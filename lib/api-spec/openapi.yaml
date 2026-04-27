@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: SmartCity OS Design Tools API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: snapshots
+    description: Revit model snapshot operations
+  - name: chat
+    description: Claude chat about a Revit snapshot
 paths:
   /healthz:
     get:
@@ -24,6 +28,118 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /snapshots:
+    get:
+      operationId: listSnapshots
+      tags: [snapshots]
+      summary: List Revit snapshots
+      description: Returns all received snapshots, newest first
+      responses:
+        "200":
+          description: Array of snapshot summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SnapshotSummary"
+    post:
+      operationId: createSnapshot
+      tags: [snapshots]
+      summary: Receive a Revit snapshot from the add-in
+      description: |
+        Stores a snapshot from the Revit add-in. Requires the `x-snapshot-secret`
+        header to match the configured `SNAPSHOT_SECRET` env var.
+      parameters:
+        - name: x-snapshot-secret
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SnapshotPayload"
+      responses:
+        "201":
+          description: Snapshot accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotReceipt"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid snapshot secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /snapshots/{id}:
+    get:
+      operationId: getSnapshot
+      tags: [snapshots]
+      summary: Get the full snapshot record
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Full snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /chat:
+    post:
+      operationId: sendChatMessage
+      tags: [chat]
+      summary: Ask Claude about a snapshot (SSE stream)
+      description: |
+        Streams an assistant response over Server-Sent Events. Each event
+        is `data: {"text": "..."}\n\n` followed by a final `data: [DONE]\n\n`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: SSE stream of assistant text chunks
+          content:
+            text/event-stream: {}
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +150,92 @@ components:
       required:
         - status
 
+    SnapshotSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        projectName:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - projectName
+        - receivedAt
+
+    SnapshotPayload:
+      type: object
+      properties:
+        projectName:
+          type: string
+      required:
+        - projectName
+      additionalProperties: true
+
+    SnapshotReceipt:
+      type: object
+      properties:
+        id:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - receivedAt
+
+    SnapshotDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        projectName:
+          type: string
+        receivedAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+      required:
+        - id
+        - projectName
+        - receivedAt
+        - payload
+
+    ChatHistoryMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+      required:
+        - role
+        - content
+
+    ChatRequest:
+      type: object
+      properties:
+        snapshotId:
+          type: string
+        question:
+          type: string
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatHistoryMessage"
+      required:
+        - snapshotId
+        - question
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

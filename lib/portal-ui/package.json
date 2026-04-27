@@ -1,0 +1,23 @@
+{
+  "name": "@workspace/portal-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles": "./src/styles/index.css",
+    "./styles/plan-review-disciplines.css": "./src/styles/plan-review-disciplines.css"
+  },
+  "dependencies": {
+    "lucide-react": "catalog:",
+    "wouter": "^3.7.1"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:"
+  }
+}

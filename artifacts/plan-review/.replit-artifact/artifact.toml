@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/plan-review/"
+title = "SmartCity Plan Review"
+version = "1.0.0"
+id = "artifacts/plan-review"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/plan-review/" ]
+localPort = 19591
+
+[services.development]
+run = "pnpm --filter @workspace/plan-review run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/plan-review", "run", "build" ]
+publicDir = "artifacts/plan-review/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19591"
+BASE_PATH = "/plan-review/"

@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "SmartCity Design Tools"
+version = "1.0.0"
+id = "artifacts/design-tools"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20295
+
+[services.development]
+run = "pnpm --filter @workspace/design-tools run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/design-tools", "run", "build" ]
+publicDir = "artifacts/design-tools/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20295"
+BASE_PATH = "/"

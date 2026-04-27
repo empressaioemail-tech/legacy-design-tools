@@ -1,0 +1,65 @@
+[data-theme="dark"] {
+  --dept-civil: #0ea5e9;
+  --dept-mep: #8b5cf6;
+  --dept-architectural: #f97316;
+  --dept-fire-life-safety: #ef4444;
+  --dept-structural: #22c55e;
+  --dept-landscape: #10b981;
+  --dept-zoning: #6366f1;
+}
+[data-theme="light"] {
+  --dept-civil: #0369a1;
+  --dept-mep: #7c3aed;
+  --dept-architectural: #ea580c;
+  --dept-fire-life-safety: #dc2626;
+  --dept-structural: #16a34a;
+  --dept-landscape: #059669;
+  --dept-zoning: #4f46e5;
+}
+
+.dept-civil {
+  background: rgba(14, 165, 233, 0.12);
+  color: var(--dept-civil);
+  border: 1px solid rgba(14, 165, 233, 0.22);
+}
+.dept-mep {
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--dept-mep);
+  border: 1px solid rgba(139, 92, 246, 0.22);
+}
+.dept-architectural {
+  background: rgba(249, 115, 22, 0.12);
+  color: var(--dept-architectural);
+  border: 1px solid rgba(249, 115, 22, 0.22);
+}
+.dept-fire-life-safety {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--dept-fire-life-safety);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+}
+.dept-structural {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--dept-structural);
+  border: 1px solid rgba(34, 197, 94, 0.22);
+}
+.dept-landscape {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--dept-landscape);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+}
+.dept-zoning {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--dept-zoning);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+}
+
+.sc-dept-badge {
+  font-size: 8.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 2px 7px;
+  border-radius: 3px;
+  display: inline-block;
+  white-space: nowrap;
+}
