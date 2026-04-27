@@ -1,0 +1,430 @@
+# Claude Code Prompt — Legacy Revit Sensor v0.1 (Wave 0)
+
+**What this is:** the kickoff prompt for the Revit-side connector. Builds a C# .NET 8 add-in for Revit 2026 that pushes a snapshot of the current model to your Replit workbench when the architect clicks a ribbon button.
+
+**Closes the Wave 0 gate:** Empressa opens Revit, clicks "Send Snapshot," sees the project show up in the web app within seconds.
+
+**Prerequisites:**
+- Windows machine with Revit 2026 installed at `C:\Program Files\Autodesk\Revit 2026\`
+- .NET 8 SDK installed (`dotnet --version` should print 8.x)
+- Cursor (or VS Code) with Claude Code
+- Your Replit URL + `SNAPSHOT_SECRET` from prompt 01
+
+**How to use:**
+1. Create a new empty folder, e.g. `C:\Users\cente\dev\legacy-revit-sensor\`
+2. Open it in Cursor
+3. Open the Claude Code panel / terminal
+4. Paste everything between the `BEGIN` and `END` markers below
+5. Let it build
+6. Restart Revit (close any open instances first)
+7. In Revit: open any project → **Add-Ins** ribbon tab → **Design Tools** panel → click **Configure** → paste Replit URL + secret → click **Send Snapshot**
+8. Switch to your Replit Workbench — the snapshot should appear within 5 seconds
+
+---
+
+```
+========== BEGIN PASTE TO CLAUDE CODE ==========
+
+Build a Revit 2026 add-in called "Legacy Revit Sensor" — a C# .NET 8 class library that adds a ribbon button to Revit. Clicking the button extracts a structured snapshot of the current model (sheets, rooms, levels, walls, doors, windows, project info) and POSTs it to a configured Replit URL.
+
+This is `legacy-revit-sensor` v0.1 — the first deliverable in a multi-CAD sensor strategy. Keep the architecture clean so SketchUp/ArchiCAD/Rhino sensors can mirror this pattern later.
+
+============================================================
+SECTION 1 — PROJECT LAYOUT
+============================================================
+
+Create this exact structure at the workspace root:
+
+LegacyRevitSensor/
+├── LegacyRevitSensor.sln
+├── LegacyRevitSensor.csproj
+├── LegacyRevitSensor.addin
+├── App.cs                              (IExternalApplication — ribbon setup)
+├── Commands/
+│   ├── SendSnapshotCommand.cs          (IExternalCommand — main button)
+│   └── ConfigureCommand.cs             (IExternalCommand — settings button)
+├── Snapshot/
+│   ├── SnapshotBuilder.cs              (extracts data from Document)
+│   └── Models.cs                       (DTOs serialized to JSON)
+├── Http/
+│   └── SnapshotClient.cs               (POSTs to Replit)
+├── Config/
+│   └── Settings.cs                     (load/save settings.json)
+├── Ui/
+│   └── ConfigureDialog.cs              (WinForms dialog for URL + secret)
+├── .gitignore
+└── README.md
+
+The .sln file should reference the .csproj. Standard `dotnet new sln` + `dotnet sln add` will work.
+
+.gitignore: standard Visual Studio + .NET ignore (bin/, obj/, *.user, .vs/, settings.json — yes, ignore the local settings file too).
+
+============================================================
+SECTION 2 — LegacyRevitSensor.csproj
+============================================================
+
+Use this verbatim. Note: do NOT include nullable enable; Revit API has lots of nullability gaps that produce noisy warnings.
+
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <AssemblyName>LegacyRevitSensor</AssemblyName>
+    <RootNamespace>LegacyRevitSensor</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="RevitAPI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="LegacyRevitSensor.addin">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Auto-install to Revit addins folder on every build -->
+  <Target Name="CopyAddinToRevit" AfterTargets="Build">
+    <PropertyGroup>
+      <RevitAddinsPath>$(APPDATA)\Autodesk\Revit\Addins\2026</RevitAddinsPath>
+    </PropertyGroup>
+    <MakeDir Directories="$(RevitAddinsPath)" Condition="!Exists('$(RevitAddinsPath)')" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFolder="$(RevitAddinsPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="LegacyRevitSensor.addin" DestinationFolder="$(RevitAddinsPath)" SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="Installed Legacy Revit Sensor to $(RevitAddinsPath)" />
+  </Target>
+</Project>
+
+============================================================
+SECTION 3 — LegacyRevitSensor.addin
+============================================================
+
+Generate a stable GUID for the ClientId. Use this template:
+
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Legacy Revit Sensor</Name>
+    <Assembly>LegacyRevitSensor.dll</Assembly>
+    <FullClassName>LegacyRevitSensor.App</FullClassName>
+    <ClientId>{GENERATE-A-NEW-GUID-HERE}</ClientId>
+    <VendorId>HKSA</VendorId>
+    <VendorDescription>Hauska / Legacy Group ATX — https://smartcityos.io</VendorDescription>
+  </AddIn>
+</RevitAddIns>
+
+============================================================
+SECTION 4 — App.cs (IExternalApplication)
+============================================================
+
+Namespace: LegacyRevitSensor
+
+Implements IExternalApplication. OnStartup creates a Ribbon panel called "Design Tools" on the "Add-Ins" tab with two buttons:
+1. "Send Snapshot" — large button (32x32 icon area, no icon for now), runs SendSnapshotCommand
+2. "Configure" — small button below or next to it, runs ConfigureCommand
+
+Use Autodesk.Revit.UI.RibbonPanel and PushButtonData. The PushButtonData.AssemblyName must be the path of the executing assembly (use `Assembly.GetExecutingAssembly().Location`).
+
+Tooltips:
+- Send Snapshot: "Push the current model state to SmartCity Design Tools."
+- Configure: "Set the Design Tools URL and secret."
+
+Both buttons live on the "Add-Ins" tab in a panel titled "Design Tools".
+
+OnShutdown returns Result.Succeeded.
+
+============================================================
+SECTION 5 — Commands/SendSnapshotCommand.cs
+============================================================
+
+[Transaction(TransactionMode.ReadOnly)]
+[Regeneration(RegenerationOption.Manual)]
+public class SendSnapshotCommand : IExternalCommand
+
+Execute(ExternalCommandData commandData, ref string message, ElementSet elements):
+1. Load Settings via Settings.Load(). If ReplitUrl or Secret is empty, show TaskDialog "Configure first" with body "Click Configure on the Design Tools panel to set your Replit URL and secret." and return Result.Cancelled.
+2. Get UIDocument via commandData.Application.ActiveUIDocument. If null, show TaskDialog "No active document" and return Result.Cancelled.
+3. Build snapshot: `var snapshot = SnapshotBuilder.Build(uidoc.Document);`
+4. POST it: 
+   try {
+     var result = SnapshotClient.PostAsync(snapshot, settings).GetAwaiter().GetResult();
+     // Show success TaskDialog with snapshot id and the URL of the workbench
+   } catch (Exception ex) {
+     // Show error TaskDialog with ex.Message
+     return Result.Failed;
+   }
+5. Return Result.Succeeded.
+
+Success TaskDialog:
+- Title: "Snapshot sent"
+- MainInstruction: "{snapshot.ProjectName} pushed to Design Tools."
+- MainContent: "Snapshot ID: {result.Id}\nReceived: {result.ReceivedAt}\n\nOpen workbench: {settings.ReplitUrl}"
+- One CommonButton: Close
+
+Error TaskDialog:
+- Title: "Snapshot failed"
+- MainInstruction: "Could not send snapshot."
+- MainContent: ex.Message
+- ExpandedContent: ex.ToString()
+
+============================================================
+SECTION 6 — Commands/ConfigureCommand.cs
+============================================================
+
+[Transaction(TransactionMode.ReadOnly)]
+public class ConfigureCommand : IExternalCommand
+
+Execute:
+1. Load current Settings.
+2. Open ConfigureDialog (a WinForms Form) pre-filled with current values.
+3. If user clicks OK, save the new settings via Settings.Save(updated).
+4. Show TaskDialog "Saved" with content "Settings written to {Settings.SettingsPath}".
+5. Return Result.Succeeded.
+
+============================================================
+SECTION 7 — Config/Settings.cs
+============================================================
+
+public class Settings
+{
+    public string ReplitUrl { get; set; } = "";
+    public string Secret { get; set; } = "";
+
+    public static string SettingsPath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Hauska", "DesignTools", "settings.json");
+
+    public static Settings Load()
+    {
+        try
+        {
+            if (!File.Exists(SettingsPath)) return new Settings();
+            var json = File.ReadAllText(SettingsPath);
+            return JsonSerializer.Deserialize<Settings>(json) ?? new Settings();
+        }
+        catch { return new Settings(); }
+    }
+
+    public static void Save(Settings s)
+    {
+        var dir = Path.GetDirectoryName(SettingsPath);
+        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+        var json = JsonSerializer.Serialize(s, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(SettingsPath, json);
+    }
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(ReplitUrl) && !string.IsNullOrWhiteSpace(Secret);
+}
+
+Use System.Text.Json. Trim trailing slashes from ReplitUrl on save.
+
+============================================================
+SECTION 8 — Ui/ConfigureDialog.cs
+============================================================
+
+WinForms Form, ~480x240, fixed dialog style, centered on parent.
+
+Title: "Design Tools — Configure"
+
+Layout:
+- Label "Replit URL" + TextBox (full-width, e.g. https://your-app.replit.app)
+- Label "Snapshot secret" + TextBox (full-width, password-mask = '*')
+- Hint label below in gray, smaller font: "These match your Replit Secrets — ANTHROPIC_API_KEY and SNAPSHOT_SECRET. Find them in your Replit project's Secrets pane."
+- OK button (DialogResult.OK) and Cancel button (DialogResult.Cancel) bottom-right
+
+Public properties: ReplitUrl, Secret. Use them to pre-fill the TextBoxes on construction and read the values back after ShowDialog.
+
+Validation on OK click: both fields must be non-empty; ReplitUrl must start with "http://" or "https://". If invalid, MessageBox.Show("Replit URL and secret are both required. URL must start with https://.") and don't close the dialog.
+
+============================================================
+SECTION 9 — Snapshot/Models.cs
+============================================================
+
+DTOs that match the JSON contract the Replit Express server expects. Use System.Text.Json with PropertyNamingPolicy = camelCase (configured in SnapshotClient).
+
+public record SnapshotPayload(
+    string ProjectName,
+    string ProjectNumber,
+    string ClientName,
+    string Address,
+    string DocumentTitle,
+    string DocumentPath,
+    string ActiveViewName,
+    string ActiveViewType,
+    string Units,
+    DateTime CapturedAt,
+    SheetInfo[] Sheets,
+    LevelInfo[] Levels,
+    RoomInfo[] Rooms,
+    WallSummary Walls,
+    DoorSummary Doors,
+    WindowSummary Windows
+);
+
+public record SheetInfo(string Number, string Name, int ViewCount);
+public record LevelInfo(string Name, double ElevationFeet);
+public record RoomInfo(string Number, string Name, double AreaSqFt, string Level);
+public record WallSummary(int Count, double TotalLengthFeet, string[] WallTypes);
+public record DoorSummary(int Count, string[] DoorFamilies);
+public record WindowSummary(int Count, string[] WindowFamilies);
+
+public record PostResult(string Id, DateTime ReceivedAt);
+
+============================================================
+SECTION 10 — Snapshot/SnapshotBuilder.cs
+============================================================
+
+public static class SnapshotBuilder
+{
+    public static SnapshotPayload Build(Document doc) { ... }
+}
+
+Wrap everything in try/catch — if any sub-extractor throws, return an empty array for that section. The point is to get SOMETHING to Replit, not to fail because one wall is malformed.
+
+Extract:
+
+1. **Project info** — from doc.ProjectInformation:
+   - ProjectName: pi.Name (or doc.Title if blank)
+   - ProjectNumber: pi.Number
+   - ClientName: pi.ClientName
+   - Address: pi.Address (replace newlines with ", ")
+
+2. **Document info**:
+   - DocumentTitle: doc.Title
+   - DocumentPath: doc.PathName ?? ""
+   - Units: doc.GetUnits().GetFormatOptions(SpecTypeId.Length).GetUnitTypeId().TypeId.Replace("autodesk.unit.unit:", "")  — fallback to "feet" on error
+
+3. **Active view** — from doc.ActiveView:
+   - ActiveViewName: view.Name
+   - ActiveViewType: view.ViewType.ToString()
+   (CapturedAt: DateTime.UtcNow)
+
+4. **Sheets** — FilteredElementCollector(doc).OfClass(typeof(ViewSheet)):
+   - For each ViewSheet vs: SheetInfo(vs.SheetNumber, vs.Name, vs.GetAllPlacedViews().Count)
+   - Sort by SheetNumber
+
+5. **Levels** — OfClass(typeof(Level)):
+   - For each Level lv: LevelInfo(lv.Name, lv.Elevation)
+   - Sort by Elevation ascending
+
+6. **Rooms** — OfCategory(BuiltInCategory.OST_Rooms).WhereElementIsNotElementType():
+   - Cast to Room. Skip rooms where Area == 0 (unplaced).
+   - For each: RoomInfo(r.Number, r.Name, r.Area, r.Level?.Name ?? "")
+   - Sort by Number
+   - Note: Area is already in square feet (Revit's internal unit is feet)
+
+7. **Walls** — OfClass(typeof(Wall)).WhereElementIsNotElementType():
+   - Count
+   - TotalLengthFeet: sum of LocationCurve.Curve.Length for each wall (skip non-LocationCurve walls without throwing)
+   - WallTypes: distinct wall.WallType.Name, sorted, max 20 entries
+
+8. **Doors** — OfCategory(BuiltInCategory.OST_Doors).WhereElementIsNotElementType():
+   - Count
+   - DoorFamilies: distinct (e as FamilyInstance)?.Symbol?.Family?.Name, max 20
+
+9. **Windows** — OfCategory(BuiltInCategory.OST_Windows).WhereElementIsNotElementType():
+   - Same as doors
+
+Cap any list extraction at 500 items to keep payloads reasonable. If a section overflows, take first 500 and note it (no need to flag in payload — just truncate).
+
+============================================================
+SECTION 11 — Http/SnapshotClient.cs
+============================================================
+
+public static class SnapshotClient
+{
+    private static readonly HttpClient _http = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(30)
+    };
+
+    private static readonly JsonSerializerOptions _jsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    public static async Task<PostResult> PostAsync(SnapshotPayload payload, Settings settings)
+    {
+        var url = settings.ReplitUrl.TrimEnd('/') + "/api/snapshots";
+        var json = JsonSerializer.Serialize(payload, _jsonOpts);
+        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        content.Headers.Add("x-snapshot-secret", settings.Secret);
+
+        var response = await _http.PostAsync(url, content);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new HttpRequestException(
+                $"POST {url} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {body}");
+        }
+
+        var resultJson = await response.Content.ReadAsStringAsync();
+        var result = JsonSerializer.Deserialize<PostResult>(resultJson, _jsonOpts);
+        if (result == null) throw new Exception("Empty response from server.");
+        return result;
+    }
+}
+
+NOTE: the Replit server may need a CORS/header tolerance update to accept x-snapshot-secret — verify that in testing. If it 401s with the secret correctly set, that's a server-side header config issue, not a client one.
+
+============================================================
+SECTION 12 — README.md
+============================================================
+
+Write a short README covering:
+- What this is (one paragraph)
+- Build: `dotnet build -c Debug` — output auto-installs to %APPDATA%\Autodesk\Revit\Addins\2026\
+- Setup: open Revit → Add-Ins tab → Design Tools → Configure → paste Replit URL + secret
+- Use: open any Revit project → Design Tools panel → Send Snapshot → check Replit workbench
+- Troubleshooting:
+  - Add-in not appearing: check %APPDATA%\Autodesk\Revit\Addins\2026\ contains both LegacyRevitSensor.addin and LegacyRevitSensor.dll
+  - 401 from server: secret mismatch; reopen Configure
+  - Connection refused: Replit instance asleep — open the Replit URL in a browser to wake it
+- Where settings.json lives: %APPDATA%\Hauska\DesignTools\settings.json
+
+============================================================
+SECTION 13 — DELIVERABLES
+============================================================
+
+When done:
+1. Run `dotnet build -c Debug` and confirm it succeeds with zero errors. Warnings about Revit API nullability are OK.
+2. Confirm the post-build target copied LegacyRevitSensor.dll and LegacyRevitSensor.addin to %APPDATA%\Autodesk\Revit\Addins\2026\
+3. Print the SettingsPath so I know where to find settings.json after I configure
+4. Print exactly these next steps for me:
+   "1. Close all open Revit instances.
+    2. Reopen Revit 2026.
+    3. Open any project (or start a new one with the default template).
+    4. Click the Add-Ins ribbon tab. You should see a 'Design Tools' panel with two buttons.
+    5. Click 'Configure' first. Paste your Replit URL (e.g. https://your-app.replit.app) and SNAPSHOT_SECRET. Click OK.
+    6. Click 'Send Snapshot'. A success dialog should appear with the snapshot ID.
+    7. Open your Replit workbench in a browser. The snapshot should be in the left panel within 5 seconds.
+    8. Click it, ask Claude 'how many rooms are in this model?' to verify the full pipeline."
+
+============================================================
+SECTION 14 — DO NOT BUILD
+============================================================
+
+- A WPF panel/dockable window inside Revit (a TaskDialog confirmation is enough for v0.1)
+- Listening for model-change events (one-shot button push only — streaming is a v0.2+ concern)
+- Authentication beyond the shared secret
+- Local model caching or diff-based snapshots
+- Anything beyond the snapshot data fields listed in Section 9
+- A custom Revit ribbon tab — use the existing "Add-Ins" tab to keep things simple
+
+========== END PASTE TO CLAUDE CODE ==========
+```
