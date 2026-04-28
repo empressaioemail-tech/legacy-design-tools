@@ -16,19 +16,102 @@ export const HealthCheckResponse = zod.object({
 });
 
 /**
- * Returns all received snapshots, newest first
- * @summary List Revit snapshots
+ * Returns all engagements ordered by updatedAt desc.
+ * @summary List engagements
+ */
+export const ListEngagementsResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  jurisdiction: zod.string().nullable(),
+  address: zod.string().nullable(),
+  status: zod.enum(["active", "on_hold", "archived"]),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+  snapshotCount: zod.number(),
+  latestSnapshot: zod.union([
+    zod.object({
+      id: zod.string(),
+      engagementId: zod.string(),
+      engagementName: zod.string(),
+      projectName: zod.string(),
+      sheetCount: zod.number().nullable(),
+      roomCount: zod.number().nullable(),
+      levelCount: zod.number().nullable(),
+      wallCount: zod.number().nullable(),
+      receivedAt: zod.coerce.date(),
+    }),
+    zod.null(),
+  ]),
+});
+export const ListEngagementsResponse = zod.array(ListEngagementsResponseItem);
+
+/**
+ * @summary Get engagement detail with snapshot list
+ */
+export const GetEngagementParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetEngagementResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  jurisdiction: zod.string().nullable(),
+  address: zod.string().nullable(),
+  status: zod.enum(["active", "on_hold", "archived"]),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+  snapshotCount: zod.number(),
+  latestSnapshot: zod.union([
+    zod.object({
+      id: zod.string(),
+      engagementId: zod.string(),
+      engagementName: zod.string(),
+      projectName: zod.string(),
+      sheetCount: zod.number().nullable(),
+      roomCount: zod.number().nullable(),
+      levelCount: zod.number().nullable(),
+      wallCount: zod.number().nullable(),
+      receivedAt: zod.coerce.date(),
+    }),
+    zod.null(),
+  ]),
+  snapshots: zod.array(
+    zod.object({
+      id: zod.string(),
+      engagementId: zod.string(),
+      engagementName: zod.string(),
+      projectName: zod.string(),
+      sheetCount: zod.number().nullable(),
+      roomCount: zod.number().nullable(),
+      levelCount: zod.number().nullable(),
+      wallCount: zod.number().nullable(),
+      receivedAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * Returns all snapshots, newest first, joined with engagementName.
+ * @summary List Revit snapshots across all engagements
  */
 export const ListSnapshotsResponseItem = zod.object({
   id: zod.string(),
+  engagementId: zod.string(),
+  engagementName: zod.string(),
   projectName: zod.string(),
+  sheetCount: zod.number().nullable(),
+  roomCount: zod.number().nullable(),
+  levelCount: zod.number().nullable(),
+  wallCount: zod.number().nullable(),
   receivedAt: zod.coerce.date(),
 });
 export const ListSnapshotsResponse = zod.array(ListSnapshotsResponseItem);
 
 /**
  * Stores a snapshot from the Revit add-in. Requires the `x-snapshot-secret`
-header to match the configured `SNAPSHOT_SECRET` env var.
+header to match the configured `SNAPSHOT_SECRET` env var. If `projectName`
+matches an existing engagement (case-insensitive), the snapshot attaches
+to it. Otherwise a new engagement is auto-created.
 
  * @summary Receive a Revit snapshot from the add-in
  */
@@ -41,7 +124,7 @@ export const CreateSnapshotBody = zod.object({
 });
 
 /**
- * @summary Get the full snapshot record
+ * @summary Get the full snapshot record (with payload)
  */
 export const GetSnapshotParams = zod.object({
   id: zod.coerce.string(),
@@ -49,7 +132,13 @@ export const GetSnapshotParams = zod.object({
 
 export const GetSnapshotResponse = zod.object({
   id: zod.string(),
+  engagementId: zod.string(),
+  engagementName: zod.string(),
   projectName: zod.string(),
+  sheetCount: zod.number().nullable(),
+  roomCount: zod.number().nullable(),
+  levelCount: zod.number().nullable(),
+  wallCount: zod.number().nullable(),
   receivedAt: zod.coerce.date(),
   payload: zod.record(zod.string(), zod.unknown()),
 });
@@ -57,11 +146,12 @@ export const GetSnapshotResponse = zod.object({
 /**
  * Streams an assistant response over Server-Sent Events. Each event
 is `data: {"text": "..."}\n\n` followed by a final `data: [DONE]\n\n`.
+Grounds Claude on the latest snapshot for the given engagement.
 
- * @summary Ask Claude about a snapshot (SSE stream)
+ * @summary Ask Claude about an engagement (SSE stream)
  */
 export const SendChatMessageBody = zod.object({
-  snapshotId: zod.string(),
+  engagementId: zod.string(),
   question: zod.string(),
   history: zod
     .array(

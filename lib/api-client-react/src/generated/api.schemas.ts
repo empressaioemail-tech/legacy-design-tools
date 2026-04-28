@@ -9,10 +9,50 @@ export interface HealthStatus {
   status: string;
 }
 
+export type EngagementStatus =
+  (typeof EngagementStatus)[keyof typeof EngagementStatus];
+
+export const EngagementStatus = {
+  active: "active",
+  on_hold: "on_hold",
+  archived: "archived",
+} as const;
+
 export interface SnapshotSummary {
   id: string;
+  engagementId: string;
+  engagementName: string;
   projectName: string;
+  sheetCount: number | null;
+  roomCount: number | null;
+  levelCount: number | null;
+  wallCount: number | null;
   receivedAt: string;
+}
+
+export interface EngagementSummary {
+  id: string;
+  name: string;
+  jurisdiction: string | null;
+  address: string | null;
+  status: EngagementStatus;
+  createdAt: string;
+  updatedAt: string;
+  snapshotCount: number;
+  latestSnapshot: SnapshotSummary | null;
+}
+
+export interface EngagementDetail {
+  id: string;
+  name: string;
+  jurisdiction: string | null;
+  address: string | null;
+  status: EngagementStatus;
+  createdAt: string;
+  updatedAt: string;
+  snapshotCount: number;
+  latestSnapshot: SnapshotSummary | null;
+  snapshots: SnapshotSummary[];
 }
 
 export interface SnapshotPayload {
@@ -23,36 +63,50 @@ export interface SnapshotPayload {
 export interface SnapshotReceipt {
   id: string;
   receivedAt: string;
+  engagementId: string;
+  engagementName: string;
+  autoCreated: boolean;
 }
 
 export type SnapshotDetailPayload = { [key: string]: unknown };
 
 export interface SnapshotDetail {
   id: string;
+  engagementId: string;
+  engagementName: string;
   projectName: string;
+  sheetCount: number | null;
+  roomCount: number | null;
+  levelCount: number | null;
+  wallCount: number | null;
   receivedAt: string;
   payload: SnapshotDetailPayload;
 }
 
-export type ChatHistoryMessageRole =
-  (typeof ChatHistoryMessageRole)[keyof typeof ChatHistoryMessageRole];
+export type ChatMessageRole =
+  (typeof ChatMessageRole)[keyof typeof ChatMessageRole];
 
-export const ChatHistoryMessageRole = {
+export const ChatMessageRole = {
   user: "user",
   assistant: "assistant",
 } as const;
 
-export interface ChatHistoryMessage {
-  role: ChatHistoryMessageRole;
+export interface ChatMessage {
+  role: ChatMessageRole;
   content: string;
 }
 
 export interface ChatRequest {
-  snapshotId: string;
+  engagementId: string;
   question: string;
-  history?: ChatHistoryMessage[];
+  history?: ChatMessage[];
 }
 
 export interface ErrorResponse {
   error: string;
+}
+
+export interface ChatErrorResponse {
+  error: string;
+  message?: string;
 }

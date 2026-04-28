@@ -9,7 +9,13 @@ import type { SnapshotDetailPayload } from "./snapshotDetailPayload";
 
 export interface SnapshotDetail {
   id: string;
+  engagementId: string;
+  engagementName: string;
   projectName: string;
+  sheetCount: number | null;
+  roomCount: number | null;
+  levelCount: number | null;
+  wallCount: number | null;
   receivedAt: Date;
   payload: SnapshotDetailPayload;
 }

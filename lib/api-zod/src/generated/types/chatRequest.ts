@@ -5,10 +5,10 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
-import type { ChatHistoryMessage } from "./chatHistoryMessage";
+import type { ChatMessage } from "./chatMessage";
 
 export interface ChatRequest {
-  snapshotId: string;
+  engagementId: string;
   question: string;
-  history?: ChatHistoryMessage[];
+  history?: ChatMessage[];
 }

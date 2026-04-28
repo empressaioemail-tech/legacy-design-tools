@@ -8,6 +8,12 @@
 
 export interface SnapshotSummary {
   id: string;
+  engagementId: string;
+  engagementName: string;
   projectName: string;
+  sheetCount: number | null;
+  roomCount: number | null;
+  levelCount: number | null;
+  wallCount: number | null;
   receivedAt: Date;
 }

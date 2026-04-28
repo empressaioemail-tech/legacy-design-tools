@@ -10,10 +10,12 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: engagements
+    description: Engagement (project) operations
   - name: snapshots
     description: Revit model snapshot operations
   - name: chat
-    description: Claude chat about a Revit snapshot
+    description: Claude chat about an engagement
 paths:
   /healthz:
     get:
@@ -29,12 +31,53 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 
+  /engagements:
+    get:
+      operationId: listEngagements
+      tags: [engagements]
+      summary: List engagements
+      description: Returns all engagements ordered by updatedAt desc.
+      responses:
+        "200":
+          description: Array of engagement summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EngagementSummary"
+
+  /engagements/{id}:
+    get:
+      operationId: getEngagement
+      tags: [engagements]
+      summary: Get engagement detail with snapshot list
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Engagement detail (snapshots without payload)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /snapshots:
     get:
       operationId: listSnapshots
       tags: [snapshots]
-      summary: List Revit snapshots
-      description: Returns all received snapshots, newest first
+      summary: List Revit snapshots across all engagements
+      description: Returns all snapshots, newest first, joined with engagementName.
       responses:
         "200":
           description: Array of snapshot summaries
@@ -50,7 +93,9 @@ paths:
       summary: Receive a Revit snapshot from the add-in
       description: |
         Stores a snapshot from the Revit add-in. Requires the `x-snapshot-secret`
-        header to match the configured `SNAPSHOT_SECRET` env var.
+        header to match the configured `SNAPSHOT_SECRET` env var. If `projectName`
+        matches an existing engagement (case-insensitive), the snapshot attaches
+        to it. Otherwise a new engagement is auto-created.
       parameters:
         - name: x-snapshot-secret
           in: header
@@ -87,7 +132,7 @@ paths:
     get:
       operationId: getSnapshot
       tags: [snapshots]
-      summary: Get the full snapshot record
+      summary: Get the full snapshot record (with payload)
       parameters:
         - name: id
           in: path
@@ -112,10 +157,11 @@ paths:
     post:
       operationId: sendChatMessage
       tags: [chat]
-      summary: Ask Claude about a snapshot (SSE stream)
+      summary: Ask Claude about an engagement (SSE stream)
       description: |
         Streams an assistant response over Server-Sent Events. Each event
         is `data: {"text": "..."}\n\n` followed by a final `data: [DONE]\n\n`.
+        Grounds Claude on the latest snapshot for the given engagement.
       requestBody:
         required: true
         content:
@@ -128,13 +174,13 @@ paths:
           content:
             text/event-stream: {}
         "400":
-          description: Invalid request
+          description: Invalid request or no snapshots yet
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ChatErrorResponse"
         "404":
-          description: Snapshot not found
+          description: Engagement not found
           content:
             application/json:
               schema:
@@ -150,19 +196,126 @@ components:
       required:
         - status
 
+    EngagementStatus:
+      type: string
+      enum: [active, on_hold, archived]
+
+    EngagementSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/EngagementStatus"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        snapshotCount:
+          type: integer
+        latestSnapshot:
+          oneOf:
+            - $ref: "#/components/schemas/SnapshotSummary"
+            - type: "null"
+      required:
+        - id
+        - name
+        - jurisdiction
+        - address
+        - status
+        - createdAt
+        - updatedAt
+        - snapshotCount
+        - latestSnapshot
+
+    EngagementDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/EngagementStatus"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        snapshotCount:
+          type: integer
+        latestSnapshot:
+          oneOf:
+            - $ref: "#/components/schemas/SnapshotSummary"
+            - type: "null"
+        snapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/SnapshotSummary"
+      required:
+        - id
+        - name
+        - jurisdiction
+        - address
+        - status
+        - createdAt
+        - updatedAt
+        - snapshotCount
+        - latestSnapshot
+        - snapshots
+
     SnapshotSummary:
       type: object
       properties:
         id:
           type: string
+        engagementId:
+          type: string
+        engagementName:
+          type: string
         projectName:
           type: string
+        sheetCount:
+          type: integer
+          nullable: true
+        roomCount:
+          type: integer
+          nullable: true
+        levelCount:
+          type: integer
+          nullable: true
+        wallCount:
+          type: integer
+          nullable: true
         receivedAt:
           type: string
           format: date-time
       required:
         - id
+        - engagementId
+        - engagementName
         - projectName
+        - sheetCount
+        - roomCount
+        - levelCount
+        - wallCount
         - receivedAt
 
     SnapshotPayload:
@@ -182,17 +335,42 @@ components:
         receivedAt:
           type: string
           format: date-time
+        engagementId:
+          type: string
+        engagementName:
+          type: string
+        autoCreated:
+          type: boolean
       required:
         - id
         - receivedAt
+        - engagementId
+        - engagementName
+        - autoCreated
 
     SnapshotDetail:
       type: object
       properties:
         id:
           type: string
+        engagementId:
+          type: string
+        engagementName:
+          type: string
         projectName:
           type: string
+        sheetCount:
+          type: integer
+          nullable: true
+        roomCount:
+          type: integer
+          nullable: true
+        levelCount:
+          type: integer
+          nullable: true
+        wallCount:
+          type: integer
+          nullable: true
         receivedAt:
           type: string
           format: date-time
@@ -201,11 +379,17 @@ components:
           additionalProperties: true
       required:
         - id
+        - engagementId
+        - engagementName
         - projectName
+        - sheetCount
+        - roomCount
+        - levelCount
+        - wallCount
         - receivedAt
         - payload
 
-    ChatHistoryMessage:
+    ChatMessage:
       type: object
       properties:
         role:
@@ -220,22 +404,32 @@ components:
     ChatRequest:
       type: object
       properties:
-        snapshotId:
+        engagementId:
           type: string
         question:
           type: string
         history:
           type: array
           items:
-            $ref: "#/components/schemas/ChatHistoryMessage"
+            $ref: "#/components/schemas/ChatMessage"
       required:
-        - snapshotId
+        - engagementId
         - question
 
     ErrorResponse:
       type: object
       properties:
         error:
+          type: string
+      required:
+        - error
+
+    ChatErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
           type: string
       required:
         - error

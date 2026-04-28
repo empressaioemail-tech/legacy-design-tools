@@ -1,20 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
+import { db, engagements, snapshots } from "@workspace/db";
+import { desc, eq } from "drizzle-orm";
 import {
   CreateSnapshotBody,
   CreateSnapshotHeader,
   GetSnapshotParams,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
-
-interface StoredSnapshot {
-  id: string;
-  projectName: string;
-  receivedAt: string;
-  payload: Record<string, unknown>;
-}
-
-const snapshots = new Map<string, StoredSnapshot>();
 
 let snapshotSecret = process.env["SNAPSHOT_SECRET"];
 if (!snapshotSecret) {
@@ -32,18 +25,62 @@ if (!snapshotSecret) {
 
 const router: IRouter = Router();
 
-router.get("/snapshots", (_req: Request, res: Response) => {
-  const list = Array.from(snapshots.values())
-    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
-    .map(({ id, projectName, receivedAt }) => ({
-      id,
-      projectName,
-      receivedAt,
-    }));
-  res.json(list);
+function deriveCounts(body: Record<string, unknown>) {
+  const sheets = body["sheets"];
+  const rooms = body["rooms"];
+  const levels = body["levels"];
+  const walls = body["walls"];
+
+  const sheetCount = Array.isArray(sheets) ? sheets.length : null;
+  const roomCount = Array.isArray(rooms) ? rooms.length : null;
+  const levelCount = Array.isArray(levels) ? levels.length : null;
+
+  let wallCount: number | null = null;
+  if (Array.isArray(walls)) {
+    wallCount = walls.length;
+  } else if (walls && typeof walls === "object") {
+    const wObj = walls as Record<string, unknown>;
+    if (typeof wObj["count"] === "number") {
+      wallCount = wObj["count"] as number;
+    } else if (Array.isArray(wObj["items"])) {
+      wallCount = (wObj["items"] as unknown[]).length;
+    }
+  }
+
+  return { sheetCount, roomCount, levelCount, wallCount };
+}
+
+router.get("/snapshots", async (_req: Request, res: Response) => {
+  try {
+    const rows = await db
+      .select({
+        id: snapshots.id,
+        engagementId: snapshots.engagementId,
+        engagementName: engagements.name,
+        projectName: snapshots.projectName,
+        sheetCount: snapshots.sheetCount,
+        roomCount: snapshots.roomCount,
+        levelCount: snapshots.levelCount,
+        wallCount: snapshots.wallCount,
+        receivedAt: snapshots.receivedAt,
+      })
+      .from(snapshots)
+      .innerJoin(engagements, eq(engagements.id, snapshots.engagementId))
+      .orderBy(desc(snapshots.receivedAt));
+
+    res.json(
+      rows.map((r) => ({
+        ...r,
+        receivedAt: r.receivedAt.toISOString(),
+      })),
+    );
+  } catch (err) {
+    logger.error({ err }, "list snapshots failed");
+    res.status(500).json({ error: "Failed to list snapshots" });
+  }
 });
 
-router.post("/snapshots", (req: Request, res: Response) => {
+router.post("/snapshots", async (req: Request, res: Response) => {
   const headerParse = CreateSnapshotHeader.safeParse({
     "x-snapshot-secret": req.header("x-snapshot-secret"),
   });
@@ -61,36 +98,127 @@ router.post("/snapshots", (req: Request, res: Response) => {
     return;
   }
 
-  const id = randomUUID();
-  const receivedAt = new Date().toISOString();
+  const projectName = bodyParse.data.projectName;
+  const nameLower = projectName.trim().toLowerCase();
   const payload = (req.body ?? {}) as Record<string, unknown>;
-  const stored: StoredSnapshot = {
-    id,
-    projectName: bodyParse.data.projectName,
-    receivedAt,
-    payload,
-  };
-  snapshots.set(id, stored);
+  const counts = deriveCounts(payload);
 
-  res.status(201).json({ id, receivedAt });
+  try {
+    const result = await db.transaction(async (tx) => {
+      const existing = await tx
+        .select()
+        .from(engagements)
+        .where(eq(engagements.nameLower, nameLower))
+        .limit(1);
+
+      let engagement = existing[0];
+      let autoCreated = false;
+
+      if (!engagement) {
+        // Race-safe: another concurrent transaction may have just inserted
+        // the same nameLower. ON CONFLICT DO NOTHING returns no rows in
+        // that case; we re-select to grab the row the other tx wrote.
+        const inserted = await tx
+          .insert(engagements)
+          .values({
+            name: projectName,
+            nameLower,
+            status: "active",
+            address: null,
+            jurisdiction: null,
+          })
+          .onConflictDoNothing({ target: engagements.nameLower })
+          .returning();
+
+        if (inserted[0]) {
+          engagement = inserted[0];
+          autoCreated = true;
+        } else {
+          const refetch = await tx
+            .select()
+            .from(engagements)
+            .where(eq(engagements.nameLower, nameLower))
+            .limit(1);
+          engagement = refetch[0];
+          autoCreated = false;
+        }
+      }
+
+      if (!engagement) {
+        throw new Error("Engagement lookup failed after insert race");
+      }
+
+      const [snap] = await tx
+        .insert(snapshots)
+        .values({
+          engagementId: engagement.id,
+          projectName,
+          payload,
+          ...counts,
+        })
+        .returning();
+
+      await tx
+        .update(engagements)
+        .set({ updatedAt: new Date() })
+        .where(eq(engagements.id, engagement.id));
+
+      return {
+        id: snap.id,
+        receivedAt: snap.receivedAt.toISOString(),
+        engagementId: engagement.id,
+        engagementName: engagement.name,
+        autoCreated,
+      };
+    });
+
+    res.status(201).json(result);
+  } catch (err) {
+    logger.error({ err, projectName }, "create snapshot failed");
+    res.status(500).json({ error: "Failed to store snapshot" });
+  }
 });
 
-router.get("/snapshots/:id", (req: Request, res: Response) => {
+router.get("/snapshots/:id", async (req: Request, res: Response) => {
   const params = GetSnapshotParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
-  const snap = snapshots.get(params.data.id);
-  if (!snap) {
-    res.status(404).json({ error: "Snapshot not found" });
-    return;
-  }
-  res.json(snap);
-});
 
-export function getSnapshot(id: string): StoredSnapshot | undefined {
-  return snapshots.get(id);
-}
+  try {
+    const rows = await db
+      .select({
+        id: snapshots.id,
+        engagementId: snapshots.engagementId,
+        engagementName: engagements.name,
+        projectName: snapshots.projectName,
+        sheetCount: snapshots.sheetCount,
+        roomCount: snapshots.roomCount,
+        levelCount: snapshots.levelCount,
+        wallCount: snapshots.wallCount,
+        receivedAt: snapshots.receivedAt,
+        payload: snapshots.payload,
+      })
+      .from(snapshots)
+      .innerJoin(engagements, eq(engagements.id, snapshots.engagementId))
+      .where(eq(snapshots.id, params.data.id))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) {
+      res.status(404).json({ error: "Snapshot not found" });
+      return;
+    }
+
+    res.json({
+      ...row,
+      receivedAt: row.receivedAt.toISOString(),
+    });
+  } catch (err) {
+    logger.error({ err, id: params.data.id }, "get snapshot failed");
+    res.status(500).json({ error: "Failed to fetch snapshot" });
+  }
+});
 
 export default router;

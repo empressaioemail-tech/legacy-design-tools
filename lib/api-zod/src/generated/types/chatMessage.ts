@@ -5,9 +5,9 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
-import type { ChatHistoryMessageRole } from "./chatHistoryMessageRole";
+import type { ChatMessageRole } from "./chatMessageRole";
 
-export interface ChatHistoryMessage {
-  role: ChatHistoryMessageRole;
+export interface ChatMessage {
+  role: ChatMessageRole;
   content: string;
 }

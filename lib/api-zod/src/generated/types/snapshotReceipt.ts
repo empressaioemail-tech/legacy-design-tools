@@ -9,4 +9,7 @@
 export interface SnapshotReceipt {
   id: string;
   receivedAt: Date;
+  engagementId: string;
+  engagementName: string;
+  autoCreated: boolean;
 }

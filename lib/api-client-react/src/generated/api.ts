@@ -17,7 +17,10 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  ChatErrorResponse,
   ChatRequest,
+  EngagementDetail,
+  EngagementSummary,
   ErrorResponse,
   HealthStatus,
   SnapshotDetail,
@@ -112,8 +115,171 @@ export function useHealthCheck<
 }
 
 /**
- * Returns all received snapshots, newest first
- * @summary List Revit snapshots
+ * Returns all engagements ordered by updatedAt desc.
+ * @summary List engagements
+ */
+export const getListEngagementsUrl = () => {
+  return `/api/engagements`;
+};
+
+export const listEngagements = async (
+  options?: RequestInit,
+): Promise<EngagementSummary[]> => {
+  return customFetch<EngagementSummary[]>(getListEngagementsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListEngagementsQueryKey = () => {
+  return [`/api/engagements`] as const;
+};
+
+export const getListEngagementsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagements>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagements>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListEngagementsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listEngagements>>> = ({
+    signal,
+  }) => listEngagements({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagements>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagements>>
+>;
+export type ListEngagementsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List engagements
+ */
+
+export function useListEngagements<
+  TData = Awaited<ReturnType<typeof listEngagements>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagements>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get engagement detail with snapshot list
+ */
+export const getGetEngagementUrl = (id: string) => {
+  return `/api/engagements/${id}`;
+};
+
+export const getEngagement = async (
+  id: string,
+  options?: RequestInit,
+): Promise<EngagementDetail> => {
+  return customFetch<EngagementDetail>(getGetEngagementUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetEngagementQueryKey = (id: string) => {
+  return [`/api/engagements/${id}`] as const;
+};
+
+export const getGetEngagementQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEngagement>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagement>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetEngagementQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getEngagement>>> = ({
+    signal,
+  }) => getEngagement(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEngagement>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEngagementQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEngagement>>
+>;
+export type GetEngagementQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get engagement detail with snapshot list
+ */
+
+export function useGetEngagement<
+  TData = Awaited<ReturnType<typeof getEngagement>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagement>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEngagementQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns all snapshots, newest first, joined with engagementName.
+ * @summary List Revit snapshots across all engagements
  */
 export const getListSnapshotsUrl = () => {
   return `/api/snapshots`;
@@ -164,7 +330,7 @@ export type ListSnapshotsQueryResult = NonNullable<
 export type ListSnapshotsQueryError = ErrorType<unknown>;
 
 /**
- * @summary List Revit snapshots
+ * @summary List Revit snapshots across all engagements
  */
 
 export function useListSnapshots<
@@ -189,7 +355,9 @@ export function useListSnapshots<
 
 /**
  * Stores a snapshot from the Revit add-in. Requires the `x-snapshot-secret`
-header to match the configured `SNAPSHOT_SECRET` env var.
+header to match the configured `SNAPSHOT_SECRET` env var. If `projectName`
+matches an existing engagement (case-insensitive), the snapshot attaches
+to it. Otherwise a new engagement is auto-created.
 
  * @summary Receive a Revit snapshot from the add-in
  */
@@ -277,7 +445,7 @@ export const useCreateSnapshot = <
 };
 
 /**
- * @summary Get the full snapshot record
+ * @summary Get the full snapshot record (with payload)
  */
 export const getGetSnapshotUrl = (id: string) => {
   return `/api/snapshots/${id}`;
@@ -337,7 +505,7 @@ export type GetSnapshotQueryResult = NonNullable<
 export type GetSnapshotQueryError = ErrorType<ErrorResponse>;
 
 /**
- * @summary Get the full snapshot record
+ * @summary Get the full snapshot record (with payload)
  */
 
 export function useGetSnapshot<
@@ -366,8 +534,9 @@ export function useGetSnapshot<
 /**
  * Streams an assistant response over Server-Sent Events. Each event
 is `data: {"text": "..."}\n\n` followed by a final `data: [DONE]\n\n`.
+Grounds Claude on the latest snapshot for the given engagement.
 
- * @summary Ask Claude about a snapshot (SSE stream)
+ * @summary Ask Claude about an engagement (SSE stream)
  */
 export const getSendChatMessageUrl = () => {
   return `/api/chat`;
@@ -386,7 +555,7 @@ export const sendChatMessage = async (
 };
 
 export const getSendChatMessageMutationOptions = <
-  TError = ErrorType<ErrorResponse>,
+  TError = ErrorType<ChatErrorResponse | ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -427,13 +596,15 @@ export type SendChatMessageMutationResult = NonNullable<
   Awaited<ReturnType<typeof sendChatMessage>>
 >;
 export type SendChatMessageMutationBody = BodyType<ChatRequest>;
-export type SendChatMessageMutationError = ErrorType<ErrorResponse>;
+export type SendChatMessageMutationError = ErrorType<
+  ChatErrorResponse | ErrorResponse
+>;
 
 /**
- * @summary Ask Claude about a snapshot (SSE stream)
+ * @summary Ask Claude about an engagement (SSE stream)
  */
 export const useSendChatMessage = <
-  TError = ErrorType<ErrorResponse>,
+  TError = ErrorType<ChatErrorResponse | ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<

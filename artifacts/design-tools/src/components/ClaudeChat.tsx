@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSnapshotsStore } from "../store/snapshots";
+import { useEngagementsStore } from "../store/engagements";
 
 function HexGlyph({ size = 18 }: { size?: number }) {
   return (
@@ -16,15 +16,24 @@ function HexGlyph({ size = 18 }: { size?: number }) {
   );
 }
 
-export function ClaudeChat() {
-  const { selectedId, messagesById, streaming, sendMessage } = useSnapshotsStore();
+interface ClaudeChatProps {
+  engagementId: string;
+  hasSnapshots: boolean;
+}
+
+export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
+  const messagesByEngagement = useEngagementsStore(
+    (s) => s.messagesByEngagement,
+  );
+  const streaming = useEngagementsStore((s) => s.streaming);
+  const sendMessage = useEngagementsStore((s) => s.sendMessage);
   const [input, setInput] = useState("");
 
-  const messages = selectedId ? (messagesById[selectedId] || []) : [];
+  const messages = messagesByEngagement[engagementId] || [];
 
   const handleSend = () => {
-    if (!input.trim() || !selectedId || streaming) return;
-    sendMessage(selectedId, input);
+    if (!input.trim() || !hasSnapshots || streaming) return;
+    sendMessage(engagementId, input);
     setInput("");
   };
 
@@ -35,26 +44,35 @@ export function ClaudeChat() {
     }
   };
 
+  const placeholder = hasSnapshots
+    ? "Ask a question (Cmd/Ctrl + Enter to send)"
+    : "Send a snapshot from Revit first.";
+
   return (
     <div className="flex flex-col h-full">
-      <div className="sc-card-header flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <HexGlyph />
-          <span className="sc-label">CLAUDE</span>
+      <div className="sc-card-header flex flex-col gap-1 flex-shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <HexGlyph />
+            <span className="sc-label">CLAUDE</span>
+          </div>
+          <div className="sc-body opacity-70">Ask about this model</div>
         </div>
-        <div className="sc-body opacity-70">Ask about this model</div>
+        <div className="sc-meta opacity-60">
+          Chat history is session-only — refreshing the page clears it.
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto sc-scroll p-4 flex flex-col gap-4">
         {messages.map((msg, i) => {
           const isUser = msg.role === "user";
           const isLastAssistant = !isUser && i === messages.length - 1;
-          
+
           if (isUser) {
             return (
               <div key={i} className="self-end max-w-[80%]">
-                <div 
-                  className="rounded-lg px-3 py-2 text-white sc-ui" 
+                <div
+                  className="rounded-lg px-3 py-2 text-white sc-ui"
                   style={{ background: "var(--cyan)" }}
                 >
                   {msg.content}
@@ -69,7 +87,13 @@ export function ClaudeChat() {
                 <div className="sc-prose whitespace-pre-wrap">
                   {msg.content}
                   {isLastAssistant && streaming && (
-                    <span className="inline-block ml-2 w-1.5 h-1.5 rounded-full sc-dot-pulse" style={{ background: "var(--cyan)", boxShadow: "0 0 7px rgba(0,180,216,0.75)" }} />
+                    <span
+                      className="inline-block ml-2 w-1.5 h-1.5 rounded-full sc-dot-pulse"
+                      style={{
+                        background: "var(--cyan)",
+                        boxShadow: "0 0 7px rgba(0,180,216,0.75)",
+                      }}
+                    />
                   )}
                 </div>
               </div>
@@ -78,13 +102,16 @@ export function ClaudeChat() {
         })}
       </div>
 
-      <div className="p-4 border-t flex-shrink-0" style={{ borderColor: "var(--border-default)" }}>
+      <div
+        className="p-4 border-t flex-shrink-0"
+        style={{ borderColor: "var(--border-default)" }}
+      >
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={!selectedId || streaming}
-          placeholder={selectedId ? "Ask a question (Cmd/Ctrl + Enter to send)" : "Select a snapshot first"}
+          disabled={!hasSnapshots || streaming}
+          placeholder={placeholder}
           className="w-full resize-none rounded-md sc-ui sc-scroll"
           style={{
             background: "var(--bg-input)",
@@ -92,16 +119,20 @@ export function ClaudeChat() {
             color: "var(--text-primary)",
             padding: "8px 12px",
             height: "72px",
-            outline: "none"
+            outline: "none",
           }}
-          onFocus={(e) => e.currentTarget.style.borderColor = "var(--border-focus)"}
-          onBlur={(e) => e.currentTarget.style.borderColor = "var(--border-default)"}
+          onFocus={(e) =>
+            (e.currentTarget.style.borderColor = "var(--border-focus)")
+          }
+          onBlur={(e) =>
+            (e.currentTarget.style.borderColor = "var(--border-default)")
+          }
         />
         <div className="mt-2 flex justify-end">
-          <button 
-            className="sc-btn-primary" 
+          <button
+            className="sc-btn-primary"
             onClick={handleSend}
-            disabled={!selectedId || streaming || !input.trim()}
+            disabled={!hasSnapshots || streaming || !input.trim()}
           >
             Send
           </button>

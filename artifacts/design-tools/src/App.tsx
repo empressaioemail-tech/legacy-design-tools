@@ -1,74 +1,34 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Workbench } from "./pages/Workbench";
+import { EngagementList } from "./pages/EngagementList";
+import { EngagementDetail } from "./pages/EngagementDetail";
 import StyleProbe from "./pages/StyleProbe";
 import { Health } from "./pages/Health";
-import { Stub } from "./pages/Stub";
-import { DashboardLayout } from "@workspace/portal-ui";
+import { AppShell } from "./components/AppShell";
 
 const queryClient = new QueryClient();
-
-const navGroups = [
-  {
-    label: "WORKSPACE",
-    items: [
-      { label: "Workbench", href: "/" },
-      { label: "Style Probe", href: "/style-probe" },
-    ],
-  },
-  {
-    label: "PROJECTS",
-    items: [
-      { label: "Seguin Residence", href: "/p/seguin" },
-      { label: "Musgrave Residence", href: "/p/musgrave" },
-    ],
-  },
-  {
-    label: "DEV",
-    items: [
-      { label: "API Health", href: "/health" },
-    ],
-  },
-];
-
-function AppLayout({ children, title }: { children: React.ReactNode, title?: string }) {
-  return (
-    <DashboardLayout
-      title={title}
-      brandLabel="SMARTCITY OS"
-      brandProductName="Design Tools"
-      navGroups={navGroups}
-    >
-      {children}
-    </DashboardLayout>
-  );
-}
 
 function Router() {
   return (
     <Switch>
       <Route path="/">
-        <Workbench />
+        <EngagementList />
+      </Route>
+      <Route path="/engagements/:id">
+        <EngagementDetail />
       </Route>
       <Route path="/style-probe">
-        <AppLayout title="Style Probe">
+        <AppShell title="Style Probe">
           <StyleProbe />
-        </AppLayout>
+        </AppShell>
       </Route>
       <Route path="/health">
-        <AppLayout title="API Health">
+        <AppShell title="API Health">
           <Health />
-        </AppLayout>
-      </Route>
-      <Route path="/p/:slug">
-        <AppLayout title="Project View">
-          <Stub />
-        </AppLayout>
+        </AppShell>
       </Route>
       <Route>
-        <AppLayout>
-          <Stub />
-        </AppLayout>
+        <Redirect to="/" />
       </Route>
     </Switch>
   );

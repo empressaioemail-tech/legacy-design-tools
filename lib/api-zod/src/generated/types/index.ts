@@ -6,9 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export * from "./chatHistoryMessage";
-export * from "./chatHistoryMessageRole";
+export * from "./chatErrorResponse";
+export * from "./chatMessage";
+export * from "./chatMessageRole";
 export * from "./chatRequest";
+export * from "./engagementDetail";
+export * from "./engagementStatus";
+export * from "./engagementSummary";
 export * from "./errorResponse";
 export * from "./healthStatus";
 export * from "./snapshotDetail";
