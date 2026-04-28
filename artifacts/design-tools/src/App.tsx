@@ -4,6 +4,7 @@ import { EngagementList } from "./pages/EngagementList";
 import { EngagementDetail } from "./pages/EngagementDetail";
 import StyleProbe from "./pages/StyleProbe";
 import { Health } from "./pages/Health";
+import { CodeLibrary } from "./pages/CodeLibrary";
 import { AppShell } from "./components/AppShell";
 
 const queryClient = new QueryClient();
@@ -16,6 +17,11 @@ function Router() {
       </Route>
       <Route path="/engagements/:id">
         <EngagementDetail />
+      </Route>
+      <Route path="/code-library">
+        <AppShell title="Code Library">
+          <CodeLibrary />
+        </AppShell>
       </Route>
       <Route path="/style-probe">
         <AppShell title="Style Probe">

@@ -19,10 +19,14 @@ import type {
 import type {
   ChatErrorResponse,
   ChatRequest,
+  CodeAtomDetail,
+  CodeAtomSummary,
   EngagementDetail,
   EngagementSummary,
   ErrorResponse,
   HealthStatus,
+  JurisdictionSummary,
+  ListJurisdictionAtomsParams,
   SheetSummary,
   SheetUploadResponse,
   SnapshotDetail,
@@ -31,6 +35,7 @@ import type {
   SnapshotSummary,
   UpdateEngagementBody,
   UploadSnapshotSheetsBody,
+  WarmupResult,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -1067,6 +1072,377 @@ export function useGetSheetFull<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary List configured code jurisdictions and their atom counts
+ */
+export const getListCodeJurisdictionsUrl = () => {
+  return `/api/codes/jurisdictions`;
+};
+
+export const listCodeJurisdictions = async (
+  options?: RequestInit,
+): Promise<JurisdictionSummary[]> => {
+  return customFetch<JurisdictionSummary[]>(getListCodeJurisdictionsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListCodeJurisdictionsQueryKey = () => {
+  return [`/api/codes/jurisdictions`] as const;
+};
+
+export const getListCodeJurisdictionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCodeJurisdictions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listCodeJurisdictions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListCodeJurisdictionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listCodeJurisdictions>>
+  > = ({ signal }) => listCodeJurisdictions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCodeJurisdictions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListCodeJurisdictionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCodeJurisdictions>>
+>;
+export type ListCodeJurisdictionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List configured code jurisdictions and their atom counts
+ */
+
+export function useListCodeJurisdictions<
+  TData = Awaited<ReturnType<typeof listCodeJurisdictions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listCodeJurisdictions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListCodeJurisdictionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List atoms for a jurisdiction (paginated, newest first)
+ */
+export const getListJurisdictionAtomsUrl = (
+  key: string,
+  params?: ListJurisdictionAtomsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/codes/jurisdictions/${key}/atoms?${stringifiedParams}`
+    : `/api/codes/jurisdictions/${key}/atoms`;
+};
+
+export const listJurisdictionAtoms = async (
+  key: string,
+  params?: ListJurisdictionAtomsParams,
+  options?: RequestInit,
+): Promise<CodeAtomSummary[]> => {
+  return customFetch<CodeAtomSummary[]>(
+    getListJurisdictionAtomsUrl(key, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListJurisdictionAtomsQueryKey = (
+  key: string,
+  params?: ListJurisdictionAtomsParams,
+) => {
+  return [
+    `/api/codes/jurisdictions/${key}/atoms`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListJurisdictionAtomsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listJurisdictionAtoms>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  key: string,
+  params?: ListJurisdictionAtomsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listJurisdictionAtoms>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListJurisdictionAtomsQueryKey(key, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listJurisdictionAtoms>>
+  > = ({ signal }) =>
+    listJurisdictionAtoms(key, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!key,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listJurisdictionAtoms>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListJurisdictionAtomsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listJurisdictionAtoms>>
+>;
+export type ListJurisdictionAtomsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List atoms for a jurisdiction (paginated, newest first)
+ */
+
+export function useListJurisdictionAtoms<
+  TData = Awaited<ReturnType<typeof listJurisdictionAtoms>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  key: string,
+  params?: ListJurisdictionAtomsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listJurisdictionAtoms>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListJurisdictionAtomsQueryOptions(
+    key,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get a single code atom (full body + provenance)
+ */
+export const getGetCodeAtomUrl = (id: string) => {
+  return `/api/codes/atoms/${id}`;
+};
+
+export const getCodeAtom = async (
+  id: string,
+  options?: RequestInit,
+): Promise<CodeAtomDetail> => {
+  return customFetch<CodeAtomDetail>(getGetCodeAtomUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCodeAtomQueryKey = (id: string) => {
+  return [`/api/codes/atoms/${id}`] as const;
+};
+
+export const getGetCodeAtomQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCodeAtom>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCodeAtom>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCodeAtomQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getCodeAtom>>> = ({
+    signal,
+  }) => getCodeAtom(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCodeAtom>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCodeAtomQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCodeAtom>>
+>;
+export type GetCodeAtomQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get a single code atom (full body + provenance)
+ */
+
+export function useGetCodeAtom<
+  TData = Awaited<ReturnType<typeof getCodeAtom>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCodeAtom>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCodeAtomQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Idempotent. Inserts new TOC entries into the fetch queue (existing
+entries are skipped) and synchronously drains a small batch so the
+caller can confirm the pipeline is alive. Long-running fetches
+continue in the background queue worker.
+
+ * @summary Trigger discovery + queue drain for a jurisdiction
+ */
+export const getWarmupJurisdictionUrl = (key: string) => {
+  return `/api/codes/warmup/${key}`;
+};
+
+export const warmupJurisdiction = async (
+  key: string,
+  options?: RequestInit,
+): Promise<WarmupResult> => {
+  return customFetch<WarmupResult>(getWarmupJurisdictionUrl(key), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getWarmupJurisdictionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof warmupJurisdiction>>,
+    TError,
+    { key: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof warmupJurisdiction>>,
+  TError,
+  { key: string },
+  TContext
+> => {
+  const mutationKey = ["warmupJurisdiction"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof warmupJurisdiction>>,
+    { key: string }
+  > = (props) => {
+    const { key } = props ?? {};
+
+    return warmupJurisdiction(key, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type WarmupJurisdictionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof warmupJurisdiction>>
+>;
+
+export type WarmupJurisdictionMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Trigger discovery + queue drain for a jurisdiction
+ */
+export const useWarmupJurisdiction = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof warmupJurisdiction>>,
+    TError,
+    { key: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof warmupJurisdiction>>,
+  TError,
+  { key: string },
+  TContext
+> => {
+  return useMutation(getWarmupJurisdictionMutationOptions(options));
+};
 
 /**
  * Streams an assistant response over Server-Sent Events. Each event

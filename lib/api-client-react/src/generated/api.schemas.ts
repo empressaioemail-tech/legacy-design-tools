@@ -164,6 +164,12 @@ export interface ChatRequest {
   question: string;
   history?: ChatMessage[];
   referencedSheetIds?: string[];
+  /** Optional list of code atom UUIDs the user has explicitly attached
+to this question. Capped server-side. Atoms are fetched, scoped
+to the engagement's jurisdiction, and injected into the system
+prompt alongside any retrieval-discovered atoms.
+ */
+  referencedAtomIds?: string[];
 }
 
 export interface ErrorResponse {
@@ -173,6 +179,61 @@ export interface ErrorResponse {
 export interface ChatErrorResponse {
   error: string;
   message?: string;
+}
+
+export type JurisdictionSummaryBooksItem = {
+  codeBook: string;
+  edition: string;
+  label: string;
+  sourceName: string;
+  atomCount: number;
+};
+
+export interface JurisdictionSummary {
+  key: string;
+  displayName: string;
+  atomCount: number;
+  embeddedCount: number;
+  lastFetchedAt: string | null;
+  books: JurisdictionSummaryBooksItem[];
+}
+
+export interface CodeAtomSummary {
+  id: string;
+  jurisdictionKey: string;
+  codeBook: string;
+  edition: string;
+  sectionNumber: string | null;
+  sectionTitle: string | null;
+  sourceName: string;
+  sourceUrl: string;
+  embedded: boolean;
+  fetchedAt: string;
+  bodyPreview: string;
+}
+
+export type CodeAtomDetailMetadata = { [key: string]: unknown } | null;
+
+export type CodeAtomDetail = CodeAtomSummary & {
+  body: string;
+  bodyHtml: string | null;
+  parentSection: string | null;
+  embeddingModel: string | null;
+  metadata: CodeAtomDetailMetadata;
+};
+
+export type WarmupResultDrained = {
+  picked: number;
+  completed: number;
+  failed: number;
+  atomsWritten: number;
+};
+
+export interface WarmupResult {
+  jurisdictionKey: string;
+  enqueued: number;
+  skipped: number;
+  drained: WarmupResultDrained;
 }
 
 export type UpdateEngagementBody = {
@@ -188,4 +249,11 @@ export type UpdateEngagementBody = {
 export type UploadSnapshotSheetsBody = {
   /** JSON-encoded array of SheetMetadata */
   metadata: string;
+};
+
+export type ListJurisdictionAtomsParams = {
+  /**
+   * @maximum 200
+   */
+  limit?: number;
 };

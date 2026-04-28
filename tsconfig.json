@@ -17,6 +17,12 @@
     },
     {
       "path": "./lib/site-context"
+    },
+    {
+      "path": "./lib/codes-sources"
+    },
+    {
+      "path": "./lib/codes"
     }
   ]
 }

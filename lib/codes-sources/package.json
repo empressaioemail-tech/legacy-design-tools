@@ -1,0 +1,25 @@
+{
+  "name": "@workspace/codes-sources",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./grand-county-html": "./src/grandCountyHtml/index.ts",
+    "./grand-county-pdf": "./src/grandCountyPdf/index.ts",
+    "./municode": "./src/municode/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "p-queue": "^8.1.1",
+    "pdf-parse-fork": "^1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "~5.9.2"
+  }
+}

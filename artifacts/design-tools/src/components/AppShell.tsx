@@ -6,6 +6,7 @@ import {
 } from "@workspace/api-client-react";
 import {
   Activity,
+  BookOpen,
   FolderOpen,
   LayoutDashboard,
   Palette,
@@ -48,6 +49,11 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
           label: "Projects",
           href: "/",
           icon: <LayoutDashboard size={14} />,
+        },
+        {
+          label: "Code Library",
+          href: "/code-library",
+          icon: <BookOpen size={14} />,
         },
         {
           label: "Style Probe",

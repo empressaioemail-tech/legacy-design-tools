@@ -3,11 +3,20 @@ import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { SendChatMessageBody } from "@workspace/api-zod";
 import { db, engagements, snapshots, sheets } from "@workspace/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import {
+  keyFromEngagement,
+  retrieveAtomsForQuestion,
+  getAtomsByIds,
+  type RetrievedAtom,
+} from "@workspace/codes";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
 const MAX_REFERENCED_SHEETS = 4;
+const MAX_REFERENCED_ATOMS = 6;
+const MAX_RETRIEVED_ATOMS = 8;
+const MAX_ATOM_BODY_CHARS = 1800;
 
 function relativeTime(from: Date): string {
   const diffMs = Date.now() - from.getTime();
@@ -34,7 +43,8 @@ router.post("/chat", async (req: Request, res: Response) => {
     res.status(400).json({ error: "Invalid chat request" });
     return;
   }
-  const { engagementId, question, history, referencedSheetIds } = parse.data;
+  const { engagementId, question, history, referencedSheetIds, referencedAtomIds } =
+    parse.data;
 
   let engagement: typeof engagements.$inferSelect | undefined;
   let latestSnapshot: typeof snapshots.$inferSelect | undefined;
@@ -113,6 +123,53 @@ router.post("/chat", async (req: Request, res: Response) => {
     }
   }
 
+  // Resolve atoms to inject. Two sources:
+  //   1. User-attached referencedAtomIds (cap 6)
+  //   2. Retrieval over the engagement's jurisdiction (cap 8)
+  // Both are scoped to the engagement's jurisdiction key so cross-tenant
+  // leakage is impossible. If the engagement has no recognized jurisdiction
+  // (no geocode yet, or location not in our registry), we skip atom injection
+  // entirely.
+  const jurisdictionKey = keyFromEngagement({
+    jurisdictionCity: engagement.jurisdictionCity,
+    jurisdictionState: engagement.jurisdictionState,
+  });
+  const explicitAtoms: RetrievedAtom[] = [];
+  const retrievedAtoms: RetrievedAtom[] = [];
+  if (jurisdictionKey) {
+    if (referencedAtomIds && referencedAtomIds.length > 0) {
+      try {
+        const ids = referencedAtomIds.slice(0, MAX_REFERENCED_ATOMS);
+        const atoms = await getAtomsByIds(ids, jurisdictionKey);
+        explicitAtoms.push(...atoms);
+      } catch (err) {
+        logger.warn(
+          { err, engagementId, jurisdictionKey },
+          "chat: explicit atom lookup failed",
+        );
+      }
+    }
+    try {
+      const atoms = await retrieveAtomsForQuestion({
+        jurisdictionKey,
+        question,
+        limit: MAX_RETRIEVED_ATOMS,
+        logger,
+      });
+      // Don't double-count atoms already provided explicitly.
+      const explicitIds = new Set(explicitAtoms.map((a) => a.id));
+      for (const a of atoms) {
+        if (!explicitIds.has(a.id)) retrievedAtoms.push(a);
+      }
+    } catch (err) {
+      logger.warn(
+        { err, engagementId, jurisdictionKey },
+        "chat: atom retrieval failed — continuing without code context",
+      );
+    }
+  }
+  const allAtoms = [...explicitAtoms, ...retrievedAtoms];
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
@@ -126,10 +183,32 @@ router.post("/chat", async (req: Request, res: Response) => {
   const captured = relativeTime(latestSnapshot.receivedAt);
   const isoReceivedAt = latestSnapshot.receivedAt.toISOString();
 
+  const atomBlock =
+    allAtoms.length > 0
+      ? "\n\n<reference_code_atoms>\n" +
+        allAtoms
+          .map((a) => {
+            const body = a.body.length > MAX_ATOM_BODY_CHARS
+              ? a.body.slice(0, MAX_ATOM_BODY_CHARS - 1) + "…"
+              : a.body;
+            const ref = a.sectionNumber ?? a.sectionTitle ?? a.codeBook;
+            return `<atom id="${a.id}" code_book="${a.codeBook}" edition="${a.edition}" section="${ref ?? ""}" mode="${a.retrievalMode}">\n${body}\n</atom>`;
+          })
+          .join("\n") +
+        "\n</reference_code_atoms>"
+      : "";
+
+  const codeCitationInstruction =
+    allAtoms.length > 0
+      ? "\n\nWhen you cite a Reference Code Atom in your answer, include a marker of the form `[[CODE:atomId]]` at the end of the relevant sentence (the architect's UI will render these as clickable chips). Use only atom ids that appear in <reference_code_atoms> above. Prefer paraphrasing over quoting; quote sparingly and only when the exact wording matters."
+      : "";
+
   const systemPrompt =
     `You are helping an architect understand their Revit model for the engagement '${engagement.name}'${addressSuffix}${jurisdictionSuffix}. The most recent snapshot was captured ${captured}.\n\n` +
-    "Answer grounded in the snapshot data below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot.\n\n" +
-    `<snapshot received_at='${isoReceivedAt}'>\n${JSON.stringify(latestSnapshot.payload, null, 2)}\n</snapshot>`;
+    "Answer grounded in the snapshot data below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot." +
+    codeCitationInstruction +
+    `\n\n<snapshot received_at='${isoReceivedAt}'>\n${JSON.stringify(latestSnapshot.payload, null, 2)}\n</snapshot>` +
+    atomBlock;
 
   type ContentBlock =
     | { type: "text"; text: string }
@@ -186,6 +265,18 @@ router.post("/chat", async (req: Request, res: Response) => {
         ),
       },
       "chat with vision attachments",
+    );
+  }
+  if (allAtoms.length > 0) {
+    logger.info(
+      {
+        engagementId,
+        jurisdictionKey,
+        explicitAtoms: explicitAtoms.length,
+        retrievedAtoms: retrievedAtoms.length,
+        retrievalModes: Array.from(new Set(allAtoms.map((a) => a.retrievalMode))),
+      },
+      "chat with code-atom context",
     );
   }
 

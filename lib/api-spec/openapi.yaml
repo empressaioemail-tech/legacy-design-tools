@@ -16,6 +16,8 @@ tags:
     description: Revit model snapshot operations
   - name: chat
     description: Claude chat about an engagement
+  - name: codes
+    description: Atom-anchored municipal/building code knowledge
 paths:
   /healthz:
     get:
@@ -368,6 +370,110 @@ paths:
             image/png: {}
         "404":
           description: Sheet not found
+
+  /codes/jurisdictions:
+    get:
+      operationId: listCodeJurisdictions
+      tags: [codes]
+      summary: List configured code jurisdictions and their atom counts
+      responses:
+        "200":
+          description: Array of jurisdiction summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JurisdictionSummary"
+
+  /codes/jurisdictions/{key}/atoms:
+    get:
+      operationId: listJurisdictionAtoms
+      tags: [codes]
+      summary: List atoms for a jurisdiction (paginated, newest first)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        "200":
+          description: Atom summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CodeAtomSummary"
+        "404":
+          description: Unknown jurisdiction key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /codes/atoms/{id}:
+    get:
+      operationId: getCodeAtom
+      tags: [codes]
+      summary: Get a single code atom (full body + provenance)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Atom detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeAtomDetail"
+        "404":
+          description: Atom not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /codes/warmup/{key}:
+    post:
+      operationId: warmupJurisdiction
+      tags: [codes]
+      summary: Trigger discovery + queue drain for a jurisdiction
+      description: |
+        Idempotent. Inserts new TOC entries into the fetch queue (existing
+        entries are skipped) and synchronously drains a small batch so the
+        caller can confirm the pipeline is alive. Long-running fetches
+        continue in the background queue worker.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Warmup result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WarmupResult"
+        "404":
+          description: Unknown jurisdiction key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /chat:
     post:
@@ -780,6 +886,15 @@ components:
           type: array
           items:
             type: string
+        referencedAtomIds:
+          type: array
+          description: |
+            Optional list of code atom UUIDs the user has explicitly attached
+            to this question. Capped server-side. Atoms are fetched, scoped
+            to the engagement's jurisdiction, and injected into the system
+            prompt alongside any retrieval-discovered atoms.
+          items:
+            type: string
       required:
         - engagementId
         - question
@@ -801,3 +916,146 @@ components:
           type: string
       required:
         - error
+
+    JurisdictionSummary:
+      type: object
+      properties:
+        key:
+          type: string
+        displayName:
+          type: string
+        atomCount:
+          type: integer
+        embeddedCount:
+          type: integer
+        lastFetchedAt:
+          type: string
+          format: date-time
+          nullable: true
+        books:
+          type: array
+          items:
+            type: object
+            properties:
+              codeBook:
+                type: string
+              edition:
+                type: string
+              label:
+                type: string
+              sourceName:
+                type: string
+              atomCount:
+                type: integer
+            required:
+              - codeBook
+              - edition
+              - label
+              - sourceName
+              - atomCount
+      required:
+        - key
+        - displayName
+        - atomCount
+        - embeddedCount
+        - lastFetchedAt
+        - books
+
+    CodeAtomSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        jurisdictionKey:
+          type: string
+        codeBook:
+          type: string
+        edition:
+          type: string
+        sectionNumber:
+          type: string
+          nullable: true
+        sectionTitle:
+          type: string
+          nullable: true
+        sourceName:
+          type: string
+        sourceUrl:
+          type: string
+        embedded:
+          type: boolean
+        fetchedAt:
+          type: string
+          format: date-time
+        bodyPreview:
+          type: string
+      required:
+        - id
+        - jurisdictionKey
+        - codeBook
+        - edition
+        - sectionNumber
+        - sectionTitle
+        - sourceName
+        - sourceUrl
+        - embedded
+        - fetchedAt
+        - bodyPreview
+
+    CodeAtomDetail:
+      allOf:
+        - $ref: "#/components/schemas/CodeAtomSummary"
+        - type: object
+          properties:
+            body:
+              type: string
+            bodyHtml:
+              type: string
+              nullable: true
+            parentSection:
+              type: string
+              nullable: true
+            embeddingModel:
+              type: string
+              nullable: true
+            metadata:
+              type: object
+              additionalProperties: true
+              nullable: true
+          required:
+            - body
+            - bodyHtml
+            - parentSection
+            - embeddingModel
+            - metadata
+
+    WarmupResult:
+      type: object
+      properties:
+        jurisdictionKey:
+          type: string
+        enqueued:
+          type: integer
+        skipped:
+          type: integer
+        drained:
+          type: object
+          properties:
+            picked:
+              type: integer
+            completed:
+              type: integer
+            failed:
+              type: integer
+            atomsWritten:
+              type: integer
+          required:
+            - picked
+            - completed
+            - failed
+            - atomsWritten
+      required:
+        - jurisdictionKey
+        - enqueued
+        - skipped
+        - drained

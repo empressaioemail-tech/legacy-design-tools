@@ -455,6 +455,118 @@ export const GetSheetFullParams = zod.object({
 });
 
 /**
+ * @summary List configured code jurisdictions and their atom counts
+ */
+export const ListCodeJurisdictionsResponseItem = zod.object({
+  key: zod.string(),
+  displayName: zod.string(),
+  atomCount: zod.number(),
+  embeddedCount: zod.number(),
+  lastFetchedAt: zod.coerce.date().nullable(),
+  books: zod.array(
+    zod.object({
+      codeBook: zod.string(),
+      edition: zod.string(),
+      label: zod.string(),
+      sourceName: zod.string(),
+      atomCount: zod.number(),
+    }),
+  ),
+});
+export const ListCodeJurisdictionsResponse = zod.array(
+  ListCodeJurisdictionsResponseItem,
+);
+
+/**
+ * @summary List atoms for a jurisdiction (paginated, newest first)
+ */
+export const ListJurisdictionAtomsParams = zod.object({
+  key: zod.coerce.string(),
+});
+
+export const listJurisdictionAtomsQueryLimitDefault = 50;
+export const listJurisdictionAtomsQueryLimitMax = 200;
+
+export const ListJurisdictionAtomsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .max(listJurisdictionAtomsQueryLimitMax)
+    .default(listJurisdictionAtomsQueryLimitDefault),
+});
+
+export const ListJurisdictionAtomsResponseItem = zod.object({
+  id: zod.string(),
+  jurisdictionKey: zod.string(),
+  codeBook: zod.string(),
+  edition: zod.string(),
+  sectionNumber: zod.string().nullable(),
+  sectionTitle: zod.string().nullable(),
+  sourceName: zod.string(),
+  sourceUrl: zod.string(),
+  embedded: zod.boolean(),
+  fetchedAt: zod.coerce.date(),
+  bodyPreview: zod.string(),
+});
+export const ListJurisdictionAtomsResponse = zod.array(
+  ListJurisdictionAtomsResponseItem,
+);
+
+/**
+ * @summary Get a single code atom (full body + provenance)
+ */
+export const GetCodeAtomParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetCodeAtomResponse = zod
+  .object({
+    id: zod.string(),
+    jurisdictionKey: zod.string(),
+    codeBook: zod.string(),
+    edition: zod.string(),
+    sectionNumber: zod.string().nullable(),
+    sectionTitle: zod.string().nullable(),
+    sourceName: zod.string(),
+    sourceUrl: zod.string(),
+    embedded: zod.boolean(),
+    fetchedAt: zod.coerce.date(),
+    bodyPreview: zod.string(),
+  })
+  .and(
+    zod.object({
+      body: zod.string(),
+      bodyHtml: zod.string().nullable(),
+      parentSection: zod.string().nullable(),
+      embeddingModel: zod.string().nullable(),
+      metadata: zod.record(zod.string(), zod.unknown()).nullable(),
+    }),
+  );
+
+/**
+ * Idempotent. Inserts new TOC entries into the fetch queue (existing
+entries are skipped) and synchronously drains a small batch so the
+caller can confirm the pipeline is alive. Long-running fetches
+continue in the background queue worker.
+
+ * @summary Trigger discovery + queue drain for a jurisdiction
+ */
+export const WarmupJurisdictionParams = zod.object({
+  key: zod.coerce.string(),
+});
+
+export const WarmupJurisdictionResponse = zod.object({
+  jurisdictionKey: zod.string(),
+  enqueued: zod.number(),
+  skipped: zod.number(),
+  drained: zod.object({
+    picked: zod.number(),
+    completed: zod.number(),
+    failed: zod.number(),
+    atomsWritten: zod.number(),
+  }),
+});
+
+/**
  * Streams an assistant response over Server-Sent Events. Each event
 is `data: {"text": "..."}\n\n` followed by a final `data: [DONE]\n\n`.
 Grounds Claude on the latest snapshot for the given engagement.
@@ -473,4 +585,10 @@ export const SendChatMessageBody = zod.object({
     )
     .optional(),
   referencedSheetIds: zod.array(zod.string()).optional(),
+  referencedAtomIds: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Optional list of code atom UUIDs the user has explicitly attached\nto this question. Capped server-side. Atoms are fetched, scoped\nto the engagement's jurisdiction, and injected into the system\nprompt alongside any retrieval-discovered atoms.\n",
+    ),
 });

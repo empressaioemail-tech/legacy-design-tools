@@ -12,4 +12,10 @@ export interface ChatRequest {
   question: string;
   history?: ChatMessage[];
   referencedSheetIds?: string[];
+  /** Optional list of code atom UUIDs the user has explicitly attached
+to this question. Capped server-side. Atoms are fetched, scoped
+to the engagement's jurisdiction, and injected into the system
+prompt alongside any retrieval-discovered atoms.
+ */
+  referencedAtomIds?: string[];
 }

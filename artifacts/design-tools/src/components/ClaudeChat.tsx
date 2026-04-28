@@ -1,11 +1,76 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useSidebarState } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import "./claude-markdown.css";
+
+// [[CODE:atomId]] markers in assistant messages render as inline chips that
+// link to the Code Library detail view. The atomId is a UUID — restrict the
+// regex to that shape so we don't accidentally match unrelated double-bracket
+// constructs the model might emit.
+const ATOM_TOKEN_RE = /\[\[CODE:([0-9a-fA-F-]{8,})\]\]/g;
+const CODE_LIBRARY_BASE = `${import.meta.env.BASE_URL}code-library`;
+
+function CodeAtomChip({ atomId }: { atomId: string }) {
+  const short = atomId.slice(0, 8);
+  return (
+    <a
+      href={`${CODE_LIBRARY_BASE}?atom=${atomId}`}
+      title={`Open atom ${atomId} in Code Library`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 3,
+        background: "rgba(99, 152, 170, 0.18)",
+        color: "var(--cyan)",
+        fontSize: 10,
+        letterSpacing: "0.04em",
+        padding: "1px 6px",
+        borderRadius: 3,
+        textTransform: "uppercase",
+        textDecoration: "none",
+        verticalAlign: "baseline",
+        marginInline: 2,
+      }}
+    >
+      <BookOpen size={9} />
+      CODE·{short}
+    </a>
+  );
+}
+
+/**
+ * Walks the children produced by ReactMarkdown and rewrites text nodes that
+ * contain [[CODE:atomId]] markers into a mix of plain text and chip elements.
+ * Non-string children (e.g. nested elements like <strong>, <code>) pass
+ * through untouched.
+ */
+function renderWithAtomChips(children: ReactNode): ReactNode {
+  if (typeof children === "string") {
+    if (!ATOM_TOKEN_RE.test(children)) return children;
+    ATOM_TOKEN_RE.lastIndex = 0;
+    const out: ReactNode[] = [];
+    let lastIdx = 0;
+    let m: RegExpExecArray | null;
+    let key = 0;
+    while ((m = ATOM_TOKEN_RE.exec(children)) !== null) {
+      if (m.index > lastIdx) out.push(children.slice(lastIdx, m.index));
+      out.push(<CodeAtomChip key={`atom-${key++}`} atomId={m[1]} />);
+      lastIdx = m.index + m[0].length;
+    }
+    if (lastIdx < children.length) out.push(children.slice(lastIdx));
+    return out;
+  }
+  if (Array.isArray(children)) {
+    return children.map((c, i) => (
+      <span key={`mc-${i}`}>{renderWithAtomChips(c)}</span>
+    ));
+  }
+  return children;
+}
 
 function HexGlyph({ size = 18 }: { size?: number }) {
   return (
@@ -182,6 +247,14 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeHighlight]}
+                    components={{
+                      p: ({ children }) => (
+                        <p>{renderWithAtomChips(children)}</p>
+                      ),
+                      li: ({ children }) => (
+                        <li>{renderWithAtomChips(children)}</li>
+                      ),
+                    }}
                   >
                     {msg.content}
                   </ReactMarkdown>

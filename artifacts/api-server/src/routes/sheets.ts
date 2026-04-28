@@ -111,13 +111,14 @@ router.post(
       res.status(400).json({ error: "Missing snapshotId" });
       return;
     }
+    const snapshotIdStr = String(snapshotId);
 
     let snapRows;
     try {
       snapRows = await db
         .select({ id: snapshots.id, engagementId: snapshots.engagementId })
         .from(snapshots)
-        .where(eq(snapshots.id, snapshotId))
+        .where(eq(snapshots.id, snapshotIdStr))
         .limit(1);
     } catch (err) {
       logger.error({ err, snapshotId }, "sheet upload: snapshot lookup failed");
@@ -309,7 +310,7 @@ router.post(
         seenSheetNumbers.add(entry.sheetNumber);
 
         rowsToInsert.push({
-          snapshotId,
+          snapshotId: snapshotIdStr,
           engagementId,
           sheetNumber: entry.sheetNumber,
           sheetName: entry.sheetName,
@@ -373,9 +374,9 @@ router.post(
         await db
           .update(snapshots)
           .set({
-            sheetCount: sql<number>`(select cast(count(*) as int) from ${sheets} where ${sheets.snapshotId} = ${snapshotId})`,
+            sheetCount: sql<number>`(select cast(count(*) as int) from ${sheets} where ${sheets.snapshotId} = ${snapshotIdStr})`,
           })
-          .where(eq(snapshots.id, snapshotId));
+          .where(eq(snapshots.id, snapshotIdStr));
       } catch (err) {
         logger.error(
           { err, snapshotId },
@@ -394,7 +395,7 @@ router.post(
 router.get(
   "/snapshots/:snapshotId/sheets",
   async (req: Request, res: Response) => {
-    const snapshotId = req.params["snapshotId"];
+    const snapshotId = String(req.params["snapshotId"] ?? "");
     if (!snapshotId) {
       res.status(400).json({ error: "Missing snapshotId" });
       return;
@@ -446,7 +447,7 @@ async function serveSheetPng(
   res: Response,
   column: "thumbnailPng" | "fullPng",
 ) {
-  const id = req.params["id"];
+  const id = String(req.params["id"] ?? "");
   if (!id) {
     res.status(400).json({ error: "Missing id" });
     return;

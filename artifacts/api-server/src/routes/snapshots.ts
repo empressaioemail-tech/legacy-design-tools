@@ -8,6 +8,10 @@ import {
   GetSnapshotParams,
 } from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
+import {
+  keyFromEngagement,
+  enqueueWarmupForJurisdiction,
+} from "@workspace/codes";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 
@@ -197,6 +201,34 @@ router.post("/snapshots", async (req: Request, res: Response) => {
                 siteContextRaw: geo.raw ?? null,
               })
               .where(eq(engagements.id, result.engagementId));
+
+            // Demand-driven code-atom warmup. If the geocode resolved to a
+            // jurisdiction we recognize, kick off TOC discovery so the next
+            // chat question has something to retrieve. Fully best-effort —
+            // failures don't roll back the snapshot or the engagement.
+            const jKey = keyFromEngagement({
+              jurisdictionCity: geo.jurisdictionCity,
+              jurisdictionState: geo.jurisdictionState,
+            });
+            if (jKey) {
+              try {
+                const enq = await enqueueWarmupForJurisdiction(jKey, logger);
+                logger.info(
+                  {
+                    engagementId: result.engagementId,
+                    jurisdictionKey: jKey,
+                    enqueued: enq.enqueued,
+                    skipped: enq.skipped,
+                  },
+                  "auto-warmup: enqueued for engagement jurisdiction",
+                );
+              } catch (warmErr) {
+                logger.warn(
+                  { warmErr, jurisdictionKey: jKey },
+                  "auto-warmup enqueue failed (non-fatal)",
+                );
+              }
+            }
           }
         } catch (err) {
           logger.warn(
