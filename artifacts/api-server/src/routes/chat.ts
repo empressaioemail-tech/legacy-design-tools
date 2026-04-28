@@ -133,7 +133,20 @@ router.post("/chat", async (req: Request, res: Response) => {
   const jurisdictionKey = keyFromEngagement({
     jurisdictionCity: engagement.jurisdictionCity,
     jurisdictionState: engagement.jurisdictionState,
+    jurisdiction: engagement.jurisdiction,
+    address: engagement.address,
   });
+  logger.info(
+    {
+      engagementId,
+      address: engagement.address,
+      jurisdictionFreeform: engagement.jurisdiction,
+      jurisdictionCity: engagement.jurisdictionCity,
+      jurisdictionState: engagement.jurisdictionState,
+      resolvedJurisdictionKey: jurisdictionKey,
+    },
+    "chat: resolved jurisdiction for atom retrieval",
+  );
   const explicitAtoms: RetrievedAtom[] = [];
   const retrievedAtoms: RetrievedAtom[] = [];
   if (jurisdictionKey) {

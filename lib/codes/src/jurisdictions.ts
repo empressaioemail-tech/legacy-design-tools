@@ -91,17 +91,76 @@ const CITY_STATE_TO_KEY: Record<string, string> = {
 };
 
 /**
- * Resolve a jurisdiction key from an engagement's geocoded city/state. Returns
- * null when no warmup is configured for the engagement's location.
+ * Resolve a jurisdiction key from an engagement. Tries, in order:
+ *   1. Structured `jurisdictionCity` + `jurisdictionState` (from geocoder).
+ *   2. Freeform `jurisdiction` string (e.g. "Moab, UT"), parsed loosely.
+ *   3. `address` field, scanned for any registered "city, state" pair.
+ *
+ * The fallback chain matters because legacy engagements created before the
+ * geocoder split city/state into structured columns still carry the location
+ * in the freeform `jurisdiction` and `address` strings. Without these
+ * fallbacks, retrieval silently returns zero atoms and the chat answers from
+ * model knowledge instead of our ingested code corpus.
+ *
+ * Returns null when no warmup is configured for the engagement's location.
  */
 export function keyFromEngagement(input: {
   jurisdictionCity?: string | null;
   jurisdictionState?: string | null;
+  jurisdiction?: string | null;
+  address?: string | null;
 }): string | null {
+  // 1) Structured city+state (preferred — set by the geocoder).
   const city = (input.jurisdictionCity ?? "").trim().toLowerCase();
   const state = (input.jurisdictionState ?? "").trim().toLowerCase();
-  if (!city || !state) return null;
-  return CITY_STATE_TO_KEY[`${city}|${state}`] ?? null;
+  if (city && state) {
+    const k = CITY_STATE_TO_KEY[`${city}|${state}`];
+    if (k) return k;
+  }
+
+  // 2) Freeform "City, ST" jurisdiction string.
+  const fromJurisdiction = parseCityState(input.jurisdiction);
+  if (fromJurisdiction) {
+    const k = CITY_STATE_TO_KEY[fromJurisdiction];
+    if (k) return k;
+  }
+
+  // 3) Scan the address for any registered city/state pair. We test each
+  //    known key by substring match — cheap because the registry is tiny.
+  const addr = (input.address ?? "").toLowerCase();
+  if (addr) {
+    for (const [pair, key] of Object.entries(CITY_STATE_TO_KEY)) {
+      const [c, s] = pair.split("|");
+      // Require both city and state to appear, to avoid e.g. "Moab" matching
+      // "Moab, OK". Use a comma-aware test for the typical "City, ST" form.
+      if (
+        addr.includes(`${c}, ${s}`) ||
+        (addr.includes(c) && addr.includes(`, ${s}`))
+      ) {
+        return key;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse a freeform jurisdiction string of the form "City, ST" or "City, State"
+ * into the lowercased "city|state" key used by CITY_STATE_TO_KEY. Returns null
+ * if the string can't be split cleanly.
+ */
+function parseCityState(s: string | null | undefined): string | null {
+  const raw = (s ?? "").trim();
+  if (!raw) return null;
+  const parts = raw.split(",").map((p) => p.trim().toLowerCase());
+  if (parts.length < 2) return null;
+  const c = parts[0];
+  // Drop trailing tokens after the state (e.g. "Moab, UT 84532") — keep first
+  // token of the second segment.
+  const s2 = parts[1].split(/\s+/)[0];
+  if (!c || !s2) return null;
+  return `${c}|${s2}`;
 }
 
 export function getJurisdiction(key: string): JurisdictionConfig | null {
