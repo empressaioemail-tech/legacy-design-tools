@@ -4,7 +4,8 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, codeAtoms, codeAtomSources } from "@workspace/db";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { embedTexts, EMBEDDING_MODEL } from "@workspace/codes";
 import {
   enqueueWarmupForJurisdiction,
   drainQueue,
@@ -236,6 +237,83 @@ router.post(
     } catch (err) {
       logger.error({ err, key }, "warmup failed");
       res.status(500).json({ error: "Warmup failed" });
+    }
+  },
+);
+
+/**
+ * One-shot backfill: embed any atoms still missing a vector. Useful after
+ * provisioning OPENAI_API_KEY for the first time. Safe to call repeatedly —
+ * it's bounded by `?limit=` (default 200, hard cap 1000) and only touches
+ * atoms where embedding IS NULL.
+ */
+router.post(
+  "/codes/embeddings/backfill",
+  async (req: Request, res: Response): Promise<void> => {
+    const limit = Math.min(
+      Math.max(Number(req.query.limit ?? 200) || 200, 1),
+      1000,
+    );
+    try {
+      const pending = await db
+        .select({ id: codeAtoms.id, body: codeAtoms.body })
+        .from(codeAtoms)
+        .where(isNull(codeAtoms.embedding))
+        .limit(limit);
+
+      if (pending.length === 0) {
+        res.json({ scanned: 0, embedded: 0, failed: 0, remaining: 0 });
+        return;
+      }
+
+      // Embed in chunks of 64 (well under any per-request token cap).
+      const CHUNK = 64;
+      let embedded = 0;
+      let failed = 0;
+      for (let i = 0; i < pending.length; i += CHUNK) {
+        const slice = pending.slice(i, i + CHUNK);
+        const result = await embedTexts(
+          slice.map((r) => r.body),
+          { logger },
+        );
+        if (!result.embeddedAny) {
+          failed += slice.length;
+          // Bail early if it's a config issue — no point hammering.
+          if (result.skipReason === "no_api_key") break;
+          continue;
+        }
+        const now = new Date();
+        for (let j = 0; j < slice.length; j++) {
+          const vec = result.vectors[j];
+          if (!vec) {
+            failed++;
+            continue;
+          }
+          await db
+            .update(codeAtoms)
+            .set({
+              embedding: vec,
+              embeddingModel: EMBEDDING_MODEL,
+              embeddedAt: now,
+            })
+            .where(eq(codeAtoms.id, slice[j].id));
+          embedded++;
+        }
+      }
+
+      const remainingRows = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(codeAtoms)
+        .where(isNull(codeAtoms.embedding));
+      res.json({
+        scanned: pending.length,
+        embedded,
+        failed,
+        remaining: Number(remainingRows[0]?.n ?? 0),
+      });
+    } catch (err) {
+      logger.error({ err }, "embeddings backfill failed");
+      res.status(500).json({ error: "Backfill failed" });
     }
   },
 );
