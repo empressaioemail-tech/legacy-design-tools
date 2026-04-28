@@ -1,0 +1,245 @@
+# Sprint A05 — UPDATED Go-Ahead with Bastrop via Municode MCP Server
+
+This is the updated reply to paste back to Replit Agent following the Section 0 reconnaissance report. It supersedes the earlier go-ahead. Adds Bastrop coverage using a Municode MCP server adapter, while keeping all the Grand County work intact.
+
+**Paste the entire text between BEGIN and END markers.**
+
+---
+
+```
+========== BEGIN PASTE TO REPLIT AGENT ==========
+
+Section 0 findings accepted. Updated plan:
+
+Path (a) confirmed for Grand County (HTML-table-first + clean PDF).
+Bastrop is now BACK IN this sprint via a Municode MCP server adapter — same atom architecture, demand-driven gathering, sourced via MCP instead of HTML scraping.
+
+OPENAI_API_KEY will be set before warmup runs.
+
+============================================================
+NEW SECTION 0.5 — MCP SERVER RECONNAISSANCE
+============================================================
+
+Before any other code work, do this reconnaissance and pause for go-ahead. Same stage-gate pattern as Section 0.
+
+A. Identify candidate Municode MCP servers
+   Search GitHub and MCP registries (lobehub.com/mcp, mcpservers.org, mcpmarket.com) for:
+   - "MunicipalMCP" / "municode-mcp-server" — Python implementation that wraps the unofficial Municode API (https://api.municode.com)
+   - "Muni" on mcpmarket.com — alternative MCP server claiming Municode access
+   - Any other actively-maintained MCP server for Municode
+   
+   For each candidate found, capture:
+   - Repository URL
+   - Last commit date
+   - Open issues count
+   - Star count
+   - License
+   - Stated tools/endpoints exposed (e.g., search, getNode, getContent)
+   - Any known limitations
+
+B. Pick the most reliable one
+   Selection criteria, in order:
+   1. Active maintenance (commits in last 6 months)
+   2. Tool surface that supports our needs: ToC traversal, section content fetch, search
+   3. License that permits commercial use (MIT/Apache/BSD preferred)
+   4. Existing usage / community trust signals
+   
+   Print your selection with reasoning.
+
+C. Verify it can be installed in Replit
+   - Check installation method (pip, npm, uvx, docker)
+   - Confirm Replit's container has the runtime needed
+   - Do a dry-run install (DON'T leave it installed yet) to confirm it works in this environment
+
+D. Verify a single live tool call works end-to-end
+   - Spawn the MCP server as subprocess (stdio transport)
+   - Call ONE tool against it — pick the cheapest/safest call (e.g., "list states with Municode coverage" or "get municipality info for Bastrop, TX")
+   - Confirm the response shape and that real data comes back
+   - Tear down
+
+E. Check rate-limit and politeness behavior
+   - Read the MCP server's source: does it implement rate limiting? User-Agent? Backoff?
+   - If rate limiting is missing or weak, our adapter will add it on top
+   - Report what's there
+
+After A-E, REPORT FINDINGS AND PAUSE. The user (Empressa) reads the report and either:
+- Approves the chosen MCP server → proceed
+- Asks to swap to a different candidate → adjust
+- Says no Bastrop in this sprint → proceed Grand County only as originally re-scoped
+
+============================================================
+PROCEED WITH (after Section 0.5 approval)
+============================================================
+
+1. Schema (already specified) — code_atom_sources, code_atoms,
+   code_atom_fetch_queue, findings_code_atoms placeholder
+
+2. lib/codes-sources package with THREE adapters now:
+   
+   a. grandCountyHtml — parses 2021 IRC Table 301.2(1) climatic
+      and geographic design criteria from
+      grandcountyutah.net/146/Design-Criteria. Each table row
+      becomes one atom (ground snow load, wind speed, seismic
+      design category, frost depth, etc.).
+   
+   b. grandCountyPdf — generic PDF adapter, configured for the
+      one clean Grand County PDF (DocumentCenter/View/3611,
+      2006 Wildland-Urban Interface Code). Skip the scanned PDF.
+   
+   c. NEW — municodeMcp — talks to the chosen Municode MCP
+      server (selected in Section 0.5) via stdio MCP protocol.
+      Implements the CodeSource interface using MCP tool calls.
+      
+      listToc(jurisdiction, codeBook, edition):
+        - Calls MCP tool "get_table_of_contents" or equivalent
+          (exact name depends on chosen server)
+        - Parses response into TocEntry[]
+        - Adds politeness layer on top of MCP server's own:
+          minimum 1.5 sec between tool calls + 0-1 sec jitter
+      
+      fetchSection(url, context):
+        - Calls MCP tool "get_section_content" or equivalent
+        - Parses response into AtomCandidate
+        - Includes sourceUrl pointing back to library.municode.com
+          for that section so architects can verify
+
+3. Seed code_atom_sources with THREE rows:
+   - "grand_county_html" / html_scrape / public_record /
+     "Government public records — Utah open records;
+      grandcountyutah.net is official county website"
+   - "grand_county_pdf" / pdf / public_record /
+     "Government public records — Utah open records"
+   - "bastrop_municode_mcp" / api / permitted_use /
+     "Unofficial Municode JSON API via MCP server [name];
+      municipal ordinances are public records by Texas law;
+      bridge infrastructure pending official Municode API
+      partnership"
+
+4. lib/codes orchestrator package — same as before. Source-agnostic.
+   The orchestrator calls source.listToc() and source.fetchSection()
+   without caring whether the source is HTML, PDF, or MCP-wrapped API.
+
+5. Update jurisdictions.ts:
+   - bastrop_tx → applicableCodeBooks: [
+       { codeBook: "bastrop_udc", edition: "current",
+         sourceName: "bastrop_municode_mcp" }
+     ]
+   - grand_county_ut → unchanged from earlier plan
+
+6. MCP server lifecycle:
+   - api-server spawns the chosen Municode MCP server as a
+     subprocess on startup
+   - stdio transport (standard for local MCP)
+   - Singleton — one MCP server process per Replit container
+   - On crash: log clearly, attempt restart up to 3 times with
+     backoff, then halt that source until manual intervention
+   - On clean shutdown of api-server: also stop MCP server
+   - Add MUNICODE_MCP_ENABLED env flag (default true) to allow
+     disabling without code change
+
+7. OpenAPI + codegen — same endpoints as before
+   (no shape changes for MCP-vs-other sources; the source layer
+   is invisible to the API surface)
+
+8. Backend routes + chat integration + warmup worker — same.
+   The warmup worker already iterates over the queue without
+   knowing which source backs each entry.
+
+9. Engagement geocoding side-effect:
+   When jurisdiction is set to bastrop_tx OR grand_county_ut,
+   fire-and-forget enqueueWarmupForJurisdiction()
+
+10. Frontend citation chips — same. The CitationChip component
+    just renders atom data; it doesn't care that some atoms came
+    from MCP and others from PDFs.
+
+11. Frontend Code Library page:
+    Both Grand County AND Bastrop cards now active.
+    Bastrop card shows "via Municode" provenance footer with
+    link to library.municode.com source.
+    Each atom's detail view shows:
+    "Source: bastrop_municode_mcp · License: permitted_use ·
+     Fetched [relativeTime] · Verify at [sourceUrl]"
+
+12. Sidebar nav addition
+
+13. NEW — MUNICODE_API_NOTES.md in lib/codes-sources/
+    Modeled on the UPCODES_CONTINGENCY.md pattern from earlier.
+    Documents:
+    - This is bridge infrastructure, not a long-term solution
+    - Legal posture is "permitted use" of an unofficial public
+      API, in service of access to municipal codes which are
+      themselves public records
+    - Replacement plan: official Municode API partnership when
+      that conversation lands; ICC API for model-code coverage
+    - Operational behavior: rate limits, retry, halt-on-failure
+    - Whom to contact at Municode if they reach out (placeholder
+      until partnership conversation produces an actual contact)
+
+============================================================
+VERIFY END-TO-END
+============================================================
+
+After build:
+
+a. Trigger warm-up for grand_county_ut → POST /api/codes/warmup/grand_county_ut
+b. Watch logs: HTML parsed, PDF parsed, atoms inserted,
+   embeddings populated. Expected ~25-80 atoms.
+
+c. Trigger warm-up for bastrop_tx → POST /api/codes/warmup/bastrop_tx
+d. Watch logs: MCP server called, ToC retrieved, sections fetched.
+   Expected: ~50-200 atoms (depends on Bastrop's UDC structure).
+   Politeness: 1.5+ sec between MCP tool calls visible in timing.
+
+e. Open Seguin Residence engagement (Moab → grand_county_ut).
+   Ask chat: "What's the ground snow load and wind speed for this site?"
+   Expect [[CODE:atomId]] citations referencing Grand County
+   design criteria atoms.
+
+f. Open Snowdon Towers engagement (Bastrop → bastrop_tx).
+   Ask chat: "What are the setback requirements for additions
+   in residential zones here?"
+   Expect [[CODE:atomId]] citations referencing Bastrop UDC
+   atoms. Chip hover should show Bastrop UDC section text.
+
+g. Click a Bastrop chip → navigates to Code Library, atom
+   detail shows "Source: bastrop_municode_mcp" provenance.
+
+h. Repeat the Bastrop question 5 minutes later → response cites
+   same atom IDs (cached, no re-fetch). Verify in logs no MCP
+   tool call happened on the second run.
+
+i. /style-probe still renders, plan-review untouched, Revit
+   add-in untouched.
+
+After completing, print:
+- Section 0 + Section 0.5 findings (chosen MCP server, with reasoning)
+- Total atoms by jurisdiction
+- Total OpenAI embedding cost
+- Sample retrieval results
+- Any MCP server reliability issues during warmup
+- Decisions diverged from spec, and why
+
+============================================================
+DO NOT BUILD
+============================================================
+
+- BULK pre-collection of every Municode jurisdiction. Atoms
+  accumulate via demand for the engagements that exist.
+  Municode covers thousands of cities; we don't pre-fetch them.
+- Pre-collection beyond Bastrop and Grand County in this sprint.
+  When a future engagement is created in a different Municode
+  jurisdiction, warmup runs for THAT jurisdiction only.
+- ICC / NFPA / UpCodes integration. Later phases.
+- Authentication-gated source access (no UpCodes scraping).
+- Findings table beyond placeholder join.
+- Test coverage.
+- Multi-tenancy.
+- ANY change to artifacts/plan-review/, mockup-sandbox/, the
+  Revit add-in.
+- Auth, login, Cloud Run migration.
+- OCR for scanned PDFs.
+- Persistent chat history in DB.
+
+========== END PASTE TO REPLIT AGENT ==========
+```
