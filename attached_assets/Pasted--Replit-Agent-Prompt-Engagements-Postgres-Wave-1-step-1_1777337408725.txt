@@ -1,0 +1,442 @@
+# Replit Agent Prompt — Engagements + Postgres (Wave 1 step 1)
+
+**What this is:** modifies the existing `apps/design-tools-web` app to introduce Engagements as the top-level concept and persist data in Neon Postgres via Drizzle ORM. Snapshots become children of engagements; engagements auto-create when an unknown `projectName` arrives.
+
+**Run this AFTER:**
+- Prompt 01 (design-tools scaffold) ✓
+- Prompt 02 (plan-review shell) ✓
+- Prompt 03 (Revit sensor) ✓ — and the C# add-in is working
+
+**Prerequisites:**
+- A Neon Postgres database (create at https://console.neon.tech if you don't have one for this project)
+- `DATABASE_URL` set in Replit Secrets (use the **pooled** connection string from Neon)
+- `ANTHROPIC_API_KEY` and `SNAPSHOT_SECRET` already set from prompt 01
+
+**How to use:** paste everything between `BEGIN` and `END` into the same Replit's Agent.
+
+**After it finishes:**
+1. Run `npm run db:push --workspace=apps/design-tools-web` to create the tables
+2. Run `npm run db:seed --workspace=apps/design-tools-web` to populate Seguin + Musgrave
+3. Open the Replit URL — home page should show 2 engagement cards
+4. From Revit, click "Send Snapshot" on a project named "Seguin Residence" — it should attach to the existing engagement
+5. From Revit, click "Send Snapshot" on a project with a NEW name — a new engagement should auto-appear
+
+---
+
+```
+========== BEGIN PASTE TO REPLIT AGENT ==========
+
+Modify the existing apps/design-tools-web app to add Engagements as the top-level concept and persist data in Neon Postgres via Drizzle ORM. The C# Revit add-in keeps working without changes — engagements auto-create when an unknown projectName arrives.
+
+CRITICAL: use `pg` (node-postgres) + `drizzle-orm/node-postgres`. Do NOT use `@neondatabase/serverless` or its WebSocket driver — we hit a production outage with that driver before. TCP-only via `pg.Pool`.
+
+============================================================
+SECTION 1 — DEPENDENCIES (apps/design-tools-web/package.json)
+============================================================
+
+Add these dependencies:
+- "drizzle-orm": "^0.36.0"
+- "pg": "^8.13.0"
+- "dotenv": "^16.4.0"
+
+Add these devDependencies:
+- "drizzle-kit": "^0.30.0"
+- "@types/pg": "^8.11.0"
+- "tsx": "^4.19.0"
+
+Add these scripts:
+- "db:push":  "drizzle-kit push"
+- "db:seed":  "tsx server/db/seed.ts"
+- "db:studio":"drizzle-kit studio"
+
+============================================================
+SECTION 2 — DRIZZLE CONFIG (apps/design-tools-web/drizzle.config.ts)
+============================================================
+
+import "dotenv/config";
+import { defineConfig } from "drizzle-kit";
+
+export default defineConfig({
+  schema: "./server/db/schema.ts",
+  out: "./server/db/migrations",
+  dialect: "postgresql",
+  dbCredentials: {
+    url: process.env.DATABASE_URL!,
+  },
+  verbose: true,
+  strict: true,
+});
+
+============================================================
+SECTION 3 — DB CLIENT (apps/design-tools-web/server/db/index.ts)
+============================================================
+
+import "dotenv/config";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "./schema";
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL not set. Add it in Replit Secrets.");
+}
+
+// TCP pool — explicitly NOT @neondatabase/serverless / WebSocket driver
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+export const db = drizzle(pool, { schema });
+
+// Health probe for the API
+export async function dbHealthCheck(): Promise<boolean> {
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query("SELECT 1");
+      return true;
+    } finally {
+      client.release();
+    }
+  } catch {
+    return false;
+  }
+}
+
+============================================================
+SECTION 4 — SCHEMA (apps/design-tools-web/server/db/schema.ts)
+============================================================
+
+import { pgTable, uuid, text, timestamp, jsonb, integer, index } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
+
+export const engagements = pgTable("engagements", {
+  id:           uuid("id").defaultRandom().primaryKey(),
+  name:         text("name").notNull(),                  // matches Revit projectName
+  nameLower:    text("name_lower").notNull().unique(),   // for case-insensitive lookup
+  jurisdiction: text("jurisdiction"),                    // e.g., "Moab, UT" — nullable
+  address:      text("address"),                         // nullable
+  status:       text("status").notNull().default("active"), // active | on_hold | archived
+  createdAt:    timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:    timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  nameLowerIdx: index("engagements_name_lower_idx").on(t.nameLower),
+}));
+
+export const snapshots = pgTable("snapshots", {
+  id:            uuid("id").defaultRandom().primaryKey(),
+  engagementId:  uuid("engagement_id").notNull().references(() => engagements.id, { onDelete: "cascade" }),
+  projectName:   text("project_name").notNull(),
+  payload:       jsonb("payload").notNull(),     // full snapshot JSON from Revit
+  sheetCount:    integer("sheet_count"),
+  roomCount:     integer("room_count"),
+  levelCount:    integer("level_count"),
+  wallCount:     integer("wall_count"),
+  receivedAt:    timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  engagementIdx: index("snapshots_engagement_idx").on(t.engagementId),
+  receivedAtIdx: index("snapshots_received_at_idx").on(t.receivedAt),
+}));
+
+export const engagementsRelations = relations(engagements, ({ many }) => ({
+  snapshots: many(snapshots),
+}));
+
+export const snapshotsRelations = relations(snapshots, ({ one }) => ({
+  engagement: one(engagements, {
+    fields: [snapshots.engagementId],
+    references: [engagements.id],
+  }),
+}));
+
+export type Engagement = typeof engagements.$inferSelect;
+export type NewEngagement = typeof engagements.$inferInsert;
+export type Snapshot = typeof snapshots.$inferSelect;
+export type NewSnapshot = typeof snapshots.$inferInsert;
+
+============================================================
+SECTION 5 — SEED (apps/design-tools-web/server/db/seed.ts)
+============================================================
+
+import "dotenv/config";
+import { db, pool } from "./index";
+import { engagements } from "./schema";
+import { sql } from "drizzle-orm";
+
+async function main() {
+  console.log("Seeding engagements…");
+
+  // Idempotent: only insert if not already present
+  const seedData = [
+    {
+      name: "Seguin Residence",
+      nameLower: "seguin residence",
+      jurisdiction: "Moab, UT",
+      address: "1421 Seguin St, Moab, UT 84532",
+      status: "active",
+    },
+    {
+      name: "Musgrave Residence",
+      nameLower: "musgrave residence",
+      jurisdiction: "Moab, UT",
+      address: "287 Musgrave Ln, Moab, UT 84532",
+      status: "active",
+    },
+  ];
+
+  for (const e of seedData) {
+    await db.insert(engagements).values(e).onConflictDoNothing({ target: engagements.nameLower });
+    console.log(`  ✓ ${e.name}`);
+  }
+
+  console.log("Done.");
+  await pool.end();
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+
+============================================================
+SECTION 6 — UPDATE EXPRESS SERVER (apps/design-tools-web/server/index.ts)
+============================================================
+
+Replace the in-memory Map entirely. Use Drizzle queries.
+
+Endpoints:
+
+1. GET /api/health
+   - Returns { ok: true, db: "up" | "down" } based on dbHealthCheck()
+   - Returns 503 if db is down
+
+2. GET /api/engagements
+   - Returns all engagements (id, name, jurisdiction, address, status, createdAt, updatedAt) ordered by updatedAt desc
+   - For each, also include `latestSnapshot: { id, receivedAt, sheetCount, roomCount, levelCount, wallCount } | null` — the most recent snapshot
+   - And `snapshotCount: number`
+   - Use Drizzle subqueries or N+1 is fine for prototype (we have 2-20 engagements)
+
+3. GET /api/engagements/:id
+   - Returns the engagement plus its full snapshot list (newest first), each with id, projectName, sheetCount, roomCount, levelCount, wallCount, receivedAt — but NOT the full payload (keep response light)
+   - 404 if not found
+
+4. POST /api/snapshots
+   - Auth: header `x-snapshot-secret` must equal env SNAPSHOT_SECRET, else 401
+   - Body: arbitrary JSON; require projectName: string
+   - Logic:
+     a. Compute nameLower = projectName.trim().toLowerCase()
+     b. Look up engagement by nameLower
+     c. If not found, INSERT a new engagement with name = projectName, nameLower, jurisdiction = null, address = null, status = "active". Return the newly created engagement.
+     d. Insert the snapshot:
+        - engagementId = engagement.id
+        - projectName from body
+        - payload = the entire body
+        - sheetCount = body.sheets?.length ?? null
+        - roomCount = body.rooms?.length ?? null
+        - levelCount = body.levels?.length ?? null
+        - wallCount = body.walls?.count ?? body.walls?.length ?? null   (handle both old and new shapes)
+     e. Update engagement.updatedAt = now()
+   - Return: { id, receivedAt, engagementId, engagementName, autoCreated: boolean }
+
+5. GET /api/snapshots/:id
+   - Returns full snapshot row including payload, or 404
+
+6. POST /api/chat
+   - Body: { engagementId: string, question: string, history?: Array<{role, content}> }
+   - Look up the engagement and its LATEST snapshot
+   - If no snapshots exist for that engagement, return 400 with "No snapshots yet for this engagement. Send one from Revit first."
+   - Build system prompt:
+     "You are helping an architect understand their Revit model for the engagement '{engagement.name}'{ if engagement.address: ' at ' + engagement.address }{ if engagement.jurisdiction: ' (' + engagement.jurisdiction + ')' }. The most recent snapshot was captured {relative time, e.g. 'about 5 minutes ago'}.\n\nAnswer grounded in the snapshot data below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot.\n\n<snapshot received_at='{ISO}'>\n{JSON.stringify(payload, null, 2)}\n</snapshot>"
+   - Stream the Claude response as SSE (model claude-sonnet-4-6, max_tokens 1024) — same pattern as before
+
+Wrap startup in dbHealthCheck. If db is down at boot, log a clear error but still start the server (so /api/health can report it). Endpoints that need the DB return 503 if dbHealthCheck fails.
+
+============================================================
+SECTION 7 — FRONTEND ROUTING (apps/design-tools-web/src/App.tsx)
+============================================================
+
+Replace the existing routes. Use wouter:
+- "/" → <EngagementList />
+- "/engagements/:id" → <EngagementDetail />
+- "/style-probe" → <StyleProbe />
+- Default fallback → redirect to "/"
+
+Delete (or repurpose) the old /pages/Workbench.tsx — its functionality moves into EngagementDetail.
+
+============================================================
+SECTION 8 — ZUSTAND STORE (apps/design-tools-web/src/store/engagements.ts)
+============================================================
+
+Replace the old snapshots store with this engagement-aware one:
+
+interface Engagement {
+  id: string;
+  name: string;
+  jurisdiction: string | null;
+  address: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  latestSnapshot: {
+    id: string;
+    receivedAt: string;
+    sheetCount: number | null;
+    roomCount: number | null;
+    levelCount: number | null;
+    wallCount: number | null;
+  } | null;
+  snapshotCount: number;
+}
+
+interface SnapshotSummary { id: string; projectName: string; sheetCount: number | null; roomCount: number | null; levelCount: number | null; wallCount: number | null; receivedAt: string; }
+interface SnapshotDetail extends SnapshotSummary { payload: any; }
+interface ChatMessage { role: "user" | "assistant"; content: string; }
+
+State:
+- engagements: Engagement[]
+- engagementsById: Record<string, { snapshots: SnapshotSummary[]; detail: Engagement }>
+- snapshotDetailById: Record<string, SnapshotDetail>
+- selectedSnapshotIdByEngagement: Record<string, string | null>  // which snapshot to view in detail panel; defaults to most recent
+- messagesByEngagement: Record<string, ChatMessage[]>             // session-only, in-memory
+- streaming: boolean
+
+Actions:
+- refreshEngagements(): GET /api/engagements
+- loadEngagement(id): GET /api/engagements/:id
+- loadSnapshotDetail(id): GET /api/snapshots/:id (cache in snapshotDetailById)
+- selectSnapshot(engagementId, snapshotId)
+- sendMessage(engagementId, question): POST /api/chat with SSE; appends user msg + streams assistant tokens
+
+Auto-poll refreshEngagements every 5 seconds while EngagementList is mounted, and loadEngagement(id) every 5 seconds while EngagementDetail is mounted (so new snapshots from Revit appear live).
+
+============================================================
+SECTION 9 — PAGE: EngagementList (src/pages/EngagementList.tsx)
+============================================================
+
+Use <DashboardLayout> with title="Projects" and the existing nav groups, but make the PROJECTS group dynamic — see Section 11.
+
+Page content:
+
+1. Page header row:
+   - Left: <h2 class="text-2xl">Active engagements</h2> + <p class="sc-body">{N} active · {M} total snapshots</p>
+   - Right: <button class="sc-btn-ghost">Refresh</button>
+
+2. Engagement card grid (grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4):
+   For each engagement, render a clickable .sc-card.sc-card-clickable:
+   - Header: .sc-card-header sc-row-sb with .sc-label (engagement.name uppercased? — no, use .sc-medium with engagement name in normal case) on left and a .sc-pill colored by status (active=cyan, on_hold=amber, archived=muted) on right
+   - Body (padding 14px): 
+     - Address in .sc-body if present, else .sc-micro "No address set"
+     - Jurisdiction in .sc-meta below
+     - 4-col mini grid: Sheets / Rooms / Levels / Walls — each with .sc-data-label key + .sc-mono value showing the count from latestSnapshot (or "—" if none)
+   - Footer: .sc-card-footer sc-row-sb
+     - Left: .sc-meta "{snapshotCount} snapshot{s}" 
+     - Right: .sc-meta "Last update {relative time of latestSnapshot.receivedAt or engagement.updatedAt}"
+   - Clicking navigates to /engagements/:id
+
+3. Empty state (if no engagements):
+   .sc-card centered, padding 48px, .sc-prose: "No engagements yet. Open a Revit project, click 'Send Snapshot' in the Design Tools ribbon, and an engagement will be created automatically."
+
+============================================================
+SECTION 10 — PAGE: EngagementDetail (src/pages/EngagementDetail.tsx)
+============================================================
+
+Use <DashboardLayout> with:
+- title = engagement.name
+- rightPanel = <ClaudeChat engagementId={id} />
+
+Main content (the middle pane):
+
+1. Header strip (60px):
+   - h2 engagement.name
+   - .sc-meta below: address · jurisdiction · status pill
+   - Right: .sc-btn-ghost "Edit details" (renders, but onClick shows TaskDialog "Coming soon")
+
+2. KPI strip — 4 .sc-card tiles in grid-cols-4 gap-3 — values from the SELECTED snapshot (defaults to most recent):
+   - Sheets / Rooms / Levels / Walls
+   - Each tile: .sc-label key, .sc-kpi-md value, .sc-meta footnote like "from snapshot {N min ago}"
+
+3. Two-column layout below KPI strip (lg:grid-cols-3 gap-4):
+   - LEFT (col-span-1) — Snapshot timeline:
+     .sc-card with .sc-card-header containing .sc-label "SNAPSHOTS" + count
+     List of .sc-card-row items, newest at top:
+       - Top line: .sc-medium "{relative time, e.g. '2 min ago'}"
+       - Bottom line: .sc-meta "{sheetCount}sh · {roomCount}rm · {levelCount}lv · {wallCount}w"
+     - Selected row: .sc-accent-cyan + var(--bg-highlight) background
+     - Click → selectSnapshot()
+   - RIGHT (col-span-2) — Snapshot detail:
+     If no snapshots: .sc-card with .sc-prose empty state "No snapshots yet. Send one from Revit."
+     If selected: .sc-card with collapsible .sc-card-header "RAW JSON" + body containing <pre class="sc-mono-sm sc-scroll"> with the full payload, max-height 600px overflow auto, var(--bg-input) background
+
+============================================================
+SECTION 11 — DYNAMIC SIDEBAR (src/components/DynamicSidebar.tsx or fold into App.tsx)
+============================================================
+
+The sidebar from @legacy/portal-ui takes a static navGroups prop. Build a small wrapper component that:
+1. Subscribes to the engagements store
+2. Constructs navGroups dynamically — the "PROJECTS" group's items come from engagements
+3. Each engagement item: { label: engagement.name, href: `/engagements/${engagement.id}` }
+4. If more than 8 engagements, only show the most recently updated 8 with a "View all" link to "/"
+5. The other groups (WORKSPACE, DEV) stay static
+
+Pass this dynamic navGroups into <DashboardLayout> from both EngagementList and EngagementDetail.
+
+============================================================
+SECTION 12 — CLAUDE CHAT COMPONENT (src/components/ClaudeChat.tsx)
+============================================================
+
+Update to take engagementId as prop instead of snapshotId. Pull messages from messagesByEngagement[engagementId].
+
+If the engagement has zero snapshots, disable the input with placeholder "Send a snapshot from Revit first."
+
+Otherwise, on submit, call sendMessage(engagementId, question) which streams via SSE to /api/chat.
+
+Visual layout same as before (header, scrollable thread, textarea + send button at bottom). User messages right-aligned in cyan bubble. Assistant messages in .sc-card with .sc-accent-cyan.
+
+Add a small caption below the header: .sc-meta "Chat history is session-only — refreshing the page clears it."
+
+============================================================
+SECTION 13 — README UPDATE (apps/design-tools-web/README.md)
+============================================================
+
+Update to document:
+- New env var: DATABASE_URL (Neon Postgres, pooled connection)
+- First-run flow: npm install → npm run db:push → npm run db:seed → npm run dev
+- New API contract for POST /api/snapshots (returns engagementId, autoCreated)
+- That engagements auto-create from Revit projectName
+
+============================================================
+SECTION 14 — DELIVERABLES
+============================================================
+
+When you finish, give me:
+1. Confirmation that:
+   a. `npm run db:push` ran successfully and created the engagements + snapshots tables
+   b. `npm run db:seed` ran successfully and the seed data is visible in /api/engagements
+   c. The home page renders 2 engagement cards (Seguin + Musgrave) with no snapshots yet
+   d. POSTing the same curl from prompt 01 (with projectName: "Seguin Residence") attaches the snapshot to the existing engagement (autoCreated: false in response)
+   e. POSTing a curl with a NEW projectName (e.g., "Test Project") creates a new engagement (autoCreated: true) which then appears as a 3rd card on the home page
+   f. Clicking an engagement card opens EngagementDetail with the KPI strip populated and Claude chat enabled
+   g. Asking Claude a question about the model streams a sensible answer
+
+2. The exact curl command with the test projectName for me to verify auto-create
+
+3. A note about anything in the existing /style-probe page that broke and was fixed
+
+============================================================
+SECTION 15 — DO NOT BUILD
+============================================================
+
+- A real auth/login system
+- Engagement create/edit UI in the frontend (auto-create from Revit is enough for now)
+- Persistent chat history in the database (session-only is fine)
+- The plan-review-web app — leave it alone
+- Migration to Hauska SDK / IPFS — those gaps still need to close on the SDK side first
+- Any change to the existing C# Revit add-in — it must keep working unchanged
+- Email notifications, Stripe, entitlements — Wave 2+
+- Submission/Review flow — that's the next prompt after this one
+- Tests
+
+========== END PASTE TO REPLIT AGENT ==========
+```
