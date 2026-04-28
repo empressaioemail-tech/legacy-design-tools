@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useSidebarState } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import "./claude-markdown.css";
@@ -31,13 +31,42 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
   const messagesByEngagement = useEngagementsStore(
     (s) => s.messagesByEngagement,
   );
+  const attachedSheetsByEngagement = useEngagementsStore(
+    (s) => s.attachedSheetsByEngagement,
+  );
   const streaming = useEngagementsStore((s) => s.streaming);
   const sendMessage = useEngagementsStore((s) => s.sendMessage);
+  const detachSheet = useEngagementsStore((s) => s.detachSheet);
+  const clearAttachedSheets = useEngagementsStore((s) => s.clearAttachedSheets);
+  const consumePendingChatInput = useEngagementsStore(
+    (s) => s.consumePendingChatInput,
+  );
+  const pendingChatInputByEngagement = useEngagementsStore(
+    (s) => s.pendingChatInputByEngagement,
+  );
   const collapsed = useSidebarState((s) => s.rightCollapsed);
   const toggleRight = useSidebarState((s) => s.toggleRight);
   const [input, setInput] = useState("");
 
   const messages = messagesByEngagement[engagementId] || [];
+  const attachedSheets = attachedSheetsByEngagement[engagementId] ?? [];
+
+  // Pull any pending input that the SheetViewer "Ask Claude" button queued up.
+  // We do this in an effect (not render) so we don't loop, and we only
+  // consume it when the panel is expanded so the user actually sees it.
+  useEffect(() => {
+    if (collapsed) return;
+    const pending = pendingChatInputByEngagement[engagementId];
+    if (pending !== undefined) {
+      const value = consumePendingChatInput(engagementId);
+      if (value !== null) setInput(value);
+    }
+  }, [
+    collapsed,
+    engagementId,
+    pendingChatInputByEngagement,
+    consumePendingChatInput,
+  ]);
 
   const handleSend = () => {
     if (!input.trim() || !hasSnapshots || streaming) return;
@@ -173,9 +202,74 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
       </div>
 
       <div
-        className="p-4 border-t flex-shrink-0"
+        className="p-4 border-t flex-shrink-0 flex flex-col gap-2"
         style={{ borderColor: "var(--border-default)" }}
       >
+        {attachedSheets.length > 0 && (
+          <div
+            className="flex items-center gap-2 flex-wrap"
+            aria-label="Attached sheets"
+          >
+            {attachedSheets.map((s) => (
+              <span
+                key={s.id}
+                className="sc-pill"
+                title={`${s.sheetNumber} ${s.sheetName}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "rgba(0,180,216,0.15)",
+                  color: "var(--cyan)",
+                  fontSize: 11,
+                  letterSpacing: "0.04em",
+                  padding: "3px 4px 3px 8px",
+                  borderRadius: 4,
+                  textTransform: "uppercase",
+                }}
+              >
+                {s.sheetNumber}
+                <button
+                  type="button"
+                  onClick={() => detachSheet(engagementId, s.id)}
+                  aria-label={`Remove ${s.sheetNumber}`}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--cyan)",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+            {attachedSheets.length >= 2 && (
+              <button
+                type="button"
+                onClick={() => clearAttachedSheets(engagementId)}
+                className="sc-meta"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                  padding: 0,
+                  fontSize: 11,
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -198,7 +292,12 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
             (e.currentTarget.style.borderColor = "var(--border-default)")
           }
         />
-        <div className="mt-2 flex justify-end">
+        <div className="flex justify-between items-center">
+          <div className="sc-meta opacity-60">
+            {attachedSheets.length > 0
+              ? `${attachedSheets.length} sheet${attachedSheets.length === 1 ? "" : "s"} attached for vision`
+              : ""}
+          </div>
           <button
             className="sc-btn-primary"
             onClick={handleSend}

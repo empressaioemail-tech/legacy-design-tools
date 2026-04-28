@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
-import { db, engagements, snapshots } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { db, engagements, snapshots, sheets } from "@workspace/db";
+import { asc, desc, eq } from "drizzle-orm";
 import {
   CreateSnapshotBody,
   CreateSnapshotHeader,
@@ -9,20 +9,9 @@ import {
 } from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
 import { logger } from "../lib/logger";
+import { getSnapshotSecret } from "../lib/snapshotSecret";
 
-let snapshotSecret = process.env["SNAPSHOT_SECRET"];
-if (!snapshotSecret) {
-  if (process.env["NODE_ENV"] === "production") {
-    logger.fatal(
-      "SNAPSHOT_SECRET env var is required in production. Refusing to start.",
-    );
-    process.exit(1);
-  }
-  snapshotSecret = "dev-snapshot-secret-" + randomUUID();
-  logger.warn(
-    "SNAPSHOT_SECRET not set; generated a temporary one for this dev process. Configure SNAPSHOT_SECRET env var before deploying.",
-  );
-}
+const snapshotSecret = getSnapshotSecret();
 
 const router: IRouter = Router();
 
@@ -257,9 +246,34 @@ router.get("/snapshots/:id", async (req: Request, res: Response) => {
       return;
     }
 
+    const sheetRows = await db
+      .select({
+        id: sheets.id,
+        snapshotId: sheets.snapshotId,
+        engagementId: sheets.engagementId,
+        sheetNumber: sheets.sheetNumber,
+        sheetName: sheets.sheetName,
+        viewCount: sheets.viewCount,
+        revisionNumber: sheets.revisionNumber,
+        revisionDate: sheets.revisionDate,
+        thumbnailWidth: sheets.thumbnailWidth,
+        thumbnailHeight: sheets.thumbnailHeight,
+        fullWidth: sheets.fullWidth,
+        fullHeight: sheets.fullHeight,
+        sortOrder: sheets.sortOrder,
+        createdAt: sheets.createdAt,
+      })
+      .from(sheets)
+      .where(eq(sheets.snapshotId, row.id))
+      .orderBy(asc(sheets.sortOrder));
+
     res.json({
       ...row,
       receivedAt: row.receivedAt.toISOString(),
+      sheets: sheetRows.map((s) => ({
+        ...s,
+        createdAt: s.createdAt.toISOString(),
+      })),
     });
   } catch (err) {
     logger.error({ err, id: params.data.id }, "get snapshot failed");

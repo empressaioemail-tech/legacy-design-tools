@@ -11,4 +11,5 @@ export interface ChatRequest {
   engagementId: string;
   question: string;
   history?: ChatMessage[];
+  referencedSheetIds?: string[];
 }

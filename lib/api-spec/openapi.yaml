@@ -241,6 +241,134 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /snapshots/{id}/sheets:
+    get:
+      operationId: getSnapshotSheets
+      tags: [snapshots]
+      summary: List sheets uploaded for a snapshot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of sheet summaries (no PNG bytes)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SheetSummary"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: uploadSnapshotSheets
+      tags: [snapshots]
+      summary: Upload sheets (multipart) for a snapshot
+      description: |
+        Multipart upload from the Revit add-in. Body must include a `metadata`
+        text field containing JSON-encoded SheetMetadata[] plus per-sheet
+        `sheet_{i}_thumb` and `sheet_{i}_full` PNG file fields. Idempotent on
+        (snapshotId, sheetNumber) — re-uploading replaces existing rows.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: x-snapshot-secret
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                metadata:
+                  type: string
+                  description: JSON-encoded array of SheetMetadata
+              required:
+                - metadata
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetUploadResponse"
+        "401":
+          description: Missing or invalid snapshot secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Payload too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Wrong content-type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sheets/{id}/thumbnail.png:
+    get:
+      operationId: getSheetThumbnail
+      tags: [snapshots]
+      summary: Sheet thumbnail PNG (512px)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PNG image
+          content:
+            image/png: {}
+        "404":
+          description: Sheet not found
+
+  /sheets/{id}/full.png:
+    get:
+      operationId: getSheetFull
+      tags: [snapshots]
+      summary: Sheet full-resolution PNG (~2048px)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PNG image
+          content:
+            image/png: {}
+        "404":
+          description: Sheet not found
+
   /chat:
     post:
       operationId: sendChatMessage
@@ -538,6 +666,10 @@ components:
         payload:
           type: object
           additionalProperties: true
+        sheets:
+          type: array
+          items:
+            $ref: "#/components/schemas/SheetSummary"
       required:
         - id
         - engagementId
@@ -549,6 +681,77 @@ components:
         - wallCount
         - receivedAt
         - payload
+        - sheets
+
+    SheetSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        snapshotId:
+          type: string
+        engagementId:
+          type: string
+        sheetNumber:
+          type: string
+        sheetName:
+          type: string
+        viewCount:
+          type: integer
+          nullable: true
+        revisionNumber:
+          type: string
+          nullable: true
+        revisionDate:
+          type: string
+          nullable: true
+        thumbnailWidth:
+          type: integer
+        thumbnailHeight:
+          type: integer
+        fullWidth:
+          type: integer
+        fullHeight:
+          type: integer
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - snapshotId
+        - engagementId
+        - sheetNumber
+        - sheetName
+        - viewCount
+        - revisionNumber
+        - revisionDate
+        - thumbnailWidth
+        - thumbnailHeight
+        - fullWidth
+        - fullHeight
+        - sortOrder
+        - createdAt
+
+    SheetUploadResponse:
+      type: object
+      properties:
+        uploaded:
+          type: integer
+        skipped:
+          type: integer
+        failed:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+      required:
+        - uploaded
+        - skipped
+        - failed
+        - errors
 
     ChatMessage:
       type: object
@@ -573,6 +776,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChatMessage"
+        referencedSheetIds:
+          type: array
+          items:
+            type: string
       required:
         - engagementId
         - question

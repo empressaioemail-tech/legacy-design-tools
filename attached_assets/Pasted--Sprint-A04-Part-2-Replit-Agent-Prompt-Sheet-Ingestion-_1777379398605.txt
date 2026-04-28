@@ -1,0 +1,347 @@
+# Sprint A04 — Part 2 / Replit Agent Prompt — Sheet Ingestion + Viewer + Vision
+
+**What this is:** the server side of Sprint A04. Ingests multipart sheet uploads from the Revit add-in (v0.2), stores them in Postgres, presents thumbnail grid + full viewer in design-tools, and wires Claude Vision into chat when a question references a specific sheet.
+
+**This is part 2 of Sprint A04.** Run AFTER Part 1 (Cursor + Claude Code) completes successfully and the Revit add-in is rebuilt to v0.2.
+
+**Prerequisites:**
+- Sprint A03 verified ✓
+- Sprint A04 Part 1 (Revit sensor v0.2) built and installed ✓
+- The v0.2 add-in can POST to /api/snapshots/:id/sheets even though that endpoint doesn't exist yet (it'll 404 until this prompt lands; that's expected)
+
+**How to use:** paste between BEGIN and END markers into Replit Agent.
+
+---
+
+```
+========== BEGIN PASTE TO REPLIT AGENT ==========
+
+Sprint A04 part 2: backend + frontend for sheet ingestion + viewer + Vision-powered chat.
+
+The Revit add-in v0.2 (already updated separately) will POST multipart uploads to /api/snapshots/:id/sheets containing per-sheet thumbnail + full PNGs and a metadata JSON block. We need to: receive these, persist them, show them in the engagement detail view, and let Claude Vision analyze them when chat questions reference a specific sheet.
+
+Storage decision: Postgres bytea (per Sprint A04 plan). Two resolutions per sheet (512px thumbnail, 2048px full).
+
+Sheet selection decision: all sheets every snapshot (per Sprint A04 plan; smart delta export deferred).
+
+============================================================
+SECTION 1 — DATABASE SCHEMA
+============================================================
+
+New table: lib/db/src/schema/sheets.ts
+
+  sheets
+    id              uuid PK, default random
+    snapshotId      uuid not null, FK → snapshots.id ON DELETE CASCADE
+    engagementId    uuid not null, FK → engagements.id ON DELETE CASCADE   (denormalized for query simplicity)
+    sheetNumber     text not null              (e.g., "G000", "A2.04")
+    sheetName       text not null              (e.g., "Cover", "First Floor Plan")
+    viewCount       integer
+    revisionNumber  text                       (nullable)
+    revisionDate    text                       (nullable; stored as text to tolerate Revit's varied date formats)
+    thumbnailPng    bytea not null
+    thumbnailWidth  integer not null
+    thumbnailHeight integer not null
+    fullPng         bytea not null
+    fullWidth       integer not null
+    fullHeight      integer not null
+    sortOrder       integer not null           (Revit's natural sheet order)
+    createdAt       timestamptz default now() not null
+  
+  indexes:
+    on (snapshotId, sortOrder) — for paginated grid display
+    on (engagementId, sheetNumber) — for cross-snapshot lookup
+    on (snapshotId, sheetNumber) UNIQUE — prevent duplicate sheets within a snapshot
+
+Re-export from schema/index.ts. Update relations: snapshots has many sheets; engagements has many sheets (via snapshots, but the denormalized FK lets us query directly).
+
+Run drizzle-kit push (additive — should not affect existing data).
+
+============================================================
+SECTION 2 — OPENAPI CONTRACT (lib/api-spec/openapi.yaml)
+============================================================
+
+Edit FIRST, then run codegen.
+
+NEW types:
+
+  SheetSummary:
+    id, sheetNumber, sheetName, viewCount: integer|null,
+    revisionNumber: string|null, revisionDate: string|null,
+    thumbnailWidth, thumbnailHeight, fullWidth, fullHeight,
+    sortOrder, createdAt
+
+  SheetUploadResponse:
+    uploaded: integer, skipped: integer, failed: integer,
+    errors: string[]
+
+EXTEND existing types:
+
+  SnapshotSummary: ADD optional `sheetCount: integer` (count of sheets uploaded for this snapshot)
+  SnapshotDetail: ADD optional `sheets: SheetSummary[]` (no PNG data — that comes via dedicated endpoints)
+
+NEW endpoints:
+
+  POST /snapshots/{id}/sheets
+    Auth: header x-snapshot-secret (same as snapshot POST)
+    Request: multipart/form-data
+      - field "metadata": JSON-encoded SheetMetadata[] (described below)
+      - fields "sheet_{i}_thumb": image/png (per sheet i)
+      - fields "sheet_{i}_full": image/png (per sheet i)
+    SheetMetadata: { index: integer, sheetNumber: string, sheetName: string, viewCount: integer|null, revisionNumber: string|null, revisionDate: string|null, thumbnailWidth: integer, thumbnailHeight: integer, fullWidth: integer, fullHeight: integer }
+    Response: SheetUploadResponse
+    Behavior: idempotent on (snapshotId, sheetNumber) — re-uploading replaces existing record (same sheet number gets updated PNG bytes); ON CONFLICT (snapshotId, sheetNumber) DO UPDATE.
+    Error responses: 401 (bad secret), 404 (snapshot not found), 413 (payload too large; cap at 100MB total request size for safety), 415 (wrong content-type)
+
+  GET /snapshots/{id}/sheets
+    Returns SheetSummary[] for the snapshot, sorted by sortOrder.
+
+  GET /sheets/{id}/thumbnail.png
+    Returns image/png response with Cache-Control: max-age=86400 (24h — they're immutable once uploaded). Body is the thumbnailPng bytea.
+
+  GET /sheets/{id}/full.png
+    Same pattern, returns fullPng bytea, Cache-Control: max-age=86400.
+
+EXTEND existing endpoint:
+
+  POST /chat
+    Add optional body field: `referencedSheetIds?: string[]` — when present, the server attaches those sheets' full PNGs to the Claude API call as image content blocks (Vision input).
+
+After editing openapi.yaml:
+  pnpm --filter @workspace/api-spec run codegen
+
+If codegen fails on the multipart spec, simplify: define POST /snapshots/{id}/sheets with content type `multipart/form-data` referencing the metadata schema, and let the multipart parts be type-loose. Don't try to specify each multipart field formally — OpenAPI/Orval don't handle that well. The hand-written backend handler does multipart parsing directly.
+
+============================================================
+SECTION 3 — BACKEND: MULTIPART INGESTION (artifacts/api-server)
+============================================================
+
+Add multipart parsing dependency: busboy (lightweight, streaming, well-supported with Express). NOT multer (older API, less control).
+
+Add to artifacts/api-server: `npm install busboy` (or pnpm add).
+
+New route: artifacts/api-server/src/routes/sheets.ts
+
+Implements:
+
+  POST /api/snapshots/:snapshotId/sheets
+
+Logic:
+  1. Validate x-snapshot-secret → 401 if mismatch
+  2. Validate snapshotId exists in DB → 404 if not, capture engagementId
+  3. Stream-parse the multipart body with busboy
+  4. As fields/files arrive:
+     - "metadata" field → buffer, JSON.parse into MetadataEntry[]
+     - "sheet_{i}_thumb" file → buffer to memory (cap 5MB per file), index by `i`
+     - "sheet_{i}_full" file → buffer to memory (cap 20MB per file), index by `i`
+  5. After busboy 'finish' event:
+     - Validate every metadata entry has matching thumb + full files (skip with error otherwise)
+     - For each entry, prepare a row with snapshotId, engagementId, sheet fields, png bytea data, sortOrder = metadata.index
+     - INSERT in a single transaction with ON CONFLICT (snapshotId, sheetNumber) DO UPDATE SET (all fields except id, createdAt) — idempotent re-upload
+  6. Update snapshots table: set a sheetCount column on the snapshot row (denormalized count)
+     - Add sheetCount column to snapshots table if not present (additive migration in this prompt's schema work)
+  7. Return SheetUploadResponse: { uploaded, skipped, failed, errors }
+
+Validation:
+- Total request body size cap: 150MB (Express default is 100KB without explicit limit; raise this for the multipart route). Express config: app.use("/api/snapshots/:id/sheets", ...) with raw body size limit.
+- Per-file size caps enforced inside busboy (set "limits.fileSize" option).
+- Reject non-PNG content-type on the file fields.
+- Treat any individual sheet failure as: skip that sheet, add error message to errors array, continue. Only fail the whole request on schema-level errors (no metadata, no auth, etc.).
+
+Error handling:
+- If busboy emits 'error' or limits exceeded, respond 413 with a clear message.
+- If DB INSERT fails, respond 500 with snapshot id (so the user can retry).
+
+GET endpoints:
+
+  GET /api/snapshots/:id/sheets
+    SELECT sheets WHERE snapshotId = :id ORDER BY sortOrder ASC
+    Return SheetSummary[] (NO png data — just metadata)
+
+  GET /api/sheets/:id/thumbnail.png
+    SELECT thumbnailPng FROM sheets WHERE id = :id
+    Set Content-Type: image/png
+    Set Cache-Control: max-age=86400, immutable
+    Set ETag: hash of the bytes (or just the sheet id since they're immutable)
+    Return the bytea as response body.
+    404 if no row.
+
+  GET /api/sheets/:id/full.png
+    Same pattern with fullPng.
+
+Update existing routes/snapshots.ts:
+  - GET /api/snapshots/:id detail response now includes the sheets array (SheetSummary, no PNGs)
+  - GET /api/snapshots flat list response: each snapshot now includes sheetCount
+
+Update existing routes/engagements.ts:
+  - GET /api/engagements: each engagement's latestSnapshot includes sheetCount
+  - GET /api/engagements/:id: each snapshot in the snapshots array includes sheetCount
+
+============================================================
+SECTION 4 — BACKEND: CHAT VISION INTEGRATION (artifacts/api-server/src/routes/chat.ts)
+============================================================
+
+Update POST /api/chat:
+
+Body now accepts: { engagementId, question, history?, referencedSheetIds?: string[] }
+
+Logic:
+  1. Existing logic stays (look up engagement, latest snapshot, build system prompt with snapshot JSON).
+  2. NEW: if referencedSheetIds is non-empty:
+     - SELECT sheets WHERE id IN (referencedSheetIds) AND engagementId = :engagementId (security: prevent cross-engagement access)
+     - For each sheet, build a Claude image content block with the FULL PNG (not thumbnail — Vision needs detail):
+       { type: "image", source: { type: "base64", media_type: "image/png", data: base64-encoded fullPng } }
+     - Augment the user message to include both:
+       - Text: "User question: " + question + "\n\nThe following sheets are attached for visual reference: " + sheets.map(s => `${s.sheetNumber} ${s.sheetName}`).join(", ")
+       - Image content blocks (one per sheet)
+     - Cap at 4 sheets per request to stay within Claude's image content block limits and reasonable token budgets.
+  3. Stream Claude response via existing @workspace/integrations-anthropic-ai (model claude-sonnet-4-6, max_tokens unchanged, stream true)
+
+Important: when calling the Anthropic SDK (via the integrations package), the messages array now needs to support content blocks (an array) not just plain string content. If the integrations package only exposes plain-text helpers, extend it minimally to accept structured content blocks for the user message.
+
+Token cost note for the response printout: include the count of attached sheets and approximate added token cost so users know vision-augmented chats are heavier.
+
+============================================================
+SECTION 5 — FRONTEND: SHEETS TAB + VIEWER (artifacts/design-tools)
+============================================================
+
+Update EngagementDetail page to add a new tab: Snapshots / Site / Sheets / Settings.
+
+The Sheets tab is per-engagement, NOT per-snapshot. It shows sheets from the most recent snapshot (the same one selected for KPI display). When a different snapshot is selected from the timeline, the sheets refresh to that snapshot's sheets.
+
+NEW components in artifacts/design-tools/src/components/:
+
+  SheetGrid.tsx — thumbnail grid display
+  SheetViewer.tsx — full-screen modal viewer with zoom/pan
+  SheetThumbnail.tsx — individual thumbnail card
+
+Use the GENERATED hooks from @workspace/api-client-react:
+  useGetSnapshotSheets(snapshotId) — for the list
+  Direct <img src={`/api/sheets/${id}/thumbnail.png`} /> for thumbnails (browser handles caching via Cache-Control)
+  Same pattern for full image in the viewer
+
+Sheets tab layout:
+  Top header strip:
+    Left: .sc-label "SHEETS · {count}"
+    Right: small filter input (.sc-input style) — filter by sheetNumber prefix or sheetName substring; client-side filtering, no API call
+  Empty state (no sheets uploaded yet):
+    .sc-card centered .sc-prose: "No sheets uploaded yet. Send a snapshot from Revit (with sheet export enabled in v0.2 of the add-in) and they'll appear here."
+  Grid:
+    grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4
+    Each cell: .sc-card.sc-card-clickable, padding 0
+      - Thumbnail image (full card width, aspect-ratio matching sheet's thumbnailWidth/Height — landscape sheets wider, portrait sheets taller; use Tailwind's aspect-square as fallback if dimensions weird)
+      - Footer (.sc-card-footer): .sc-medium sheetNumber on left, .sc-meta sheetName on right (truncate with ellipsis)
+      - Hover effect handled by .sc-card-clickable
+    Click a card → opens SheetViewer modal
+
+SheetViewer.tsx:
+  Full-screen overlay (fixed, inset-0, z-50, var(--bg-base) with rgba 0.95 alpha)
+  Top bar (60px tall):
+    Left: .sc-label sheet number + .sc-medium sheet name
+    Center: zoom level indicator (like "100%")
+    Right: 
+      - .sc-btn-sm "Ask Claude about this sheet" (NEW interaction — see below)
+      - Close button (Lucide X icon, ghost button)
+  Body: <img src={fullUrl} /> centered, with pan + zoom support
+    Implementation: use react-zoom-pan-pinch (npm: react-zoom-pan-pinch) — install it. Mature, lightweight, supports mouse wheel zoom and click-drag pan and pinch on touch. Default zoom 1, min 0.25, max 8.
+    Image gets aspect-ratio per fullWidth/fullHeight, max-height 100vh - 60px - 16px padding.
+    Loading state while image fetches: skeleton .sc-card placeholder with .sc-prose "Loading sheet…"
+
+  "Ask Claude about this sheet" button:
+    On click: closes the viewer AND auto-prepopulates the chat input with: "What do you see on sheet {sheetNumber} {sheetName}?" AND attaches the sheet's id to a new "attached sheets" state in the chat. The chat panel needs to expand if collapsed.
+    Send the next message with referencedSheetIds: [sheetId] in the chat API call.
+
+============================================================
+SECTION 6 — FRONTEND: CHAT WITH SHEET ATTACHMENTS
+============================================================
+
+Update artifacts/design-tools/src/components/ClaudeChat.tsx:
+
+State additions:
+  attachedSheets: SheetSummary[]  — sheets currently attached for the next question
+  
+UI additions:
+  Above the chat input, show a row of attached-sheet chips:
+    For each attached sheet: small pill .sc-pill-cyan with the sheetNumber, an X icon to detach
+    "Clear" link if 2+ attached
+  When user presses Send:
+    - Build the request body with referencedSheetIds: attachedSheets.map(s => s.id)
+    - After response starts streaming, clear attachedSheets (one-shot attachment per question)
+
+Update the Zustand store (artifacts/design-tools/src/store/engagements.ts):
+  - Add attachedSheetIdsByEngagement: Record<string, string[]>
+  - Add actions: attachSheet(engagementId, sheet), detachSheet(engagementId, sheetId), clearAttachedSheets(engagementId)
+  - sendMessage now reads attachedSheetIds from this store, sends them with the request, then clears
+
+A "from sheet viewer" prepopulation flow:
+  - When SheetViewer's "Ask Claude" button is clicked: call attachSheet(engagementId, sheet); set chat input value to the prepopulated question; close the viewer; expand the chat panel if it was collapsed (use the sidebar-state store from Sprint A03).
+  - The user can edit the prepopulated text before sending.
+
+============================================================
+SECTION 7 — COSMETIC DETAILS
+============================================================
+
+The Snapshots tab on engagement detail (existing): the snapshot timeline now shows sheetCount alongside the existing counts. Update the .sc-meta line from "{sheetCount}sh · {roomCount}rm · {levelCount}lv · {wallCount}w" to include sheets — wait, existing code already shows {sheetCount}sh from Sprint A02. Verify the Sprint A02 code uses snapshot.sheetCount which is now populated by Sprint A04. Should auto-fix; just confirm.
+
+If a snapshot has 0 sheets (e.g., from v0.1 add-in before this sprint, or upload failed mid-flight), the Sheets tab shows the empty state. Don't error.
+
+============================================================
+SECTION 8 — RUN ORDER & DELIVERABLES
+============================================================
+
+Run order:
+  1. Edit lib/api-spec/openapi.yaml
+  2. pnpm --filter @workspace/api-spec run codegen
+  3. Add sheets schema in lib/db/src/schema/
+  4. Add sheetCount column to snapshots table (extending existing schema)
+  5. drizzle-kit push (additive)
+  6. Backend: install busboy, implement routes/sheets.ts, update routes/snapshots.ts and routes/engagements.ts to include sheetCount and sheets
+  7. Backend: update routes/chat.ts to accept referencedSheetIds + attach Vision content blocks
+  8. Frontend: install react-zoom-pan-pinch, build SheetGrid + SheetViewer + SheetThumbnail
+  9. Frontend: add Sheets tab to EngagementDetail
+  10. Frontend: extend ClaudeChat with attached-sheet chips + sheet-viewer prepopulation hook
+  11. Restart dev servers
+
+Verify end-to-end:
+  a. From Revit (with v0.2 add-in), click Send Snapshot on Snowdon Towers. Progress dialog appears in Revit. Wait for completion (~60-180s).
+  b. In design-tools, refresh the Snowdon engagement detail. Sheets tab should appear with 55 thumbnails in a grid.
+  c. Snapshot timeline shows "55sh" count.
+  d. Click any sheet thumbnail → full viewer opens with the high-res image. Mouse wheel zooms; click-drag pans.
+  e. Click "Ask Claude about this sheet" on (say) the cover sheet → viewer closes, chat panel expands if collapsed, chat input shows "What do you see on sheet G000 Cover?" with a cyan chip showing G000 attached.
+  f. Click Send → response streams, and the response should reference visual elements actually visible on the cover sheet (the sample model has rendered building images, project name, etc.) — proving Vision integration works.
+  g. Push another snapshot from Revit → new snapshot row in timeline; clicking it shows that snapshot's sheets (which should be the same 55 unless the model changed; idempotent UPSERT handled it).
+  h. Verify GET /api/sheets/:id/thumbnail.png returns image/png with Cache-Control header (use browser devtools Network tab).
+  i. /style-probe still renders.
+  j. plan-review at /plan-review/ untouched.
+  k. The Site tab from Sprint A03 still works.
+  l. Engagement intake modal from Sprint A03 still works.
+
+After completing, print:
+  - Decisions made that diverged from this spec, and why
+  - Files/routes touched outside scope
+  - Memory pressure during a 55-sheet upload (busboy buffers files in memory; if Replit's container ran into memory limits, note it)
+  - Approximate database size after 1 snapshot's worth of sheets uploaded
+  - Anything that didn't work cleanly and the fix
+
+============================================================
+SECTION 9 — DO NOT BUILD
+============================================================
+
+- Smart delta export logic (deferred per A04 strategy)
+- Sheet content hashing
+- Persistent chat-with-sheet history (still session-only Zustand)
+- Sheet annotation / markup overlay (Sprint E05 territory)
+- PDF export of the sheet viewer (later sprint)
+- Sheet diff visualization between snapshots (Sprint E06 — different sprint)
+- ANY change to artifacts/plan-review/ — leave it alone
+- ANY change to artifacts/mockup-sandbox/
+- ANY change to the C# Revit add-in (it's already at v0.2 from Part 1)
+- Auth/login
+- Migration to Cloud Run / Neon
+- GCS / S3 / external blob storage — Postgres bytea is fine for prototype
+- Streaming uploads from sheet viewer to plan-review (cross-app data flow comes in Sprint A07)
+- Sheet OCR / text extraction (later sprint, possibly part of Sprint A05 or A06)
+- Tests
+
+========== END PASTE TO REPLIT AGENT ==========
+```

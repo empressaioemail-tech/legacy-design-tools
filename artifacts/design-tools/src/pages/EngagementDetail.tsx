@@ -11,10 +11,13 @@ import {
   type EngagementDetail as EngagementDetailType,
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
+import type { SheetSummary } from "@workspace/api-client-react";
 import { AppShell } from "../components/AppShell";
 import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
+import { SheetGrid } from "../components/SheetGrid";
 import { useEngagementsStore } from "../store/engagements";
+import { useSidebarState } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
 
 const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
@@ -69,7 +72,7 @@ function KpiTile({
   );
 }
 
-type TabId = "snapshots" | "site" | "settings";
+type TabId = "snapshots" | "sheets" | "site" | "settings";
 
 function TabBar({
   active,
@@ -80,6 +83,7 @@ function TabBar({
 }) {
   const tabs: Array<{ id: TabId; label: string }> = [
     { id: "snapshots", label: "Snapshots" },
+    { id: "sheets", label: "Sheets" },
     { id: "site", label: "Site" },
     { id: "settings", label: "Settings" },
   ];
@@ -390,6 +394,21 @@ export function EngagementDetail() {
     (s) => s.selectedSnapshotIdByEngagement,
   );
   const selectSnapshot = useEngagementsStore((s) => s.selectSnapshot);
+  const attachSheet = useEngagementsStore((s) => s.attachSheet);
+  const setPendingChatInput = useEngagementsStore(
+    (s) => s.setPendingChatInput,
+  );
+  const rightCollapsed = useSidebarState((s) => s.rightCollapsed);
+  const toggleRight = useSidebarState((s) => s.toggleRight);
+
+  const handleAskClaudeAboutSheet = (sheet: SheetSummary) => {
+    attachSheet(id, sheet);
+    setPendingChatInput(
+      id,
+      `What is shown on sheet ${sheet.sheetNumber} (${sheet.sheetName})?`,
+    );
+    if (rightCollapsed) toggleRight();
+  };
 
   const explicitlySelected = selectedSnapshotIdByEngagement[id] ?? null;
   const defaultSelected = engagement?.snapshots?.[0]?.id ?? null;
@@ -629,6 +648,13 @@ export function EngagementDetail() {
               </div>
             </div>
           </>
+        )}
+
+        {tab === "sheets" && (
+          <SheetGrid
+            snapshotId={selectedSnapshotId}
+            onAskClaude={handleAskClaudeAboutSheet}
+          />
         )}
 
         {tab === "site" && (

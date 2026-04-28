@@ -18,6 +18,8 @@ export type {
   GeocodeSource,
   HealthStatus,
   ProjectType,
+  SheetSummary,
+  SheetUploadResponse,
   Site,
   SnapshotDetail,
   SnapshotDetailPayload,

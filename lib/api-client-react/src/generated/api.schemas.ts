@@ -108,6 +108,23 @@ export interface SnapshotReceipt {
 
 export type SnapshotDetailPayload = { [key: string]: unknown };
 
+export interface SheetSummary {
+  id: string;
+  snapshotId: string;
+  engagementId: string;
+  sheetNumber: string;
+  sheetName: string;
+  viewCount: number | null;
+  revisionNumber: string | null;
+  revisionDate: string | null;
+  thumbnailWidth: number;
+  thumbnailHeight: number;
+  fullWidth: number;
+  fullHeight: number;
+  sortOrder: number;
+  createdAt: string;
+}
+
 export interface SnapshotDetail {
   id: string;
   engagementId: string;
@@ -119,6 +136,14 @@ export interface SnapshotDetail {
   wallCount: number | null;
   receivedAt: string;
   payload: SnapshotDetailPayload;
+  sheets: SheetSummary[];
+}
+
+export interface SheetUploadResponse {
+  uploaded: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
 }
 
 export type ChatMessageRole =
@@ -138,6 +163,7 @@ export interface ChatRequest {
   engagementId: string;
   question: string;
   history?: ChatMessage[];
+  referencedSheetIds?: string[];
 }
 
 export interface ErrorResponse {
@@ -157,4 +183,9 @@ export type UpdateEngagementBody = {
   projectType?: ProjectType;
   zoningCode?: string;
   lotAreaSqft?: number | null;
+};
+
+export type UploadSnapshotSheetsBody = {
+  /** JSON-encoded array of SheetMetadata */
+  metadata: string;
 };

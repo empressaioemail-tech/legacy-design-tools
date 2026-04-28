@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { SheetSummary } from "./sheetSummary";
 import type { SnapshotDetailPayload } from "./snapshotDetailPayload";
 
 export interface SnapshotDetail {
@@ -18,4 +19,5 @@ export interface SnapshotDetail {
   wallCount: number | null;
   receivedAt: Date;
   payload: SnapshotDetailPayload;
+  sheets: SheetSummary[];
 }

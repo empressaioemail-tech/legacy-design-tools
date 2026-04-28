@@ -23,11 +23,14 @@ import type {
   EngagementSummary,
   ErrorResponse,
   HealthStatus,
+  SheetSummary,
+  SheetUploadResponse,
   SnapshotDetail,
   SnapshotPayload,
   SnapshotReceipt,
   SnapshotSummary,
   UpdateEngagementBody,
+  UploadSnapshotSheetsBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -701,6 +704,362 @@ export function useGetSnapshot<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetSnapshotQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List sheets uploaded for a snapshot
+ */
+export const getGetSnapshotSheetsUrl = (id: string) => {
+  return `/api/snapshots/${id}/sheets`;
+};
+
+export const getSnapshotSheets = async (
+  id: string,
+  options?: RequestInit,
+): Promise<SheetSummary[]> => {
+  return customFetch<SheetSummary[]>(getGetSnapshotSheetsUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSnapshotSheetsQueryKey = (id: string) => {
+  return [`/api/snapshots/${id}/sheets`] as const;
+};
+
+export const getGetSnapshotSheetsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSnapshotSheets>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSnapshotSheets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSnapshotSheetsQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSnapshotSheets>>
+  > = ({ signal }) => getSnapshotSheets(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSnapshotSheets>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSnapshotSheetsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSnapshotSheets>>
+>;
+export type GetSnapshotSheetsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List sheets uploaded for a snapshot
+ */
+
+export function useGetSnapshotSheets<
+  TData = Awaited<ReturnType<typeof getSnapshotSheets>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSnapshotSheets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSnapshotSheetsQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Multipart upload from the Revit add-in. Body must include a `metadata`
+text field containing JSON-encoded SheetMetadata[] plus per-sheet
+`sheet_{i}_thumb` and `sheet_{i}_full` PNG file fields. Idempotent on
+(snapshotId, sheetNumber) — re-uploading replaces existing rows.
+
+ * @summary Upload sheets (multipart) for a snapshot
+ */
+export const getUploadSnapshotSheetsUrl = (id: string) => {
+  return `/api/snapshots/${id}/sheets`;
+};
+
+export const uploadSnapshotSheets = async (
+  id: string,
+  uploadSnapshotSheetsBody: UploadSnapshotSheetsBody,
+  options?: RequestInit,
+): Promise<SheetUploadResponse> => {
+  const formData = new FormData();
+  formData.append(`metadata`, uploadSnapshotSheetsBody.metadata);
+
+  return customFetch<SheetUploadResponse>(getUploadSnapshotSheetsUrl(id), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getUploadSnapshotSheetsMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadSnapshotSheets>>,
+    TError,
+    { id: string; data: BodyType<UploadSnapshotSheetsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof uploadSnapshotSheets>>,
+  TError,
+  { id: string; data: BodyType<UploadSnapshotSheetsBody> },
+  TContext
+> => {
+  const mutationKey = ["uploadSnapshotSheets"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof uploadSnapshotSheets>>,
+    { id: string; data: BodyType<UploadSnapshotSheetsBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return uploadSnapshotSheets(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UploadSnapshotSheetsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof uploadSnapshotSheets>>
+>;
+export type UploadSnapshotSheetsMutationBody =
+  BodyType<UploadSnapshotSheetsBody>;
+export type UploadSnapshotSheetsMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Upload sheets (multipart) for a snapshot
+ */
+export const useUploadSnapshotSheets = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadSnapshotSheets>>,
+    TError,
+    { id: string; data: BodyType<UploadSnapshotSheetsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof uploadSnapshotSheets>>,
+  TError,
+  { id: string; data: BodyType<UploadSnapshotSheetsBody> },
+  TContext
+> => {
+  return useMutation(getUploadSnapshotSheetsMutationOptions(options));
+};
+
+/**
+ * @summary Sheet thumbnail PNG (512px)
+ */
+export const getGetSheetThumbnailUrl = (id: string) => {
+  return `/api/sheets/${id}/thumbnail.png`;
+};
+
+export const getSheetThumbnail = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetSheetThumbnailUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSheetThumbnailQueryKey = (id: string) => {
+  return [`/api/sheets/${id}/thumbnail.png`] as const;
+};
+
+export const getGetSheetThumbnailQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSheetThumbnail>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSheetThumbnail>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSheetThumbnailQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSheetThumbnail>>
+  > = ({ signal }) => getSheetThumbnail(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSheetThumbnail>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSheetThumbnailQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSheetThumbnail>>
+>;
+export type GetSheetThumbnailQueryError = ErrorType<void>;
+
+/**
+ * @summary Sheet thumbnail PNG (512px)
+ */
+
+export function useGetSheetThumbnail<
+  TData = Awaited<ReturnType<typeof getSheetThumbnail>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSheetThumbnail>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSheetThumbnailQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Sheet full-resolution PNG (~2048px)
+ */
+export const getGetSheetFullUrl = (id: string) => {
+  return `/api/sheets/${id}/full.png`;
+};
+
+export const getSheetFull = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetSheetFullUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSheetFullQueryKey = (id: string) => {
+  return [`/api/sheets/${id}/full.png`] as const;
+};
+
+export const getGetSheetFullQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSheetFull>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSheetFull>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSheetFullQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getSheetFull>>> = ({
+    signal,
+  }) => getSheetFull(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSheetFull>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSheetFullQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSheetFull>>
+>;
+export type GetSheetFullQueryError = ErrorType<void>;
+
+/**
+ * @summary Sheet full-resolution PNG (~2048px)
+ */
+
+export function useGetSheetFull<
+  TData = Awaited<ReturnType<typeof getSheetFull>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSheetFull>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSheetFullQueryOptions(id, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

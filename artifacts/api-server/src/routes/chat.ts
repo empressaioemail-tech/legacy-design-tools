@@ -1,11 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { SendChatMessageBody } from "@workspace/api-zod";
-import { db, engagements, snapshots } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { db, engagements, snapshots, sheets } from "@workspace/db";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+const MAX_REFERENCED_SHEETS = 4;
 
 function relativeTime(from: Date): string {
   const diffMs = Date.now() - from.getTime();
@@ -19,13 +21,20 @@ function relativeTime(from: Date): string {
   return `about ${diffDay} day${diffDay === 1 ? "" : "s"} ago`;
 }
 
+interface AttachedSheet {
+  id: string;
+  sheetNumber: string;
+  sheetName: string;
+  pngBase64: string;
+}
+
 router.post("/chat", async (req: Request, res: Response) => {
   const parse = SendChatMessageBody.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: "Invalid chat request" });
     return;
   }
-  const { engagementId, question, history } = parse.data;
+  const { engagementId, question, history, referencedSheetIds } = parse.data;
 
   let engagement: typeof engagements.$inferSelect | undefined;
   let latestSnapshot: typeof snapshots.$inferSelect | undefined;
@@ -65,6 +74,45 @@ router.post("/chat", async (req: Request, res: Response) => {
     return;
   }
 
+  // Resolve attached sheets, scoped to this engagement so the user can't
+  // hand-craft a request that exfiltrates someone else's images.
+  const attachedSheets: AttachedSheet[] = [];
+  if (referencedSheetIds && referencedSheetIds.length > 0) {
+    const ids = referencedSheetIds.slice(0, MAX_REFERENCED_SHEETS);
+    try {
+      const rows = await db
+        .select({
+          id: sheets.id,
+          sheetNumber: sheets.sheetNumber,
+          sheetName: sheets.sheetName,
+          fullPng: sheets.fullPng,
+        })
+        .from(sheets)
+        .where(
+          and(
+            inArray(sheets.id, ids),
+            eq(sheets.engagementId, engagement.id),
+          ),
+        );
+      for (const r of rows) {
+        const buf = Buffer.isBuffer(r.fullPng)
+          ? r.fullPng
+          : Buffer.from(r.fullPng as Uint8Array);
+        attachedSheets.push({
+          id: r.id,
+          sheetNumber: r.sheetNumber,
+          sheetName: r.sheetName,
+          pngBase64: buf.toString("base64"),
+        });
+      }
+    } catch (err) {
+      logger.warn(
+        { err, engagementId, count: ids.length },
+        "failed to load attached sheets — proceeding without vision",
+      );
+    }
+  }
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
@@ -83,17 +131,73 @@ router.post("/chat", async (req: Request, res: Response) => {
     "Answer grounded in the snapshot data below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot.\n\n" +
     `<snapshot received_at='${isoReceivedAt}'>\n${JSON.stringify(latestSnapshot.payload, null, 2)}\n</snapshot>`;
 
+  type ContentBlock =
+    | { type: "text"; text: string }
+    | {
+        type: "image";
+        source: { type: "base64"; media_type: "image/png"; data: string };
+      };
+
+  const userBlocks: ContentBlock[] = [];
+  if (attachedSheets.length > 0) {
+    const sheetList = attachedSheets
+      .map((s) => `${s.sheetNumber} ${s.sheetName}`)
+      .join(", ");
+    userBlocks.push({
+      type: "text",
+      text: `User question: ${question}\n\nThe following sheets are attached for visual reference: ${sheetList}`,
+    });
+    for (const s of attachedSheets) {
+      userBlocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/png",
+          data: s.pngBase64,
+        },
+      });
+    }
+  } else {
+    userBlocks.push({ type: "text", text: question });
+  }
+
   const messages = [
-    ...(history ?? []).map((m) => ({ role: m.role, content: m.content })),
-    { role: "user" as const, content: question },
+    ...(history ?? []).map((m) => ({
+      role: m.role,
+      content: m.content,
+    })),
+    {
+      role: "user" as const,
+      content:
+        attachedSheets.length > 0
+          ? userBlocks
+          : (userBlocks[0] as { type: "text"; text: string }).text,
+    },
   ];
+
+  if (attachedSheets.length > 0) {
+    logger.info(
+      {
+        engagementId,
+        sheetCount: attachedSheets.length,
+        approxAddedTokens: attachedSheets.reduce(
+          (sum, s) => sum + Math.round(s.pngBase64.length / 4),
+          0,
+        ),
+      },
+      "chat with vision attachments",
+    );
+  }
 
   try {
     const stream = anthropic.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 1024,
       system: systemPrompt,
-      messages,
+      // The SDK accepts string OR content-block arrays for user content; the
+      // type union here is wider than the generated typings expose.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      messages: messages as any,
     });
 
     for await (const event of stream) {

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { SheetSummary } from "@workspace/api-client-react";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -8,9 +9,16 @@ export interface ChatMessage {
 interface EngagementsUiState {
   selectedSnapshotIdByEngagement: Record<string, string | null>;
   messagesByEngagement: Record<string, ChatMessage[]>;
+  attachedSheetsByEngagement: Record<string, SheetSummary[]>;
+  pendingChatInputByEngagement: Record<string, string>;
   streaming: boolean;
 
   selectSnapshot: (engagementId: string, snapshotId: string | null) => void;
+  attachSheet: (engagementId: string, sheet: SheetSummary) => void;
+  detachSheet: (engagementId: string, sheetId: string) => void;
+  clearAttachedSheets: (engagementId: string) => void;
+  setPendingChatInput: (engagementId: string, value: string) => void;
+  consumePendingChatInput: (engagementId: string) => string | null;
   sendMessage: (engagementId: string, question: string) => Promise<void>;
 }
 
@@ -19,6 +27,8 @@ const API_BASE = `${import.meta.env.BASE_URL}api`;
 export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
   selectedSnapshotIdByEngagement: {},
   messagesByEngagement: {},
+  attachedSheetsByEngagement: {},
+  pendingChatInputByEngagement: {},
   streaming: false,
 
   selectSnapshot: (engagementId, snapshotId) =>
@@ -28,6 +38,57 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
         [engagementId]: snapshotId,
       },
     })),
+
+  attachSheet: (engagementId, sheet) =>
+    set((state) => {
+      const existing = state.attachedSheetsByEngagement[engagementId] ?? [];
+      if (existing.some((s) => s.id === sheet.id)) return {};
+      return {
+        attachedSheetsByEngagement: {
+          ...state.attachedSheetsByEngagement,
+          [engagementId]: [...existing, sheet],
+        },
+      };
+    }),
+
+  detachSheet: (engagementId, sheetId) =>
+    set((state) => {
+      const existing = state.attachedSheetsByEngagement[engagementId] ?? [];
+      return {
+        attachedSheetsByEngagement: {
+          ...state.attachedSheetsByEngagement,
+          [engagementId]: existing.filter((s) => s.id !== sheetId),
+        },
+      };
+    }),
+
+  clearAttachedSheets: (engagementId) =>
+    set((state) => ({
+      attachedSheetsByEngagement: {
+        ...state.attachedSheetsByEngagement,
+        [engagementId]: [],
+      },
+    })),
+
+  setPendingChatInput: (engagementId, value) =>
+    set((state) => ({
+      pendingChatInputByEngagement: {
+        ...state.pendingChatInputByEngagement,
+        [engagementId]: value,
+      },
+    })),
+
+  consumePendingChatInput: (engagementId) => {
+    const v = get().pendingChatInputByEngagement[engagementId] ?? null;
+    if (v !== null) {
+      set((state) => {
+        const next = { ...state.pendingChatInputByEngagement };
+        delete next[engagementId];
+        return { pendingChatInputByEngagement: next };
+      });
+    }
+    return v;
+  },
 
   sendMessage: async (engagementId, question) => {
     set((state) => {
@@ -49,11 +110,30 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
       const state = get();
       const all = state.messagesByEngagement[engagementId] || [];
       const history = all.slice(0, -2);
+      const attachedSheets =
+        state.attachedSheetsByEngagement[engagementId] ?? [];
+      const referencedSheetIds = attachedSheets.map((s) => s.id);
+
+      // One-shot attachment: clear before the response starts streaming so
+      // the chips disappear from the UI as soon as the request is in flight.
+      if (referencedSheetIds.length > 0) {
+        set((s) => ({
+          attachedSheetsByEngagement: {
+            ...s.attachedSheetsByEngagement,
+            [engagementId]: [],
+          },
+        }));
+      }
 
       const res = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ engagementId, question, history }),
+        body: JSON.stringify({
+          engagementId,
+          question,
+          history,
+          ...(referencedSheetIds.length > 0 ? { referencedSheetIds } : {}),
+        }),
       });
 
       if (!res.ok) {

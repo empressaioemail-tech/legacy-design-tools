@@ -366,6 +366,92 @@ export const GetSnapshotResponse = zod.object({
   wallCount: zod.number().nullable(),
   receivedAt: zod.coerce.date(),
   payload: zod.record(zod.string(), zod.unknown()),
+  sheets: zod.array(
+    zod.object({
+      id: zod.string(),
+      snapshotId: zod.string(),
+      engagementId: zod.string(),
+      sheetNumber: zod.string(),
+      sheetName: zod.string(),
+      viewCount: zod.number().nullable(),
+      revisionNumber: zod.string().nullable(),
+      revisionDate: zod.string().nullable(),
+      thumbnailWidth: zod.number(),
+      thumbnailHeight: zod.number(),
+      fullWidth: zod.number(),
+      fullHeight: zod.number(),
+      sortOrder: zod.number(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary List sheets uploaded for a snapshot
+ */
+export const GetSnapshotSheetsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetSnapshotSheetsResponseItem = zod.object({
+  id: zod.string(),
+  snapshotId: zod.string(),
+  engagementId: zod.string(),
+  sheetNumber: zod.string(),
+  sheetName: zod.string(),
+  viewCount: zod.number().nullable(),
+  revisionNumber: zod.string().nullable(),
+  revisionDate: zod.string().nullable(),
+  thumbnailWidth: zod.number(),
+  thumbnailHeight: zod.number(),
+  fullWidth: zod.number(),
+  fullHeight: zod.number(),
+  sortOrder: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+export const GetSnapshotSheetsResponse = zod.array(
+  GetSnapshotSheetsResponseItem,
+);
+
+/**
+ * Multipart upload from the Revit add-in. Body must include a `metadata`
+text field containing JSON-encoded SheetMetadata[] plus per-sheet
+`sheet_{i}_thumb` and `sheet_{i}_full` PNG file fields. Idempotent on
+(snapshotId, sheetNumber) — re-uploading replaces existing rows.
+
+ * @summary Upload sheets (multipart) for a snapshot
+ */
+export const UploadSnapshotSheetsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UploadSnapshotSheetsHeader = zod.object({
+  "x-snapshot-secret": zod.string(),
+});
+
+export const UploadSnapshotSheetsBody = zod.object({
+  metadata: zod.string().describe("JSON-encoded array of SheetMetadata"),
+});
+
+export const UploadSnapshotSheetsResponse = zod.object({
+  uploaded: zod.number(),
+  skipped: zod.number(),
+  failed: zod.number(),
+  errors: zod.array(zod.string()),
+});
+
+/**
+ * @summary Sheet thumbnail PNG (512px)
+ */
+export const GetSheetThumbnailParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Sheet full-resolution PNG (~2048px)
+ */
+export const GetSheetFullParams = zod.object({
+  id: zod.coerce.string(),
 });
 
 /**
@@ -386,4 +472,5 @@ export const SendChatMessageBody = zod.object({
       }),
     )
     .optional(),
+  referencedSheetIds: zod.array(zod.string()).optional(),
 });
