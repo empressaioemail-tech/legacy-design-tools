@@ -1,0 +1,546 @@
+# Sprint A05 — Phase 1 — Codes via Atom-Anchored Demand-Driven Gathering
+
+**What this is:** Sprint A05 — atoms accumulate organically as architects use the platform. When a Revit model is synced, jurisdiction is resolved, and the warm-up worker fetches the section index for that jurisdiction from public sources. When chat questions are asked, body text is fetched on demand and cached as atoms. Future projects in the same jurisdiction reuse atoms without re-fetching.
+
+**Run this AFTER:** Sprint A04 verified ✓ (sheet pipeline working).
+
+**Sources:**
+- **Grand County, Utah** — public PDFs from `grandcountyutah.net/146/Design-Criteria` (government records, clean)
+- **Bastrop, Texas** — Municode hosted version at `library.municode.com/tx/bastrop/codes/code_of_ordinances` — gated by Section 0 robots.txt check; if disallowed, Bastrop is deferred to a later sprint with direct city contact
+
+**Prerequisites:**
+- `OPENAI_API_KEY` set in Replit Secrets (used for embeddings)
+- Replit Postgres has `pgvector` available
+
+**How to use:** paste between BEGIN and END markers into Replit Agent. Section 0 will pause and wait for your go-ahead before any other work.
+
+---
+
+```
+========== BEGIN PASTE TO REPLIT AGENT ==========
+
+Sprint A05 (Phase 1): atom-anchored demand-driven knowledge accumulation. When a Revit-synced engagement's jurisdiction is resolved, a background warm-up worker fetches the section index from public sources. When chat questions are asked, body text is fetched on demand and stored as deduplicated, content-hashed, source-attributed atoms. The corpus grows organically based on real architect demand.
+
+Strategic context: Hauska is the AI orchestration + provenance layer over public legal data, not a code repository. Atoms are jurisdiction-keyed, edition-keyed, content-hashed. Each atom records its source URL and license type. Findings (in A06) will reference atoms for citation provenance.
+
+Sources for this sprint:
+- "grand_county_ut" — Grand County, Utah Design Criteria from grandcountyutah.net/146/Design-Criteria (PUBLIC GOVERNMENT RECORDS — clean to crawl)
+- "bastrop_tx" — Bastrop, Texas Code of Ordinances via library.municode.com (GATED on Section 0 robots.txt check; if not permitted, defer to later sprint)
+- "default" — fallback empty jurisdiction; no retrieval
+
+============================================================
+SECTION 0 — STAGE GATE — RUN BEFORE ANY OTHER WORK
+============================================================
+
+Reconnaissance with mandatory pause for user go-ahead. Don't proceed past this section without explicit approval.
+
+A. Verify pgvector available
+   - SELECT * FROM pg_available_extensions WHERE name = 'vector';
+   - CREATE EXTENSION IF NOT EXISTS vector;
+   - Confirm extension created or present
+
+B. Verify OPENAI_API_KEY
+   - Confirm process.env.OPENAI_API_KEY is non-empty (don't print)
+   - If missing, STOP and ask user
+
+C. Inspect Grand County's PDF source
+   - Fetch https://www.grandcountyutah.net/146/Design-Criteria — this is the listing page
+   - Identify all PDF download links on the page (likely several covering drainage, road design, water/sewer, etc.)
+   - Download ONE representative PDF as a sample (the smallest file, to be polite)
+   - Use pdfjs-dist or pdf-parse to extract text from a few pages
+   - Report: 
+     - List of all PDFs found (filenames + URLs + sizes)
+     - Sample text from one PDF (first ~500 chars of extracted text)
+     - Are these clean digital PDFs or scanned (i.e., does pdf-parse return real text or empty/garbage)?
+     - Are there multi-column layouts or tables that won't parse cleanly?
+     - Estimated total page count across all PDFs
+
+D. Check Municode's robots.txt — CRITICAL
+   - Fetch https://library.municode.com/robots.txt
+   - Paste contents verbatim
+   - Analyze: are paths under /tx/bastrop/codes/ explicitly allowed, disallowed, or unspecified?
+   - Look for:
+     * "User-agent: *" rules
+     * Specific Allow / Disallow directives
+     * Crawl-delay directive
+     * Sitemap reference
+   - Report your interpretation: "Crawling appears permitted under [conditions]" OR "Crawling appears disallowed" OR "Ambiguous — robots.txt doesn't specifically address /tx/bastrop/codes/ paths"
+
+E. Inspect Bastrop's Municode page structure (only if D suggests crawling is permitted)
+   - Fetch https://library.municode.com/tx/bastrop/codes/code_of_ordinances?nodeId=CH6PUNU with a polite browser User-Agent
+   - Identify: section title selector, body text selector, table-of-contents structure, total chapter count
+   - Report scraping strategy
+
+F. Verify outbound network from Replit
+   - Confirm HTTPS to grandcountyutah.net works (it should)
+   - Confirm HTTPS to library.municode.com works (it should)
+
+After A-F, REPORT FINDINGS AND PAUSE. Don't proceed until user gives explicit go-ahead.
+
+The user will read the report and decide:
+- If D (Municode robots.txt) permits crawling → proceed with both jurisdictions
+- If D disallows or is ambiguous → proceed with Grand County only; Bastrop is deferred to a later sprint
+- If C reveals scanned/garbage PDFs for Grand County → stop and propose alternatives
+
+Whatever the user decides, encode it in the implementation: if Bastrop is deferred, the lib/codes-sources/municode adapter is NOT built; if Grand County is the only jurisdiction, lib/codes-sources/pdf is the only fetcher.
+
+============================================================
+SECTION 1 — DATABASE SCHEMA
+============================================================
+
+(Same as planned earlier — atom architecture is source-agnostic.)
+
+New tables in lib/db/src/schema/:
+
+codeAtomSources.ts:
+  code_atom_sources
+    id              uuid PK
+    sourceName      text not null UNIQUE   ("grand_county_pdf", "bastrop_municode", "manual_upload", "future_municode_api", "future_icc_api")
+    sourceType      text not null          ("pdf" | "html_scrape" | "api" | "manual")
+    licenseType     text not null          ("public_record" | "subscribed" | "permitted_use")
+    licenseTermsUrl text                   (link to source's terms or governmental authority)
+    active          boolean not null default true
+    addedAt         timestamptz default now() not null
+    notes           text                   (e.g., "Government public records — Grand County, Utah; no ToS")
+
+codeAtoms.ts:
+  code_atoms
+    id              uuid PK
+    jurisdiction    text not null         ("grand_county_ut", "bastrop_tx", etc.)
+    codeBook        text not null         (e.g., "grand_county_design_criteria", "bastrop_udc", "ibc_2021")
+    edition         text not null         (e.g., "2024-08", or "2021" for I-Codes)
+    sectionNumber   text not null
+    sectionTitle    text not null
+    parentNumbers   text[]
+    fullPath        text not null
+    bodyText        text                  (NULL allowed — for "reference only" atoms that don't retain text)
+    bodyTextRetained boolean not null default true
+    sourceUrl       text                  (link back to the source for verification)
+    sourceId        uuid not null FK → code_atom_sources.id
+    fetchedAt       timestamptz default now() not null
+    contentHash     text                  (SHA-256 of bodyText; null if no bodyText)
+    embedding       vector(1536)          (NULL until embedded; null for reference-only atoms)
+    embeddedAt      timestamptz
+  
+  UNIQUE constraint on (jurisdiction, codeBook, edition, sectionNumber, contentHash)
+  
+  indexes:
+    idx_atoms_lookup       ON code_atoms (jurisdiction, codeBook, edition, sectionNumber)
+    idx_atoms_embedding    ON code_atoms USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100) WHERE embedding IS NOT NULL
+    idx_atoms_jurisdiction ON code_atoms (jurisdiction)
+    idx_atoms_source       ON code_atoms (sourceId)
+
+codeAtomFetchQueue.ts:
+  code_atom_fetch_queue
+    id              uuid PK
+    jurisdiction    text not null
+    codeBook        text
+    sectionNumber   text
+    sectionUrl      text not null
+    requestedBy     text not null         ("warmup" | "chat" | "manual" | "cross_reference")
+    requestedAt     timestamptz default now() not null
+    fetchedAt       timestamptz
+    failedAt        timestamptz
+    failureReason   text
+    atomId          uuid                  (set after successful fetch)
+  
+  index on (fetchedAt IS NULL, failedAt IS NULL, requestedAt)
+
+findingsCodeAtoms.ts (placeholder — findings table doesn't exist yet, lands in A06):
+  findings_code_atoms
+    findingId       uuid not null         (no FK constraint yet — A06 adds it)
+    atomId          uuid not null FK → code_atoms.id
+    citationContext text
+    citedAt         timestamptz default now() not null
+    PRIMARY KEY (findingId, atomId)
+
+Seed code_atom_sources:
+  - "grand_county_pdf" / pdf / public_record / "Government public records — Utah Open Records Act" / active=true
+  - "bastrop_municode" / html_scrape / permitted_use / "Per robots.txt analysis dated [today]" / active=ONLY IF Section 0.D permits
+
+After schema:
+  pnpm --filter @workspace/db run push
+
+============================================================
+SECTION 2 — PACKAGE: lib/codes-sources
+============================================================
+
+This package contains source-specific fetchers. Each fetcher implements a common interface so the orchestrator doesn't need to know which source an atom came from.
+
+Structure:
+lib/codes-sources/
+├── package.json   (deps: pdf-parse, cheerio, p-queue)
+├── tsconfig.json
+├── src/
+│   ├── index.ts                  (public API + interface definition)
+│   ├── types.ts                  (CodeSource, AtomCandidate, TocEntry — shared)
+│   ├── grandCounty/
+│   │   ├── index.ts
+│   │   ├── crawler.ts            (PDF download + page-by-page text extraction)
+│   │   └── parser.ts             (heuristic chunking — section headers, sub-numbered)
+│   └── municode/                 (BUILT ONLY IF Section 0.D permitted)
+│       ├── index.ts
+│       ├── crawler.ts            (HTML fetch with polite rate limiting)
+│       └── parser.ts             (Cheerio-based section extraction)
+
+types.ts:
+  export interface CodeSource {
+    id: string;                          // matches code_atom_sources.sourceName
+    label: string;
+    sourceType: "pdf" | "html_scrape" | "api" | "manual";
+    licenseType: "public_record" | "subscribed" | "permitted_use";
+    
+    listToc(jurisdiction: string, codeBook: string, edition: string): Promise<TocEntry[]>;
+    fetchSection(url: string, context: { jurisdiction, codeBook, edition }): Promise<AtomCandidate>;
+  }
+
+  export interface AtomCandidate {
+    jurisdiction: string;
+    codeBook: string;
+    edition: string;
+    sectionNumber: string;
+    sectionTitle: string;
+    parentNumbers: string[];
+    fullPath: string;
+    bodyText: string;
+    sourceUrl: string;
+    crossReferences: string[];           // other section numbers seen in body text
+  }
+
+  export interface TocEntry {
+    jurisdiction: string;
+    codeBook: string;
+    edition: string;
+    sectionNumber: string;
+    sectionTitle: string;
+    sectionUrl: string;
+    parentNumbers: string[];
+    fullPath: string;
+  }
+
+Grand County implementation (lib/codes-sources/src/grandCounty):
+
+  GrandCountyDesignCriteriaSource implements CodeSource
+  
+  listToc():
+    1. Fetch https://www.grandcountyutah.net/146/Design-Criteria
+    2. Parse HTML (Cheerio) to find all PDF links
+    3. For each PDF (limit to first 20 to be safe):
+       - Download the PDF (cap 50MB per file)
+       - Use pdf-parse to extract text per page
+       - Run heuristic chunking: split on ALL-CAPS headers + numbered sub-sections (e.g., "1.0 GENERAL", "2.1 SCOPE")
+       - Each chunk becomes a TocEntry: sectionNumber from matched header, sectionTitle from first line after header, sectionUrl points to PDF + page anchor
+    4. Return TocEntry[]
+  
+  fetchSection(url):
+    1. Parse PDF + page reference from URL
+    2. Re-extract text for that section (cache PDF locally if seen recently)
+    3. Build AtomCandidate
+  
+  Politeness:
+    - Min 2-second delay between PDF downloads
+    - Realistic Mozilla/5.0 User-Agent + Accept-Language: en-US
+    - Cache PDFs locally during a single warm-up run
+
+Municode implementation (lib/codes-sources/src/municode) — BUILT ONLY IF SECTION 0 PERMITTED:
+
+  MunicodeSource implements CodeSource
+  
+  listToc():
+    1. Fetch the codebook root page
+    2. Parse navigation tree to enumerate all sections
+    3. Each entry becomes a TocEntry — sectionUrl is the Municode URL for that section
+    4. Return TocEntry[]
+  
+  fetchSection(url):
+    1. Fetch the Municode section page
+    2. Parse with Cheerio using selectors identified in Section 0.E
+    3. Return AtomCandidate
+  
+  Politeness:
+    - Honor crawl-delay from robots.txt; minimum 2 seconds + 0-2s jitter
+    - Realistic Mozilla User-Agent, identifying string with contact email per RFC convention
+    - Cap: 200 requests per UTC day per IP (configurable via MUNICODE_DAILY_REQUEST_CAP)
+    - Single-thread fetch queue
+  
+  Error handling:
+    - 4xx (other than 429) → unrecoverable, mark failure, do not retry
+    - 429 → exponential backoff up to 3 retries
+    - 5xx → exponential backoff up to 3 retries
+    - HTTP timeout → 1 retry with longer timeout, then fail
+
+============================================================
+SECTION 3 — PACKAGE: lib/codes (orchestrator)
+============================================================
+
+Same as planned earlier. This package is source-agnostic; it knows about atoms, embeddings, retrieval, jurisdictions, and the warm-up worker.
+
+Structure:
+lib/codes/
+├── package.json   (deps: openai, @workspace/db, @workspace/codes-sources)
+├── src/
+│   ├── index.ts
+│   ├── jurisdictions.ts             (engagement → jurisdiction → applicable code books)
+│   ├── atoms/
+│   │   ├── store.ts                 (CRUD on code_atoms)
+│   │   ├── retrieve.ts              (cosine similarity search)
+│   │   ├── fetch.ts                 (route to correct lib/codes-sources adapter)
+│   │   └── embed.ts                 (OpenAI text-embedding-3-large)
+│   ├── warmup/
+│   │   ├── enqueue.ts               (mark sections needed for fetching)
+│   │   └── worker.ts                (background loop processing the queue)
+│   └── prompt/
+│       └── format.ts                (format atoms into Claude system prompt blocks)
+
+jurisdictions.ts (hardcoded for now):
+
+  bastrop_tx → applicable code books:
+    [
+      { codeBook: "bastrop_udc", edition: "current", sourceName: "bastrop_municode" }
+      // Note: bastrop_municode source is conditional on Section 0.D
+    ]
+  
+  grand_county_ut → applicable code books:
+    [
+      { codeBook: "grand_county_design_criteria", edition: "current", sourceName: "grand_county_pdf" }
+    ]
+  
+  default → empty list
+
+  export function mapEngagementToJurisdiction(city, state) — same as before
+  export function getApplicableCodeBooks(jurisdictionId) — returns config
+
+atoms/fetch.ts:
+  Looks up the source adapter from lib/codes-sources by sourceName.
+  Calls source.fetchSection(url) to get the AtomCandidate.
+  Calls atoms/store.upsertAtom() to persist.
+  
+  This decoupling means future sources (real Municode API, ICC API) plug in as new lib/codes-sources packages without changes here.
+
+atoms/store.ts upsertAtom():
+  1. Compute contentHash if bodyText present
+  2. SELECT by (jurisdiction, codeBook, edition, sectionNumber, contentHash)
+  3. If exists: return existing, no change
+  4. Otherwise INSERT with embedding=NULL
+  5. Trigger embedding async (fire-and-forget; embedding fills in within seconds)
+  6. Return the atom
+
+atoms/retrieve.ts retrieveForQuery():
+  1. Get applicable code books for jurisdiction
+  2. Embed the question
+  3. Cosine similarity SELECT FROM code_atoms WHERE jurisdiction match AND embedding IS NOT NULL
+     ORDER BY embedding <=> $queryEmbedding LIMIT topK
+  4. Filter similarity > 0.4
+  5. Return RetrievalResult[]
+  6. If results.length < 3, enqueue a warm-up task to fetch more sections (demand-driven gathering signal)
+
+warmup/enqueue.ts enqueueWarmupForJurisdiction(jurisdiction):
+  For each applicable code book:
+    1. Look up source config from jurisdictions.ts
+    2. Call source.listToc(jurisdiction, codeBook, edition)
+    3. For each TocEntry, INSERT INTO code_atom_fetch_queue if not already queued
+  Returns total queued count
+
+warmup/worker.ts startWarmupWorker():
+  Singleton (in-memory mutex). Runs:
+  1. SELECT one queue row WHERE not yet fetched/failed, oldest first
+  2. atoms/fetch.ts to fetch and store
+  3. On success: UPDATE row.fetchedAt, atomId; sleep 5s
+  4. On UpCodesAuthError or similar (not applicable to Phase 1 sources but pattern stays): halt 1h, log clearly
+  5. On other errors: UPDATE row.failedAt + reason, continue
+  6. If queue empty: sleep 30s
+
+prompt/format.ts:
+  formatRetrievedAtomsForPrompt(atoms) returns the <reference_code_sections> block.
+  For atoms where bodyTextRetained=true: include full text.
+  For atoms where bodyTextRetained=false: include only section reference (sectionNumber, sectionTitle, fullPath, sourceUrl), NOT body text. Mark with "(reference only — see source URL for text)".
+
+============================================================
+SECTION 4 — OPENAPI CONTRACT
+============================================================
+
+(Same shape as previously planned. Edit lib/api-spec/openapi.yaml, run codegen.)
+
+NEW types: CodeAtom, CodeAtomSummary, JurisdictionConfig, WarmupStatus, RetrievalResult, RetrievalResultItem
+
+NEW endpoints:
+  GET  /api/codes/jurisdictions
+  GET  /api/codes/atoms?jurisdiction=&codeBook=&search=&limit=&offset=
+  GET  /api/codes/atoms/:id
+  GET  /api/codes/atoms/by-section?jurisdiction=&codeBook=&edition=&sectionNumber=
+  POST /api/codes/warmup/:jurisdiction
+  GET  /api/codes/warmup/:jurisdiction
+  POST /api/codes/retrieve
+
+EXTEND endpoints:
+  POST /chat — server resolves jurisdiction, retrieves atoms, formats into system prompt (no body shape change)
+  POST /engagements/:id (PATCH) — when geocoding sets jurisdiction to a recognized value, fire-and-forget enqueueWarmupForJurisdiction()
+
+============================================================
+SECTION 5 — BACKEND ROUTES + CHAT INTEGRATION
+============================================================
+
+artifacts/api-server/src/routes/codes.ts — implements all endpoints from Section 4
+artifacts/api-server/src/routes/chat.ts — UPDATE to call retrieveForQuery and inject system prompt
+artifacts/api-server/src/routes/engagements.ts — UPDATE PATCH handler to enqueueWarmupForJurisdiction on jurisdiction change
+artifacts/api-server/src/main.ts — startWarmupWorker() in background
+
+Chat system prompt template:
+
+  You are helping an architect understand and review their Revit model for the engagement '{engagement.name}'{address ? ' at ' + address : ''}{jurisdiction ? ' in ' + jurisdictionLabel : ''}.
+
+  The most recent snapshot was captured {relative time}.
+
+  Answer grounded in the snapshot data and, when relevant, the reference code sections below. Be terse and operational in tone — this is a professional tool, not a chatbot.
+
+  CITATION DISCIPLINE (critical):
+  - When you reference a code requirement, ALWAYS cite the specific section using its number.
+  - Cite ONLY sections that appear in the REFERENCE CODE SECTIONS block below. Do not invent citations or rely on training-data knowledge of building codes.
+  - If a relevant code section is not in the REFERENCE CODE SECTIONS block, say so plainly: "I don't have a verified citation for [topic] in this jurisdiction. Recommend manual lookup against [code book and chapter]."
+  - Citation format: emit each citation as a marker [[CODE:{atomId}]] where atomId is the UUID of the atom (provided in the reference block). The frontend converts these to clickable chips.
+
+  <snapshot received_at='{ISO}'>
+  {JSON.stringify(snapshot.payload, null, 2)}
+  </snapshot>
+
+  {if retrieved.length > 0:}
+  <reference_code_sections jurisdiction='{jurisdiction}'>
+  Top {retrieved.length} sections semantically similar to the user's question:
+
+  {for each atom:}
+  ---
+  Atom ID: {atom.id}
+  Path: {atom.fullPath}
+  Section: {atom.sectionNumber}
+  Title: {atom.sectionTitle}
+  
+  {if atom.bodyTextRetained:}
+  {atom.bodyText}
+  {else:}
+  (Reference only — view full text at {atom.sourceUrl})
+  {/if}
+  ---
+  {/for}
+  </reference_code_sections>
+  {else:}
+  <reference_code_sections>
+  No relevant code sections retrieved for this jurisdiction yet. Inform the user that the code corpus is being warmed up; recommend a manual lookup if urgent.
+  </reference_code_sections>
+  {/if}
+
+============================================================
+SECTION 6 — FRONTEND: CITATION CHIPS
+============================================================
+
+artifacts/design-tools/src/components/ClaudeChat.tsx
+
+Parser for [[CODE:atomId]] markers in assistant responses. Replace each match with <CitationChip atomId={...} />.
+
+CitationChip component:
+  - Fetches atom via useGetCodeAtom(atomId) (generated React Query hook)
+  - Renders <span class="sc-ref">{atom.sectionNumber}</span> when loaded
+  - Hover: tooltip with sectionNumber + sectionTitle + fullPath + first 400 chars + source URL link
+  - For reference-only atoms (bodyTextRetained=false): tooltip says "(view at source)" and links to sourceUrl
+  - Click: navigate to /codes/{jurisdiction}/{atomId}
+
+============================================================
+SECTION 7 — FRONTEND: CODE LIBRARY PAGE
+============================================================
+
+artifacts/design-tools/src/pages/CodeLibrary.tsx
+Routes: /codes, /codes/:jurisdiction, /codes/:jurisdiction/:atomId
+
+Add to dynamic sidebar's WORKSPACE group: "Code Library" → /codes
+
+Index (/codes):
+  Card grid of jurisdictions
+  Each card: jurisdictionLabel, atomCount, warmup status pill
+  Click → /codes/:jurisdiction
+
+Jurisdiction page (/codes/:jurisdiction):
+  Three-pane layout
+  
+  LEFT (272px):
+    Code book filter
+    Search by section number/title
+    Tree of atoms grouped by chapter/article
+    Bottom: warmup status display
+  
+  CENTER:
+    Selected atom display
+    Breadcrumb (fullPath)
+    Section number + title
+    Body text (if bodyTextRetained=true) OR "view at source" message + link
+    "Source: {sourceName} · License: {licenseType} · Fetched {relativeTime}" provenance footer
+    Cross-references as clickable chips
+  
+  RIGHT (420px):
+    Reuse ClaudeChat component for code library context
+    Different system prompt for code-library questions
+    "Ask Claude about this section" button to attach the atom
+  
+  Empty states:
+    No jurisdictions configured: friendly message
+    Jurisdiction has zero atoms: "Code library is being warmed up..." with refresh
+    Atom not yet fetched: spinner + auto-refresh every 5s
+
+============================================================
+SECTION 8 — RUN ORDER + DELIVERABLES
+============================================================
+
+Run order:
+  1. Section 0 reconnaissance — STOP and report to user
+  2. After explicit go-ahead: Schema + pgvector
+  3. Seed code_atom_sources
+  4. lib/codes-sources package:
+     - Always: grandCounty source
+     - Conditional: municode source (only if Section 0.D permitted)
+  5. lib/codes orchestrator package
+  6. OpenAPI + codegen
+  7. Backend routes + chat integration + warmup worker startup
+  8. Engagement geocoding side-effect (warmup enqueue)
+  9. Frontend citation chips
+  10. Frontend Code Library page
+  11. Sidebar nav addition
+  12. Restart dev workflows
+
+Verify end-to-end:
+
+  a. Trigger warm-up for grand_county_ut → POST /api/codes/warmup/grand_county_ut
+  b. Watch warmup worker fetch sections (Replit logs). Expected ~50-200 sections fetched.
+  c. Verify code_atoms count grows; embeddings populate
+  d. (If Bastrop included) Same for bastrop_tx
+  e. Open Seguin Residence engagement (jurisdiction = grand_county_ut)
+  f. Ask chat: "What are the design requirements for stormwater management here?"
+  g. Verify response cites [[CODE:atomId]] markers; chips render with hover preview; click navigates to Code Library
+  h. (If Bastrop included) Open Snowdon Towers engagement, ask similar question
+  i. Re-ask same question 5 min later → response references same atom IDs (no re-fetch — atom cached)
+  j. /style-probe still renders, plan-review untouched, Revit add-in untouched
+
+After completing, print:
+  - Section 0 findings (fully)
+  - Whether Bastrop was included or deferred
+  - Total atoms fetched per jurisdiction
+  - Total OpenAI embedding cost
+  - Any failed fetches and reasons
+  - Decisions diverged from spec, and why
+
+============================================================
+SECTION 9 — DO NOT BUILD
+============================================================
+
+- Pre-bulk ingestion of any source — atoms accumulate via demand
+- ICC / NFPA / UpCodes integration (later phases)
+- Authentication-gated source access (no UpCodes scraping; that path was rejected)
+- Findings table beyond placeholder join table (A06 sprint)
+- Test coverage (still in H01)
+- Multi-tenancy
+- ANY change to artifacts/plan-review/, artifacts/mockup-sandbox/, the C# Revit add-in
+- Auth / login
+- Cloud Run migration
+- OCR fallback for scanned PDFs (defer if Grand County PDFs are scanned)
+- A second non-Phase-1 fetcher (premature)
+- Persistent chat history in DB
+
+========== END PASTE TO REPLIT AGENT ==========
+```

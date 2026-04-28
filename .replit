@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -39,3 +39,6 @@ externalPort = 3000
 
 [userenv.shared]
 SNAPSHOT_SECRET = "sc_6d53f8f17946d466cb20a5f8a0d815aa4dfbcd6aaa6c295759240463733053a8"
+
+[nix]
+channel = "stable-25_05"
