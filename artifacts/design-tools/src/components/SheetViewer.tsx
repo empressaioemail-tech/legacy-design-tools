@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   TransformWrapper,
   TransformComponent,
@@ -13,14 +13,19 @@ interface SheetViewerProps {
   onAskClaude: (sheet: SheetSummary) => void;
 }
 
+type LoadStatus = "loading" | "loaded" | "error";
+
 export function SheetViewer({ sheet, onClose, onAskClaude }: SheetViewerProps) {
   const [zoom, setZoom] = useState(1);
-  const [imgLoaded, setImgLoaded] = useState(false);
+  const [status, setStatus] = useState<LoadStatus>("loading");
+  const [reloadKey, setReloadKey] = useState(0);
+  const imgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
     if (!sheet) return;
     setZoom(1);
-    setImgLoaded(false);
+    setStatus("loading");
+    setReloadKey(0);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -28,9 +33,26 @@ export function SheetViewer({ sheet, onClose, onAskClaude }: SheetViewerProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [sheet, onClose]);
 
+  useEffect(() => {
+    if (!sheet) return;
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) {
+      setStatus("loaded");
+    }
+  });
+
+  useEffect(() => {
+    if (!sheet || status !== "loading") return;
+    const t = window.setTimeout(() => {
+      setStatus((s) => (s === "loading" ? "error" : s));
+    }, 10000);
+    return () => window.clearTimeout(t);
+  }, [sheet, status, reloadKey]);
+
   if (!sheet) return null;
 
-  const fullUrl = `${import.meta.env.BASE_URL}api/sheets/${sheet.id}/full.png`;
+  const baseUrl = `${import.meta.env.BASE_URL}api/sheets/${sheet.id}/full.png`;
+  const fullUrl = reloadKey > 0 ? `${baseUrl}?r=${reloadKey}` : baseUrl;
 
   return (
     <div
@@ -109,7 +131,7 @@ export function SheetViewer({ sheet, onClose, onAskClaude }: SheetViewerProps) {
       </div>
 
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-        {!imgLoaded && (
+        {status === "loading" && (
           <div
             className="sc-prose"
             style={{
@@ -123,6 +145,34 @@ export function SheetViewer({ sheet, onClose, onAskClaude }: SheetViewerProps) {
             }}
           >
             Loading sheet…
+          </div>
+        )}
+        {status === "error" && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              zIndex: 1,
+            }}
+          >
+            <div className="sc-prose" style={{ opacity: 0.8 }}>
+              Couldn't load this sheet.
+            </div>
+            <button
+              type="button"
+              className="sc-btn-sm"
+              onClick={() => {
+                setStatus("loading");
+                setReloadKey((k) => k + 1);
+              }}
+            >
+              Reload
+            </button>
           </div>
         )}
         <TransformWrapper
@@ -146,16 +196,24 @@ export function SheetViewer({ sheet, onClose, onAskClaude }: SheetViewerProps) {
             }}
           >
             <img
+              ref={imgRef}
               src={fullUrl}
               alt={`${sheet.sheetNumber} ${sheet.sheetName}`}
-              onLoad={() => setImgLoaded(true)}
+              onLoad={() => {
+                console.log("[SheetViewer] onLoad", sheet.id);
+                setStatus("loaded");
+              }}
+              onError={() => {
+                console.log("[SheetViewer] onError", sheet.id);
+                setStatus("error");
+              }}
               draggable={false}
               style={{
                 maxWidth: "calc(100vw - 32px)",
                 maxHeight: "calc(100vh - 60px - 32px)",
                 objectFit: "contain",
                 background: "white",
-                opacity: imgLoaded ? 1 : 0,
+                opacity: status === "loaded" ? 1 : 0,
                 transition: "opacity 0.2s ease-out",
                 userSelect: "none",
               }}

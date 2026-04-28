@@ -1,0 +1,47 @@
+Bug in artifacts/design-tools SheetViewer: the modal opens, 
+shows "Loading sheet..." overlay, but never clears even though 
+the full.png request succeeds (200 response in the Network tab, 
+~167KB, ~250ms). 
+
+Most likely cause: the SheetViewer is using `<img onLoad>` to 
+clear the loading overlay, but onLoad doesn't fire when the 
+image is already in browser cache. After the first successful 
+load, every subsequent click on a thumbnail caches the image, 
+the onLoad event never fires, and the overlay stays.
+
+Fix:
+
+1. In the SheetViewer component, change the loading-state 
+   pattern from "set isLoading to false in onLoad" to a more 
+   robust pattern:
+   
+   - On mount, check if the image is already complete via 
+     imgRef.current?.complete and imgRef.current?.naturalWidth > 0
+   - If yes, immediately clear isLoading
+   - Otherwise, set isLoading to true and let onLoad/onError 
+     clear it
+   - Also add an onError handler that clears isLoading and 
+     shows an error state instead of the loading state forever
+
+2. Also handle the cached-image case: if the image is already 
+   in cache, the browser may complete it synchronously before 
+   React renders. Use a useEffect that runs after every render 
+   to check imgRef.current?.complete and clear loading if true.
+
+3. Add a fallback timeout: if isLoading is still true after 
+   10 seconds, switch to an error state with a "Reload" button. 
+   Better than hanging forever.
+
+4. Add a console.log in the onLoad and onError handlers (we'll 
+   remove later) so we can verify which path is firing.
+
+Don't change the polling intervals or the React Query setup — 
+that's a separate cleanup we'll address later.
+
+After the fix, verify: open a thumbnail (image loads). Close 
+the modal. Open the SAME thumbnail again — this time it should 
+show the image immediately without hanging on the loading 
+overlay (the cached-image case).
+
+Don't restart the dev server unnecessarily; the Vite HMR should 
+pick up the change.
