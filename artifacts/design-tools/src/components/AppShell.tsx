@@ -4,6 +4,12 @@ import {
   useListEngagements,
   getListEngagementsQueryKey,
 } from "@workspace/api-client-react";
+import {
+  Activity,
+  FolderOpen,
+  LayoutDashboard,
+  Palette,
+} from "lucide-react";
 
 interface AppShellProps {
   title?: string;
@@ -23,18 +29,31 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
   const projectItems = engagements.slice(0, 8).map((e) => ({
     label: e.name,
     href: `/engagements/${e.id}`,
+    icon: <FolderOpen size={14} />,
   }));
 
   if (engagements.length > 8) {
-    projectItems.push({ label: "View all →", href: "/" });
+    projectItems.push({
+      label: "View all →",
+      href: "/",
+      icon: <FolderOpen size={14} />,
+    });
   }
 
   const navGroups = [
     {
       label: "WORKSPACE",
       items: [
-        { label: "Projects", href: "/" },
-        { label: "Style Probe", href: "/style-probe" },
+        {
+          label: "Projects",
+          href: "/",
+          icon: <LayoutDashboard size={14} />,
+        },
+        {
+          label: "Style Probe",
+          href: "/style-probe",
+          icon: <Palette size={14} />,
+        },
       ],
     },
     {
@@ -42,11 +61,23 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
       items:
         projectItems.length > 0
           ? projectItems
-          : [{ label: "No engagements yet", href: "/" }],
+          : [
+              {
+                label: "No engagements yet",
+                href: "/",
+                icon: <FolderOpen size={14} />,
+              },
+            ],
     },
     {
       label: "DEV",
-      items: [{ label: "API Health", href: "/health" }],
+      items: [
+        {
+          label: "API Health",
+          href: "/health",
+          icon: <Activity size={14} />,
+        },
+      ],
     },
   ];
 

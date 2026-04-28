@@ -42,6 +42,33 @@ export const ListEngagementsResponseItem = zod.object({
     }),
     zod.null(),
   ]),
+  site: zod.object({
+    address: zod.string().nullable(),
+    geocode: zod.union([
+      zod.object({
+        latitude: zod.number(),
+        longitude: zod.number(),
+        jurisdictionCity: zod.string().nullable(),
+        jurisdictionState: zod.string().nullable(),
+        jurisdictionFips: zod.string().nullable(),
+        source: zod.enum(["nominatim", "manual"]),
+        geocodedAt: zod.coerce.date(),
+      }),
+      zod.null(),
+    ]),
+    projectType: zod.union([
+      zod.enum([
+        "new_build",
+        "renovation",
+        "addition",
+        "tenant_improvement",
+        "other",
+      ]),
+      zod.null(),
+    ]),
+    zoningCode: zod.string().nullable(),
+    lotAreaSqft: zod.number().nullable(),
+  }),
 });
 export const ListEngagementsResponse = zod.array(ListEngagementsResponseItem);
 
@@ -88,6 +115,204 @@ export const GetEngagementResponse = zod.object({
       receivedAt: zod.coerce.date(),
     }),
   ),
+  site: zod.object({
+    address: zod.string().nullable(),
+    geocode: zod.union([
+      zod.object({
+        latitude: zod.number(),
+        longitude: zod.number(),
+        jurisdictionCity: zod.string().nullable(),
+        jurisdictionState: zod.string().nullable(),
+        jurisdictionFips: zod.string().nullable(),
+        source: zod.enum(["nominatim", "manual"]),
+        geocodedAt: zod.coerce.date(),
+      }),
+      zod.null(),
+    ]),
+    projectType: zod.union([
+      zod.enum([
+        "new_build",
+        "renovation",
+        "addition",
+        "tenant_improvement",
+        "other",
+      ]),
+      zod.null(),
+    ]),
+    zoningCode: zod.string().nullable(),
+    lotAreaSqft: zod.number().nullable(),
+  }),
+  warnings: zod.array(zod.string()).optional(),
+});
+
+/**
+ * Partial update. Only fields present in the request body are changed.
+If `address` is included and differs from the current value, the
+server will geocode the new address synchronously (best-effort).
+On geocoding failure, the address is still saved but a warning is
+included in the response.
+
+ * @summary Update engagement details (intake / edit modal)
+ */
+export const UpdateEngagementParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateEngagementBody = zod.object({
+  name: zod.string().optional(),
+  address: zod.string().optional(),
+  jurisdiction: zod.string().optional(),
+  status: zod.enum(["active", "on_hold", "archived"]).optional(),
+  projectType: zod
+    .enum([
+      "new_build",
+      "renovation",
+      "addition",
+      "tenant_improvement",
+      "other",
+    ])
+    .optional(),
+  zoningCode: zod.string().optional(),
+  lotAreaSqft: zod.number().nullish(),
+});
+
+export const UpdateEngagementResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  jurisdiction: zod.string().nullable(),
+  address: zod.string().nullable(),
+  status: zod.enum(["active", "on_hold", "archived"]),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+  snapshotCount: zod.number(),
+  latestSnapshot: zod.union([
+    zod.object({
+      id: zod.string(),
+      engagementId: zod.string(),
+      engagementName: zod.string(),
+      projectName: zod.string(),
+      sheetCount: zod.number().nullable(),
+      roomCount: zod.number().nullable(),
+      levelCount: zod.number().nullable(),
+      wallCount: zod.number().nullable(),
+      receivedAt: zod.coerce.date(),
+    }),
+    zod.null(),
+  ]),
+  snapshots: zod.array(
+    zod.object({
+      id: zod.string(),
+      engagementId: zod.string(),
+      engagementName: zod.string(),
+      projectName: zod.string(),
+      sheetCount: zod.number().nullable(),
+      roomCount: zod.number().nullable(),
+      levelCount: zod.number().nullable(),
+      wallCount: zod.number().nullable(),
+      receivedAt: zod.coerce.date(),
+    }),
+  ),
+  site: zod.object({
+    address: zod.string().nullable(),
+    geocode: zod.union([
+      zod.object({
+        latitude: zod.number(),
+        longitude: zod.number(),
+        jurisdictionCity: zod.string().nullable(),
+        jurisdictionState: zod.string().nullable(),
+        jurisdictionFips: zod.string().nullable(),
+        source: zod.enum(["nominatim", "manual"]),
+        geocodedAt: zod.coerce.date(),
+      }),
+      zod.null(),
+    ]),
+    projectType: zod.union([
+      zod.enum([
+        "new_build",
+        "renovation",
+        "addition",
+        "tenant_improvement",
+        "other",
+      ]),
+      zod.null(),
+    ]),
+    zoningCode: zod.string().nullable(),
+    lotAreaSqft: zod.number().nullable(),
+  }),
+  warnings: zod.array(zod.string()).optional(),
+});
+
+/**
+ * @summary Re-run geocoding using the engagement's current address
+ */
+export const RegeocodeEngagementParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const RegeocodeEngagementResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  jurisdiction: zod.string().nullable(),
+  address: zod.string().nullable(),
+  status: zod.enum(["active", "on_hold", "archived"]),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+  snapshotCount: zod.number(),
+  latestSnapshot: zod.union([
+    zod.object({
+      id: zod.string(),
+      engagementId: zod.string(),
+      engagementName: zod.string(),
+      projectName: zod.string(),
+      sheetCount: zod.number().nullable(),
+      roomCount: zod.number().nullable(),
+      levelCount: zod.number().nullable(),
+      wallCount: zod.number().nullable(),
+      receivedAt: zod.coerce.date(),
+    }),
+    zod.null(),
+  ]),
+  snapshots: zod.array(
+    zod.object({
+      id: zod.string(),
+      engagementId: zod.string(),
+      engagementName: zod.string(),
+      projectName: zod.string(),
+      sheetCount: zod.number().nullable(),
+      roomCount: zod.number().nullable(),
+      levelCount: zod.number().nullable(),
+      wallCount: zod.number().nullable(),
+      receivedAt: zod.coerce.date(),
+    }),
+  ),
+  site: zod.object({
+    address: zod.string().nullable(),
+    geocode: zod.union([
+      zod.object({
+        latitude: zod.number(),
+        longitude: zod.number(),
+        jurisdictionCity: zod.string().nullable(),
+        jurisdictionState: zod.string().nullable(),
+        jurisdictionFips: zod.string().nullable(),
+        source: zod.enum(["nominatim", "manual"]),
+        geocodedAt: zod.coerce.date(),
+      }),
+      zod.null(),
+    ]),
+    projectType: zod.union([
+      zod.enum([
+        "new_build",
+        "renovation",
+        "addition",
+        "tenant_improvement",
+        "other",
+      ]),
+      zod.null(),
+    ]),
+    zoningCode: zod.string().nullable(),
+    lotAreaSqft: zod.number().nullable(),
+  }),
+  warnings: zod.array(zod.string()).optional(),
 });
 
 /**

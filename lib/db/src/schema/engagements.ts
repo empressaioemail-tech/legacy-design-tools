@@ -3,6 +3,8 @@ import {
   uuid,
   text,
   timestamp,
+  numeric,
+  jsonb,
   index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -17,6 +19,20 @@ export const engagements = pgTable(
     jurisdiction: text("jurisdiction"),
     address: text("address"),
     status: text("status").notNull().default("active"),
+
+    // Wave 1.2: site context fields (all nullable, additive)
+    latitude: numeric("latitude", { precision: 9, scale: 6 }),
+    longitude: numeric("longitude", { precision: 9, scale: 6 }),
+    geocodedAt: timestamp("geocoded_at", { withTimezone: true }),
+    geocodeSource: text("geocode_source"),
+    jurisdictionCity: text("jurisdiction_city"),
+    jurisdictionState: text("jurisdiction_state"),
+    jurisdictionFips: text("jurisdiction_fips"),
+    projectType: text("project_type"),
+    zoningCode: text("zoning_code"),
+    lotAreaSqft: numeric("lot_area_sqft"),
+    siteContextRaw: jsonb("site_context_raw"),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

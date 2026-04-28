@@ -27,6 +27,7 @@ import type {
   SnapshotPayload,
   SnapshotReceipt,
   SnapshotSummary,
+  UpdateEngagementBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -276,6 +277,183 @@ export function useGetEngagement<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Partial update. Only fields present in the request body are changed.
+If `address` is included and differs from the current value, the
+server will geocode the new address synchronously (best-effort).
+On geocoding failure, the address is still saved but a warning is
+included in the response.
+
+ * @summary Update engagement details (intake / edit modal)
+ */
+export const getUpdateEngagementUrl = (id: string) => {
+  return `/api/engagements/${id}`;
+};
+
+export const updateEngagement = async (
+  id: string,
+  updateEngagementBody: UpdateEngagementBody,
+  options?: RequestInit,
+): Promise<EngagementDetail> => {
+  return customFetch<EngagementDetail>(getUpdateEngagementUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateEngagementBody),
+  });
+};
+
+export const getUpdateEngagementMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateEngagement>>,
+    TError,
+    { id: string; data: BodyType<UpdateEngagementBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateEngagement>>,
+  TError,
+  { id: string; data: BodyType<UpdateEngagementBody> },
+  TContext
+> => {
+  const mutationKey = ["updateEngagement"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateEngagement>>,
+    { id: string; data: BodyType<UpdateEngagementBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateEngagement(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateEngagementMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateEngagement>>
+>;
+export type UpdateEngagementMutationBody = BodyType<UpdateEngagementBody>;
+export type UpdateEngagementMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update engagement details (intake / edit modal)
+ */
+export const useUpdateEngagement = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateEngagement>>,
+    TError,
+    { id: string; data: BodyType<UpdateEngagementBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateEngagement>>,
+  TError,
+  { id: string; data: BodyType<UpdateEngagementBody> },
+  TContext
+> => {
+  return useMutation(getUpdateEngagementMutationOptions(options));
+};
+
+/**
+ * @summary Re-run geocoding using the engagement's current address
+ */
+export const getRegeocodeEngagementUrl = (id: string) => {
+  return `/api/engagements/${id}/geocode`;
+};
+
+export const regeocodeEngagement = async (
+  id: string,
+  options?: RequestInit,
+): Promise<EngagementDetail> => {
+  return customFetch<EngagementDetail>(getRegeocodeEngagementUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRegeocodeEngagementMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof regeocodeEngagement>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof regeocodeEngagement>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["regeocodeEngagement"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof regeocodeEngagement>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return regeocodeEngagement(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RegeocodeEngagementMutationResult = NonNullable<
+  Awaited<ReturnType<typeof regeocodeEngagement>>
+>;
+
+export type RegeocodeEngagementMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Re-run geocoding using the engagement's current address
+ */
+export const useRegeocodeEngagement = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof regeocodeEngagement>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof regeocodeEngagement>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getRegeocodeEngagementMutationOptions(options));
+};
 
 /**
  * Returns all snapshots, newest first, joined with engagementName.

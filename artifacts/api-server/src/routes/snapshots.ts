@@ -7,6 +7,7 @@ import {
   CreateSnapshotHeader,
   GetSnapshotParams,
 } from "@workspace/api-zod";
+import { geocodeAddress } from "@workspace/site-context/server";
 import { logger } from "../lib/logger";
 
 let snapshotSecret = process.env["SNAPSHOT_SECRET"];
@@ -103,6 +104,20 @@ router.post("/snapshots", async (req: Request, res: Response) => {
   const payload = (req.body ?? {}) as Record<string, unknown>;
   const counts = deriveCounts(payload);
 
+  // Pull a candidate address out of the Revit payload (projectInformation.address)
+  // so newly auto-created engagements arrive pre-populated.
+  const projectInfo = payload["projectInformation"];
+  const rawAddress =
+    projectInfo && typeof projectInfo === "object"
+      ? ((projectInfo as Record<string, unknown>)["address"] as
+          | string
+          | undefined)
+      : undefined;
+  const incomingAddress =
+    typeof rawAddress === "string" && rawAddress.trim().length > 0
+      ? rawAddress.trim()
+      : null;
+
   try {
     const result = await db.transaction(async (tx) => {
       const existing = await tx
@@ -124,7 +139,7 @@ router.post("/snapshots", async (req: Request, res: Response) => {
             name: projectName,
             nameLower,
             status: "active",
-            address: null,
+            address: incomingAddress,
             jurisdiction: null,
           })
           .onConflictDoNothing({ target: engagements.nameLower })
@@ -171,6 +186,37 @@ router.post("/snapshots", async (req: Request, res: Response) => {
         autoCreated,
       };
     });
+
+    // Best-effort: if we just created an engagement and Revit gave us an
+    // address, kick off geocoding outside the transaction. Errors are
+    // swallowed; the user can retry via POST /engagements/:id/geocode.
+    if (result.autoCreated && incomingAddress) {
+      void (async () => {
+        try {
+          const geo = await geocodeAddress(incomingAddress);
+          if (geo) {
+            await db
+              .update(engagements)
+              .set({
+                latitude: String(geo.latitude),
+                longitude: String(geo.longitude),
+                geocodedAt: new Date(geo.geocodedAt),
+                geocodeSource: geo.source,
+                jurisdictionCity: geo.jurisdictionCity,
+                jurisdictionState: geo.jurisdictionState,
+                jurisdictionFips: geo.jurisdictionFips,
+                siteContextRaw: geo.raw ?? null,
+              })
+              .where(eq(engagements.id, result.engagementId));
+          }
+        } catch (err) {
+          logger.warn(
+            { err, engagementId: result.engagementId, address: incomingAddress },
+            "auto-geocode after snapshot create failed",
+          );
+        }
+      })();
+    }
 
     res.status(201).json(result);
   } catch (err) {

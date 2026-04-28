@@ -18,6 +18,41 @@ export const EngagementStatus = {
   archived: "archived",
 } as const;
 
+export type ProjectType = (typeof ProjectType)[keyof typeof ProjectType];
+
+export const ProjectType = {
+  new_build: "new_build",
+  renovation: "renovation",
+  addition: "addition",
+  tenant_improvement: "tenant_improvement",
+  other: "other",
+} as const;
+
+export type GeocodeSource = (typeof GeocodeSource)[keyof typeof GeocodeSource];
+
+export const GeocodeSource = {
+  nominatim: "nominatim",
+  manual: "manual",
+} as const;
+
+export interface Geocode {
+  latitude: number;
+  longitude: number;
+  jurisdictionCity: string | null;
+  jurisdictionState: string | null;
+  jurisdictionFips: string | null;
+  source: GeocodeSource;
+  geocodedAt: string;
+}
+
+export interface Site {
+  address: string | null;
+  geocode: Geocode | null;
+  projectType: ProjectType | null;
+  zoningCode: string | null;
+  lotAreaSqft: number | null;
+}
+
 export interface SnapshotSummary {
   id: string;
   engagementId: string;
@@ -40,6 +75,7 @@ export interface EngagementSummary {
   updatedAt: string;
   snapshotCount: number;
   latestSnapshot: SnapshotSummary | null;
+  site: Site;
 }
 
 export interface EngagementDetail {
@@ -53,6 +89,8 @@ export interface EngagementDetail {
   snapshotCount: number;
   latestSnapshot: SnapshotSummary | null;
   snapshots: SnapshotSummary[];
+  site: Site;
+  warnings?: string[];
 }
 
 export interface SnapshotPayload {
@@ -110,3 +148,13 @@ export interface ChatErrorResponse {
   error: string;
   message?: string;
 }
+
+export type UpdateEngagementBody = {
+  name?: string;
+  address?: string;
+  jurisdiction?: string;
+  status?: EngagementStatus;
+  projectType?: ProjectType;
+  zoningCode?: string;
+  lotAreaSqft?: number | null;
+};

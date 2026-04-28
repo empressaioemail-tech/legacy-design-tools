@@ -16,3 +16,8 @@ export {
   toggleTheme,
   type ThemeName,
 } from "./lib/theme";
+
+export {
+  useSidebarState,
+  type SidebarStateValue,
+} from "./lib/sidebar-state";

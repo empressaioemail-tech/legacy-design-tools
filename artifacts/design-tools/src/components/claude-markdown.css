@@ -1,0 +1,174 @@
+/* Markdown rendering for assistant messages in ClaudeChat. Scoped to
+   .claude-md so user message bubbles and other prose elsewhere are
+   unaffected. Token references match SmartCity OS design tokens. */
+
+.claude-md {
+  font-family: Inter, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.claude-md > *:first-child {
+  margin-top: 0;
+}
+.claude-md > *:last-child {
+  margin-bottom: 0;
+}
+
+.claude-md h1,
+.claude-md h2,
+.claude-md h3,
+.claude-md h4 {
+  font-family: Oxygen, sans-serif;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 12px;
+  margin-bottom: 4px;
+  line-height: 1.25;
+}
+.claude-md h1:first-child,
+.claude-md h2:first-child,
+.claude-md h3:first-child,
+.claude-md h4:first-child {
+  margin-top: 0;
+}
+.claude-md h1 + *,
+.claude-md h2 + *,
+.claude-md h3 + *,
+.claude-md h4 + * {
+  margin-top: 4px;
+}
+.claude-md h2,
+.claude-md h3,
+.claude-md h4 {
+  margin-top: 8px;
+}
+.claude-md h1 { font-size: 16px; }
+.claude-md h2 { font-size: 14px; }
+.claude-md h3 { font-size: 13px; }
+.claude-md h4 { font-size: 12px; }
+
+.claude-md p {
+  margin: 0 0 8px 0;
+}
+.claude-md p:last-child {
+  margin-bottom: 0;
+}
+
+.claude-md strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.claude-md em {
+  font-style: italic;
+}
+
+.claude-md ul,
+.claude-md ol {
+  padding-left: 18px;
+  margin: 4px 0 8px 0;
+}
+.claude-md li {
+  margin-bottom: 3px;
+  line-height: 1.5;
+}
+.claude-md li > p {
+  margin-bottom: 3px;
+}
+
+.claude-md code {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  font-size: 11px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.claude-md pre {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+  font-size: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin: 6px 0;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+.claude-md pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+.claude-md a {
+  color: var(--cyan-text, var(--cyan));
+  text-decoration: none;
+}
+.claude-md a:hover {
+  text-decoration: underline;
+}
+
+.claude-md blockquote {
+  border-left: 2px solid var(--border-soft, var(--border-default));
+  padding-left: 12px;
+  color: var(--text-secondary);
+  margin: 6px 0;
+}
+
+.claude-md table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  width: auto;
+}
+.claude-md th {
+  text-align: left;
+  padding: 4px 10px;
+  background: var(--bg-highlight);
+  font-family: Inter, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.claude-md td {
+  padding: 4px 10px;
+  border-top: 1px solid var(--border-default);
+  font-size: 11.5px;
+}
+
+.claude-md hr {
+  border: 0;
+  border-top: 1px solid var(--border-default);
+  margin: 10px 0;
+}
+
+/* highlight.js theme tweaks (subtle, tokens kept neutral on dark bg) */
+.claude-md .hljs {
+  background: transparent;
+  color: var(--text-primary);
+}
+.claude-md .hljs-keyword,
+.claude-md .hljs-selector-tag,
+.claude-md .hljs-built_in {
+  color: var(--cyan, #00b4d8);
+}
+.claude-md .hljs-string,
+.claude-md .hljs-attr {
+  color: #9ccfd8;
+}
+.claude-md .hljs-comment,
+.claude-md .hljs-meta {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.claude-md .hljs-number,
+.claude-md .hljs-literal {
+  color: #f59e0b;
+}

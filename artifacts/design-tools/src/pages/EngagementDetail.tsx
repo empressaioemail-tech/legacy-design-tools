@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetEngagement,
   useGetSnapshot,
+  useUpdateEngagement,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
+  getListEngagementsQueryKey,
+  type EngagementDetail as EngagementDetailType,
 } from "@workspace/api-client-react";
+import { SiteMap } from "@workspace/site-context/client";
 import { AppShell } from "../components/AppShell";
 import { ClaudeChat } from "../components/ClaudeChat";
+import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
 import { useEngagementsStore } from "../store/engagements";
 import { relativeTime } from "../lib/relativeTime";
 
@@ -15,6 +21,14 @@ const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
   active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },
   on_hold: { bg: "rgba(245,158,11,0.18)", color: "#f59e0b" },
   archived: { bg: "var(--bg-input)", color: "var(--text-muted)" },
+};
+
+const PROJECT_TYPE_LABEL: Record<string, string> = {
+  new_build: "New build",
+  renovation: "Renovation",
+  addition: "Addition",
+  tenant_improvement: "Tenant improvement",
+  other: "Other",
 };
 
 function StatusPill({ status }: { status: string }) {
@@ -55,10 +69,314 @@ function KpiTile({
   );
 }
 
+type TabId = "snapshots" | "site" | "settings";
+
+function TabBar({
+  active,
+  onChange,
+}: {
+  active: TabId;
+  onChange: (id: TabId) => void;
+}) {
+  const tabs: Array<{ id: TabId; label: string }> = [
+    { id: "snapshots", label: "Snapshots" },
+    { id: "site", label: "Site" },
+    { id: "settings", label: "Settings" },
+  ];
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 4,
+        borderBottom: "1px solid var(--border-default)",
+      }}
+    >
+      {tabs.map((t) => {
+        const isActive = active === t.id;
+        return (
+          <button
+            key={t.id}
+            onClick={() => onChange(t.id)}
+            className="sc-tab"
+            style={{
+              padding: "8px 14px",
+              background: "transparent",
+              border: "none",
+              borderBottom: isActive
+                ? "2px solid var(--cyan)"
+                : "2px solid transparent",
+              color: isActive
+                ? "var(--text-primary)"
+                : "var(--text-secondary)",
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              cursor: "pointer",
+              transition: "color 0.12s, border-color 0.12s",
+              marginBottom: -1,
+            }}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function KvGrid({
+  rows,
+}: {
+  rows: Array<{ label: string; value: React.ReactNode }>;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(140px, 1fr) 2fr",
+        gap: "6px 12px",
+        fontSize: 12,
+      }}
+    >
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: "contents" }}>
+          <div
+            className="sc-data-label"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            {r.label}
+          </div>
+          <div style={{ color: "var(--text-primary)" }}>{r.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SiteTab({
+  engagement,
+  onAddAddress,
+}: {
+  engagement: EngagementDetailType;
+  onAddAddress: () => void;
+}) {
+  const site = engagement.site;
+  const geocode = site?.geocode ?? null;
+
+  const locationRows: Array<{ label: string; value: React.ReactNode }> = [
+    { label: "Address", value: site?.address ?? "—" },
+    {
+      label: "Coordinates",
+      value: geocode
+        ? `${geocode.latitude.toFixed(5)}, ${geocode.longitude.toFixed(5)}`
+        : "—",
+    },
+    {
+      label: "Jurisdiction",
+      value: geocode
+        ? [geocode.jurisdictionCity, geocode.jurisdictionState]
+            .filter(Boolean)
+            .join(", ") || "—"
+        : "—",
+    },
+    {
+      label: "Geocoded",
+      value: geocode ? relativeTime(geocode.geocodedAt) : "Not yet",
+    },
+  ];
+
+  const projectRows: Array<{ label: string; value: React.ReactNode }> = [
+    {
+      label: "Project type",
+      value: site?.projectType
+        ? (PROJECT_TYPE_LABEL[site.projectType] ?? site.projectType)
+        : "—",
+    },
+    { label: "Zoning code", value: site?.zoningCode ?? "—" },
+    {
+      label: "Lot area",
+      value:
+        site?.lotAreaSqft !== null && site?.lotAreaSqft !== undefined
+          ? `${site.lotAreaSqft.toLocaleString()} sq ft`
+          : "—",
+    },
+    {
+      label: "Project status",
+      value: <StatusPill status={engagement.status} />,
+    },
+  ];
+
+  return (
+    <div className="grid lg:grid-cols-2 gap-4">
+      <div className="flex flex-col gap-4">
+        <div className="sc-card flex flex-col">
+          <div className="sc-card-header">
+            <span className="sc-label">LOCATION</span>
+          </div>
+          <div className="p-3">
+            {geocode ? (
+              <SiteMap
+                latitude={geocode.latitude}
+                longitude={geocode.longitude}
+                addressLabel={site?.address ?? undefined}
+                height={280}
+              />
+            ) : (
+              <div
+                className="sc-prose"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 12,
+                  height: 200,
+                  textAlign: "center",
+                  opacity: 0.8,
+                }}
+              >
+                <div>Add an address to see this project on a map.</div>
+                <button className="sc-btn-primary" onClick={onAddAddress}>
+                  Add address
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="sc-card p-4">
+          <KvGrid rows={locationRows} />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <div className="sc-card flex flex-col">
+          <div className="sc-card-header">
+            <span className="sc-label">PROJECT</span>
+          </div>
+          <div className="p-4">
+            <KvGrid rows={projectRows} />
+          </div>
+        </div>
+
+        <div className="sc-card flex flex-col">
+          <div className="sc-card-header">
+            <span className="sc-label">PARCEL & ZONING</span>
+          </div>
+          <div className="p-4">
+            <div className="sc-prose opacity-70" style={{ fontSize: 12.5 }}>
+              Coming soon — automatic parcel boundaries and zoning summaries
+              will appear here once we integrate county GIS.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsTab({
+  engagement,
+  onEdit,
+}: {
+  engagement: EngagementDetailType;
+  onEdit: () => void;
+}) {
+  const qc = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const archive = useUpdateEngagement({
+    mutation: {
+      onSuccess: async () => {
+        await qc.invalidateQueries({
+          queryKey: getGetEngagementQueryKey(engagement.id),
+        });
+        await qc.invalidateQueries({
+          queryKey: getListEngagementsQueryKey(),
+        });
+        setConfirming(false);
+      },
+    },
+  });
+  const isArchived = engagement.status === "archived";
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="sc-card p-4 flex items-center justify-between">
+        <div>
+          <div className="sc-label" style={{ marginBottom: 4 }}>
+            DETAILS
+          </div>
+          <div className="sc-meta opacity-70">
+            Update name, address, project type, zoning, lot area, and status.
+          </div>
+        </div>
+        <button className="sc-btn-primary" onClick={onEdit}>
+          Edit details
+        </button>
+      </div>
+
+      <div
+        style={{
+          borderTop: "1px solid var(--border-default)",
+          paddingTop: 16,
+          color: "var(--text-secondary)",
+        }}
+      >
+        <div className="sc-label" style={{ marginBottom: 8 }}>
+          DANGER ZONE
+        </div>
+        {!confirming ? (
+          <button
+            className="sc-btn-ghost"
+            disabled={isArchived || archive.isPending}
+            onClick={() => setConfirming(true)}
+            style={{
+              color: isArchived ? "var(--text-muted)" : "#ef4444",
+              borderColor: isArchived
+                ? "var(--border-default)"
+                : "rgba(239,68,68,0.4)",
+            }}
+          >
+            {isArchived ? "Already archived" : "Archive engagement"}
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="sc-meta">
+              Archive {engagement.name}? You can change it back later.
+            </span>
+            <button
+              className="sc-btn-ghost"
+              onClick={() => setConfirming(false)}
+              disabled={archive.isPending}
+            >
+              Cancel
+            </button>
+            <button
+              className="sc-btn-primary"
+              disabled={archive.isPending}
+              onClick={() =>
+                archive.mutate({
+                  id: engagement.id,
+                  data: { status: "archived" },
+                })
+              }
+              style={{ background: "#ef4444" }}
+            >
+              {archive.isPending ? "Archiving…" : "Confirm archive"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function EngagementDetail() {
   const params = useParams();
   const id = params.id as string;
   const [jsonExpanded, setJsonExpanded] = useState(true);
+  const [tab, setTab] = useState<TabId>("snapshots");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"intake" | "edit">("edit");
 
   const { data: engagement } = useGetEngagement(id, {
     query: {
@@ -94,6 +412,30 @@ export function EngagementDetail() {
     selectSnapshot,
   ]);
 
+  // Intake mode: open modal automatically the first time we see an
+  // engagement without an address, unless the user has dismissed it.
+  // We use a ref so we don't keep re-opening it after the user closes
+  // the modal (e.g. via Save in edit mode while the engagement query
+  // hasn't refetched yet).
+  const intakeStorageKey = useMemo(
+    () => (id ? `engagement-intake-skipped:${id}` : ""),
+    [id],
+  );
+  const intakeShownForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!engagement || !intakeStorageKey) return;
+    if (engagement.address && engagement.address.trim().length > 0) return;
+    if (intakeShownForRef.current === engagement.id) return;
+    try {
+      if (localStorage.getItem(intakeStorageKey)) return;
+    } catch {
+      /* ignore */
+    }
+    intakeShownForRef.current = engagement.id;
+    setModalMode("intake");
+    setModalOpen(true);
+  }, [engagement, intakeStorageKey]);
+
   const { data: snapshotDetail } = useGetSnapshot(selectedSnapshotId ?? "", {
     query: {
       enabled: !!selectedSnapshotId,
@@ -114,6 +456,34 @@ export function EngagementDetail() {
   const captured = snapshotDetail
     ? `from snapshot ${relativeTime(snapshotDetail.receivedAt)}`
     : undefined;
+
+  const openEdit = () => {
+    setModalMode("edit");
+    setModalOpen(true);
+  };
+
+  const handleIntakeSkip = () => {
+    try {
+      localStorage.setItem(intakeStorageKey, "1");
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Whenever the modal closes after intake mode (whether saved, skipped, or
+  // dismissed), record that we've handled intake so a page refresh doesn't
+  // re-prompt. The Skip button does this immediately; for Save & continue
+  // we set the same key here so the prompt is always one-shot per browser.
+  const handleModalClose = () => {
+    if (modalMode === "intake") {
+      try {
+        localStorage.setItem(intakeStorageKey, "1");
+      } catch {
+        /* ignore */
+      }
+    }
+    setModalOpen(false);
+  };
 
   return (
     <AppShell
@@ -136,130 +506,147 @@ export function EngagementDetail() {
             <Link href="/" className="sc-btn-ghost">
               ← Projects
             </Link>
-            <button
-              className="sc-btn-ghost"
-              disabled
-              title="Coming soon"
-              style={{ opacity: 0.5, cursor: "not-allowed" }}
-            >
+            <button className="sc-btn-ghost" onClick={openEdit}>
               Edit details
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-3">
-          <KpiTile
-            label="SHEETS"
-            value={snapshotDetail?.sheetCount}
-            footnote={captured}
-          />
-          <KpiTile
-            label="ROOMS"
-            value={snapshotDetail?.roomCount}
-            footnote={captured}
-          />
-          <KpiTile
-            label="LEVELS"
-            value={snapshotDetail?.levelCount}
-            footnote={captured}
-          />
-          <KpiTile
-            label="WALLS"
-            value={snapshotDetail?.wallCount}
-            footnote={captured}
-          />
-        </div>
+        <TabBar active={tab} onChange={setTab} />
 
-        <div className="grid lg:grid-cols-3 gap-4 flex-1 min-h-0">
-          <div className="sc-card flex flex-col col-span-1 min-h-0">
-            <div className="sc-card-header sc-row-sb">
-              <span className="sc-label">SNAPSHOTS</span>
-              <span className="sc-meta">{snapshots.length}</span>
+        {tab === "snapshots" && (
+          <>
+            <div className="grid grid-cols-4 gap-3">
+              <KpiTile
+                label="SHEETS"
+                value={snapshotDetail?.sheetCount}
+                footnote={captured}
+              />
+              <KpiTile
+                label="ROOMS"
+                value={snapshotDetail?.roomCount}
+                footnote={captured}
+              />
+              <KpiTile
+                label="LEVELS"
+                value={snapshotDetail?.levelCount}
+                footnote={captured}
+              />
+              <KpiTile
+                label="WALLS"
+                value={snapshotDetail?.wallCount}
+                footnote={captured}
+              />
             </div>
-            <div className="flex-1 overflow-y-auto sc-scroll">
-              {!hasSnapshots ? (
-                <div className="p-4 sc-body text-center opacity-70">
-                  No snapshots yet. Send one from Revit.
-                </div>
-              ) : (
-                snapshots.map((s) => {
-                  const isSelected = s.id === selectedSnapshotId;
-                  return (
-                    <div
-                      key={s.id}
-                      className={`sc-card-row sc-card-clickable flex flex-col ${
-                        isSelected ? "sc-accent-cyan" : ""
-                      }`}
-                      style={{
-                        background: isSelected
-                          ? "var(--bg-highlight)"
-                          : undefined,
-                      }}
-                      onClick={() => selectSnapshot(id, s.id)}
-                    >
-                      <div className="sc-medium">
-                        {relativeTime(s.receivedAt)}
-                      </div>
-                      <div className="sc-meta mt-1">
-                        {s.sheetCount ?? "—"}sh · {s.roomCount ?? "—"}rm ·{" "}
-                        {s.levelCount ?? "—"}lv · {s.wallCount ?? "—"}w
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
 
-          <div className="col-span-2 min-h-0">
-            {!hasSnapshots ? (
-              <div className="sc-card p-8 h-full flex items-center justify-center">
-                <div className="sc-prose text-center opacity-70">
-                  No snapshots yet. Send one from Revit.
-                </div>
-              </div>
-            ) : !snapshotDetail ? (
-              <div className="sc-card p-8 h-full flex items-center justify-center">
-                <div className="sc-prose opacity-60">Loading snapshot…</div>
-              </div>
-            ) : (
-              <div className="sc-card flex flex-col h-full">
+            <div className="grid lg:grid-cols-3 gap-4 flex-1 min-h-0">
+              <div className="sc-card flex flex-col col-span-1 min-h-0">
                 <div className="sc-card-header sc-row-sb">
-                  <span className="sc-label">RAW JSON</span>
-                  <button
-                    className="sc-btn-sm"
-                    onClick={() => setJsonExpanded(!jsonExpanded)}
-                  >
-                    {jsonExpanded ? "Collapse" : "Expand"}
-                  </button>
+                  <span className="sc-label">SNAPSHOTS</span>
+                  <span className="sc-meta">{snapshots.length}</span>
                 </div>
-                {jsonExpanded && (
-                  <div
-                    className="flex-1 overflow-hidden"
-                    style={{
-                      borderTop: "1px solid var(--border-default)",
-                    }}
-                  >
-                    <pre
-                      className="sc-mono-sm sc-scroll m-0"
-                      style={{
-                        background: "var(--bg-input)",
-                        padding: 12,
-                        maxHeight: 600,
-                        overflow: "auto",
-                        whiteSpace: "pre-wrap",
-                        wordWrap: "break-word",
-                      }}
-                    >
-                      {JSON.stringify(snapshotDetail.payload, null, 2)}
-                    </pre>
+                <div className="flex-1 overflow-y-auto sc-scroll">
+                  {!hasSnapshots ? (
+                    <div className="p-4 sc-body text-center opacity-70">
+                      No snapshots yet. Send one from Revit.
+                    </div>
+                  ) : (
+                    snapshots.map((s) => {
+                      const isSelected = s.id === selectedSnapshotId;
+                      return (
+                        <div
+                          key={s.id}
+                          className={`sc-card-row sc-card-clickable flex flex-col ${
+                            isSelected ? "sc-accent-cyan" : ""
+                          }`}
+                          style={{
+                            background: isSelected
+                              ? "var(--bg-highlight)"
+                              : undefined,
+                          }}
+                          onClick={() => selectSnapshot(id, s.id)}
+                        >
+                          <div className="sc-medium">
+                            {relativeTime(s.receivedAt)}
+                          </div>
+                          <div className="sc-meta mt-1">
+                            {s.sheetCount ?? "—"}sh · {s.roomCount ?? "—"}rm ·{" "}
+                            {s.levelCount ?? "—"}lv · {s.wallCount ?? "—"}w
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="col-span-2 min-h-0">
+                {!hasSnapshots ? (
+                  <div className="sc-card p-8 h-full flex items-center justify-center">
+                    <div className="sc-prose text-center opacity-70">
+                      No snapshots yet. Send one from Revit.
+                    </div>
+                  </div>
+                ) : !snapshotDetail ? (
+                  <div className="sc-card p-8 h-full flex items-center justify-center">
+                    <div className="sc-prose opacity-60">Loading snapshot…</div>
+                  </div>
+                ) : (
+                  <div className="sc-card flex flex-col h-full">
+                    <div className="sc-card-header sc-row-sb">
+                      <span className="sc-label">RAW JSON</span>
+                      <button
+                        className="sc-btn-sm"
+                        onClick={() => setJsonExpanded(!jsonExpanded)}
+                      >
+                        {jsonExpanded ? "Collapse" : "Expand"}
+                      </button>
+                    </div>
+                    {jsonExpanded && (
+                      <div
+                        className="flex-1 overflow-hidden"
+                        style={{
+                          borderTop: "1px solid var(--border-default)",
+                        }}
+                      >
+                        <pre
+                          className="sc-mono-sm sc-scroll m-0"
+                          style={{
+                            background: "var(--bg-input)",
+                            padding: 12,
+                            maxHeight: 600,
+                            overflow: "auto",
+                            whiteSpace: "pre-wrap",
+                            wordWrap: "break-word",
+                          }}
+                        >
+                          {JSON.stringify(snapshotDetail.payload, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          </>
+        )}
+
+        {tab === "site" && (
+          <SiteTab engagement={engagement} onAddAddress={openEdit} />
+        )}
+
+        {tab === "settings" && (
+          <SettingsTab engagement={engagement} onEdit={openEdit} />
+        )}
       </div>
+
+      <EngagementDetailsModal
+        engagement={engagement}
+        isOpen={modalOpen}
+        onClose={handleModalClose}
+        mode={modalMode}
+        onSkip={handleIntakeSkip}
+      />
     </AppShell>
   );
 }

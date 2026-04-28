@@ -71,6 +71,94 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateEngagement
+      tags: [engagements]
+      summary: Update engagement details (intake / edit modal)
+      description: |
+        Partial update. Only fields present in the request body are changed.
+        If `address` is included and differs from the current value, the
+        server will geocode the new address synchronously (best-effort).
+        On geocoding failure, the address is still saved but a warning is
+        included in the response.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                address:
+                  type: string
+                jurisdiction:
+                  type: string
+                status:
+                  $ref: "#/components/schemas/EngagementStatus"
+                projectType:
+                  $ref: "#/components/schemas/ProjectType"
+                zoningCode:
+                  type: string
+                lotAreaSqft:
+                  type: number
+                  nullable: true
+      responses:
+        "200":
+          description: Updated engagement detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementDetail"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{id}/geocode:
+    post:
+      operationId: regeocodeEngagement
+      tags: [engagements]
+      summary: Re-run geocoding using the engagement's current address
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Engagement detail (possibly with warnings)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementDetail"
+        "400":
+          description: Engagement has no address to geocode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /snapshots:
     get:
@@ -200,6 +288,68 @@ components:
       type: string
       enum: [active, on_hold, archived]
 
+    ProjectType:
+      type: string
+      enum: [new_build, renovation, addition, tenant_improvement, other]
+
+    Geocode:
+      type: object
+      properties:
+        latitude:
+          type: number
+        longitude:
+          type: number
+        jurisdictionCity:
+          type: string
+          nullable: true
+        jurisdictionState:
+          type: string
+          nullable: true
+        jurisdictionFips:
+          type: string
+          nullable: true
+        source:
+          type: string
+          enum: [nominatim, manual]
+        geocodedAt:
+          type: string
+          format: date-time
+      required:
+        - latitude
+        - longitude
+        - jurisdictionCity
+        - jurisdictionState
+        - jurisdictionFips
+        - source
+        - geocodedAt
+
+    Site:
+      type: object
+      properties:
+        address:
+          type: string
+          nullable: true
+        geocode:
+          oneOf:
+            - $ref: "#/components/schemas/Geocode"
+            - type: "null"
+        projectType:
+          oneOf:
+            - $ref: "#/components/schemas/ProjectType"
+            - type: "null"
+        zoningCode:
+          type: string
+          nullable: true
+        lotAreaSqft:
+          type: number
+          nullable: true
+      required:
+        - address
+        - geocode
+        - projectType
+        - zoningCode
+        - lotAreaSqft
+
     EngagementSummary:
       type: object
       properties:
@@ -227,6 +377,8 @@ components:
           oneOf:
             - $ref: "#/components/schemas/SnapshotSummary"
             - type: "null"
+        site:
+          $ref: "#/components/schemas/Site"
       required:
         - id
         - name
@@ -237,6 +389,7 @@ components:
         - updatedAt
         - snapshotCount
         - latestSnapshot
+        - site
 
     EngagementDetail:
       type: object
@@ -269,6 +422,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SnapshotSummary"
+        site:
+          $ref: "#/components/schemas/Site"
+        warnings:
+          type: array
+          items:
+            type: string
       required:
         - id
         - name
@@ -280,6 +439,8 @@ components:
         - snapshotCount
         - latestSnapshot
         - snapshots
+        - site
+
 
     SnapshotSummary:
       type: object

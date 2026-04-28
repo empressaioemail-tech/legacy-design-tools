@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Sidebar, type SidebarGroup } from "./Sidebar";
 import { Header } from "./Header";
+import { useSidebarState } from "../lib/sidebar-state";
 
 export interface DashboardLayoutProps {
   children: ReactNode;
@@ -21,6 +22,9 @@ export function DashboardLayout({
   rightPanel,
   search,
 }: DashboardLayoutProps) {
+  const rightCollapsed = useSidebarState((s) => s.rightCollapsed);
+  const rightWidth = rightCollapsed ? 48 : 420;
+
   return (
     <div
       style={{
@@ -62,7 +66,7 @@ export function DashboardLayout({
       {rightPanel && (
         <aside
           style={{
-            width: 420,
+            width: rightWidth,
             flexShrink: 0,
             borderLeft: "1px solid var(--border-default)",
             background: "var(--ai-panel-bg)",
@@ -70,6 +74,8 @@ export function DashboardLayout({
             position: "sticky",
             top: 0,
             overflowY: "auto",
+            overflowX: "hidden",
+            transition: "width 200ms ease-out",
           }}
           className="sc-scroll"
         >

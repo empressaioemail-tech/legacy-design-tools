@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { EngagementStatus } from "./engagementStatus";
+import type { Site } from "./site";
 import type { SnapshotSummary } from "./snapshotSummary";
 
 export interface EngagementDetail {
@@ -19,4 +20,6 @@ export interface EngagementDetail {
   snapshotCount: number;
   latestSnapshot: SnapshotSummary | null;
   snapshots: SnapshotSummary[];
+  site: Site;
+  warnings?: string[];
 }

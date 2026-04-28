@@ -1,5 +1,11 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useSidebarState } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
+import "./claude-markdown.css";
 
 function HexGlyph({ size = 18 }: { size?: number }) {
   return (
@@ -27,6 +33,8 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
   );
   const streaming = useEngagementsStore((s) => s.streaming);
   const sendMessage = useEngagementsStore((s) => s.sendMessage);
+  const collapsed = useSidebarState((s) => s.rightCollapsed);
+  const toggleRight = useSidebarState((s) => s.toggleRight);
   const [input, setInput] = useState("");
 
   const messages = messagesByEngagement[engagementId] || [];
@@ -44,6 +52,42 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
     }
   };
 
+  if (collapsed) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          height: "100%",
+          padding: "16px 0",
+          gap: 12,
+        }}
+      >
+        <HexGlyph size={20} />
+        <button
+          onClick={toggleRight}
+          title="Expand Claude (⇤)"
+          aria-label="Expand Claude"
+          style={{
+            width: 28,
+            height: 28,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "transparent",
+            border: "1px solid var(--border-default)",
+            color: "var(--text-secondary)",
+            borderRadius: 4,
+            cursor: "pointer",
+          }}
+        >
+          <ChevronLeft size={14} />
+        </button>
+      </div>
+    );
+  }
+
   const placeholder = hasSnapshots
     ? "Ask a question (Cmd/Ctrl + Enter to send)"
     : "Send a snapshot from Revit first.";
@@ -56,7 +100,28 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
             <HexGlyph />
             <span className="sc-label">CLAUDE</span>
           </div>
-          <div className="sc-body opacity-70">Ask about this model</div>
+          <div className="flex items-center gap-2">
+            <div className="sc-body opacity-70">Ask about this model</div>
+            <button
+              onClick={toggleRight}
+              title="Collapse Claude"
+              aria-label="Collapse Claude"
+              style={{
+                width: 24,
+                height: 24,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "transparent",
+                border: "1px solid var(--border-default)",
+                color: "var(--text-secondary)",
+                borderRadius: 3,
+                cursor: "pointer",
+              }}
+            >
+              <ChevronRight size={12} />
+            </button>
+          </div>
         </div>
         <div className="sc-meta opacity-60">
           Chat history is session-only — refreshing the page clears it.
@@ -84,8 +149,13 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
           return (
             <div key={i} className="self-start max-w-[90%]">
               <div className="sc-card sc-accent-cyan px-3.5 py-2.5">
-                <div className="sc-prose whitespace-pre-wrap">
-                  {msg.content}
+                <div className="claude-md">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeHighlight]}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
                   {isLastAssistant && streaming && (
                     <span
                       className="inline-block ml-2 w-1.5 h-1.5 rounded-full sc-dot-pulse"
