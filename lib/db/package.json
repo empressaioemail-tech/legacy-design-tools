@@ -12,7 +12,8 @@
     "push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
     "seed": "tsx src/seed.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:fixture:schema": "bash ./scripts/refresh-schema-fixture.sh"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

@@ -2,15 +2,18 @@
  * lib/db schema integration tests.
  *
  * Replays the production DDL into a temporary `test_<ts>_<rand>` schema and
- * exercises:
+ * exercises the contracts that downstream code depends on:
  *   - all expected tables exist
  *   - FK cascade from engagement → snapshots → sheets
- *   - UNIQUE (snapshot_id, sheet_number) prevents duplicates
+ *   - UNIQUE (snapshot_id, sheet_number) prevents duplicate sheets
  *   - UNIQUE (content_hash) prevents duplicate atoms
+ *   - UNIQUE (source_id, section_url) prevents duplicate queue rows
  *   - pgvector column accepts a 1536-dim embedding and round-trips it
+ *   - cosine self-distance ≈ 0
+ *   - queue defaults: status=pending, attempts=0, next_attempt_at set
  *
- * The withTestSchema helper sets search_path so the same table names that
- * Drizzle uses unqualified in production resolve into the test schema.
+ * Drizzle wraps PG errors in DrizzleQueryError; the underlying pg error
+ * (with .code) is on `.cause`. The expectPgError helper handles both.
  */
 
 import { describe, it, expect } from "vitest";
@@ -24,6 +27,29 @@ import {
   codeAtomFetchQueue,
 } from "../../schema";
 import { withTestSchema } from "../utils";
+
+/**
+ * Vitest's .rejects.toThrow only inspects message text, but Drizzle's
+ * DrizzleQueryError stuffs the SQL into the message and the real PG
+ * SQLSTATE code into the underlying `cause`. This helper unwraps it.
+ */
+async function expectPgError(p: Promise<unknown>, code: string): Promise<void> {
+  let err: unknown;
+  try {
+    await p;
+  } catch (e) {
+    err = e;
+  }
+  expect(err, "expected the promise to reject").toBeDefined();
+  // Drizzle: { cause: pgError }. Direct pg: pgError. Defensively try both.
+  const pgErr = (err as { cause?: { code?: string }; code?: string }).cause ??
+    (err as { code?: string });
+  expect(pgErr.code).toBe(code);
+}
+
+const PG_UNIQUE_VIOLATION = "23505";
+
+const minimalThumb = Buffer.from([0x89, 0x50, 0x4e, 0x47]); // not a real PNG, schema only requires bytes
 
 describe("lib/db schema integration", () => {
   it("creates every expected table in the test schema", async () => {
@@ -61,25 +87,38 @@ describe("lib/db schema integration", () => {
         .insert(snapshots)
         .values({
           engagementId: eng.id,
-          driveFileId: "drive_test_1",
-          revisionId: "rev_1",
-          name: "Test Snapshot",
+          projectName: "Test Snapshot",
+          payload: { kind: "stub" },
         })
         .returning({ id: snapshots.id });
       await db.insert(sheets).values({
         snapshotId: snap.id,
+        engagementId: eng.id,
         sheetNumber: "A1",
-        title: "First Floor Plan",
+        sheetName: "First Floor Plan",
+        thumbnailPng: minimalThumb,
+        thumbnailWidth: 100,
+        thumbnailHeight: 100,
+        fullPng: minimalThumb,
+        fullWidth: 1000,
+        fullHeight: 1000,
+        sortOrder: 0,
       });
 
-      const before = await pool.query<{ c: string }>(`SELECT COUNT(*)::text c FROM sheets`);
+      const before = await pool.query<{ c: string }>(
+        `SELECT COUNT(*)::text c FROM sheets`,
+      );
       expect(Number(before.rows[0].c)).toBe(1);
 
       await db.delete(engagements).where(eq(engagements.id, eng.id));
 
-      const snapsAfter = await pool.query<{ c: string }>(`SELECT COUNT(*)::text c FROM snapshots`);
+      const snapsAfter = await pool.query<{ c: string }>(
+        `SELECT COUNT(*)::text c FROM snapshots`,
+      );
       expect(Number(snapsAfter.rows[0].c)).toBe(0);
-      const sheetsAfter = await pool.query<{ c: string }>(`SELECT COUNT(*)::text c FROM sheets`);
+      const sheetsAfter = await pool.query<{ c: string }>(
+        `SELECT COUNT(*)::text c FROM sheets`,
+      );
       expect(Number(sheetsAfter.rows[0].c)).toBe(0);
     });
   });
@@ -100,23 +139,28 @@ describe("lib/db schema integration", () => {
         .insert(snapshots)
         .values({
           engagementId: eng.id,
-          driveFileId: "drive_dup",
-          revisionId: "rev_dup",
-          name: "Dup Snap",
+          projectName: "Dup Snap",
+          payload: {},
         })
         .returning({ id: snapshots.id });
-      await db.insert(sheets).values({
+      const baseSheet = {
         snapshotId: snap.id,
+        engagementId: eng.id,
         sheetNumber: "A1",
-        title: "First",
-      });
-      await expect(
-        db.insert(sheets).values({
-          snapshotId: snap.id,
-          sheetNumber: "A1",
-          title: "Duplicate",
-        }),
-      ).rejects.toThrow(/duplicate key|unique/i);
+        sheetName: "First",
+        thumbnailPng: minimalThumb,
+        thumbnailWidth: 1,
+        thumbnailHeight: 1,
+        fullPng: minimalThumb,
+        fullWidth: 1,
+        fullHeight: 1,
+        sortOrder: 0,
+      };
+      await db.insert(sheets).values(baseSheet);
+      await expectPgError(
+        db.insert(sheets).values({ ...baseSheet, sheetName: "Duplicate" }),
+        PG_UNIQUE_VIOLATION,
+      );
     });
   });
 
@@ -144,8 +188,9 @@ describe("lib/db schema integration", () => {
         contentHash: "deadbeef".repeat(8), // 64-char fake sha256
       };
       await db.insert(codeAtoms).values(baseAtom);
-      await expect(db.insert(codeAtoms).values(baseAtom)).rejects.toThrow(
-        /duplicate key|unique/i,
+      await expectPgError(
+        db.insert(codeAtoms).values(baseAtom),
+        PG_UNIQUE_VIOLATION,
       );
     });
   });
@@ -184,7 +229,11 @@ describe("lib/db schema integration", () => {
       expect(raw.rows).toHaveLength(1);
       const parsed = JSON.parse(raw.rows[0].embedding) as number[];
       expect(parsed).toHaveLength(1536);
-      expect(parsed.slice(0, 5)).toEqual([0, 0.1, 0.2, 0.3, 0.4]);
+      // Floating-point nudge from pgvector's normalisation: compare with tolerance.
+      const expected = [0, 0.1, 0.2, 0.3, 0.4];
+      for (let i = 0; i < expected.length; i++) {
+        expect(parsed[i]).toBeCloseTo(expected[i], 5);
+      }
     });
   });
 
@@ -211,10 +260,9 @@ describe("lib/db schema integration", () => {
         contentHash: "c".repeat(64),
         embedding: vec,
       });
-      const dist = await db.execute<{ d: string }>(
-        sql.raw(
-          `SELECT (embedding <=> '${vecLit}'::vector) AS d FROM code_atoms WHERE jurisdiction_key = 'cos_jurisdiction' LIMIT 1`,
-        ),
+      const dist = await pool.query<{ d: string }>(
+        `SELECT (embedding <=> $1::vector) AS d FROM code_atoms WHERE jurisdiction_key = $2 LIMIT 1`,
+        [vecLit, "cos_jurisdiction"],
       );
       expect(Number(dist.rows[0].d)).toBeCloseTo(0, 5);
     });
@@ -266,9 +314,13 @@ describe("lib/db schema integration", () => {
         sectionUrl: "https://example.com/dup",
       };
       await db.insert(codeAtomFetchQueue).values(baseRow);
-      await expect(db.insert(codeAtomFetchQueue).values(baseRow)).rejects.toThrow(
-        /duplicate key|unique/i,
+      await expectPgError(
+        db.insert(codeAtomFetchQueue).values(baseRow),
+        PG_UNIQUE_VIOLATION,
       );
     });
   });
 });
+
+// avoid unused import lint when sql isn't actively referenced
+void sql;

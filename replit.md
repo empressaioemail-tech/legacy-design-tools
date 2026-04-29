@@ -47,7 +47,18 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
 
 - `SNAPSHOT_SECRET` — required for non-dev. In dev, a temporary secret is generated for the process and a generic warning is logged (the value is **never** logged).
 - `DATABASE_URL` — Replit-managed Postgres. Used by Drizzle.
+- `TEST_DATABASE_URL` — optional; falls back to `DATABASE_URL`. Lib integration tests use a per-run schema named `test_<unix_ts>_<rand8hex>` and drop it on completion. A reaper drops `test_*` schemas older than 1h (cap 50/pass).
+- `MUNICODE_MIN_GAP_MS` / `MUNICODE_JITTER_MAX_MS` — optional rate-limit overrides for the municode HTTP client (used in tests to avoid sleeping). Defaults preserve production behavior.
 - AI integration credentials provided by Replit AI Integrations.
+
+## Testing (Sprint H01 Part 1)
+
+- Per-package Vitest with v8 coverage in `lib/db`, `lib/codes`, `lib/codes-sources`. Root: `pnpm test` runs all three.
+- `lib/codes` and `lib/codes-sources`: pure unit tests with mocked HTTP/OpenAI/DB. No live network.
+- `lib/db`: Postgres integration tests. `withTestSchema()` creates an isolated schema, replays `lib/db/src/__tests__/__fixtures__/schema.sql.template` (sed-rewritten from a real `pg_dump`), runs the test, then drops the schema.
+- After any drizzle-kit push that changes tables/columns/FKs, refresh the fixture: `pnpm --filter @workspace/db run test:fixture:schema`. The script strips pg_dump preamble and rewrites `public.` → `@@SCHEMA@@.`, but preserves `public.vector(...)` because pgvector's type lives in the public schema.
+- Refactors landed for testability: extracted `parseDesignCriteriaHtml`, `chunkByHeader`, `parseSectionResponse`, `contentHash`; added test-only resets `__resetMunicodeClientStateForTesting` / `__setRateLimitOverridesForTesting`.
+- Out of scope (Part 2): orchestrator + queue tests, prompt formatter (if extracted), api-server route tests, frontend tests, CI, coverage thresholds. See `TESTS_DEFERRED.md`.
 
 ## Key Commands
 

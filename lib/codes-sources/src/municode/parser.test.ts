@@ -34,9 +34,17 @@ const ctx = {
 };
 
 describe("parseSectionResponse", () => {
-  it("converts each Doc with non-null Content into one AtomCandidate", () => {
+  it("converts each Doc with substantive non-null Content into one AtomCandidate", () => {
+    // The fixture has 4 Docs. The first (ARTIINFOGO heading-only doc) strips
+    // down to 0 plain-text chars and is dropped by the < 30-char gate; the
+    // other three sections become atoms.
     const out = parseSectionResponse(envelope, ctx);
-    expect(out.length).toBe(envelope.Docs.filter((d) => d.Content).length);
+    expect(out).toHaveLength(3);
+    expect(out.map((a) => a.metadata?.nodeId)).toEqual([
+      "PTIHORUCH_ARTIINFOGO_S1.01IN",
+      "PTIHORUCH_ARTIINFOGO_S1.02FOGO",
+      "PTIHORUCH_ARTIINFOGO_S1.03BO",
+    ]);
   });
 
   it("each candidate carries the expected metadata block", () => {
