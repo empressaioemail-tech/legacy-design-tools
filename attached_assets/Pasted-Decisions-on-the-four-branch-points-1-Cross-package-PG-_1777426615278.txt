@@ -1,0 +1,54 @@
+Decisions on the four branch points:
+
+1. Cross-package PG helper: option (b) — re-export from 
+   @workspace/db under a /testing subpath via package.json exports. 
+   Move withTestSchema cleanly; ensure no other test code imports 
+   from the internal __tests__/utils.ts path. Update the existing 
+   schema integration test to import from the new path.
+
+2. Prompt formatter: EXTRACT to lib/codes/src/promptFormatter.ts. 
+   This is a pure function and A06 will modify it heavily; clean 
+   extraction now means A06 changes behavior without re-extracting. 
+   Test in isolation: citation ordering, char budget, jurisdiction 
+   lock, missing-section fallback, reference-only atoms.
+
+3. CI: SKIP GitHub Actions for Part 2. The repo is on GitHub 
+   (empressaioemail-tech/legacy-design-tools), but the dev model 
+   is agent-driven and pre-PR checks happen via the agent's own 
+   pnpm test before reporting. Document the workflow file as 
+   ready-to-enable in TESTING.md so it's a 5-min task when team 
+   grows. Don't deploy it.
+
+4. Frontend: TIGHT scope. Vitest + RTL smoke tests for 
+   CitationChip, ClaudeChat, SheetGrid, SheetViewer. Skip 
+   Playwright entirely. Estimated ~12 tests. UI is still 
+   evolving (A06 will touch chat heavily); locking with E2E 
+   would create flakiness.
+
+LEFTOVER ITEMS FROM PART 1:
+
+- Reaper hardening (advisory lock): PUNT to TESTS_DEFERRED.md 
+  with explicit "real-world likelihood low for solo-dev workflow; 
+  failure mode is loss of single in-progress test schema" note.
+  
+- Fixture drift guard: FOLD INTO PART 2. Small (one bash script 
+  + one test that runs the script and asserts no diff). Add to 
+  lib/db's existing schema-fixture script suite.
+
+PROCEED with Section 0 stage gate first. Same pattern as Part 1 — 
+investigate, report, pause for go-ahead before code changes. 
+Specifically check:
+- @workspace/db's package.json exports field — does it already 
+  expose anything beyond main, or is /testing the first subpath?
+- Any existing imports of __tests__/utils.ts from outside lib/db 
+  that need updating
+- Inline prompt assembly in chat.ts — is there a clean extraction 
+  point, or is it deeply tangled with route handler logic?
+- artifacts/design-tools current Vitest config — does it have 
+  jsdom environment set up, or is that a new addition?
+- msw availability and existing usage in the workspace
+
+After reconnaissance, REPORT FINDINGS AND PAUSE before any code 
+changes. Same discipline as Part 1.
+
+GO.
