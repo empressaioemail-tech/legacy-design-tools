@@ -22,4 +22,6 @@ export interface EngagementDetail {
   snapshots: SnapshotSummary[];
   site: Site;
   warnings?: string[];
+  revitCentralGuid: string | null;
+  revitDocumentPath: string | null;
 }

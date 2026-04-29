@@ -28,3 +28,9 @@ delete process.env.OPENAI_API_KEY;
 // app.ts directly. Tests that mount routes use buildTestApp() (which doesn't
 // call startQueueWorker) so this is belt-and-suspenders.
 process.env.CODE_ATOM_QUEUE_TICK_MS = "999999999";
+
+// A04.7: pin the snapshot secret so tests can send the right header.
+// snapshotSecret.ts caches the first value it sees at module load; without
+// this, dev mode would generate a random per-process value that the test
+// has no way to read.
+process.env.SNAPSHOT_SECRET = "test-snapshot-secret";

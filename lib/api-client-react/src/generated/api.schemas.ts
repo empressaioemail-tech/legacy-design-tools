@@ -76,6 +76,8 @@ export interface EngagementSummary {
   snapshotCount: number;
   latestSnapshot: SnapshotSummary | null;
   site: Site;
+  revitCentralGuid: string | null;
+  revitDocumentPath: string | null;
 }
 
 export interface EngagementDetail {
@@ -91,12 +93,102 @@ export interface EngagementDetail {
   snapshots: SnapshotSummary[];
   site: Site;
   warnings?: string[];
+  revitCentralGuid: string | null;
+  revitDocumentPath: string | null;
 }
 
-export interface SnapshotPayload {
-  projectName: string;
+export interface SnapshotPayloadExisting {
+  engagementId: string;
   [key: string]: unknown;
 }
+
+export interface SnapshotPayloadNew {
+  /** Discriminator literal — must be true to select this branch. */
+  createNewEngagement: boolean;
+  projectName: string;
+  revitCentralGuid?: string | null;
+  revitDocumentPath?: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * A04.7 — discriminated union. Either bind to an existing engagement by
+id (typically returned by /engagements/match action="auto-bind" or
+chosen from action="choose"), or explicitly request a new engagement
+via createNewEngagement=true with the project metadata.
+
+ */
+export type SnapshotPayload = SnapshotPayloadExisting | SnapshotPayloadNew;
+
+export interface MatchEngagementBody {
+  projectName: string;
+  revitCentralGuid?: string | null;
+  revitDocumentPath?: string | null;
+}
+
+/**
+ * Lean engagement summary for the add-in's "choose" dropdown.
+ */
+export interface EngagementCandidate {
+  id: string;
+  name: string;
+  address: string | null;
+  jurisdiction: string | null;
+  revitCentralGuid: string | null;
+  revitDocumentPath: string | null;
+  snapshotCount: number;
+  updatedAt: string;
+}
+
+export type MatchAutoBindResultAction =
+  (typeof MatchAutoBindResultAction)[keyof typeof MatchAutoBindResultAction];
+
+export const MatchAutoBindResultAction = {
+  "auto-bind": "auto-bind",
+} as const;
+
+export type MatchAutoBindResultMatchedBy =
+  (typeof MatchAutoBindResultMatchedBy)[keyof typeof MatchAutoBindResultMatchedBy];
+
+export const MatchAutoBindResultMatchedBy = {
+  revitCentralGuid: "revitCentralGuid",
+  revitDocumentPath: "revitDocumentPath",
+} as const;
+
+export interface MatchAutoBindResult {
+  action: MatchAutoBindResultAction;
+  engagementId: string;
+  engagementName: string;
+  matchedBy: MatchAutoBindResultMatchedBy;
+}
+
+export type MatchChooseResultAction =
+  (typeof MatchChooseResultAction)[keyof typeof MatchChooseResultAction];
+
+export const MatchChooseResultAction = {
+  choose: "choose",
+} as const;
+
+export interface MatchChooseResult {
+  action: MatchChooseResultAction;
+  candidates: EngagementCandidate[];
+}
+
+export type MatchCreateNewResultAction =
+  (typeof MatchCreateNewResultAction)[keyof typeof MatchCreateNewResultAction];
+
+export const MatchCreateNewResultAction = {
+  "create-new": "create-new",
+} as const;
+
+export interface MatchCreateNewResult {
+  action: MatchCreateNewResultAction;
+}
+
+export type MatchEngagementResponse =
+  | MatchAutoBindResult
+  | MatchChooseResult
+  | MatchCreateNewResult;
 
 export interface SnapshotReceipt {
   id: string;

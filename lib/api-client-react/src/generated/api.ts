@@ -27,6 +27,8 @@ import type {
   HealthStatus,
   JurisdictionSummary,
   ListJurisdictionAtomsParams,
+  MatchEngagementBody,
+  MatchEngagementResponse,
   SheetSummary,
   SheetUploadResponse,
   SnapshotDetail,
@@ -198,6 +200,109 @@ export function useListEngagements<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Called by the Revit add-in BEFORE uploading a snapshot, to decide which
+engagement (if any) the file belongs to. Auth: requires the same
+`x-snapshot-secret` header as POST /snapshots.
+
+Precedence (first hit wins):
+  1. `revitCentralGuid` exact match → action="auto-bind".
+  2. `revitDocumentPath` exact match → action="auto-bind".
+  3. case-insensitive `projectName` collision → action="choose" with
+     up to 10 candidates (newest first). The add-in MUST surface a
+     dropdown in this case, regardless of GUID presence.
+  4. nothing matched → action="create-new".
+
+Note: even when a GUID is supplied, a name collision still returns
+"choose" if neither GUID nor path matched — the user makes the final
+call. GUID is sticky on rebind: an engagement's stored GUID is never
+overwritten by a later snapshot from a different file.
+
+ * @summary Resolve a Revit file to an engagement (or signal create-new)
+ */
+export const getMatchEngagementUrl = () => {
+  return `/api/engagements/match`;
+};
+
+export const matchEngagement = async (
+  matchEngagementBody: MatchEngagementBody,
+  options?: RequestInit,
+): Promise<MatchEngagementResponse> => {
+  return customFetch<MatchEngagementResponse>(getMatchEngagementUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(matchEngagementBody),
+  });
+};
+
+export const getMatchEngagementMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof matchEngagement>>,
+    TError,
+    { data: BodyType<MatchEngagementBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof matchEngagement>>,
+  TError,
+  { data: BodyType<MatchEngagementBody> },
+  TContext
+> => {
+  const mutationKey = ["matchEngagement"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof matchEngagement>>,
+    { data: BodyType<MatchEngagementBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return matchEngagement(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MatchEngagementMutationResult = NonNullable<
+  Awaited<ReturnType<typeof matchEngagement>>
+>;
+export type MatchEngagementMutationBody = BodyType<MatchEngagementBody>;
+export type MatchEngagementMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Resolve a Revit file to an engagement (or signal create-new)
+ */
+export const useMatchEngagement = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof matchEngagement>>,
+    TError,
+    { data: BodyType<MatchEngagementBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof matchEngagement>>,
+  TError,
+  { data: BodyType<MatchEngagementBody> },
+  TContext
+> => {
+  return useMutation(getMatchEngagementMutationOptions(options));
+};
 
 /**
  * @summary Get engagement detail with snapshot list

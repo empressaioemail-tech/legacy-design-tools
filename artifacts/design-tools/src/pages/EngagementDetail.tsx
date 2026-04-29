@@ -15,6 +15,7 @@ import type { SheetSummary } from "@workspace/api-client-react";
 import { AppShell } from "../components/AppShell";
 import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
+import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
@@ -317,6 +318,11 @@ function SettingsTab({
           Edit details
         </button>
       </div>
+
+      <RevitBinding
+        revitCentralGuid={engagement.revitCentralGuid}
+        revitDocumentPath={engagement.revitDocumentPath}
+      />
 
       <div
         style={{

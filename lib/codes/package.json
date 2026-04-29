@@ -23,7 +23,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/pg": "^8.18.0",
     "@vitest/coverage-v8": "catalog:",
+    "pg": "^8.20.0",
     "typescript": "~5.9.2",
     "vitest": "catalog:"
   }

@@ -5,8 +5,14 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { SnapshotPayloadExisting } from "./snapshotPayloadExisting";
+import type { SnapshotPayloadNew } from "./snapshotPayloadNew";
 
-export interface SnapshotPayload {
-  projectName: string;
-  [key: string]: unknown;
-}
+/**
+ * A04.7 — discriminated union. Either bind to an existing engagement by
+id (typically returned by /engagements/match action="auto-bind" or
+chosen from action="choose"), or explicitly request a new engagement
+via createNewEngagement=true with the project metadata.
+
+ */
+export type SnapshotPayload = SnapshotPayloadExisting | SnapshotPayloadNew;

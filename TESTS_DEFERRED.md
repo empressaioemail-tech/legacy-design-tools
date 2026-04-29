@@ -125,16 +125,14 @@ emits with hard-coded schema qualifiers — extend the `sed` pipeline in
 time. Track these as they come up; punt to Part 3 if the list grows
 beyond two or three exceptions.
 
-## Anthropic singleton → factory migration
+## EP-003: Migrate `chat.ts` from `anthropic` singleton to `createAnthropicClient()`
 
-Sprint H01 Part 2 added `createAnthropicClient(opts?)` alongside the
-existing `anthropic` singleton, with the singleton kept for back-compat.
-Production callers were intentionally **not** changed. The known callers
-that could move to the factory pattern (and the rationale for not
-touching them yet) are listed in the Part 2 final report. Revisit if any
-caller starts needing per-request configuration (different timeouts,
-different base URLs, request-scoped logging) — that's the right trigger
-to migrate.
+Migrate `artifacts/api-server/src/routes/chat.ts` from the `anthropic`
+singleton to `createAnthropicClient()`. Low priority — `chat.test.ts`
+already substitutes the SDK via `vi.mock`, so the testability gap is
+covered. Stylistic consistency only. Migrate when `chat.ts` grows a
+per-request configuration need (alternate base URL, request-scoped
+logging, custom timeout). Single caller across the workspace.
 
 ## Frontend coverage beyond smoke
 

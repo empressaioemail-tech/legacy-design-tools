@@ -6,8 +6,9 @@ import {
   numeric,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { snapshots } from "./snapshots";
 
 export const engagements = pgTable(
@@ -15,7 +16,12 @@ export const engagements = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     name: text("name").notNull(),
-    nameLower: text("name_lower").notNull().unique(),
+    // A04.7: name_lower is no longer UNIQUE. Two distinct Revit projects may
+    // legitimately share a (case-insensitive) name; the matching identity is
+    // now `revit_central_guid` / `revit_document_path` (silent auto-bind) or
+    // an explicit user choice surfaced via POST /api/engagements/match.
+    // The non-unique index below is retained for fast collision lookup.
+    nameLower: text("name_lower").notNull(),
     jurisdiction: text("jurisdiction"),
     address: text("address"),
     status: text("status").notNull().default("active"),
@@ -33,6 +39,15 @@ export const engagements = pgTable(
     lotAreaSqft: numeric("lot_area_sqft"),
     siteContextRaw: jsonb("site_context_raw"),
 
+    // A04.7: Revit binding identity. Both nullable — populated only when the
+    // Revit add-in supplies them. revit_central_guid is the strong signal
+    // (truly unique per Revit central file); revit_document_path is the
+    // weaker fallback used for non-workshared files. Sticky on rebind: never
+    // overwritten once set, even if the user picks the engagement from the
+    // dropdown for a file with a different GUID.
+    revitCentralGuid: text("revit_central_guid"),
+    revitDocumentPath: text("revit_document_path"),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -42,6 +57,9 @@ export const engagements = pgTable(
   },
   (t) => ({
     nameLowerIdx: index("engagements_name_lower_idx").on(t.nameLower),
+    revitCentralGuidUniq: uniqueIndex("engagements_revit_central_guid_uniq")
+      .on(t.revitCentralGuid)
+      .where(sql`${t.revitCentralGuid} IS NOT NULL`),
   }),
 );
 

@@ -1,5 +1,19 @@
+/**
+ * /api/snapshots — Revit add-in snapshot ingestion.
+ *
+ * A04.7 contract change: POST body is a discriminated union.
+ *   - { engagementId: uuid, ...sheets }                    → bind to existing
+ *   - { createNewEngagement: true, projectName, revitCentralGuid?,
+ *       revitDocumentPath?, ...sheets }                    → create new
+ *
+ * Sticky on rebind: when binding to an existing engagement, we NEVER overwrite
+ * its address, jurisdiction, geocode, revitCentralGuid, or revitDocumentPath.
+ * The user's chosen identity wins. Edits flow through engagement-edit UI only.
+ *
+ * Geocode + jurisdiction warmup are kicked off only on the create-new branch.
+ */
+
 import { Router, type IRouter, type Request, type Response } from "express";
-import { randomUUID } from "node:crypto";
 import { db, engagements, snapshots, sheets } from "@workspace/db";
 import { asc, desc, eq } from "drizzle-orm";
 import {
@@ -18,6 +32,17 @@ import { getSnapshotSecret } from "../lib/snapshotSecret";
 const snapshotSecret = getSnapshotSecret();
 
 const router: IRouter = Router();
+
+/** PG unique-violation SQLSTATE. */
+const PG_UNIQUE_VIOLATION = "23505";
+
+interface SnapshotResult {
+  id: string;
+  receivedAt: string;
+  engagementId: string;
+  engagementName: string;
+  autoCreated: boolean;
+}
 
 function deriveCounts(body: Record<string, unknown>) {
   const sheets = body["sheets"];
@@ -42,6 +67,122 @@ function deriveCounts(body: Record<string, unknown>) {
   }
 
   return { sheetCount, roomCount, levelCount, wallCount };
+}
+
+/** Pull a candidate address out of the Revit payload. */
+function extractIncomingAddress(payload: Record<string, unknown>): string | null {
+  const projectInfo = payload["projectInformation"];
+  const rawAddress =
+    projectInfo && typeof projectInfo === "object"
+      ? ((projectInfo as Record<string, unknown>)["address"] as
+          | string
+          | undefined)
+      : undefined;
+  return typeof rawAddress === "string" && rawAddress.trim().length > 0
+    ? rawAddress.trim()
+    : null;
+}
+
+/**
+ * PG unique-violation typeguard for the GUID race. Drizzle wraps pg errors in
+ * DrizzleQueryError with the underlying pg error on `.cause`, so we check both
+ * the top level and `.cause`.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const direct = (err as { code?: string }).code;
+  const cause = (err as { cause?: { code?: string } }).cause?.code;
+  return direct === PG_UNIQUE_VIOLATION || cause === PG_UNIQUE_VIOLATION;
+}
+
+/** Insert a snapshot under an existing engagement and bump updated_at. */
+async function attachSnapshot(
+  engagement: typeof engagements.$inferSelect,
+  projectName: string,
+  payload: Record<string, unknown>,
+  counts: ReturnType<typeof deriveCounts>,
+): Promise<SnapshotResult> {
+  return db.transaction(async (tx) => {
+    const [snap] = await tx
+      .insert(snapshots)
+      .values({
+        engagementId: engagement.id,
+        projectName,
+        payload,
+        ...counts,
+      })
+      .returning();
+    await tx
+      .update(engagements)
+      .set({ updatedAt: new Date() })
+      .where(eq(engagements.id, engagement.id));
+    return {
+      id: snap.id,
+      receivedAt: snap.receivedAt.toISOString(),
+      engagementId: engagement.id,
+      engagementName: engagement.name,
+      autoCreated: false,
+    };
+  });
+}
+
+/**
+ * Best-effort: geocode the address (if any) and enqueue jurisdiction
+ * warmup. Errors swallowed — user can retry via POST /engagements/:id/geocode.
+ * Only ever called on the create-new branch.
+ */
+function fireGeocodeAndWarmup(
+  engagementId: string,
+  incomingAddress: string,
+): void {
+  void (async () => {
+    try {
+      const geo = await geocodeAddress(incomingAddress);
+      if (!geo) return;
+      await db
+        .update(engagements)
+        .set({
+          latitude: String(geo.latitude),
+          longitude: String(geo.longitude),
+          geocodedAt: new Date(geo.geocodedAt),
+          geocodeSource: geo.source,
+          jurisdictionCity: geo.jurisdictionCity,
+          jurisdictionState: geo.jurisdictionState,
+          jurisdictionFips: geo.jurisdictionFips,
+          siteContextRaw: geo.raw ?? null,
+        })
+        .where(eq(engagements.id, engagementId));
+
+      const jKey = keyFromEngagement({
+        jurisdictionCity: geo.jurisdictionCity,
+        jurisdictionState: geo.jurisdictionState,
+      });
+      if (jKey) {
+        try {
+          const enq = await enqueueWarmupForJurisdiction(jKey, logger);
+          logger.info(
+            {
+              engagementId,
+              jurisdictionKey: jKey,
+              enqueued: enq.enqueued,
+              skipped: enq.skipped,
+            },
+            "auto-warmup: enqueued for engagement jurisdiction",
+          );
+        } catch (warmErr) {
+          logger.warn(
+            { warmErr, jurisdictionKey: jKey },
+            "auto-warmup enqueue failed (non-fatal)",
+          );
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        { err, engagementId, address: incomingAddress },
+        "auto-geocode after snapshot create failed",
+      );
+    }
+  })();
 }
 
 router.get("/snapshots", async (_req: Request, res: Response) => {
@@ -75,6 +216,7 @@ router.get("/snapshots", async (_req: Request, res: Response) => {
 });
 
 router.post("/snapshots", async (req: Request, res: Response) => {
+  // 1. Auth.
   const headerParse = CreateSnapshotHeader.safeParse({
     "x-snapshot-secret": req.header("x-snapshot-secret"),
   });
@@ -86,47 +228,63 @@ router.post("/snapshots", async (req: Request, res: Response) => {
     return;
   }
 
+  // 2. Body discrimination via the new union schema.
   const bodyParse = CreateSnapshotBody.safeParse(req.body);
   if (!bodyParse.success) {
-    res.status(400).json({ error: "projectName is required" });
+    res.status(400).json({ error: "invalid_snapshot_body" });
     return;
   }
 
-  const projectName = bodyParse.data.projectName;
-  const nameLower = projectName.trim().toLowerCase();
   const payload = (req.body ?? {}) as Record<string, unknown>;
   const counts = deriveCounts(payload);
 
-  // Pull a candidate address out of the Revit payload (projectInformation.address)
-  // so newly auto-created engagements arrive pre-populated.
-  const projectInfo = payload["projectInformation"];
-  const rawAddress =
-    projectInfo && typeof projectInfo === "object"
-      ? ((projectInfo as Record<string, unknown>)["address"] as
-          | string
-          | undefined)
-      : undefined;
-  const incomingAddress =
-    typeof rawAddress === "string" && rawAddress.trim().length > 0
-      ? rawAddress.trim()
-      : null;
-
-  try {
-    const result = await db.transaction(async (tx) => {
-      const existing = await tx
+  // 3a. Existing-engagement branch.
+  if ("engagementId" in bodyParse.data) {
+    const engagementId = bodyParse.data.engagementId;
+    try {
+      const found = await db
         .select()
         .from(engagements)
-        .where(eq(engagements.nameLower, nameLower))
+        .where(eq(engagements.id, engagementId))
         .limit(1);
-
-      let engagement = existing[0];
-      let autoCreated = false;
-
+      const engagement = found[0];
       if (!engagement) {
-        // Race-safe: another concurrent transaction may have just inserted
-        // the same nameLower. ON CONFLICT DO NOTHING returns no rows in
-        // that case; we re-select to grab the row the other tx wrote.
-        const inserted = await tx
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+      // Sticky: address/jurisdiction/GUID/path are NOT touched here.
+      const result = await attachSnapshot(
+        engagement,
+        engagement.name,
+        payload,
+        counts,
+      );
+      res.status(201).json(result);
+    } catch (err) {
+      logger.error({ err, engagementId }, "attach snapshot failed");
+      res.status(500).json({ error: "Failed to store snapshot" });
+    }
+    return;
+  }
+
+  // 3b. New-engagement branch.
+  const { projectName, revitCentralGuid, revitDocumentPath } = bodyParse.data;
+  const nameLower = projectName.trim().toLowerCase();
+  const guid =
+    typeof revitCentralGuid === "string" && revitCentralGuid.trim().length > 0
+      ? revitCentralGuid.trim()
+      : null;
+  const path =
+    typeof revitDocumentPath === "string" && revitDocumentPath.trim().length > 0
+      ? revitDocumentPath.trim()
+      : null;
+  const incomingAddress = extractIncomingAddress(payload);
+
+  try {
+    let result: SnapshotResult;
+    try {
+      result = await db.transaction(async (tx) => {
+        const [eng] = await tx
           .insert(engagements)
           .values({
             name: projectName,
@@ -134,109 +292,52 @@ router.post("/snapshots", async (req: Request, res: Response) => {
             status: "active",
             address: incomingAddress,
             jurisdiction: null,
+            revitCentralGuid: guid,
+            revitDocumentPath: path,
           })
-          .onConflictDoNothing({ target: engagements.nameLower })
           .returning();
-
-        if (inserted[0]) {
-          engagement = inserted[0];
-          autoCreated = true;
-        } else {
-          const refetch = await tx
-            .select()
-            .from(engagements)
-            .where(eq(engagements.nameLower, nameLower))
-            .limit(1);
-          engagement = refetch[0];
-          autoCreated = false;
-        }
+        const [snap] = await tx
+          .insert(snapshots)
+          .values({
+            engagementId: eng.id,
+            projectName,
+            payload,
+            ...counts,
+          })
+          .returning();
+        return {
+          id: snap.id,
+          receivedAt: snap.receivedAt.toISOString(),
+          engagementId: eng.id,
+          engagementName: eng.name,
+          autoCreated: true,
+        };
+      });
+    } catch (err) {
+      // GUID race: another client raced past /match and created the engagement
+      // first. The partial unique index on revit_central_guid rejects our
+      // INSERT with 23505. Idempotent fallback: refetch and bind to that row.
+      if (guid && isUniqueViolation(err)) {
+        const refetch = await db
+          .select()
+          .from(engagements)
+          .where(eq(engagements.revitCentralGuid, guid))
+          .limit(1);
+        const existing = refetch[0];
+        if (!existing) throw err;
+        logger.info(
+          { engagementId: existing.id, guid },
+          "snapshots: GUID race resolved by refetch",
+        );
+        result = await attachSnapshot(existing, projectName, payload, counts);
+      } else {
+        throw err;
       }
+    }
 
-      if (!engagement) {
-        throw new Error("Engagement lookup failed after insert race");
-      }
-
-      const [snap] = await tx
-        .insert(snapshots)
-        .values({
-          engagementId: engagement.id,
-          projectName,
-          payload,
-          ...counts,
-        })
-        .returning();
-
-      await tx
-        .update(engagements)
-        .set({ updatedAt: new Date() })
-        .where(eq(engagements.id, engagement.id));
-
-      return {
-        id: snap.id,
-        receivedAt: snap.receivedAt.toISOString(),
-        engagementId: engagement.id,
-        engagementName: engagement.name,
-        autoCreated,
-      };
-    });
-
-    // Best-effort: if we just created an engagement and Revit gave us an
-    // address, kick off geocoding outside the transaction. Errors are
-    // swallowed; the user can retry via POST /engagements/:id/geocode.
+    // Geocode + warmup only on actual create (not race-resolved bind).
     if (result.autoCreated && incomingAddress) {
-      void (async () => {
-        try {
-          const geo = await geocodeAddress(incomingAddress);
-          if (geo) {
-            await db
-              .update(engagements)
-              .set({
-                latitude: String(geo.latitude),
-                longitude: String(geo.longitude),
-                geocodedAt: new Date(geo.geocodedAt),
-                geocodeSource: geo.source,
-                jurisdictionCity: geo.jurisdictionCity,
-                jurisdictionState: geo.jurisdictionState,
-                jurisdictionFips: geo.jurisdictionFips,
-                siteContextRaw: geo.raw ?? null,
-              })
-              .where(eq(engagements.id, result.engagementId));
-
-            // Demand-driven code-atom warmup. If the geocode resolved to a
-            // jurisdiction we recognize, kick off TOC discovery so the next
-            // chat question has something to retrieve. Fully best-effort —
-            // failures don't roll back the snapshot or the engagement.
-            const jKey = keyFromEngagement({
-              jurisdictionCity: geo.jurisdictionCity,
-              jurisdictionState: geo.jurisdictionState,
-            });
-            if (jKey) {
-              try {
-                const enq = await enqueueWarmupForJurisdiction(jKey, logger);
-                logger.info(
-                  {
-                    engagementId: result.engagementId,
-                    jurisdictionKey: jKey,
-                    enqueued: enq.enqueued,
-                    skipped: enq.skipped,
-                  },
-                  "auto-warmup: enqueued for engagement jurisdiction",
-                );
-              } catch (warmErr) {
-                logger.warn(
-                  { warmErr, jurisdictionKey: jKey },
-                  "auto-warmup enqueue failed (non-fatal)",
-                );
-              }
-            }
-          }
-        } catch (err) {
-          logger.warn(
-            { err, engagementId: result.engagementId, address: incomingAddress },
-            "auto-geocode after snapshot create failed",
-          );
-        }
-      })();
+      fireGeocodeAndWarmup(result.engagementId, incomingAddress);
     }
 
     res.status(201).json(result);

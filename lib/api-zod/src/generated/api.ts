@@ -69,8 +69,71 @@ export const ListEngagementsResponseItem = zod.object({
     zoningCode: zod.string().nullable(),
     lotAreaSqft: zod.number().nullable(),
   }),
+  revitCentralGuid: zod.string().nullable(),
+  revitDocumentPath: zod.string().nullable(),
 });
 export const ListEngagementsResponse = zod.array(ListEngagementsResponseItem);
+
+/**
+ * Called by the Revit add-in BEFORE uploading a snapshot, to decide which
+engagement (if any) the file belongs to. Auth: requires the same
+`x-snapshot-secret` header as POST /snapshots.
+
+Precedence (first hit wins):
+  1. `revitCentralGuid` exact match → action="auto-bind".
+  2. `revitDocumentPath` exact match → action="auto-bind".
+  3. case-insensitive `projectName` collision → action="choose" with
+     up to 10 candidates (newest first). The add-in MUST surface a
+     dropdown in this case, regardless of GUID presence.
+  4. nothing matched → action="create-new".
+
+Note: even when a GUID is supplied, a name collision still returns
+"choose" if neither GUID nor path matched — the user makes the final
+call. GUID is sticky on rebind: an engagement's stored GUID is never
+overwritten by a later snapshot from a different file.
+
+ * @summary Resolve a Revit file to an engagement (or signal create-new)
+ */
+export const MatchEngagementHeader = zod.object({
+  "x-snapshot-secret": zod.string(),
+});
+
+export const MatchEngagementBody = zod.object({
+  projectName: zod.string(),
+  revitCentralGuid: zod.string().nullish(),
+  revitDocumentPath: zod.string().nullish(),
+});
+
+export const MatchEngagementResponse = zod.union([
+  zod.object({
+    action: zod.enum(["auto-bind"]),
+    engagementId: zod.string(),
+    engagementName: zod.string(),
+    matchedBy: zod.enum(["revitCentralGuid", "revitDocumentPath"]),
+  }),
+  zod.object({
+    action: zod.enum(["choose"]),
+    candidates: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          name: zod.string(),
+          address: zod.string().nullable(),
+          jurisdiction: zod.string().nullable(),
+          revitCentralGuid: zod.string().nullable(),
+          revitDocumentPath: zod.string().nullable(),
+          snapshotCount: zod.number(),
+          updatedAt: zod.coerce.date(),
+        })
+        .describe(
+          'Lean engagement summary for the add-in\'s \"choose\" dropdown.',
+        ),
+    ),
+  }),
+  zod.object({
+    action: zod.enum(["create-new"]),
+  }),
+]);
 
 /**
  * @summary Get engagement detail with snapshot list
@@ -143,6 +206,8 @@ export const GetEngagementResponse = zod.object({
     lotAreaSqft: zod.number().nullable(),
   }),
   warnings: zod.array(zod.string()).optional(),
+  revitCentralGuid: zod.string().nullable(),
+  revitDocumentPath: zod.string().nullable(),
 });
 
 /**
@@ -240,6 +305,8 @@ export const UpdateEngagementResponse = zod.object({
     lotAreaSqft: zod.number().nullable(),
   }),
   warnings: zod.array(zod.string()).optional(),
+  revitCentralGuid: zod.string().nullable(),
+  revitDocumentPath: zod.string().nullable(),
 });
 
 /**
@@ -313,6 +380,8 @@ export const RegeocodeEngagementResponse = zod.object({
     lotAreaSqft: zod.number().nullable(),
   }),
   warnings: zod.array(zod.string()).optional(),
+  revitCentralGuid: zod.string().nullable(),
+  revitDocumentPath: zod.string().nullable(),
 });
 
 /**
@@ -344,9 +413,25 @@ export const CreateSnapshotHeader = zod.object({
   "x-snapshot-secret": zod.string(),
 });
 
-export const CreateSnapshotBody = zod.object({
-  projectName: zod.string(),
-});
+export const CreateSnapshotBody = zod
+  .union([
+    zod.object({
+      engagementId: zod.string(),
+    }),
+    zod.object({
+      createNewEngagement: zod
+        .literal(true)
+        .describe(
+          "Discriminator literal — must be true to select this branch.",
+        ),
+      projectName: zod.string(),
+      revitCentralGuid: zod.string().nullish(),
+      revitDocumentPath: zod.string().nullish(),
+    }),
+  ])
+  .describe(
+    'A04.7 — discriminated union. Either bind to an existing engagement by\nid (typically returned by \/engagements\/match action=\"auto-bind\" or\nchosen from action=\"choose\"), or explicitly request a new engagement\nvia createNewEngagement=true with the project metadata.\n',
+  );
 
 /**
  * @summary Get the full snapshot record (with payload)

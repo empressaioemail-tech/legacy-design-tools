@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import engagementsRouter from "./engagements";
+import matchRouter from "./match";
 import snapshotsRouter from "./snapshots";
 import sheetsRouter from "./sheets";
 import chatRouter from "./chat";
@@ -9,6 +10,9 @@ import codesRouter from "./codes";
 const router: IRouter = Router();
 
 router.use(healthRouter);
+// /engagements/match must register BEFORE /engagements/:id otherwise Express
+// matches the literal path against the parametric route first.
+router.use(matchRouter);
 router.use(engagementsRouter);
 router.use(snapshotsRouter);
 router.use(sheetsRouter);

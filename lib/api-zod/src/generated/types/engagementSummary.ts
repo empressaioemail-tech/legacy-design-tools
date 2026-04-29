@@ -20,4 +20,6 @@ export interface EngagementSummary {
   snapshotCount: number;
   latestSnapshot: SnapshotSummary | null;
   site: Site;
+  revitCentralGuid: string | null;
+  revitDocumentPath: string | null;
 }

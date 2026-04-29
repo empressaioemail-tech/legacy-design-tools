@@ -87,7 +87,9 @@ CREATE TABLE @@SCHEMA@@.engagements (
     project_type text,
     zoning_code text,
     lot_area_sqft numeric,
-    site_context_raw jsonb
+    site_context_raw jsonb,
+    revit_central_guid text,
+    revit_document_path text
 );
 
 
@@ -169,12 +171,6 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
     ADD CONSTRAINT code_atoms_pkey PRIMARY KEY (id);
 
 
--- Name: engagements engagements_name_lower_unique; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.engagements
-    ADD CONSTRAINT engagements_name_lower_unique UNIQUE (name_lower);
-
-
 -- Name: engagements engagements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.engagements
@@ -242,6 +238,11 @@ CREATE INDEX code_atoms_source_idx ON @@SCHEMA@@.code_atoms USING btree (source_
 -- Name: engagements_name_lower_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (name_lower);
+
+
+-- Name: engagements_revit_central_guid_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX engagements_revit_central_guid_uniq ON @@SCHEMA@@.engagements USING btree (revit_central_guid) WHERE (revit_central_guid IS NOT NULL);
 
 
 -- Name: findings_code_atoms_atom_idx; Type: INDEX; Schema: public; Owner: -

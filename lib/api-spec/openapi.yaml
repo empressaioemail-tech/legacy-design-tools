@@ -49,6 +49,60 @@ paths:
                 items:
                   $ref: "#/components/schemas/EngagementSummary"
 
+  /engagements/match:
+    post:
+      operationId: matchEngagement
+      tags: [engagements]
+      summary: Resolve a Revit file to an engagement (or signal create-new)
+      description: |
+        Called by the Revit add-in BEFORE uploading a snapshot, to decide which
+        engagement (if any) the file belongs to. Auth: requires the same
+        `x-snapshot-secret` header as POST /snapshots.
+
+        Precedence (first hit wins):
+          1. `revitCentralGuid` exact match → action="auto-bind".
+          2. `revitDocumentPath` exact match → action="auto-bind".
+          3. case-insensitive `projectName` collision → action="choose" with
+             up to 10 candidates (newest first). The add-in MUST surface a
+             dropdown in this case, regardless of GUID presence.
+          4. nothing matched → action="create-new".
+
+        Note: even when a GUID is supplied, a name collision still returns
+        "choose" if neither GUID nor path matched — the user makes the final
+        call. GUID is sticky on rebind: an engagement's stored GUID is never
+        overwritten by a later snapshot from a different file.
+      parameters:
+        - name: x-snapshot-secret
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchEngagementBody"
+      responses:
+        "200":
+          description: Match result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchEngagementResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid snapshot secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /engagements/{id}:
     get:
       operationId: getEngagement
@@ -613,6 +667,12 @@ components:
             - type: "null"
         site:
           $ref: "#/components/schemas/Site"
+        revitCentralGuid:
+          type: string
+          nullable: true
+        revitDocumentPath:
+          type: string
+          nullable: true
       required:
         - id
         - name
@@ -624,6 +684,8 @@ components:
         - snapshotCount
         - latestSnapshot
         - site
+        - revitCentralGuid
+        - revitDocumentPath
 
     EngagementDetail:
       type: object
@@ -662,6 +724,12 @@ components:
           type: array
           items:
             type: string
+        revitCentralGuid:
+          type: string
+          nullable: true
+        revitDocumentPath:
+          type: string
+          nullable: true
       required:
         - id
         - name
@@ -674,6 +742,8 @@ components:
         - latestSnapshot
         - snapshots
         - site
+        - revitCentralGuid
+        - revitDocumentPath
 
 
     SnapshotSummary:
@@ -714,13 +784,146 @@ components:
         - receivedAt
 
     SnapshotPayload:
+      description: |
+        A04.7 — discriminated union. Either bind to an existing engagement by
+        id (typically returned by /engagements/match action="auto-bind" or
+        chosen from action="choose"), or explicitly request a new engagement
+        via createNewEngagement=true with the project metadata.
+      oneOf:
+        - $ref: "#/components/schemas/SnapshotPayloadExisting"
+        - $ref: "#/components/schemas/SnapshotPayloadNew"
+
+    SnapshotPayloadExisting:
+      type: object
+      properties:
+        engagementId:
+          type: string
+      required:
+        - engagementId
+      additionalProperties: true
+
+    SnapshotPayloadNew:
+      type: object
+      properties:
+        createNewEngagement:
+          type: boolean
+          enum: [true]
+          description: Discriminator literal — must be true to select this branch.
+        projectName:
+          type: string
+        revitCentralGuid:
+          type: string
+          nullable: true
+        revitDocumentPath:
+          type: string
+          nullable: true
+      required:
+        - createNewEngagement
+        - projectName
+      additionalProperties: true
+
+    MatchEngagementBody:
       type: object
       properties:
         projectName:
           type: string
+        revitCentralGuid:
+          type: string
+          nullable: true
+        revitDocumentPath:
+          type: string
+          nullable: true
       required:
         - projectName
-      additionalProperties: true
+
+    EngagementCandidate:
+      type: object
+      description: Lean engagement summary for the add-in's "choose" dropdown.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+          nullable: true
+        jurisdiction:
+          type: string
+          nullable: true
+        revitCentralGuid:
+          type: string
+          nullable: true
+        revitDocumentPath:
+          type: string
+          nullable: true
+        snapshotCount:
+          type: integer
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - address
+        - jurisdiction
+        - revitCentralGuid
+        - revitDocumentPath
+        - snapshotCount
+        - updatedAt
+
+    MatchEngagementResponse:
+      oneOf:
+        - $ref: "#/components/schemas/MatchAutoBindResult"
+        - $ref: "#/components/schemas/MatchChooseResult"
+        - $ref: "#/components/schemas/MatchCreateNewResult"
+      discriminator:
+        propertyName: action
+        mapping:
+          auto-bind: "#/components/schemas/MatchAutoBindResult"
+          choose: "#/components/schemas/MatchChooseResult"
+          create-new: "#/components/schemas/MatchCreateNewResult"
+
+    MatchAutoBindResult:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [auto-bind]
+        engagementId:
+          type: string
+        engagementName:
+          type: string
+        matchedBy:
+          type: string
+          enum: [revitCentralGuid, revitDocumentPath]
+      required:
+        - action
+        - engagementId
+        - engagementName
+        - matchedBy
+
+    MatchChooseResult:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [choose]
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/EngagementCandidate"
+      required:
+        - action
+        - candidates
+
+    MatchCreateNewResult:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [create-new]
+      required:
+        - action
 
     SnapshotReceipt:
       type: object
