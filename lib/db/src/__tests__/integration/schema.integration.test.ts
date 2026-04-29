@@ -26,7 +26,7 @@ import {
   codeAtoms,
   codeAtomFetchQueue,
 } from "../../schema";
-import { withTestSchema } from "../utils";
+import { withTestSchema } from "../../testing";
 
 /**
  * Vitest's .rejects.toThrow only inspects message text, but Drizzle's

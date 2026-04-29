@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   dbResponses: [] as unknown[][],
   embedQueryResult: null as number[] | null,
-  embedQuerySpy: undefined as undefined | ((q: string) => Promise<number[] | null>),
+  embedQuerySpy: undefined as undefined | ((q: string) => void),
 }));
 
 function chainable(): unknown {

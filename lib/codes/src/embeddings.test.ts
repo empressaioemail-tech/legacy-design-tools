@@ -60,7 +60,7 @@ describe("embeddings: with API key (mocked OpenAI)", () => {
   });
 
   it("happy path: returns vectors keyed by index", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(
         JSON.stringify({
           data: [
@@ -83,10 +83,11 @@ describe("embeddings: with API key (mocked OpenAI)", () => {
     // Inspect the request: should hit /embeddings with Bearer auth and the
     // expected model + dimensions.
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [, init] = fetchSpy.mock.calls[0];
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("POST");
-    expect(init.headers.Authorization).toBe("Bearer sk-test-fake");
-    const body = JSON.parse(init.body);
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer sk-test-fake");
+    const body = JSON.parse(init.body as string);
     expect(body.model).toBe("text-embedding-3-small");
     expect(body.dimensions).toBe(EMBEDDING_DIMENSIONS);
     expect(body.input).toEqual(["foo", "bar"]);
@@ -117,7 +118,7 @@ describe("embeddings: with API key (mocked OpenAI)", () => {
   });
 
   it("clamps very long inputs to 32k chars", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(
         JSON.stringify({
           data: [{ embedding: [0.5], index: 0 }],
@@ -129,12 +130,13 @@ describe("embeddings: with API key (mocked OpenAI)", () => {
     vi.stubGlobal("fetch", fetchSpy);
     const huge = "x".repeat(100_000);
     await embedTexts([huge]);
-    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(init.body as string);
     expect(body.input[0].length).toBe(32_000);
   });
 
   it("substitutes a single space for empty inputs (OpenAI rejects empty)", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(
         JSON.stringify({
           data: [{ embedding: [0], index: 0 }],
@@ -145,7 +147,8 @@ describe("embeddings: with API key (mocked OpenAI)", () => {
     );
     vi.stubGlobal("fetch", fetchSpy);
     await embedTexts([""]);
-    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(init.body as string);
     expect(body.input[0]).toBe(" ");
   });
 

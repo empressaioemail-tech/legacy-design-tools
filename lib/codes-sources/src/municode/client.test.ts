@@ -62,23 +62,23 @@ describe("municodeGet: HTTP basics", () => {
   });
 
   it("sends the Hauska User-Agent and Accept: application/json", async () => {
-    const fetchSpy = vi.fn(async () => jsonResponse({ ok: true }));
+    const fetchSpy = vi.fn<typeof fetch>(async () => jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchSpy);
     await municodeGet({ path: "/x", params: {} });
-    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
     const headers = init.headers as Record<string, string>;
     expect(headers["User-Agent"]).toMatch(/Hauska-CodeAtoms/);
     expect(headers.Accept).toBe("application/json");
   });
 
   it("serializes params into the query string", async () => {
-    const fetchSpy = vi.fn(async () => jsonResponse({ ok: true }));
+    const fetchSpy = vi.fn<typeof fetch>(async () => jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchSpy);
     await municodeGet({
       path: "/codesToc/children",
       params: { jobId: 123, productId: 456, nodeId: "ABC" },
     });
-    const url = String(fetchSpy.mock.calls[0][0]);
+    const url = String(fetchSpy.mock.calls[0]?.[0]);
     expect(url).toMatch(/api\.municode\.com\/codesToc\/children/);
     expect(url).toMatch(/jobId=123/);
     expect(url).toMatch(/productId=456/);
@@ -86,13 +86,13 @@ describe("municodeGet: HTTP basics", () => {
   });
 
   it("skips undefined params (does not write 'undefined' into the URL)", async () => {
-    const fetchSpy = vi.fn(async () => jsonResponse({ ok: true }));
+    const fetchSpy = vi.fn<typeof fetch>(async () => jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchSpy);
     await municodeGet({
       path: "/codesToc/children",
       params: { jobId: 1, productId: 2, nodeId: undefined },
     });
-    const url = String(fetchSpy.mock.calls[0][0]);
+    const url = String(fetchSpy.mock.calls[0]?.[0]);
     expect(url).not.toMatch(/nodeId/);
   });
 });

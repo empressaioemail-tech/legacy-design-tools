@@ -84,3 +84,67 @@ Out of scope for Part 1. Part 2 should add a GitHub Actions workflow that:
 - caches pnpm + vitest transform cache
 - enforces a coverage floor (suggest 70% lines on `lib/codes` and
   `lib/codes-sources` excluding `index.ts` glue)
+
+---
+
+# Tests / hardening deferred to Sprint H01 Part 3 (or later)
+
+## `withTestSchema` reaper hardening
+
+Current behavior: on each call to `withTestSchema`, a one-shot reaper drops
+any `test_*` schemas older than 1 hour before creating the new one. This is
+best-effort — if the process is killed mid-test (SIGKILL, container OOM,
+laptop lid close mid-debug), the in-progress schema leaks until the next
+test run.
+
+Why deferred: real-world likelihood is low for the solo-dev workflow we
+have today. The failure mode is loss of a single in-progress test schema —
+no production data risk, no test correctness risk (each test gets a fresh
+unique schema name), and the next run cleans it up. Cost of a more robust
+implementation (pg_advisory_lock + a separate reaper process, or a
+lifecycle hook in vitest's globalTeardown) is not yet warranted.
+
+Revisit if: we move to CI with parallel test runners (where a leaked
+schema from job N could collide with job N+1 only by name, but disk
+pressure on the dev DB could become real), or if we ever observe more
+than a handful of orphan schemas accumulating.
+
+## Fixture-rewriter exception list extension
+
+Current: `refresh-schema-fixture.sh` and `check-fixture-drift.sh` strip
+`pg_dump`'s `SET …` / `SELECT pg_catalog.set_config(…)` preamble and
+rewrite `public.` → `@@SCHEMA@@.` (with a re-exception for
+`public.vector(`). That is the entire transform.
+
+If we ever introduce schema features that need additional rewrites — for
+example, a Postgres extension whose types live in a non-public schema, a
+`COMMENT ON` we want to keep, or a partitioned-table syntax `pg_dump`
+emits with hard-coded schema qualifiers — extend the `sed` pipeline in
+**both** scripts at the same time. They are intentionally kept in lockstep
+(inline copies, not a sourced helper) so a divergence is loud at review
+time. Track these as they come up; punt to Part 3 if the list grows
+beyond two or three exceptions.
+
+## Anthropic singleton → factory migration
+
+Sprint H01 Part 2 added `createAnthropicClient(opts?)` alongside the
+existing `anthropic` singleton, with the singleton kept for back-compat.
+Production callers were intentionally **not** changed. The known callers
+that could move to the factory pattern (and the rationale for not
+touching them yet) are listed in the Part 2 final report. Revisit if any
+caller starts needing per-request configuration (different timeouts,
+different base URLs, request-scoped logging) — that's the right trigger
+to migrate.
+
+## Frontend coverage beyond smoke
+
+Part 2 covers `CitationChip`, `ClaudeChat`, `SheetGrid`, `SheetViewer`
+with happy-dom + RTL smoke tests. Out of scope and deferred:
+
+- Playwright end-to-end coverage of the Revit-snapshot → chat flow
+- The Code Library tab (search, jurisdiction filter, atom detail drawer)
+- The plan-review artifact (separate Vitest setup needed; pre-existing
+  TS errors in its `mock.ts` should be cleared first)
+- Streaming-ReadableStream test for `ClaudeChat.sendMessage` SSE
+  consumption (currently exercised end-to-end via the api-server route
+  test; no per-component test of the consumer)

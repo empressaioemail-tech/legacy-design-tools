@@ -47,9 +47,23 @@ function maybeWarnMissingKey(logger?: { warn: (obj: unknown, msg: string) => voi
   else console.warn(msg);
 }
 
+export interface EmbedTextsOptions {
+  logger?: {
+    warn: (obj: unknown, msg: string) => void;
+    error?: (obj: unknown, msg: string) => void;
+  };
+  /**
+   * TEST-ONLY. When provided, used in place of the global `fetch` to call
+   * OpenAI. Production code must NOT pass this. Used by api-server route
+   * tests to deterministically simulate embedding responses without
+   * network access.
+   */
+  fetcher?: typeof fetch;
+}
+
 export async function embedTexts(
   inputs: string[],
-  opts: { logger?: { warn: (obj: unknown, msg: string) => void; error?: (obj: unknown, msg: string) => void } } = {},
+  opts: EmbedTextsOptions = {},
 ): Promise<EmbedResult> {
   if (inputs.length === 0) {
     return { vectors: [], embeddedAny: false };
@@ -69,8 +83,10 @@ export async function embedTexts(
   // text-embedding-3-small 8191-token cap with margin.
   const safeInputs = inputs.map((s) => (s ?? "").slice(0, 32000) || " ");
 
+  const fetchImpl = opts.fetcher ?? fetch;
+
   try {
-    const res = await fetch(`${OPENAI_BASE}/embeddings`, {
+    const res = await fetchImpl(`${OPENAI_BASE}/embeddings`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -106,7 +122,7 @@ export async function embedTexts(
 
 export async function embedQuery(
   q: string,
-  opts: { logger?: { warn: (obj: unknown, msg: string) => void; error?: (obj: unknown, msg: string) => void } } = {},
+  opts: EmbedTextsOptions = {},
 ): Promise<number[] | null> {
   const r = await embedTexts([q], opts);
   return r.vectors[0] ?? null;
