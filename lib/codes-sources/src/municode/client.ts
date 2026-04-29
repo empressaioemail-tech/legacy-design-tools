@@ -40,7 +40,12 @@ export class MunicodeDailyCapExceeded extends Error {
 
 const userAgent =
   process.env.MUNICODE_USER_AGENT ?? "Hauska-CodeAtoms/0.1 (+nick@hauska.io)";
-const dailyCap = Number(process.env.MUNICODE_DAILY_REQUEST_CAP ?? "500");
+
+// Mutable so tests can tighten / relax limits without an env-reload cycle.
+let dailyCap = Number(process.env.MUNICODE_DAILY_REQUEST_CAP ?? "500");
+let minGapMs = Number(process.env.MUNICODE_MIN_GAP_MS ?? "1500");
+let jitterMaxMs = Number(process.env.MUNICODE_JITTER_MAX_MS ?? "1000");
+let retryBackoffsMs: number[] = [1000, 2000, 4000];
 
 const queue = new PQueue({ concurrency: 1 });
 
@@ -90,9 +95,8 @@ function buildUrl(req: RawRequest): string {
 }
 
 async function performOnce(req: RawRequest): Promise<unknown> {
-  // Spacing: 1.5s minimum + 0..1s jitter from the previous successful start.
-  const minGapMs = 1500;
-  const jitter = Math.floor(Math.random() * 1000);
+  // Spacing: configured min-gap + 0..jitterMax jitter from the previous start.
+  const jitter = jitterMaxMs > 0 ? Math.floor(Math.random() * jitterMaxMs) : 0;
   const wait = Math.max(0, lastRequestTs + minGapMs + jitter - Date.now());
   if (wait > 0) await delay(wait);
 
@@ -129,19 +133,18 @@ async function performOnce(req: RawRequest): Promise<unknown> {
 }
 
 async function performWithRetry(req: RawRequest): Promise<unknown> {
-  const backoffs = [1000, 2000, 4000];
   let lastErr: unknown;
-  for (let attempt = 0; attempt <= backoffs.length; attempt++) {
+  for (let attempt = 0; attempt <= retryBackoffsMs.length; attempt++) {
     try {
       return await performOnce(req);
     } catch (err) {
       lastErr = err;
       const status = err instanceof MunicodeError ? err.status : 0;
       const retryable = status === 429 || (status >= 500 && status < 600);
-      if (!retryable || attempt === backoffs.length) {
+      if (!retryable || attempt === retryBackoffsMs.length) {
         throw err;
       }
-      await delay(backoffs[attempt]);
+      await delay(retryBackoffsMs[attempt]);
     }
   }
   throw lastErr;
@@ -167,6 +170,39 @@ export function municodeStats(): MunicodeStats {
     dailyResetIso: new Date(dailyResetTs).toISOString(),
     userAgent,
   };
+}
+
+/**
+ * TEST-ONLY: reset module-level rate-limiter state (lastRequestTs, dailyUsed,
+ * daily reset clock). Production code must never call this. Exposed so the
+ * client.test.ts suite can run multiple independent scenarios from a clean
+ * baseline without relying on vi.resetModules().
+ */
+export function __resetMunicodeClientStateForTesting(): void {
+  lastRequestTs = 0;
+  dailyUsed = 0;
+  dailyResetTs = nextUtcMidnight();
+  // Also restore production defaults for any overrides applied below.
+  dailyCap = Number(process.env.MUNICODE_DAILY_REQUEST_CAP ?? "500");
+  minGapMs = Number(process.env.MUNICODE_MIN_GAP_MS ?? "1500");
+  jitterMaxMs = Number(process.env.MUNICODE_JITTER_MAX_MS ?? "1000");
+  retryBackoffsMs = [1000, 2000, 4000];
+}
+
+/**
+ * TEST-ONLY: tighten or loosen rate-limit knobs for a single test scenario.
+ * Pair with `__resetMunicodeClientStateForTesting()` to restore defaults.
+ */
+export function __setRateLimitOverridesForTesting(opts: {
+  minGapMs?: number;
+  jitterMaxMs?: number;
+  dailyCap?: number;
+  retryBackoffsMs?: number[];
+}): void {
+  if (opts.minGapMs !== undefined) minGapMs = opts.minGapMs;
+  if (opts.jitterMaxMs !== undefined) jitterMaxMs = opts.jitterMaxMs;
+  if (opts.dailyCap !== undefined) dailyCap = opts.dailyCap;
+  if (opts.retryBackoffsMs !== undefined) retryBackoffsMs = opts.retryBackoffsMs;
 }
 
 // High-level typed wrappers ---------------------------------------------------

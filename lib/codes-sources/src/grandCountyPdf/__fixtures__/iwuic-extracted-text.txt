@@ -1,0 +1,2903 @@
+
+
+2006 U
+WU
+IC
+TAH
+ILDLAND-   RBAN
+NTERFACE    ODE
+
+2006 Utah Wildland-Urban Interface Code
+First Printing:July 2006
+Second Printing:October 2006
+Third Printing:March 2007
+Fourth Printing:February 2008
+Fifth Printing:June 2008
+COPYRIGHT © 2006
+by
+INTERNATIONAL CODE COUNCIL, INC.
+ALL RIGHTS RESERVED. This 2006Utah Wildland-Urban Interface Codecontains substantial copyrighted material from the
+2003International Wildland-Urban Interface Code, which is a copyrighted work owned by the International Code Council, Inc.
+Without advance written permission from the copyright owner, no part of this book may be reproduced, distributed or transmitted in
+any form or by any means, including, without limitation, electronic, optical or mechanical means (by way of example and not limita-
+tion, photocopying, or recording by or in an information storage retrieval system). For information on permission to copy material
+exceeding  fair  use,  please  contact:  Publications,  4051  West  Flossmoor  Road,  Country  Club  Hills,  IL  60478-5771.  Phone
+1-888-ICC-SAFE (422-7233).
+Trademarks: “International Code Council,” the “International Code Council” logo and the “International Residential Code” are
+trademarks of the International Code Council, Inc.
+PRINTED IN THE U.S.A.
+
+PREFACE
+Introduction
+Internationally, code officials recognize the need for a modern, up-to-date code addressing the mitigation of fire in the urban-wildland in-
+terface. TheInternational Wildland-Urban Interface Code™, in this 2003 edition, is designed to bridge the gap between enforcement of the
+International Building Code
+Ò
+andInternational Fire Code
+Ò
+by mitigating the hazard of wildfires through model code regulations, which
+safeguard the public health and safety in all communities, large and small.
+This comprehensive urban-wildland interface code establishes minimum regulations for land use and the built environment in desig-
+nated urban-wildland interface areas using prescriptive and performance-related provisions. It is founded on data collected from tests and
+fire incidents, technical reports and mitigation strategies from around the world. This 2003 edition is fully compatible with all theInterna-
+tional Codes™(“I-Codes”™)published by the International Code Council
+Ò
+(ICC
+Ò
+), including theInternational Building Code
+Ò
+, ICC
+Electrical Code™, International Energy Conservation Code
+Ò
+, International Existing Builiding Code
+Ò
+, International Fire Code
+Ò
+, Interna-
+tional Fuel Gas Code
+Ò
+, International Mechanical Code
+Ò
+, ICC Performance Code™, International Plumbing Code
+Ò
+, International Pri-
+vate Sewage Disposal Code
+Ò
+, International Property Maintenance Code
+Ò
+, International Residential Code
+Ò
+andInternational Zoning
+Code
+Ò
+.
+TheInternational Wildland-Urban Interface Codeprovisions provide many benefits, including the model code development process,
+which offers an international forum for fire safety professionals to discuss performance and prescriptive code requirements. This forum
+provides an excellent arena to debate proposed revisions. This model code also encourages international consistency in the application of
+provisions.
+Development
+This is the first edition of theInternational Wildland-Urban Interface Code(2003) and is the culmination of an effort initiated in 2001 by
+the ICC and the three statutory members of the International Code Council: Building Officials and Code Administrators International, Inc.
+(BOCA), International Conference of Building Officials (ICBO) and Southern Building Code Congress International (SBCCI). The intent
+was to draft a comprehensive set of regulations for mitigating the hazard to life and property from the intrusion of fire from wildland expo-
+sures and fire from adjacent structures, and preventing structure fires from spreading to wildland fuels. Technical content of the 2000
+Wildland- Urban Interface Code, published by the International Fire Code Institute, was utilized as the basis for the development, followed
+by the publication of the 2001 Final Draft. This 2003 edition is based on the Final Draft, with changes approved in the 2002 ICC Code De-
+velopment Process. A new edition such as this is promulgated every three years.
+With the development and publication of the family ofInternational Codesin 2000, the continued development and maintenance of the
+model codes individually promulgated by BOCA (“BOCA National Codes”), ICBO (“Uniform Codes”) and SBCCI (“Standard Codes”)
+was discontinued. The 2003International Codes,as well as their predecessors—the 2000International Codes—are intended to be the suc-
+cessor set of codes to those codes previously developed by BOCA, ICBO and SBCCI.
+The development of a single family of comprehensive and coordinatedInternational Codeswas a significant milestone in the develop-
+ment of regulations for the built environment. The timing of this publication mirrors a milestone in the change in structure of the model
+codes, namely, the pending consolidation of BOCA, ICBO and SBCCI into the ICC. The activities and services previously provided by the
+individual model code organizations will be the responsibility of the consolidated ICC.
+This code is founded on principles intended to mitigate the hazard from fires through the development of provisions that adequately pro-
+tect public health, safety and welfare; provisions that do not unnecessarily increase construction costs; provisions that do not restrict the use
+of new materials, products or methods of construction; and provisions that do not give preferential treatment to particular types or classes of
+materials, products or methods of construction.
+Adoption
+TheInternational Wildland-Urban Interface Codeis available for adoption and use by jurisdictions internationally. Its use within a govern-
+mental jurisdiction is intended to be accomplished through adoption by reference in accordance with proceedings establishing the jurisdic-
+tion’s  laws.  At  the  time  of  adoption,  jurisdictions  should  insert  the  appropriate  information  in  provisions  requiring  specific  local
+information, such as the name of the adopting jurisdiction. These locations are shown in bracketed words in small capital letters in the code
+and in the sample ordinance. The sample adoption ordinance on pagevaddresses several key elements of a code adoption ordinance,
+including the information required for insertion into the code text.
+2006 UTAH WILDLAND-URBAN INTERFACE CODEiii
+1
+0b_pref_Utah_WildlandUrban_2006_pg_iii.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\0b_pref_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:47:06 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+Maintenance
+TheInternational Wildland-Urban Interface Codeis kept up-to-date through the review of proposed changes submitted by code
+enforcing officials, industry representatives, design professionals and other interested parties. Proposed changes are carefully
+considered through an open code development process in which all interested and affected parties may participate.
+The contents of this work are subject to change both through the Code Development Cycles and the governmental body that enacts the
+code into law. For more information regarding the code development process, contact the Code and Standard Development Department of
+the International Code Council.
+Although the development procedure of theInternational Wildland-Urban Interface Codeassures the highest degree of care, ICC and
+the founding members of ICC—BOCA, ICBO and SBCCI—their members and those participating in the development of this code do not
+accept any liability resulting from compliance or noncompliance with the provisions, because ICC and its founding members do not have
+the power or authority to police or enforce compliance with the contents of this code. Only the governmental body that enacts the code into
+law has such authority.
+Authority
+The Division is required to establish minimum standards for a wildland fire ordinance and specify minimum standards for wildland fire
+training, certification and wildland fire suppression equipment in accordance with subsections 65A-8-6(3)(a) and 65A-8-6(3)(b). This re-
+quirement is promulgated under general rule-making authority of subsection 65A-1-4(2).
+iv2006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+0b_pref_Utah_WildlandUrban_2006_pg_iv.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\0b_pref_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:47:24 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+ORDINANCE
+TheInternational Codesare designed and promulgated to be adopted by reference by ordinance. Jurisdictions wishing to adopt the 2003
+International Wildland-Urban Interface Codeas an enforceable regulation for the mitigation of fire in the urban-wildland interface should
+ensure that certain factual information is included in the adopting ordinance at the time adoption is being considered by the appropriate
+governmental body. The following sample adoption ordinance addresses several key elements of a code adoption ordinance, including the
+information required for insertion into the code text.
+Minimum Standards for Wildland Fire Ordinance
+The division uses theInternational Wildland-Urban Interface Codeas a basis for establishing the minimum standards discussed in this
+document. A county ordinance that at least meets the minimum standards should be in place by September 2006.
+The Division incorporates by reference the 2003International Code Council Wildland-Urban Interface Codeas the minimum standard
+for wildland fire ordinance in conjunction with Utah requirements.
+SAMPLE ORDINANCE FOR ADOPTION OF
+THE
+INTERNATIONAL WILDLAND-URBAN INTERFACE CODE
+ORDINANCE NO.________
+An ordinance of the[JURISDICTION]adopting the 2003 edition of theInternational Wildland-Urban Interface Codeas currently
+amended by the division of Forestry, Fire and State Lands, regulating and governing the mitigation of hazard to life and property from the
+intrusion of fire from wildland exposures, fire from adjacent structures and prevention of structure fires from spreading to wildland fuels in
+the
+[JURISDICTION]; providing for the issuance of permits and collection of fees therefor; repealing Ordinance No. ______ of the[JU-
+RISDICTION]and all other ordinances and parts of the ordinances in conflict therewith.
+The
+[GOVERNING BODY]of the[JURISDICTION]does ordain as follows:
+Section 1.That a certain document, three (3) copies of which are on file in the office of the
+[TITLE OF JURISDICTION’S KEEPER OF RE-
+CORDS]of[NAME OF JURISDICTION], being marked and designated as theInternational Wildland-Urban Interface Code, 2003 edi-
+tion, including Appendix Chapters
+[FILL IN THE APPENDIX CHAPTERS BEING ADOPTED  ], as published by the International Code
+Council, be and is hereby adopted as the Urban-Wildland Interface Code of the
+[JURISDICTION], in the State of[STATE NAME]for reg-
+ulating and governing the mitigation of hazard to life and property from the intrusion of fire from wildland exposures, fire from adjacent
+structures and prevention of structure fires from spreading to wildland fuels as herein provided; providing for the issuance of permits and
+collection of fees therefor; and each and all of the regulations, provisions, penalties, conditions and terms of said Urban-Wildland Interface
+Code on file in the office of the
+[JURISDICTION]are hereby referred to, adopted, and made a part hereof, as if fully set out in this ordi-
+nance, with the additions, insertions, deletions and changes, if any, prescribed in Section 2 of this ordinance.
+Section 2.The following sections are hereby revised:
+Section 101.1. Insert:
+[NAME OF JURISDICTION]
+Section 3.That Ordinance No. ______ of[JURISDICTION]entitled[FILL IN HERE THE COMPLETE TITLE OF THE ORDINANCE OR OR-
+DINANCES IN EFFECT AT THE PRESENT TIME SO THAT THEY WILL BE REPEALED BY DEFINITE MENTION]and all other ordinances or
+parts of ordinances in conflict herewith are hereby repealed.
+Section 4.That if any section, subsection, sentence, clause or phrase of this ordinance is, for any reason, held to be unconstitutional, such
+decision shall not affect the validity of the remaining portions of this ordinance. The
+[GOVERNING BODY]hereby declares that it would
+have passed this ordinance, and each section, subsection, clause or phrase thereof, irrespective of the fact that any one or more sections, sub-
+sections, sentences, clauses and phrases be declared unconstitutional.
+Section 5.That nothing in this ordinance or in theWildland-Urban Interface Codehereby adopted shall be construed to affect any suit or
+proceeding impending in any court, or any rights acquired, or liability incurred, or any cause or causes of action acquired or existing, under
+any act or ordinance hereby repealed as cited in Section 2 of this ordinance; nor shall any just or legal right or remedy of any character be
+lost, impaired or affected by this ordinance.
+2006 UTAH WILDLAND-URBAN INTERFACE CODEv
+1
+0c_ord_Utah_WildlandUrban_2006_pgv.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\0c_ord_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:33:06 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+Section 6.That the[JURISDICTION’S KEEPER OF RECORDS]is hereby ordered and directed to cause this ordinance to be published.
+(An additional provision may be required to direct the number of times the ordinance is to be published and to specify that it is to be in a
+newspaper in general circulation. Posting may also be required.)
+Section 7.That this ordinance and the rules, regulations, provisions, requirements, orders and matters established and adopted hereby
+shall take effect and be in full force and effect
+[TIME PERIOD]from and after the date of its final passage and adoption.
+Section 8.Specific boundaries of natural or man-made features of wildland-urban interface areas shall be as shown on the wildland area
+interface map. The legal description of such areas is as described as follows:
+[INSERT LEGAL DESCRIPTION]
+vi2006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+0c_ord_Utah_WildlandUrban_2006_pgvi.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\0c_ord_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:33:28 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+TABLE OF CONTENTS
+CHAPTER 1ADMINISTRATION. . . . . . . . . . . . . . . 1
+Section
+101General . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+102Authority of the Code Official  . . . . . . . . . . . . . . . . . 1
+103Compliance Alternatives . . . . . . . . . . . . . . . . . . . . . . 2
+104Appeals . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 2
+105Permits  . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 2
+106Plans and Specifications . . . . . . . . . . . . . . . . . . . . . . 3
+107Inspection and Enforcement . . . . . . . . . . . . . . . . . . . 4
+108Certificate of Completion . . . . . . . . . . . . . . . . . . . . . 5
+CHAPTER 2DEFINITIONS  . . . . . . . . . . . . . . . . . . . 7
+Section
+201General . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+202Definitions. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+CHAPTER 3WILDLAND-URBAN
+INTERFACE AREAS . . . . . . . . . . . . . . 9
+Section
+301Wildland-Urban Interface Area Designations . . . . . . 9
+CHAPTER 4WILDLAND-URBAN INTERFACE
+AREA REQUIREMENTS . . . . . . . . . 11
+Section
+401General . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+402Applicability . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+403Access . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+404Water Supply. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+405Fire Protection Plan. . . . . . . . . . . . . . . . . . . . . . . . . 13
+CHAPTER 5SPECIAL BUILDING CON-
+STRUCTION REGULATIONS  . . . . 15
+Section
+501General . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+502Fire Hazard Severity . . . . . . . . . . . . . . . . . . . . . . . . 15
+503Ignition-resistant Construction . . . . . . . . . . . . . . . . 15
+504Class 1 Ignition-resistant Construction . . . . . . . . . . 15
+505Class 2 Ignition-resistant Construction . . . . . . . . . . 16
+506Class 3 Ignition-resistant Construction . . . . . . . . . . 17
+507Replacement or Repair of Roof Coverings . . . . . . . 18
+CHAPTER 6FIRE-PROTECTION
+REQUIREMENTS  . . . . . . . . . . . . . . . 19
+Section
+601General . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+603Defensible Space. . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+604Maintenance of Defensible Space . . . . . . . . . . . . . . 20
+605Spark Arresters . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+606Liquefied Petroleum Gas Installations  . . . . . . . . . . 20
+607Storage of Firewood and
+Combustible Materials  . . . . . . . . . . . . . . . . . . . . . . 20
+APPENDIX A   GENERAL REQUIREMENTS. . . . . 21
+Section
+A101   General . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+A102   Vegetation Control  . . . . . . . . . . . . . . . . . . . . . . . . . 21
+A103   Access Restrictions . . . . . . . . . . . . . . . . . . . . . . . . . 22
+A104   Ignition Source Control. . . . . . . . . . . . . . . . . . . . . . 22
+A105   Control of Storage. . . . . . . . . . . . . . . . . . . . . . . . . . 23
+A106   Dumping . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+A107   Protection of Pumps and Water
+Storage Facilities. . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+A108   Land Use Limitations . . . . . . . . . . . . . . . . . . . . . . . 24
+APPENDIX B    VEGETATION
+MANAGEMENT PLAN . . . . . . . . . . . 25
+APPENDIX C   FIRE HAZARD
+SEVERITY FORM . . . . . . . . . . . . . . . 27
+INDEX . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29
+2006 UTAH WILDLAND-URBAN INTERFACE CODEvii
+1
+0d_toc_Utah_WildlandUrban_2006_pgvii.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\0d_toc_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:34:52 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+viii2006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+0d_toc_Utah_WildlandUrban_2006_pgviii.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\0d_toc_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:42:28 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+SECTION 101
+GENERAL
+101.1  Scope.The provisions of this code shall apply to the
+construction,  alteration,  movement,  repair,  maintenance  and
+use of any building, structure or premises within the urban-
+wildland interface areas in this jurisdiction.
+Buildings or conditions in existence at the time of the adop
+-
+tion of this code are allowed to have their use or occupancy con
+-
+tinued, if such condition, use or occupancy was legal at the time
+of the adoption of this code, provided such continued use does
+not constitute a distinct danger to life or property.
+Buildings or structures moved into or within the jurisdiction
+shall comply with the provisions of this code for new buildings
+or structures.
+101.2  Objective.The  objective  of  this  code  is  to  establish
+minimum  regulations  consistent  with  nationally  recognized
+good practice for the safeguarding of life and property. Regula-
+tions in this code are intended to mitigate the risk to life and
+structures from intrusion of fire from wildland fire exposures
+and  fire  exposures  from  adjacent  structures  and  to  mitigate
+structure fires from spreading to wildland fuels.
+The development and use of property in wildland-urban in-
+terface areas is a potential threat to life and property from fire
+and resulting erosion. Safeguards to prevent the occurrence of
+fires and to provide adequate fire-protection facilities to control
+the spread of fire in wildland-urban interface areas shall be in
+accordance with this code.
+This code shall supplement the jurisdiction’s building and
+fire codes, if such codes have been adopted, to provide for spe
+-
+cial regulations to mitigate the fire- and life-safety hazards of
+the wildland-urban interface areas.
+101.3  Retroactivity.The provisions of the code shall apply
+to conditions arising after the adoption thereof, conditions not
+legally in existence at the adoption of this code, to conditions
+which, in the opinion of the code official, constitute a distinct
+hazard to life or property.
+101.4  Additions  or  alterations.Additions  or  alterations
+may be made to any building or structure without requiring the
+existing building or structure to comply with all of the require
+-
+ments of  this code,  provided  the addition  or  alteration con
+-
+forms to that required for a new building or structure.
+Exception:Provisions of this code that specifically apply to
+existing conditions are retroactive. See Section 601.1 and
+Appendix A.
+Additions  or  alterations  shall  not  be  made  to  an  existing
+building or structure that will cause the existing building or
+structure to be in violation of any of the provisions of this code
+nor shall such additions or alterations cause the existing build
+-
+ing or structure to become unsafe. An unsafe condition shall be
+deemed to have been created if an addition or alteration will
+cause the existing building or structure to become structurally
+unsafe or overloaded; will not provide adequate access in com
+-
+pliance with the provisions of this code or will obstruct existing
+exits or access; will create a fire hazard; will reduce required
+fire resistance or will otherwise create conditions dangerous to
+human life.
+101.5  Maintenance.All buildings, structures, landscape ma
+-
+terials, vegetation, defensible space or other devices or safe
+-
+guards  required  by  this  code  shall  be  maintained  in
+conformance to the code edition under which installed. The
+owner or the owner’s designated agent shall be responsible for
+the maintenance of buildings, structures, landscape materials
+and vegetation.
+SECTION 102
+AUTHORITY OF THE CODE OFFICIAL
+102.1  Powers and duties of the code official.The code offi-
+cial is hereby authorized to administer and enforce this code, or
+designated sections thereof, and all ordinances of the jurisdic-
+tion pertaining to designated wildland-urban interface areas.
+For such purposes, the code official shall have the powers of a
+law enforcement officer.
+102.2  Interpretations, rules and regulations.The code of-
+ficial shall have the power to render interpretations of this code
+and to adopt and enforce rules and supplemental regulations to
+clarify the application of its provisions. Such interpretations,
+rules and regulations shall be in conformance to the intent and
+purpose of this code.
+A copy of such rules and regulations shall be filed with the
+clerk  of  the  jurisdiction  and  shall  be  in  effect  immediately
+thereafter. Additional copies shall be available for distribution
+to the public.
+102.3  Liability  of  the  code  official.The  code  official
+charged with the enforcement of this code, acting in good faith
+and without malice in the discharge of the duties required by
+this code or other pertinent law or ordinance, shall not thereby
+be rendered personally liable for damages that may accrue to
+persons or property as a result of an act or by reason of an act or
+omission in the discharge of such duties. A suit brought against
+the code official or employee because of such act or omission
+performed by the code official or employee in the enforcement
+of any provision of such codes or other pertinent laws or ordi
+-
+nances implemented through the enforcement of this code or
+enforced by the code enforcement agency shall be defended by
+this jurisdiction until final termination of such proceedings,
+and any judgment resulting therefrom shall be assumed by this
+jurisdiction. The code enforcement agency or its parent juris
+-
+diction shall not be held as assuming any liability by reason of
+the inspections authorized by this code or any permits or certif
+-
+icates issued under this code.
+102.4  Other agencies.When requested to do so by the code
+official, other officials of this jurisdiction shall assist and coop
+-
+2006 UTAH WILDLAND-URBAN INTERFACE CODE1
+CHAPTER 1
+ADMINISTRATION
+1
+01_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\01_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:15:04 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+erate with the code official in the discharge of the duties re
+-
+quired by this code.
+SECTION 103
+COMPLIANCE ALTERNATIVES
+103.1  Practical difficulties.When there are practical diffi
+-
+culties involved in carrying out the provisions of this code, the
+code official is authorized to grant modifications for individual
+cases on application in writing by the owner or a duly autho
+-
+rized representative. The code official shall first find that a spe
+-
+cial individual reason makes enforcement of the strict letter of
+this code impractical, the modification is in conformance to the
+intent and purpose of this code, and the modification does not
+lessen any fire protection requirements or any degree of struc
+-
+tural integrity. The details of any action granting modifications
+shall be recorded and entered into the files of the code enforce
+-
+ment agency.
+If the code official determines that difficult terrain, danger of
+erosion or other unusual circumstances make strict compliance
+with the vegetation control provisions of the code detrimental
+to  safety  or  impractical,  enforcement  thereof  may  be  sus-
+pended,  provided  that  reasonable  alternative  measures  are
+taken.
+103.2  Technical assistance.To determine the acceptability
+of technologies, processes, products, facilities, materials and
+uses attending the design, operation or use of a building or pre-
+mises subject to the inspection of the code official, the code of-
+ficial  is  authorized  to  require  the  owner  or  the  person  in
+possession or control of the building or premises to provide,
+without charge to the jurisdiction, a technical opinion and re
+-
+port. The opinion and report shall be prepared by a qualified
+engineer, specialist, laboratory or fire safety specialty organi
+-
+zation acceptable to the code official and the owner and shall
+analyze the fire safety of the design, operation or use of the
+building or premises, the facilities and appurtenances situated
+thereon and fuel management for purposes of establishing fire
+hazard severity to recommend necessary changes.
+103.3  Alternative materials or methods.The code official,
+in concurrence with approval from the building official and fire
+chief, is authorized to approve alternative materials or meth
+-
+ods, provided that the code official finds that the proposed de
+-
+sign, use or operation satisfactorily complies with the intent of
+this code and that the alternative is, for the purpose intended, at
+least equivalent to the level of quality, strength, effectiveness,
+fire resistance, durability and safety prescribed by this code.
+Approvals under the authority herein contained shall be subject
+to the approval of the building official whenever the alternate
+material or method involves matters regulated by theInterna
+-
+tional Building Code.
+The code official shall require that sufficient evidence or
+proof be submitted to substantiate any claims that may be made
+regarding its use. The details of any action granting approval of
+an alternate shall be recorded and entered in the files of the
+code enforcement agency.
+SECTION 104
+APPEALS
+104.1  General.To  determine  the  suitability  of  alternative
+materials and methods and to provide for reasonable interpreta
+-
+tions of the provisions of this code, there shall be and hereby is
+created a board of appeals consisting of five members who are
+qualified by experience and training to pass judgment on perti
+-
+nent matters. The code official, building official and fire chief
+shall be ex officio members, and the code official shall act as
+secretary of the board. The board of appeals shall be appointed
+by the legislative body and shall hold office at their discretion.
+The board shall adopt reasonable rules and regulations for con
+-
+ducting its investigations and shall render decisions and find
+-
+ings in writing to the code official, with a duplicate copy to the
+applicant.
+104.2  Limitations of authority.The board of appeals shall
+not have authority relative to interpretation of the administra
+-
+tive  provisions  of  this  code  and  shall  not  have  authority  to
+waive requirements of this code.
+SECTION 105
+PERMITS
+105.1  General.When not otherwise provided in the require-
+ments of the building or fire code, permits are required in ac-
+cordance with Section 105.
+105.2  Permits  required.Unless  otherwise  exempted,  no
+building or structure regulated by this code shall be erected,
+constructed, altered, repaired, moved, removed, converted or
+demolished unless a separate permit for each building or struc-
+ture has first been obtained from the code official.
+When required by the code official, a permit shall be ob-
+tained  for  the  following  activities,  operations,  practices  or
+functions within an wildland-urban interface area:
+1.  Automobile wrecking yard;
+2.  Candles and open flames in assembly areas;
+3.  Explosives or blasting agents;
+4.  Fireworks;
+5.  Flammable or combustible liquids;
+6.  Hazardous materials;
+7.  Liquefied petroleum gases;
+8.  Lumberyards;
+9.  Motor vehicle fuel-dispensing stations;
+10. Open burning;
+11. Pyrotechnical special effects material;
+12. Tents, canopies and temporary membrane structures;
+13. Tire storage;
+14. Welding and cutting operations; or
+15. Other activities as determined by the code official.
+105.3  Work  exempt  from  permit.Unless  otherwise  pro
+-
+vided in the requirements of the building or fire code, a permit
+shall not be required for the following:
+1.   One-story detached accessory buildings used as tool and
+storage sheds, playhouses and similar uses, provided the
+floor area does not exceed 120 square feet (11.15 m
+2
+) and
+ADMINISTRATION
+22006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+01_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\01_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:15:04 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+the structure is located more than 50 feet (15 240 mm)
+from the nearest adjacent structure.
+2.   Fences not over 6 feet (1829 mm) high.
+Exemption from the permit requirements of this code shall
+not be deemed to grant authorization for any work to be done in
+any manner in violation of the provisions of this code or any
+other laws or ordinances of this jurisdiction.
+The code official is authorized to stipulate conditions for
+permits. Permits shall not be issued when public safety would
+be at risk, as determined by the code official.
+105.4  Permit application.To obtain a permit, the applicant
+shall first file an application therefor in writing on a form fur
+-
+nished by the code enforcement agency for that purpose. Every
+such application shall:
+1.   Identify and describe the work, activity, operation, prac
+-
+tice or function to be covered by the permit for which ap
+-
+plication is made.
+2.   Describe the land on which the proposed work, activity,
+operation, practice or function is to be done by legal de
+-
+scription, street address or similar description that will
+readily identify and definitely locate the proposed build
+-
+ing, work, activity, operation, practice or function.
+3.   Indicate the use or occupancy for which the proposed
+work,  activity,  operation,  practice  or  function  is  in-
+tended.
+4.   Be accompanied by plans, diagrams, computation and
+specifications and other data as required in Section 106
+of this code.
+5.   State the valuation of any new building or structure or
+any  addition,  remodeling  or  alteration  to  an  existing
+building.
+6.   Be signed by the applicant or the applicant’s authorized
+agent.
+7.   Give such other data and information as may be required
+by the code official.
+105.5  Permit approval.Before a permit is issued, the code
+official, or an authorized representative, shall review and ap
+-
+prove  all  permitted  uses,  occupancies  or  structures.  Where
+laws or regulations are enforceable by other agencies or depart
+-
+ments, a joint approval shall be obtained from all agencies or
+departments concerned.
+105.6  Permit  issuance.The  application,  plans,  specifica
+-
+tions and other data filed by an applicant for a permit shall be
+reviewed by the code official. If the code official finds that the
+work  described  in an application for  a permit and the plan,
+specifications and other data filed therewith conform to the re
+-
+quirements of this code, the code official is allowed to issue a
+permit to the applicant.
+When the code official issues the permit, the code official
+shall endorse in writing or stamp the plans and specifications
+APPROVED. Such approved plans and specifications shall not
+be changed, modified or altered without authorization from the
+code official, and all work regulated by this code shall be done
+in accordance with the approved plans.
+105.7  Validity of permit.The issuance or granting of a per
+-
+mit or approval of plans, specifications and computations shall
+not  be  construed  to  be  a  permit  for,  or  an  approval of,  any
+violation of any of the provisions of this code or of any other or
+-
+dinance of the jurisdiction. Permits presuming to give authority
+to violate or conceal the provisions of this code or other ordi
+-
+nances of the jurisdiction shall not be valid.
+105.8  Expiration.Every permit issued by the code official
+under the provisions of this code shall expire by limitation and
+become null and void if the building, use or work authorized by
+such permit is not commenced within 180 days from the date of
+such permit, or if the building, use or work authorized by such
+permit is suspended or abandoned at any time after the work is
+commenced for a period of 180 days.
+Any permittee holding an unexpired permit may apply for
+an extension of the time within which work may commence un
+-
+der that permit when the permittee is unable to commence work
+within the time required by this section for good and satisfac
+-
+tory reasons. The code official may extend the time for action
+by the permittee for a period not exceeding 180 days on written
+request by the permittee showing that circumstances beyond
+the control of the permittee have prevented action from being
+taken. No permit shall be extended more than once.
+105.9  Retention of permits.Permits shall at all times be kept
+on the premises designated therein and shall at all times be sub-
+ject to inspection by the code official or other authorized repre-
+sentative.
+105.10  Revocation  of  permits.Permits  issued  under  this
+code may be suspended or revoked when it is determined by the
+code official that:
+1.   It is used by a person other than the person to whom the
+permit was issued.
+2.   It is used for a location other than that for which the per-
+mit was issued.
+3.   Any of the conditions or limitations set forth in the per
+-
+mit have been violated.
+4.   The permittee fails, refuses or neglects to comply with
+any order or notice duly served on him under the provi
+-
+sions of this code within the time provided therein.
+5.   There has been any false statement or misrepresentation
+as to material fact in the application or plans on which
+the permit or application was made.
+6.   When the permit is issued in error or in violation of any
+other ordinance, regulations or provisions of this code.
+The code official is allowed to, in writing, suspend or revoke
+a permit issued under the provisions of this code whenever the
+permit is issued in error or on the basis of incorrect information
+supplied, or in violation of any ordinance or regulation or any
+of the provisions of this code.
+SECTION 106
+PLANS AND SPECIFICATIONS
+106.1  General.Plans,  engineering  calculations,  diagrams
+and other data shall be submitted in at least two sets with each
+application for a permit. When such plans are not prepared by
+an architect or engineer, the code official may require the appli
+-
+cant submitting such plans or other data to demonstrate that
+state law does not require that the plans be prepared by a li
+-
+ADMINISTRATION
+2006 UTAH WILDLAND-URBAN INTERFACE CODE3
+3
+01_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\01_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:15:05 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+censed  architect  or  engineer.  The  code  official  may  require
+plans, computations and specifications to be prepared and de
+-
+signed by an architect or engineer licensed by the state to prac
+-
+tice as such even if not required by state law.
+Exception:Submission of plans, calculations, construction
+inspection requirements and other data, if it is found that the
+nature of the work applied for is such that reviewing of plans
+is not necessary to obtain compliance with this code.
+106.2  Information on plans and specifications.Plans and
+specifications shall be drawn to scale upon substantial paper or
+cloth and shall be of sufficient clarity to indicate the location,
+nature and extent of the work proposed, and show in detail that
+it will conform to the provisions of this code and all relevant
+laws, ordinances, rules and regulations.
+106.3  Site plan.In addition to the requirements for plans in
+theInternational Building Code, site plans shall include topog
+-
+raphy, width and percent of grade of access roads, landscape
+and vegetation details, locations of structures or building enve
+-
+lopes, existing or proposed overhead utilities, occupancy clas
+-
+sification of buildings, types of ignition-resistant construction
+of buildings, structures and their appendages, roof classifica
+-
+tion of buildings, and site water supply systems.
+106.4  Vegetation management plans.When utilized by the
+permit applicant pursuant to Section 502, vegetation manage-
+ment plans shall be prepared and shall be submitted to the code
+official for review and approval as part of the plans required for
+a permit. See Appendix B.
+106.5  Fire protection plan.When required by the code offi-
+cial pursuant to Section 405, a fire protection plan shall be pre-
+pared and shall be submitted to the code official for review and
+approved as a part of the plans required for a permit.
+106.6  Other data and substantiation.When required by the
+code official, the plans and specifications shall include classifi
+-
+cation of fuel loading, fuel model light, medium or heavy, and
+substantiating data to verify classification of fire-resistive veg
+-
+etation.
+106.7  Vicinity plan.In addition to the requirements for site
+plans, plans shall include details regarding the vicinity within
+300 feet (91 440 mm) of property lines, including other struc
+-
+tures, slope, vegetation, fuel breaks, water supply systems and
+access roads.
+106.8  Retention of plans.One set of approved plans, specifi
+-
+cations and computations shall be retained by the code official
+for a period of not less than 90 days from date of completion of
+the work covered therein; and one set of approved plans and
+specifications shall be returned to the applicant, and said set
+shall be kept on the site of the building, use or work at all times
+during which the work authorized thereby is in progress.
+SECTION 107
+INSPECTION AND ENFORCEMENT
+107.1  Inspection.
+107.1.1  General.All  construction  or  work  for  which  a
+permit is required by this code shall be subject to inspection
+by the code official and all such construction or work shall
+remain accessible and exposed for inspection purposes until
+approved by the code official.
+It shall be the duty of the permit applicant to cause the
+work to remain accessible and exposed for inspection pur
+-
+poses. Neither the code official nor the jurisdiction shall be
+liable for expense entailed in the removal or replacement of
+any material required to allow inspection.
+Approval as a result of an inspection shall not be con
+-
+strued to be an approval of a violation of the provisions of
+this code or of other ordinances of the jurisdiction. Inspec
+-
+tions presuming to give authority to violate or cancel the
+provisions of this code or of other ordinances of the jurisdic
+-
+tion shall not be valid.
+A survey of the lot may be required by the code official to
+verify  that  the  mitigation  features  are  provided  and  the
+building or structure is located in accordance with the ap
+-
+proved plans.
+107.1.2  Authority to inspect.The code official shall in
+-
+spect, as often as necessary, buildings and premises, includ
+-
+ing such other hazards or appliances designated by the code
+official for the purpose of ascertaining and causing to be
+corrected any conditions that could reasonably be expected
+to cause fire or contribute to its spread, or any violation of
+the purpose of this code and of any other law or standard af-
+fecting fire safety.
+107.1.3  Reinspections.To  determine  compliance  with
+this code, the code official may cause a structure to be rein-
+spected. A fee may be assessed for each inspection or rein-
+spection when such portion of work for which inspection is
+called is not complete or when corrections called for are not
+made.
+Reinspection fees may be assessed when the approved
+plans are not readily available to the inspector, for failure to
+provide access on the date for which inspection is requested
+or for deviating from plans requiring the approval of the
+code official.
+To obtain a reinspection, the applicant shall pay the rein
+-
+spection fee as set forth in the fee schedule adopted by the
+jurisdiction. When reinspection fees have been assessed, no
+additional inspection of the work will be performed until the
+required fees have been paid.
+107.2  Enforcement.
+107.2.1  Authorization to issue corrective orders and no
+-
+tices.When the code official finds any building or premises
+that are in violation of this code, the code official is autho
+-
+rized to issue corrective orders and notices.
+107.2.2  Service  of  orders  and  notices.Orders  and  no
+-
+tices authorized or required by this code shall be given or
+served on the owner, operator, occupant or other person re
+-
+sponsible for the condition or violation either by verbal noti
+-
+fication,  personal  service,  or  delivering  the  same  to,  and
+leaving it with, a person of suitable age and discretion on the
+premises; or, if no such person is found on the premises, by
+affixing a copy thereof in a conspicuous place on the door to
+the entrance of said premises and by mailing a copy thereof
+to such person by registered or certified mail to the person’s
+last known address.
+ADMINISTRATION
+42006 UTAH WILDLAND-URBAN INTERFACE CODE
+4
+01_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\01_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:15:05 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+Orders or notices that are given verbally shall be con
+-
+firmed by service in writing as herein provided.
+107.3  Right  of  entry.Whenever  necessary  to  make  an  in
+-
+spection to enforce any of the provisions of this code, or when
+-
+ever the code official has reasonable cause to believe that there
+exists in any building or on any premises any condition that
+makes such building or premises unsafe, the code official is au
+-
+thorized to enter such building or premises at all reasonable
+times to inspect the same or to perform any duty authorized by
+this code, provided that if such building or premises is occu
+-
+pied, the code official shall first present proper credentials and
+request entry; and if such building or premises is unoccupied,
+the code official shall first make a reasonable effort to locate the
+owner or other persons having charge or control of the building
+or premises and request entry.
+If such entry is refused, the code official shall have recourse
+to every remedy provided by law to secure entry. Owners, oc
+-
+cupants or any other persons having charge, care or control of
+any building or premises, shall, after proper request is made as
+herein provided, promptly permit entry therein by the code of
+-
+ficial for the purpose of inspection and examination pursuant to
+this code.
+107.4  Compliance with orders and notices.
+107.4.1  General compliance.Orders and notices issued
+or served as provided by this code shall be complied with by
+the owner, operator, occupant or other person responsible
+for the condition or violation to which the corrective order
+or notice pertains.
+If the building or premises is not occupied, such correc-
+tive orders or notices shall be complied with by the owner.
+107.4.2  Compliance  with  tags.A  building  or  premises
+shall not be used when in violation of this code as noted on a
+tag affixed in accordance with Section 107.4.1.
+107.4.3  Removal and destruction of signs and tags.A
+sign or tag posted or affixed by the code official shall not be
+mutilated, destroyed or removed without authorization by
+the code official.
+107.4.4  Citations.Persons  operating  or  maintaining  an
+occupancy, premises or vehicle subject to this code who al
+-
+low a hazard to exist or fail to take immediate action to abate
+a hazard on such occupancy, premises or vehicle when or
+-
+dered or notified to do so by the code official shall be guilty
+of a misdemeanor.
+107.4.5  Unsafe conditions.Buildings, structures or pre
+-
+mises that constitute a fire hazard or are otherwise danger
+-
+ous  to  human  life,  or  which  in  relation  to  existing  use
+constitute a hazard to safety or health or public welfare, by
+reason  of  inadequate  maintenance,  dilapidation,  obsoles
+-
+cence, fire hazard, disaster damage or abandonment as spec
+-
+ified  in  this  code  or  any  other  ordinance,  are  unsafe
+conditions. Unsafe buildings or structures shall not be used.
+Unsafe buildings are hereby declared to be public nuisances
+and shall be abated by repair, rehabilitation, demolition or
+removal,  pursuant  to  applicable  state  and  local  laws  and
+codes.
+SECTION 108
+CERTIFICATE OF COMPLETION
+No building, structure or premises shall be used or occupied,
+and  no  change  in the existing occupancy classification of  a
+building, structure, premise or portion thereof shall be made
+until the code official has issued a certificate of completion
+therefor as provided herein. The certificate of occupancy shall
+not be issued until the certificate of completion indicating that
+the project is in compliance with this code has been issued by
+the code official.
+Issuance of a certificate of occupancy shall not be construed
+as an approval of a violation of the provisions of this code or of
+other pertinent laws and ordinances of the jurisdiction. Certifi
+-
+cates presuming to give authority to violate or cancel the provi
+-
+sions of this code or other laws or ordinances of the jurisdiction
+shall not be valid.
+ADMINISTRATION
+2006 UTAH WILDLAND-URBAN INTERFACE CODE5
+5
+01_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\01_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:15:05 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+62006 UTAH WILDLAND-URBAN INTERFACE CODE
+6
+01_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\01_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:15:05 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+SECTION 201
+GENERAL
+201.1 Scope.Unless otherwise expressly stated, the follow
+-
+ing words and terms shall, for the purposes of this code, have
+the meanings shown in this chapter.
+201.2 Interchangeability.Words stated in the present tense
+include the future; words stated in the masculine gender in
+-
+clude  the  feminine  and  neuter,  and  the  singular  number  in
+-
+cludes the plural and the plural the singular.
+201.3 Terms defined in other codes.Where terms are not
+defined  in  this  code  and  are  defined  in  otherInternational
+Codes, such terms shall have the meanings ascribed to them as
+in those codes.
+201.4 Terms not defined.Where  terms  are  not  defined
+through  the  methods  authorized  by  this  section,  such  terms
+shall have their ordinarily accepted meanings such as the con-
+text implies.
+SECTION 202
+DEFINITIONS
+ACCESSORY STRUCTURE.A building or structure used to
+shelter or support  any material, equipment,  chattel or occu-
+pancy other than a habitable building.
+APPROVED.Approval by the code official as the result of re-
+view, investigation or tests conducted by the code official or by
+reason of accepted principles or tests by national authorities, or
+technical or scientific organizations.
+BRUSH, SHORT.Low-growing species that reach heights of 1
+to 3 feet. Sagebrush, snowberry and rabbitbrush are some variet
+-
+ies.
+BRUSH, TALL.Arbor-like  varieties  of  brush  species  and/or
+short varieties of broad-leaf trees that grow in compact groups or
+clumps. These groups or clumps reach heights of 4 to 20 feet. In
+Utah, this includes primary varieties of oak, maples, chokecherry,
+serviceberry and mahogany, but may also include other species.
+BUILDING.Any structure used or intended for supporting or
+sheltering any use or occupancy.
+BUILDING OFFICIAL.The officer or other designated au
+-
+thority charged with the administration and enforcement of the
+International Building Code,or the building official’s duly au
+-
+thorized representative.
+CERTIFICATE OF COMPLETION.Written documenta
+-
+tion that the project or work for which a permit was issued has
+been  completed  in  conformance  with  requirements  of  this
+code.
+CODE OFFICIAL.The official designated by the jurisdiction
+to interpret and enforce this code, or the code official’s autho
+-
+rized representative.
+DEFENSIBLE SPACE.An area either natural or man-made,
+where material capable of allowing a fire to spread unchecked
+has been treated, cleared or modified to slow the rate and inten
+-
+sity of an advancing wildfire and to create an area for fire sup
+-
+pression operations to occur.
+DRIVEWAY.A vehicular ingress and egress route that serves
+no more than two buildings or structures, not including acces
+-
+sory structures, or more than five dwelling units.
+FIRE AREA.The floor area, in square feet (square meters),
+used to determine the adequate water supply.
+FIRE CHIEF.The chief officer or the chief officer’s autho
+-
+rized representative of the fire department serving the jurisdic
+-
+tion.
+FIRE PROTECTION PLAN.A  document  prepared  for  a
+specific project or development proposed for the wildland-ur
+-
+ban interface area. It describes ways to minimize and mitigate
+the fire problems created by the project or development, with
+the purpose of reducing impact on the community’s fire protec-
+tion delivery system.
+FIRE WEATHER.Weather conditions favorable to the igni-
+tion and rapid spread of fire. In wildfires, this generally in-
+cludes high temperatures combined with strong winds and low
+humidity.
+FIRE-RESISTANCE-RATED CONSTRUCTION.The use
+of materials and systems in the design and construction of a
+building  or  structure  to  safeguard  against the  spread  of  fire
+within a building or structure and the spread of fire to or from
+buildings or structures to the wildland-urban interface area.
+FLAME SPREAD RATING.As used herein refers to rating
+obtained according to tests conducted as specified by a nation
+-
+ally recognized standard.
+FUEL BREAK.An area, strategically located for fighting an
+-
+ticipated fires, where the native vegetation has been perma
+-
+nently modified or replaced so that fires burning into it can be
+more easily controlled. Fuel breaks divide fire-prone areas into
+smaller areas for easier fire control and to provide access for
+fire fighting.
+FUEL, HEAVY.Vegetation consisting of round wood 3 inches
+(76 mm) or larger in diameter. The amount of fuel (vegetation)
+would be 6 tons per acre or greater.
+FUEL, LIGHT.Vegetation consisting of herbaceous and round
+wood less than
+1
+/
+4
+inch (6.4 mm) in diameter. The amount of fuel
+(vegetation) would be
+1
+/
+2
+tonto2tonsperacre.
+FUEL, MEDIUM.Vegetation consisting of round wood
+1
+/
+4
+to 3
+inches (6.4mm to 76 mm) in diameter.  The amount of fuel (vegeta
+-
+tion) would be 2 to 6 tons per acre.
+FUEL MODIFICATION.A method of modifying fuel load
+by reducing the amount of nonfire-resistive vegetation or alter
+-
+ing the type of vegetation to reduce the fuel load.
+2006 UTAH WILDLAND-URBAN INTERFACE CODE7
+CHAPTER 2
+DEFINITIONS
+1
+02_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\02_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:21:18 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+FUEL MOSAIC.A fuel modification system that provides for
+the creation of islands and irregular boundaries to reduce the
+visual and ecological impact of fuel modification.
+FUEL-LOADING.The oven-dry weight of fuels in a given
+area, usually expressed in pounds per acre (lb/a) (kg/ha). Fuel
+loading may be referenced to fuel size or timelag categories,
+and may include surface fuels or total fuels.
+GREENBELT.A fuel break designated for a use other than
+fire protection.
+HAZARDOUS MATERIALS.As  defined  in  theInterna
+-
+tional Fire Code.
+HEAVY TIMBER CONSTRUCTION.As described in the
+International Building Code.
+INSURANCE SERVICES OFFICE (ISO).An agency that
+recommends fire insurance rates based on a grading schedule
+that  incorporates  evaluation  of  fire  fighting  resources  and
+capabilities.
+LEGISLATIVE BODY.The governing body of the political ju
+-
+risdiction administering this code.
+LOG WALL CONSTRUCTION.A type of construction in
+which exterior walls are constructed of solid wood members
+and  where  the  smallest  horizontal  dimension  of  each  solid
+wood member is at least 6 inches (152 mm).
+MULTILAYERED GLAZED PANELS.Window  or  door
+assemblies that consist of two or more independently glazed
+panels installed parallel to each other, having a sealed air gap in
+between, within a frame designed to fill completely the win-
+dow or door opening in which the assembly is intended to be
+installed.
+NONCOMBUSTIBLE.As applied to building construction
+material means a material that, in the form in which it is used, is
+either one of the following:
+1.   Material of which no part will ignite and burn when sub
+-
+jected to fire. Any material conforming to ASTM E 136
+shall be considered noncombustible within the meaning
+of this section.
+2.   Material having a structural base of noncombustible ma
+-
+terial as defined in Item 1 above, with a surfacing mate
+-
+rial not over
+1
+/
+8
+inch (3.2 mm) thick, which has a flame-
+spread rating of 50 or less. Flame-spread rating as used
+herein refers to rating obtained according to tests con
+-
+ducted as specified in ASTM E 84.
+“Noncombustible” does not apply to surface finish materi
+-
+als. Material required to be noncombustible for reduced clear
+-
+ances  to  flues,  heating  appliances  or  other  sources  of  high
+temperature shall refer to material conforming to Item 1. No
+material shall be classed as noncombustible that is subject to
+increase in combustibility or flame-spread rating, beyond the
+limits herein established, through the effects of age, moisture
+or other atmospheric condition.
+NONCOMBUSTIBLE ROOF COVERING.One of the fol
+-
+lowing:
+1.   Cement shingles or sheets.
+2.   Exposed concrete slab roof.
+3.   Ferrous or copper shingles or sheets.
+4.   Slate shingles.
+5.   Clay or concrete roofing tile.
+6.   Approved roof covering of noncombustible material.
+SLOPE.The variation of terrain from the horizontal; the num
+-
+ber of feet (meters) rise or fall per 100 feet (30 480 mm) mea
+-
+sured horizontally, expressed as a percentage.
+STRUCTURE.That which is built or constructed, an edifice
+or building of any kind, or any piece of work artificially built up
+or composed of parts joined together in some manner.
+TREE CROWN.The primary and secondary branches grow
+-
+ing out from the main stem, together with twigs and foliage.
+UNENCLOSED ACCESSORY STRUCTURE.An acces
+-
+sory structure without a complete exterior wall system enclos
+-
+ing the area under roof or floor above.
+WILDFIRE.An uncontrolled fire spreading through vegeta
+-
+tive fuels, exposing and possibly consuming structures.
+WILDLAND.An  area  in  which  development  is essentially
+nonexistent, except for roads, railroads, power lines and similar
+facilities.
+WILDLAND URBAN INTERFACE.The line, area or zone
+where structures or other human development (including critical
+infrastructure that if destroyed would result in hardship to com-
+munities) meet or intermingle with undeveloped wildland or veg-
+etative fuel.
+DEFINITIONS
+82006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+02_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\02_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:21:18 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+SECTION 301
+WILDLAND-URBAN INTERFACE
+AREA DESIGNATIONS
+301.1 Declaration.The  legislative  body  shall  declare  the
+wildland-urban  interface  areas  within  the  jurisdiction.  The
+urban-wildland interface areas shall be based on the maps cre
+-
+ated in accordance with Section 301.
+301.2 Mapping.In cooperation, the code official and the Divi
+-
+sion of Forestry, Fire and State Lands (FFSL) wildfire repre
+-
+sentative  (per  participating  agreement  between  county  and
+FFSL) will create or review Wildland-Urban  Interface Area
+maps, to be recorded and filed with the clerk of the jurisdiction.
+These areas shall become effective immediately thereafter.
+301.3 Review of wildland-urban interface areas.The code
+official and the FFSL wildfire representative shall reevaluate
+and recommend modification to the wildland-urban interface
+areas in accordance with Section 301.1 on a three-year basis or
+more frequently as deemed necessary by the legislative body.
+2006 UTAH WILDLAND-URBAN INTERFACE CODE9
+CHAPTER 3
+WILDLAND-URBAN INTERFACE AREAS
+1
+03_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\03_Utah_WildlandUrban_2006.vp
+Friday, August 04, 2006 9:31:56 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+102006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+03_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\03_Utah_WildlandUrban_2006.vp
+Friday, August 04, 2006 9:31:56 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+SECTION 401
+GENERAL
+401.1  Scope.Wildland-urban  interface  areas  shall  be  pro
+-
+vided with emergency vehicle access and water supply in ac
+-
+cordance with this chapter.
+401.2  Objective.The objective of this chapter is to establish
+the minimum requirements for emergency vehicle access and
+water  supply  for  buildings  and  structures  located  in  the
+wildland-urban interface areas.
+401.3  General  safety  precautions.General  safety  precau
+-
+tions shall be in accordance with this chapter. See also Appen
+-
+dix A.
+SECTION 402
+APPLICABILITY
+402.1  Subdivisions.
+402.1.1  Access.New subdivisions, as determined by this
+jurisdiction,  shall  be  provided  with  fire  apparatus  access
+roads in accordance with theInternational Fire Codeand
+access requirements in accordance with Section 403.
+402.1.2  Water  supply.New  subdivisions  as  determined
+by this jurisdiction shall be provided with water supply in
+accordance with Section 404.
+402.2  Individual structures.
+402.2.1  Access.Individual    structures    hereafter    con
+-
+structed or relocated into or within wildland-urban interface
+areas shall be provided with fire apparatus access in accor
+-
+dance with theInternational Fire Codeand driveways in ac
+-
+cordance  with  Section  403.2.  Marking  of  fire  protection
+equipment  shall  be  provided  in  accordance  with  Section
+403.5 and address markers shall be provided in accordance
+with Section 403.6.
+402.2.2  Water   supply.Individual   structures   hereafter
+constructed or relocated into or within wildland-urban in
+-
+terface areas shall be provided with a conforming water sup
+-
+ply in accordance with Section 404.
+Exceptions:
+1.Structures constructed to meet the requirements
+for  the  class  of  ignition-resistant  construction
+specified in Table 503.1 for a nonconforming wa
+-
+ter supply.
+2.Buildings containing only private garages, car
+-
+ports,  sheds  and  agricultural  buildings  with  a
+floor area of not more than 600 square feet (56
+m
+2
+).
+SECTION 403
+ACCESS
+403.1  Restricted access.Where emergency vehicle access is
+restricted  because  of  secured  access  roads  or  driveways  or
+where immediate access is necessary for life-saving or fire-
+fighting purposes, the code official is authorized to require a
+key box to be installed in an accessible location. The key box
+shall be of a type approved by the code official and shall con
+-
+tain keys to gain necessary access as required by the code offi
+-
+cial.
+403.2  Driveways.Driveways  shall  be  provided  when  any
+portion of an exterior wall of the first story of a building is lo
+-
+cated more than 150 feet (45 720 mm) from a fire apparatus ac
+-
+cess road. Driveways shall provide a minimum unobstructed
+width  of  12  feet  (3658  mm)  and  a  minimum  unobstructed
+height of 13 feet 6 inches (4115 mm). Driveways in excess of
+150 feet (45 720 mm) in length shall be provided with turn-
+arounds.  Driveways  in  excess  of  200  feet  (60  960  mm)  in
+length and less than 20 feet (6096 mm) in width shall be pro-
+vided with turnouts in addition to turnarounds.
+A driveway shall not serve in excess of five dwelling units.
+Driveway turnarounds shall have inside turning radii of not
+less than 30 feet (9144 mm) and outside turning radii of not less
+than 45 feet (13 716 mm). Driveways that connect with a road
+or roads at more than one point may be considered as having a
+turnaround if all changes of direction meet the radii require-
+ments for driveway turnarounds.
+Driveway turnouts shall be an all-weather road surface at
+least 10 feet (3048 mm) wide and 30 feet (9144 mm) long.
+Driveway turnouts shall be located as required by the code offi
+-
+cial.
+Vehicle  load  limits  shall  be  posted  at  both  entrances  to
+bridges  on  driveways  and  private  roads.  Design  loads  for
+bridges shall be established by the code official.
+403.3  Fire apparatus access road.When required, fire ap
+-
+paratus access roads shall be all-weather roads with a mini
+-
+mum width of 20 feet (6096 mm) and a clear height of 13 feet 6
+inches (4115 mm); shall be designed to accommodate the loads
+and turning radii for fire apparatus; and have a gradient nego
+-
+tiable by the specific fire apparatus normally used at that loca
+-
+tion within the jurisdiction. Dead-end roads in excess of 150
+feet (45 720 mm) in length shall be provided with turnarounds
+as approved by the code official. An all-weather road surface
+shall be any surface material acceptable to the code official that
+would normally allow the passage of emergency service vehi
+-
+cles to protect structures and wildlands within the jurisdiction.
+403.4  Marking of roads.Approved signs or other approved
+notices shall be provided and maintained for access roads and
+driveways to identify such roads and prohibit the obstruction
+thereof or both.
+2006 UTAH WILDLAND-URBAN INTERFACE CODE11
+CHAPTER 4
+WILDLAND-URBAN INTERFACE AREA REQUIREMENTS
+1
+04_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\04_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:20:21 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+All  road  identification  signs  and  supports  shall  be  of
+noncombustible materials. Signs shall have minimum 4-inch-
+high (102 mm) reflective letters with
+1
+/
+2
+inch (12.7 mm) stroke
+on a contrasting 6-inch-high (152 mm) sign. Road identifica
+-
+tion signage shall be mounted at a height of 7 feet (2134 mm)
+from the road surface to the bottom of the sign.
+403.5  Marking of fire protection equipment.Fire protec
+-
+tion equipment and fire hydrants shall be clearly identified in a
+manner approved by the code official to prevent obstruction.
+403.6  Address markers.All buildings shall have a perma
+-
+nently posted address, which shall be placed at each driveway
+entrance and be visible from both directions of travel along the
+road. In all cases, the address shall be posted at the beginning of
+construction and shall be maintained thereafter, and the ad
+-
+dress shall be visible and legible from the road on which the ad
+-
+dress is located.
+Address signs along one-way roads shall be visible from
+both the intended direction of travel and the opposite direction.
+Where multiple addresses are required at a single driveway,
+they shall be mounted on a single post, and additional signs
+shall be posted at locations where driveways divide.
+Where a roadway provides access solely to a single com-
+mercial or industrial business, the address sign shall be placed
+at the nearest road intersection providing access to that site.
+403.7  Grade.The  gradient  for  fire  apparatus  access  roads
+and driveways shall not exceed the maximum approved by the
+code official. It will be up to the code official to ascertain the stan-
+dard based on local fire equipment grade not to exceed 12 percent.
+SECTION 404
+WATER SUPPLY
+404.1  General.When provided in order to qualify as a con
+-
+forming water supply for the purpose of Table 503.1, an ap
+-
+proved water source shall have an adequate water supply for
+the use of the fire protection service to protect buildings and
+structures from exterior fire sources or to suppress structure
+fires within the wildland-urban interface area of the jurisdic
+-
+tion in accordance with this section.
+404.2  Water sources.The point at which a water source is
+available for use shall be located not more than 1,000 feet (305
+m) from the building and be approved by the code official. The
+distance shall be measured along an unobstructed line of travel.
+Water sources shall comply with the following:
+1.   Man-made water sources shall have a minimum usable
+water volume as determined by the adequate water sup
+-
+ply needs in accordance with Section 404.5. This water
+source shall be equipped with an approved hydrant. The
+water level of the water source shall be maintained by
+rainfall, water pumped from a well, water hauled by a
+tanker, or by seasonal high water of a stream or river. The
+design, construction, location, water level maintenance,
+access,  and  access  maintenance  of  man-made  water
+sources shall be approved by the code official.
+2.   Natural water sources shall have a minimum annual wa
+-
+ter level or flow sufficient to meet the adequate water
+supply needs in accordance with Section 404.5. This wa
+-
+ter level or flow shall not be rendered unusable because
+of freezing. This water source shall have an approved
+draft site with an approved hydrant. Adequate water flow
+and rights for access to the water source shall be ensured
+in a form acceptable to the code official.
+404.3  Draft sites.Approved draft sites shall be provided at
+all natural water sources intended for use as fire protection for
+compliance with this code. The design, construction, location,
+access and access maintenance of draft sites shall be approved
+by the code official.
+The pumper access point shall be either an emergency vehi
+-
+cle access area alongside a conforming access road or an ap
+-
+proved driveway no longer than 150 feet (45 720 mm). Pumper
+access points and access driveways shall be designed and con
+-
+structed in accordance with all codes and ordinances enforced
+by this jurisdiction. Pumper access points shall not require the
+pumper apparatus to obstruct a road or driveway.
+404.4  Hydrants.All  hydrants  shall  be  designed  and  con
+-
+structed in accordance with nationally recognized standards.
+The location and access shall be approved by the code official.
+404.5  Adequate water supply.Adequate water supply shall
+be determined for purposes of initial attack and flame front
+control by the local jurisdiction. NFPA1142 may be used as a ref-
+erence.
+404.6  Fire  department.The  water  system  required  by  this
+code can only be considered conforming for purposes of deter-
+mining  the  level  of  ignition-resistant  construction  (see  Table
+503.1).
+404.7  Obstructions.Access to all water sources required by
+this code shall be unobstructed at all times. The code official
+shall not be deterred or hindered from gaining immediate ac
+-
+cess to water source equipment, fire protection equipment or
+hydrants.
+404.8  Identification.Water sources, draft sites, hydrants and
+fire protection equipment shall be clearly identified in a manner
+approved by the code official to identify location and to prevent
+obstruction by parking and other obstructions.
+404.9  Testing and maintenance.Water sources, draft sites,
+hydrants and other fire protection equipment required by this
+code shall be subject to periodic tests as required by the code
+official. Code official shall establish a periodic testing schedule.
+Costs are to be covered by the water provider. All such equipment
+installed under the provisions of this code shall be maintained
+in an operative condition at all times and shall be repaired or re
+-
+placed where defective. Additions, repairs, alterations and ser
+-
+vicing of such fire protection equipment and resources shall be
+in  accordance  with  approved  standards.  Mains  and  appurte
+-
+nances shall be installed in accordance with NFPA 24. Water tanks
+for private fire protection shallbe installed in accordance with
+NFPA 22. The costs are to be covered by the water provider.
+404.10  Reliability.
+404.10.1  Objective.The objective of this section is to in
+-
+crease the reliability of water supplies by reducing the expo
+-
+sure of vegetative fuels to electrically powered systems.
+WILDLAND-URBAN INTERFACE AREA REQUIREMENTS
+122006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+04_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\04_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:20:21 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+404.10.2  Clearance  of  fuel.Defensible  space  shall  be
+provided around water tank structures, water supply pumps
+and pump houses in accordance with Section 603.
+404.10.3  Standby power.Stationary water supply facili
+-
+ties within the wildland-urban interface area dependent on
+electrical power supplied by power grid to meet adequate wa
+-
+ter supply demands shall provide functional standby power
+systems in accordance with the ICCElectrical Codeto en
+-
+sure that an uninterrupted water supply is maintained. The
+standby power source shall be capable of providing power
+for a minimum of two hours.
+Exceptions:When  approved  by  the  code  official,  a
+standby power supply is not required where the primary
+power service to the stationary water supply facility is un
+-
+derground or there is an on-site generator.
+SECTION 405
+FIRE PROTECTION PLAN
+405.1 Purpose.The plan is to provide a basis to determine overall
+compliance with this code, for determination of Ignition Resistant
+Construction  (IRC)  (see  Table  503.1)  and  for  determining  the
+need for alternative materials and methods.
+405.2  General.When required by the code official, a fire pro-
+tection plan shall be prepared  and approved prior to the first
+building permit issuance or subdivision approval.
+405.3  Content.The plan shall be based upon a site-specific
+wildfire risk assessment that includes considerations of loca-
+tion, topography, aspect, flammable vegetation, climatic con-
+ditions and fire history. The plan shall address water supply,
+access, building ignition and fire-resistance factors, fire protec-
+tion systems and equipment, defensible space and vegetation
+management.
+405.4  Cost.The cost of fire protection plan preparation and
+review shall be the responsibility of the applicant.
+405.5  Plan  retention.The  fire protection  plan  shall be  re
+-
+tained by the code official.
+WILDLAND-URBAN INTERFACE AREA REQUIREMENTS
+2006 UTAH WILDLAND-URBAN INTERFACE CODE13
+3
+04_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\04_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:20:21 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+142006 UTAH WILDLAND-URBAN INTERFACE CODE
+4
+04_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\04_Utah_WildlandUrban_2006.vp
+Thursday, July 27, 2006 10:20:21 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+SECTION 501
+GENERAL
+501.1 Scope.Buildings and structures shall be constructed in
+accordance with theInternational Building Codeand this code.
+Exceptions:
+1.   Accessory structures not exceeding 120 square feet
+(11 m
+2
+) in floor area when located at least 50 feet (15
+240 mm) from buildings containing habitable spaces.
+2.   Agricultural buildings at least 50 feet (15 240 mm)
+from buildings containing habitable spaces.
+501.2 Objective.The objective of this chapter is to establish
+minimum standards to locate, design and construct buildings
+and structures or portions thereof for the protection of life and
+property, to resist damage from wildfires, and to mitigate build
+-
+ing and structure fires from spreading to wildland fuels. The
+minimum standards set forth in this chapter vary with the criti-
+cal fire weather, slope and fuel type to provide increased pro-
+tection, above the requirements set forth in theInternational
+Building Code, from the various levels of hazards.
+SECTION 502
+FIRE HAZARD SEVERITY
+The fire hazard severity of building sites for all buildings here-
+after constructed, modified or relocated into wildland-urban
+interface areas shall be established in accordance with Appen
+-
+dix C.
+The fire hazard severity is allowed to be reduced by imple
+-
+menting a vegetation management plan in accordance with Ap
+-
+pendix B.
+SECTION 503
+IGNITION-RESISTANT CONSTRUCTION
+503.1 General.Buildings and structures hereafter constructed,
+modified or relocated into or within wildland-urban interface
+areas shall meet the construction requirements in accordance
+with Table 503.1. Class 1, Class 2 or Class 3 ignition-resistant
+construction shall be in accordance with Sections 504, 505 and
+506, respectively.
+SECTION 504
+CLASS 1 IGNITION-RESISTANT CONSTRUCTION
+504.1 General.Class 1 ignition-resistant construction shall be
+in accordance with Section 504.
+504.2 Roof covering.Roofs shall have a Class A roof covering
+or a Class A roof assembly. For roof coverings where the pro-
+file allows a space between the roof covering and roof decking,
+the space at the eave ends shall be firestopped to preclude entry
+of flames or embers.
+2006 UTAH WILDLAND-URBAN INTERFACE CODE15
+CHAPTER 5
+SPECIAL BUILDING CONSTRUCTION REGULATIONS
+TABLE 503.1
+IGNITION-RESISTANT CONSTRUCTION
+a
+DEFENSIBLE
+SPACE
+c
+FIRE HAZARD SEVERITY
+Moderate HazardHigh HazardExtreme Hazard
+Water Supply
+b
+Water Supply
+b
+Water Supply
+b
+Conforming
+d
+Nonconforming
+e
+Conforming
+d
+Nonconforming
+e
+Conforming
+d
+Nonconforming
+e
+NonconformingIR 2IR 1IR 1
+IR 1
+N.C.
+IR 1
+N.C.
+Not Permitted
+ConformingIR 3IR 2IR 2IR 1IR 1
+IR 1
+N.C.
+1.5 x ConformingNot RequiredIR 3IR 3IR 2IR 2IR 1
+a. Access shall be in accordance with Section 402.
+b. Subdivisions shall have a conforming water supply in accordance with Section 402.1.
+IR 1   = Ignition-resistant construction in accordance with Section 504.
+IR 2   = Ignition-resistant construction in accordance with Section 505.
+IR 3   = Ignition-resistant construction in accordance with Section 506.
+N.C.  = Exterior walls shall have a fire-resistance rating of not less than 1-hour and the exterior surfaces of such walls shall be noncombustible. Usage of log wall
+construction is allowed.
+c. Conformance based on Section 603.
+d. Conformance based on Section 404.
+e. A nonconforming water supply is any water system or source that does not comply with Section 404, including situations where there is no water supplyfor struc
+-
+ture protection or fire suppression.
+1
+05_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\05_Utah_WildlandUrban_2006.vp
+Friday, August 04, 2006 9:01:28 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+504.3 Protection of eaves.Eaves and soffits shall be protected
+on the exposed underside by materials approved for a mini
+-
+mum of 1-hour fire-resistance-rated construction. Fascias are
+required and must be protected on the backside by materials
+approved for a minimum of 1-hour fire-resistance-rated con
+-
+struction or 2-inch (51 mm) nominal dimension lumber.
+504.4 Gutters and downspouts.Gutters  and  downspouts
+shall be constructed of noncombustible material.
+504.5 Exterior walls.Exterior walls of buildings or structures
+shall be constructed with materials approved for a minimum of
+1-hour fire-resistance-rated construction on the exterior side or
+constructed with approved noncombustible materials.
+Exception:Heavy timber or log wall construction.
+Such material shall extend from the top of the foundation to
+the underside of the roof sheathing.
+504.6 Unenclosed underfloor protection.Buildings or struc
+-
+tures shall have all underfloor  areas enclosed to the ground
+with exterior walls in accordance with Section 504.5.
+Exception:Complete enclosure may be omitted where the
+underside of all exposed floors and all exposed structural
+columns, beams and supporting walls are protected as re-
+quired for exterior 1-hour fire-resistance-rated construction
+or heavy timber construction.
+504.7 Appendages and projections.Unenclosed  accessory
+structures attached to buildings with habitable spaces and pro-
+jections, such as decks, shall be a minimum of 1-hour  fire-re-
+sistance-rated  construction,  heavy  timber  construction  or
+constructed of approved noncombustible materials.
+When the attached structure is located and constructed so
+that the structure  or  any portion  thereof  projects over a de-
+scending slope surface greater than 10 percent, the area below
+the structure shall have all underfloor areas enclosed to within
+6 inches (152 mm) of the ground, with exterior wall construc
+-
+tion in accordance with Section 504.5.
+504.8 Exterior glazing.Exterior windows, window walls and
+glazed  doors,  windows  within  exterior  doors,  and  skylights
+shall  be  tempered  glass,  multilayered  glazed  panels,  glass
+block or have a fire protection rating of not less than 20 min
+-
+utes.
+504.9 Exterior doors.Exterior  doors  shall  be  approved
+noncombustible construction, solid core wood not less than 1
+3
+/
+4
+inches thick (45 mm), or have a fire protection rating of not less
+than 20 minutes. Windows within doors and glazed doors shall
+be in accordance with Section 504.8.
+Exception:Vehicle access doors.
+504.10 Vents.Attic ventilation openings, foundation or under
+-
+floor vents, or other ventilation openings in vertical exterior
+walls  and  vents  through  roofs  shall  not  exceed  144  square
+inches  (0.0929  m
+2
+)  each.  Such  vents  shall  be  covered  with
+noncombustible corrosion-resistant mesh with openings not to
+exceed
+1
+/
+4
+inch (6.4 mm).
+Attic ventilation openings shall not be located in soffits, in
+eave overhangs, between rafters at eaves, or in other overhang
+areas. Gable end and dormer vents shall be located at least 10
+feet (3048  mm)  from  property  lines.  Underfloor  ventilation
+openings shall be located as close to grade as practical.
+504.11 Detached accessory structures.Detached accessory
+structures located less than 50 feet (15 240 mm) from a build
+-
+ing containing habitable space shall have exterior walls con
+-
+structed with materials approved for a minimum of 1-hour fire-
+resistance-rated construction, heavy timber, log wall construc
+-
+tion or constructed with approved noncombustible materials on
+the exterior side.
+When the detached structure is located and constructed so
+that the structure  or  any  portion  thereof  projects  over  a de
+-
+scending slope surface greater than 10 percent, the area below
+the structure shall have all underfloor areas enclosed to within 6
+inches (152 mm) of the ground, with exterior wall construction
+in accordance with Section 504.5 or underfloor protection in
+accordance with Section 504.6.
+Exception:The enclosure may be omitted where the under
+-
+side of all exposed  floors  and all exposed  structural col
+-
+umns, beams and supporting walls are protected as required
+for  exterior  1-hour  fire-resistance-rated  construction  or
+heavy-timber construction.
+See Section 504.2 for roof requirements.
+SECTION 505
+CLASS 2 IGNITION-RESISTANT CONSTRUCTION
+505.1 General.Class 2 ignition-resistant construction shall be
+in accordance with Section 505.
+505.2 Roof covering.Roofs shall have at least a Class A roof
+covering,  Class  B  roof  assembly  or  an  approved
+noncombustible roof covering. For roof coverings where the
+profile allows a space between the roof covering and roof deck-
+ing, the space at the eave ends shall be firestopped to preclude
+entry of flames or embers.
+505.3 Protection of eaves.Combustible eaves, fascias and sof
+-
+fits  shall  be  enclosed  with  solid  materials  with  a  minimum
+thickness of
+3
+/
+4
+inch (19 mm). No exposed rafter tails shall be
+permitted unless constructed of heavy timber materials.
+505.4 Gutters and downspouts.Gutters and downspouts shall
+be constructed of noncombustible material.
+505.5 Exterior walls.Exterior walls of buildings or structures
+shall be constructed with materials approved for a minimum of
+1-hour fire-resistance-rated construction on the exterior side or
+constructed with approved noncombustible materials.
+Exception:Heavy timber or log wall construction.
+Such material shall extend from the top of the foundation to
+the underside of the roof sheathing.
+505.6 Unenclosed underfloor protection.Buildings or struc
+-
+tures shall have all underfloor areas enclosed to the ground,
+with exterior walls in accordance with Section 505.5.
+Exception:Complete enclosure may be omitted where the
+underside of all exposed floors and all exposed structural
+columns, beams and supporting walls are protected as re
+-
+quired for exterior 1-hour fire-resistance-rated construction
+or heavy timber construction.
+505.7 Appendages and projections.Unenclosed  accessory
+structures attached to buildings with habitable spaces and pro
+-
+jections, such as decks, shall be a minimum of 1-hour fire-re
+-
+SPECIAL BUILDING CONSTRUCTION REGULATIONS
+162006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+05_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\05_Utah_WildlandUrban_2006.vp
+Friday, August 04, 2006 9:01:28 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+sistance-rated  construction,  heavy  timber  construction  or
+constructed with approved noncombustible materials.
+When the attached structure is located and constructed so
+that the structure  or  any  portion  thereof  projects  over  a de
+-
+scending slope surface greater than 10 percent, the area below
+the structure shall have all underfloor areas enclosed to within 6
+inches (152 mm) of the ground, with exterior wall construction
+in accordance with Section 505.5.
+505.8 Exterior glazing.Exterior windows, window walls and
+glazed  doors,  windows  within  exterior  doors,  and  skylights
+shall  be  tempered  glass,  multilayered  glazed  panels,  glass
+block or have a fire-protection rating of not less than 20 min
+-
+utes.
+505.9 Exterior doors.Exterior  doors  shall  be  approved
+noncombustible construction,  solid  core  wood  not  less than
+1
+3
+/
+4
+-inches thick (45 mm), or have a fire protection rating of not
+less than 20 minutes. Windows within doors and glazed doors
+shall be in accordance with Section 505.8.
+Exception:Vehicle access doors.
+505.10 Vents.Attic ventilation openings, foundation or under-
+floor  vents or other ventilation openings  in vertical exterior
+walls  and  vents  through  roofs  shall  not  exceed  144  square
+inches  (0.0929  m
+2
+)  each.  Such  vents  shall  be  covered  with
+noncombustible corrosion-resistant mesh with openings not to
+exceed
+1
+/
+4
+inch (6.4 mm).
+Attic ventilation openings shall not be located in soffits, in
+eave overhangs, between rafters at eaves, or in other overhang
+areas. Gable end and dormer vents shall be located at least 10
+feet  (3048  mm)  from  property  lines.  Underfloor  ventilation
+openings shall be located as close to grade as practical.
+505.11 Detached accessory structures.Detached accessory
+structures located less than 50 feet (15 240 mm) from a build
+-
+ing containing habitable space shall have exterior walls con
+-
+structed with materials approved for a minimum of 1-hour fire-
+resistance-rated construction, heavy timber, log wall construc
+-
+tion, or constructed with approved noncombustible material on
+the exterior side.
+When the detached structure is located and constructed so
+that the structure  or  any  portion  thereof  projects  over  a de
+-
+scending slope surface greater than 10 percent, the area below
+the structure shall have all underfloor areas enclosed to within 6
+inches (152 mm) of the ground, with exterior wall construction
+in accordance with Section 505.5 or underfloor protection in
+accordance with Section 505.6.
+Exception:The enclosure may be omitted where the under
+-
+side of all exposed  floors  and all exposed  structural col
+-
+umns, beams and supporting walls are protected as required
+for  exterior  1-hour  fire-resistance-rated  construction  or
+heavy-timber construction.
+See Section 505.2 for roof requirements.
+SECTION 506
+CLASS 3 IGNITION-RESISTANT CONSTRUCTION
+506.1 General.Class 3 ignition-resistant construction shall be
+in accordance with Section 506.
+506.2 Roof covering.Roofs shall have at least a Class A roof
+covering,  Class  C  roof  assembly  or  an  approved
+noncombustible roof covering. For roof coverings where the
+profile allows a space between the roof covering and roof deck
+-
+ing, the space at the eave ends shall be firestopped to preclude
+entry of flames or embers.
+506.3 Unenclosed underfloor protection.Buildings or struc
+-
+tures shall have all underfloor  areas enclosed to the ground
+with exterior walls.
+Exception:Complete enclosure may be omitted where the
+underside of all exposed floors and all exposed structural
+columns, beams and supporting walls are protected as re
+-
+quired for exterior 1-hour fire-resistance-rated construction
+or heavy timber construction.
+506.4 Vents.Attic ventilation openings, soffit vents, founda
+-
+tion or underfloor vents or other ventilation openings in verti
+-
+cal exterior walls and vents through roofs shall not exceed 144
+square inches (0.0929 m
+2
+) each. Such vents shall be covered
+with noncombustible corrosion-resistant mesh with openings
+not to exceed
+1
+/
+4
+inch (6.4 mm).
+SECTION 507
+REPLACEMENT OR REPAIR OF ROOF COVERINGS
+The roof covering on buildings or structures in existence prior
+to the adoption of this code that are replaced or have 25 percent
+or more replaced in a 12-month period shall be replaced with a
+roof covering required for new construction based on the type
+of ignition-resistant construction specified in accordance with
+Section 503.
+SPECIAL BUILDING CONSTRUCTION REGULATIONS
+2006 UTAH WILDLAND-URBAN INTERFACE CODE17
+3
+05_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\05_Utah_WildlandUrban_2006.vp
+Friday, August 04, 2006 9:01:29 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+182006 UTAH WILDLAND-URBAN INTERFACE CODE
+4
+05_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\05_Utah_WildlandUrban_2006.vp
+Friday, August 04, 2006 9:01:29 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+SECTION 601
+GENERAL
+601.1 Scope.The provisions of this chapter establish general
+requirements  for  new  and  existing  buildings,  structures  and
+premises located within wildland-urban interface areas.
+601.2 Objective.The objective of this chapter is to establish
+minimum requirements to mitigate the risk to life and property
+from wildland fire exposures, exposures from adjacent struc
+-
+tures and to mitigate structure fires from spreading to wildland
+fuels.
+SECTION 602
+AUTOMATIC FIRE SPRINKLER SYSTEMS
+DELETED
+SECTION 603
+DEFENSIBLE SPACE
+603.1 Objective.Provisions  of  this  section  are  intended  to
+modify the fuel load in areas adjacent to structures to create a
+defensible space.
+603.2 Fuel modification.In order to qualify as a conforming
+defensible space for individual buildings or structures on a prop-
+erty, fuel modification shall be provided within a distance from
+buildings or structures as specified in Table 603.2. For all other
+purposes, the fuel modification distance shall not be less than
+30 feet (9144 mm) or to the property line, whichever is less.
+Distances specified in Table 603.2 shall be measured on a hori
+-
+zontal plane from the perimeter or projection of the building or
+structure as shown in Figure 603.2. Distances specified in Ta
+-
+ble 603.2 may be modified by the code official because of a
+site-specific analysis based on local conditions and the fire pro
+-
+tection plan.
+Persons owning, leasing, controlling, operating or maintain
+-
+ing buildings or structures requiring defensible spaces are re
+-
+sponsible  for  modifying  or  removing  nonfire-resistive
+vegetation on the property owned, leased or controlled by said
+person.
+Trees are allowed within the defensible space, provided the
+horizontal distance between crowns of adjacent trees and over
+-
+head electrical facilities or unmodified fuel is not less than 10
+feet (3048  mm).  Deadwood  and  litter shall be  regularly  re
+-
+moved from trees.
+Where  ornamental  vegetative  fuels  or  cultivated  ground
+cover, such as green grass, ivy, succulents or similar plants are
+used as ground cover, they are allowed to be within the desig
+-
+nated defensible space, provided they do not form a means of
+transmitting fire from the native growth to any structure.
+TABLE 603.2
+REQUIRED DEFENSIBLE SPACE
+WILDLAND-URBAN INTERFACE
+AREA
+FUEL MODIFICATION DISTANCE
+(feet)
+Moderate hazard30
+High hazard50
+Extreme hazard100
+For SI: 1 foot = 304.8 mm.
+603.3 Community fuel modification zones.Fuel modification
+zones to protect new communities shall be provided when re
+-
+quired by the code official in accordance with Section 603, in or
+-
+der to reduce fuel loads adjacent to communities and structures.
+2006 UTAH WILDLAND-URBAN INTERFACE CODE19
+CHAPTER 6
+FIRE PROTECTION REQUIREMENTS
+FIGURE 603.2
+MEASUREMENTS OF FUEL MODIFICATION DISTANCE
+1
+06_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\06_Utah_WildlandUrban_2006.vp
+Thursday, August 03, 2006 2:42:52 PM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+603.3.1 Land ownership.Fuel modification zone land used to
+protect a community shall be under the control of an associa
+-
+tion or other common ownership instrument for the life of the
+community to be protected.
+603.3.2 Fuel modification zone plans.Fuel  modification
+zone plans shall be approved prior to fuel modification work
+and shall be placed on a site grading plan shown in plan view.
+An elevation plan shall also be provided to indicate the length
+of the fuel modification zone on the slope. Fuel modification
+zone plans shall include, but not be limited to the following:
+1.  Plan showing existing vegetation.
+2.  Photographs  showing  natural  conditions  prior  to
+work being performed.
+3.  Grading plan showing location of proposed buildings
+and structures, and set backs from top of slope to all
+buildings or structures.
+SECTION 604
+MAINTENANCE OF DEFENSIBLE SPACE
+604.1 General.Defensible  spaces  required  by  Section  603
+shall be maintained annually, or as necessary in accordance
+with Section 604.
+604.2 Modified area.Nonfire-resistive vegetation or growth
+shall be kept clear of buildings or structures, in accordance
+with Section 603, in such a manner as to provide a clear area for
+fire suppression operations.
+604.3 Responsibility.Persons  owning,  leasing,  controlling,
+operating or maintaining buildings or structures are responsi-
+ble for maintenance of defensible spaces. Maintenance of the
+defensible space shall include modifying or removing nonfire-
+resistive vegetation and keeping leaves, needles and other dead
+vegetative material regularly removed from roofs of buildings
+and structures.
+604.4 Trees.Individual trees and/or small clumps of trees or
+brush crowns, extending to within 10 feet (3048 mm) of any
+structure, shall be pruned to maintain a minimum horizontal
+clearance of 10 feet (3048 mm). Tree crowns within the defen
+-
+sible space shall be pruned to remove limbs located less than 6
+feet (1829 mm) above the ground surface adjacent to the trees.
+Portions  of  tree crowns  that extend  within  10  feet (3048
+mm) of the outlet of a chimney shall be pruned to maintain a
+minimum horizontal clearance of 10 feet (3048 mm).
+Deadwood and litter shall be regularly removed from trees.
+SECTION 605
+SPARK ARRESTERS
+Chimneys serving fireplaces, barbecues, incinerators or deco
+-
+rative heating appliances in which solid or liquid fuel is used,
+shall be provided with a spark arrester. Spark arresters shall be
+constructed of woven or welded wire screening of 12 USA
+standard gage wire (0.1046 inch) (2.66 mm) having openings
+not exceeding
+1
+/
+2
+inch (12.7 mm).
+The net free area of the spark arrester shall not be less than
+four times the net free area of the outlet of the chimney.
+SECTION 606
+LIQUEFIED PETROLEUM GAS INSTALLATIONS
+606.1 General.The storage of LP-gas and the installation and
+maintenance  of  pertinent  equipment  shall  be  in  accordance
+with theInternational Fire Codeor, in the absence thereof, rec
+-
+ognized standards.
+606.2 Location of containers.LP-gas containers shall be lo
+-
+cated  within  the  defensible  space  in  accordance  with  the
+Interational Fire Code.
+SECTION 607
+STORAGE OF FIREWOOD AND COMBUSTIBLE
+MATERIALS
+Firewood and combustible material shall not be stored in unen
+-
+closed spaces beneath buildings or structures, or on decks or
+under eaves, canopies or other projections or overhangs. When
+required by the code official, storage of firewood and combus
+-
+tible material stored in the defensible space shall be located a
+minimum of 30 feet (9144 mm) from structures and separated
+from the crown of trees by a minimum horizontal distance of 15
+feet (4572 mm).
+Firewood and combustible materials not for consumption on
+the premises shall be stored so as to not pose a hazard. See Ap-
+pendix A.
+FIRE PROTECTION REQUIREMENTS
+202006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+06_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\06_Utah_WildlandUrban_2006.vp
+Thursday, August 03, 2006 2:42:52 PM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+SECTION A101
+GENERAL
+A101.1 Scope.The provisions of this appendix establish gen
+-
+eral requirements applicable to new and existing properties lo
+-
+cated within urban-wildland interface areas.
+A101.2 Objective.The objective of this appendix is to provide
+necessary fire-protection measures to reduce the threat of wild
+-
+fire in an urban-wildland interface area and improve the capa
+-
+bility of controlling such fires.
+SECTION A102
+VEGETATION CONTROL
+A102.1  General.Vegetation  control  shall  comply  with  this
+section.
+A102.2 Clearance of brush or vegetative growth from road-
+ways.The code official is authorized to require areas within 10
+feet (3048 mm) on each side of portions of fire apparatus access
+roads and driveways to be cleared of nonfire-resistive vegeta-
+tion growth.
+Exception:Single specimens of trees, ornamental vegeta-
+tive fuels or cultivated ground cover, such as green grass,
+ivy, succulents or similar plants used as ground cover, pro-
+vided they do not form a means of readily transmitting fire.
+A102.3  Clearance  of  brush  and  vegetative  growth  from
+electrical transmission and distribution lines.
+A102.3.1  General.Clearance  of  brush  and  vegetative
+growth from electrical transmission and distribution lines
+shall be in accordance with Section A102.3.
+Exception:Section A102.3 does not authorize persons
+not having legal right of entry to enter on or damage the
+property of others without consent of the owner.
+A102.3.2 Support clearance.Persons owning, controlling,
+operating or maintaining electrical transmission or distribu
+-
+tion lines shall have an approved program in place that iden
+-
+tifies poles or towers with equipment and hardware types
+that have a history of becoming an ignition source, and pro
+-
+vides a combustible free space consisting of a clearing of not
+less than 10 feet (3048 mm) in each direction from the outer
+circumference of such pole or tower during such periods of
+time as designated by the code official.
+Exception:Lines  used  exclusively  as  telephone,  tele
+-
+graph, messenger call, alarm transmission or other lines
+classed as communication circuits by a public utility.
+A102.3.3  Electrical  distribution  and  transmission  line
+clearances.
+A102.3.3.1  General.Clearances  between  vegetation
+and electrical lines shall be in accordance with Section
+A102.3.3.
+A102.3.3.2 Trimming clearance.At the time of trim
+-
+ming, clearances not less than those established by Table
+A102.3.3.2  shall  be  provided.  The  radial  clearances
+shown below are minimum clearances that shall be es
+-
+tablished, at time of trimming, between the vegetation
+and the energized conductors and associated live parts.
+TABLE A102.3.3.2
+MINIMUM CLEARANCES BETWEEN VEGETATION
+AND ELECTRICAL LINES AT TIME OF TRIMMING
+LINE VOLTAGE
+MINIMUM RADIAL CLEARANCE
+FROM CONDUCTOR (feet)
+2,400-72,0004
+72,001-110,0006
+110,001-300,00010
+300,001 or more15
+For SI: 1 foot = 304.8 mm.
+Exception:The code official is authorized to estab-
+lish minimum clearances different than those speci-
+fied  by  Table  A102.3.3.2  when  evidence
+substantiating such other clearances is submitted to
+and approved by the code official.
+A102.3.3.3  Minimum  clearance  to  be  maintained.
+Clearances  not  less  than  those  established  by  Table
+A102.3.3.3 shall be maintained during such periods of
+time as designated by the code official. The site-specific
+clearance achieved, at time of pruning, shall vary based
+on  species  growth  rates,  the  utility  company-specific
+trim cycle, the potential line sway due to wind, line sag
+due to electrical loading and ambient temperature and
+the tree’s location in proximity to the high voltage lines.
+Exception:The code official is authorized to estab
+-
+lish minimum clearances different than those speci
+-
+fied  by  Table  A102.3.3.3  when  evidence
+substantiating such other clearances is submitted to
+and approved by the code official.
+TABLE A102.3.3.3
+MINIMUM CLEARANCES BETWEEN VEGETATION AND
+ELECTRICAL LINES TO BE MAINTAINED
+LINE VOLTAGEMINIMUM CLEARANCE (inches)
+750-35,0006
+35,001-60,00012
+60,001-115,00019
+115,001-230,00030.5
+230,001-500,000115
+For SI: 1 inch = 25.4 mm.
+A102.3.3.4 Electrical power line emergencies.During
+emergencies, the utility shall perform the required work
+to the extent necessary to clear the hazard. An emergency
+2006 UTAH WILDLAND-URBAN INTERFACE CODE21
+APPENDIX A
+GENERAL REQUIREMENTS (optional)
+1
+07_AppA_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\07_AppA_Utah_WildlandUrban_2006.vp
+Thursday, August 03, 2006 2:29:23 PM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+can include situations such as trees falling into power
+lines, or trees in violation of Table A102.3.3.3.
+A102.4 Correction of condition.The code official is autho
+-
+rized to give notice to the owner of the property on which con
+-
+ditions  regulated  by  Section  A102  exist  to  correct  such
+conditions. If the owner fails to correct such conditions, the
+legislative body of the jurisdiction is authorized to cause the
+same to be done and make the expense of such correction a lien
+on the property where such condition exists.
+SECTION A103
+ACCESS RESTRICTIONS
+A103.1 Restricted entry to public lands.The code official is
+authorized to determine and publicly announce when urban-
+wildland interface areas shall be closed to entry and when such
+areas shall again be opened to entry. Entry on and occupation of
+urban-wildland interface areas, except public roadways, inhab
+-
+ited areas or established trails and campsites that have not been
+closed  during  such  time  when  the  urban-wildland  interface
+area is closed to entry, is prohibited.
+Exceptions:
+1.   Residents and owners of private property within ur-
+ban-wildland  interface  areas  and  their  invitees  and
+guests going to or being on their lands.
+2.   Entry, in the course of duty, by peace or police offi-
+cers, and other duly authorized public officers, mem-
+bers  of  a  fire  department  and  members  of  the
+Wildland Firefighting Service.
+A103.2 Trespassing on posted private property.
+A103.2.1 General.When the code official determines that a
+specific area within an urban-wildland interface area pres-
+ents an exceptional and continuing fire danger because of
+the density of natural growth, difficulty of terrain, proximity
+to structures or accessibility to the public, such areas shall
+be restricted or closed until changed conditions warrant ter
+-
+mination of such restriction or closure. Such areas shall be
+posted in accordance with Section A103.2.2.
+A103.2.2 Signs.Approved signs prohibiting entry by unau
+-
+thorized persons and referring to this code shall be placed on
+every closed area.
+A103.2.3 Trespassing.Entering and remaining within ar
+-
+eas closed and posted is prohibited.
+Exception:Owners and occupiers of private or public
+property within closed and posted areas; their guests or
+invitees;  authorized  persons  engaged  in  the  operation
+and maintenance of necessary utilities such as electrical
+power, gas, telephone, water and sewer; and local, state
+and federal public officers and their authorized agents
+acting in the course of duty.
+A103.3 Use of fire roads and defensible space.Motorcycles,
+motor scooters and motor vehicles shall not be driven or parked
+on, and trespassing is prohibited on, fire roads or defensible
+space beyond the point where travel is restricted by a cable,
+gate or sign, without the permission of the property owners.
+Vehicles shall not be parked in a manner that obstructs the en
+-
+trance to a fire road or defensible space.
+Exception:Public officers acting within their scope of duty.
+Radio and television aerials, guy wires thereto, and other ob
+-
+structions shall not be installed or maintained on fire roads or
+defensible spaces, unless located 16 feet (4877 mm) or more
+above such fire road or defensible space.
+A103.4 Use of motorcycles, motor scooters, ultralight air
+-
+craft  and  motor  vehicles.Motorcycles,  motor  scooters,
+ultralight  aircraft  and  motor  vehicles  shall  not  be  operated
+within urban-wildland interface areas, without a permit by the
+code official, except on clearly established public or private
+roads. Permission from the property owner shall be presented
+when requesting a permit.
+A103.5  Tampering  with  locks,  barricades,  signs  and  ad
+-
+dress markers.Locks, barricades, seals, cables, signs and ad
+-
+dress markers installed within urban-wildland interface areas,
+by or under the control of the code official, shall not be tam
+-
+pered with, mutilated, destroyed or removed.
+Gates, doors, barriers and locks installed by or under the
+control of the code official shall not be unlocked.
+SECTION A104
+IGNITION SOURCE CONTROL
+A104.1 General.Ignition sources shall be in accordance with
+Section A104.
+A104.2 Objective.Regulations in this section are intended to
+provide the minimum requirements to prevent the occurrence
+of wildfires.
+A104.3 Clearance from ignition sources.Clearance between
+ignition sources and grass, brush or other combustible materi-
+als shall be maintained a minimum of 30 feet (9144 mm).
+A104.4 Smoking.When required by the code official, signs
+shall be posted stating NO SMOKING. No person shall smoke
+within 15 feet (4572 mm) of combustible materials or nonfire-
+resistive vegetation.
+Exception:Places of habitation or in the boundaries of es
+-
+tablished smoking areas or campsites as designated by the
+code official.
+A104.5 Equipment and devices generating heat, sparks or
+open flames.Equipment and devices generating heat, sparks
+or open flames capable of igniting nearby combustibles shall
+not be used in urban-wildland interface areas without a permit
+from the code official.
+Exception:Use of approved equipment in habitated pre
+-
+mises or designated campsites that are a minimum of 30 feet
+(9144 mm) from grass-, grain-, brush- or forest-covered ar
+-
+eas.
+A104.6 Fireworks.Fireworks shall not be used or possessed in
+urban-wildland interface areas.
+Exception:Fireworks allowed by the code official under
+permit in accordance with theInternational Fire Codewhen
+not prohibited by applicable local or state laws, ordinances
+and regulations.
+The  code  official  is  authorized  to  seize,  take,  remove  or
+cause to be removed fireworks in violation of this section.
+APPENDIX A
+222006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+07_AppA_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\07_AppA_Utah_WildlandUrban_2006.vp
+Thursday, August 03, 2006 2:29:24 PM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+A104.7 Outdoor fires.
+A104.7.1 General.No person shall build, ignite or maintain
+any outdoor fire of any kind for any purpose in or on any ur
+-
+ban-wildland  interface area,  except  by  the  authority  of  a
+written permit from the code official.
+Exception:Outdoor fires within inhabited premises or
+designated campsites where such fires are in a permanent
+barbecue, portable barbecue, outdoor fireplace, incinera
+-
+tor or grill and are a minimum of 30 feet (9144 mm) from
+any combustible material or nonfire-resistive vegetation.
+A104.7.2 Permits.Permits shall incorporate such terms and
+conditions that will reasonably safeguard public safety and
+property. Outdoor fires shall not be built, ignited or main
+-
+tained in or on hazardous fire areas under the following con
+-
+ditions:
+1.   When high winds are blowing,
+2.   When a person 17 years old or over is not present at all
+times to watch and tend such fire, or
+3.   When a public announcement is made that open burn
+-
+ing is prohibited.
+A104.7.3  Restrictions.No person shall use a permanent
+barbecue, portable barbecue, outdoor fireplace or grill for
+the disposal of rubbish, trash or combustible waste material.
+A104.8 Incinerators, outdoor fireplaces, permanent barbe-
+cues and  grills.Incinerators,  outdoor  fireplaces, permanent
+barbecues and grills shall not be built, installed or maintained
+in urban-wildland interface areas without approval of the code
+official.
+Incinerators, outdoor fireplaces, permanent barbecues and
+grills shall be maintained in good repair and in a safe condition
+at all times. Openings in such appliances shall be provided with
+an approved spark arrestor, screen or door.
+Exception:When  approved  by  the  code  official,  unpro
+-
+tected openings in barbecues and grills necessary for proper
+functioning.
+A104.9 Reckless behavior.The code official is authorized to
+stop any actions of a person or persons if the official determines
+that the action is reckless and could result in an ignition of fire
+or spread of fire.
+A104.10  Planting  vegetation  under  or  adjacent  to  ener
+-
+gized electrical lines.No vegetation shall be planted under or
+adjacent to energized power lines that, at maturity, shall grow
+within 10 feet (3048 mm) of the energized conductors.
+SECTION A105
+CONTROL OF STORAGE
+A105.1 General.In addition to the requirements of theInter
+-
+national Fire Code, storage and use of the materials shall be in
+accordance with Section A105.
+A105.2 Hazardous materials.Hazardous materials in excess
+of 10 gallons (37.8 L) of liquid, 200 cubic feet (5.66 m
+3
+) of gas,
+or 10 pounds (4.54 kg) of solids require a permit and shall com
+-
+ply with nationally recognized standards for storage and use.
+A105.3 Explosives.Explosives shall not be possessed, kept,
+stored,  sold,  offered  for  sale, given  away, used,  discharged,
+transported or disposed of within urban-wildland interface ar
+-
+eas, except by permit from the code official.
+A105.4 Combustible materials.
+A105.4.1 General.Outside storage of combustible materi
+-
+als such as, but not limited to, wood, rubber tires, building
+materials or paper products shall comply with the other ap
+-
+plicable sections of this code and this section.
+A105.4.2 Individual piles.Individual piles shall not exceed
+5,000 square feet (465 m
+2
+) of contiguous area. Piles shall
+not exceed 50,000 cubic feet (1416 m
+3
+) in volume or 10 feet
+(3048 mm) in height.
+A105.4.3 Separation.A clear space of at least 40 feet (12
+192 mm) shall be provided between piles. The clear space
+shall not contain combustible material or nonfire-resistive
+vegetation.
+SECTION A106
+DUMPING
+A106.1 Waste material.Waste material shall not be placed,
+deposited or dumped in urban-wildland interface areas, or in,
+on or along trails, roadways or highways or against structures
+in urban-wildland interface areas.
+Exception:Approved public and approved private dump-
+ing areas.
+A106.2 Ashes and coals.Ashes and coals shall not be placed,
+deposited or dumped in or on urban-wildland interface areas.
+Exceptions:
+1.   In the hearth of an established fire pit, camp stove or
+fireplace.
+2.   In a noncombustible container with a tightfitting lid,
+which is kept or maintained in a safe location not less
+than 10 feet (3048 mm) from nonfire-resistive vegeta
+-
+tion or structures.
+3.   Where  such  ashes  or  coals  are  buried  and  covered
+with 1 foot (305 mm) of mineral earth not less than 25
+feet (7620 mm) from nonfire-resistive vegetation or
+structures.
+SECTION A107
+PROTECTION OF PUMPS AND
+WATER STORAGE FACILITIES
+A107.1 General.The reliability of the water supply shall be in
+accordance with Section A107.
+A107.2 Objective.The intent of this section is to increase the
+reliability of water storage and pumping facilities and to pro
+-
+tect such systems against loss from intrusion by fire.
+A107.3 Fuel modification area.Water storage and pumping
+facilities shall be provided with a defensible space of not less
+than 30 feet (9144 mm) clear of nonfire-resistive vegetation or
+growth around and adjacent to such facilities.
+Persons owning, controlling, operating or maintaining wa
+-
+ter  storage  and  pumping  systems  requiring  this  defensible
+APPENDIX A
+2006 UTAH WILDLAND-URBAN INTERFACE CODE23
+3
+07_AppA_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\07_AppA_Utah_WildlandUrban_2006.vp
+Thursday, August 03, 2006 2:29:24 PM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+space are responsible for clearing and removing nonfire-resis
+-
+tive vegetation and  maintaining the defensible  space on  the
+property owned, leased or controlled by said person.
+A107.4 Trees.Portions of trees that extend to within 30 feet
+(9144  mm)  of  combustible  portions  of  water  storage  and
+pumping facilities shall be removed.
+A107.5 Protection of electrical power supplies.When elec
+-
+trical pumps  are used  to provide the required  water supply,
+such pumps shall be connected to a standby power source to au
+-
+tomatically maintain electrical power  in  the  event  of  power
+loss. The standby power source shall be capable of providing
+power for a minimum of two hours in accordance with the ICC
+Electrical Code.
+Exception:A standby power source is not required where
+the primary power service to pumps are underground as ap
+-
+proved by the code official.
+SECTION A108
+LAND USE LIMITATIONS
+A108.1  General.Temporary  fairs,  carnivals,  public  exhibi
+-
+tions and similar uses must comply with all other provisions of
+this code in addition to enhanced ingress and egress require-
+ments.
+A108.2 Objective.The increased public use of land or struc-
+tures in urban-wildland interface areas also increases the po-
+tential threat to life safety. The provisions of this section are
+intended to reduce that threat.
+A108.3  Permits.Temporary  fairs,  carnivals,  public  exhibi-
+tions or similar uses shall not be allowed in a designated urban-
+wildland interface area, except by permit from the code offi-
+cial.
+Permits shall incorporate such terms and conditions that will
+reasonably safeguard public safety and property.
+A108.4 Access roadways.In addition to the requirements in
+Section 403, access roadways shall be a minimum of 24 feet
+(7315 mm) wide and posted NO PARKING. Two access road
+-
+ways shall be provided to serve the permitted use area.
+When required by the code official to facilitate emergency
+operations, approved emergency vehicle operating areas shall
+be provided.
+APPENDIX A
+242006 UTAH WILDLAND-URBAN INTERFACE CODE
+4
+07_AppA_Utah_WildlandUrban_2006.ps
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\07_AppA_Utah_WildlandUrban_2006.vp
+Thursday, August 03, 2006 2:29:24 PM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+APPENDIX B
+VEGETATION MANAGEMENT PLAN
+Vegetation management plans shall be submitted to the code
+official for review and approval as part of the plans required for
+a permit. Vegetation management plans shall describe all ac-
+tions that will be taken to prevent a fire from being carried to-
+ward  or  away  from  the building.  A  vegetation management
+plan shall include at least the following information:
+1.   A copy of the site plan.
+2.   Methods and timetables forcontrolling, changing or mod-
+ifying areas on the property. Elements of the plan shall in-
+clude removal of slash, snags, vegetation that may grow
+into overhead electrical lines, other ground fuels, ladder
+fuels and dead trees, and the thinning of live trees.
+3.   A plan for maintaining the proposed fuel-reduction mea-
+sures.
+To be considered a fuel modification for purposes of this
+code, continuous maintenance of the clearance is required.
+2006 UTAH WILDLAND-URBAN INTERFACE CODE25
+Grasses
+Agropyron cristatum(Crested Wheatgrass)
+Agropyron smithii(Western Wheatgrass)
+Buchloe dactyloides(Buffalograss)
+Dactylis glomerata(Orchardgrass)
+Festuca cinereaand other species  (Blue Fescue)
+Loliumspecies  (Rye Grass)
+Poa pratensis(Kentucky Bluegrass)
+Poa secunda(Sandberg Bluegrass)
+Herbaceous Perennials
+Achillea clavennae(Silvery Yarrow)
+Achillea filipendulina(Fernleaf Yarrow)
+Achillea- other species & hybrids  (Yarrow)*
+Aquilegia- species & hybrids  (Columbine)
+Armeria maritime(Sea Pink, Sea Thrift)
+Artemisia stelleriana(Beach Wormwood, Dusty Miller)
+Artemisia- other species & hybrids  (Various names)*
+Bergenia– species & hybrids  (Bergenia)
+Centranthus rubber(Red Valerian, Jupiter’s Beard)
+Cerastium tomentosum(Snow-in-summer)
+Coreopsis auriculatavar.Nana(Dwarf Mouse Ear Coreopsis)
+Coreopsis– other perennial species  (Coreopsis)
+Delosperma nubigenum(Hardy Ice Plant)
+Dianthus plumarius& others  (Pinks)
+Erigeronhybrids  (Fleabane)*
+Gaillardia X grandiflora(Blanket Flower)
+Geranium cinereum(Hardy Geranium)
+Geranium sanguineum(Bloody Cranesbill, Bloodred Geranium)
+Geraniumspecies  (Geranium)
+Hemerocallisspecies  (Daylily)
+Heuchera sanguinea(Coral Bells, Alum Root)
+Iberis sempervirens(Evergreen Candytuft)
+Irisspecies & hybrids  (Iris)
+Kniphofiaspecies & hybrids  (Red-hot Poker)
+Lavandulaspecies  (Lavender)
+Leucanthemum X superbum(Shasta Daisy)
+Limonium latifolium(Sea-lavender, Statice)
+Linumspecies  (Flax)
+Liriope spicata(Lily-turf)
+Lupinusspecies & hybrids  (Lupine)*
+Medicago sativus(Alfalfa)
+Oenotheraspecies  (Primrose)
+Papaverspecies  (Poppy)
+Penstemonspecies & hybrids  (Penstemon)
+Perovskia atriplicifolia(Russian Sage, Azure Sage)
+Potentilla nepalensis(Nepal Cinquefoil)
+Potentilla tridentata(Wineleaf Cinquefoil)
+Potentilla  verna  (tabernaemontani)(Spring  Cinquefoil;  Creeping
+Potentilla)
+Potentilla–  other  non-shrubby  species  &  hybrids  (Cinquefoil,
+Potentilla)*
+Salviaspecies & hybrids  (Salvia, Sage)*
+Sedumspecies  (Stonecrop, Sedum)
+Sempervivum tectorum(Hen and Chicks)
+Stachys byzantina(Lamb’s Ear)
+Yucca filamentosa(Yucca)
+UTAH FIRE RESISTIVE SPECIES
+Adapted from “Utah Forest Facts:  Firewise Plants for Utah Landscapes”
+Utah State University Extension, 2002
+continued
+1
+08_AppB_Utah_WildlandUrban_2006_pg_25.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\08_AppB_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:57:00 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+APPENDIX B
+262006 UTAH WILDLAND-URBAN INTERFACE CODE
+Shrubs and Woody Vines
+Atriplexspecies  (Saltbush)
+Ceanothus americanus(New Jersey Tea)
+Ceanothus ovatus& others   (Ceanothus)
+Cistusspecies  (Rock-rose)
+Cotoneaster dammeri(Bearberry Cotoneaster)
+Cotoneaster horizontalis(Rockspray or Rock Cotoneaster)
+Cotoneaster– other compact species  (Cotoneaster)
+Hedera helix(English Ivy)
+Loniceraspecies & hybrids  (Honeysuckle)
+Mahonia repens(Creeping Oregon Grape)
+Parthenocissus quinquefolia(Virginia Creeper)
+Prunus besseyi(Sand Cherry)
+Purshia tridentata(Bitterbrush, Antelope Bitterbrush)
+Pyracanthaspecies  (Firethorn, Pyracantha)
+Rhamnusspecies  (Buckthorn)
+Rhus trilobata(Skunkbush Sumac)
+Rhus– other species  (Sumac)
+Ribesspecies  (Currant, Gooseberry)
+Rosa rugosa& other hedge roses  (Rugosa Rose)
+Shepherdia canadensis(Russet Buffaloberry)
+Syringa vulgare(Lilac)
+Vinca major(Large Periwinkle)
+Vinca minor(Dwarf Periwinkle, Common Periwinkle)
+Trees
+Acerspecies  (Maple)
+Betulaspecies  (Birch)
+Cercis canadensis(Eastern Redbud)
+Populus tremuloides(Quaking Aspen)
+Populus– other species  (Poplar, Cottonwood)
+Salixspecies   (Willow)
+* Plants or groups of plants marked with an asterisk (*) can become weedy in certain circumstances, and may even be noxious weeds with legal
+restrictions against their planting and cultivation. Check with your local Extension office or State Department of Agriculture for information
+on noxious weeds in your area.
+Note:Some of the listed plants may not be considered “water-wise” or drought-tolerant for arid climates.
+2
+08_AppB_Utah_WildlandUrban_2006_pg_26.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\08_AppB_Utah_WildlandUrban_2006.vp
+Wednesday, October 18, 2006 7:53:03 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+A. Subdivision DesignPoints
+1. Ingress/Egress
+Two or more primary roads1___
+One road10___
+One-lane road in, one-lane road out15___
+2. Width of Primary Road
+20 feet or more1___
+Less than 20 feet5___
+3. Accessibility
+Road grade 5% or less1___
+Road grade 5-10%5___
+Road grade greater than 10%10___
+4. Secondary Road Terminus
+Loop roads, cul-de-sacs with an outside turning
+radius of 45 feet or greater1___
+Cul-de-sac turnaround5___
+Dead-end roads 200 feet or less in length8___
+Dead-end roads greater than 200 feet in length10___
+5. Street Signs
+Present but unapproved3___
+Not present5___
+B. Vegetation (IUWIC Definitions)
+1. Fuel Types
+Surface
+Lawn/noncombustible1___
+Grass/short brush5___
+Scattered dead/down woody material10___
+Abundant dead/down woody material15___
+Overstory
+Deciduous trees (except tall brush)3___
+Mixed deciduous trees and tall brush10___
+Clumped/scattered conifers and/or tall brush15___
+Contiguous conifer and/or tall brush20___
+2. Defensible Space
+70% or more of lots completed1___
+30% to 70% of lots completed10___
+Less than 30% of lots completed20___
+C. Topography
+Located on flat, base of hill, or setback at crest of hill1___
+On slope with 0-20% grade5___
+On slope with 21-30% grade10___
+On slope with 31% grade or greater15___
+At crest of hill with unmitigated vegetation below20___
+D. Roofing Material
+Class A Fire Rated1___
+Class B Fire Rated5___
+Class C Fire Rated10___
+Nonrated20___
+E. Fire Protection—Water Source
+500 GPM hydrant within 1,000 feet1___
+Hydrant farther than 1,000 feet or draft site5___
+Water source 20 min. or less, round trip10___
+Water source farther than 20 min., and
+45 min. or less, round trip15___
+Water source farther than 45 min., round trip20___
+F. Siding and Decking
+Noncombustible siding/deck1___
+Combustible siding/no deck5___
+Noncombustible siding/combustible deck10___
+Combustible siding and deck15___
+G . Utilities (gas and/or electric)
+All underground utilities1___
+One underground, one aboveground3___
+All aboveground5___
+Total for Subdivision
+Moderate Hazard50–75
+High Hazard76–100
+Extreme Hazard101+
+2006 UTAH WILDLAND-URBAN INTERFACE CODE27
+APPENDIX C
+FIRE HAZARD SEVERITY FORM
+This appendix is to be used to determine the fire hazard severity.
+1
+09_AppC_Utah_WildlandUrban_2006_pg_27.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\09_AppC_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 11:49:26 AM
+Color profile: Disabled
+Composite  Default screen
+
+282006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+09_AppC_Utah_WildlandUrban_2006_pg28.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\09_AppC_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 9:57:15 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+INDEX
+A
+ACCESS
+Applicability . . . . . . . . . . . . . . . . . . . . . . . . . . . 402
+Driveways . . . . . . . . . . . . . . . . . . . . . . . . . . . 403.2
+Fire apparatus. . . . . . . . . . . . . . . . . . . . . . . . 403.2
+Grade . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 403.7
+Individual structures . . . . . . . . . . . . . . . . . . . 402.2
+Marking of roads . . . . . . . . . . . . . . . . . . . . . . 403.4
+Restricted . . . . . . . . . . . . . . . . . . . . . . . . . . . 403.1
+Subdivisions . . . . . . . . . . . . . . . . . . . . . . . . . 402.1
+ADDITIONS OR ALTERATIONS. . . . . . . . . . . . . 101.4
+ALTERNATIVE MATERIALS OR METHODS. . . . 103.3
+AUTOMATIC FIRE SPRINKLER SYSTEMS. . . . . . 602
+C
+CERTIFICATE OF COMPLETION. . . . . . . . . . . . . . 108
+CLASS 1 IGNITION-RESISTANT
+CONSTRUCTION. . . . . . . . . . . . . . . . . . . . . . . . . 504
+Detached accessory structures . . . . . . . . . 504.11
+Exterior doors . . . . . . . . . . . . . . . . . . . . . . . . 504.9
+Exterior walls  . . . . . . . . . . . . . . . . . . . . . . . . 504.5
+Protection of eaves . . . . . . . . . . . . . . . . . . . . 504.3
+Roof covering . . . . . . . . . . . . . . . . . . . . . . . . 504.2
+Vents . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 504.10
+Windows . . . . . . . . . . . . . . . . . . . . . . . . . . . . 504.8
+CLASS 2 IGNITION-RESISTANT
+CONSTRUCTION. . . . . . . . . . . . . . . . . . . . . . . . . 505
+Detached accessory structures . . . . . . . . . 505.11
+Exterior doors . . . . . . . . . . . . . . . . . . . . . . . . 505.9
+Exterior walls  . . . . . . . . . . . . . . . . . . . . . . . . 505.5
+Protection of eaves . . . . . . . . . . . . . . . . . . . . 505.3
+Roof covering . . . . . . . . . . . . . . . . . . . . . . . . 505.2
+Vents . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 505.10
+Windows . . . . . . . . . . . . . . . . . . . . . . . . . . . . 505.8
+CLASS 3 IGNITION-RESISTANT
+CONSTRUCTION. . . . . . . . . . . . . . . . . . . . . . . . . 506
+Roof covering . . . . . . . . . . . . . . . . . . . . . . . . 506.2
+Unenclosed underfloor protection  . . . . . . . . 506.3
+Vents . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 506.4
+CONTROL OF STORAGE. . . . . . . . . . . . . Appendix A,
+Section A105
+D
+DEFENSIBLE SPACE. . . . . . . . . . . . . . . . . . . . . . . 603
+Fuel modification. . . . . . . . . . . . . . . . . . . . . . 603.2
+DEFINITIONS. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 202
+DUMPING. . . . . . . . . . . . . . . Appendix A, Section A106
+F
+FIRE HAZARD SEVERITY. . . . . . . . . . . . . . . . . . . 502
+FIRE HAZARD SEVERITY FORM. . . . . . . Appendix C
+G
+GENERAL REQUIREMENTS. . . . . . . . . . . Appendix A
+I
+IGNITION SOURCE CONTROL. . . . . . . . . Appendix A,
+Section A104
+INSPECTION AND ENFORCEMENT
+Authority to inspect  . . . . . . . . . . . . . . . . . . 107.1.2
+Citations . . . . . . . . . . . . . . . . . . . . . . . . . . . 107.4.4
+Enforcements . . . . . . . . . . . . . . . . . . . . . . . . 107.2
+Reinspections  . . . . . . . . . . . . . . . . . . . . . . 107.1.3
+Right of entry  . . . . . . . . . . . . . . . . . . . . . . . . 107.3
+Unsafe conditions  . . . . . . . . . . . . . . . . . . . 107.4.5
+L
+LAND USE LIMITATIONS. . . . . . . . . . . . . Appendix A,
+Section A108
+LIABILITY OF THE CODE OFFICIAL. . . . . . . . . 102.3
+LPG INSTALLATIONS. . . . . . . . . . . . . . . . . . . . . . . 606
+M
+MAINTENANCE. . . . . . . . . . . . . . . . . . . . . . . . . . 101.6
+MAINTENANCE OF DEFENSIBLE SPACE. . . . . . 604
+Modified area  . . . . . . . . . . . . . . . . . . . . . . . . 604.2
+Responsibility . . . . . . . . . . . . . . . . . . . . . . . . 604.3
+Trees . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 604.4
+P
+PERMITS
+Application  . . . . . . . . . . . . . . . . . . . . . . . . . . 105.4
+Approval . . . . . . . . . . . . . . . . . . . . . . . . . . . . 105.5
+Expiration . . . . . . . . . . . . . . . . . . . . . . . . . . . 105.8
+Issuance . . . . . . . . . . . . . . . . . . . . . . . . . . . . 105.6
+Required . . . . . . . . . . . . . . . . . . . . . . . . . . . . 105.2
+Retention  . . . . . . . . . . . . . . . . . . . . . . . . . . . 105.9
+Revocation . . . . . . . . . . . . . . . . . . . . . . . . . 105.10
+Validity. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 105.7
+2006 UTAH WILDLAND-URBAN INTERFACE CODE29
+1
+10_Utah_WildlandUrban_2006_pg_29.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\10_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:53:12 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen
+
+Work exempt from permit . . . . . . . . . . . . . . . 105.3
+PLANS AND SPECIFICATIONS. . . . . . . . . . . . . . . 106
+Information on plans and specifications . . . . 106.2
+Vegetation management plans . . . . . . . . . . . 106.4
+POWERS AND DUTIES OF THE
+CODE OFFICIAL. . . . . . . . . . . . . . . . . . . . . . . . 102.1
+PRACTICAL DIFFICULTIES. . . . . . . . . . . . . . . . . 103.1
+PROTECTION OF PUMPS AND WATER
+STORAGE FACILITIES. . . . . . . . . . . . . . Appendix A,
+Section A107
+R
+REPLACEMENT OR REPAIR OF
+ROOF COVERINGS. . . . . . . . . . . . . . . . . . . . . . . 507
+RETROACTIVITY. . . . . . . . . . . . . . . . . . . . . . . . . 101.4
+S
+SPARK ARRESTERS. . . . . . . . . . . . . . . . . . . . . . . 605
+STORAGE OF FIREWOOD AND
+COMBUSTIBLE MATERIALS. . . . . . . . . . . . . . . 607
+T
+TECHNICAL ASSISTANCE. . . . . . . . . . . . . . . . . 103.2
+U
+URBAN-WILDLAND INTERFACE
+AREA DESIGNATIONS. . . . . . . . . . . . . . . . . . . . 301
+Declaration . . . . . . . . . . . . . . . . . . . . . . . . . . 301.1
+Mapping  . . . . . . . . . . . . . . . . . . . . . . . . . . . . 301.2
+Review  . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 301.3
+V
+VEGETATION CONTROL. . . . . . . . . . . . . Appendix A,
+Section A102
+VEGETATION MANAGEMENT PLAN. . . . Appendix B
+W
+WATER SUPPLY
+Adequate water supply . . . . . . . . . . . . . . . . . 404.5
+Applicability . . . . . . . . . . . . . . . . . . . . . . . . . . . 402
+Draft sites . . . . . . . . . . . . . . . . . . . . . . . . . . . 404.3
+Hydrants . . . . . . . . . . . . . . . . . . . . . . . . . . . . 404.4
+Identification . . . . . . . . . . . . . . . . . . . . . . . . . 404.8
+Individual structures . . . . . . . . . . . . . . . . . . . 402.2
+Obstructions . . . . . . . . . . . . . . . . . . . . . . . . . 404.7
+Reliability  . . . . . . . . . . . . . . . . . . . . . . . . . . 404.10
+Subdivisions . . . . . . . . . . . . . . . . . . . . . . . . . 402.1
+Testing and maintenance . . . . . . . . . . . . . . . 404.9
+Water sources. . . . . . . . . . . . . . . . . . . . . . . . 404.2
+INDEX
+302006 UTAH WILDLAND-URBAN INTERFACE CODE
+2
+10_Utah_WildlandUrban_2006_pg_30.prn
+M:\data\CODES\STATE CODES\Utah\2006\Wildland-Urban\Final VP\10_Utah_WildlandUrban_2006.vp
+Tuesday, October 17, 2006 10:52:41 AM
+Color profile: Generic CMYK printer profile
+Composite  Default screen

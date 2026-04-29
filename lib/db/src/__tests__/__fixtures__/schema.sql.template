@@ -1,0 +1,407 @@
+--
+-- PostgreSQL database dump
+--
+
+
+-- Dumped from database version 16.10
+-- Dumped by pg_dump version 16.10
+
+
+--
+-- Name: public; Type: SCHEMA; Schema: -; Owner: -
+--
+
+
+
+
+
+--
+-- Name: code_atom_fetch_queue; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.code_atom_fetch_queue (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    source_id uuid NOT NULL,
+    jurisdiction_key text NOT NULL,
+    code_book text NOT NULL,
+    edition text NOT NULL,
+    section_url text NOT NULL,
+    section_ref text,
+    context jsonb,
+    status text DEFAULT 'pending'::text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    last_error text,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    lease_expires_at timestamp with time zone
+);
+
+
+--
+-- Name: code_atom_sources; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.code_atom_sources (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    source_name text NOT NULL,
+    label text NOT NULL,
+    source_type text NOT NULL,
+    license_type text NOT NULL,
+    base_url text,
+    notes text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: code_atoms; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.code_atoms (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    source_id uuid NOT NULL,
+    jurisdiction_key text NOT NULL,
+    code_book text NOT NULL,
+    edition text NOT NULL,
+    section_number text,
+    section_title text,
+    parent_section text,
+    body text NOT NULL,
+    body_html text,
+    embedding @@SCHEMA@@.vector(1536),
+    embedding_model text,
+    embedded_at timestamp with time zone,
+    content_hash text NOT NULL,
+    source_url text NOT NULL,
+    fetched_at timestamp with time zone DEFAULT now() NOT NULL,
+    metadata jsonb
+);
+
+
+--
+-- Name: engagements; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.engagements (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    name_lower text NOT NULL,
+    jurisdiction text,
+    address text,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    latitude numeric(9,6),
+    longitude numeric(9,6),
+    geocoded_at timestamp with time zone,
+    geocode_source text,
+    jurisdiction_city text,
+    jurisdiction_state text,
+    jurisdiction_fips text,
+    project_type text,
+    zoning_code text,
+    lot_area_sqft numeric,
+    site_context_raw jsonb
+);
+
+
+--
+-- Name: findings_code_atoms; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.findings_code_atoms (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    finding_id uuid NOT NULL,
+    atom_id uuid NOT NULL,
+    role text DEFAULT 'supports'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: sheets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.sheets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    snapshot_id uuid NOT NULL,
+    engagement_id uuid NOT NULL,
+    sheet_number text NOT NULL,
+    sheet_name text NOT NULL,
+    view_count integer,
+    revision_number text,
+    revision_date text,
+    thumbnail_png bytea NOT NULL,
+    thumbnail_width integer NOT NULL,
+    thumbnail_height integer NOT NULL,
+    full_png bytea NOT NULL,
+    full_width integer NOT NULL,
+    full_height integer NOT NULL,
+    sort_order integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: snapshots; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE @@SCHEMA@@.snapshots (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    project_name text NOT NULL,
+    payload jsonb NOT NULL,
+    sheet_count integer,
+    room_count integer,
+    level_count integer,
+    wall_count integer,
+    received_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: code_atom_fetch_queue code_atom_fetch_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
+    ADD CONSTRAINT code_atom_fetch_queue_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: code_atom_sources code_atom_sources_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.code_atom_sources
+    ADD CONSTRAINT code_atom_sources_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: code_atom_sources code_atom_sources_source_name_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.code_atom_sources
+    ADD CONSTRAINT code_atom_sources_source_name_unique UNIQUE (source_name);
+
+
+--
+-- Name: code_atoms code_atoms_content_hash_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.code_atoms
+    ADD CONSTRAINT code_atoms_content_hash_unique UNIQUE (content_hash);
+
+
+--
+-- Name: code_atoms code_atoms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.code_atoms
+    ADD CONSTRAINT code_atoms_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: engagements engagements_name_lower_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.engagements
+    ADD CONSTRAINT engagements_name_lower_unique UNIQUE (name_lower);
+
+
+--
+-- Name: engagements engagements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.engagements
+    ADD CONSTRAINT engagements_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: findings_code_atoms findings_code_atoms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
+    ADD CONSTRAINT findings_code_atoms_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: sheets sheets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.sheets
+    ADD CONSTRAINT sheets_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: snapshots snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.snapshots
+    ADD CONSTRAINT snapshots_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: code_atom_fetch_queue_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_atom_fetch_queue_jurisdiction_idx ON @@SCHEMA@@.code_atom_fetch_queue USING btree (jurisdiction_key);
+
+
+--
+-- Name: code_atom_fetch_queue_lease_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_atom_fetch_queue_lease_idx ON @@SCHEMA@@.code_atom_fetch_queue USING btree (status, lease_expires_at);
+
+
+--
+-- Name: code_atom_fetch_queue_status_next_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_atom_fetch_queue_status_next_idx ON @@SCHEMA@@.code_atom_fetch_queue USING btree (status, next_attempt_at);
+
+
+--
+-- Name: code_atom_fetch_queue_url_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX code_atom_fetch_queue_url_unique ON @@SCHEMA@@.code_atom_fetch_queue USING btree (source_id, section_url);
+
+
+--
+-- Name: code_atoms_jurisdiction_book_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_atoms_jurisdiction_book_idx ON @@SCHEMA@@.code_atoms USING btree (jurisdiction_key, code_book);
+
+
+--
+-- Name: code_atoms_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_atoms_jurisdiction_idx ON @@SCHEMA@@.code_atoms USING btree (jurisdiction_key);
+
+
+--
+-- Name: code_atoms_section_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_atoms_section_idx ON @@SCHEMA@@.code_atoms USING btree (jurisdiction_key, code_book, section_number);
+
+
+--
+-- Name: code_atoms_source_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_atoms_source_idx ON @@SCHEMA@@.code_atoms USING btree (source_id);
+
+
+--
+-- Name: engagements_name_lower_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (name_lower);
+
+
+--
+-- Name: findings_code_atoms_atom_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX findings_code_atoms_atom_idx ON @@SCHEMA@@.findings_code_atoms USING btree (atom_id);
+
+
+--
+-- Name: findings_code_atoms_finding_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX findings_code_atoms_finding_idx ON @@SCHEMA@@.findings_code_atoms USING btree (finding_id);
+
+
+--
+-- Name: sheets_engagement_number_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sheets_engagement_number_idx ON @@SCHEMA@@.sheets USING btree (engagement_id, sheet_number);
+
+
+--
+-- Name: sheets_snapshot_number_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX sheets_snapshot_number_unique ON @@SCHEMA@@.sheets USING btree (snapshot_id, sheet_number);
+
+
+--
+-- Name: sheets_snapshot_sort_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sheets_snapshot_sort_idx ON @@SCHEMA@@.sheets USING btree (snapshot_id, sort_order);
+
+
+--
+-- Name: snapshots_engagement_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX snapshots_engagement_idx ON @@SCHEMA@@.snapshots USING btree (engagement_id);
+
+
+--
+-- Name: snapshots_received_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX snapshots_received_at_idx ON @@SCHEMA@@.snapshots USING btree (received_at);
+
+
+--
+-- Name: code_atom_fetch_queue code_atom_fetch_queue_source_id_code_atom_sources_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
+    ADD CONSTRAINT code_atom_fetch_queue_source_id_code_atom_sources_id_fk FOREIGN KEY (source_id) REFERENCES @@SCHEMA@@.code_atom_sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: code_atoms code_atoms_source_id_code_atom_sources_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.code_atoms
+    ADD CONSTRAINT code_atoms_source_id_code_atom_sources_id_fk FOREIGN KEY (source_id) REFERENCES @@SCHEMA@@.code_atom_sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: findings_code_atoms findings_code_atoms_atom_id_code_atoms_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
+    ADD CONSTRAINT findings_code_atoms_atom_id_code_atoms_id_fk FOREIGN KEY (atom_id) REFERENCES @@SCHEMA@@.code_atoms(id) ON DELETE CASCADE;
+
+
+--
+-- Name: sheets sheets_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.sheets
+    ADD CONSTRAINT sheets_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+--
+-- Name: sheets sheets_snapshot_id_snapshots_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.sheets
+    ADD CONSTRAINT sheets_snapshot_id_snapshots_id_fk FOREIGN KEY (snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
+
+
+--
+-- Name: snapshots snapshots_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY @@SCHEMA@@.snapshots
+    ADD CONSTRAINT snapshots_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+

@@ -11,7 +11,9 @@
     "./municode": "./src/municode/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
@@ -20,6 +22,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "typescript": "~5.9.2"
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "~5.9.2",
+    "vitest": "catalog:"
   }
 }

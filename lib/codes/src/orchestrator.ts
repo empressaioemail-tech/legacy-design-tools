@@ -24,8 +24,7 @@
  * jurisdiction" — that lets us crash and resume safely.
  */
 
-import { createHash } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   db,
   codeAtomSources,
@@ -45,6 +44,7 @@ import {
   type JurisdictionConfig,
 } from "./jurisdictions";
 import { embedTexts, EMBEDDING_MODEL } from "./embeddings";
+import { contentHash } from "./contentHash";
 
 export interface OrchestratorLogger {
   info: (obj: unknown, msg: string) => void;
@@ -58,10 +58,6 @@ const consoleLogger: OrchestratorLogger = {
   warn: (obj, msg) => console.warn(msg, obj),
   error: (obj, msg) => console.error(msg, obj),
 };
-
-function contentHash(parts: string[]): string {
-  return createHash("sha256").update(parts.join("\u0001")).digest("hex");
-}
 
 interface SourceRow {
   id: string;

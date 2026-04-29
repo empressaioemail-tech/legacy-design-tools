@@ -15,7 +15,6 @@
  * non-null Content into one AtomCandidate.
  */
 
-import { load } from "cheerio";
 import type { CodeSource, TocEntry, AtomCandidate, FetchContext } from "../types";
 import { libraryUrl } from "./endpoints";
 import {
@@ -24,12 +23,13 @@ import {
   getLatestJob,
   getTocChildren,
   getCodesContent,
-  municodeStats,
   type MunicodeJob,
   type MunicodeCodeProduct,
 } from "./client";
+import { parseSectionResponse } from "./parser";
 
 export { municodeStats, MunicodeError, MunicodeDailyCapExceeded } from "./client";
+export { parseSectionResponse, htmlToPlainText } from "./parser";
 
 interface MunicodeAdapterConfig {
   /** Optional pre-resolved Municode ClientID. If omitted, we resolve via /Clients/name. */
@@ -110,12 +110,6 @@ async function resolveContext(
   };
 }
 
-function htmlToPlainText(html: string): string {
-  // Cheerio strip tags + collapse whitespace.
-  const $ = load(`<root>${html}</root>`);
-  return $("root").text().replace(/\s+/g, " ").trim();
-}
-
 export const municodeSource: CodeSource = {
   id: "bastrop_municode",
   label: "Municode (Bastrop, TX)",
@@ -192,33 +186,14 @@ export const municodeSource: CodeSource = {
     }
 
     const env = await getCodesContent(jobId, productId, nodeId);
-    const candidates: AtomCandidate[] = [];
-    for (const doc of env.Docs ?? []) {
-      if (!doc.Content) continue;
-      const text = htmlToPlainText(doc.Content);
-      if (text.length < 30) continue;
-      candidates.push({
-        sectionRef: doc.Title,
-        sectionTitle: doc.Title,
-        parentSection: c.chapterHeading ? String(c.chapterHeading) : null,
-        body: text,
-        bodyHtml: doc.Content,
-        sourceUrl: stateAbbr && librarySlug
-          ? libraryUrl(stateAbbr, librarySlug, doc.Id)
-          : sectionUrl,
-        metadata: {
-          kind: "municode_doc",
-          nodeId: doc.Id,
-          parentNodeId: nodeId,
-          docOrderId: doc.DocOrderId,
-          isAmended: doc.IsAmended,
-          isUpdated: doc.IsUpdated,
-          jobId,
-          productId,
-          fetchedAt: new Date().toISOString(),
-        },
-      });
-    }
-    return candidates;
+    return parseSectionResponse(env, {
+      parentNodeId: nodeId,
+      jobId,
+      productId,
+      stateAbbr,
+      librarySlug,
+      chapterHeading: c.chapterHeading ? String(c.chapterHeading) : undefined,
+      fallbackUrl: sectionUrl,
+    });
   },
 };

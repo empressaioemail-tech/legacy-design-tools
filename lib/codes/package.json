@@ -12,7 +12,9 @@
     "./embeddings": "./src/embeddings.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@workspace/codes-sources": "workspace:*",
@@ -21,6 +23,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "typescript": "~5.9.2"
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "~5.9.2",
+    "vitest": "catalog:"
   }
 }

@@ -1,0 +1,48 @@
+Section 0 findings accepted. Hybrid PG strategy approved.
+
+CONFIRMED DECISIONS:
+
+1. Hybrid PG strategy:
+   - Pure logic tests (parsers, hash utils, jurisdiction 
+     resolution, prompt formatting, retrieval ranking math): 
+     no DB, mock the store layer. ~80% of the suite.
+   - lib/db integration tests (FK cascades, UNIQUE constraints, 
+     vector inserts, pgvector index behavior): schema-prefix 
+     on the same Postgres via search_path injection.
+   - No pglite — the driver-mismatch fidelity tax isn't worth 
+     it for the surfaces we're testing.
+
+2. Test DB: default to the existing DATABASE_URL with 
+   test_<random> schema. TEST_DATABASE_URL env var as override 
+   so we can provision a separate Replit DB later if 
+   contention becomes an issue. Document the env var in 
+   TESTING.md (Part 2 task).
+
+3. ADDITIONAL: add a small "schema reaper" routine that 
+   runs at the start of every integration test suite. It 
+   should DROP SCHEMA IF EXISTS for any test_* schema older 
+   than 1 hour (use timestamp encoded in schema name OR 
+   query pg_namespace + pg_class for last-modified info). 
+   This protects against orphaned schemas from crashed test 
+   runs. Cap the reaper at 50 schemas per pass to avoid long 
+   startup if CI explodes.
+
+4. Naming convention for test schemas:
+   test_<unix_timestamp>_<random>
+   e.g., test_1730500000_a3f9b2
+   
+   The timestamp prefix lets the reaper identify old schemas 
+   without parsing pg_class metadata. Cleaner than UUID-only.
+
+5. The pnpm-workspace minimumReleaseAge: 1440 policy is fine 
+   for vitest 3.x and @vitest/coverage-v8 — both are mature. 
+   Note any package added to test deps that hits this 
+   constraint and report it in the deliverables.
+
+PROCEED with Section 1 (Vitest config) through Section 5 
+(lib/codes orchestrator tests) as drafted in the spec, with 
+the additions above.
+
+PAUSE again before Section 6 (verification) so we can review 
+test counts and any code-quality refactors that emerged 
+before running the full suite.
