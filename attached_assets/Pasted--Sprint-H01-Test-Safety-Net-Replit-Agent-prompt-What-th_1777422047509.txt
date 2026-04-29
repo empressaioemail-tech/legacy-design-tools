@@ -1,0 +1,446 @@
+# Sprint H01 — Test Safety Net (Replit Agent prompt)
+
+**What this is:** Sprint H01 establishes a minimum viable test safety net so Sprint A06 (AI Reviewer reasoning loop) can ship structural changes without silently breaking the working A04+A05 pipeline.
+
+**Run this AFTER:** Sprint A05 verified ✓ (citation chips working on real Moab engagement, 264 atoms embedded, embedding backfill complete).
+
+**Stack:** Vitest (already in the Vite ecosystem, zero new deps to choose), GitHub Actions on push/PR, practical strictness (critical paths get tests, peripheral code is best-effort).
+
+**Two parts.** Part 1 is test infrastructure + lib unit tests. Part 2 is api-server integration + frontend components + CI workflow. Run Part 1 to completion before Part 2.
+
+**This is a multi-day sprint.** Estimated 7-10 days of agent work split across both parts. Don't try to one-shot.
+
+**How to use:** paste Part 1 first into Replit Agent. After Part 1 verifies, paste Part 2.
+
+---
+
+## Part 1 — Test Infrastructure + Lib Unit Tests
+
+```
+========== BEGIN PASTE TO REPLIT AGENT (PART 1 OF 2) ==========
+
+Sprint H01 Part 1: test infrastructure + lib package unit tests.
+
+Goal: establish Vitest setup, fixture conventions, and unit tests for the lib packages that are most likely to break silently when A06 modifies the chat-and-codes pipeline. No CI yet (Part 2). No frontend tests yet (Part 2). No api-server integration tests yet (Part 2). Just lib unit tests with a working `pnpm test` command.
+
+============================================================
+SECTION 0 — STAGE GATE
+============================================================
+
+A. Verify Vitest installable in workspace
+   - Vitest should already be in the Vite-using packages (artifacts/design-tools)
+   - Confirm pnpm install at workspace root and that Vitest resolves
+   - If not installed in lib packages, plan to add it as a workspace dev dependency
+
+B. Verify TypeScript test config can be set up
+   - tsconfig.base.json exists with workspace conventions
+   - Lib packages can extend it for tests
+   - Path aliases between workspace packages resolve in test mode
+
+C. Inspect existing tests
+   - grep -r "*.test.ts" lib/ artifacts/ — find anything that exists already
+   - Note any conventions already in use
+
+D. Check Postgres test strategy availability
+   - For lib/db tests we'll need a test database
+   - Options: testcontainers (spawns docker pg; complex on Replit), pglite (in-memory pg; new but promising), or "just use the existing prod db with a test schema prefix"
+   - Recommend the lightest option that works in Replit; default is pglite if it supports pgvector
+   - If pglite doesn't support pgvector, fall back to: Vitest tests use a separate test schema (e.g. `test_$RANDOM`) on the same Postgres instance; afterEach drops the schema
+
+After A-D, REPORT FINDINGS AND PAUSE. Wait for go-ahead before proceeding.
+
+============================================================
+SECTION 1 — VITEST CONFIGURATION
+============================================================
+
+Add to root package.json scripts:
+  "test": "pnpm -r test",
+  "test:watch": "pnpm -r test:watch"
+
+Each lib/ package and artifacts/api-server/ gets its own vitest.config.ts. Standard config:
+
+  // vitest.config.ts in each package
+  import { defineConfig } from "vitest/config";
+  
+  export default defineConfig({
+    test: {
+      globals: true,
+      environment: "node",   // override to "jsdom" for frontend
+      setupFiles: ["./src/__tests__/setup.ts"],  // optional
+      include: ["src/**/*.test.ts"],
+      coverage: {
+        provider: "v8",
+        reporter: ["text", "html"],
+        exclude: ["**/*.test.ts", "**/__fixtures__/**", "**/__tests__/**"],
+      },
+    },
+  });
+
+Each package adds dev deps:
+  vitest, @vitest/coverage-v8
+
+Per-package package.json scripts:
+  "test": "vitest run",
+  "test:watch": "vitest"
+
+============================================================
+SECTION 2 — TEST FIXTURE CONVENTIONS
+============================================================
+
+Establish conventions so future agents (and humans) follow consistent patterns:
+
+  Source code:           lib/<package>/src/foo.ts
+  Unit tests:            lib/<package>/src/foo.test.ts (colocated)
+  Integration tests:     lib/<package>/src/__tests__/integration/foo.integration.test.ts
+  Fixtures (static data) lib/<package>/src/__fixtures__/foo.html (or .pdf, .json, etc.)
+  Test utilities:        lib/<package>/src/__tests__/utils.ts
+
+Fixtures are real-world data captured at a point in time:
+  - HTML fixtures from Grand County's actual page (saved as static .html)
+  - PDF text fixtures from the IWUIC PDF (saved as .txt of extracted text, since PDF parsing is tested separately)
+  - Municode API JSON fixtures from real responses (saved as .json)
+
+Why fixtures and not live calls in tests:
+  - Tests run offline, deterministic, fast
+  - Source layout changes are caught (test fails when fixture doesn't match parser expectations)
+  - No API costs in tests, no Municode rate limit concerns
+  - Fixtures get refreshed manually when source changes (rare)
+
+============================================================
+SECTION 3 — lib/db TESTS
+============================================================
+
+Critical paths to cover:
+
+  src/__tests__/integration/schema.integration.test.ts
+    - Database can be set up with all tables
+    - All indexes exist as expected
+    - FK cascade behavior: delete an engagement → snapshots cascade → sheets cascade
+    - UNIQUE constraint on (snapshotId, sheetNumber) prevents duplicate sheets
+    - UNIQUE constraint on (jurisdiction, codeBook, edition, sectionNumber, contentHash) prevents duplicate atoms
+    - pgvector extension loads, vector column accepts inserts
+
+  src/utils/contentHash.test.ts (new file if not present)
+    - SHA-256 hash is deterministic
+    - Different bodyText produces different hash
+    - Whitespace normalization is consistent (or document that it's not)
+
+Test database setup:
+  - Use whatever strategy was decided in Section 0.D
+  - Set up + teardown in beforeAll/afterAll (or beforeEach/afterEach if cheap)
+  - Each test gets isolated state
+
+============================================================
+SECTION 4 — lib/codes-sources TESTS
+============================================================
+
+Each adapter gets fixtures + parser tests + (mocked) integration tests.
+
+GRAND COUNTY HTML:
+
+  src/grandCounty/parser.test.ts
+    - Fixture: src/grandCounty/__fixtures__/design-criteria-page.html
+      (Capture the current state of grandcountyutah.net/146/Design-Criteria; commit as static fixture)
+    - Test: parser extracts the IRC Table 301.2(1) rows
+    - Test: each row has expected sectionNumber, sectionTitle, bodyText
+    - Test: snow load row, wind speed row, seismic category row are all parsed correctly with expected values
+    - Test: table parser handles missing/empty cells gracefully
+
+GRAND COUNTY PDF:
+
+  src/grandCountyPdf/parser.test.ts
+    - Fixture: src/grandCountyPdf/__fixtures__/iwuic-extracted-text.txt
+      (Pre-extracted text from the IWUIC PDF; we don't re-parse PDFs in tests, just chunk pre-extracted text)
+    - Test: heuristic chunker produces expected number of sections (~61)
+    - Test: section number patterns are matched ("1.0 GENERAL", "2.1 SCOPE", etc.)
+    - Test: handles edge cases: empty pages, page break mid-section, all-caps body content
+
+MUNICODE:
+
+  src/municode/client.test.ts
+    - Mock the HTTP layer with msw or undici-mock
+    - Test: rate limiter enforces 1.5s minimum between requests (advance fake timers)
+    - Test: User-Agent header present and matches "Hauska-CodeAtoms/0.1 (+nick@hauska.io)"
+    - Test: 429 response triggers retry with backoff
+    - Test: 5xx response triggers retry with backoff
+    - Test: 4xx (other than 429) throws without retry
+    - Test: daily request cap halts further requests
+  
+  src/municode/parser.test.ts
+    - Fixture: src/municode/__fixtures__/bastrop-section-response.json
+      (Real captured Municode API response for one Bastrop section)
+    - Test: parser produces AtomCandidate with expected sectionNumber, title, body
+    - Test: missing optional fields handled gracefully
+
+============================================================
+SECTION 5 — lib/codes ORCHESTRATOR TESTS
+============================================================
+
+  src/atoms/store.test.ts
+    - upsertAtom dedupes by contentHash
+    - upsertAtom handles null bodyText (reference-only atoms)
+    - upsertAtom triggers async embedding (mock the embedder)
+    - re-running upsertAtom with identical content returns existing without modification
+
+  src/atoms/retrieve.test.ts
+    - Vector retrieval returns top-K by cosine similarity
+    - Threshold filter (similarity > 0.4) drops low-relevance atoms
+    - Cross-jurisdiction isolation: Bastrop questions don't return Grand County atoms
+    - Embedding null tolerance: atoms with null embeddings excluded from vector search
+    - Lexical fallback works when no atoms have embeddings
+
+  src/jurisdictions.test.ts
+    - mapEngagementToJurisdiction handles all three fallback tiers:
+      Tier 1: structured city + state ("Bastrop", "TX") → bastrop_tx
+      Tier 2: freeform jurisdiction ("Moab, UT") → grand_county_ut
+      Tier 3: address substring ("...Bastrop, TX 78602") → bastrop_tx
+    - Returns "default" when no match
+    - Case-insensitive matching
+    - Multi-word city names handled (e.g., "Salt Lake City" — though not in our jurisdictions, test edge case)
+
+  src/warmup/worker.test.ts
+    - Lease pattern: claimed row has lease set
+    - Reaper: claimed rows past lease are reclaimed
+    - Per-jurisdiction drain scope: synchronous warmup only processes the requested jurisdiction
+    - Error handling: failed fetch marks row failedAt, continues to next
+    - Daily cap respected
+
+  src/prompt/format.test.ts
+    - formatRetrievedAtomsForPrompt caps total bodyText at ~6000 chars
+    - Drops lowest-similarity atoms when over cap
+    - Reference-only atoms (bodyTextRetained=false) include source URL but not body
+    - Empty atom list produces "no relevant code sections" prompt section
+
+============================================================
+SECTION 6 — FORMS OF VERIFICATION
+============================================================
+
+After all tests written, run:
+
+  pnpm test
+
+Expected output:
+  - All tests pass
+  - Roughly 50-100 tests across the lib packages
+  - Run time under 30 seconds (no flaky integration tests)
+  - Coverage report shows >80% on lib/codes, lib/codes-sources core paths
+
+If any test fails, fix the underlying code or the test (whichever is wrong) — don't merge with red tests. Document any test that's intentionally skipped (e.g., "PDF parser test skipped pending pdf-parse dep update") in a TESTS_SKIPPED.md.
+
+============================================================
+SECTION 7 — DELIVERABLES
+============================================================
+
+After completing, print:
+- Total test count by package
+- Coverage percentages by package
+- Any tests skipped and why
+- Any code changes made beyond tests (refactors that emerged because tests were hard to write — these are typically code-quality wins)
+- Run time of pnpm test cold (first run) and warm (subsequent runs)
+- Decisions diverged from spec, and why
+
+============================================================
+SECTION 8 — DO NOT BUILD IN PART 1
+============================================================
+
+- Frontend component tests (Part 2)
+- api-server route integration tests (Part 2)
+- E2E browser tests (deferred indefinitely; not needed for prototype)
+- GitHub Actions workflow (Part 2)
+- Performance benchmarks
+- Visual regression tests
+- Snapshot tests for UI (premature)
+- Tests for the C# Revit add-in (different ecosystem)
+- Coverage thresholds in vitest.config.ts (we'll add when stable)
+- ANY change to source code beyond "make this testable" refactors
+  (and those should be minimal — flag them if they happen)
+
+========== END PASTE TO REPLIT AGENT (PART 1 OF 2) ==========
+```
+
+---
+
+## Part 2 — API integration tests + frontend component tests + CI
+
+```
+========== BEGIN PASTE TO REPLIT AGENT (PART 2 OF 2) ==========
+
+Sprint H01 Part 2: api-server integration tests, frontend component tests, GitHub Actions CI.
+
+Run AFTER Part 1 verified — Vitest infrastructure exists, lib package tests are green, fixture conventions established.
+
+============================================================
+SECTION 1 — API-SERVER ROUTE INTEGRATION TESTS
+============================================================
+
+artifacts/api-server/src/__tests__/integration/
+
+Critical paths to cover:
+
+  routes-snapshots.integration.test.ts
+    - POST /api/snapshots: validates secret, creates snapshot, geocodes, idempotent on duplicate snapshots
+    - GET /api/snapshots/:id: returns snapshot detail
+    - POST /api/snapshots/:id/sheets: multipart upload, busboy parses correctly, idempotent upsert
+    - GET /api/snapshots/:id/sheets: returns SheetSummary[]
+    - GET /api/sheets/:id/{thumbnail,full}.png: bytea served with right Content-Type, Cache-Control, ETag
+
+  routes-chat.integration.test.ts
+    - POST /api/chat: assembles system prompt with snapshot data
+    - POST /api/chat with referencedSheetIds: attaches Vision blocks (mock Claude SDK)
+    - POST /api/chat with engagement in covered jurisdiction: includes <reference_code_sections>
+    - POST /api/chat with engagement in default jurisdiction: omits code sections
+    - SSE streaming response shape preserved
+
+  routes-codes.integration.test.ts
+    - GET /api/codes/jurisdictions: returns configured list
+    - GET /api/codes/atoms: filtering, pagination
+    - GET /api/codes/atoms/:id: returns full atom
+    - GET /api/codes/atoms/by-section: lookup by jurisdiction + sectionNumber
+    - POST /api/codes/retrieve: vector + lexical search
+    - POST /api/codes/warmup/:jurisdiction: enqueues TOC, returns immediately
+    - GET /api/codes/warmup/:jurisdiction: status
+
+  routes-engagements.integration.test.ts
+    - PATCH /api/engagements/:id: updates fields, triggers geocoding on address change
+    - PATCH triggers warmup enqueue when jurisdiction resolves to recognized value
+    - Missing engagement: 404
+    - Invalid input: 400
+
+Strategy:
+  - In-process Express via supertest
+  - Test database isolated per test suite (same strategy as Part 1)
+  - Mock external services: Claude SDK, OpenAI embeddings, Nominatim geocoder, Municode API
+  - Use msw or undici-mock for HTTP-level mocking
+  - Tests should be runnable offline
+
+============================================================
+SECTION 2 — FRONTEND COMPONENT TESTS
+============================================================
+
+artifacts/design-tools/src/components/__tests__/
+
+  CitationChip.test.tsx
+    - Renders section number when atom loads
+    - Hover shows tooltip with atom details
+    - Click navigates to /codes/{jurisdiction}/{atomId}
+    - Reference-only atoms show "view at source" link in tooltip
+    - Failed fetch renders chip text without popover (graceful degradation)
+
+  ClaudeChat.test.tsx
+    - Markdown renders correctly (already covered indirectly by react-markdown's own tests, but verify our components prop wiring)
+    - [[CODE:atomId]] tokens replaced with CitationChip components
+    - Attached sheets render as chips above input
+    - Send button submits with referencedSheetIds payload
+    - Attached sheets cleared after send
+
+  SheetGrid.test.tsx
+    - Empty state when no sheets
+    - Filter input narrows displayed thumbnails
+    - Click navigates to viewer
+
+  SheetViewer.test.tsx
+    - Loads on mount, clears loading state when image complete (incl. cached-image case via imgRef.complete)
+    - Zoom/pan controls present
+    - "Ask Claude about this sheet" button attaches sheet + closes viewer
+
+Strategy:
+  - Vitest with environment: "jsdom" override
+  - @testing-library/react + @testing-library/user-event
+  - Mock API calls via msw
+  - vitest.config.ts in artifacts/design-tools updated for jsdom
+
+============================================================
+SECTION 3 — GITHUB ACTIONS CI WORKFLOW
+============================================================
+
+.github/workflows/test.yml at the legacy-design-tools repo root:
+
+  name: test
+  on:
+    push:
+      branches: [main]
+    pull_request:
+      branches: [main]
+  
+  jobs:
+    test:
+      runs-on: ubuntu-latest
+      services:
+        postgres:
+          image: pgvector/pgvector:pg16
+          env:
+            POSTGRES_PASSWORD: testpw
+            POSTGRES_DB: test
+          ports: ['5432:5432']
+          options: >-
+            --health-cmd pg_isready
+            --health-interval 10s
+            --health-timeout 5s
+            --health-retries 5
+      steps:
+        - uses: actions/checkout@v4
+        - uses: pnpm/action-setup@v3
+          with:
+            version: 9
+        - uses: actions/setup-node@v4
+          with:
+            node-version: 20
+            cache: pnpm
+        - run: pnpm install --frozen-lockfile
+        - run: pnpm typecheck
+        - run: pnpm lint
+        - run: pnpm test
+          env:
+            DATABASE_URL: postgresql://postgres:testpw@localhost:5432/test
+            OPENAI_API_KEY: dummy-key-for-mocked-tests
+            MUNICODE_USER_AGENT: "Hauska-CI/0.1"
+
+Workflow shape notes:
+  - Pre-1.0, single-job, single-platform, single-Node-version
+  - typecheck + lint + test all gate the PR
+  - Failing tests should fail the PR
+  - Coverage report published as a workflow artifact (not blocking)
+
+Add a status badge to README.md:
+  ![tests](https://github.com/empressaioemail-tech/legacy-design-tools/actions/workflows/test.yml/badge.svg)
+
+============================================================
+SECTION 4 — TEST DOCUMENTATION
+============================================================
+
+Create TESTING.md at workspace root:
+  - How to run tests locally (pnpm test)
+  - How to add a test for a new feature
+  - Fixture conventions
+  - When to use unit vs integration tests
+  - How to refresh fixtures from real-world sources
+  - When to mock external services vs use the real ones
+  - Coverage philosophy (practical, not strict; critical paths only)
+
+============================================================
+SECTION 5 — DELIVERABLES
+============================================================
+
+After completing, print:
+- Total test count across the workspace
+- Run time of full pnpm test (cold + warm)
+- Coverage % per package (target: >70% on critical paths, no target on peripheral code)
+- CI workflow first run result (paste link to GitHub Actions run)
+- Any external dependencies added to test deps
+- Decisions diverged from spec, and why
+
+============================================================
+SECTION 6 — DO NOT BUILD IN PART 2
+============================================================
+
+- Browser-level E2E tests (Playwright/Cypress) — deferred
+- Visual regression tests
+- Performance/load tests
+- Component snapshot tests (anti-pattern at this stage; brittle, low value)
+- Coverage threshold enforcement (we'll add later)
+- Multi-platform / multi-Node CI matrix
+- C# Revit add-in tests
+- Tests for plan-review/ or mockup-sandbox/ apps (out of scope)
+
+========== END PASTE TO REPLIT AGENT (PART 2 OF 2) ==========
+```
