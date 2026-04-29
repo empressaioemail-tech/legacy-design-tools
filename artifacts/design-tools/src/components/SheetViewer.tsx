@@ -181,7 +181,7 @@ export function SheetViewer({ sheet, onClose, onAskClaude }: SheetViewerProps) {
           maxScale={8}
           wheel={{ step: 0.2 }}
           doubleClick={{ disabled: false, mode: "reset" }}
-          onTransformed={(ref: ReactZoomPanPinchRef) =>
+          onTransform={(ref: ReactZoomPanPinchRef) =>
             setZoom(ref.state.scale)
           }
         >

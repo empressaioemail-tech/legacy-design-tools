@@ -47,3 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Conversation transcripts auto-saved by the workspace shouldn't ride along
+# with code changes — they're per-session ephemera, not project artifacts.
+attached_assets/Pasted-*.txt

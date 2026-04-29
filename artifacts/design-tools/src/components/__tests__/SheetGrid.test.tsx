@@ -51,18 +51,25 @@ vi.mock("../SheetViewer", () => ({
 
 const { SheetGrid } = await import("../SheetGrid");
 
-function mkSheet(over: Partial<SheetSummary> & Pick<SheetSummary, "id">): SheetSummary {
+function mkSheet(
+  over: Partial<SheetSummary> & Pick<SheetSummary, "id">,
+): SheetSummary {
   return {
     id: over.id,
     snapshotId: over.snapshotId ?? "snap-1",
+    engagementId: over.engagementId ?? "eng-1",
     sheetNumber: over.sheetNumber ?? "A0.0",
     sheetName: over.sheetName ?? "Cover",
-    width: over.width ?? 1024,
-    height: over.height ?? 768,
-    hasFull: over.hasFull ?? true,
-    hasThumb: over.hasThumb ?? true,
-    receivedAt: over.receivedAt ?? new Date().toISOString(),
-  } as SheetSummary;
+    viewCount: over.viewCount ?? null,
+    revisionNumber: over.revisionNumber ?? null,
+    revisionDate: over.revisionDate ?? null,
+    thumbnailWidth: over.thumbnailWidth ?? 200,
+    thumbnailHeight: over.thumbnailHeight ?? 150,
+    fullWidth: over.fullWidth ?? 1024,
+    fullHeight: over.fullHeight ?? 768,
+    sortOrder: over.sortOrder ?? 0,
+    createdAt: over.createdAt ?? new Date().toISOString(),
+  };
 }
 
 describe("SheetGrid", () => {
