@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { SendChatMessageBody } from "@workspace/api-zod";
 import { db, snapshots, sheets } from "@workspace/db";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   keyFromEngagement,
   retrieveAtomsForQuestion,
@@ -132,28 +132,81 @@ router.post("/chat", async (req: Request, res: Response) => {
     return;
   }
 
+  // Resolve the latest snapshot through the engagement atom's
+  // `relatedAtoms` instead of running a second `engagementId + ORDER BY
+  // receivedAt DESC` query here. The engagement atom already loads its
+  // child snapshots most-recent-first via `resolveComposition`, so
+  // taking the first `snapshot` ref off that list is equivalent to the
+  // previous Drizzle read but keyed off the registry's view of the
+  // engagement — the same source of truth the FE atom card sees.
+  const latestSnapshotRef = engagementSummary.relatedAtoms.find(
+    (r) => r.entityType === "snapshot",
+  );
+  if (!latestSnapshotRef) {
+    res.status(400).json({
+      error: "no_snapshots",
+      message:
+        "No snapshots yet for this engagement. Send one from Revit first.",
+    });
+    return;
+  }
+  const latestSnapshotId = latestSnapshotRef.entityId;
+
+  // Snapshot framework atom — pushed into `<framework_atoms>` so the
+  // model receives the same provenance-stamped narrative the FE atom
+  // card sees, instead of inferring everything from the raw payload
+  // blob below. Best-effort: a contract drift inside the snapshot atom
+  // (e.g. throwing on a stale id) drops the framework entry but lets
+  // the chat continue with engagement + raw payload.
+  let snapshotSummary: ContextSummary<"snapshot"> | null = null;
+  const snapshotResolution = getAtomRegistry().resolve("snapshot");
+  if (snapshotResolution.ok) {
+    try {
+      snapshotSummary = await snapshotResolution.registration.contextSummary(
+        latestSnapshotId,
+        scope,
+      );
+    } catch (err) {
+      logger.warn(
+        { err, engagementId, snapshotId: latestSnapshotId },
+        "chat: snapshot atom contextSummary threw — skipping framework entry",
+      );
+    }
+  } else {
+    logger.warn(
+      { err: snapshotResolution.error.message },
+      "chat: snapshot atom not registered — typed snapshot summary skipped",
+    );
+  }
+
   let latestSnapshot: typeof snapshots.$inferSelect | undefined;
   try {
-    // Snapshot still loaded directly here: the snapshot atom's
+    // Raw payload still loaded directly here: the snapshot atom's
     // `contextSummary` (sprint A2) intentionally omits the raw
-    // `payload` blob, but the prompt builder needs that blob to render
-    // the latest snapshot's Revit elements. The lookup is keyed off
-    // the atom's typed id rather than the URL param so a single source
-    // of truth (the registry) drives both branches.
+    // `payload` blob to keep the atom-card payload cheap, but the
+    // prompt builder needs that blob to render the latest snapshot's
+    // Revit elements. The lookup is now keyed off the atom-resolved
+    // snapshot id (single-row by primary key) rather than re-running
+    // the engagement + receivedAt-desc scan we did before.
     const sRows = await db
       .select()
       .from(snapshots)
-      .where(eq(snapshots.engagementId, engagementTyped.id))
-      .orderBy(desc(snapshots.receivedAt))
+      .where(eq(snapshots.id, latestSnapshotId))
       .limit(1);
     latestSnapshot = sRows[0];
   } catch (err) {
-    logger.error({ err, engagementId }, "chat snapshot lookup failed");
+    logger.error(
+      { err, engagementId, snapshotId: latestSnapshotId },
+      "chat snapshot lookup failed",
+    );
     res.status(500).json({ error: "Failed to load engagement" });
     return;
   }
 
   if (!latestSnapshot) {
+    // The engagement atom said this snapshot existed a moment ago. If
+    // the row is gone now (deleted between reads) treat it the same as
+    // "no snapshots" — the wire contract callers expect.
     res.status(400).json({
       error: "no_snapshots",
       message:
@@ -163,12 +216,14 @@ router.post("/chat", async (req: Request, res: Response) => {
   }
 
   // Engagement is the first framework atom in the prompt (always
-  // present once we got past the not-found branch above). Sheet atoms
-  // get appended below when they're referenced. Order matters only for
-  // human-readability of the rendered `<framework_atoms>` block; the
-  // model treats each entry independently. Both paths share the same
-  // request-scoped `scope` so a `user`-audience chat redacts the
-  // engagement prose AND the sheet prose consistently.
+  // present once we got past the not-found branch above), followed by
+  // the latest snapshot's typed summary when the atom resolved
+  // successfully. Sheet atoms get appended below when they're
+  // referenced. Order matters only for human-readability of the
+  // rendered `<framework_atoms>` block; the model treats each entry
+  // independently. All paths share the same request-scoped `scope` so
+  // a `user`-audience chat redacts the engagement prose AND the sheet
+  // prose AND the snapshot prose consistently.
   const frameworkAtoms: PromptFrameworkAtom[] = [
     {
       entityType: "engagement",
@@ -177,6 +232,14 @@ router.post("/chat", async (req: Request, res: Response) => {
       historyProvenance: engagementSummary.historyProvenance,
     },
   ];
+  if (snapshotSummary) {
+    frameworkAtoms.push({
+      entityType: "snapshot",
+      entityId: latestSnapshotId,
+      prose: snapshotSummary.prose,
+      historyProvenance: snapshotSummary.historyProvenance,
+    });
+  }
 
   // Resolve attached sheets, scoped to this engagement so the user can't
   // hand-craft a request that exfiltrates someone else's images.

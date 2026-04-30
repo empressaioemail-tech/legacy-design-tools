@@ -222,6 +222,73 @@ describe("POST /api/chat", () => {
     expect(userSystem).toContain("123 Main St");
   });
 
+  it("snapshot atom prose lands in <framework_atoms> tagged with entity_type=\"snapshot\" for the most recent snapshot", async () => {
+    // Seed the engagement first, then insert TWO snapshot rows so we
+    // can prove chat picks the most recent one (i.e. it's threading
+    // the snapshot atom in via `engagement.relatedAtoms`, which is
+    // pre-sorted most-recent-first by the engagement atom). The
+    // earlier snapshot's id should NOT appear in <framework_atoms>.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Snapshot Provenance Test",
+        nameLower: `snapshot-provenance-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    // Older snapshot — receivedAt explicitly set in the past so the
+    // ordering test isn't relying on insert order or microsecond
+    // timing on the default `now()` value.
+    const [older] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Older Project",
+        payload: { sheets: [], rooms: [] },
+        sheetCount: 1,
+        roomCount: 0,
+        levelCount: 0,
+        wallCount: 0,
+        receivedAt: new Date("2024-01-01T00:00:00.000Z"),
+      })
+      .returning({ id: snapshots.id });
+    const [newer] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Newer Project",
+        payload: { sheets: [], rooms: [] },
+        sheetCount: 7,
+        roomCount: 0,
+        levelCount: 0,
+        wallCount: 0,
+        receivedAt: new Date("2026-04-01T00:00:00.000Z"),
+      })
+      .returning({ id: snapshots.id });
+
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({ engagementId: eng.id, question: "what's in the snapshot?" });
+    expect(res.status).toBe(200);
+
+    const system = String(anthropicMocks.lastArgs.system);
+    // Snapshot framework atom is present and tagged with the most
+    // recent snapshot's id, not the older one.
+    expect(system).toContain('entity_type="snapshot"');
+    expect(system).toContain(`entity_id="${newer.id}"`);
+    expect(system).not.toContain(`entity_id="${older.id}"`);
+    // Prose-level sanity check: the snapshot atom's prose names the
+    // project + counts. If chat were ignoring the atom and only
+    // shipping the raw payload, neither would appear here.
+    expect(system).toContain("Newer Project");
+    expect(system).toContain("7 sheets");
+  });
+
   it("error path: when the SDK throws, emits {error:'stream_failed'} then [DONE]", async () => {
     anthropicMocks.throwOnStream = new Error("upstream 500");
     const eng = await seedEngagementWithSnapshot();
