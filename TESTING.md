@@ -335,10 +335,10 @@ Notes on the workflow:
 | Package | Files | Tests |
 |---|---:|---:|
 | `lib/db` | 2 | 9 |
-| `lib/codes` | 3 | 34 |
-| `lib/codes-sources` | (Part 1) | 46 |
-| `artifacts/api-server` | 3 | 12 |
-| `artifacts/design-tools` | 4 | 16 |
-| **Total** | **12+** | **117+** (Part 1 base + Part 2 additions) |
+| `lib/codes` | 7 | 80 |
+| `lib/codes-sources` | 4 | 46 |
+| `artifacts/api-server` | 5 | 29 |
+| `artifacts/design-tools` | 5 | 18 |
+| **Total** | **23** | **182** |
 
 Refresh this table when adding a suite.
