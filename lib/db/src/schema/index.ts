@@ -5,3 +5,4 @@ export * from "./codeAtomSources";
 export * from "./codeAtoms";
 export * from "./codeAtomFetchQueue";
 export * from "./findingsCodeAtoms";
+export * from "./atomEvents";

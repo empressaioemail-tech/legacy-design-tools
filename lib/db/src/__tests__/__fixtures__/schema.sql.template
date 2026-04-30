@@ -8,6 +8,22 @@
 
 
 
+-- Name: atom_events; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.atom_events (
+    id text NOT NULL,
+    entity_type text NOT NULL,
+    entity_id text NOT NULL,
+    event_type text NOT NULL,
+    actor jsonb NOT NULL,
+    payload jsonb NOT NULL,
+    prev_hash text,
+    chain_hash text NOT NULL,
+    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: code_atom_fetch_queue; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.code_atom_fetch_queue (
@@ -141,6 +157,12 @@ CREATE TABLE @@SCHEMA@@.snapshots (
 );
 
 
+-- Name: atom_events atom_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.atom_events
+    ADD CONSTRAINT atom_events_pkey PRIMARY KEY (id);
+
+
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
@@ -193,6 +215,16 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_pkey PRIMARY KEY (id);
+
+
+-- Name: atom_events_chain_hash_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX atom_events_chain_hash_uniq ON @@SCHEMA@@.atom_events USING btree (chain_hash);
+
+
+-- Name: atom_events_timeline_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX atom_events_timeline_idx ON @@SCHEMA@@.atom_events USING btree (entity_type, entity_id, occurred_at);
 
 
 -- Name: code_atom_fetch_queue_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -

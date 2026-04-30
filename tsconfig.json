@@ -23,6 +23,9 @@
     },
     {
       "path": "./lib/codes"
+    },
+    {
+      "path": "./lib/empressa-atom"
     }
   ]
 }

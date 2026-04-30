@@ -60,6 +60,7 @@ describe("lib/db schema integration", () => {
       );
       const names = res.rows.map((r) => r.tablename);
       expect(names).toEqual([
+        "atom_events",
         "code_atom_fetch_queue",
         "code_atom_sources",
         "code_atoms",
