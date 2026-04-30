@@ -129,4 +129,57 @@ describe("createAtomRegistry", () => {
     );
     expect(registry.validate().ok).toBe(true);
   });
+
+  it("validate skips composition edges marked forwardRef", () => {
+    // Spec 20 decision #3: a parent may declare a child atom slated for
+    // a later sprint via `forwardRef: true`. The boot validator must
+    // treat that edge as deliberate and not as a dangling reference.
+    const registry = createAtomRegistry();
+    registry.register(
+      makeStub("engagement", "plan-review", [
+        {
+          childEntityType: "submission",
+          childMode: "compact",
+          dataKey: "submissions",
+          forwardRef: true,
+        },
+      ]),
+    );
+    expect(registry.validate().ok).toBe(true);
+  });
+
+  it("validate still flags non-forwardRef dangling edges in a parent that has a forwardRef sibling edge", () => {
+    // The opt-out is per-edge, not per-parent: a typo in a non-marked
+    // edge must still fail the boot even when a sibling edge on the
+    // same parent is forward-ref. This guards against blanket-disabling
+    // validation by the presence of any forwardRef declaration.
+    const registry = createAtomRegistry();
+    registry.register(
+      makeStub("engagement", "plan-review", [
+        {
+          childEntityType: "submission",
+          childMode: "compact",
+          dataKey: "submissions",
+          forwardRef: true,
+        },
+        {
+          // Not a forward ref — `snapshot` is misspelled (typo) and
+          // not registered. Validate must surface this as an error.
+          childEntityType: "snapshto",
+          childMode: "compact",
+          dataKey: "snapshots",
+        },
+      ]),
+    );
+    const result = registry.validate();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({
+        parentEntityType: "engagement",
+        childEntityType: "snapshto",
+        dataKey: "snapshots",
+      });
+    }
+  });
 });

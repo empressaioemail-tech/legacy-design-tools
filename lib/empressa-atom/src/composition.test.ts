@@ -140,4 +140,48 @@ describe("resolveComposition", () => {
       expect(result.errors[0]?.childEntityType).toBe("task");
     }
   });
+
+  it("silently skips forwardRef edges whose child is still unregistered", () => {
+    // Spec 20 decision #3: a parent that opts an edge into `forwardRef`
+    // is opting in to "produce zero children for this edge until the
+    // child catalog atom registers" rather than crashing the resolver.
+    // The other (concrete) edge must still resolve normally.
+    const registry = createAtomRegistry();
+    registry.register(makeStub("snapshot"));
+    const engagementReg = makeStub("engagement", [
+      {
+        childEntityType: "snapshot",
+        childMode: "compact",
+        dataKey: "snapshots",
+      },
+      {
+        childEntityType: "submission",
+        childMode: "compact",
+        dataKey: "submissions",
+        forwardRef: true,
+      },
+    ]);
+    registry.register(engagementReg);
+
+    const result = resolveComposition(
+      engagementReg,
+      { kind: "atom", entityType: "engagement", entityId: "e1" },
+      {
+        snapshots: [{ id: "s1" }, { id: "s2" }],
+        submissions: [{ id: "should-be-ignored" }],
+      },
+      registry,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Two snapshot children; zero submission children even though we
+      // passed `submissions` rows, because the child atom is not
+      // registered. Future submission sprint will register `submission`
+      // and these refs will start surfacing without code changes here.
+      expect(result.children).toHaveLength(2);
+      for (const child of result.children) {
+        expect(child.reference.entityType).toBe("snapshot");
+      }
+    }
+  });
 });

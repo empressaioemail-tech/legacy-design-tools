@@ -18,27 +18,30 @@
  *   - history-provenance fallback to the row's `updated_at` when the
  *     history service is absent or has no events for this entity yet.
  *
- * Composition decision (Phase 1 recon, path A):
- *   The spec's locked decision #3 says composition declarations may
- *   reference unregistered atom types and the registry validates at
- *   lookup time. The current framework (`lib/empressa-atom/src/registry.ts:
- *   159-173`) walks every composition edge at `validate()` time and treats
- *   an unregistered child as a boot error. Because invariant 9 forbids
- *   changes to `@workspace/empressa-atom` this sprint, and because
- *   `snapshot` is not registered yet, we declare `composition: []` with a
- *   TODO and emit snapshot references via `relatedAtoms` directly. The
- *   framework gap is filed as an A0 follow-up.
+ * Composition declaration:
+ *   Spec 20 locked decision #3 — composition declarations may reference
+ *   atom types that aren't registered yet, with the registry validating
+ *   at lookup time rather than at boot. The framework supports this via
+ *   the per-edge `forwardRef: true` opt-out on `AtomComposition`, so
+ *   `engagement` declares its real children (`snapshot` directly,
+ *   `submission` as a forward ref pending the submission sprint) and
+ *   the framework's `resolveComposition` resolver — not hand-written
+ *   code — drives the parent/child wiring.
  */
 
 import { desc, eq } from "drizzle-orm";
 import { engagements, snapshots } from "@workspace/db";
-import type {
-  AtomReference,
-  AtomRegistration,
-  ContextSummary,
-  EventAnchoringService,
-  KeyMetric,
-  Scope,
+import {
+  resolveComposition,
+  type AnyAtomRegistration,
+  type AtomComposition,
+  type AtomReference,
+  type AtomRegistration,
+  type CompositionRegistryView,
+  type ContextSummary,
+  type EventAnchoringService,
+  type KeyMetric,
+  type Scope,
 } from "@workspace/empressa-atom";
 import type { db as ProdDb } from "@workspace/db";
 
@@ -110,29 +113,56 @@ export interface EngagementTypedPayload {
 
 /**
  * Dependencies of {@link makeEngagementAtom}. Same shape as
- * `SheetAtomDeps`; `history` falls back to "no events" when omitted.
+ * `SheetAtomDeps` plus an optional `registry` view passed to
+ * {@link resolveComposition} so the framework — not hand-written code —
+ * synthesizes the child snapshot references. When `registry` is omitted
+ * (e.g. the bare contract test), the composition resolver step is
+ * skipped and `relatedAtoms` returns empty rather than throwing.
  */
 export interface EngagementAtomDeps {
   db: typeof ProdDb;
   history?: EventAnchoringService;
+  registry?: CompositionRegistryView;
 }
 
 /**
  * Build the engagement atom registration. Factory style mirrors
  * `makeSheetAtom` so tests can swap in a per-schema `db` and a
- * deterministic in-memory `EventAnchoringService`.
+ * deterministic in-memory `EventAnchoringService`. The closure also
+ * captures the registration object itself so `contextSummary` can hand
+ * it to {@link resolveComposition}.
  */
 export function makeEngagementAtom(
   deps: EngagementAtomDeps,
 ): AtomRegistration<"engagement", EngagementSupportedModes> {
-  return {
+  // Engagement's real children:
+  //   - snapshot: registered alongside engagement in the api-server
+  //     bootstrap, so this edge is concrete and validated at boot.
+  //   - submission: not yet implemented (sprint TBD); declared as a
+  //     forward ref so the framework's `validate()` step does not crash
+  //     on the missing child registration. The lookup-time resolver
+  //     silently produces zero children for `submissions` until the
+  //     submission catalog atom registers.
+  const composition: ReadonlyArray<AtomComposition> = [
+    {
+      childEntityType: "snapshot",
+      childMode: "compact",
+      dataKey: "snapshots",
+    },
+    {
+      childEntityType: "submission",
+      childMode: "compact",
+      dataKey: "submissions",
+      forwardRef: true,
+    },
+  ];
+
+  const registration: AtomRegistration<"engagement", EngagementSupportedModes> = {
     entityType: "engagement",
     domain: "plan-review",
     supportedModes: ENGAGEMENT_SUPPORTED_MODES,
     defaultMode: "card",
-    // Composition path A (see file header). Snapshot composition will be
-    // declared once the snapshot atom registers.
-    composition: [],
+    composition,
     async contextSummary(
       entityId: string,
       scope: Scope,
@@ -165,9 +195,10 @@ export function makeEngagementAtom(
         };
       }
 
-      // Resolve children declaratively: most-recent-first snapshot rows
-      // produce the `relatedAtoms` list. Path A above explains why this
-      // is hand-built here instead of via `composition`.
+      // Load child snapshot rows once. The `id` field is what
+      // `resolveComposition` picks up via its id-candidate lookup, and
+      // the rest (`receivedAt`, `sheetCount`) feed the keyMetrics +
+      // most-recent-activity computation below.
       const snapshotRows = await deps.db
         .select({
           id: snapshots.id,
@@ -178,12 +209,41 @@ export function makeEngagementAtom(
         .where(eq(snapshots.engagementId, row.id))
         .orderBy(desc(snapshots.receivedAt));
 
-      const relatedAtoms: AtomReference[] = snapshotRows.map((s) => ({
+      // Composition resolution: hand the snapshot rows to the framework
+      // so `relatedAtoms` is what `resolveComposition` produces, not a
+      // hand-rolled list. Mirrors the pattern in `snapshot.atom.ts`.
+      // When `deps.registry` is omitted (e.g. the bare contract test),
+      // the resolver step is skipped and `relatedAtoms` is empty — the
+      // framework's boot-time `validate()` is the canonical place that
+      // surfaces a missing `snapshot` registration.
+      // The `submission` edge is declared `forwardRef: true`, and
+      // `parentData["submissions"]` is intentionally absent here, so
+      // the resolver naturally produces zero submission references
+      // until that catalog atom is wired up.
+      const parentRef: AtomReference = {
         kind: "atom",
-        entityType: "snapshot",
-        entityId: s.id,
-        mode: "compact",
-      }));
+        entityType: "engagement",
+        entityId: row.id,
+      };
+      const relatedAtoms: AtomReference[] = [];
+      if (deps.registry) {
+        const resolved = resolveComposition(
+          registration as unknown as AnyAtomRegistration,
+          parentRef,
+          { snapshots: snapshotRows },
+          deps.registry,
+        );
+        if (resolved.ok) {
+          for (const child of resolved.children) {
+            relatedAtoms.push(child.reference);
+          }
+        }
+        // resolved.ok === false would mean a non-forward-ref child type
+        // is unregistered in the passed registry view. We don't throw —
+        // the engagement summary is still useful without children, and
+        // the boot-time `validate()` call is the canonical place that
+        // surfaces this kind of misconfiguration.
+      }
 
       const sheetCountTotal = snapshotRows.reduce(
         (acc, s) => acc + (s.sheetCount ?? 0),
@@ -330,4 +390,6 @@ export function makeEngagementAtom(
       };
     },
   };
+
+  return registration;
 }

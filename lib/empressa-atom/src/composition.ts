@@ -18,7 +18,12 @@ import type { AtomMode, AtomReference, AnyAtomRegistration } from "./registratio
  * One edge of the composition graph.
  */
 export interface AtomComposition {
-  /** Entity type of the child atom; must resolve in the registry. */
+  /**
+   * Entity type of the child atom. Must resolve in the registry by the
+   * time {@link resolveComposition} is called; the boot-time
+   * `AtomRegistry.validate()` step also asserts the child is registered
+   * unless {@link forwardRef} is `true`.
+   */
   childEntityType: string;
 
   /** Mode the parent renders each child in (typically `"compact"`). */
@@ -29,6 +34,32 @@ export interface AtomComposition {
    * resolver looks up `parentData[dataKey]` and expects an array.
    */
   dataKey: string;
+
+  /**
+   * Opt-out of presence validation for this edge. When `true`:
+   *   - `AtomRegistry.validate()` does not require {@link childEntityType}
+   *     to be registered, so a parent can ship a composition declaration
+   *     that names a child atom slated for a later sprint without
+   *     crashing the boot.
+   *   - {@link resolveComposition} silently produces zero children for
+   *     this edge while the child remains unregistered, so the parent's
+   *     `contextSummary` keeps returning `ok: true` (instead of erroring
+   *     and forcing a hand-rolled fallback in every consumer).
+   *   - Once the child atom is registered, both checks resolve normally
+   *     and child references begin surfacing without further changes to
+   *     the parent atom's code.
+   *
+   * Use sparingly — most edges should reference an already-registered
+   * child so a typo in `childEntityType` continues to fail the boot
+   * validator (the per-edge scope of this opt-out is deliberate so a
+   * sibling forward-ref edge doesn't silently mask a typo elsewhere on
+   * the same parent).
+   *
+   * Spec 20 locked decision #3 says composition declarations should be
+   * allowed to reference atom types that aren't registered yet; this
+   * field is the opt-in expression of that allowance.
+   */
+  forwardRef?: boolean;
 }
 
 /**
@@ -79,9 +110,14 @@ function pickIdFrom(row: Record<string, unknown>, fallback: string): string {
  *   `entityId`, `slug`, or `name` (in that order), falling back to
  *   `${parentRef.entityId}-${dataKey}-${index}`.
  *
+ * Edges marked `forwardRef: true` whose child is still unregistered at
+ * lookup time produce zero children silently rather than contributing
+ * an error — the parent has explicitly opted in to that behavior so its
+ * declaration can ship before the child catalog atom does.
+ *
  * @returns A list of {@link ResolvedChild} on success, or `{ ok: false,
- *   errors }` enumerating every missing child entity type. The caller
- *   decides whether to dev-warn or hard-fail.
+ *   errors }` enumerating every missing non-forward-ref child entity
+ *   type. The caller decides whether to dev-warn or hard-fail.
  */
 export function resolveComposition(
   parentRegistration: AnyAtomRegistration,
@@ -101,6 +137,14 @@ export function resolveComposition(
   for (const edge of composition) {
     const resolved = registry.resolve(edge.childEntityType);
     if (!resolved.ok) {
+      if (edge.forwardRef) {
+        // Forward-ref edges are allowed to point at an unregistered
+        // child (Spec 20 decision #3). When the child still isn't
+        // registered at lookup time, the resolver silently produces
+        // zero children for that edge instead of erroring — the parent
+        // atom's prose / keyMetrics path already runs without it.
+        continue;
+      }
       errors.push({
         childEntityType: edge.childEntityType,
         message: resolved.error.message,

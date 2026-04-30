@@ -55,8 +55,12 @@ const { engagements, snapshots } = dbModule;
 const { runAtomContractTests, createInMemoryEventService } = await import(
   "@workspace/empressa-atom/testing"
 );
-const { defaultScope } = await import("@workspace/empressa-atom");
+const { createAtomRegistry, defaultScope } = await import(
+  "@workspace/empressa-atom"
+);
 const { makeEngagementAtom } = await import("../atoms/engagement.atom");
+const { makeSnapshotAtom } = await import("../atoms/snapshot.atom");
+const { makeSheetAtom } = await import("../atoms/sheet.atom");
 
 // Lazy `db` proxy: same trick as `sheet-atom.test.ts`. The mock above
 // throws at property-access time when `ctx.schema` is null, so building
@@ -105,8 +109,17 @@ describe("engagement atom (contract)", () => {
     history: createInMemoryEventService(),
   });
 
+  // The contract suite's `composition references resolve in the registry`
+  // step needs the `snapshot` child registered — and `snapshot` itself
+  // composes `sheet`, so we register both. The forward-ref `submission`
+  // edge on `engagement` does not need a stub: the framework's
+  // `validate()` skips forward-ref edges by design.
   runAtomContractTests(engagementAtom, {
     withFixture: { entityId: ENGAGEMENT_ID },
+    alsoRegister: [
+      makeSheetAtom({ db: lazyDb }),
+      makeSnapshotAtom({ db: lazyDb }),
+    ],
   });
 });
 
@@ -152,13 +165,31 @@ describe("engagement atom (behavior)", () => {
       });
     }
 
-    const atom = makeEngagementAtom({ db: lazyDb });
+    // Build a real registry containing the `snapshot` child so the
+    // engagement atom's `resolveComposition` step finds it at lookup
+    // time. The `submission` composition edge on engagement is declared
+    // `forwardRef: true`, so we deliberately do NOT register a
+    // submission stub here — the resolver must produce zero submission
+    // children (because `parentData` has no `submissions` key) without
+    // the boot validator complaining either.
+    const registry = createAtomRegistry();
+    registry.register(makeSheetAtom({ db: lazyDb }));
+    registry.register(makeSnapshotAtom({ db: lazyDb }));
+    const atom = makeEngagementAtom({ db: lazyDb, registry });
+    registry.register(atom);
+    // Sanity: validate must succeed with the forward-ref `submission`
+    // edge present and `submission` deliberately absent.
+    expect(registry.validate().ok).toBe(true);
+
     const summary = await atom.contextSummary(eng.id, defaultScope());
 
     expect(summary.relatedAtoms).toHaveLength(N);
     for (const ref of summary.relatedAtoms) {
       expect(ref.kind).toBe("atom");
       expect(ref.entityType).toBe("snapshot");
+      // `resolveComposition` tags each child with the composition edge's
+      // `childMode`, which is `"compact"` for the snapshot edge.
+      expect(ref.mode).toBe("compact");
       expect(typeof ref.entityId).toBe("string");
       expect(ref.entityId.length).toBeGreaterThan(0);
     }

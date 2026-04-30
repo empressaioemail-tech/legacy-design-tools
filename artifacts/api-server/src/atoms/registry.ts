@@ -72,7 +72,10 @@ export function getHistoryService(): EventAnchoringService {
  *
  * Catalog atoms registered today:
  *   - `sheet` (domain: `plan-review`)
- *   - `engagement` (domain: `plan-review`)
+ *   - `engagement` (domain: `plan-review`) — composes `snapshot` as a
+ *     child plus a forward-ref edge to the future `submission` atom; its
+ *     registration receives the registry so `resolveComposition` can
+ *     look up `snapshot` at lookup time.
  *   - `snapshot` (domain: `plan-review`) — composes `sheet` as a child;
  *     its registration receives the registry as a dep so the
  *     composition resolver can look up `sheet` at lookup time.
@@ -81,12 +84,12 @@ export function getAtomRegistry(): AtomRegistry {
   if (_registry) return _registry;
   const registry = createAtomRegistry();
   const history = getHistoryService();
-  // Sheet must register first so snapshot's composition edge to `sheet`
-  // is non-dangling when boot-time `validate()` runs. The order doesn't
-  // matter for `register()` itself (the registry validates lazily), but
-  // matters for clarity.
+  // Registration order does not matter for `register()` itself — the
+  // registry validates lazily and `resolveComposition` looks up children
+  // at lookup time, by which point all three atoms are present. The
+  // order below mirrors the parent → child reading order for clarity.
   registry.register(makeSheetAtom({ db, history }));
-  registry.register(makeEngagementAtom({ db, history }));
+  registry.register(makeEngagementAtom({ db, history, registry }));
   registry.register(makeSnapshotAtom({ db, history, registry }));
   _registry = registry;
   return registry;

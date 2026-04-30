@@ -123,6 +123,14 @@ export interface AtomRegistry {
  * otherwise surface only at composition-resolution time. Treating
  * `validate()` as a hard boot gate keeps the contract enforceable
  * without paying its cost on every call.
+ *
+ * Per Spec 20 decision #3, a composition edge may opt out of presence
+ * validation by setting `forwardRef: true`. Forward-ref edges are
+ * skipped by both `validate()` (so the bootstrap doesn't crash on a
+ * not-yet-registered child) and the lookup-time `resolveComposition`
+ * step (so the parent's `contextSummary` keeps returning a successful
+ * result, with zero child references for that edge, until the child
+ * catalog atom registers).
  */
 export function createAtomRegistry(): AtomRegistry {
   const store = new Map<string, AnyAtomRegistration>();
@@ -168,6 +176,13 @@ export function createAtomRegistry(): AtomRegistry {
       const errors: DanglingCompositionRef[] = [];
       for (const reg of store.values()) {
         for (const edge of reg.composition) {
+          // Spec 20 decision #3: forward-ref edges deliberately point at
+          // a child atom that has not been registered yet (typically a
+          // future-sprint catalog atom). The parent has opted out of
+          // boot-time presence validation; the lookup-time
+          // `resolveComposition` step still rejects the edge if the
+          // child is still missing when contextSummary runs.
+          if (edge.forwardRef) continue;
           if (!store.has(edge.childEntityType)) {
             errors.push({
               parentEntityType: reg.entityType,
