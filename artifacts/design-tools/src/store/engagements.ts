@@ -19,7 +19,11 @@ interface EngagementsUiState {
   clearAttachedSheets: (engagementId: string) => void;
   setPendingChatInput: (engagementId: string, value: string) => void;
   consumePendingChatInput: (engagementId: string) => string | null;
-  sendMessage: (engagementId: string, question: string) => Promise<void>;
+  sendMessage: (
+    engagementId: string,
+    question: string,
+    options?: { snapshotFocus?: boolean },
+  ) => Promise<void>;
 }
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
@@ -90,7 +94,8 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
     return v;
   },
 
-  sendMessage: async (engagementId, question) => {
+  sendMessage: async (engagementId, question, options) => {
+    const snapshotFocus = options?.snapshotFocus === true;
     set((state) => {
       const msgs = state.messagesByEngagement[engagementId] || [];
       return {
@@ -133,6 +138,7 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
           question,
           history,
           ...(referencedSheetIds.length > 0 ? { referencedSheetIds } : {}),
+          ...(snapshotFocus ? { snapshotFocus: true } : {}),
         }),
       });
 

@@ -52,9 +52,59 @@ describe("ClaudeChat", () => {
     fireEvent.click(screen.getByRole("button", { name: /Send/i }));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(sendMessage).toHaveBeenCalledWith("eng-1", "what is the IBC?");
+    expect(sendMessage).toHaveBeenCalledWith("eng-1", "what is the IBC?", {
+      snapshotFocus: false,
+    });
     // Input cleared after send.
     expect((textarea as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("forwards snapshotFocus=true when the Dive deeper toggle is on, and resets it after send", () => {
+    sendMessage.mockClear();
+    stores.streaming = false;
+    stores.rightCollapsed = false;
+    stores.messagesByEngagement = {};
+
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+    const toggle = screen.getByRole("button", {
+      name: /Dive deeper into the latest snapshot/i,
+    });
+    // Off by default.
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    const textarea = screen.getByPlaceholderText(/Ask a question/i);
+    fireEvent.change(textarea, { target: { value: "area of room 204?" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/i }));
+
+    expect(sendMessage).toHaveBeenCalledWith("eng-1", "area of room 204?", {
+      snapshotFocus: true,
+    });
+    // Resets per turn so follow-ups don't accidentally pay the focus cost.
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("disables the Dive deeper toggle when there is no snapshot", () => {
+    stores.streaming = false;
+    stores.rightCollapsed = false;
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={false} />);
+    const toggle = screen.getByRole("button", {
+      name: /Dive deeper into the latest snapshot/i,
+    });
+    expect(toggle).toBeDisabled();
+  });
+
+  it("disables the Dive deeper toggle while a previous turn is still streaming", () => {
+    stores.streaming = true;
+    stores.rightCollapsed = false;
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+    const toggle = screen.getByRole("button", {
+      name: /Dive deeper into the latest snapshot/i,
+    });
+    expect(toggle).toBeDisabled();
+    stores.streaming = false;
   });
 
   it("disables the Send button when hasSnapshots is false and shows the snapshot-required placeholder", () => {

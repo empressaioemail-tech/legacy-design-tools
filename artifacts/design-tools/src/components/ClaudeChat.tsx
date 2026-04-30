@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { BookOpen, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Telescope, X } from "lucide-react";
 import { useSidebarState } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import "./claude-markdown.css";
@@ -112,6 +112,10 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
   const collapsed = useSidebarState((s) => s.rightCollapsed);
   const toggleRight = useSidebarState((s) => s.toggleRight);
   const [input, setInput] = useState("");
+  // Snapshot focus opts in for one turn at a time. It's intentionally off by
+  // default and resets after each send so users don't pay the focus cost on
+  // every follow-up.
+  const [snapshotFocus, setSnapshotFocus] = useState(false);
 
   const messages = messagesByEngagement[engagementId] || [];
   const attachedSheets = attachedSheetsByEngagement[engagementId] ?? [];
@@ -135,8 +139,9 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
 
   const handleSend = () => {
     if (!input.trim() || !hasSnapshots || streaming) return;
-    sendMessage(engagementId, input);
+    sendMessage(engagementId, input, { snapshotFocus });
     setInput("");
+    setSnapshotFocus(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -371,13 +376,49 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
               ? `${attachedSheets.length} sheet${attachedSheets.length === 1 ? "" : "s"} attached for vision`
               : ""}
           </div>
-          <button
-            className="sc-btn-primary"
-            onClick={handleSend}
-            disabled={!hasSnapshots || streaming || !input.trim()}
-          >
-            Send
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSnapshotFocus((v) => !v)}
+              disabled={!hasSnapshots || streaming}
+              aria-pressed={snapshotFocus}
+              aria-label="Dive deeper into the latest snapshot"
+              title={
+                snapshotFocus
+                  ? "Snapshot focus on — next message will include the full snapshot payload"
+                  : "Dive deeper: include the full latest snapshot in the next message (resets after send)"
+              }
+              className="sc-ui"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                padding: "4px 8px",
+                borderRadius: 4,
+                cursor:
+                  !hasSnapshots || streaming ? "not-allowed" : "pointer",
+                background: snapshotFocus
+                  ? "rgba(0,180,216,0.15)"
+                  : "transparent",
+                border: `1px solid ${snapshotFocus ? "var(--cyan)" : "var(--border-default)"}`,
+                color: snapshotFocus ? "var(--cyan)" : "var(--text-secondary)",
+                opacity: !hasSnapshots || streaming ? 0.5 : 1,
+              }}
+            >
+              <Telescope size={12} />
+              Dive deeper
+            </button>
+            <button
+              className="sc-btn-primary"
+              onClick={handleSend}
+              disabled={!hasSnapshots || streaming || !input.trim()}
+            >
+              Send
+            </button>
+          </div>
         </div>
       </div>
     </div>
