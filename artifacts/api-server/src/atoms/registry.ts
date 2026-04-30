@@ -21,6 +21,7 @@ import {
 } from "@workspace/empressa-atom";
 import { db } from "@workspace/db";
 import { makeSheetAtom } from "./sheet.atom";
+import { makeEngagementAtom } from "./engagement.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -70,11 +71,14 @@ export function getHistoryService(): EventAnchoringService {
  *
  * Catalog atoms registered today:
  *   - `sheet` (domain: `plan-review`)
+ *   - `engagement` (domain: `plan-review`)
  */
 export function getAtomRegistry(): AtomRegistry {
   if (_registry) return _registry;
   const registry = createAtomRegistry();
-  registry.register(makeSheetAtom({ db, history: getHistoryService() }));
+  const history = getHistoryService();
+  registry.register(makeSheetAtom({ db, history }));
+  registry.register(makeEngagementAtom({ db, history }));
   _registry = registry;
   return registry;
 }
