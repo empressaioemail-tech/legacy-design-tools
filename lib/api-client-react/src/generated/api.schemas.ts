@@ -268,6 +268,56 @@ export interface ErrorResponse {
   error: string;
 }
 
+/**
+ * One row of the atom `keyMetrics` layer.
+ */
+export interface AtomKeyMetric {
+  label: string;
+  value: string | number;
+  unit?: string;
+}
+
+/**
+ * Reference to another atom this one mentions. The framework keeps the
+shape narrow on purpose — a render binding only needs `slug` + `id`
+to fetch the referenced atom's own summary.
+
+ */
+export interface AtomReference {
+  slug: string;
+  id: string;
+}
+
+/**
+ * Provenance of the latest history event written through the atom's
+`EventAnchoringService`. `latestEventId` is `""` when the atom has
+no events yet — render bindings should treat that as "not tracked"
+rather than parsing the timestamp.
+
+ */
+export interface AtomHistoryProvenance {
+  latestEventId: string;
+  latestEventAt: string;
+}
+
+export type AtomSummaryTyped = { [key: string]: unknown };
+
+/**
+ * Spec 20 §4 four-layer `ContextSummary` returned by an atom's
+`contextSummary(id, scope)` callback. `typed` is open-shaped
+because each atom narrows it differently (see e.g. `SheetTypedPayload`
+in the api-server `sheet.atom`).
+
+ */
+export interface AtomSummary {
+  prose: string;
+  typed: AtomSummaryTyped;
+  keyMetrics: AtomKeyMetric[];
+  relatedAtoms: AtomReference[];
+  historyProvenance: AtomHistoryProvenance;
+  scopeFiltered: boolean;
+}
+
 export interface ChatErrorResponse {
   error: string;
   message?: string;
@@ -543,3 +593,10 @@ export const ListCodeAtomsEmbedded = {
   true: "true",
   false: "false",
 } as const;
+
+export type GetAtomSummaryParams = {
+  /**
+   * URL-encoded JSON scope object (compact form `{a,r,t,p}`).
+   */
+  scope?: string;
+};

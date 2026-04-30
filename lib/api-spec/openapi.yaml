@@ -720,6 +720,56 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /atoms/{slug}/{id}/summary:
+    get:
+      operationId: getAtomSummary
+      tags: [atoms]
+      summary: Resolve an atom's four-layer ContextSummary
+      description: |
+        Looks up an atom in the process-wide registry by `slug` (its
+        `entityType`) and returns the typed `ContextSummary` produced by
+        the registration's `contextSummary(id, scope)` callback. The
+        `scope` query parameter is optional URL-encoded JSON using the
+        compact wire format produced by `httpContextSummary` in
+        `@workspace/empressa-atom`; decode failures fall back to the
+        default scope rather than 400ing.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: scope
+          in: query
+          required: false
+          description: URL-encoded JSON scope object (compact form `{a,r,t,p}`).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Four-layer context summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtomSummary"
+        "404":
+          description: Atom type not registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: contextSummary callback threw
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /chat:
     post:
       operationId: sendChatMessage
@@ -1300,6 +1350,87 @@ components:
           type: string
       required:
         - error
+
+    AtomKeyMetric:
+      description: One row of the atom `keyMetrics` layer.
+      type: object
+      properties:
+        label:
+          type: string
+        value:
+          oneOf:
+            - type: string
+            - type: number
+        unit:
+          type: string
+      required:
+        - label
+        - value
+
+    AtomReference:
+      description: |
+        Reference to another atom this one mentions. The framework keeps the
+        shape narrow on purpose — a render binding only needs `slug` + `id`
+        to fetch the referenced atom's own summary.
+      type: object
+      properties:
+        slug:
+          type: string
+        id:
+          type: string
+      required:
+        - slug
+        - id
+
+    AtomHistoryProvenance:
+      description: |
+        Provenance of the latest history event written through the atom's
+        `EventAnchoringService`. `latestEventId` is `""` when the atom has
+        no events yet — render bindings should treat that as "not tracked"
+        rather than parsing the timestamp.
+      type: object
+      properties:
+        latestEventId:
+          type: string
+        latestEventAt:
+          type: string
+          format: date-time
+      required:
+        - latestEventId
+        - latestEventAt
+
+    AtomSummary:
+      description: |
+        Spec 20 §4 four-layer `ContextSummary` returned by an atom's
+        `contextSummary(id, scope)` callback. `typed` is open-shaped
+        because each atom narrows it differently (see e.g. `SheetTypedPayload`
+        in the api-server `sheet.atom`).
+      type: object
+      properties:
+        prose:
+          type: string
+        typed:
+          type: object
+          additionalProperties: true
+        keyMetrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/AtomKeyMetric"
+        relatedAtoms:
+          type: array
+          items:
+            $ref: "#/components/schemas/AtomReference"
+        historyProvenance:
+          $ref: "#/components/schemas/AtomHistoryProvenance"
+        scopeFiltered:
+          type: boolean
+      required:
+        - prose
+        - typed
+        - keyMetrics
+        - relatedAtoms
+        - historyProvenance
+        - scopeFiltered
 
     ChatErrorResponse:
       type: object

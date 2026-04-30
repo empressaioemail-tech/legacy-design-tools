@@ -16,7 +16,7 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
   - `/` engagement list (cards with KPI counts from latest snapshot, status pill, refetch every 5s)
   - `/engagements/:id` engagement detail (KPI strip + snapshot timeline + raw JSON viewer + Claude chat in right panel)
   - `/style-probe`, `/health` for dev
-- **artifacts/plan-review** — `/plan-review/` — Plan-review console (mock data only, untouched by Wave 1).
+- **artifacts/plan-review** — `/plan-review/` — Plan-review console (mostly mock data). The "Sheets" nav entry (`/plan-review/sheets`) lists real Revit snapshots and renders sheet cards with a "First ingested" chip backed by `sheet.created` history events via `GET /api/atoms/sheet/{id}/summary`. Legacy rows render "Not tracked".
 - **artifacts/api-server** — `/api/*` — Express + Pino + Drizzle:
   - `GET  /api/healthz`
   - `GET  /api/engagements` — list with `snapshotCount` + `latestSnapshot` summary
@@ -24,6 +24,7 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
   - `GET  /api/snapshots` / `GET /api/snapshots/:id` — kept for back-compat
   - `POST /api/snapshots` — guarded by `X-Snapshot-Secret`. Returns `{id, receivedAt, engagementId, engagementName, autoCreated}`. Handles `walls.count` or `walls[]` shapes.
   - `POST /api/chat` — SSE stream. Body: `{engagementId, question, history}`. Looks up engagement + latest snapshot; returns 400 `{error:"no_snapshots"}` if none. Model `claude-sonnet-4-5` via `@workspace/integrations-anthropic-ai`.
+  - `GET  /api/atoms/:slug/:id/summary` — empressa-atom `contextSummary` for a single atom. Returns `{prose, typed, keyMetrics, relatedAtoms, historyProvenance:{latestEventId, latestEventAt}, scopeFiltered}`. `latestEventId === ""` is the "no events yet" sentinel.
 - **artifacts/mockup-sandbox** — design exploration sandbox.
 
 ## Shared Libraries

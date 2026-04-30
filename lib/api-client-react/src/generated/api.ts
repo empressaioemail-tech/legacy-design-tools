@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AtomSummary,
   ChatErrorResponse,
   ChatRequest,
   CodeAtomDetail,
@@ -25,6 +26,7 @@ import type {
   EngagementDetail,
   EngagementSummary,
   ErrorResponse,
+  GetAtomSummaryParams,
   HealthStatus,
   JurisdictionSummary,
   ListCodeAtomsParams,
@@ -1857,6 +1859,131 @@ export const useRetrieveAtomsProbe = <
 > => {
   return useMutation(getRetrieveAtomsProbeMutationOptions(options));
 };
+
+/**
+ * Looks up an atom in the process-wide registry by `slug` (its
+`entityType`) and returns the typed `ContextSummary` produced by
+the registration's `contextSummary(id, scope)` callback. The
+`scope` query parameter is optional URL-encoded JSON using the
+compact wire format produced by `httpContextSummary` in
+`@workspace/empressa-atom`; decode failures fall back to the
+default scope rather than 400ing.
+
+ * @summary Resolve an atom's four-layer ContextSummary
+ */
+export const getGetAtomSummaryUrl = (
+  slug: string,
+  id: string,
+  params?: GetAtomSummaryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/atoms/${slug}/${id}/summary?${stringifiedParams}`
+    : `/api/atoms/${slug}/${id}/summary`;
+};
+
+export const getAtomSummary = async (
+  slug: string,
+  id: string,
+  params?: GetAtomSummaryParams,
+  options?: RequestInit,
+): Promise<AtomSummary> => {
+  return customFetch<AtomSummary>(getGetAtomSummaryUrl(slug, id, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAtomSummaryQueryKey = (
+  slug: string,
+  id: string,
+  params?: GetAtomSummaryParams,
+) => {
+  return [
+    `/api/atoms/${slug}/${id}/summary`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetAtomSummaryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAtomSummary>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  slug: string,
+  id: string,
+  params?: GetAtomSummaryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAtomSummary>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAtomSummaryQueryKey(slug, id, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAtomSummary>>> = ({
+    signal,
+  }) => getAtomSummary(slug, id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(slug && id),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAtomSummary>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAtomSummaryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAtomSummary>>
+>;
+export type GetAtomSummaryQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Resolve an atom's four-layer ContextSummary
+ */
+
+export function useGetAtomSummary<
+  TData = Awaited<ReturnType<typeof getAtomSummary>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  slug: string,
+  id: string,
+  params?: GetAtomSummaryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAtomSummary>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAtomSummaryQueryOptions(slug, id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Streams an assistant response over Server-Sent Events. Each event

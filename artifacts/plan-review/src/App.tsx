@@ -5,6 +5,7 @@ import SubmittalDetail from "./pages/SubmittalDetail";
 import FindingsLibrary from "./pages/FindingsLibrary";
 import CodeLibrary from "./pages/CodeLibrary";
 import StyleProbe from "./pages/StyleProbe";
+import Sheets from "./pages/Sheets";
 import ComingSoon from "./pages/ComingSoon";
 
 const queryClient = new QueryClient();
@@ -16,6 +17,7 @@ function Router() {
       <Route path="/submittals/:id" component={SubmittalDetail} />
       <Route path="/findings" component={FindingsLibrary} />
       <Route path="/code" component={CodeLibrary} />
+      <Route path="/sheets" component={Sheets} />
       <Route path="/style-probe" component={StyleProbe} />
       
       {/* Other routes from nav groups */}

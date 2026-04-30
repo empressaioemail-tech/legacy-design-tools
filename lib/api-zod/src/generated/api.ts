@@ -901,6 +901,66 @@ export const RetrieveAtomsProbeResponse = zod.object({
 });
 
 /**
+ * Looks up an atom in the process-wide registry by `slug` (its
+`entityType`) and returns the typed `ContextSummary` produced by
+the registration's `contextSummary(id, scope)` callback. The
+`scope` query parameter is optional URL-encoded JSON using the
+compact wire format produced by `httpContextSummary` in
+`@workspace/empressa-atom`; decode failures fall back to the
+default scope rather than 400ing.
+
+ * @summary Resolve an atom's four-layer ContextSummary
+ */
+export const GetAtomSummaryParams = zod.object({
+  slug: zod.coerce.string(),
+  id: zod.coerce.string(),
+});
+
+export const GetAtomSummaryQueryParams = zod.object({
+  scope: zod.coerce
+    .string()
+    .optional()
+    .describe("URL-encoded JSON scope object (compact form `{a,r,t,p}`)."),
+});
+
+export const GetAtomSummaryResponse = zod
+  .object({
+    prose: zod.string(),
+    typed: zod.record(zod.string(), zod.unknown()),
+    keyMetrics: zod.array(
+      zod
+        .object({
+          label: zod.string(),
+          value: zod.union([zod.string(), zod.number()]),
+          unit: zod.string().optional(),
+        })
+        .describe("One row of the atom `keyMetrics` layer."),
+    ),
+    relatedAtoms: zod.array(
+      zod
+        .object({
+          slug: zod.string(),
+          id: zod.string(),
+        })
+        .describe(
+          "Reference to another atom this one mentions. The framework keeps the\nshape narrow on purpose — a render binding only needs `slug` + `id`\nto fetch the referenced atom's own summary.\n",
+        ),
+    ),
+    historyProvenance: zod
+      .object({
+        latestEventId: zod.string(),
+        latestEventAt: zod.coerce.date(),
+      })
+      .describe(
+        'Provenance of the latest history event written through the atom\'s\n`EventAnchoringService`. `latestEventId` is `\"\"` when the atom has\nno events yet — render bindings should treat that as \"not tracked\"\nrather than parsing the timestamp.\n',
+      ),
+    scopeFiltered: zod.boolean(),
+  })
+  .describe(
+    "Spec 20 §4 four-layer `ContextSummary` returned by an atom's\n`contextSummary(id, scope)` callback. `typed` is open-shaped\nbecause each atom narrows it differently (see e.g. `SheetTypedPayload`\nin the api-server `sheet.atom`).\n",
+  );
+
+/**
  * Streams an assistant response over Server-Sent Events. Each event
 is `data: {"text": "..."}\n\n` followed by a final `data: [DONE]\n\n`.
 Grounds Claude on the latest snapshot for the given engagement.

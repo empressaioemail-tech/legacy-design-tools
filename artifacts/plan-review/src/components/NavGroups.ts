@@ -3,7 +3,8 @@ export const navGroups = [
       { label: "Inbox", href: "/" },
       { label: "In Review", href: "/in-review" },
       { label: "Approved", href: "/approved" },
-      { label: "Rejected", href: "/rejected" }
+      { label: "Rejected", href: "/rejected" },
+      { label: "Sheets", href: "/sheets" }
   ]},
   { label: "AI REVIEWER", items: [
       { label: "Compliance Engine", href: "/compliance" },
