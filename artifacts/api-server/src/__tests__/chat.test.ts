@@ -170,13 +170,17 @@ describe("POST /api/chat", () => {
     expect(Array.isArray(anthropicMocks.lastArgs.messages)).toBe(true);
   });
 
-  it("registry path: engagement atom prose lands in the system prompt and scope=user redacts the Revit binding", async () => {
-    // Two requests against the SAME seeded engagement, differing only
-    // in `x-audience`. The engagement atom's `contextSummary` produces
-    // different prose for `internal` vs `user` audiences (it omits the
-    // "Bound to Revit document …" sentence under the user variant).
-    // If chat is consuming the atom (and forwarding scope), the
-    // forwarded `system` prompt must reflect that diff.
+  it("registry path: an internal session sees the Revit binding in the system prompt", async () => {
+    // The engagement atom's `contextSummary` only emits the
+    // "Bound to Revit document …" sentence when the scope's audience is
+    // `internal` (or `ai`, or carries the architect permission claim).
+    // Pre-task-29 the chat route defaulted to `internal` whenever the
+    // `x-audience` header was missing, so this assertion required no
+    // setup. Post-task-29 the route reads `req.session`, so the test
+    // has to opt the request into an internal session — here we use
+    // the dev-only `x-audience` override that `sessionMiddleware`
+    // honors when NODE_ENV !== "production". A real client would set
+    // the `pr_session` cookie instead.
     anthropicMocks.events = [
       { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
     ];
@@ -186,11 +190,9 @@ describe("POST /api/chat", () => {
       revitCentralGuid: "deadbeef-aaaa-bbbb-cccc-000000000001",
     });
 
-    // 1. Internal audience (default header → "internal"): the
-    //    engagement atom emits the Revit binding sentence in prose,
-    //    and the chat path threads that prose into <framework_atoms>.
     const resInternal = await request(getApp())
       .post("/api/chat")
+      .set("x-audience", "internal")
       .send({ engagementId: eng.id, question: "what's the doc path?" });
     expect(resInternal.status).toBe(200);
     const internalSystem = String(anthropicMocks.lastArgs.system);
@@ -200,26 +202,157 @@ describe("POST /api/chat", () => {
     // answer back to the registry entity.
     expect(internalSystem).toContain('entity_type="engagement"');
     expect(internalSystem).toContain(`entity_id="${eng.id}"`);
+  });
 
-    // 2. User audience (applicant view): same engagement, but the
-    //    atom redacts the Revit binding under `audience: "user"`. If
-    //    chat were still loading from the engagement row directly
-    //    (pre-A3 behavior), this assertion would fail — the redaction
-    //    only happens inside the atom.
+  it("anonymous request is treated as applicant: Revit binding is redacted from the system prompt", async () => {
+    // Acceptance criterion for task #29: an unauthenticated caller must
+    // not see internal-only Revit binding fields. The session
+    // middleware's least-privilege default (`audience: "user"`) drives
+    // the engagement atom to omit the "Bound to Revit document …"
+    // sentence; chat forwards that prose verbatim, so the model never
+    // sees the document path.
+    //
+    // Pre-task-29 this same request would have defaulted to `internal`
+    // and leaked the path — the regression guard here is the absence of
+    // any audience-setting header / cookie.
     anthropicMocks.events = [
       { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
     ];
-    const resUser = await request(getApp())
+    const REVIT_DOC = "C:/Projects/AnonRedactsTest.rvt";
+    const eng = await seedEngagementWithSnapshot({
+      revitDocumentPath: REVIT_DOC,
+      revitCentralGuid: "deadbeef-aaaa-bbbb-cccc-000000000002",
+    });
+
+    const resAnon = await request(getApp())
       .post("/api/chat")
-      .set("x-audience", "user")
       .send({ engagementId: eng.id, question: "what's the doc path?" });
-    expect(resUser.status).toBe(200);
-    const userSystem = String(anthropicMocks.lastArgs.system);
-    expect(userSystem).not.toContain(REVIT_DOC);
+    expect(resAnon.status).toBe(200);
+    const anonSystem = String(anthropicMocks.lastArgs.system);
+    expect(anonSystem).not.toContain(REVIT_DOC);
     // Engagement framing (name/address/jurisdiction) still ships on
-    // the user variant — only the internal Revit binding is dropped.
-    expect(userSystem).toContain("Test Engagement");
-    expect(userSystem).toContain("123 Main St");
+    // the applicant variant — only the internal Revit binding is dropped.
+    expect(anonSystem).toContain("Test Engagement");
+    expect(anonSystem).toContain("123 Main St");
+  });
+
+  it("session cookie carries audience: pr_session={'audience':'user'} redacts the Revit binding", async () => {
+    // Round-trip the canonical wire format used by real clients (FE,
+    // Revit add-in once auth lands): a `pr_session` JSON cookie. The
+    // route should reach the same redacted prose it does for an
+    // anonymous request, proving the cookie path and the default path
+    // agree on the engagement-atom scope.
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const REVIT_DOC = "C:/Projects/CookieRedactsTest.rvt";
+    const eng = await seedEngagementWithSnapshot({
+      revitDocumentPath: REVIT_DOC,
+      revitCentralGuid: "deadbeef-aaaa-bbbb-cccc-000000000003",
+    });
+
+    const cookie = `pr_session=${encodeURIComponent(
+      JSON.stringify({
+        audience: "user",
+        requestor: { kind: "user", id: "applicant-1" },
+      }),
+    )}`;
+    const resCookie = await request(getApp())
+      .post("/api/chat")
+      .set("Cookie", cookie)
+      .send({ engagementId: eng.id, question: "what's the doc path?" });
+    expect(resCookie.status).toBe(200);
+    const cookieSystem = String(anthropicMocks.lastArgs.system);
+    expect(cookieSystem).not.toContain(REVIT_DOC);
+  });
+
+  it("session cookie carries audience: pr_session={'audience':'internal'} sees the Revit binding (non-production only)", async () => {
+    // Mirror of the previous test for the internal-staff path: a
+    // properly-formed `pr_session` cookie with `audience: "internal"`
+    // unlocks the Revit-binding sentence, just like the dev-only
+    // `x-audience: internal` header does in tests.
+    //
+    // IMPORTANT: this elevation is a development-only convenience. The
+    // session middleware fails closed in production (NODE_ENV ===
+    // "production") so the same cookie cannot be used to escalate
+    // against a deployed server. The "production fails closed" test
+    // immediately below pins that contract.
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const REVIT_DOC = "C:/Projects/CookieInternalTest.rvt";
+    const eng = await seedEngagementWithSnapshot({
+      revitDocumentPath: REVIT_DOC,
+      revitCentralGuid: "deadbeef-aaaa-bbbb-cccc-000000000004",
+    });
+
+    const cookie = `pr_session=${encodeURIComponent(
+      JSON.stringify({ audience: "internal" }),
+    )}`;
+    const resCookie = await request(getApp())
+      .post("/api/chat")
+      .set("Cookie", cookie)
+      .send({ engagementId: eng.id, question: "what's the doc path?" });
+    expect(resCookie.status).toBe(200);
+    const cookieSystem = String(anthropicMocks.lastArgs.system);
+    expect(cookieSystem).toContain(REVIT_DOC);
+  });
+
+  it("production fails closed: cookie + override headers cannot escalate audience", async () => {
+    // Regression guard for the security review's central finding: an
+    // unsigned `pr_session` cookie is just another piece of
+    // client-controlled input, so trusting it in production would
+    // recreate the spoofable-header bug task #29 was fixing. The
+    // session middleware therefore strips the cookie and the dev
+    // override headers when NODE_ENV === "production", forcing the
+    // anonymous applicant default for every production request.
+    //
+    // We toggle NODE_ENV per-request (the middleware reads it on each
+    // call) and we batter the request with every elevation channel at
+    // once: a cookie claiming `audience: internal`, an
+    // `x-audience: internal` header, and an architect permission claim.
+    // None of them should land — the engagement atom's Revit binding
+    // sentence must stay redacted.
+    const prevEnv = process.env["NODE_ENV"];
+    process.env["NODE_ENV"] = "production";
+    try {
+      anthropicMocks.events = [
+        {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "ok" },
+        },
+      ];
+      const REVIT_DOC = "C:/Projects/ProdFailsClosedTest.rvt";
+      const eng = await seedEngagementWithSnapshot({
+        revitDocumentPath: REVIT_DOC,
+        revitCentralGuid: "deadbeef-aaaa-bbbb-cccc-000000000005",
+      });
+
+      const cookie = `pr_session=${encodeURIComponent(
+        JSON.stringify({
+          audience: "internal",
+          permissions: ["plan-review:architect"],
+          requestor: { kind: "user", id: "spoofed-staff" },
+        }),
+      )}`;
+      const resProd = await request(getApp())
+        .post("/api/chat")
+        .set("Cookie", cookie)
+        .set("x-audience", "internal")
+        .set("x-permissions", "plan-review:architect")
+        .send({ engagementId: eng.id, question: "what's the doc path?" });
+      expect(resProd.status).toBe(200);
+      const prodSystem = String(anthropicMocks.lastArgs.system);
+      expect(prodSystem).not.toContain(REVIT_DOC);
+      // Sanity: the prompt itself was assembled — we are exercising
+      // the redaction path, not a "request rejected" branch.
+      expect(prodSystem).toContain("Test Engagement");
+    } finally {
+      // Restore so subsequent tests in this file (and other files run
+      // in the same vitest worker) keep the test-mode behavior.
+      if (prevEnv === undefined) delete process.env["NODE_ENV"];
+      else process.env["NODE_ENV"] = prevEnv;
+    }
   });
 
   it("snapshot atom prose lands in <framework_atoms> tagged with entity_type=\"snapshot\" for the most recent snapshot", async () => {

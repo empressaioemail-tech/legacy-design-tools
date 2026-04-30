@@ -15,6 +15,7 @@
  */
 
 import express, { type Express } from "express";
+import cookieParser from "cookie-parser";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import {
   createTestSchema,
@@ -22,6 +23,7 @@ import {
   truncateAll,
 } from "@workspace/db/testing";
 import { ctx } from "./test-context";
+import { sessionMiddleware } from "../middlewares/session";
 
 /**
  * Tables that the api-server tests touch. CASCADE handles FK chains, so
@@ -56,8 +58,17 @@ export const TRUNCATE_TABLES: readonly string[] = [
 export async function buildTestApp(): Promise<Express> {
   const { default: router } = await import("../routes");
   const app = express();
+  // Mirror app.ts: cookie-parser → session middleware → routes. Without
+  // these, route handlers that read `req.session` (chat, etc.) would
+  // crash with "cannot read property 'audience' of undefined" inside the
+  // route, which is harder to diagnose than a wiring mismatch caught at
+  // setup time. Vitest sets NODE_ENV=test by default, so the dev-only
+  // header overrides in `sessionMiddleware` are honored here — that is
+  // how route tests opt into a specific audience without minting cookies.
+  app.use(cookieParser());
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
+  app.use(sessionMiddleware);
   app.use("/api", router);
   return app;
 }

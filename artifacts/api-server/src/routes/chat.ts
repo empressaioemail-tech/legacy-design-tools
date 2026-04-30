@@ -47,25 +47,32 @@ const MAX_REFERENCED_ATOMS = 6;
 const MAX_RETRIEVED_ATOMS = 8;
 
 /**
- * Build the request-scoped {@link Scope} for chat. Source order today:
- *   1. `x-audience` header — `"user" | "ai" | "internal"`. The applicant
- *      view sends `user` so the engagement atom omits Revit-binding
- *      details from prose + typed payload (engagement.atom.ts §scope).
- *   2. Default → `"internal"` so existing operator/server-to-server
- *      callers (Revit add-in, dev tools) keep the unredacted view they
- *      had before this route adopted the registry.
+ * Build the request-scoped {@link Scope} for chat from the authenticated
+ * session attached by `middlewares/session.ts`. The session — not any
+ * request header — is the source of truth for audience, requestor, and
+ * permission claims; the previous `x-audience`-header path was trivially
+ * spoofable (an applicant could set `x-audience: internal` and the
+ * engagement atom would happily emit Revit-binding details meant only
+ * for internal staff).
  *
- * Mirrors `parseScopeParam` in `routes/atoms.ts` but is intentionally
- * narrower: chat only cares about audience right now. Once a real auth
- * layer lands, the requestor + permission-claim fields can be derived
- * from the session and threaded in here without changing the call site
- * inside the handler.
+ * Defaults & dev override
+ * -----------------------
+ * Anonymous requests get `audience: "user"` from the middleware, so the
+ * engagement atom redacts internal-only fields by default. The
+ * `x-audience` / `x-requestor` / `x-permissions` headers are still
+ * honored as a development override — but the override happens inside
+ * `sessionMiddleware`, gated on `NODE_ENV !== "production"`, so a
+ * deployed server cannot be coerced via headers. See task #29 and
+ * `middlewares/session.ts` for the full integration contract.
  */
-function chatScopeFromRequest(req: Request): Scope {
-  const raw = req.header("x-audience");
-  const audience: Scope["audience"] =
-    raw === "user" || raw === "ai" || raw === "internal" ? raw : "internal";
-  return { audience };
+function chatScopeFromSession(req: Request): Scope {
+  const session = req.session;
+  const scope: Scope = { audience: session.audience };
+  if (session.requestor) scope.requestor = session.requestor;
+  if (session.permissions && session.permissions.length > 0) {
+    scope.permissions = session.permissions;
+  }
+  return scope;
 }
 
 router.post("/chat", async (req: Request, res: Response) => {
@@ -85,9 +92,12 @@ router.post("/chat", async (req: Request, res: Response) => {
   //     /atom-card share, so chat can ship that *same* prose into the
   //     `<framework_atoms>` block without re-deriving it here.
   //   - Scope (audience + future RBAC claims) is forwarded through the
-  //     atom, so an applicant chat (`x-audience: user`) automatically
-  //     gets the redacted variant — no per-route filter to maintain.
-  const scope = chatScopeFromRequest(req);
+  //     atom, so an applicant chat (`req.session.audience === "user"`)
+  //     automatically gets the redacted variant — no per-route filter
+  //     to maintain. The session is built by `middlewares/session.ts`,
+  //     which fails closed in production; see that file for the trust
+  //     model.
+  const scope = chatScopeFromSession(req);
   const engagementResolution = getAtomRegistry().resolve("engagement");
   if (!engagementResolution.ok) {
     // Boot validation should make this unreachable. If it ever fires,
