@@ -71,6 +71,8 @@ setupRouteTests((g) => {
 
 async function seedEngagementWithSnapshot(opts?: {
   withSnapshot?: boolean;
+  revitDocumentPath?: string | null;
+  revitCentralGuid?: string | null;
 }): Promise<{ id: string }> {
   if (!ctx.schema) throw new Error("schema not ready");
   const withSnapshot = opts?.withSnapshot ?? true;
@@ -81,6 +83,8 @@ async function seedEngagementWithSnapshot(opts?: {
       nameLower: `test-engagement-${Math.random().toString(36).slice(2)}`,
       jurisdiction: "Moab, UT",
       address: "123 Main St",
+      revitDocumentPath: opts?.revitDocumentPath ?? null,
+      revitCentralGuid: opts?.revitCentralGuid ?? null,
     })
     .returning({ id: engagements.id });
   if (withSnapshot) {
@@ -164,6 +168,58 @@ describe("POST /api/chat", () => {
     expect(anthropicMocks.lastArgs.model).toMatch(/^claude-/);
     expect(anthropicMocks.lastArgs.system).toEqual(expect.any(String));
     expect(Array.isArray(anthropicMocks.lastArgs.messages)).toBe(true);
+  });
+
+  it("registry path: engagement atom prose lands in the system prompt and scope=user redacts the Revit binding", async () => {
+    // Two requests against the SAME seeded engagement, differing only
+    // in `x-audience`. The engagement atom's `contextSummary` produces
+    // different prose for `internal` vs `user` audiences (it omits the
+    // "Bound to Revit document …" sentence under the user variant).
+    // If chat is consuming the atom (and forwarding scope), the
+    // forwarded `system` prompt must reflect that diff.
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const REVIT_DOC = "C:/Projects/RegistryPathTest.rvt";
+    const eng = await seedEngagementWithSnapshot({
+      revitDocumentPath: REVIT_DOC,
+      revitCentralGuid: "deadbeef-aaaa-bbbb-cccc-000000000001",
+    });
+
+    // 1. Internal audience (default header → "internal"): the
+    //    engagement atom emits the Revit binding sentence in prose,
+    //    and the chat path threads that prose into <framework_atoms>.
+    const resInternal = await request(getApp())
+      .post("/api/chat")
+      .send({ engagementId: eng.id, question: "what's the doc path?" });
+    expect(resInternal.status).toBe(200);
+    const internalSystem = String(anthropicMocks.lastArgs.system);
+    expect(internalSystem).toContain(REVIT_DOC);
+    // Provenance round-trip: the chat path tags the framework atom
+    // with `entityType="engagement"` so the LLM can attribute its
+    // answer back to the registry entity.
+    expect(internalSystem).toContain('entity_type="engagement"');
+    expect(internalSystem).toContain(`entity_id="${eng.id}"`);
+
+    // 2. User audience (applicant view): same engagement, but the
+    //    atom redacts the Revit binding under `audience: "user"`. If
+    //    chat were still loading from the engagement row directly
+    //    (pre-A3 behavior), this assertion would fail — the redaction
+    //    only happens inside the atom.
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const resUser = await request(getApp())
+      .post("/api/chat")
+      .set("x-audience", "user")
+      .send({ engagementId: eng.id, question: "what's the doc path?" });
+    expect(resUser.status).toBe(200);
+    const userSystem = String(anthropicMocks.lastArgs.system);
+    expect(userSystem).not.toContain(REVIT_DOC);
+    // Engagement framing (name/address/jurisdiction) still ships on
+    // the user variant — only the internal Revit binding is dropped.
+    expect(userSystem).toContain("Test Engagement");
+    expect(userSystem).toContain("123 Main St");
   });
 
   it("error path: when the SDK throws, emits {error:'stream_failed'} then [DONE]", async () => {
