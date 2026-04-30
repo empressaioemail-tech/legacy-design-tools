@@ -102,6 +102,17 @@ import {
   drainQueue,
   type OrchestratorLogger,
 } from "./orchestrator";
+import { JURISDICTIONS } from "./jurisdictions";
+import { REQUIRED_CODE_ATOM_SOURCES } from "./sourceRegistry";
+
+// Derive Grand County's expected source set from the canonical configs so
+// adding a new code book to the jurisdiction (or a new row to the source
+// registry) doesn't require touching this test file.
+const GRAND_COUNTY_BOOKS = JURISDICTIONS.grand_county_ut.books;
+const GRAND_COUNTY_SOURCE_NAMES = GRAND_COUNTY_BOOKS.map(
+  (b) => b.sourceName,
+).sort();
+const GRAND_COUNTY_BOOK_COUNT = GRAND_COUNTY_BOOKS.length;
 
 const silentLogger: OrchestratorLogger = {
   info: () => {},
@@ -116,28 +127,36 @@ beforeEach(() => {
 });
 
 /**
- * Seed the source rows that grand_county_ut depends on. Both books in the
- * jurisdiction config (grand_county_html + grand_county_pdf) need rows for
- * enqueueWarmupForJurisdiction to find them via loadSourceRow().
+ * Seed the source rows that grand_county_ut depends on. Every book listed in
+ * the jurisdiction's config needs a matching row in code_atom_sources for
+ * enqueueWarmupForJurisdiction to find it via loadSourceRow(). Pulling the
+ * list from the canonical registry keeps this in lockstep with production
+ * config when new books are added.
  */
 async function seedGrandCountySources(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   db: any,
 ): Promise<void> {
-  await db.insert(codeAtomSources).values([
-    {
-      sourceName: "grand_county_html",
-      label: "Grand County HTML",
-      sourceType: "html",
-      licenseType: "public_record",
-    },
-    {
-      sourceName: "grand_county_pdf",
-      label: "Grand County PDF",
-      sourceType: "pdf",
-      licenseType: "public_record",
-    },
-  ]);
+  const rows = GRAND_COUNTY_BOOKS.map((book) => {
+    const registryEntry = REQUIRED_CODE_ATOM_SOURCES.find(
+      (s) => s.sourceName === book.sourceName,
+    );
+    if (!registryEntry) {
+      // Fail loudly: a book pointing at an unregistered source is a real bug,
+      // not just a test setup issue. This guards against silent drift between
+      // jurisdictions.ts and sourceRegistry.ts.
+      throw new Error(
+        `seedGrandCountySources: no REQUIRED_CODE_ATOM_SOURCES entry for ${book.sourceName}`,
+      );
+    }
+    return {
+      sourceName: registryEntry.sourceName,
+      label: registryEntry.label,
+      sourceType: registryEntry.sourceType,
+      licenseType: registryEntry.licenseType,
+    };
+  });
+  await db.insert(codeAtomSources).values(rows);
 }
 
 describe("enqueueWarmupForJurisdiction", () => {
@@ -167,16 +186,16 @@ describe("enqueueWarmupForJurisdiction", () => {
         "grand_county_ut",
         silentLogger,
       );
-      expect(result.enqueued).toBe(4); // 2 books × 2 entries
+      const ENTRIES_PER_BOOK = 2; // listTocImpl yields 2 entries per book
+      expect(result.enqueued).toBe(GRAND_COUNTY_BOOK_COUNT * ENTRIES_PER_BOOK);
       expect(result.skipped).toBe(0);
-      expect(result.perBook).toHaveLength(2);
-      expect(result.perBook.map((b) => b.sourceName).sort()).toEqual([
-        "grand_county_html",
-        "grand_county_pdf",
-      ]);
+      expect(result.perBook).toHaveLength(GRAND_COUNTY_BOOK_COUNT);
+      expect(result.perBook.map((b) => b.sourceName).sort()).toEqual(
+        GRAND_COUNTY_SOURCE_NAMES,
+      );
 
       const rows = await db.select().from(codeAtomFetchQueue);
-      expect(rows).toHaveLength(4);
+      expect(rows).toHaveLength(GRAND_COUNTY_BOOK_COUNT * ENTRIES_PER_BOOK);
       expect(rows.every((r) => r.status === "pending")).toBe(true);
       // Spot-check one row's metadata round-trip.
       const ircRow = rows.find((r) =>
@@ -220,7 +239,8 @@ describe("enqueueWarmupForJurisdiction", () => {
         "grand_county_ut",
         silentLogger,
       );
-      expect(first.enqueued).toBe(2);
+      // listTocImpl yields exactly one entry per book here.
+      expect(first.enqueued).toBe(GRAND_COUNTY_BOOK_COUNT);
       expect(first.skipped).toBe(0);
 
       const second = await enqueueWarmupForJurisdiction(
@@ -228,10 +248,10 @@ describe("enqueueWarmupForJurisdiction", () => {
         silentLogger,
       );
       expect(second.enqueued).toBe(0);
-      expect(second.skipped).toBe(2);
+      expect(second.skipped).toBe(GRAND_COUNTY_BOOK_COUNT);
 
       const rows = await db.select().from(codeAtomFetchQueue);
-      expect(rows).toHaveLength(2);
+      expect(rows).toHaveLength(GRAND_COUNTY_BOOK_COUNT);
     });
   });
 });
