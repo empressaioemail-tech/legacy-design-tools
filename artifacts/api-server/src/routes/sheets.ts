@@ -10,6 +10,7 @@ import { db, snapshots, sheets } from "@workspace/db";
 import { eq, sql, asc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
+import { getHistoryService } from "../atoms/registry";
 
 const snapshotSecret = getSnapshotSecret();
 
@@ -262,6 +263,14 @@ router.post(
       abort(400, "Failed to parse multipart body");
     });
 
+    // Prefer the per-request logger (carries the pino-http request id
+    // for trace correlation in production) but fall back to the module
+    // singleton when the request was wired up without pino-http (notably
+    // the test harness in `setup.ts`). This matches the brief's ask for
+    // request-scoped logging without breaking the unit tests.
+    const reqLogger =
+      (req as unknown as { log?: typeof logger }).log ?? logger;
+
     busboy.on("finish", async () => {
       if (aborted) return;
       let entries: SheetMetadataEntry[];
@@ -332,9 +341,17 @@ router.post(
       // transaction on the first statement error, which made the
       // per-row try/catch inside `db.transaction` ineffective for
       // partial-success semantics.
+      //
+      // We RETURN `(xmax = 0)` alongside the row id so we can tell whether
+      // the upsert produced a fresh row (xmax = 0) or merely updated an
+      // existing one (xmax != 0). Only fresh rows emit `sheet.created` —
+      // upsert-update territory belongs to a future `sheet.updated` event
+      // (out of scope per task #18).
+      const history = getHistoryService();
       for (const row of rowsToInsert) {
+        let inserted: { id: string; wasInsert: boolean } | null = null;
         try {
-          await db
+          const returned = await db
             .insert(sheets)
             .values(row)
             .onConflictDoUpdate({
@@ -353,17 +370,76 @@ router.post(
                 sortOrder: row.sortOrder,
                 engagementId: row.engagementId,
               },
+            })
+            .returning({
+              id: sheets.id,
+              // `xmax = 0` is the canonical Postgres trick for "this
+              // tuple was just inserted" vs "this tuple existed and was
+              // updated by ON CONFLICT". Cast to boolean so drizzle
+              // surfaces it cleanly.
+              wasInsert: sql<boolean>`(xmax = 0)`.as("was_insert"),
             });
           uploaded++;
+          if (returned[0]) {
+            inserted = {
+              id: returned[0].id,
+              wasInsert: Boolean(returned[0].wasInsert),
+            };
+          }
         } catch (err) {
           failed++;
           errors.push(
             `db insert failed for sheet ${row.sheetNumber}: ${err instanceof Error ? err.message : String(err)}`,
           );
-          logger.warn(
+          reqLogger.warn(
             { err, snapshotId, sheetNumber: row.sheetNumber },
             "sheet insert failed",
           );
+          continue;
+        }
+
+        // Event emission is best-effort: a history append failure must
+        // never roll back or fail the row insert (the row is the source
+        // of truth; events are observability). Per task #18 invariants.
+        if (inserted && inserted.wasInsert) {
+          try {
+            const event = await history.appendEvent({
+              entityType: "sheet",
+              entityId: inserted.id,
+              eventType: "sheet.created",
+              // No human actor for snapshot ingest — the add-in posts on
+              // behalf of the workstation. We model it as a system actor
+              // with a stable id so downstream consumers can filter
+              // ingest-originated events without false positives.
+              actor: { kind: "system", id: "snapshot-ingest" },
+              payload: {
+                sheetNumber: row.sheetNumber,
+                sheetName: row.sheetName,
+                snapshotId: snapshotIdStr,
+                engagementId: row.engagementId,
+              },
+            });
+            reqLogger.info(
+              {
+                sheetId: inserted.id,
+                snapshotId,
+                sheetNumber: row.sheetNumber,
+                eventId: event.id,
+                chainHash: event.chainHash,
+              },
+              "sheet.created event appended",
+            );
+          } catch (err) {
+            reqLogger.error(
+              {
+                err,
+                sheetId: inserted.id,
+                snapshotId,
+                sheetNumber: row.sheetNumber,
+              },
+              "sheet.created event append failed — row insert kept",
+            );
+          }
         }
       }
 

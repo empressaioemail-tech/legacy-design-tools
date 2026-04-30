@@ -37,6 +37,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "code_atom_fetch_queue",
   "code_atoms",
   "code_atom_sources",
+  // `atom_events` has no FK to the entity tables (it stores
+  // entity_type+entity_id as opaque text), so the engagements CASCADE
+  // does not clear it. Producers like the sheet ingest route now write
+  // here, so we must reset it between tests to keep chain assertions
+  // independent.
+  "atom_events",
 ];
 
 /**

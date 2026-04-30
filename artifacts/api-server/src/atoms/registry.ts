@@ -40,7 +40,17 @@ export interface BootstrapAtomsLogger {
 let _registry: AtomRegistry | null = null;
 let _history: EventAnchoringService | null = null;
 
-function getHistory(): EventAnchoringService {
+/**
+ * Lazily-constructed process-wide {@link EventAnchoringService} singleton
+ * backed by the prod Postgres `db`. Exposed (in addition to being injected
+ * into atom factories) so consumer code paths — most notably the snapshot
+ * sheet ingest route — can append `*.created`/`*.updated` events through
+ * the same instance the atoms read from in `contextSummary`.
+ *
+ * Idempotent: repeated calls return the same instance. Tests can drop the
+ * cache via {@link resetAtomRegistryForTests}.
+ */
+export function getHistoryService(): EventAnchoringService {
   if (_history) return _history;
   // The Postgres history service is structurally typed against drizzle's
   // execute() shape; the prod `db` satisfies that contract.
@@ -64,7 +74,7 @@ function getHistory(): EventAnchoringService {
 export function getAtomRegistry(): AtomRegistry {
   if (_registry) return _registry;
   const registry = createAtomRegistry();
-  registry.register(makeSheetAtom({ db, history: getHistory() }));
+  registry.register(makeSheetAtom({ db, history: getHistoryService() }));
   _registry = registry;
   return registry;
 }
