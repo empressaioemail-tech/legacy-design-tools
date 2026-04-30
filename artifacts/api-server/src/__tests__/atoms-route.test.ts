@@ -38,6 +38,8 @@ const { engagements, snapshots, sheets } = await import("@workspace/db");
 const { resetAtomRegistryForTests, getHistoryService } = await import(
   "../atoms/registry"
 );
+const { SHEET_EVENT_TYPES } = await import("../atoms/sheet.atom");
+const { SNAPSHOT_EVENT_TYPES } = await import("../atoms/snapshot.atom");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -335,22 +337,18 @@ describe("GET /api/atoms/catalog", () => {
       }
     >(res.body.atoms.map((a: { entityType: string }) => [a.entityType, a]));
 
+    // Assert against the authoritative `*_EVENT_TYPES` constants exported
+    // by each atom module rather than re-typing the strings here. That way
+    // a rename in the atom (the failure mode that caused Task #40) flows
+    // straight into this test instead of needing a parallel edit.
     const sheet = byType.get("sheet");
     expect(sheet).toBeDefined();
-    expect(sheet?.eventTypes).toEqual([
-      "sheet.created",
-      "sheet.updated",
-      "sheet.removed",
-    ]);
+    expect(sheet?.eventTypes).toEqual([...SHEET_EVENT_TYPES]);
     expect(sheet?.composes).toEqual([]);
 
     const snapshot = byType.get("snapshot");
     expect(snapshot).toBeDefined();
-    expect(snapshot?.eventTypes).toEqual([
-      "snapshot.created",
-      "snapshot.sheets_attached",
-      "snapshot.replaced",
-    ]);
+    expect(snapshot?.eventTypes).toEqual([...SNAPSHOT_EVENT_TYPES]);
     expect(snapshot?.composes).toEqual(["sheet"]);
 
     // Engagement doesn't declare events today — the catalog must still
