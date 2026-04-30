@@ -304,6 +304,21 @@ export interface CodeAtomSummary {
   bodyPreview: string;
 }
 
+/**
+ * Paginated response for the global atom list endpoint
+(`GET /codes/atoms`). `total` reflects the count of atoms matching
+the filters before pagination; `limit` and `offset` echo the
+applied (clamped) request values so the UI can render correct
+Prev/Next state without re-deriving them.
+
+ */
+export interface CodeAtomListResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  items: CodeAtomSummary[];
+}
+
 export type CodeAtomDetailMetadata = { [key: string]: unknown } | null;
 
 export type CodeAtomDetail = CodeAtomSummary & {
@@ -399,3 +414,43 @@ export type ListJurisdictionAtomsParams = {
    */
   edition?: string;
 };
+
+export type ListCodeAtomsParams = {
+  jurisdictionKey?: string;
+  codeBook?: string;
+  edition?: string;
+  /**
+   * Filter by `code_atom_sources.source_name` (e.g. `grand_county_html`).
+   */
+  sourceName?: string;
+  /**
+ * Tri-state. `true` → only embedded atoms; `false` → only raw
+atoms; omitted → no filter. Strings (not JSON booleans) so the
+querystring round-trips cleanly.
+
+ */
+  embedded?: ListCodeAtomsEmbedded;
+  /**
+ * Case-insensitive substring match against `sectionNumber` OR
+`sectionTitle`. Trimmed; empty string is treated as no filter.
+
+ */
+  q?: string;
+  /**
+   * @minimum 1
+   * @maximum 200
+   */
+  limit?: number;
+  /**
+   * @minimum 0
+   */
+  offset?: number;
+};
+
+export type ListCodeAtomsEmbedded =
+  (typeof ListCodeAtomsEmbedded)[keyof typeof ListCodeAtomsEmbedded];
+
+export const ListCodeAtomsEmbedded = {
+  true: "true",
+  false: "false",
+} as const;

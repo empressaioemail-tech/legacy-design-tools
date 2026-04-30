@@ -4,7 +4,7 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, codeAtoms, codeAtomSources, codeAtomFetchQueue } from "@workspace/db";
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { embedTexts, EMBEDDING_MODEL } from "@workspace/codes";
 import {
   enqueueWarmupForJurisdiction,
@@ -165,6 +165,139 @@ router.get(
       );
     } catch (err) {
       logger.error({ err, key }, "list jurisdiction atoms failed");
+      res.status(500).json({ error: "Failed to list atoms" });
+    }
+  },
+);
+
+/**
+ * Global atom list — operator/debug surface backing the /dev/atoms page.
+ * Distinct from `/codes/jurisdictions/:key/atoms`, which is scoped to one
+ * jurisdiction and intentionally narrow for the consumer Code Library UI.
+ *
+ * This endpoint exposes filters the consumer surface doesn't (sourceName,
+ * embedded vs raw, free-text section search) and adds offset pagination
+ * with a server-computed `total` so the inspector can render
+ * "showing X of Y" and Prev/Next without overfetching.
+ *
+ * Stable order: (fetchedAt DESC, id DESC) — fetchedAt may collide for
+ * atoms written in the same batch, so id is the tiebreaker.
+ */
+router.get(
+  "/codes/atoms",
+  async (req: Request, res: Response): Promise<void> => {
+    // limit: clamp to [1, 200] with default 50, mirroring the per-jurisdiction
+    // endpoint's bounds. offset: clamp to >=0 with default 0.
+    const limitRaw = Number(req.query.limit ?? 50);
+    const limit = Number.isFinite(limitRaw)
+      ? Math.max(1, Math.min(200, Math.floor(limitRaw)))
+      : 50;
+    const offsetRaw = Number(req.query.offset ?? 0);
+    const offset = Number.isFinite(offsetRaw)
+      ? Math.max(0, Math.floor(offsetRaw))
+      : 0;
+
+    const jurisdictionFilter = req.query.jurisdictionKey
+      ? String(req.query.jurisdictionKey)
+      : null;
+    const codeBookFilter = req.query.codeBook
+      ? String(req.query.codeBook)
+      : null;
+    const editionFilter = req.query.edition ? String(req.query.edition) : null;
+    const sourceNameFilter = req.query.sourceName
+      ? String(req.query.sourceName)
+      : null;
+    // embedded: tri-state. "true" → only embedded; "false" → only raw;
+    // anything else (including missing) → no filter. We accept the literal
+    // strings "true"/"false" rather than a JSON boolean because querystring
+    // values are always strings and we want predictable behavior.
+    const embeddedRaw = req.query.embedded;
+    const embeddedFilter =
+      embeddedRaw === "true" ? true : embeddedRaw === "false" ? false : null;
+    // q: free-text substring match against sectionNumber OR sectionTitle.
+    // Trimmed; empty after trim → no filter. Wrapped in %...% server-side
+    // so the caller doesn't have to worry about escaping wildcards.
+    const qRaw = req.query.q ? String(req.query.q).trim() : "";
+    const qFilter = qRaw.length > 0 ? qRaw : null;
+
+    try {
+      // Assemble WHERE clauses. The sourceName filter requires the join
+      // (which we'd be doing anyway for the response shape).
+      const conditions = [];
+      if (jurisdictionFilter)
+        conditions.push(eq(codeAtoms.jurisdictionKey, jurisdictionFilter));
+      if (codeBookFilter)
+        conditions.push(eq(codeAtoms.codeBook, codeBookFilter));
+      if (editionFilter) conditions.push(eq(codeAtoms.edition, editionFilter));
+      if (sourceNameFilter)
+        conditions.push(eq(codeAtomSources.sourceName, sourceNameFilter));
+      if (embeddedFilter === true)
+        conditions.push(isNotNull(codeAtoms.embedding));
+      if (embeddedFilter === false) conditions.push(isNull(codeAtoms.embedding));
+      if (qFilter) {
+        const pattern = `%${qFilter}%`;
+        // ilike for case-insensitive substring; OR across the two text
+        // columns operators are most likely to inspect.
+        conditions.push(
+          or(
+            ilike(codeAtoms.sectionNumber, pattern),
+            ilike(codeAtoms.sectionTitle, pattern),
+          )!,
+        );
+      }
+
+      const whereClause =
+        conditions.length === 0 ? undefined : and(...conditions);
+
+      // Two queries: total count + page slice. Cheaper than a window
+      // function for our row counts (low thousands at most) and clearer.
+      const [{ n: total }] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(codeAtoms)
+        .innerJoin(codeAtomSources, eq(codeAtomSources.id, codeAtoms.sourceId))
+        .where(whereClause ?? sql`TRUE`);
+
+      const rows = await db
+        .select({
+          id: codeAtoms.id,
+          jurisdictionKey: codeAtoms.jurisdictionKey,
+          codeBook: codeAtoms.codeBook,
+          edition: codeAtoms.edition,
+          sectionNumber: codeAtoms.sectionNumber,
+          sectionTitle: codeAtoms.sectionTitle,
+          sourceUrl: codeAtoms.sourceUrl,
+          embedding: codeAtoms.embedding,
+          fetchedAt: codeAtoms.fetchedAt,
+          body: codeAtoms.body,
+          sourceName: codeAtomSources.sourceName,
+        })
+        .from(codeAtoms)
+        .innerJoin(codeAtomSources, eq(codeAtomSources.id, codeAtoms.sourceId))
+        .where(whereClause ?? sql`TRUE`)
+        .orderBy(desc(codeAtoms.fetchedAt), desc(codeAtoms.id))
+        .limit(limit)
+        .offset(offset);
+
+      res.json({
+        total: Number(total ?? 0),
+        limit,
+        offset,
+        items: rows.map((r) => ({
+          id: r.id,
+          jurisdictionKey: r.jurisdictionKey,
+          codeBook: r.codeBook,
+          edition: r.edition,
+          sectionNumber: r.sectionNumber,
+          sectionTitle: r.sectionTitle,
+          sourceName: r.sourceName,
+          sourceUrl: r.sourceUrl,
+          embedded: r.embedding !== null,
+          fetchedAt: r.fetchedAt.toISOString(),
+          bodyPreview: previewBody(r.body),
+        })),
+      });
+    } catch (err) {
+      logger.error({ err }, "list atoms (global) failed");
       res.status(500).json({ error: "Failed to list atoms" });
     }
   },

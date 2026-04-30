@@ -607,6 +607,82 @@ export const ListJurisdictionAtomsResponse = zod.array(
 );
 
 /**
+ * Operator-facing global atom list backing the `/dev/atoms` inspector
+page. Distinct from `/codes/jurisdictions/{key}/atoms` (consumer
+surface, scoped to one jurisdiction): exposes filters not present
+in the consumer view (sourceName, embedded vs raw, free-text q)
+and adds offset pagination with a server-computed `total` so the
+UI can render Prev/Next without overfetching.
+
+Stable order: (fetchedAt DESC, id DESC).
+
+ * @summary List atoms across jurisdictions (operator/debug surface)
+ */
+export const listCodeAtomsQueryLimitDefault = 50;
+export const listCodeAtomsQueryLimitMax = 200;
+
+export const listCodeAtomsQueryOffsetDefault = 0;
+export const listCodeAtomsQueryOffsetMin = 0;
+
+export const ListCodeAtomsQueryParams = zod.object({
+  jurisdictionKey: zod.coerce.string().optional(),
+  codeBook: zod.coerce.string().optional(),
+  edition: zod.coerce.string().optional(),
+  sourceName: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Filter by `code_atom_sources.source_name` (e.g. `grand_county_html`).",
+    ),
+  embedded: zod
+    .enum(["true", "false"])
+    .optional()
+    .describe(
+      "Tri-state. `true` → only embedded atoms; `false` → only raw\natoms; omitted → no filter. Strings (not JSON booleans) so the\nquerystring round-trips cleanly.\n",
+    ),
+  q: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Case-insensitive substring match against `sectionNumber` OR\n`sectionTitle`. Trimmed; empty string is treated as no filter.\n",
+    ),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listCodeAtomsQueryLimitMax)
+    .default(listCodeAtomsQueryLimitDefault),
+  offset: zod.coerce
+    .number()
+    .min(listCodeAtomsQueryOffsetMin)
+    .default(listCodeAtomsQueryOffsetDefault),
+});
+
+export const ListCodeAtomsResponse = zod
+  .object({
+    total: zod.number(),
+    limit: zod.number(),
+    offset: zod.number(),
+    items: zod.array(
+      zod.object({
+        id: zod.string(),
+        jurisdictionKey: zod.string(),
+        codeBook: zod.string(),
+        edition: zod.string(),
+        sectionNumber: zod.string().nullable(),
+        sectionTitle: zod.string().nullable(),
+        sourceName: zod.string(),
+        sourceUrl: zod.string(),
+        embedded: zod.boolean(),
+        fetchedAt: zod.coerce.date(),
+        bodyPreview: zod.string(),
+      }),
+    ),
+  })
+  .describe(
+    "Paginated response for the global atom list endpoint\n(`GET \/codes\/atoms`). `total` reflects the count of atoms matching\nthe filters before pagination; `limit` and `offset` echo the\napplied (clamped) request values so the UI can render correct\nPrev\/Next state without re-deriving them.\n",
+  );
+
+/**
  * @summary Get a single code atom (full body + provenance)
  */
 export const GetCodeAtomParams = zod.object({

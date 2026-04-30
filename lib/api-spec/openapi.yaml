@@ -486,6 +486,83 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /codes/atoms:
+    get:
+      operationId: listCodeAtoms
+      tags: [codes]
+      summary: List atoms across jurisdictions (operator/debug surface)
+      description: |
+        Operator-facing global atom list backing the `/dev/atoms` inspector
+        page. Distinct from `/codes/jurisdictions/{key}/atoms` (consumer
+        surface, scoped to one jurisdiction): exposes filters not present
+        in the consumer view (sourceName, embedded vs raw, free-text q)
+        and adds offset pagination with a server-computed `total` so the
+        UI can render Prev/Next without overfetching.
+
+        Stable order: (fetchedAt DESC, id DESC).
+      parameters:
+        - name: jurisdictionKey
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: codeBook
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: edition
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sourceName
+          in: query
+          required: false
+          description: Filter by `code_atom_sources.source_name` (e.g. `grand_county_html`).
+          schema:
+            type: string
+        - name: embedded
+          in: query
+          required: false
+          description: |
+            Tri-state. `true` → only embedded atoms; `false` → only raw
+            atoms; omitted → no filter. Strings (not JSON booleans) so the
+            querystring round-trips cleanly.
+          schema:
+            type: string
+            enum: ["true", "false"]
+        - name: q
+          in: query
+          required: false
+          description: |
+            Case-insensitive substring match against `sectionNumber` OR
+            `sectionTitle`. Trimmed; empty string is treated as no filter.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        "200":
+          description: Paginated atom list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeAtomListResponse"
+
   /codes/atoms/{id}:
     get:
       operationId: getCodeAtom
@@ -1254,6 +1331,31 @@ components:
         - embedded
         - fetchedAt
         - bodyPreview
+
+    CodeAtomListResponse:
+      type: object
+      description: |
+        Paginated response for the global atom list endpoint
+        (`GET /codes/atoms`). `total` reflects the count of atoms matching
+        the filters before pagination; `limit` and `offset` echo the
+        applied (clamped) request values so the UI can render correct
+        Prev/Next state without re-deriving them.
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodeAtomSummary"
+      required:
+        - total
+        - limit
+        - offset
+        - items
 
     CodeAtomDetail:
       allOf:

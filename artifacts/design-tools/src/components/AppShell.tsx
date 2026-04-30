@@ -7,6 +7,7 @@ import {
 import {
   Activity,
   BookOpen,
+  Database,
   FolderOpen,
   LayoutDashboard,
   Palette,
@@ -78,6 +79,11 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
     {
       label: "DEV",
       items: [
+        {
+          label: "Atom Inspector",
+          href: "/dev/atoms",
+          icon: <Database size={14} />,
+        },
         {
           label: "API Health",
           href: "/health",

@@ -173,6 +173,263 @@ describe("POST /api/codes/warmup/:key", () => {
   });
 });
 
+describe("GET /api/codes/atoms (global inspector list)", () => {
+  /**
+   * Seed two source rows + a controlled set of atoms across two
+   * jurisdictions, two books, two sources, mixed embedded/raw, with
+   * predictable section numbers and titles so we can exercise every
+   * filter axis the endpoint exposes.
+   */
+  async function seedInspectorFixture(): Promise<void> {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const dbi = ctx.schema.db;
+    await dbi.insert(codeAtomSources).values([
+      {
+        sourceName: "grand_county_html",
+        label: "Grand County HTML",
+        sourceType: "html",
+        licenseType: "public_record",
+      },
+      {
+        sourceName: "grand_county_pdf",
+        label: "Grand County PDF",
+        sourceType: "pdf",
+        licenseType: "public_record",
+      },
+    ]);
+    const sources = await dbi.select().from(codeAtomSources);
+    const htmlId = sources.find((s) => s.sourceName === "grand_county_html")!.id;
+    const pdfId = sources.find((s) => s.sourceName === "grand_county_pdf")!.id;
+
+    // 6 atoms total. Mix of:
+    //  - jurisdiction (gc=4, bx=2)
+    //  - codeBook (IRC=3, IWUIC=2, BC=1)
+    //  - source (html=4, pdf=2)
+    //  - embedded (3 with vector, 3 without)
+    //  - section title contains "wind" twice (one in number, one in title)
+    const dummyVec = new Array<number>(1536).fill(0.001);
+    await dbi.insert(codeAtoms).values([
+      {
+        sourceId: htmlId,
+        jurisdictionKey: "grand_county_ut",
+        codeBook: "IRC_R301_2_1",
+        edition: "2021",
+        sectionNumber: "R301.2.1",
+        sectionTitle: "Wind Loads",
+        body: "wind loads body",
+        contentHash: "h1",
+        sourceUrl: "https://example.com/1",
+        embedding: dummyVec,
+        embeddingModel: "test-model",
+        embeddedAt: new Date(),
+        fetchedAt: new Date(Date.now() - 1_000),
+      },
+      {
+        sourceId: htmlId,
+        jurisdictionKey: "grand_county_ut",
+        codeBook: "IRC_R301_2_1",
+        edition: "2021",
+        sectionNumber: "R301.2.2",
+        sectionTitle: "Snow Loads",
+        body: "snow loads body",
+        contentHash: "h2",
+        sourceUrl: "https://example.com/2",
+        embedding: null,
+        fetchedAt: new Date(Date.now() - 2_000),
+      },
+      {
+        sourceId: htmlId,
+        jurisdictionKey: "grand_county_ut",
+        codeBook: "IRC_R301_2_1",
+        edition: "2021",
+        sectionNumber: "R301.2.WIND.X",
+        sectionTitle: "Frost Depth",
+        body: "frost body",
+        contentHash: "h3",
+        sourceUrl: "https://example.com/3",
+        embedding: dummyVec,
+        embeddingModel: "test-model",
+        embeddedAt: new Date(),
+        fetchedAt: new Date(Date.now() - 3_000),
+      },
+      {
+        sourceId: pdfId,
+        jurisdictionKey: "grand_county_ut",
+        codeBook: "IWUIC",
+        edition: "2006",
+        sectionNumber: "503.2",
+        sectionTitle: "Roof Coverings",
+        body: "roof body",
+        contentHash: "h4",
+        sourceUrl: "https://example.com/4",
+        embedding: null,
+        fetchedAt: new Date(Date.now() - 4_000),
+      },
+      {
+        sourceId: pdfId,
+        jurisdictionKey: "bastrop_tx",
+        codeBook: "BC_BUILDING",
+        edition: "2018",
+        sectionNumber: "1604",
+        sectionTitle: "General Design Requirements",
+        body: "general body",
+        contentHash: "h5",
+        sourceUrl: "https://example.com/5",
+        embedding: dummyVec,
+        embeddingModel: "test-model",
+        embeddedAt: new Date(),
+        fetchedAt: new Date(Date.now() - 5_000),
+      },
+      {
+        sourceId: htmlId,
+        jurisdictionKey: "bastrop_tx",
+        codeBook: "BC_BUILDING",
+        edition: "2018",
+        sectionNumber: "1605",
+        sectionTitle: "Load Combinations",
+        body: "loads body",
+        contentHash: "h6",
+        sourceUrl: "https://example.com/6",
+        embedding: null,
+        fetchedAt: new Date(Date.now() - 6_000),
+      },
+    ]);
+  }
+
+  it("returns the full set, newest-first, with total/limit/offset echoed when no filters are applied", async () => {
+    await seedInspectorFixture();
+    const res = await request(getApp()).get("/api/codes/atoms");
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(6);
+    expect(res.body.limit).toBe(50);
+    expect(res.body.offset).toBe(0);
+    expect(res.body.items).toHaveLength(6);
+    // fetchedAt DESC: index 0 had the newest fetchedAt (Date.now() - 1_000).
+    expect(res.body.items[0].sectionNumber).toBe("R301.2.1");
+    expect(res.body.items[5].sectionNumber).toBe("1605");
+    // bodyPreview is collapsed/truncated, embedded reflects vector presence.
+    expect(typeof res.body.items[0].bodyPreview).toBe("string");
+    expect(res.body.items[0].embedded).toBe(true);
+    expect(res.body.items[1].embedded).toBe(false);
+  });
+
+  it("filters by jurisdictionKey", async () => {
+    await seedInspectorFixture();
+    const res = await request(getApp()).get(
+      "/api/codes/atoms?jurisdictionKey=bastrop_tx",
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(2);
+    expect(res.body.items).toHaveLength(2);
+    expect(
+      res.body.items.every(
+        (a: { jurisdictionKey: string }) => a.jurisdictionKey === "bastrop_tx",
+      ),
+    ).toBe(true);
+  });
+
+  it("filters by codeBook + edition together", async () => {
+    await seedInspectorFixture();
+    const res = await request(getApp()).get(
+      "/api/codes/atoms?codeBook=IRC_R301_2_1&edition=2021",
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(3);
+    expect(
+      res.body.items.every(
+        (a: { codeBook: string; edition: string }) =>
+          a.codeBook === "IRC_R301_2_1" && a.edition === "2021",
+      ),
+    ).toBe(true);
+  });
+
+  it("filters by sourceName via the source join", async () => {
+    await seedInspectorFixture();
+    const res = await request(getApp()).get(
+      "/api/codes/atoms?sourceName=grand_county_pdf",
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(2);
+    expect(
+      res.body.items.every(
+        (a: { sourceName: string }) => a.sourceName === "grand_county_pdf",
+      ),
+    ).toBe(true);
+  });
+
+  it("filters by embedded=true and embedded=false (tri-state)", async () => {
+    await seedInspectorFixture();
+    const onlyEmbedded = await request(getApp()).get(
+      "/api/codes/atoms?embedded=true",
+    );
+    expect(onlyEmbedded.status).toBe(200);
+    expect(onlyEmbedded.body.total).toBe(3);
+    expect(
+      onlyEmbedded.body.items.every(
+        (a: { embedded: boolean }) => a.embedded === true,
+      ),
+    ).toBe(true);
+
+    const onlyRaw = await request(getApp()).get(
+      "/api/codes/atoms?embedded=false",
+    );
+    expect(onlyRaw.status).toBe(200);
+    expect(onlyRaw.body.total).toBe(3);
+    expect(
+      onlyRaw.body.items.every(
+        (a: { embedded: boolean }) => a.embedded === false,
+      ),
+    ).toBe(true);
+  });
+
+  it("free-text q matches sectionNumber OR sectionTitle, case-insensitively", async () => {
+    await seedInspectorFixture();
+    // "wind" appears in section title "Wind Loads" AND in section number
+    // "R301.2.WIND.X" — the OR should pick up both.
+    const res = await request(getApp()).get("/api/codes/atoms?q=wind");
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(2);
+    const refs = res.body.items
+      .map((a: { sectionNumber: string }) => a.sectionNumber)
+      .sort();
+    expect(refs).toEqual(["R301.2.1", "R301.2.WIND.X"]);
+  });
+
+  it("paginates via limit + offset and reports the unfiltered total", async () => {
+    await seedInspectorFixture();
+    const page1 = await request(getApp()).get(
+      "/api/codes/atoms?limit=2&offset=0",
+    );
+    expect(page1.status).toBe(200);
+    expect(page1.body.total).toBe(6);
+    expect(page1.body.limit).toBe(2);
+    expect(page1.body.offset).toBe(0);
+    expect(page1.body.items).toHaveLength(2);
+    const page1Ids = page1.body.items.map((a: { id: string }) => a.id);
+
+    const page2 = await request(getApp()).get(
+      "/api/codes/atoms?limit=2&offset=2",
+    );
+    expect(page2.status).toBe(200);
+    expect(page2.body.total).toBe(6);
+    expect(page2.body.offset).toBe(2);
+    expect(page2.body.items).toHaveLength(2);
+    const page2Ids = page2.body.items.map((a: { id: string }) => a.id);
+    // No overlap between the two pages — confirms stable ordering.
+    expect(page1Ids.some((id: string) => page2Ids.includes(id))).toBe(false);
+  });
+
+  it("returns total=0 / items=[] when no atoms match", async () => {
+    await seedInspectorFixture();
+    const res = await request(getApp()).get(
+      "/api/codes/atoms?jurisdictionKey=does_not_exist",
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(0);
+    expect(res.body.items).toEqual([]);
+  });
+});
+
 describe("GET /api/codes/warmup-status/:key", () => {
   it("404s for an unregistered jurisdiction key", async () => {
     const res = await request(getApp()).get(

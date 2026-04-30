@@ -20,12 +20,14 @@ import type {
   ChatErrorResponse,
   ChatRequest,
   CodeAtomDetail,
+  CodeAtomListResponse,
   CodeAtomSummary,
   EngagementDetail,
   EngagementSummary,
   ErrorResponse,
   HealthStatus,
   JurisdictionSummary,
+  ListCodeAtomsParams,
   ListJurisdictionAtomsParams,
   MatchEngagementBody,
   MatchEngagementResponse,
@@ -1366,6 +1368,109 @@ export function useListJurisdictionAtoms<
     params,
     options,
   );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Operator-facing global atom list backing the `/dev/atoms` inspector
+page. Distinct from `/codes/jurisdictions/{key}/atoms` (consumer
+surface, scoped to one jurisdiction): exposes filters not present
+in the consumer view (sourceName, embedded vs raw, free-text q)
+and adds offset pagination with a server-computed `total` so the
+UI can render Prev/Next without overfetching.
+
+Stable order: (fetchedAt DESC, id DESC).
+
+ * @summary List atoms across jurisdictions (operator/debug surface)
+ */
+export const getListCodeAtomsUrl = (params?: ListCodeAtomsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/codes/atoms?${stringifiedParams}`
+    : `/api/codes/atoms`;
+};
+
+export const listCodeAtoms = async (
+  params?: ListCodeAtomsParams,
+  options?: RequestInit,
+): Promise<CodeAtomListResponse> => {
+  return customFetch<CodeAtomListResponse>(getListCodeAtomsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListCodeAtomsQueryKey = (params?: ListCodeAtomsParams) => {
+  return [`/api/codes/atoms`, ...(params ? [params] : [])] as const;
+};
+
+export const getListCodeAtomsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCodeAtoms>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListCodeAtomsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCodeAtoms>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListCodeAtomsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listCodeAtoms>>> = ({
+    signal,
+  }) => listCodeAtoms(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCodeAtoms>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListCodeAtomsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCodeAtoms>>
+>;
+export type ListCodeAtomsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List atoms across jurisdictions (operator/debug surface)
+ */
+
+export function useListCodeAtoms<
+  TData = Awaited<ReturnType<typeof listCodeAtoms>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListCodeAtomsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCodeAtoms>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListCodeAtomsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
