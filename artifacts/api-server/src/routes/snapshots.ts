@@ -15,7 +15,7 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, engagements, snapshots, sheets } from "@workspace/db";
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import {
   CreateSnapshotBody,
   CreateSnapshotHeader,
@@ -548,5 +548,145 @@ router.get("/snapshots/:id", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to fetch snapshot" });
   }
 });
+
+/**
+ * GET /api/snapshots/:id/sheet-history?limit=N — batch variant of the
+ * per-sheet history endpoint that returns the most-recent events for
+ * every sheet in a snapshot in a single round trip.
+ *
+ * The plan-review /sheets page renders one card per sheet and used to
+ * issue an `/atoms/sheet/{id}/history` request per card; on a snapshot
+ * with dozens of sheets that fan-out hammered the API server with N
+ * extra calls per page render. This route collapses the fan-out to one
+ * SQL query — a `ROW_NUMBER() OVER (PARTITION BY entity_id ...)` window
+ * filtered to the snapshot's sheet ids — and returns a per-sheet list
+ * (always present, possibly empty) so the FE can render a stable shape
+ * without a second lookup.
+ *
+ * Limit handling mirrors the per-atom history endpoint: invalid input
+ * silently falls back to the default rather than 400ing.
+ */
+const SHEET_HISTORY_DEFAULT_LIMIT = 5;
+const SHEET_HISTORY_MAX_LIMIT = 50;
+
+interface SheetHistoryRow extends Record<string, unknown> {
+  entity_id: string;
+  event_id: string;
+  event_type: string;
+  actor: { kind: "user" | "agent" | "system"; id: string };
+  occurred_at: string | Date;
+  recorded_at: string | Date;
+}
+
+router.get(
+  "/snapshots/:id/sheet-history",
+  async (req: Request, res: Response) => {
+    const params = GetSnapshotParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    let limit = SHEET_HISTORY_DEFAULT_LIMIT;
+    const rawLimit = req.query["limit"];
+    if (typeof rawLimit === "string" && rawLimit.length > 0) {
+      const parsed = Number.parseInt(rawLimit, 10);
+      if (Number.isFinite(parsed) && parsed >= 1) {
+        limit = Math.min(parsed, SHEET_HISTORY_MAX_LIMIT);
+      }
+    }
+
+    try {
+      // 1. Confirm the snapshot exists and collect its sheet ids in one
+      //    cheap query. We could collapse this into the window query
+      //    below by JOINing on `sheets`, but that would conflate "no
+      //    such snapshot" with "snapshot has zero sheets" — distinguishing
+      //    the two lets us return a proper 404 for the former.
+      const snapshotRow = await db
+        .select({ id: snapshots.id })
+        .from(snapshots)
+        .where(eq(snapshots.id, params.data.id))
+        .limit(1);
+      if (snapshotRow.length === 0) {
+        res.status(404).json({ error: "Snapshot not found" });
+        return;
+      }
+      const sheetRows = await db
+        .select({ id: sheets.id })
+        .from(sheets)
+        .where(eq(sheets.snapshotId, params.data.id));
+      const sheetIds = sheetRows.map((r) => r.id);
+
+      // Snapshot with no sheets — short-circuit, no need to hit
+      // atom_events at all.
+      if (sheetIds.length === 0) {
+        res.json({ histories: [] });
+        return;
+      }
+
+      // 2. One SQL query, top-N per sheetId via window function. The
+      //    ORDER BY mirrors `PostgresEventAnchoringService.readHistory`
+      //    so a single sheet's slice here is byte-identical to the
+      //    per-atom endpoint's output (modulo the `entity_id` column).
+      const result = await db.execute<SheetHistoryRow>(sql`
+        SELECT entity_id, event_id, event_type, actor, occurred_at, recorded_at
+          FROM (
+            SELECT
+              entity_id,
+              id AS event_id,
+              event_type,
+              actor,
+              occurred_at,
+              recorded_at,
+              ROW_NUMBER() OVER (
+                PARTITION BY entity_id
+                ORDER BY occurred_at DESC, recorded_at DESC, id DESC
+              ) AS rn
+            FROM atom_events
+            WHERE entity_type = 'sheet'
+              AND entity_id IN (${sql.join(sheetIds, sql`, `)})
+          ) ranked
+          WHERE rn <= ${limit}
+          ORDER BY entity_id, occurred_at DESC, recorded_at DESC, event_id DESC
+      `);
+
+      const eventsBySheet = new Map<
+        string,
+        Array<{
+          id: string;
+          eventType: string;
+          actor: { kind: string; id: string };
+          occurredAt: string;
+          recordedAt: string;
+        }>
+      >();
+      for (const id of sheetIds) eventsBySheet.set(id, []);
+      for (const row of result.rows) {
+        const list = eventsBySheet.get(row.entity_id);
+        if (!list) continue;
+        list.push({
+          id: row.event_id,
+          eventType: row.event_type,
+          actor: row.actor,
+          occurredAt: new Date(row.occurred_at).toISOString(),
+          recordedAt: new Date(row.recorded_at).toISOString(),
+        });
+      }
+
+      res.json({
+        histories: sheetIds.map((id) => ({
+          sheetId: id,
+          events: eventsBySheet.get(id) ?? [],
+        })),
+      });
+    } catch (err) {
+      logger.error(
+        { err, id: params.data.id },
+        "snapshot sheet-history batch read failed",
+      );
+      res.status(500).json({ error: "history_failed" });
+    }
+  },
+);
 
 export default router;

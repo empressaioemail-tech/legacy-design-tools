@@ -340,6 +340,29 @@ export interface AtomHistoryResponse {
   events: AtomHistoryEvent[];
 }
 
+/**
+ * One sheet's recent history slice as returned by
+`GET /snapshots/{id}/sheet-history`. `events` is newest-first
+(matching the per-atom endpoint) and may be empty when the sheet
+has no recorded events yet.
+
+ */
+export interface SnapshotSheetHistoryEntry {
+  sheetId: string;
+  events: AtomHistoryEvent[];
+}
+
+/**
+ * Snapshot-scoped batch history response. `histories` contains one
+entry per sheet that belongs to the snapshot (one entry even when
+the sheet has no events), so the FE can render a stable shape
+without a second lookup.
+
+ */
+export interface SnapshotSheetHistoryResponse {
+  histories: SnapshotSheetHistoryEntry[];
+}
+
 export type AtomSummaryTyped = { [key: string]: unknown };
 
 /**
@@ -577,6 +600,15 @@ export type UpdateEngagementBody = {
 export type UploadSnapshotSheetsBody = {
   /** JSON-encoded array of SheetMetadata */
   metadata: string;
+};
+
+export type GetSnapshotSheetHistoryParams = {
+  /**
+   * Max events per sheet (default 5, max 50).
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
 };
 
 export type ListJurisdictionAtomsParams = {

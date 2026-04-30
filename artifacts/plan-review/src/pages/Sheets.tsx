@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@workspace/portal-ui";
 import {
+  getGetSnapshotSheetHistoryQueryKey,
   getGetSnapshotSheetsQueryKey,
+  useGetSnapshotSheetHistory,
   useGetSnapshotSheets,
   useListSnapshots,
+  type AtomHistoryEvent,
   type SnapshotSummary,
 } from "@workspace/api-client-react";
 import { navGroups } from "../components/NavGroups";
-import { SheetCard } from "../components/SheetCard";
+import { SheetCard, TIMELINE_HISTORY_LIMIT } from "../components/SheetCard";
 import { relativeTime } from "../lib/relativeTime";
 
 export default function Sheets() {
@@ -159,6 +162,35 @@ function SheetGridForSnapshot(props: SheetGridForSnapshotProps) {
     },
   });
 
+  // Single batch request for the inline mini-timeline data across every
+  // sheet card in this snapshot. Replaces the previous per-card
+  // `useGetAtomHistory` fan-out (one request per sheet → O(N) calls).
+  // The batch endpoint returns one entry per sheet so cards can render
+  // a stable shape without an extra lookup.
+  const historyParams = { limit: TIMELINE_HISTORY_LIMIT };
+  const { data: batchHistory } = useGetSnapshotSheetHistory(
+    snapshotId ?? "",
+    historyParams,
+    {
+      query: {
+        enabled,
+        queryKey: getGetSnapshotSheetHistoryQueryKey(
+          snapshotId ?? "",
+          historyParams,
+        ),
+        staleTime: 30_000,
+      },
+    },
+  );
+  const eventsBySheetId = useMemo(() => {
+    const map = new Map<string, AtomHistoryEvent[]>();
+    if (!batchHistory) return map;
+    for (const entry of batchHistory.histories) {
+      map.set(entry.sheetId, entry.events);
+    }
+    return map;
+  }, [batchHistory]);
+
   const sortedSheets = useMemo(() => {
     if (!sheets) return [];
     return [...sheets].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -205,7 +237,11 @@ function SheetGridForSnapshot(props: SheetGridForSnapshotProps) {
         data-testid="sheets-grid"
       >
         {sortedSheets.map((sheet) => (
-          <SheetCard key={sheet.id} sheet={sheet} />
+          <SheetCard
+            key={sheet.id}
+            sheet={sheet}
+            historyEvents={eventsBySheetId.get(sheet.id) ?? null}
+          />
         ))}
       </div>
     </div>

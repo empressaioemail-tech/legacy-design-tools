@@ -526,6 +526,72 @@ export const UploadSnapshotSheetsResponse = zod.object({
 });
 
 /**
+ * Batch variant of `GET /atoms/sheet/{id}/history` that returns the
+most-recent events for every sheet attached to a single snapshot
+in one round trip. Backed by a single SQL query (window function
+over `atom_events`), so the page-render cost is O(1) requests
+regardless of sheet count — the per-card endpoint stays as the
+single-sheet path.
+
+The `limit` query parameter caps the per-sheet page size (default
+5, max 50). Sheets with no recorded events appear as an empty
+`events` array so callers can render a stable shape without
+a second lookup. 404s when the snapshot id does not resolve.
+
+ * @summary Recent atom_events for every sheet in a snapshot, in one batch
+ */
+export const GetSnapshotSheetHistoryParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getSnapshotSheetHistoryQueryLimitMax = 50;
+
+export const GetSnapshotSheetHistoryQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getSnapshotSheetHistoryQueryLimitMax)
+    .optional()
+    .describe("Max events per sheet (default 5, max 50)."),
+});
+
+export const GetSnapshotSheetHistoryResponse = zod
+  .object({
+    histories: zod.array(
+      zod
+        .object({
+          sheetId: zod.string(),
+          events: zod.array(
+            zod
+              .object({
+                id: zod.string(),
+                eventType: zod.string(),
+                actor: zod
+                  .object({
+                    kind: zod.enum(["user", "agent", "system"]),
+                    id: zod.string(),
+                  })
+                  .describe(
+                    "Identity of the actor that produced an event. Mirrors the\n`EventActor` type in `@workspace\/empressa-atom`. `id` is opaque\nto the framework; producers (e.g. snapshot ingest) choose the\nidentity scheme.\n",
+                  ),
+                occurredAt: zod.coerce.date(),
+                recordedAt: zod.coerce.date(),
+              })
+              .describe(
+                "One row from `atom_events` exposed over HTTP. Matches the public\nfields of `AtomEvent` from `@workspace\/empressa-atom` minus the\nchain hashes (`prevHash`\/`chainHash`), which are an implementation\ndetail of the anchoring service and not useful to UI consumers.\n",
+              ),
+          ),
+        })
+        .describe(
+          "One sheet's recent history slice as returned by\n`GET \/snapshots\/{id}\/sheet-history`. `events` is newest-first\n(matching the per-atom endpoint) and may be empty when the sheet\nhas no recorded events yet.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Snapshot-scoped batch history response. `histories` contains one\nentry per sheet that belongs to the snapshot (one entry even when\nthe sheet has no events), so the FE can render a stable shape\nwithout a second lookup.\n",
+  );
+
+/**
  * @summary Sheet thumbnail PNG (512px)
  */
 export const GetSheetThumbnailParams = zod.object({

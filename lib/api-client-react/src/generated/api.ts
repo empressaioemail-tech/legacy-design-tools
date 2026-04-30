@@ -29,6 +29,7 @@ import type {
   ErrorResponse,
   GetAtomHistoryParams,
   GetAtomSummaryParams,
+  GetSnapshotSheetHistoryParams,
   HealthStatus,
   JurisdictionSummary,
   ListCodeAtomsParams,
@@ -42,6 +43,7 @@ import type {
   SnapshotDetail,
   SnapshotPayload,
   SnapshotReceipt,
+  SnapshotSheetHistoryResponse,
   SnapshotSummary,
   UpdateEngagementBody,
   UploadSnapshotSheetsBody,
@@ -1012,6 +1014,138 @@ export const useUploadSnapshotSheets = <
 > => {
   return useMutation(getUploadSnapshotSheetsMutationOptions(options));
 };
+
+/**
+ * Batch variant of `GET /atoms/sheet/{id}/history` that returns the
+most-recent events for every sheet attached to a single snapshot
+in one round trip. Backed by a single SQL query (window function
+over `atom_events`), so the page-render cost is O(1) requests
+regardless of sheet count — the per-card endpoint stays as the
+single-sheet path.
+
+The `limit` query parameter caps the per-sheet page size (default
+5, max 50). Sheets with no recorded events appear as an empty
+`events` array so callers can render a stable shape without
+a second lookup. 404s when the snapshot id does not resolve.
+
+ * @summary Recent atom_events for every sheet in a snapshot, in one batch
+ */
+export const getGetSnapshotSheetHistoryUrl = (
+  id: string,
+  params?: GetSnapshotSheetHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/snapshots/${id}/sheet-history?${stringifiedParams}`
+    : `/api/snapshots/${id}/sheet-history`;
+};
+
+export const getSnapshotSheetHistory = async (
+  id: string,
+  params?: GetSnapshotSheetHistoryParams,
+  options?: RequestInit,
+): Promise<SnapshotSheetHistoryResponse> => {
+  return customFetch<SnapshotSheetHistoryResponse>(
+    getGetSnapshotSheetHistoryUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetSnapshotSheetHistoryQueryKey = (
+  id: string,
+  params?: GetSnapshotSheetHistoryParams,
+) => {
+  return [
+    `/api/snapshots/${id}/sheet-history`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetSnapshotSheetHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSnapshotSheetHistory>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: GetSnapshotSheetHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSnapshotSheetHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSnapshotSheetHistoryQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSnapshotSheetHistory>>
+  > = ({ signal }) =>
+    getSnapshotSheetHistory(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSnapshotSheetHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSnapshotSheetHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSnapshotSheetHistory>>
+>;
+export type GetSnapshotSheetHistoryQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Recent atom_events for every sheet in a snapshot, in one batch
+ */
+
+export function useGetSnapshotSheetHistory<
+  TData = Awaited<ReturnType<typeof getSnapshotSheetHistory>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: GetSnapshotSheetHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSnapshotSheetHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSnapshotSheetHistoryQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Sheet thumbnail PNG (512px)

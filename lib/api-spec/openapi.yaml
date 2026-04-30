@@ -387,6 +387,57 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /snapshots/{id}/sheet-history:
+    get:
+      operationId: getSnapshotSheetHistory
+      tags: [snapshots]
+      summary: Recent atom_events for every sheet in a snapshot, in one batch
+      description: |
+        Batch variant of `GET /atoms/sheet/{id}/history` that returns the
+        most-recent events for every sheet attached to a single snapshot
+        in one round trip. Backed by a single SQL query (window function
+        over `atom_events`), so the page-render cost is O(1) requests
+        regardless of sheet count — the per-card endpoint stays as the
+        single-sheet path.
+
+        The `limit` query parameter caps the per-sheet page size (default
+        5, max 50). Sheets with no recorded events appear as an empty
+        `events` array so callers can render a stable shape without
+        a second lookup. 404s when the snapshot id does not resolve.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Max events per sheet (default 5, max 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+      responses:
+        "200":
+          description: Per-sheet recent history, newest first per sheet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotSheetHistoryResponse"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: History read failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /sheets/{id}/thumbnail.png:
     get:
       operationId: getSheetThumbnail
@@ -1509,6 +1560,39 @@ components:
             $ref: "#/components/schemas/AtomHistoryEvent"
       required:
         - events
+
+    SnapshotSheetHistoryEntry:
+      description: |
+        One sheet's recent history slice as returned by
+        `GET /snapshots/{id}/sheet-history`. `events` is newest-first
+        (matching the per-atom endpoint) and may be empty when the sheet
+        has no recorded events yet.
+      type: object
+      properties:
+        sheetId:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AtomHistoryEvent"
+      required:
+        - sheetId
+        - events
+
+    SnapshotSheetHistoryResponse:
+      description: |
+        Snapshot-scoped batch history response. `histories` contains one
+        entry per sheet that belongs to the snapshot (one entry even when
+        the sheet has no events), so the FE can render a stable shape
+        without a second lookup.
+      type: object
+      properties:
+        histories:
+          type: array
+          items:
+            $ref: "#/components/schemas/SnapshotSheetHistoryEntry"
+      required:
+        - histories
 
     AtomSummary:
       description: |

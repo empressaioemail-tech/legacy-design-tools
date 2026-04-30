@@ -1,7 +1,5 @@
 import {
-  getGetAtomHistoryQueryKey,
   getGetAtomSummaryQueryKey,
-  useGetAtomHistory,
   useGetAtomSummary,
   type AtomHistoryEvent,
   type AtomSummary,
@@ -19,6 +17,15 @@ import { Clock, FileText, History } from "lucide-react";
 
 interface SheetCardProps {
   sheet: SheetSummary;
+  /**
+   * Recent history events for this sheet, supplied by the parent's
+   * snapshot-scoped batch query (`useGetSnapshotSheetHistory`). Pass
+   * `null` while the batch is loading or when no events are available;
+   * the card hides its mini-timeline rather than rendering a placeholder
+   * row, matching the behavior from when each card fetched its own
+   * history.
+   */
+  historyEvents: AtomHistoryEvent[] | null;
 }
 
 /**
@@ -27,9 +34,14 @@ interface SheetCardProps {
  * `TIMELINE_HISTORY_LIMIT`).
  */
 const TIMELINE_INLINE_COUNT = 2;
-const TIMELINE_HISTORY_LIMIT = 5;
+/**
+ * Per-sheet page size for the snapshot-scoped batch history query. Kept
+ * in this module so the parent page and the card agree on the cap
+ * without duplicating the constant.
+ */
+export const TIMELINE_HISTORY_LIMIT = 5;
 
-export function SheetCard({ sheet }: SheetCardProps) {
+export function SheetCard({ sheet, historyEvents }: SheetCardProps) {
   const { data: summary, isLoading, isError } = useGetAtomSummary(
     "sheet",
     sheet.id,
@@ -42,22 +54,7 @@ export function SheetCard({ sheet }: SheetCardProps) {
     },
   );
 
-  // Fetch a small page of recent history events for the inline mini-
-  // timeline. Independent of the summary query so a slow/failed history
-  // read never blocks the "First ingested" chip.
-  const historyParams = { limit: TIMELINE_HISTORY_LIMIT };
-  const { data: history } = useGetAtomHistory(
-    "sheet",
-    sheet.id,
-    historyParams,
-    {
-      query: {
-        queryKey: getGetAtomHistoryQueryKey("sheet", sheet.id, historyParams),
-        staleTime: 30_000,
-      },
-    },
-  );
-  const events = history?.events ?? [];
+  const events = historyEvents ?? [];
 
   return (
     <div
