@@ -113,6 +113,7 @@ describe("GET /api/codes/jurisdictions", () => {
     expect(grand.books.map((b) => b.codeBook).sort()).toEqual([
       "IRC_R301_2_1",
       "IWUIC",
+      "LAND_USE",
     ]);
     expect(grand.books.every((b) => b.atomCount === 0)).toBe(true);
   });
