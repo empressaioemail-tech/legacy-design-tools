@@ -52,7 +52,11 @@ beforeAll(() => {
 
 const TINY_PNG = Buffer.from([0]);
 
-async function seedSheet(): Promise<{ sheetId: string }> {
+async function seedSheet(): Promise<{
+  sheetId: string;
+  snapshotId: string;
+  engagementId: string;
+}> {
   if (!ctx.schema) throw new Error("schema not ready");
   const db = ctx.schema.db;
   const [eng] = await db
@@ -95,7 +99,7 @@ async function seedSheet(): Promise<{ sheetId: string }> {
       sortOrder: 0,
     })
     .returning({ id: sheets.id });
-  return { sheetId: sheet.id };
+  return { sheetId: sheet.id, snapshotId: snap.id, engagementId: eng.id };
 }
 
 describe("GET /api/atoms/:slug/:id/summary", () => {
@@ -153,5 +157,55 @@ describe("GET /api/atoms/:slug/:id/summary", () => {
     // internal) rather than returning a 4xx for a bad client param.
     expect(res.status).toBe(200);
     expect(res.body.typed.found).toBe(true);
+  });
+
+  // A2 sprint: snapshot is the second registered atom and the first
+  // one with a non-empty composition. The route is atom-agnostic — these
+  // cases prove the new registration flows through it without any
+  // route-level change.
+  it("returns the four-layer ContextSummary for a registered snapshot id with composition resolved", async () => {
+    const { snapshotId, engagementId, sheetId } = await seedSheet();
+    const res = await request(getApp()).get(
+      `/api/atoms/snapshot/${snapshotId}/summary`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.typed).toMatchObject({
+      id: snapshotId,
+      found: true,
+      engagementId,
+      projectName: "Atoms Route Test",
+    });
+    // First related atom is the engagement parent ref; the rest are the
+    // child sheets surfaced by the framework's composition resolver.
+    expect(Array.isArray(res.body.relatedAtoms)).toBe(true);
+    expect(res.body.relatedAtoms[0]).toMatchObject({
+      kind: "atom",
+      entityType: "engagement",
+      entityId: engagementId,
+    });
+    const sheetRefs = res.body.relatedAtoms.slice(1);
+    expect(sheetRefs).toHaveLength(1);
+    expect(sheetRefs[0]).toMatchObject({
+      kind: "atom",
+      entityType: "sheet",
+      entityId: sheetId,
+      mode: "compact",
+    });
+    expect(typeof res.body.prose).toBe("string");
+    expect(res.body.prose).toContain("Atoms Route Test");
+    expect(res.body.scopeFiltered).toBe(false);
+  });
+
+  it("returns 200 with typed.found=false for an unknown snapshot id (not an error)", async () => {
+    const res = await request(getApp()).get(
+      "/api/atoms/snapshot/00000000-0000-0000-0000-000000000000/summary",
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.typed).toEqual({
+      id: "00000000-0000-0000-0000-000000000000",
+      found: false,
+    });
+    expect(res.body.relatedAtoms).toEqual([]);
+    expect(res.body.scopeFiltered).toBe(false);
   });
 });

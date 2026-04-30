@@ -22,6 +22,7 @@ import {
 import { db } from "@workspace/db";
 import { makeSheetAtom } from "./sheet.atom";
 import { makeEngagementAtom } from "./engagement.atom";
+import { makeSnapshotAtom } from "./snapshot.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -72,13 +73,21 @@ export function getHistoryService(): EventAnchoringService {
  * Catalog atoms registered today:
  *   - `sheet` (domain: `plan-review`)
  *   - `engagement` (domain: `plan-review`)
+ *   - `snapshot` (domain: `plan-review`) — composes `sheet` as a child;
+ *     its registration receives the registry as a dep so the
+ *     composition resolver can look up `sheet` at lookup time.
  */
 export function getAtomRegistry(): AtomRegistry {
   if (_registry) return _registry;
   const registry = createAtomRegistry();
   const history = getHistoryService();
+  // Sheet must register first so snapshot's composition edge to `sheet`
+  // is non-dangling when boot-time `validate()` runs. The order doesn't
+  // matter for `register()` itself (the registry validates lazily), but
+  // matters for clarity.
   registry.register(makeSheetAtom({ db, history }));
   registry.register(makeEngagementAtom({ db, history }));
+  registry.register(makeSnapshotAtom({ db, history, registry }));
   _registry = registry;
   return registry;
 }
