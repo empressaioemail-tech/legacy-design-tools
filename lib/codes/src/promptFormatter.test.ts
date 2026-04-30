@@ -44,7 +44,6 @@ function baseInput(over: Partial<BuildChatPromptInput> = {}): BuildChatPromptInp
     },
     latestSnapshot: {
       receivedAt: new Date("2026-04-01T12:00:00Z"),
-      payload: { kind: "stub", count: 3 },
     },
     allAtoms: [],
     attachedSheets: [],
@@ -314,20 +313,52 @@ describe("relativeTime: bucket boundaries", () => {
   });
 });
 
-describe("buildChatPrompt: snapshot payload + receivedAt are embedded", () => {
-  it("serializes the snapshot payload as JSON inside the <snapshot> block", () => {
+describe("buildChatPrompt: snapshot framing without raw payload (Task #34)", () => {
+  it("renders the captured-time framing sentence using receivedAt", () => {
+    // The opening framing sentence still has to land — the snapshot
+    // atom's prose covers identity/counts, but the prompt itself owns
+    // the "captured X ago" line so even when the snapshot atom is
+    // skipped (warn path in chat.ts) the model still sees recency.
     const { systemPrompt } = buildChatPrompt(
       baseInput({
-        latestSnapshot: {
-          receivedAt: new Date("2026-04-01T12:00:00Z"),
-          payload: { rooms: [{ name: "Kitchen", area: 200 }] },
-        },
+        latestSnapshot: { receivedAt: new Date("2026-04-01T12:00:00Z") },
+        now: () => new Date("2026-04-01T12:00:30Z"),
       }),
     );
-    expect(systemPrompt).toMatch(
-      /<snapshot received_at='2026-04-01T12:00:00\.000Z'>/,
+    expect(systemPrompt).toContain(
+      "The most recent snapshot was captured just now.",
     );
-    expect(systemPrompt).toContain('"name": "Kitchen"');
-    expect(systemPrompt).toContain('"area": 200');
+  });
+
+  it("does NOT emit a <snapshot> block or pass through any raw payload bytes", () => {
+    // Pre-Task-#34 the system prompt always carried
+    // `<snapshot received_at='…'>{full JSON}</snapshot>`. That block is
+    // intentionally retired — for real Revit pushes it ran tens of KB
+    // and dominated the prompt token budget. The snapshot atom (in
+    // <framework_atoms>) covers the same information with a typed
+    // prose summary instead.
+    const { systemPrompt } = buildChatPrompt(
+      baseInput({
+        latestSnapshot: { receivedAt: new Date("2026-04-01T12:00:00Z") },
+      }),
+    );
+    expect(systemPrompt).not.toContain("<snapshot ");
+    expect(systemPrompt).not.toContain("</snapshot>");
+    // The ISO timestamp itself is not embedded anywhere in the system
+    // prompt either — the framing uses the relative-time bucket. If a
+    // future change adds back an ISO field, update this assertion.
+    expect(systemPrompt).not.toContain("2026-04-01T12:00:00.000Z");
+  });
+
+  it("retires the 'snapshot data below' phrasing in favor of 'structured atoms below'", () => {
+    // Locks the wording change so a future grep for "snapshot data
+    // below" surfaces this test (and not just a stale prompt). The new
+    // phrasing accurately describes what's actually below: framework
+    // atoms + reference code atoms + atom vocabulary, never raw JSON.
+    const { systemPrompt } = buildChatPrompt(baseInput());
+    expect(systemPrompt).not.toContain("snapshot data below");
+    expect(systemPrompt).toContain(
+      "Answer grounded in the structured atoms below.",
+    );
   });
 });

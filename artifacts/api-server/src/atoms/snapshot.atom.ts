@@ -31,8 +31,34 @@ import {
 } from "@workspace/empressa-atom";
 import type { db as ProdDb } from "@workspace/db";
 
-/** Hard cap on the prose summary length so we don't blow up token budget. */
-export const SNAPSHOT_PROSE_MAX_CHARS = 600;
+/**
+ * Hard cap on the prose summary length so we don't blow up token budget.
+ *
+ * Bumped (Task #34) from 600 → 1800 because snapshot prose now carries
+ * a compact list of child sheets — `${number} ${name}; ...; +N more` —
+ * which the chat prompt previously got from the raw payload JSON. The
+ * sheet listing is hard-capped to {@link SHEETS_IN_PROSE_LIMIT} entries
+ * with each label clipped to {@link SHEET_LABEL_MAX_CHARS} chars, so a
+ * worst-case prose stays under this ceiling. The framework atom layer
+ * applies its own cap (`MAX_FRAMEWORK_ATOM_PROSE_CHARS`) on top.
+ */
+export const SNAPSHOT_PROSE_MAX_CHARS = 1800;
+
+/**
+ * Max number of child sheets the snapshot atom names in its prose. The
+ * chat prompt no longer ships the full snapshot JSON (Task #34), so this
+ * is the model's window into "which sheets exist in this snapshot"
+ * without explicitly attaching one. Anything beyond this limit is
+ * summarised as `+N more` so the count is still accurate.
+ */
+export const SHEETS_IN_PROSE_LIMIT = 25;
+
+/**
+ * Per-sheet label cap inside the prose listing. Long sheet names get
+ * tail-truncated with an ellipsis. Keeps a degenerate snapshot
+ * (e.g. user-pasted-essay sheet names) from blowing the prose budget.
+ */
+export const SHEET_LABEL_MAX_CHARS = 50;
 
 /**
  * All five Spec 20 §5 render modes — declared at the type level so
@@ -183,10 +209,16 @@ export function makeSnapshotAtom(
       // Only the fields the resolver and our prose need are selected —
       // PNG bytes are deliberately excluded so the composition lookup
       // doesn't pay for image bytes it never inspects.
+      //
+      // `sheetName` is loaded (Task #34) so the prose can render a
+      // compact "Sheets: A101 First Floor; A102 Site Plan; +N more"
+      // listing — that listing is what the chat prompt now consumes
+      // instead of the raw snapshot JSON payload.
       const childSheetRows = await deps.db
         .select({
           id: sheets.id,
           sheetNumber: sheets.sheetNumber,
+          sheetName: sheets.sheetName,
         })
         .from(sheets)
         .where(eq(sheets.snapshotId, entityId))
@@ -219,10 +251,34 @@ export function makeSnapshotAtom(
         countFragments.length > 0
           ? ` Includes ${countFragments.join(", ")}.`
           : "";
+
+      // Compact list of sheet labels (Task #34). The chat prompt no
+      // longer pastes the raw snapshot JSON, so the model needs *some*
+      // way to know which sheet numbers/names exist on this snapshot to
+      // answer questions like "what's on A102?". We render up to
+      // {@link SHEETS_IN_PROSE_LIMIT} entries here and add a `+N more`
+      // tail when the snapshot is wider than that — the count is still
+      // accurate via the `Sheets` keyMetric / countsSentence above, so
+      // truncation only loses identity info, never headline numbers.
+      let sheetsSentence = "";
+      if (childSheetRows.length > 0) {
+        const visible = childSheetRows.slice(0, SHEETS_IN_PROSE_LIMIT);
+        const labels = visible.map((s) => {
+          const raw = `${s.sheetNumber} ${s.sheetName}`.trim();
+          return raw.length > SHEET_LABEL_MAX_CHARS
+            ? raw.slice(0, SHEET_LABEL_MAX_CHARS - 1) + "…"
+            : raw;
+        });
+        const remainder = childSheetRows.length - visible.length;
+        const moreSuffix = remainder > 0 ? `; +${remainder} more` : "";
+        sheetsSentence = ` Sheets: ${labels.join("; ")}${moreSuffix}.`;
+      }
+
       const proseRaw =
         `Snapshot of "${row.projectName}" for engagement ${row.engagementName}, ` +
         `received ${row.receivedAt.toISOString()}.` +
-        countsSentence;
+        countsSentence +
+        sheetsSentence;
       const prose =
         proseRaw.length > SNAPSHOT_PROSE_MAX_CHARS
           ? proseRaw.slice(0, SNAPSHOT_PROSE_MAX_CHARS - 1) + "…"

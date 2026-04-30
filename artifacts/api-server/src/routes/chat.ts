@@ -189,21 +189,24 @@ router.post("/chat", async (req: Request, res: Response) => {
     );
   }
 
-  let latestSnapshot: typeof snapshots.$inferSelect | undefined;
+  let snapshotReceivedAt: Date | undefined;
   try {
-    // Raw payload still loaded directly here: the snapshot atom's
-    // `contextSummary` (sprint A2) intentionally omits the raw
-    // `payload` blob to keep the atom-card payload cheap, but the
-    // prompt builder needs that blob to render the latest snapshot's
-    // Revit elements. The lookup is now keyed off the atom-resolved
-    // snapshot id (single-row by primary key) rather than re-running
-    // the engagement + receivedAt-desc scan we did before.
+    // Only `receivedAt` is read here (Task #34). The chat prompt no
+    // longer pastes the entire snapshot `payload` blob into the system
+    // prompt — the snapshot framework atom's prose carries the project
+    // name, headline counts, and compact list of sheet identities, so
+    // the only field still needed at this layer is the timestamp that
+    // drives the "captured <relative-time> ago" framing sentence.
+    //
+    // The lookup is keyed off the atom-resolved snapshot id (single-row
+    // by primary key) rather than re-running the engagement +
+    // receivedAt-desc scan the route used before A3.
     const sRows = await db
-      .select()
+      .select({ receivedAt: snapshots.receivedAt })
       .from(snapshots)
       .where(eq(snapshots.id, latestSnapshotId))
       .limit(1);
-    latestSnapshot = sRows[0];
+    snapshotReceivedAt = sRows[0]?.receivedAt;
   } catch (err) {
     logger.error(
       { err, engagementId, snapshotId: latestSnapshotId },
@@ -213,7 +216,7 @@ router.post("/chat", async (req: Request, res: Response) => {
     return;
   }
 
-  if (!latestSnapshot) {
+  if (!snapshotReceivedAt) {
     // The engagement atom said this snapshot existed a moment ago. If
     // the row is gone now (deleted between reads) treat it the same as
     // "no snapshots" — the wire contract callers expect.
@@ -425,8 +428,7 @@ router.post("/chat", async (req: Request, res: Response) => {
       jurisdiction: engagementTyped.jurisdiction ?? null,
     },
     latestSnapshot: {
-      receivedAt: latestSnapshot.receivedAt,
-      payload: latestSnapshot.payload,
+      receivedAt: snapshotReceivedAt,
     },
     allAtoms,
     attachedSheets,

@@ -422,6 +422,62 @@ describe("POST /api/chat", () => {
     expect(system).toContain("7 sheets");
   });
 
+  it("does NOT inline the raw snapshot JSON payload in the system prompt (Task #34)", async () => {
+    // Pre-Task-#34 the chat route loaded the entire snapshots.payload
+    // blob and pasted it into a `<snapshot received_at='…'>{full
+    // JSON}</snapshot>` block — for real Revit pushes that ran tens of
+    // KB and dominated the prompt token budget. The snapshot framework
+    // atom now carries the same information (project name, counts,
+    // compact list of sheet identities) as typed prose, so the raw
+    // payload no longer ships by default.
+    //
+    // We seed a payload with a clearly-distinguishable marker string,
+    // and assert the system prompt contains neither the marker nor the
+    // wrapper tag. The framing sentence ("captured X ago") and the
+    // snapshot framework atom (entity_type="snapshot") both still land
+    // — we double-check those so a regression that drops the framing
+    // entirely doesn't masquerade as a passing test.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const PAYLOAD_MARKER = "PAYLOAD_LEAK_CANARY_d7e1c2";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Payload Leak Canary",
+        nameLower: `payload-leak-canary-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    await ctx.schema.db.insert(snapshots).values({
+      engagementId: eng.id,
+      projectName: "Canary Project",
+      payload: { canaryField: PAYLOAD_MARKER, sheets: [], rooms: [] },
+      sheetCount: 0,
+      roomCount: 0,
+      levelCount: 0,
+      wallCount: 0,
+    });
+
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({ engagementId: eng.id, question: "what's in here?" });
+    expect(res.status).toBe(200);
+
+    const system = String(anthropicMocks.lastArgs.system);
+    // Raw payload bytes are gone — no marker, no wrapper tag.
+    expect(system).not.toContain(PAYLOAD_MARKER);
+    expect(system).not.toContain("<snapshot ");
+    expect(system).not.toContain("</snapshot>");
+    // Framing + framework atom still present so the model knows there
+    // IS a snapshot and roughly when it landed.
+    expect(system).toMatch(/The most recent snapshot was captured /);
+    expect(system).toContain('entity_type="snapshot"');
+    expect(system).toContain("Canary Project");
+  });
+
   it("error path: when the SDK throws, emits {error:'stream_failed'} then [DONE]", async () => {
     anthropicMocks.throwOnStream = new Error("upstream 500");
     const eng = await seedEngagementWithSnapshot();

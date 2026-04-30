@@ -14,8 +14,17 @@ import type { RetrievedAtom } from "./retrieval";
 /** Atom body is hard-truncated at this many chars when injected into the prompt. */
 export const MAX_ATOM_BODY_CHARS = 1800;
 
-/** Framework-atom prose is hard-truncated at this many chars when injected. */
-export const MAX_FRAMEWORK_ATOM_PROSE_CHARS = 1200;
+/**
+ * Framework-atom prose is hard-truncated at this many chars when injected.
+ *
+ * Bumped (Task #34) from 1200 → 2000 to make room for the snapshot
+ * atom's compact sheet listing — chat used to paste the entire raw
+ * snapshot JSON in a separate `<snapshot>` block, and that block has
+ * been retired in favor of the snapshot atom's prose covering counts +
+ * sheet identities. Worst-case snapshot prose stays well under this
+ * cap (see `SNAPSHOT_PROSE_MAX_CHARS`).
+ */
+export const MAX_FRAMEWORK_ATOM_PROSE_CHARS = 2000;
 
 /**
  * One framework-atom payload to inject into the system prompt. Mirrors the
@@ -56,9 +65,22 @@ export interface PromptEngagement {
   jurisdiction: string | null;
 }
 
+/**
+ * Per-turn snapshot framing data. Only the timestamp is consumed today
+ * — the chat prompt opens with "The most recent snapshot was captured
+ * <relative-time>" and the snapshot atom (in `<framework_atoms>`)
+ * carries the project name, counts, and sheet listing.
+ *
+ * Pre-Task #34 this carried the full snapshot `payload: unknown` blob
+ * that was JSON-stringified into a `<snapshot>` system-prompt block.
+ * That block dominated the token budget for real Revit pushes, so it
+ * was dropped in favor of the atom-driven summary. If a future
+ * "snapshot focus mode" needs structured payload access again, add it
+ * here behind an explicit opt-in field rather than restoring the
+ * always-on dump.
+ */
 export interface PromptSnapshot {
   receivedAt: Date;
-  payload: unknown;
 }
 
 export interface PromptAttachedSheet {
@@ -212,7 +234,13 @@ export function relativeTime(from: Date, now: Date = new Date()): string {
  * Build the system prompt + Anthropic-style messages array for a chat turn.
  * Pure: same inputs → same outputs.
  *
- * - System prompt always includes the engagement framing + the snapshot JSON.
+ * - System prompt always includes the engagement framing (name + address +
+ *   jurisdiction) and a one-line "captured <relative-time>" framing for the
+ *   latest snapshot. Snapshot identity, counts, and the sheet listing are
+ *   delivered through the snapshot framework atom (in `<framework_atoms>`),
+ *   not as a raw JSON blob — the pre-Task-#34 `<snapshot received_at='…'>{…}</snapshot>`
+ *   block has been retired so real Revit pushes (tens of KB of payload) no
+ *   longer dominate the prompt token budget.
  * - When `allAtoms` is non-empty, a `<reference_code_atoms>` block is appended
  *   and a citation instruction is added directing the model to emit
  *   `[[CODE:atomId]]` markers.
@@ -242,7 +270,6 @@ export function buildChatPrompt(
     ? ` (${engagement.jurisdiction})`
     : "";
   const captured = relativeTime(latestSnapshot.receivedAt, now());
-  const isoReceivedAt = latestSnapshot.receivedAt.toISOString();
 
   // The reference_code_atoms XML block is assembled by a helper so the
   // /dev/atoms/probe diagnostic can render the SAME bytes the LLM would
@@ -282,15 +309,19 @@ export function buildChatPrompt(
     atomTypeList.length > 0
       ? `\n\nWhen you reference an entity from <framework_atoms> or one the user can plausibly drill into, embed an inline reference of the form \`{{atom:type:id:label}}\` where \`type\` is one of: ${atomTypeList
           .map((d) => `\`${d.entityType}\``)
-          .join(", ")}. Use only entity ids that appear in <framework_atoms> or in the snapshot data — never invent ids.`
+          .join(", ")}. Use only entity ids that appear in <framework_atoms> — never invent ids.`
       : "";
 
+  // The legacy `<snapshot received_at='…'>{full JSON}</snapshot>` block
+  // is intentionally absent (Task #34). The snapshot atom's prose,
+  // appended below in `<framework_atoms>`, now carries project name,
+  // counts (sheets/levels/rooms/walls), and a compact list of sheet
+  // identities — everything the model used to dig out of the JSON dump.
   const systemPrompt =
     `You are helping an architect understand their Revit model for the engagement '${engagement.name}'${addressSuffix}${jurisdictionSuffix}. The most recent snapshot was captured ${captured}.\n\n` +
-    "Answer grounded in the snapshot data below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot." +
+    "Answer grounded in the structured atoms below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot." +
     codeCitationInstruction +
     atomReferenceInstruction +
-    `\n\n<snapshot received_at='${isoReceivedAt}'>\n${JSON.stringify(latestSnapshot.payload, null, 2)}\n</snapshot>` +
     atomBlock +
     frameworkAtomBlock +
     atomVocabularyBlock;

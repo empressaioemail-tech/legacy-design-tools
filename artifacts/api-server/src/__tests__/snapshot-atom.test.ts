@@ -222,6 +222,16 @@ describe("snapshot atom (composition + behavior)", () => {
     expect(metricLabels).toContain("Sheets");
     expect(metricLabels).toContain("Levels");
     expect(metricLabels).toContain("Walls");
+    // Prose carries a compact sheet listing (Task #34) — both seeded
+    // sheets show up by `${number} ${name}`. The chat prompt no longer
+    // pastes raw payload JSON, so this prose IS how the model learns
+    // which sheets exist on a snapshot.
+    expect(summary.prose).toContain("Sheets:");
+    expect(summary.prose).toContain("A101 First Floor");
+    expect(summary.prose).toContain("A102 Second Floor");
+    // Two sheets fit comfortably under SHEETS_IN_PROSE_LIMIT, so no
+    // "+N more" tail should appear for this fixture.
+    expect(summary.prose).not.toMatch(/\+\d+ more/);
   });
 
   it("returns relatedAtoms with only the engagement parent when the snapshot has zero child sheets", async () => {
