@@ -21,7 +21,15 @@ if (!process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY) {
   process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY = "test-key-not-real";
 }
 
-// Force the embeddings module's no-key branch in every test.
+// Force the embeddings module's no-key branch in every test. We stash the
+// original (if any) into SMOKE_OPENAI_API_KEY first so the Land Use smoke
+// test can opt back in to real embeddings without other tests' offline
+// invariants drifting. Without the stash, an operator running `pnpm test`
+// with OPENAI_API_KEY in their env would silently take the vector path in
+// every test that asserts the lexical-fallback shape.
+if (process.env.OPENAI_API_KEY && !process.env.SMOKE_OPENAI_API_KEY) {
+  process.env.SMOKE_OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+}
 delete process.env.OPENAI_API_KEY;
 
 // Disable the queue worker's first-tick setTimeout in case any test imports
