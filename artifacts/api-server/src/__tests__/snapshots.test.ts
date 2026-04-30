@@ -48,8 +48,8 @@ vi.mock("@workspace/codes", async () => {
 });
 
 const { setupRouteTests } = await import("./setup");
-const { engagements, snapshots } = await import("@workspace/db");
-const { eq } = await import("drizzle-orm");
+const { engagements, snapshots, atomEvents } = await import("@workspace/db");
+const { eq, and, asc } = await import("drizzle-orm");
 
 const SECRET = process.env["SNAPSHOT_SECRET"]!;
 
@@ -172,6 +172,32 @@ describe("POST /api/snapshots — A04.7", () => {
     expect(snaps).toHaveLength(1);
     expect(snaps[0].sheetCount).toBe(2);
     expect(snaps[0].roomCount).toBe(1);
+
+    // Lifecycle event was persisted into atom_events: exactly one
+    // `snapshot.created` row anchored at the new snapshot. No
+    // `snapshot.replaced` since this is the engagement's first snapshot.
+    const evRows = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "snapshot"),
+          eq(atomEvents.entityId, snaps[0].id),
+        ),
+      );
+    expect(evRows).toHaveLength(1);
+    expect(evRows[0]!.eventType).toBe("snapshot.created");
+    expect(evRows[0]!.actor).toEqual({
+      kind: "system",
+      id: "snapshot-ingest",
+    });
+    expect(evRows[0]!.payload).toMatchObject({
+      engagementId: eng.id,
+      engagementName: "Existing Engagement",
+      autoCreated: false,
+      // No prior snapshot for this engagement, so the replaced ref is null.
+      replacedSnapshotId: null,
+    });
   });
 
   it("createNewEngagement branch: persists GUID + path on the new engagement", async () => {
@@ -294,5 +320,50 @@ describe("POST /api/snapshots — A04.7", () => {
     // Engagement keeps its ORIGINAL name — sticky principle applies to the
     // GUID-race rebind path too.
     expect(allEngs[0].name).toBe("Racey");
+
+    // Lifecycle events: the GUID-race rebind goes through the same
+    // existing-engagement attach helper, so it must emit
+    // `snapshot.replaced` against the prior latest (snap A) followed by
+    // `snapshot.created` for the new latest (snap B). Snap A's chain
+    // should also carry its own initial `snapshot.created`.
+    const sortedSnaps = [...allSnaps].sort(
+      (a, b) => a.receivedAt.getTime() - b.receivedAt.getTime(),
+    );
+    const snapA = sortedSnaps[0]!;
+    const snapB = sortedSnaps[1]!;
+
+    const aEvents = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "snapshot"),
+          eq(atomEvents.entityId, snapA.id),
+        ),
+      )
+      .orderBy(asc(atomEvents.recordedAt));
+    expect(aEvents.map((e) => e.eventType)).toEqual([
+      "snapshot.created",
+      "snapshot.replaced",
+    ]);
+    // The `snapshot.replaced` event is anchored on snap A's chain
+    // (entityId = snapA.id) and points forward to snap B via the
+    // `replacedBySnapshotId` payload field.
+    expect(aEvents[1]!.payload).toMatchObject({
+      replacedBySnapshotId: snapB.id,
+      engagementId: allEngs[0].id,
+    });
+
+    const bEvents = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "snapshot"),
+          eq(atomEvents.entityId, snapB.id),
+        ),
+      );
+    expect(bEvents).toHaveLength(1);
+    expect(bEvents[0]!.eventType).toBe("snapshot.created");
   });
 });

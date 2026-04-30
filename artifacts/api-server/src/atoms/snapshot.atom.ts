@@ -55,22 +55,25 @@ export type SnapshotSupportedModes = typeof SNAPSHOT_SUPPORTED_MODES;
  * via the `eventTypes` field (Task #26) so the registry catalog and any
  * `describeForPrompt`-driven surface can introspect the vocabulary
  * without sniffing source files. The exported constant is preserved so
- * producers (the snapshot ingest path, parallel sprint to Task #18) can
- * reference the same names when calling
+ * producers (the snapshot ingest routes in `routes/snapshots.ts` and
+ * `routes/sheets.ts`) can reference the same names when calling
  * {@link EventAnchoringService.appendEvent}.
  *
- * - `snapshot.created` — a new snapshot row was inserted.
- * - `snapshot.received` — the Revit add-in payload was successfully
- *   accepted and parsed (may equal `created` in the common case but is
- *   distinct so future ingest paths can split them).
- * - `snapshot.referenced-in-submission` — a permit submission cited this
- *   snapshot. Load-bearing for the future submission atom (out of scope
- *   for A2; declared here for forward compatibility).
+ * - `snapshot.created` — a new snapshot row was inserted (either via the
+ *   create-new-engagement branch or by attaching to an existing
+ *   engagement, including the GUID-race rebind path).
+ * - `snapshot.sheets_attached` — a multipart sheet upload finished
+ *   processing for this snapshot. Emitted once per
+ *   `POST /api/snapshots/:id/sheets` invocation, regardless of whether
+ *   any individual sheet rows were inserts vs. upserts.
+ * - `snapshot.replaced` — emitted against the previously-latest
+ *   snapshot for an engagement when a fresher snapshot supersedes it
+ *   (the new snapshot row also gets its own `snapshot.created` event).
  */
 export const SNAPSHOT_EVENT_TYPES = [
   "snapshot.created",
-  "snapshot.received",
-  "snapshot.referenced-in-submission",
+  "snapshot.sheets_attached",
+  "snapshot.replaced",
 ] as const;
 
 /**

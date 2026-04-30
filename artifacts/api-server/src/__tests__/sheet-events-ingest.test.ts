@@ -476,6 +476,13 @@ describe("snapshot sheet ingest emits sheet.created events (Task #18)", () => {
     // then restore. Spying on the live singleton (not re-mocking the
     // module) is the cleanest way to exercise the producer's
     // try/catch without disturbing the rest of the suite.
+    //
+    // The route emits TWO events per upload: one `sheet.created` per
+    // inserted row + one trailing `snapshot.sheets_attached`. We force
+    // the FIRST call (the per-sheet event) to reject so the failure
+    // path under test is the one that matters for "row insert kept" —
+    // the second call (snapshot-level event) is allowed to succeed and
+    // is asserted separately below.
     const history = getHistoryService();
     const spy = vi
       .spyOn(history, "appendEvent")
@@ -487,8 +494,16 @@ describe("snapshot sheet ingest emits sheet.created events (Task #18)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ uploaded: 1, skipped: 0, failed: 0 });
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy.mock.calls[0]![0]).toMatchObject({
+
+    // Two appendEvent invocations: the rejected `sheet.created` and the
+    // trailing `snapshot.sheets_attached`. We assert the per-sheet call
+    // is what tripped the simulated outage; the snapshot-level call ran
+    // afterwards through the real history service.
+    const sheetCreatedCalls = spy.mock.calls.filter(
+      (c) => c[0]?.eventType === "sheet.created",
+    );
+    expect(sheetCreatedCalls).toHaveLength(1);
+    expect(sheetCreatedCalls[0]![0]).toMatchObject({
       entityType: "sheet",
       eventType: "sheet.created",
       payload: expect.objectContaining({
@@ -504,7 +519,10 @@ describe("snapshot sheet ingest emits sheet.created events (Task #18)", () => {
       .where(eq(sheets.snapshotId, snapshotId));
     expect(rows).toHaveLength(1);
 
-    // No event row was written.
+    // No `sheet`-scoped event row was written (the failed appendEvent
+    // never made it to the atom_events table). The
+    // `snapshot.sheets_attached` row is on a different entityType chain
+    // and is not in scope for this assertion.
     const events = await db
       .select()
       .from(atomEvents)

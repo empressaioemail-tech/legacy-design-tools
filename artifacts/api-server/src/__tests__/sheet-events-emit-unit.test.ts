@@ -148,8 +148,21 @@ async function uploadOneSheet(
     });
 }
 
+/**
+ * Helper: filter the appendEventMock's recorded calls down to just
+ * those whose `eventType` matches a given prefix or exact value. The
+ * route emits more than one event-type per upload (`sheet.created` per
+ * row, plus a trailing `snapshot.sheets_attached`), and most of the
+ * assertions below care about a specific kind in isolation.
+ */
+function callsOfType(eventType: string) {
+  return appendEventMock.mock.calls.filter(
+    (c) => (c[0] as { eventType?: string } | undefined)?.eventType === eventType,
+  );
+}
+
 describe("sheet ingest emission call site (unit, mocked registry)", () => {
-  it("calls appendEvent exactly once per newly-inserted row with the canonical payload", async () => {
+  it("calls appendEvent exactly once per newly-inserted row with the canonical sheet.created payload", async () => {
     appendEventMock.mockReset();
     appendEventMock.mockResolvedValue({
       id: "evt-fake",
@@ -164,9 +177,7 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ uploaded: 1, skipped: 0, failed: 0 });
-    expect(appendEventMock).toHaveBeenCalledTimes(1);
 
-    const arg = appendEventMock.mock.calls[0]![0];
     // Find the sheet id we expect to see in the call args.
     if (!ctx.schema) throw new Error("schema not ready");
     const [{ id: sheetId }] = await ctx.schema.db
@@ -174,7 +185,10 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
       .from(sheets)
       .where(eq(sheets.snapshotId, snapshotId));
 
-    expect(arg).toEqual({
+    // Exactly one `sheet.created` for the inserted row.
+    const sheetCreated = callsOfType("sheet.created");
+    expect(sheetCreated).toHaveLength(1);
+    expect(sheetCreated[0]![0]).toEqual({
       entityType: "sheet",
       entityId: sheetId,
       eventType: "sheet.created",
@@ -187,14 +201,34 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
       },
     });
     // No `occurredAt` — the producer must let the service stamp now().
-    expect(arg).not.toHaveProperty("occurredAt");
+    expect(sheetCreated[0]![0]).not.toHaveProperty("occurredAt");
+
+    // Plus exactly one trailing snapshot-level event with the upload tally.
+    const snapshotAttached = callsOfType("snapshot.sheets_attached");
+    expect(snapshotAttached).toHaveLength(1);
+    expect(snapshotAttached[0]![0]).toEqual({
+      entityType: "snapshot",
+      entityId: snapshotId,
+      eventType: "snapshot.sheets_attached",
+      actor: { kind: "system", id: "snapshot-ingest" },
+      payload: {
+        engagementId,
+        uploaded: 1,
+        skipped: 0,
+        failed: 0,
+      },
+    });
   });
 
   it("emits sheet.updated (NOT a second sheet.created) when an upload hits onConflictDoUpdate, with a field-level diff", async () => {
     // Task #20 expanded the producer: re-uploading the same
-    // (snapshotId, sheetNumber) pair triggers the upsert-update
-    // branch (xmax != 0) and must emit a `sheet.updated` event with a
-    // `changes` diff payload — NOT a duplicate `sheet.created`.
+    // (snapshotId, sheetNumber) pair triggers the upsert-update branch
+    // (xmax != 0) and must emit a `sheet.updated` event with a
+    // `changes` diff payload — NOT a duplicate `sheet.created`. Task
+    // #27 layered the snapshot-level `snapshot.sheets_attached` on top:
+    // every upload (insert OR update) emits exactly one of those at the
+    // tail, so we filter calls by eventType throughout instead of
+    // asserting a single overall count.
     appendEventMock.mockReset();
     appendEventMock.mockResolvedValue({
       id: "evt-fake",
@@ -209,8 +243,10 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
     });
     expect(first.status).toBe(200);
     expect(first.body).toMatchObject({ uploaded: 1 });
-    expect(appendEventMock).toHaveBeenCalledTimes(1);
-    expect(appendEventMock.mock.calls[0]![0].eventType).toBe("sheet.created");
+    // After the first upload: 1 sheet.created + 1 snapshot.sheets_attached.
+    expect(callsOfType("sheet.created")).toHaveLength(1);
+    expect(callsOfType("sheet.updated")).toHaveLength(0);
+    expect(callsOfType("snapshot.sheets_attached")).toHaveLength(1);
 
     // Same snapshot, same sheet number, different sheet name — this
     // hits the `onConflictDoUpdate` branch (xmax != 0) and must emit
@@ -221,12 +257,13 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
     });
     expect(second.status).toBe(200);
     expect(second.body).toMatchObject({ uploaded: 1 });
-    // Now there must be exactly two appendEvent calls total: one
-    // `sheet.created` from the first upload + one `sheet.updated`
-    // from the re-upload. The producer must NOT issue a second
-    // `sheet.created`.
-    expect(appendEventMock).toHaveBeenCalledTimes(2);
-    const updatedCallArg = appendEventMock.mock.calls[1]![0];
+
+    // Critical assertion: still exactly one sheet.created in total.
+    // Exactly one new sheet.updated for the re-upload. And the
+    // snapshot-level event count advances by one (one per upload).
+    expect(callsOfType("sheet.created")).toHaveLength(1);
+    expect(callsOfType("sheet.updated")).toHaveLength(1);
+    expect(callsOfType("snapshot.sheets_attached")).toHaveLength(2);
 
     // Locate the row id we expect the update event to reference.
     if (!ctx.schema) throw new Error("schema not ready");
@@ -235,6 +272,7 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
       .from(sheets)
       .where(eq(sheets.snapshotId, snapshotId));
 
+    const updatedCallArg = callsOfType("sheet.updated")[0]![0];
     expect(updatedCallArg).toEqual({
       entityType: "sheet",
       entityId: sheetId,
@@ -265,6 +303,9 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
 
   it("rejects from appendEvent are swallowed: response stays 200 and the row remains committed", async () => {
     appendEventMock.mockReset();
+    // Reject every appendEvent call (both the `sheet.created` and the
+    // trailing `snapshot.sheets_attached`) — the route must still 200
+    // and keep the inserted row.
     appendEventMock.mockRejectedValue(new Error("simulated outage"));
     const { snapshotId } = await seedSnapshot("Unit Failure");
 
@@ -275,7 +316,10 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ uploaded: 1, skipped: 0, failed: 0 });
-    expect(appendEventMock).toHaveBeenCalledTimes(1);
+    // Both the per-sheet and the per-snapshot append attempts ran, both
+    // were rejected and swallowed.
+    expect(callsOfType("sheet.created")).toHaveLength(1);
+    expect(callsOfType("snapshot.sheets_attached")).toHaveLength(1);
 
     if (!ctx.schema) throw new Error("schema not ready");
     const rows = await ctx.schema.db

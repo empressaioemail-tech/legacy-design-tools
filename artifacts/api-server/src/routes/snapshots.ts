@@ -26,8 +26,10 @@ import {
   keyFromEngagement,
   enqueueWarmupForJurisdiction,
 } from "@workspace/codes";
+import type { EventAnchoringService } from "@workspace/empressa-atom";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
+import { getHistoryService } from "../atoms/registry";
 
 const snapshotSecret = getSnapshotSecret();
 
@@ -42,6 +44,97 @@ interface SnapshotResult {
   engagementId: string;
   engagementName: string;
   autoCreated: boolean;
+}
+
+/**
+ * Internal extension of {@link SnapshotResult} carrying the
+ * previously-latest snapshot id for the engagement (or `null` if this
+ * is the engagement's first snapshot). Used by event emission to fire
+ * `snapshot.replaced` against the prior id alongside `snapshot.created`
+ * for the new one. Not part of the public HTTP response shape.
+ */
+interface SnapshotAttachOutcome {
+  result: SnapshotResult;
+  previousSnapshotId: string | null;
+}
+
+/** Stable system actor for snapshot lifecycle events emitted by the ingest path. */
+const SNAPSHOT_INGEST_ACTOR = {
+  kind: "system" as const,
+  id: "snapshot-ingest",
+};
+
+/**
+ * Best-effort emission of `snapshot.replaced` (against the prior latest
+ * snapshot, when one exists) followed by `snapshot.created` for the new
+ * snapshot. Failures are swallowed and logged so a history outage cannot
+ * roll back or fail the snapshot ingest — the snapshot row is the source
+ * of truth, events are observability (mirrors the contract used by the
+ * sheet ingest path in `routes/sheets.ts`).
+ */
+async function emitSnapshotLifecycleEvents(
+  history: EventAnchoringService,
+  outcome: SnapshotAttachOutcome,
+  reqLog: typeof logger,
+): Promise<void> {
+  const { result, previousSnapshotId } = outcome;
+  if (previousSnapshotId) {
+    try {
+      const event = await history.appendEvent({
+        entityType: "snapshot",
+        entityId: previousSnapshotId,
+        eventType: "snapshot.replaced",
+        actor: SNAPSHOT_INGEST_ACTOR,
+        payload: {
+          replacedBySnapshotId: result.id,
+          engagementId: result.engagementId,
+        },
+      });
+      reqLog.info(
+        {
+          previousSnapshotId,
+          newSnapshotId: result.id,
+          engagementId: result.engagementId,
+          eventId: event.id,
+          chainHash: event.chainHash,
+        },
+        "snapshot.replaced event appended",
+      );
+    } catch (err) {
+      reqLog.error(
+        { err, previousSnapshotId, newSnapshotId: result.id },
+        "snapshot.replaced event append failed — row insert kept",
+      );
+    }
+  }
+  try {
+    const event = await history.appendEvent({
+      entityType: "snapshot",
+      entityId: result.id,
+      eventType: "snapshot.created",
+      actor: SNAPSHOT_INGEST_ACTOR,
+      payload: {
+        engagementId: result.engagementId,
+        engagementName: result.engagementName,
+        autoCreated: result.autoCreated,
+        replacedSnapshotId: previousSnapshotId,
+      },
+    });
+    reqLog.info(
+      {
+        snapshotId: result.id,
+        engagementId: result.engagementId,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "snapshot.created event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      { err, snapshotId: result.id, engagementId: result.engagementId },
+      "snapshot.created event append failed — row insert kept",
+    );
+  }
 }
 
 function deriveCounts(body: Record<string, unknown>) {
@@ -95,14 +188,32 @@ function isUniqueViolation(err: unknown): boolean {
   return direct === PG_UNIQUE_VIOLATION || cause === PG_UNIQUE_VIOLATION;
 }
 
-/** Insert a snapshot under an existing engagement and bump updated_at. */
+/**
+ * Insert a snapshot under an existing engagement and bump updated_at.
+ * Also captures the previously-latest snapshot id for the engagement
+ * (looked up inside the same transaction so the read is consistent with
+ * the write) so the caller can emit `snapshot.replaced` against it.
+ */
 async function attachSnapshot(
   engagement: typeof engagements.$inferSelect,
   projectName: string,
   payload: Record<string, unknown>,
   counts: ReturnType<typeof deriveCounts>,
-): Promise<SnapshotResult> {
+): Promise<SnapshotAttachOutcome> {
   return db.transaction(async (tx) => {
+    // Read the previously-latest snapshot for this engagement BEFORE the
+    // insert so we know which row is being superseded. Ordered by
+    // receivedAt DESC to match every other "latest snapshot" query in
+    // the codebase. Empty result means this is the engagement's first
+    // snapshot — no `snapshot.replaced` event will be emitted later.
+    const priorRows = await tx
+      .select({ id: snapshots.id })
+      .from(snapshots)
+      .where(eq(snapshots.engagementId, engagement.id))
+      .orderBy(desc(snapshots.receivedAt))
+      .limit(1);
+    const previousSnapshotId = priorRows[0]?.id ?? null;
+
     const [snap] = await tx
       .insert(snapshots)
       .values({
@@ -117,11 +228,14 @@ async function attachSnapshot(
       .set({ updatedAt: new Date() })
       .where(eq(engagements.id, engagement.id));
     return {
-      id: snap.id,
-      receivedAt: snap.receivedAt.toISOString(),
-      engagementId: engagement.id,
-      engagementName: engagement.name,
-      autoCreated: false,
+      result: {
+        id: snap.id,
+        receivedAt: snap.receivedAt.toISOString(),
+        engagementId: engagement.id,
+        engagementName: engagement.name,
+        autoCreated: false,
+      },
+      previousSnapshotId,
     };
   });
 }
@@ -238,6 +352,11 @@ router.post("/snapshots", async (req: Request, res: Response) => {
   const payload = (req.body ?? {}) as Record<string, unknown>;
   const counts = deriveCounts(payload);
 
+  // Per-request logger (carries pino-http's request id when wired) so
+  // event-emission log lines correlate with the originating request.
+  const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+  const history = getHistoryService();
+
   // 3a. Existing-engagement branch.
   if ("engagementId" in bodyParse.data) {
     const engagementId = bodyParse.data.engagementId;
@@ -253,13 +372,17 @@ router.post("/snapshots", async (req: Request, res: Response) => {
         return;
       }
       // Sticky: address/jurisdiction/GUID/path are NOT touched here.
-      const result = await attachSnapshot(
+      const outcome = await attachSnapshot(
         engagement,
         engagement.name,
         payload,
         counts,
       );
-      res.status(201).json(result);
+      // Best-effort lifecycle events (`snapshot.replaced` for the prior
+      // latest snapshot when one exists, `snapshot.created` for the new
+      // row). Awaited but never throw — see emitSnapshotLifecycleEvents.
+      await emitSnapshotLifecycleEvents(history, outcome, reqLog);
+      res.status(201).json(outcome.result);
     } catch (err) {
       logger.error({ err, engagementId }, "attach snapshot failed");
       res.status(500).json({ error: "Failed to store snapshot" });
@@ -281,9 +404,13 @@ router.post("/snapshots", async (req: Request, res: Response) => {
   const incomingAddress = extractIncomingAddress(payload);
 
   try {
-    let result: SnapshotResult;
+    // `outcome` carries the new snapshot result + the prior latest
+    // snapshot id (always null on the clean create-new branch since the
+    // engagement is fresh; populated when the GUID-race fallback rebinds
+    // to a pre-existing engagement that already had snapshots).
+    let outcome: SnapshotAttachOutcome;
     try {
-      result = await db.transaction(async (tx) => {
+      outcome = await db.transaction(async (tx) => {
         const [eng] = await tx
           .insert(engagements)
           .values({
@@ -306,11 +433,14 @@ router.post("/snapshots", async (req: Request, res: Response) => {
           })
           .returning();
         return {
-          id: snap.id,
-          receivedAt: snap.receivedAt.toISOString(),
-          engagementId: eng.id,
-          engagementName: eng.name,
-          autoCreated: true,
+          result: {
+            id: snap.id,
+            receivedAt: snap.receivedAt.toISOString(),
+            engagementId: eng.id,
+            engagementName: eng.name,
+            autoCreated: true,
+          },
+          previousSnapshotId: null,
         };
       });
     } catch (err) {
@@ -329,18 +459,23 @@ router.post("/snapshots", async (req: Request, res: Response) => {
           { engagementId: existing.id, guid },
           "snapshots: GUID race resolved by refetch",
         );
-        result = await attachSnapshot(existing, projectName, payload, counts);
+        outcome = await attachSnapshot(existing, projectName, payload, counts);
       } else {
         throw err;
       }
     }
 
     // Geocode + warmup only on actual create (not race-resolved bind).
-    if (result.autoCreated && incomingAddress) {
-      fireGeocodeAndWarmup(result.engagementId, incomingAddress);
+    if (outcome.result.autoCreated && incomingAddress) {
+      fireGeocodeAndWarmup(outcome.result.engagementId, incomingAddress);
     }
 
-    res.status(201).json(result);
+    // Best-effort lifecycle events. Same contract as the existing
+    // branch above — `snapshot.replaced` only fires on the GUID-race
+    // rebind where the existing engagement already carried snapshots.
+    await emitSnapshotLifecycleEvents(history, outcome, reqLog);
+
+    res.status(201).json(outcome.result);
   } catch (err) {
     logger.error({ err, projectName }, "create snapshot failed");
     res.status(500).json({ error: "Failed to store snapshot" });

@@ -41,7 +41,9 @@ const { engagements, snapshots, sheets } = dbModule;
 const { runAtomContractTests, createTestRegistry } = await import(
   "@workspace/empressa-atom/testing"
 );
-const { createAtomRegistry } = await import("@workspace/empressa-atom");
+const { createAtomRegistry, PostgresEventAnchoringService } = await import(
+  "@workspace/empressa-atom"
+);
 const { makeSheetAtom } = await import("../atoms/sheet.atom");
 const { makeSnapshotAtom, SNAPSHOT_EVENT_TYPES } = await import(
   "../atoms/snapshot.atom"
@@ -274,21 +276,89 @@ describe("snapshot atom (composition + behavior)", () => {
     // The constant is preserved (producers reference it when appending
     // events) AND wired onto the registration via the framework's
     // `eventTypes` field (Task #26) so the registry catalog can
-    // introspect it without sniffing source files.
+    // introspect it without sniffing source files. The three event types
+    // match what the snapshot ingestion routes emit through
+    // `EventAnchoringService.appendEvent` — `snapshot.created` and
+    // `snapshot.replaced` from `routes/snapshots.ts`,
+    // `snapshot.sheets_attached` from the bulk sheet upload in
+    // `routes/sheets.ts`.
     expect(SNAPSHOT_EVENT_TYPES).toEqual([
       "snapshot.created",
-      "snapshot.received",
-      "snapshot.referenced-in-submission",
+      "snapshot.sheets_attached",
+      "snapshot.replaced",
     ]);
     const registration = makeSnapshotAtom({ db: lazyDb });
     expect(registration.eventTypes).toEqual(SNAPSHOT_EVENT_TYPES);
+  });
+
+  it("historyProvenance reports the latest atom_event when one exists for the snapshot", async () => {
+    // Real Postgres-backed history service against the test schema —
+    // mirrors how the prod registry wires `getHistoryService()` so the
+    // atom's `latestEvent({ kind, entityType, entityId })` call exercises
+    // the same SQL path the production reads from.
+    if (!ctx.schema) throw new Error("snapshot-atom.test: ctx.schema not set");
+    const history = new PostgresEventAnchoringService(
+      ctx.schema.db as unknown as ConstructorParameters<
+        typeof PostgresEventAnchoringService
+      >[0],
+    );
+
+    // Append a `snapshot.created` event for the seeded snapshot id —
+    // this is the same event-type the ingest route emits at create time.
+    const event = await history.appendEvent({
+      entityType: "snapshot",
+      entityId: SNAPSHOT_ID,
+      eventType: "snapshot.created",
+      actor: { kind: "system", id: "snapshot-ingest" },
+      payload: { engagementId: ENGAGEMENT_ID, autoCreated: true },
+    });
+
+    const snapshotAtom = makeSnapshotAtom({ db: lazyDb, history });
+    const summary = await snapshotAtom.contextSummary(SNAPSHOT_ID, {
+      audience: "internal",
+    });
+
+    // The atom must surface the event's id and timestamp instead of the
+    // row's `receivedAt` fallback.
+    expect(summary.historyProvenance.latestEventId).toBe(event.id);
+    expect(summary.historyProvenance.latestEventAt).toBe(
+      event.occurredAt.toISOString(),
+    );
+  });
+
+  it("historyProvenance falls back to receivedAt when no events exist for the snapshot", async () => {
+    // Use the empty snapshot id (no events appended for it in this
+    // suite) to exercise the fallback path. `latestEventId` stays empty
+    // — the framework treats that as "no events yet" — and
+    // `latestEventAt` mirrors the snapshot row's `receivedAt`.
+    if (!ctx.schema) throw new Error("snapshot-atom.test: ctx.schema not set");
+    const history = new PostgresEventAnchoringService(
+      ctx.schema.db as unknown as ConstructorParameters<
+        typeof PostgresEventAnchoringService
+      >[0],
+    );
+
+    const snapshotAtom = makeSnapshotAtom({ db: lazyDb, history });
+    const summary = await snapshotAtom.contextSummary(EMPTY_SNAPSHOT_ID, {
+      audience: "internal",
+    });
+
+    expect(summary.historyProvenance.latestEventId).toBe("");
+    expect(typeof summary.historyProvenance.latestEventAt).toBe("string");
+    // The fallback timestamp is the snapshot row's receivedAt — readable
+    // from the typed payload's mirror of the same field.
+    expect(summary.historyProvenance.latestEventAt).toBe(
+      summary.typed.receivedAt,
+    );
   });
 
   it("describeForPrompt advertises both sheet and snapshot with their event vocabularies", () => {
     // Sanity check that the chat path's `describeForPrompt()` call sees
     // both atoms in the vocabulary it returns to the prompt builder, and
     // that each atom's declared event types come along for the ride
-    // (Task #26).
+    // (Task #26). The snapshot vocabulary reflects the Task #27 update
+    // (`snapshot.created` / `snapshot.sheets_attached` /
+    // `snapshot.replaced`); the sheet vocabulary reflects Task #20.
     const registry = createTestRegistry([
       makeSheetAtom({ db: lazyDb }),
       makeSnapshotAtom({ db: lazyDb }),
@@ -300,8 +370,8 @@ describe("snapshot atom (composition + behavior)", () => {
     expect(snap?.composes).toEqual(["sheet"]);
     expect(snap?.eventTypes).toEqual([
       "snapshot.created",
-      "snapshot.received",
-      "snapshot.referenced-in-submission",
+      "snapshot.sheets_attached",
+      "snapshot.replaced",
     ]);
     const sheet = desc.find((d) => d.entityType === "sheet");
     expect(sheet?.eventTypes).toEqual([

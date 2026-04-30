@@ -700,6 +700,43 @@ router.post(
         errors.push("warning: sheetCount recompute failed");
       }
 
+      // Snapshot-level lifecycle event. Emitted once per request — even
+      // if every row in the upload was an upsert-update (uploaded=0 is
+      // not a meaningful skip signal here, the request itself attaching
+      // sheets to the snapshot is what consumers care about). Best-effort
+      // exactly like the per-sheet `sheet.created` emission above.
+      try {
+        const event = await history.appendEvent({
+          entityType: "snapshot",
+          entityId: snapshotIdStr,
+          eventType: "snapshot.sheets_attached",
+          actor: { kind: "system", id: "snapshot-ingest" },
+          payload: {
+            engagementId,
+            uploaded,
+            skipped,
+            failed,
+          },
+        });
+        reqLogger.info(
+          {
+            snapshotId,
+            engagementId,
+            uploaded,
+            skipped,
+            failed,
+            eventId: event.id,
+            chainHash: event.chainHash,
+          },
+          "snapshot.sheets_attached event appended",
+        );
+      } catch (err) {
+        reqLogger.error(
+          { err, snapshotId, engagementId },
+          "snapshot.sheets_attached event append failed — upload kept",
+        );
+      }
+
       safeRespond(200, { uploaded, skipped, failed, errors });
     });
 
