@@ -1089,6 +1089,16 @@ importers:
         version: 5.9.3
 
   scripts:
+    dependencies:
+      '@workspace/db':
+        specifier: workspace:*
+        version: link:../lib/db
+      '@workspace/empressa-atom':
+        specifier: workspace:*
+        version: link:../lib/empressa-atom
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
