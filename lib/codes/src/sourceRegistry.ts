@@ -43,6 +43,15 @@ export const REQUIRED_CODE_ATOM_SOURCES: ReadonlyArray<RequiredCodeAtomSource> =
         'Inline HTML "2021 IRC TABLE 301.2(1)" and surrounding climatic/geographic design criteria scraped from the Grand County Building Department page. Page is published by the County for public design use; treated as public record.',
     },
     {
+      sourceName: "grand_county_landuse_html",
+      label: "Grand County, UT — Land Use Code (HTML, codepublishing.com)",
+      sourceType: "html",
+      licenseType: "public_record",
+      baseUrl: "https://www.codepublishing.com/UT/GrandCounty/",
+      notes:
+        "Per-article HTML on Code Publishing Co. (General Code Inc.); linked from grandcountyutah.net/927/Land-Use-Code via 301 redirect. Section-level atoms at H3 granularity, with over-cap sections split into '#partN' siblings. Per-section revision markers (e.g. 'Revised 6/19') are captured into atom metadata.revision. Warmup makes exactly 10 GETs (LUC01-LUC10); the LUCAddA/LUCAddB appendix pages are forwarding-link stubs and are intentionally NOT ingested.",
+    },
+    {
       sourceName: "grand_county_pdf",
       label: "Grand County, UT — 2006 Wildland-Urban Interface Code (PDF)",
       sourceType: "pdf",

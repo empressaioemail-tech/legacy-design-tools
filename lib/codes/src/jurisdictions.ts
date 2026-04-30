@@ -51,6 +51,12 @@ export const JURISDICTIONS: Record<string, JurisdictionConfig> = {
         edition: "IWUIC 2006",
         sourceName: "grand_county_pdf",
       },
+      {
+        label: "Grand County Land Use Code (rev. 3/21)",
+        codeBook: "LAND_USE",
+        edition: "Land Use Code (rev. 3/21)",
+        sourceName: "grand_county_landuse_html",
+      },
     ],
   },
   bastrop_tx: {
