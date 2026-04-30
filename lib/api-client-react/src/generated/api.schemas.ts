@@ -273,6 +273,83 @@ export interface ChatErrorResponse {
   message?: string;
 }
 
+/**
+ * Either `engagementId` OR `jurisdiction` must be set, but not both. The
+server validates this and returns 400 if violated. (Modeled as both
+optional rather than `oneOf` for codegen simplicity.)
+
+ */
+export interface RetrievalProbeBody {
+  /** Engagement UUID. Server resolves jurisdiction from the engagement. */
+  engagementId?: string | null;
+  /** Literal jurisdiction key (e.g. `grand_county_ut`). */
+  jurisdiction?: string | null;
+  /**
+   * Natural-language question to embed and retrieve atoms for.
+   * @minLength 1
+   */
+  query: string;
+  /**
+   * Number of top-ranked atoms to return. Defaults to 10 (wider than
+prod chat's MAX_RETRIEVED_ATOMS=8 to give the operator more
+below-the-fold context). The UI labels chat's actual cutoff.
+
+   * @minimum 1
+   * @maximum 50
+   */
+  topN?: number;
+}
+
+export interface RetrievalProbeResultItem {
+  /** 1-indexed position by similarity DESC. */
+  rank: number;
+  atomId: string;
+  /** Display ref — sectionNumber ?? sectionTitle ?? codeBook. */
+  codeRef: string;
+  sectionTitle: string | null;
+  /** Server-truncated body, ~120 chars at word boundary. */
+  bodyPreview: string;
+  /** Cosine similarity (vector path) or bag-of-words score (lexical
+fallback). Vector scores are in [0, 1]; lexical scores are raw
+integer match counts. The probe rounds vector scores to 4 decimal
+places.
+ */
+  similarity: number;
+  /** codeBook from the atom (e.g. IRC_R301_2_1). */
+  sourceBook: string;
+  sourceUrl: string | null;
+  /** "vector" or "lexical" — which retrieval path produced this row. */
+  retrievalMode: string;
+}
+
+export type RetrievalProbeResponseQueryEmbedding = {
+  /** Embedding model name (e.g. `text-embedding-3-small`). */
+  model: string;
+  /** Embedding vector dimension (e.g. 1536). */
+  dimension: number;
+  /** False if no OPENAI_API_KEY is configured (retrieval falls back
+to lexical bag-of-words; similarity scores are integer match
+counts, not cosine).
+ */
+  available: boolean;
+};
+
+export interface RetrievalProbeResponse {
+  /** The jurisdiction key actually used for retrieval. */
+  resolvedJurisdiction: string;
+  /** True when jurisdiction was derived from engagementId path. */
+  resolvedFromEngagement: boolean;
+  query: string;
+  queryEmbedding: RetrievalProbeResponseQueryEmbedding;
+  /** ALL retrieved atoms (threshold not applied server-side). */
+  results: RetrievalProbeResultItem[];
+  /** The literal `<reference_code_atoms>...</reference_code_atoms>` XML
+block that would be embedded in Claude's system prompt for this
+query. Empty string when results is empty (matches chat behavior).
+ */
+  assembledPromptBlock: string;
+}
+
 export type JurisdictionSummaryBooksItem = {
   codeBook: string;
   edition: string;

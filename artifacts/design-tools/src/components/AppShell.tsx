@@ -11,6 +11,7 @@ import {
   FolderOpen,
   LayoutDashboard,
   Palette,
+  Search,
 } from "lucide-react";
 
 interface AppShellProps {
@@ -83,6 +84,11 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
           label: "Atom Inspector",
           href: "/dev/atoms",
           icon: <Database size={14} />,
+        },
+        {
+          label: "Retrieval Probe",
+          href: "/dev/atoms/probe",
+          icon: <Search size={14} />,
         },
         {
           label: "API Health",

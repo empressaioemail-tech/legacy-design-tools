@@ -46,6 +46,7 @@ export {
 
 export {
   buildChatPrompt,
+  formatReferenceCodeAtoms,
   relativeTime,
   MAX_ATOM_BODY_CHARS,
   type BuildChatPromptInput,

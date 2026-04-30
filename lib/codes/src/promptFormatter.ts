@@ -69,6 +69,33 @@ export interface BuildChatPromptOutput {
 }
 
 /**
+ * Assemble the `<reference_code_atoms>` XML block exactly as it appears
+ * in the chat system prompt. Returns `""` when there are no atoms (which
+ * matches the chat behavior — no empty `<reference_code_atoms></...>` tags
+ * are emitted).
+ *
+ * Exported so the /dev/atoms/probe diagnostic can show the operator the
+ * literal bytes that would be sent to Claude for a given retrieval result,
+ * without duplicating the formatting logic. If you change the atom block
+ * shape, update this function — buildChatPrompt and the probe will both
+ * follow.
+ */
+export function formatReferenceCodeAtoms(atoms: RetrievedAtom[]): string {
+  if (atoms.length === 0) return "";
+  const inner = atoms
+    .map((a) => {
+      const body =
+        a.body.length > MAX_ATOM_BODY_CHARS
+          ? a.body.slice(0, MAX_ATOM_BODY_CHARS - 1) + "…"
+          : a.body;
+      const ref = a.sectionNumber ?? a.sectionTitle ?? a.codeBook;
+      return `<atom id="${a.id}" code_book="${a.codeBook}" edition="${a.edition}" section="${ref ?? ""}" mode="${a.retrievalMode}">\n${body}\n</atom>`;
+    })
+    .join("\n");
+  return `<reference_code_atoms>\n${inner}\n</reference_code_atoms>`;
+}
+
+/**
  * Human-friendly age string for the snapshot timestamp. Round-trips through
  * second/minute/hour/day buckets. Exported for direct testing.
  */
@@ -118,21 +145,13 @@ export function buildChatPrompt(
   const captured = relativeTime(latestSnapshot.receivedAt, now());
   const isoReceivedAt = latestSnapshot.receivedAt.toISOString();
 
+  // The reference_code_atoms XML block is assembled by a helper so the
+  // /dev/atoms/probe diagnostic can render the SAME bytes the LLM would
+  // see, without re-implementing the format. The helper returns the block
+  // by itself; the leading "\n\n" separator below is buildChatPrompt's job
+  // because it depends on what comes immediately before in systemPrompt.
   const atomBlock =
-    allAtoms.length > 0
-      ? "\n\n<reference_code_atoms>\n" +
-        allAtoms
-          .map((a) => {
-            const body =
-              a.body.length > MAX_ATOM_BODY_CHARS
-                ? a.body.slice(0, MAX_ATOM_BODY_CHARS - 1) + "…"
-                : a.body;
-            const ref = a.sectionNumber ?? a.sectionTitle ?? a.codeBook;
-            return `<atom id="${a.id}" code_book="${a.codeBook}" edition="${a.edition}" section="${ref ?? ""}" mode="${a.retrievalMode}">\n${body}\n</atom>`;
-          })
-          .join("\n") +
-        "\n</reference_code_atoms>"
-      : "";
+    allAtoms.length > 0 ? "\n\n" + formatReferenceCodeAtoms(allAtoms) : "";
 
   const codeCitationInstruction =
     allAtoms.length > 0

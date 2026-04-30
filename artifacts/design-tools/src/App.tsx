@@ -6,6 +6,7 @@ import StyleProbe from "./pages/StyleProbe";
 import { Health } from "./pages/Health";
 import { CodeLibrary } from "./pages/CodeLibrary";
 import { DevAtoms } from "./pages/DevAtoms";
+import { DevAtomsProbe } from "./pages/DevAtomsProbe";
 import { AppShell } from "./components/AppShell";
 
 const queryClient = new QueryClient();
@@ -37,6 +38,11 @@ function Router() {
       <Route path="/dev/atoms">
         <AppShell title="Atom Inspector">
           <DevAtoms />
+        </AppShell>
+      </Route>
+      <Route path="/dev/atoms/probe">
+        <AppShell title="Retrieval Probe">
+          <DevAtomsProbe />
         </AppShell>
       </Route>
       <Route>

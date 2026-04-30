@@ -785,6 +785,115 @@ export const WarmupJurisdictionResponse = zod.object({
 });
 
 /**
+ * Operator-facing diagnostic backing the `/dev/atoms/probe` page. Runs the
+SAME retrieval module (`retrieveAtomsForQuestion` in `@workspace/codes`)
+that `/api/chat` uses, with the SAME jurisdiction-resolution logic
+(`keyFromEngagement`), and assembles the SAME `<reference_code_atoms>`
+XML block (`formatReferenceCodeAtoms`) that gets sent to Claude. No
+threshold filter is applied server-side — ALL retrieved atoms are
+returned and the UI renders the 0.6 threshold line visually.
+
+Either `engagementId` (server resolves jurisdiction from the engagement
+address using the same logic chat does) OR `jurisdiction` (a literal
+jurisdiction key like `grand_county_ut`) must be provided — exactly one.
+
+Header-gated by `x-snapshot-secret` to match the rest of the
+operator-facing surfaces (POST /snapshots, POST /engagements/match).
+
+ * @summary Retrieval probe — preview what /api/chat would inject for a given query
+ */
+export const RetrieveAtomsProbeHeader = zod.object({
+  "x-snapshot-secret": zod.string(),
+});
+
+export const retrieveAtomsProbeBodyTopNDefault = 10;
+export const retrieveAtomsProbeBodyTopNMax = 50;
+
+export const RetrieveAtomsProbeBody = zod
+  .object({
+    engagementId: zod
+      .string()
+      .nullish()
+      .describe(
+        "Engagement UUID. Server resolves jurisdiction from the engagement.",
+      ),
+    jurisdiction: zod
+      .string()
+      .nullish()
+      .describe("Literal jurisdiction key (e.g. `grand_county_ut`)."),
+    query: zod
+      .string()
+      .min(1)
+      .describe("Natural-language question to embed and retrieve atoms for."),
+    topN: zod
+      .number()
+      .min(1)
+      .max(retrieveAtomsProbeBodyTopNMax)
+      .default(retrieveAtomsProbeBodyTopNDefault)
+      .describe(
+        "Number of top-ranked atoms to return. Defaults to 10 (wider than\nprod chat's MAX_RETRIEVED_ATOMS=8 to give the operator more\nbelow-the-fold context). The UI labels chat's actual cutoff.\n",
+      ),
+  })
+  .describe(
+    "Either `engagementId` OR `jurisdiction` must be set, but not both. The\nserver validates this and returns 400 if violated. (Modeled as both\noptional rather than `oneOf` for codegen simplicity.)\n",
+  );
+
+export const RetrieveAtomsProbeResponse = zod.object({
+  resolvedJurisdiction: zod
+    .string()
+    .describe("The jurisdiction key actually used for retrieval."),
+  resolvedFromEngagement: zod
+    .boolean()
+    .describe("True when jurisdiction was derived from engagementId path."),
+  query: zod.string(),
+  queryEmbedding: zod.object({
+    model: zod
+      .string()
+      .describe("Embedding model name (e.g. `text-embedding-3-small`)."),
+    dimension: zod.number().describe("Embedding vector dimension (e.g. 1536)."),
+    available: zod
+      .boolean()
+      .describe(
+        "False if no OPENAI_API_KEY is configured (retrieval falls back\nto lexical bag-of-words; similarity scores are integer match\ncounts, not cosine).\n",
+      ),
+  }),
+  results: zod
+    .array(
+      zod.object({
+        rank: zod.number().describe("1-indexed position by similarity DESC."),
+        atomId: zod.string(),
+        codeRef: zod
+          .string()
+          .describe("Display ref — sectionNumber ?? sectionTitle ?? codeBook."),
+        sectionTitle: zod.string().nullable(),
+        bodyPreview: zod
+          .string()
+          .describe("Server-truncated body, ~120 chars at word boundary."),
+        similarity: zod
+          .number()
+          .describe(
+            "Cosine similarity (vector path) or bag-of-words score (lexical\nfallback). Vector scores are in [0, 1]; lexical scores are raw\ninteger match counts. The probe rounds vector scores to 4 decimal\nplaces.\n",
+          ),
+        sourceBook: zod
+          .string()
+          .describe("codeBook from the atom (e.g. IRC_R301_2_1)."),
+        sourceUrl: zod.string().nullable(),
+        retrievalMode: zod
+          .string()
+          .describe(
+            '\"vector\" or \"lexical\" — which retrieval path produced this row.',
+          ),
+      }),
+    )
+    .describe("ALL retrieved atoms (threshold not applied server-side)."),
+  assembledPromptBlock: zod
+    .string()
+    .describe(
+      "The literal `<reference_code_atoms>...<\/reference_code_atoms>` XML\nblock that would be embedded in Claude's system prompt for this\nquery. Empty string when results is empty (matches chat behavior).\n",
+    ),
+});
+
+/**
  * Streams an assistant response over Server-Sent Events. Each event
 is `data: {"text": "..."}\n\n` followed by a final `data: [DONE]\n\n`.
 Grounds Claude on the latest snapshot for the given engagement.

@@ -31,6 +31,8 @@ import type {
   ListJurisdictionAtomsParams,
   MatchEngagementBody,
   MatchEngagementResponse,
+  RetrievalProbeBody,
+  RetrievalProbeResponse,
   SheetSummary,
   SheetUploadResponse,
   SnapshotDetail,
@@ -1753,6 +1755,107 @@ export const useWarmupJurisdiction = <
   TContext
 > => {
   return useMutation(getWarmupJurisdictionMutationOptions(options));
+};
+
+/**
+ * Operator-facing diagnostic backing the `/dev/atoms/probe` page. Runs the
+SAME retrieval module (`retrieveAtomsForQuestion` in `@workspace/codes`)
+that `/api/chat` uses, with the SAME jurisdiction-resolution logic
+(`keyFromEngagement`), and assembles the SAME `<reference_code_atoms>`
+XML block (`formatReferenceCodeAtoms`) that gets sent to Claude. No
+threshold filter is applied server-side — ALL retrieved atoms are
+returned and the UI renders the 0.6 threshold line visually.
+
+Either `engagementId` (server resolves jurisdiction from the engagement
+address using the same logic chat does) OR `jurisdiction` (a literal
+jurisdiction key like `grand_county_ut`) must be provided — exactly one.
+
+Header-gated by `x-snapshot-secret` to match the rest of the
+operator-facing surfaces (POST /snapshots, POST /engagements/match).
+
+ * @summary Retrieval probe — preview what /api/chat would inject for a given query
+ */
+export const getRetrieveAtomsProbeUrl = () => {
+  return `/api/dev/atoms/retrieve`;
+};
+
+export const retrieveAtomsProbe = async (
+  retrievalProbeBody: RetrievalProbeBody,
+  options?: RequestInit,
+): Promise<RetrievalProbeResponse> => {
+  return customFetch<RetrievalProbeResponse>(getRetrieveAtomsProbeUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(retrievalProbeBody),
+  });
+};
+
+export const getRetrieveAtomsProbeMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retrieveAtomsProbe>>,
+    TError,
+    { data: BodyType<RetrievalProbeBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof retrieveAtomsProbe>>,
+  TError,
+  { data: BodyType<RetrievalProbeBody> },
+  TContext
+> => {
+  const mutationKey = ["retrieveAtomsProbe"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof retrieveAtomsProbe>>,
+    { data: BodyType<RetrievalProbeBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return retrieveAtomsProbe(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RetrieveAtomsProbeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof retrieveAtomsProbe>>
+>;
+export type RetrieveAtomsProbeMutationBody = BodyType<RetrievalProbeBody>;
+export type RetrieveAtomsProbeMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Retrieval probe — preview what /api/chat would inject for a given query
+ */
+export const useRetrieveAtomsProbe = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retrieveAtomsProbe>>,
+    TError,
+    { data: BodyType<RetrievalProbeBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof retrieveAtomsProbe>>,
+  TError,
+  { data: BodyType<RetrievalProbeBody> },
+  TContext
+> => {
+  return useMutation(getRetrieveAtomsProbeMutationOptions(options));
 };
 
 /**

@@ -6,6 +6,7 @@ import snapshotsRouter from "./snapshots";
 import sheetsRouter from "./sheets";
 import chatRouter from "./chat";
 import codesRouter from "./codes";
+import devAtomsRouter from "./devAtoms";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(snapshotsRouter);
 router.use(sheetsRouter);
 router.use(chatRouter);
 router.use(codesRouter);
+router.use(devAtomsRouter);
 
 export default router;
