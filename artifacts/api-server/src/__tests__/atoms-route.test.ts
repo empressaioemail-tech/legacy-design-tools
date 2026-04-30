@@ -35,7 +35,9 @@ vi.mock("@workspace/db", async () => {
 
 const { setupRouteTests } = await import("./setup");
 const { engagements, snapshots, sheets } = await import("@workspace/db");
-const { resetAtomRegistryForTests } = await import("../atoms/registry");
+const { resetAtomRegistryForTests, getHistoryService } = await import(
+  "../atoms/registry"
+);
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -207,6 +209,108 @@ describe("GET /api/atoms/:slug/:id/summary", () => {
     });
     expect(res.body.relatedAtoms).toEqual([]);
     expect(res.body.scopeFiltered).toBe(false);
+  });
+});
+
+describe("GET /api/atoms/:slug/:id/history", () => {
+  it("returns recent events newest-first for a registered atom", async () => {
+    const { sheetId } = await seedSheet();
+    const history = getHistoryService();
+    // Append three events with strictly-increasing occurredAt so the
+    // ORDER BY is deterministic regardless of insertion races.
+    const t0 = new Date("2026-04-01T10:00:00Z");
+    const t1 = new Date("2026-04-02T10:00:00Z");
+    const t2 = new Date("2026-04-03T10:00:00Z");
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetId,
+      eventType: "sheet.created",
+      actor: { kind: "system", id: "test" },
+      payload: {},
+      occurredAt: t0,
+    });
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetId,
+      eventType: "sheet.updated",
+      actor: { kind: "agent", id: "ingest" },
+      payload: { revision: 1 },
+      occurredAt: t1,
+    });
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetId,
+      eventType: "sheet.updated",
+      actor: { kind: "user", id: "u1" },
+      payload: { revision: 2 },
+      occurredAt: t2,
+    });
+
+    const res = await request(getApp()).get(
+      `/api/atoms/sheet/${sheetId}/history`,
+    );
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.events)).toBe(true);
+    expect(res.body.events).toHaveLength(3);
+    expect(res.body.events[0].eventType).toBe("sheet.updated");
+    expect(res.body.events[0].occurredAt).toBe(t2.toISOString());
+    expect(res.body.events[0].actor).toEqual({ kind: "user", id: "u1" });
+    expect(res.body.events[2].eventType).toBe("sheet.created");
+    // Chain hashes must NOT leak through the public response.
+    expect(res.body.events[0]).not.toHaveProperty("chainHash");
+    expect(res.body.events[0]).not.toHaveProperty("prevHash");
+  });
+
+  it("clamps the limit query parameter to at most 50 and caps the page", async () => {
+    const { sheetId } = await seedSheet();
+    const history = getHistoryService();
+    for (let i = 0; i < 4; i++) {
+      await history.appendEvent({
+        entityType: "sheet",
+        entityId: sheetId,
+        eventType: "sheet.updated",
+        actor: { kind: "system", id: "test" },
+        payload: { i },
+        occurredAt: new Date(Date.UTC(2026, 3, 10 + i)),
+      });
+    }
+    const res = await request(getApp())
+      .get(`/api/atoms/sheet/${sheetId}/history`)
+      .query({ limit: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body.events).toHaveLength(2);
+    // Newest first → last appended is at index 0.
+    expect(res.body.events[0].occurredAt).toBe(
+      new Date(Date.UTC(2026, 3, 13)).toISOString(),
+    );
+  });
+
+  it("returns an empty list for an unknown id (atom_events is opaque)", async () => {
+    const res = await request(getApp()).get(
+      "/api/atoms/sheet/00000000-0000-0000-0000-000000000000/history",
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ events: [] });
+  });
+
+  it("404s when the slug is not a registered atom type", async () => {
+    const res = await request(getApp()).get(
+      "/api/atoms/no-such-atom/anything/history",
+    );
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({
+      error: "atom_type_not_registered",
+      slug: "no-such-atom",
+    });
+  });
+
+  it("falls back to the default limit when the query value is malformed", async () => {
+    const { sheetId } = await seedSheet();
+    const res = await request(getApp())
+      .get(`/api/atoms/sheet/${sheetId}/history`)
+      .query({ limit: "not-a-number" });
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.events)).toBe(true);
   });
 });
 

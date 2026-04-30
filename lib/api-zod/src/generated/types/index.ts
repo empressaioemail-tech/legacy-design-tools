@@ -6,7 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./atomEventActor";
+export * from "./atomEventActorKind";
+export * from "./atomHistoryEvent";
 export * from "./atomHistoryProvenance";
+export * from "./atomHistoryResponse";
 export * from "./atomKeyMetric";
 export * from "./atomReference";
 export * from "./atomSummary";
@@ -26,6 +30,7 @@ export * from "./engagementSummary";
 export * from "./errorResponse";
 export * from "./geocode";
 export * from "./geocodeSource";
+export * from "./getAtomHistoryParams";
 export * from "./getAtomSummaryParams";
 export * from "./healthStatus";
 export * from "./jurisdictionSummary";

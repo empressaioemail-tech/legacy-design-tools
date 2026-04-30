@@ -300,6 +300,46 @@ export interface AtomHistoryProvenance {
   latestEventAt: string;
 }
 
+export type AtomEventActorKind =
+  (typeof AtomEventActorKind)[keyof typeof AtomEventActorKind];
+
+export const AtomEventActorKind = {
+  user: "user",
+  agent: "agent",
+  system: "system",
+} as const;
+
+/**
+ * Identity of the actor that produced an event. Mirrors the
+`EventActor` type in `@workspace/empressa-atom`. `id` is opaque
+to the framework; producers (e.g. snapshot ingest) choose the
+identity scheme.
+
+ */
+export interface AtomEventActor {
+  kind: AtomEventActorKind;
+  id: string;
+}
+
+/**
+ * One row from `atom_events` exposed over HTTP. Matches the public
+fields of `AtomEvent` from `@workspace/empressa-atom` minus the
+chain hashes (`prevHash`/`chainHash`), which are an implementation
+detail of the anchoring service and not useful to UI consumers.
+
+ */
+export interface AtomHistoryEvent {
+  id: string;
+  eventType: string;
+  actor: AtomEventActor;
+  occurredAt: string;
+  recordedAt: string;
+}
+
+export interface AtomHistoryResponse {
+  events: AtomHistoryEvent[];
+}
+
 export type AtomSummaryTyped = { [key: string]: unknown };
 
 /**
@@ -599,4 +639,13 @@ export type GetAtomSummaryParams = {
    * URL-encoded JSON scope object (compact form `{a,r,t,p}`).
    */
   scope?: string;
+};
+
+export type GetAtomHistoryParams = {
+  /**
+   * Max events to return (default 5, max 50).
+   * @minimum 1
+   * @maximum 50
+   */
+  limit?: number;
 };

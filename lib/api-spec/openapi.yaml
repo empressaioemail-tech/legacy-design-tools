@@ -770,6 +770,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /atoms/{slug}/{id}/history:
+    get:
+      operationId: getAtomHistory
+      tags: [atoms]
+      summary: Read recent history events for an atom
+      description: |
+        Returns the most recent atom_events for the given atom, newest first.
+        Backed by the same `EventAnchoringService` the registration's
+        `contextSummary` reads through for `historyProvenance`, so this
+        endpoint complements (does not replace) the four-layer summary —
+        callers that only need the latest provenance can keep using
+        `getAtomSummary`.
+
+        Requires a registered atom slug (404 otherwise). The `limit`
+        query parameter caps the page size (default 5, max 50). Events
+        whose entity row has been deleted upstream still surface here:
+        atom_events stores `(entity_type, entity_id)` as opaque text and
+        is intentionally not FK'd to the entity table.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Max events to return (default 5, max 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+      responses:
+        "200":
+          description: Recent events, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtomHistoryResponse"
+        "404":
+          description: Atom type not registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: History read failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /chat:
     post:
       operationId: sendChatMessage
@@ -1398,6 +1455,60 @@ components:
       required:
         - latestEventId
         - latestEventAt
+
+    AtomEventActor:
+      description: |
+        Identity of the actor that produced an event. Mirrors the
+        `EventActor` type in `@workspace/empressa-atom`. `id` is opaque
+        to the framework; producers (e.g. snapshot ingest) choose the
+        identity scheme.
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [user, agent, system]
+        id:
+          type: string
+      required:
+        - kind
+        - id
+
+    AtomHistoryEvent:
+      description: |
+        One row from `atom_events` exposed over HTTP. Matches the public
+        fields of `AtomEvent` from `@workspace/empressa-atom` minus the
+        chain hashes (`prevHash`/`chainHash`), which are an implementation
+        detail of the anchoring service and not useful to UI consumers.
+      type: object
+      properties:
+        id:
+          type: string
+        eventType:
+          type: string
+        actor:
+          $ref: "#/components/schemas/AtomEventActor"
+        occurredAt:
+          type: string
+          format: date-time
+        recordedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - eventType
+        - actor
+        - occurredAt
+        - recordedAt
+
+    AtomHistoryResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AtomHistoryEvent"
+      required:
+        - events
 
     AtomSummary:
       description: |

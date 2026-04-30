@@ -961,6 +961,61 @@ export const GetAtomSummaryResponse = zod
   );
 
 /**
+ * Returns the most recent atom_events for the given atom, newest first.
+Backed by the same `EventAnchoringService` the registration's
+`contextSummary` reads through for `historyProvenance`, so this
+endpoint complements (does not replace) the four-layer summary —
+callers that only need the latest provenance can keep using
+`getAtomSummary`.
+
+Requires a registered atom slug (404 otherwise). The `limit`
+query parameter caps the page size (default 5, max 50). Events
+whose entity row has been deleted upstream still surface here:
+atom_events stores `(entity_type, entity_id)` as opaque text and
+is intentionally not FK'd to the entity table.
+
+ * @summary Read recent history events for an atom
+ */
+export const GetAtomHistoryParams = zod.object({
+  slug: zod.coerce.string(),
+  id: zod.coerce.string(),
+});
+
+export const getAtomHistoryQueryLimitMax = 50;
+
+export const GetAtomHistoryQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getAtomHistoryQueryLimitMax)
+    .optional()
+    .describe("Max events to return (default 5, max 50)."),
+});
+
+export const GetAtomHistoryResponse = zod.object({
+  events: zod.array(
+    zod
+      .object({
+        id: zod.string(),
+        eventType: zod.string(),
+        actor: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+          })
+          .describe(
+            "Identity of the actor that produced an event. Mirrors the\n`EventActor` type in `@workspace\/empressa-atom`. `id` is opaque\nto the framework; producers (e.g. snapshot ingest) choose the\nidentity scheme.\n",
+          ),
+        occurredAt: zod.coerce.date(),
+        recordedAt: zod.coerce.date(),
+      })
+      .describe(
+        "One row from `atom_events` exposed over HTTP. Matches the public\nfields of `AtomEvent` from `@workspace\/empressa-atom` minus the\nchain hashes (`prevHash`\/`chainHash`), which are an implementation\ndetail of the anchoring service and not useful to UI consumers.\n",
+      ),
+  ),
+});
+
+/**
  * Streams an assistant response over Server-Sent Events. Each event
 is `data: {"text": "..."}\n\n` followed by a final `data: [DONE]\n\n`.
 Grounds Claude on the latest snapshot for the given engagement.

@@ -19,8 +19,13 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { defaultScope, type Scope } from "@workspace/empressa-atom";
-import { getAtomRegistry } from "../atoms/registry";
+import { getAtomRegistry, getHistoryService } from "../atoms/registry";
 import { logger } from "../lib/logger";
+
+/** Default and hard cap for the history endpoint's page size. Mirrors the
+ *  OpenAPI contract for `GET /atoms/:slug/:id/history?limit=`. */
+const HISTORY_DEFAULT_LIMIT = 5;
+const HISTORY_MAX_LIMIT = 50;
 
 const router: IRouter = Router();
 
@@ -118,6 +123,76 @@ router.get(
         "atoms summary: contextSummary threw",
       );
       res.status(500).json({ error: "summary_failed" });
+    }
+  },
+);
+
+/**
+ * GET /atoms/:slug/:id/history — most-recent atom_events for one atom,
+ * newest first. Used by the plan-review sheet card's inline mini-
+ * timeline so reviewers can see the last few events without leaving
+ * the list view.
+ *
+ * 404s when the slug is not a registered atom (mirrors the summary
+ * route — the registry is the single source of truth for which atom
+ * types exist). The id is not validated against the entity table:
+ * `atom_events` stores `(entity_type, entity_id)` as opaque text and
+ * an unknown id legitimately yields an empty list.
+ *
+ * Registration order relative to `/atoms/:slug/:id/summary` does not
+ * matter — Express matches by path structure (the trailing segment
+ * differs), so the two routes never overlap.
+ */
+router.get(
+  "/atoms/:slug/:id/history",
+  async (req: Request, res: Response) => {
+    const slug = String(req.params["slug"] ?? "");
+    const id = String(req.params["id"] ?? "");
+    if (!slug || !id) {
+      res.status(400).json({ error: "Missing slug or id" });
+      return;
+    }
+
+    const registry = getAtomRegistry();
+    const resolved = registry.resolve(slug);
+    if (!resolved.ok) {
+      res.status(404).json({ error: "atom_type_not_registered", slug });
+      return;
+    }
+
+    // Parse + clamp `limit`: invalid input falls back to the default
+    // rather than 400ing (matches the rest of the route's "be liberal
+    // in what you accept from FE callers" stance).
+    const rawLimit = req.query["limit"];
+    let limit = HISTORY_DEFAULT_LIMIT;
+    if (typeof rawLimit === "string" && rawLimit.length > 0) {
+      const parsed = Number.parseInt(rawLimit, 10);
+      if (Number.isFinite(parsed) && parsed >= 1) {
+        limit = Math.min(parsed, HISTORY_MAX_LIMIT);
+      }
+    }
+
+    try {
+      const history = getHistoryService();
+      const events = await history.readHistory(
+        { kind: "atom", entityType: slug, entityId: id },
+        { limit, reverse: true },
+      );
+      // Strip chain hashes — they're an implementation detail of the
+      // anchoring service and not part of the public contract. Keep
+      // ISO strings for the timestamp fields per the OpenAPI schema.
+      res.json({
+        events: events.map((e) => ({
+          id: e.id,
+          eventType: e.eventType,
+          actor: e.actor,
+          occurredAt: e.occurredAt.toISOString(),
+          recordedAt: e.recordedAt.toISOString(),
+        })),
+      });
+    } catch (err) {
+      logger.error({ err, slug, id }, "atoms history: readHistory threw");
+      res.status(500).json({ error: "history_failed" });
     }
   },
 );

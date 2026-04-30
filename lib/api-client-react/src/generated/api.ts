@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AtomHistoryResponse,
   AtomSummary,
   ChatErrorResponse,
   ChatRequest,
@@ -26,6 +27,7 @@ import type {
   EngagementDetail,
   EngagementSummary,
   ErrorResponse,
+  GetAtomHistoryParams,
   GetAtomSummaryParams,
   HealthStatus,
   JurisdictionSummary,
@@ -1977,6 +1979,139 @@ export function useGetAtomSummary<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetAtomSummaryQueryOptions(slug, id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns the most recent atom_events for the given atom, newest first.
+Backed by the same `EventAnchoringService` the registration's
+`contextSummary` reads through for `historyProvenance`, so this
+endpoint complements (does not replace) the four-layer summary —
+callers that only need the latest provenance can keep using
+`getAtomSummary`.
+
+Requires a registered atom slug (404 otherwise). The `limit`
+query parameter caps the page size (default 5, max 50). Events
+whose entity row has been deleted upstream still surface here:
+atom_events stores `(entity_type, entity_id)` as opaque text and
+is intentionally not FK'd to the entity table.
+
+ * @summary Read recent history events for an atom
+ */
+export const getGetAtomHistoryUrl = (
+  slug: string,
+  id: string,
+  params?: GetAtomHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/atoms/${slug}/${id}/history?${stringifiedParams}`
+    : `/api/atoms/${slug}/${id}/history`;
+};
+
+export const getAtomHistory = async (
+  slug: string,
+  id: string,
+  params?: GetAtomHistoryParams,
+  options?: RequestInit,
+): Promise<AtomHistoryResponse> => {
+  return customFetch<AtomHistoryResponse>(
+    getGetAtomHistoryUrl(slug, id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAtomHistoryQueryKey = (
+  slug: string,
+  id: string,
+  params?: GetAtomHistoryParams,
+) => {
+  return [
+    `/api/atoms/${slug}/${id}/history`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetAtomHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAtomHistory>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  slug: string,
+  id: string,
+  params?: GetAtomHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAtomHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAtomHistoryQueryKey(slug, id, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAtomHistory>>> = ({
+    signal,
+  }) => getAtomHistory(slug, id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(slug && id),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAtomHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAtomHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAtomHistory>>
+>;
+export type GetAtomHistoryQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Read recent history events for an atom
+ */
+
+export function useGetAtomHistory<
+  TData = Awaited<ReturnType<typeof getAtomHistory>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  slug: string,
+  id: string,
+  params?: GetAtomHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAtomHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAtomHistoryQueryOptions(slug, id, params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
