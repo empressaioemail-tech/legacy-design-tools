@@ -1,11 +1,20 @@
 /**
- * Sheet ingest → `sheet.created` event emission (Task #18).
+ * Sheet ingest → atom event emission (Task #18 + Task #20).
  *
- * Wires the first real event producer onto the empressa-atom history
- * primitive: every newly-inserted sheet row in the snapshot ingest path
- * must produce exactly one `sheet.created` event in `atom_events`,
- * appended through the registry's history service (NOT a direct DB
- * write).
+ * Wires the snapshot ingest path onto the empressa-atom history
+ * primitive: every sheet mutation in the ingest path must produce a
+ * matching event in `atom_events`, appended through the registry's
+ * history service (NOT a direct DB write).
+ *
+ * Event types produced by the ingest path (Task #20 expanded #18):
+ *   - `sheet.created`: emitted on a fresh upsert (xmax = 0).
+ *   - `sheet.updated`: emitted when an upsert hits `onConflictDoUpdate`
+ *     (xmax != 0) for the same `(snapshotId, sheetNumber)` pair, with
+ *     a field-level `changes` diff payload.
+ *   - `sheet.removed`: emitted for any sheet that lived in the prior
+ *     snapshot for the same engagement but is missing from the current
+ *     upload. Attaches to the prior snapshot's sheet row (so the
+ *     entity's chain grows by one event).
  *
  * Coverage:
  *   1. Single multipart upload with one sheet → exactly one `sheet.created`
@@ -14,32 +23,24 @@
  *   2. The `GET /api/atoms/sheet/<id>/summary` route surfaces the
  *      real event id + timestamp via `historyProvenance`, not the
  *      `1970-01-01T...` placeholder.
- *   3. Two snapshots for the same engagement that share a sheet
- *      number produce two distinct sheet rows (the ingest upsert key
- *      is `(snapshotId, sheetNumber)` — see open-question note below)
- *      and therefore two events on SEPARATE chains, each rooted with
- *      `prev_hash = NULL`.
- *   4. Chain mechanics still hold for a single chain: a manual second
- *      `appendEvent` for the same sheet id correctly chains its
- *      `prev_hash` to the first event's `chain_hash`. This stands in
- *      for future `sheet.updated`/`sheet.removed` producers (out of
- *      scope for this task) and confirms the consumer-side hookup is
- *      correct end-to-end.
- *   5. An `appendEvent` failure does NOT roll back or fail the sheet
+ *   3. Two snapshots for the same engagement that BOTH contain the same
+ *      sheet number produce two distinct sheet rows (the ingest upsert
+ *      key is `(snapshotId, sheetNumber)`) — each with its own
+ *      `sheet.created` chain root. No `sheet.removed` is emitted
+ *      because the sheet number is present in the new upload.
+ *   4. Re-uploading to the same `(snapshotId, sheetNumber)` pair with
+ *      changed metadata grows the chain: a `sheet.updated` event is
+ *      appended whose `prev_hash` chains to the prior `sheet.created`
+ *      and whose payload carries the field-level diff.
+ *   5. A two-snapshot ingest where a sheet drops out of the newer
+ *      snapshot grows the dropped sheet's chain with a `sheet.removed`
+ *      event whose `prev_hash` links back to the original
+ *      `sheet.created`. Replaces the old "manual stand-in append"
+ *      coverage with a real cross-snapshot ingest sequence.
+ *   6. An `appendEvent` failure does NOT roll back or fail the sheet
  *      row insert — the `uploaded` counter still increments and the
  *      row is queryable. (Locked decision #5: events are observability,
  *      rows are the source of truth.)
- *
- * Open question resolution (task #18 step 6 note): The sheet ingest
- * upsert key is `(snapshotId, sheetNumber)`, not
- * `(engagementId, sheetNumber)`. A second snapshot under the same
- * engagement therefore creates a NEW sheet row (different uuid) for the
- * same sheet number, so each sheet's chain is single-event under the
- * ingest path alone. The cross-snapshot chain-linkage assertion in the
- * task brief assumed a row-level upsert and doesn't apply as-stated;
- * test (4) covers the same chain-hash invariant by appending a second
- * event directly to the history service, which is what the future
- * `sheet.updated` producer will do.
  */
 
 import { describe, it, expect, beforeAll, vi } from "vitest";
@@ -295,14 +296,17 @@ describe("snapshot sheet ingest emits sheet.created events (Task #18)", () => {
     expect(allEvents[0]!.chainHash).not.toBe(allEvents[1]!.chainHash);
   });
 
-  it("chain mechanics: appending a second event to an existing sheet's chain links prev_hash → first.chain_hash", async () => {
-    // Stand-in for the future `sheet.updated` producer. Confirms the
-    // history service the route uses correctly chains hashes when the
-    // same (entityType, entityId) pair sees a second append.
+  it("re-uploading the same (snapshotId, sheetNumber) emits sheet.updated chained onto sheet.created with a field-level diff", async () => {
+    // Real-ingest replacement for the manual chain-mechanics
+    // stand-in: the second upload to the same snapshot+sheetNumber
+    // triggers `onConflictDoUpdate` (xmax != 0), which the producer
+    // now translates into a `sheet.updated` event with a `changes`
+    // payload diff (Task #20).
     if (!ctx.schema) throw new Error("schema not ready");
     const db = ctx.schema.db;
-    const { snapshotId } = await seedSnapshot("Chain Mechanics");
+    const { engagementId, snapshotId } = await seedSnapshot("Update Snapshot");
 
+    // First upload — establishes the chain root.
     await uploadSheets(getApp(), snapshotId, [
       { sheetNumber: "A103", sheetName: "Roof Plan" },
     ]);
@@ -311,16 +315,22 @@ describe("snapshot sheet ingest emits sheet.created events (Task #18)", () => {
       .from(sheets)
       .where(eq(sheets.snapshotId, snapshotId));
 
-    // Manually append a second event through the same singleton the
-    // route uses.
-    const history = getHistoryService();
-    await history.appendEvent({
-      entityType: "sheet",
-      entityId: sheetId,
-      eventType: "sheet.updated",
-      actor: { kind: "system", id: "test-suite" },
-      payload: { reason: "chain mechanics check" },
-    });
+    // Second upload — same (snapshotId, sheetNumber), different
+    // sheetName. Hits the upsert-update branch.
+    const res2 = await uploadSheets(getApp(), snapshotId, [
+      { sheetNumber: "A103", sheetName: "Roof Plan (rev B)" },
+    ]);
+    expect(res2.status).toBe(200);
+    expect(res2.body).toMatchObject({ uploaded: 1, skipped: 0, failed: 0 });
+
+    // Still exactly one sheet row — the upsert mutated in place.
+    const sheetRows = await db
+      .select({ id: sheets.id, sheetName: sheets.sheetName })
+      .from(sheets)
+      .where(eq(sheets.snapshotId, snapshotId));
+    expect(sheetRows).toHaveLength(1);
+    expect(sheetRows[0]!.id).toBe(sheetId);
+    expect(sheetRows[0]!.sheetName).toBe("Roof Plan (rev B)");
 
     const events = await db
       .select()
@@ -339,6 +349,122 @@ describe("snapshot sheet ingest emits sheet.created events (Task #18)", () => {
     // Linkage: second event's prev_hash MUST equal first event's chain_hash.
     expect(events[1]!.prevHash).toBe(events[0]!.chainHash);
     expect(events[1]!.chainHash).not.toBe(events[0]!.chainHash);
+    expect(events[1]!.actor).toEqual({
+      kind: "system",
+      id: "snapshot-ingest",
+    });
+    expect(events[1]!.payload).toMatchObject({
+      sheetNumber: "A103",
+      snapshotId,
+      engagementId,
+      changes: {
+        sheetName: { from: "Roof Plan", to: "Roof Plan (rev B)" },
+      },
+    });
+    // Unchanged fields (PNG bytes, dimensions) should NOT show up in
+    // the diff.
+    const changes = (events[1]!.payload as { changes: Record<string, unknown> })
+      .changes;
+    expect(Object.keys(changes)).toEqual(["sheetName"]);
+  });
+
+  it("two-snapshot ingest where a sheet drops out emits sheet.removed chained onto the original sheet.created", async () => {
+    // Replaces the prior manual `appendEvent` stand-in with a real
+    // cross-snapshot ingest. Snapshot A has sheets {A201, A202}.
+    // Snapshot B (later) has only {A201}. The producer must emit a
+    // `sheet.removed` event against snapshot A's A202 row, growing
+    // that entity's chain from one event to two and linking the new
+    // `prev_hash` to the original `sheet.created`'s `chain_hash`.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const db = ctx.schema.db;
+    const { engagementId, snapshotId: snapshotIdA } =
+      await seedSnapshot("Removal Snapshot A");
+
+    await uploadSheets(getApp(), snapshotIdA, [
+      { sheetNumber: "A201", sheetName: "Floor 1" },
+      { sheetNumber: "A202", sheetName: "Floor 2" },
+    ]);
+
+    // Find the row id for A202 — that's the chain we expect to grow.
+    const [a202Row] = await db
+      .select({ id: sheets.id })
+      .from(sheets)
+      .where(
+        and(
+          eq(sheets.snapshotId, snapshotIdA),
+          eq(sheets.sheetNumber, "A202"),
+        ),
+      );
+    const a202Id = a202Row!.id;
+
+    // Create a strictly-later snapshot B for the same engagement.
+    // `received_at` defaults to `now()`; a microsecond delay isn't
+    // strictly necessary in practice but a tiny advisory wait avoids
+    // any flake risk if the test machine's clock granularity is
+    // unusually coarse.
+    await new Promise((r) => setTimeout(r, 5));
+    const [snapB] = await db
+      .insert(snapshots)
+      .values({
+        engagementId,
+        projectName: "Removal Snapshot B",
+        payload: { sheets: [], rooms: [] },
+      })
+      .returning({ id: snapshots.id });
+    const snapshotIdB = snapB.id;
+
+    // Snapshot B's upload is missing A202 — it should be marked
+    // removed against the prior snapshot's row.
+    await uploadSheets(getApp(), snapshotIdB, [
+      { sheetNumber: "A201", sheetName: "Floor 1 (rev)" },
+    ]);
+
+    const events = await db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "sheet"),
+          eq(atomEvents.entityId, a202Id),
+        ),
+      )
+      .orderBy(asc(atomEvents.recordedAt));
+    expect(events).toHaveLength(2);
+    expect(events[0]!.eventType).toBe("sheet.created");
+    expect(events[0]!.prevHash).toBeNull();
+    expect(events[1]!.eventType).toBe("sheet.removed");
+    // Real chain growth via the ingest path: prev_hash links the
+    // removal back to the creation event for the same entity.
+    expect(events[1]!.prevHash).toBe(events[0]!.chainHash);
+    expect(events[1]!.chainHash).not.toBe(events[0]!.chainHash);
+    expect(events[1]!.actor).toEqual({
+      kind: "system",
+      id: "snapshot-ingest",
+    });
+    expect(events[1]!.payload).toMatchObject({
+      sheetNumber: "A202",
+      sheetName: "Floor 2",
+      snapshotId: snapshotIdA,
+      engagementId,
+      missingFromSnapshotId: snapshotIdB,
+    });
+
+    // Idempotency: a second ingest into snapshot B that still omits
+    // A202 must NOT append another `sheet.removed` (the latest event
+    // on the chain is already a removal).
+    await uploadSheets(getApp(), snapshotIdB, [
+      { sheetNumber: "A201", sheetName: "Floor 1 (rev 2)" },
+    ]);
+    const eventsAfter = await db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "sheet"),
+          eq(atomEvents.entityId, a202Id),
+        ),
+      );
+    expect(eventsAfter).toHaveLength(2);
   });
 
   it("appendEvent failure is swallowed: the row insert still commits and the request still 200s", async () => {

@@ -7,7 +7,7 @@ import {
 import { createHash } from "node:crypto";
 import Busboy from "busboy";
 import { db, snapshots, sheets } from "@workspace/db";
-import { eq, sql, asc } from "drizzle-orm";
+import { eq, sql, asc, and, inArray, desc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { getHistoryService } from "../atoms/registry";
@@ -32,6 +32,65 @@ interface SheetMetadataEntry {
   thumbnailHeight: number;
   fullWidth: number;
   fullHeight: number;
+}
+
+/**
+ * Scalar columns we diff for `sheet.updated` events. Binary PNG columns
+ * are diffed separately by SHA-256 hash to keep payloads bounded.
+ */
+const SHEET_DIFF_SCALAR_FIELDS = [
+  "sheetName",
+  "viewCount",
+  "revisionNumber",
+  "revisionDate",
+  "thumbnailWidth",
+  "thumbnailHeight",
+  "fullWidth",
+  "fullHeight",
+  "sortOrder",
+  "engagementId",
+] as const;
+
+function sha256Hex(buf: Buffer | Uint8Array): string {
+  return createHash("sha256")
+    .update(Buffer.isBuffer(buf) ? buf : Buffer.from(buf))
+    .digest("hex");
+}
+
+interface SheetUpdateChange {
+  from: unknown;
+  to: unknown;
+}
+
+/**
+ * Produce a field-level diff between an existing sheet row and the
+ * proposed insert values. Only changed fields are returned. Binary
+ * fields (`thumbnailPng`, `fullPng`) are diffed by SHA-256 hash so the
+ * resulting event payload stays small even when the PNGs are large.
+ */
+function diffSheetRow(
+  oldRow: Record<string, unknown>,
+  newRow: Record<string, unknown>,
+): Record<string, SheetUpdateChange> {
+  const changes: Record<string, SheetUpdateChange> = {};
+  for (const f of SHEET_DIFF_SCALAR_FIELDS) {
+    const oldV = oldRow[f] ?? null;
+    const newV = newRow[f] ?? null;
+    if (oldV !== newV) {
+      changes[f] = { from: oldV, to: newV };
+    }
+  }
+  for (const f of ["thumbnailPng", "fullPng"] as const) {
+    const oldB = oldRow[f] as Buffer | Uint8Array | undefined | null;
+    const newB = newRow[f] as Buffer | Uint8Array | undefined | null;
+    if (!oldB || !newB) continue;
+    const oldH = sha256Hex(oldB);
+    const newH = sha256Hex(newB);
+    if (oldH !== newH) {
+      changes[f] = { from: oldH, to: newH };
+    }
+  }
+  return changes;
 }
 
 function parseMetadataEntries(raw: string): SheetMetadataEntry[] {
@@ -344,10 +403,46 @@ router.post(
       //
       // We RETURN `(xmax = 0)` alongside the row id so we can tell whether
       // the upsert produced a fresh row (xmax = 0) or merely updated an
-      // existing one (xmax != 0). Only fresh rows emit `sheet.created` —
-      // upsert-update territory belongs to a future `sheet.updated` event
-      // (out of scope per task #18).
+      // existing one (xmax != 0). Fresh rows emit `sheet.created`;
+      // updates emit `sheet.updated` with a diff payload (task #20).
       const history = getHistoryService();
+
+      // Pre-fetch any existing rows for the (snapshotId, sheetNumber)
+      // pairs we're about to upsert. We need the OLD column values so
+      // the `sheet.updated` payload can carry a real diff. A single
+      // batched query is cheap (small N, indexed by the unique
+      // constraint) and avoids a per-row round trip. Best-effort: if
+      // this query fails we proceed with empty diffs rather than
+      // failing the whole ingest.
+      const existingByNumber = new Map<string, Record<string, unknown>>();
+      if (rowsToInsert.length > 0) {
+        try {
+          const existingRows = await db
+            .select()
+            .from(sheets)
+            .where(
+              and(
+                eq(sheets.snapshotId, snapshotIdStr),
+                inArray(
+                  sheets.sheetNumber,
+                  rowsToInsert.map((r) => r.sheetNumber),
+                ),
+              ),
+            );
+          for (const r of existingRows) {
+            existingByNumber.set(
+              r.sheetNumber,
+              r as unknown as Record<string, unknown>,
+            );
+          }
+        } catch (err) {
+          reqLogger.warn(
+            { err, snapshotId },
+            "pre-fetch of existing sheets for diff failed — sheet.updated payloads will have empty diffs",
+          );
+        }
+      }
+
       for (const row of rowsToInsert) {
         let inserted: { id: string; wasInsert: boolean } | null = null;
         try {
@@ -401,46 +496,190 @@ router.post(
         // Event emission is best-effort: a history append failure must
         // never roll back or fail the row insert (the row is the source
         // of truth; events are observability). Per task #18 invariants.
-        if (inserted && inserted.wasInsert) {
-          try {
-            const event = await history.appendEvent({
-              entityType: "sheet",
-              entityId: inserted.id,
-              eventType: "sheet.created",
-              // No human actor for snapshot ingest — the add-in posts on
-              // behalf of the workstation. We model it as a system actor
-              // with a stable id so downstream consumers can filter
-              // ingest-originated events without false positives.
-              actor: { kind: "system", id: "snapshot-ingest" },
-              payload: {
-                sheetNumber: row.sheetNumber,
-                sheetName: row.sheetName,
-                snapshotId: snapshotIdStr,
-                engagementId: row.engagementId,
-              },
-            });
-            reqLogger.info(
-              {
-                sheetId: inserted.id,
-                snapshotId,
-                sheetNumber: row.sheetNumber,
-                eventId: event.id,
-                chainHash: event.chainHash,
-              },
-              "sheet.created event appended",
-            );
-          } catch (err) {
-            reqLogger.error(
-              {
-                err,
-                sheetId: inserted.id,
-                snapshotId,
-                sheetNumber: row.sheetNumber,
-              },
-              "sheet.created event append failed — row insert kept",
-            );
+        if (inserted) {
+          if (inserted.wasInsert) {
+            try {
+              const event = await history.appendEvent({
+                entityType: "sheet",
+                entityId: inserted.id,
+                eventType: "sheet.created",
+                // No human actor for snapshot ingest — the add-in posts on
+                // behalf of the workstation. We model it as a system actor
+                // with a stable id so downstream consumers can filter
+                // ingest-originated events without false positives.
+                actor: { kind: "system", id: "snapshot-ingest" },
+                payload: {
+                  sheetNumber: row.sheetNumber,
+                  sheetName: row.sheetName,
+                  snapshotId: snapshotIdStr,
+                  engagementId: row.engagementId,
+                },
+              });
+              reqLogger.info(
+                {
+                  sheetId: inserted.id,
+                  snapshotId,
+                  sheetNumber: row.sheetNumber,
+                  eventId: event.id,
+                  chainHash: event.chainHash,
+                },
+                "sheet.created event appended",
+              );
+            } catch (err) {
+              reqLogger.error(
+                {
+                  err,
+                  sheetId: inserted.id,
+                  snapshotId,
+                  sheetNumber: row.sheetNumber,
+                },
+                "sheet.created event append failed — row insert kept",
+              );
+            }
+          } else {
+            // The upsert hit `onConflictDoUpdate` (xmax != 0) so this is
+            // a re-upload of an existing (snapshotId, sheetNumber)
+            // pair. Emit `sheet.updated` with a field-level diff so the
+            // history chain grows under the ingest path (task #20).
+            const oldRow = existingByNumber.get(row.sheetNumber);
+            const changes = oldRow
+              ? diffSheetRow(oldRow, row as unknown as Record<string, unknown>)
+              : {};
+            try {
+              const event = await history.appendEvent({
+                entityType: "sheet",
+                entityId: inserted.id,
+                eventType: "sheet.updated",
+                actor: { kind: "system", id: "snapshot-ingest" },
+                payload: {
+                  sheetNumber: row.sheetNumber,
+                  snapshotId: snapshotIdStr,
+                  engagementId: row.engagementId,
+                  changes,
+                },
+              });
+              reqLogger.info(
+                {
+                  sheetId: inserted.id,
+                  snapshotId,
+                  sheetNumber: row.sheetNumber,
+                  eventId: event.id,
+                  chainHash: event.chainHash,
+                  changedFields: Object.keys(changes),
+                },
+                "sheet.updated event appended",
+              );
+            } catch (err) {
+              reqLogger.error(
+                {
+                  err,
+                  sheetId: inserted.id,
+                  snapshotId,
+                  sheetNumber: row.sheetNumber,
+                },
+                "sheet.updated event append failed — row update kept",
+              );
+            }
           }
         }
+      }
+
+      // Diff against the prior snapshot for this engagement and emit a
+      // `sheet.removed` event for any sheet that lived in the prior
+      // snapshot but is missing from this upload. This is what causes
+      // an entity's history chain to grow across snapshots — the row
+      // itself stays put (it belongs to the old snapshot), but its
+      // event log records that it no longer appears in the engagement's
+      // current state. (Task #20.)
+      try {
+        const priorSnapRows = await db
+          .select({ id: snapshots.id })
+          .from(snapshots)
+          .where(
+            and(
+              eq(snapshots.engagementId, engagementId),
+              sql`${snapshots.receivedAt} < (
+                SELECT ${snapshots.receivedAt} FROM ${snapshots}
+                WHERE ${snapshots.id} = ${snapshotIdStr}
+              )`,
+            ),
+          )
+          .orderBy(desc(snapshots.receivedAt))
+          .limit(1);
+        const prior = priorSnapRows[0];
+        if (prior) {
+          const priorSheets = await db
+            .select({
+              id: sheets.id,
+              sheetNumber: sheets.sheetNumber,
+              sheetName: sheets.sheetName,
+            })
+            .from(sheets)
+            .where(eq(sheets.snapshotId, prior.id));
+          const currentNumbers = new Set(
+            rowsToInsert.map((r) => r.sheetNumber),
+          );
+          for (const ps of priorSheets) {
+            if (currentNumbers.has(ps.sheetNumber)) continue;
+            // Idempotency guard: if a previous ingest into a snapshot
+            // newer than `prior` already emitted `sheet.removed` for
+            // this entity, skip — re-emitting on every subsequent
+            // ingest would noisily inflate the chain.
+            try {
+              const latest = await history.latestEvent({
+                kind: "atom",
+                entityType: "sheet",
+                entityId: ps.id,
+              });
+              if (latest && latest.eventType === "sheet.removed") continue;
+            } catch (err) {
+              reqLogger.warn(
+                { err, sheetId: ps.id },
+                "latestEvent lookup for sheet.removed idempotency failed — emitting anyway",
+              );
+            }
+            try {
+              const ev = await history.appendEvent({
+                entityType: "sheet",
+                entityId: ps.id,
+                eventType: "sheet.removed",
+                actor: { kind: "system", id: "snapshot-ingest" },
+                payload: {
+                  sheetNumber: ps.sheetNumber,
+                  sheetName: ps.sheetName,
+                  snapshotId: prior.id,
+                  engagementId,
+                  missingFromSnapshotId: snapshotIdStr,
+                },
+              });
+              reqLogger.info(
+                {
+                  sheetId: ps.id,
+                  priorSnapshotId: prior.id,
+                  currentSnapshotId: snapshotIdStr,
+                  sheetNumber: ps.sheetNumber,
+                  eventId: ev.id,
+                  chainHash: ev.chainHash,
+                },
+                "sheet.removed event appended",
+              );
+            } catch (err) {
+              reqLogger.error(
+                {
+                  err,
+                  sheetId: ps.id,
+                  sheetNumber: ps.sheetNumber,
+                },
+                "sheet.removed event append failed",
+              );
+            }
+          }
+        }
+      } catch (err) {
+        reqLogger.warn(
+          { err, snapshotId },
+          "sheet.removed diff against prior snapshot failed — skipping removals",
+        );
       }
 
       // Recompute snapshot.sheetCount from the canonical sheets table so the

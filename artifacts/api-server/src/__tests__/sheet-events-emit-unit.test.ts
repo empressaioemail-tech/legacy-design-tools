@@ -1,6 +1,6 @@
 /**
- * Unit-level coverage for the `sheet.created` emission call site
- * (Task #18 step 5).
+ * Unit-level coverage for the sheet event emission call sites
+ * (Task #18 step 5; expanded by Task #20 to cover `sheet.updated`).
  *
  * Where the sibling `sheet-events-ingest.test.ts` exercises the
  * producer end-to-end against a real history service, this file
@@ -14,7 +14,10 @@
  *      canonical payload shape (`sheetNumber`, `sheetName`,
  *      `snapshotId`, `engagementId`), `entityType:"sheet"`,
  *      `eventType:"sheet.created"`, and the system actor.
- *   2. An `appendEvent` rejection is swallowed: the HTTP response is
+ *   2. Re-uploading the same `(snapshotId, sheetNumber)` pair emits
+ *      `sheet.updated` (Task #20) with a `changes` diff payload,
+ *      while the `sheet.created` for the original insert is preserved.
+ *   3. An `appendEvent` rejection is swallowed: the HTTP response is
  *      still 200 with `uploaded: 1`, and the sheet row is queryable.
  *
  * The DB itself is real (test schema) because mocking drizzle's full
@@ -187,17 +190,18 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
     expect(arg).not.toHaveProperty("occurredAt");
   });
 
-  it("does NOT emit sheet.created when an upload hits onConflictDoUpdate (re-uploading the same (snapshotId, sheetNumber))", async () => {
-    // Step 3 of the task brief explicitly carves out upsert-update from
-    // sheet.created emission — that's sheet.updated territory, owned by
-    // a future task. Re-uploading the same (snapshotId, sheetNumber)
-    // pair must NOT call appendEvent a second time.
+  it("emits sheet.updated (NOT a second sheet.created) when an upload hits onConflictDoUpdate, with a field-level diff", async () => {
+    // Task #20 expanded the producer: re-uploading the same
+    // (snapshotId, sheetNumber) pair triggers the upsert-update
+    // branch (xmax != 0) and must emit a `sheet.updated` event with a
+    // `changes` diff payload — NOT a duplicate `sheet.created`.
     appendEventMock.mockReset();
     appendEventMock.mockResolvedValue({
       id: "evt-fake",
       chainHash: "x".repeat(64),
     });
-    const { snapshotId } = await seedSnapshot("Unit Conflict Update");
+    const { engagementId, snapshotId } =
+      await seedSnapshot("Unit Conflict Update");
 
     const first = await uploadOneSheet(getApp(), snapshotId, {
       sheetNumber: "A300",
@@ -206,23 +210,51 @@ describe("sheet ingest emission call site (unit, mocked registry)", () => {
     expect(first.status).toBe(200);
     expect(first.body).toMatchObject({ uploaded: 1 });
     expect(appendEventMock).toHaveBeenCalledTimes(1);
+    expect(appendEventMock.mock.calls[0]![0].eventType).toBe("sheet.created");
 
     // Same snapshot, same sheet number, different sheet name — this
-    // hits the `onConflictDoUpdate` branch (xmax != 0) and must not
-    // emit a second `sheet.created`.
+    // hits the `onConflictDoUpdate` branch (xmax != 0) and must emit
+    // exactly one `sheet.updated` event (no second `sheet.created`).
     const second = await uploadOneSheet(getApp(), snapshotId, {
       sheetNumber: "A300",
       sheetName: "Renamed In Re-upload",
     });
     expect(second.status).toBe(200);
     expect(second.body).toMatchObject({ uploaded: 1 });
-    // Critical assertion: still exactly one appendEvent call total.
-    expect(appendEventMock).toHaveBeenCalledTimes(1);
+    // Now there must be exactly two appendEvent calls total: one
+    // `sheet.created` from the first upload + one `sheet.updated`
+    // from the re-upload. The producer must NOT issue a second
+    // `sheet.created`.
+    expect(appendEventMock).toHaveBeenCalledTimes(2);
+    const updatedCallArg = appendEventMock.mock.calls[1]![0];
+
+    // Locate the row id we expect the update event to reference.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const [{ id: sheetId }] = await ctx.schema.db
+      .select({ id: sheets.id, sheetName: sheets.sheetName })
+      .from(sheets)
+      .where(eq(sheets.snapshotId, snapshotId));
+
+    expect(updatedCallArg).toEqual({
+      entityType: "sheet",
+      entityId: sheetId,
+      eventType: "sheet.updated",
+      actor: { kind: "system", id: "snapshot-ingest" },
+      payload: {
+        sheetNumber: "A300",
+        snapshotId,
+        engagementId,
+        changes: {
+          sheetName: { from: "Original Name", to: "Renamed In Re-upload" },
+        },
+      },
+    });
+    // No `occurredAt` — the producer lets the service stamp now().
+    expect(updatedCallArg).not.toHaveProperty("occurredAt");
 
     // And the row was indeed updated (not a no-op): the sheetName
     // changed in place, confirming we exercised the conflict-update
     // branch rather than a fresh insert.
-    if (!ctx.schema) throw new Error("schema not ready");
     const rows = await ctx.schema.db
       .select({ id: sheets.id, sheetName: sheets.sheetName })
       .from(sheets)
