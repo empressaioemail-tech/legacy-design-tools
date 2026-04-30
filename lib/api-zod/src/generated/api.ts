@@ -577,6 +577,16 @@ export const ListJurisdictionAtomsQueryParams = zod.object({
     .number()
     .max(listJurisdictionAtomsQueryLimitMax)
     .default(listJurisdictionAtomsQueryLimitDefault),
+  codeBook: zod.coerce
+    .string()
+    .optional()
+    .describe("Optional filter — restrict to a single code book."),
+  edition: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Optional filter — restrict to a single edition (use together with codeBook).",
+    ),
 });
 
 export const ListJurisdictionAtomsResponseItem = zod.object({
@@ -628,6 +638,43 @@ export const GetCodeAtomResponse = zod
   );
 
 /**
+ * Returns counts of `code_atom_fetch_queue` rows by status for the given
+jurisdiction, a derived `state`, and (when present) the most recent
+failed row's `lastError` text so failures are debuggable from the
+browser without server-log access.
+
+state derivation:
+  - total === 0          → "idle"
+  - pending > 0 OR
+    processing > 0       → "running"
+  - failed > 0 AND
+    pending+processing=0 → "failed"
+  - otherwise            → "completed"
+
+ * @summary Live warmup queue state for a jurisdiction
+ */
+export const GetWarmupStatusParams = zod.object({
+  key: zod.coerce.string(),
+});
+
+export const GetWarmupStatusResponse = zod
+  .object({
+    jurisdictionKey: zod.string(),
+    state: zod.enum(["idle", "running", "completed", "failed"]),
+    pending: zod.number(),
+    processing: zod.number(),
+    completed: zod.number(),
+    failed: zod.number(),
+    total: zod.number(),
+    startedAt: zod.coerce.date().nullable(),
+    completedAt: zod.coerce.date().nullable(),
+    lastError: zod.string().nullable(),
+  })
+  .describe(
+    "Live state of the code-atom fetch queue for a jurisdiction. The DB\ncolumn `status` uses `in_progress`; this surface re-labels it as\n`processing` for clarity. `lastError` carries the most recent\nfailed-row text (truncated to 1000 chars by the orchestrator) so\nwarmup failures are debuggable from the browser.\n",
+  );
+
+/**
  * Idempotent. Inserts new TOC entries into the fetch queue (existing
 entries are skipped) and synchronously drains a small batch so the
 caller can confirm the pipeline is alive. Long-running fetches
@@ -649,6 +696,16 @@ export const WarmupJurisdictionResponse = zod.object({
     failed: zod.number(),
     atomsWritten: zod.number(),
   }),
+  discoveryErrors: zod
+    .array(
+      zod.object({
+        sourceName: zod.string(),
+        error: zod.string(),
+      }),
+    )
+    .describe(
+      'Per-book discovery-phase failures (missing source row, listToc\nthrew, etc). Empty array on success. Surfaced to the UI so the\n\"warmup discovered nothing\" silent-failure case is debuggable\nfrom the browser.\n',
+    ),
 });
 
 /**

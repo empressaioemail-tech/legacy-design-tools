@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { WarmupResultDiscoveryErrorsItem } from "./warmupResultDiscoveryErrorsItem";
 import type { WarmupResultDrained } from "./warmupResultDrained";
 
 export interface WarmupResult {
@@ -12,4 +13,10 @@ export interface WarmupResult {
   enqueued: number;
   skipped: number;
   drained: WarmupResultDrained;
+  /** Per-book discovery-phase failures (missing source row, listToc
+threw, etc). Empty array on success. Surfaced to the UI so the
+"warmup discovered nothing" silent-failure case is debuggable
+from the browser.
+ */
+  discoveryErrors: WarmupResultDiscoveryErrorsItem[];
 }

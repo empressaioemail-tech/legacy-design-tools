@@ -47,4 +47,7 @@ export * from "./snapshotSummary";
 export * from "./updateEngagementBody";
 export * from "./uploadSnapshotSheetsBody";
 export * from "./warmupResult";
+export * from "./warmupResultDiscoveryErrorsItem";
 export * from "./warmupResultDrained";
+export * from "./warmupStatus";
+export * from "./warmupStatusState";

@@ -3,7 +3,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, codeAtoms, codeAtomSources } from "@workspace/db";
+import { db, codeAtoms, codeAtomSources, codeAtomFetchQueue } from "@workspace/db";
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { embedTexts, EMBEDDING_MODEL } from "@workspace/codes";
 import {
@@ -116,7 +116,19 @@ router.get(
     const limit = Number.isFinite(limitRaw)
       ? Math.max(1, Math.min(200, Math.floor(limitRaw)))
       : 50;
+    // Optional book filter: codeBook (and optionally edition) narrow the
+    // response to a single book for the "click a book pill to browse it"
+    // flow. We accept codeBook on its own (Bastrop has only one edition per
+    // book today) but require codeBook to use edition.
+    const codeBookFilter = req.query.codeBook
+      ? String(req.query.codeBook)
+      : null;
+    const editionFilter = req.query.edition ? String(req.query.edition) : null;
     try {
+      const conditions = [eq(codeAtoms.jurisdictionKey, key)];
+      if (codeBookFilter) conditions.push(eq(codeAtoms.codeBook, codeBookFilter));
+      if (codeBookFilter && editionFilter)
+        conditions.push(eq(codeAtoms.edition, editionFilter));
       const rows = await db
         .select({
           id: codeAtoms.id,
@@ -133,7 +145,7 @@ router.get(
         })
         .from(codeAtoms)
         .innerJoin(codeAtomSources, eq(codeAtomSources.id, codeAtoms.sourceId))
-        .where(eq(codeAtoms.jurisdictionKey, key))
+        .where(and(...conditions))
         .orderBy(desc(codeAtoms.fetchedAt))
         .limit(limit);
       res.json(
@@ -215,6 +227,122 @@ router.get(
   },
 );
 
+/**
+ * Live warmup queue state for a jurisdiction. Used by the Code Library UI to
+ * poll progress while "Warm up now" is running and to surface failure detail
+ * inline (without requiring server-log access).
+ *
+ * The DB column `status` uses `in_progress`; the API surface re-labels that
+ * bucket as `processing` for clarity. `lastError` carries the most recent
+ * failed-row text (orchestrator truncates to 1000 chars at write time).
+ */
+router.get(
+  "/codes/warmup-status/:key",
+  async (req: Request, res: Response): Promise<void> => {
+    const key = String(req.params.key ?? "");
+    if (!getJurisdiction(key)) {
+      res.status(404).json({ error: "Unknown jurisdiction" });
+      return;
+    }
+    try {
+      // One pass aggregating by status, plus the earliest createdAt and
+      // latest completedAt across all rows. The most recent failed-row
+      // lastError is fetched as a tiny separate query so we can surface the
+      // text even when the row is the only failed one in the set.
+      const aggRows = await db
+        .select({
+          status: codeAtomFetchQueue.status,
+          count: sql<number>`count(*)::int`,
+          minCreated: sql<string | null>`min(${codeAtomFetchQueue.createdAt})`,
+          maxCompleted: sql<string | null>`max(${codeAtomFetchQueue.completedAt})`,
+        })
+        .from(codeAtomFetchQueue)
+        .where(eq(codeAtomFetchQueue.jurisdictionKey, key))
+        .groupBy(codeAtomFetchQueue.status);
+
+      let pending = 0;
+      let processing = 0;
+      let completed = 0;
+      let failed = 0;
+      let startedAt: string | null = null;
+      let completedAt: string | null = null;
+      for (const r of aggRows) {
+        const c = Number(r.count);
+        if (r.status === "pending") pending = c;
+        else if (r.status === "in_progress") processing = c;
+        else if (r.status === "completed") completed = c;
+        else if (r.status === "failed") failed = c;
+        const minC = r.minCreated
+          ? new Date(r.minCreated as unknown as string).toISOString()
+          : null;
+        if (minC && (!startedAt || minC < startedAt)) startedAt = minC;
+        const maxC = r.maxCompleted
+          ? new Date(r.maxCompleted as unknown as string).toISOString()
+          : null;
+        if (maxC && (!completedAt || maxC > completedAt)) completedAt = maxC;
+      }
+      const total = pending + processing + completed + failed;
+
+      // Most recent failed row's lastError. We only surface it when there's
+      // at least one failed row in the bucket — otherwise null. This matches
+      // what the spec calls out: "warmup did nothing" should be debuggable
+      // from the browser without log access.
+      let lastError: string | null = null;
+      if (failed > 0) {
+        const failedRows = await db
+          .select({ lastError: codeAtomFetchQueue.lastError })
+          .from(codeAtomFetchQueue)
+          .where(
+            and(
+              eq(codeAtomFetchQueue.jurisdictionKey, key),
+              eq(codeAtomFetchQueue.status, "failed"),
+              isNotNull(codeAtomFetchQueue.lastError),
+            ),
+          )
+          .orderBy(desc(codeAtomFetchQueue.createdAt))
+          .limit(1);
+        lastError = failedRows[0]?.lastError ?? null;
+      }
+
+      // Derive state. Order matters:
+      //   - empty queue → idle (nothing has ever been enqueued)
+      //   - any pending or processing → running
+      //   - else if any failed → failed (terminal-with-failures)
+      //   - else → completed
+      let state: "idle" | "running" | "completed" | "failed";
+      if (total === 0) state = "idle";
+      else if (pending > 0 || processing > 0) state = "running";
+      else if (failed > 0) state = "failed";
+      else state = "completed";
+
+      // For an empty queue, startedAt/completedAt have no meaning.
+      if (total === 0) {
+        startedAt = null;
+        completedAt = null;
+      }
+      // For a still-running queue, completedAt is misleading (it's the
+      // latest among already-completed rows, not the whole batch). Suppress.
+      if (state === "running") completedAt = null;
+
+      res.json({
+        jurisdictionKey: key,
+        state,
+        pending,
+        processing,
+        completed,
+        failed,
+        total,
+        startedAt,
+        completedAt,
+        lastError,
+      });
+    } catch (err) {
+      logger.error({ err, key }, "warmup-status failed");
+      res.status(500).json({ error: "Failed to read warmup status" });
+    }
+  },
+);
+
 router.post(
   "/codes/warmup/:key",
   async (req: Request, res: Response): Promise<void> => {
@@ -228,11 +356,18 @@ router.post(
       // Drain a small synchronous batch so the caller sees real progress;
       // background worker handles the rest.
       const drain = await drainQueue(logger, 3);
+      // Surface per-book discovery failures so the UI can debug
+      // "warmup did nothing" without server-log access. The orchestrator
+      // already collects these but the previous response shape dropped them.
+      const discoveryErrors = enqueue.perBook
+        .filter((b) => b.error)
+        .map((b) => ({ sourceName: b.sourceName, error: String(b.error) }));
       res.json({
         jurisdictionKey: key,
         enqueued: enqueue.enqueued,
         skipped: enqueue.skipped,
         drained: drain,
+        discoveryErrors,
       });
     } catch (err) {
       logger.error({ err, key }, "warmup failed");

@@ -11,4 +11,12 @@ export type ListJurisdictionAtomsParams = {
    * @maximum 200
    */
   limit?: number;
+  /**
+   * Optional filter — restrict to a single code book.
+   */
+  codeBook?: string;
+  /**
+   * Optional filter — restrict to a single edition (use together with codeBook).
+   */
+  edition?: string;
 };

@@ -458,6 +458,18 @@ paths:
             type: integer
             default: 50
             maximum: 200
+        - name: codeBook
+          in: query
+          required: false
+          description: Optional filter — restrict to a single code book.
+          schema:
+            type: string
+        - name: edition
+          in: query
+          required: false
+          description: Optional filter — restrict to a single edition (use together with codeBook).
+          schema:
+            type: string
       responses:
         "200":
           description: Atom summaries
@@ -494,6 +506,44 @@ paths:
                 $ref: "#/components/schemas/CodeAtomDetail"
         "404":
           description: Atom not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /codes/warmup-status/{key}:
+    get:
+      operationId: getWarmupStatus
+      tags: [codes]
+      summary: Live warmup queue state for a jurisdiction
+      description: |
+        Returns counts of `code_atom_fetch_queue` rows by status for the given
+        jurisdiction, a derived `state`, and (when present) the most recent
+        failed row's `lastError` text so failures are debuggable from the
+        browser without server-log access.
+
+        state derivation:
+          - total === 0          → "idle"
+          - pending > 0 OR
+            processing > 0       → "running"
+          - failed > 0 AND
+            pending+processing=0 → "failed"
+          - otherwise            → "completed"
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current warmup status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WarmupStatus"
+        "404":
+          description: Unknown jurisdiction key
           content:
             application/json:
               schema:
@@ -1257,8 +1307,73 @@ components:
             - completed
             - failed
             - atomsWritten
+        discoveryErrors:
+          type: array
+          description: |
+            Per-book discovery-phase failures (missing source row, listToc
+            threw, etc). Empty array on success. Surfaced to the UI so the
+            "warmup discovered nothing" silent-failure case is debuggable
+            from the browser.
+          items:
+            type: object
+            properties:
+              sourceName:
+                type: string
+              error:
+                type: string
+            required:
+              - sourceName
+              - error
       required:
         - jurisdictionKey
         - enqueued
         - skipped
         - drained
+        - discoveryErrors
+
+    WarmupStatus:
+      type: object
+      description: |
+        Live state of the code-atom fetch queue for a jurisdiction. The DB
+        column `status` uses `in_progress`; this surface re-labels it as
+        `processing` for clarity. `lastError` carries the most recent
+        failed-row text (truncated to 1000 chars by the orchestrator) so
+        warmup failures are debuggable from the browser.
+      properties:
+        jurisdictionKey:
+          type: string
+        state:
+          type: string
+          enum: [idle, running, completed, failed]
+        pending:
+          type: integer
+        processing:
+          type: integer
+        completed:
+          type: integer
+        failed:
+          type: integer
+        total:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastError:
+          type: string
+          nullable: true
+      required:
+        - jurisdictionKey
+        - state
+        - pending
+        - processing
+        - completed
+        - failed
+        - total
+        - startedAt
+        - completedAt
+        - lastError

@@ -38,6 +38,7 @@ import type {
   UpdateEngagementBody,
   UploadSnapshotSheetsBody,
   WarmupResult,
+  WarmupStatus,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -1452,6 +1453,106 @@ export function useGetCodeAtom<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetCodeAtomQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns counts of `code_atom_fetch_queue` rows by status for the given
+jurisdiction, a derived `state`, and (when present) the most recent
+failed row's `lastError` text so failures are debuggable from the
+browser without server-log access.
+
+state derivation:
+  - total === 0          → "idle"
+  - pending > 0 OR
+    processing > 0       → "running"
+  - failed > 0 AND
+    pending+processing=0 → "failed"
+  - otherwise            → "completed"
+
+ * @summary Live warmup queue state for a jurisdiction
+ */
+export const getGetWarmupStatusUrl = (key: string) => {
+  return `/api/codes/warmup-status/${key}`;
+};
+
+export const getWarmupStatus = async (
+  key: string,
+  options?: RequestInit,
+): Promise<WarmupStatus> => {
+  return customFetch<WarmupStatus>(getGetWarmupStatusUrl(key), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetWarmupStatusQueryKey = (key: string) => {
+  return [`/api/codes/warmup-status/${key}`] as const;
+};
+
+export const getGetWarmupStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getWarmupStatus>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  key: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getWarmupStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetWarmupStatusQueryKey(key);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getWarmupStatus>>> = ({
+    signal,
+  }) => getWarmupStatus(key, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!key,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getWarmupStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetWarmupStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getWarmupStatus>>
+>;
+export type GetWarmupStatusQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Live warmup queue state for a jurisdiction
+ */
+
+export function useGetWarmupStatus<
+  TData = Awaited<ReturnType<typeof getWarmupStatus>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  key: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getWarmupStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetWarmupStatusQueryOptions(key, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

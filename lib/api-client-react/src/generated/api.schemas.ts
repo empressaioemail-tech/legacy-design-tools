@@ -321,11 +321,53 @@ export type WarmupResultDrained = {
   atomsWritten: number;
 };
 
+export type WarmupResultDiscoveryErrorsItem = {
+  sourceName: string;
+  error: string;
+};
+
 export interface WarmupResult {
   jurisdictionKey: string;
   enqueued: number;
   skipped: number;
   drained: WarmupResultDrained;
+  /** Per-book discovery-phase failures (missing source row, listToc
+threw, etc). Empty array on success. Surfaced to the UI so the
+"warmup discovered nothing" silent-failure case is debuggable
+from the browser.
+ */
+  discoveryErrors: WarmupResultDiscoveryErrorsItem[];
+}
+
+export type WarmupStatusState =
+  (typeof WarmupStatusState)[keyof typeof WarmupStatusState];
+
+export const WarmupStatusState = {
+  idle: "idle",
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+/**
+ * Live state of the code-atom fetch queue for a jurisdiction. The DB
+column `status` uses `in_progress`; this surface re-labels it as
+`processing` for clarity. `lastError` carries the most recent
+failed-row text (truncated to 1000 chars by the orchestrator) so
+warmup failures are debuggable from the browser.
+
+ */
+export interface WarmupStatus {
+  jurisdictionKey: string;
+  state: WarmupStatusState;
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  total: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
 }
 
 export type UpdateEngagementBody = {
@@ -348,4 +390,12 @@ export type ListJurisdictionAtomsParams = {
    * @maximum 200
    */
   limit?: number;
+  /**
+   * Optional filter — restrict to a single code book.
+   */
+  codeBook?: string;
+  /**
+   * Optional filter — restrict to a single edition (use together with codeBook).
+   */
+  edition?: string;
 };
