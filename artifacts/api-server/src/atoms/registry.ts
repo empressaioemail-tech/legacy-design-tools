@@ -120,6 +120,11 @@ export function bootstrapAtomRegistry(
         entityType: r.entityType,
         domain: r.domain,
         defaultMode: r.defaultMode,
+        // Surface the declared event vocabulary in the boot log so
+        // operators tailing logs can see what each atom is allowed to
+        // emit without grepping the source. `?? []` mirrors the
+        // catalog's "missing field = no declared events" convention.
+        eventTypes: r.eventTypes ?? [],
       })),
     },
     "atom registry ready",

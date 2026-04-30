@@ -51,12 +51,13 @@ export const SNAPSHOT_SUPPORTED_MODES = [
 export type SnapshotSupportedModes = typeof SNAPSHOT_SUPPORTED_MODES;
 
 /**
- * Event types this atom is allowed to emit. Declared as an exported
- * constant rather than on the `AtomRegistration` itself because the
- * framework does not yet expose an `emits`/`eventTypes` field on the
- * registration shape — see the Phase 4 report. Producers (the snapshot
- * ingest path, parallel sprint to Task #18) will reference these names
- * when calling {@link EventAnchoringService.appendEvent}.
+ * Event types this atom is allowed to emit. Wired onto the registration
+ * via the `eventTypes` field (Task #26) so the registry catalog and any
+ * `describeForPrompt`-driven surface can introspect the vocabulary
+ * without sniffing source files. The exported constant is preserved so
+ * producers (the snapshot ingest path, parallel sprint to Task #18) can
+ * reference the same names when calling
+ * {@link EventAnchoringService.appendEvent}.
  *
  * - `snapshot.created` — a new snapshot row was inserted.
  * - `snapshot.received` — the Revit add-in payload was successfully
@@ -120,6 +121,7 @@ export function makeSnapshotAtom(
     supportedModes: SNAPSHOT_SUPPORTED_MODES,
     defaultMode: "card",
     composition,
+    eventTypes: SNAPSHOT_EVENT_TYPES,
     async contextSummary(
       entityId: string,
       _scope,

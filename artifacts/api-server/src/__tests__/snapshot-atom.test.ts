@@ -270,20 +270,25 @@ describe("snapshot atom (composition + behavior)", () => {
     expect(summary.historyProvenance.latestEventId).toBe("");
   });
 
-  it("declares the snapshot.* event vocabulary as a stable export", () => {
-    // Framework gap: `AtomRegistration` has no `emits`/`eventTypes`
-    // field yet, so we expose declared event types as an exported const
-    // until the framework grows that surface (see Phase 4 report).
+  it("declares the snapshot.* event vocabulary as a stable export and on the registration", () => {
+    // The constant is preserved (producers reference it when appending
+    // events) AND wired onto the registration via the framework's
+    // `eventTypes` field (Task #26) so the registry catalog can
+    // introspect it without sniffing source files.
     expect(SNAPSHOT_EVENT_TYPES).toEqual([
       "snapshot.created",
       "snapshot.received",
       "snapshot.referenced-in-submission",
     ]);
+    const registration = makeSnapshotAtom({ db: lazyDb });
+    expect(registration.eventTypes).toEqual(SNAPSHOT_EVENT_TYPES);
   });
 
-  it("describeForPrompt advertises both sheet and snapshot after registration", () => {
+  it("describeForPrompt advertises both sheet and snapshot with their event vocabularies", () => {
     // Sanity check that the chat path's `describeForPrompt()` call sees
-    // both atoms in the vocabulary it returns to the prompt builder.
+    // both atoms in the vocabulary it returns to the prompt builder, and
+    // that each atom's declared event types come along for the ride
+    // (Task #26).
     const registry = createTestRegistry([
       makeSheetAtom({ db: lazyDb }),
       makeSnapshotAtom({ db: lazyDb }),
@@ -293,5 +298,16 @@ describe("snapshot atom (composition + behavior)", () => {
     expect(types).toEqual(["sheet", "snapshot"]);
     const snap = desc.find((d) => d.entityType === "snapshot");
     expect(snap?.composes).toEqual(["sheet"]);
+    expect(snap?.eventTypes).toEqual([
+      "snapshot.created",
+      "snapshot.received",
+      "snapshot.referenced-in-submission",
+    ]);
+    const sheet = desc.find((d) => d.entityType === "sheet");
+    expect(sheet?.eventTypes).toEqual([
+      "sheet.created",
+      "sheet.updated",
+      "sheet.removed",
+    ]);
   });
 });

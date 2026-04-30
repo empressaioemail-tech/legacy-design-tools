@@ -33,8 +33,32 @@ import {
   getListCodeJurisdictionsQueryKey,
 } from "@workspace/api-client-react";
 import type { RetrievalProbeResponse } from "@workspace/api-client-react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Copy, Search } from "lucide-react";
+
+/**
+ * Shape returned by GET /api/atoms/catalog. Mirrors `AtomPromptDescription`
+ * from `@workspace/empressa-atom`; declared inline (rather than going
+ * through OpenAPI codegen) because the catalog is a dev-only operator
+ * surface and the contract is tiny + stable.
+ */
+interface AtomCatalogEntry {
+  entityType: string;
+  domain: string;
+  supportedModes: ReadonlyArray<string>;
+  defaultMode: string;
+  composes: ReadonlyArray<string>;
+  eventTypes: ReadonlyArray<string>;
+}
+
+async function fetchAtomCatalog(): Promise<AtomCatalogEntry[]> {
+  const res = await fetch("/api/atoms/catalog");
+  if (!res.ok) {
+    throw new Error(`/api/atoms/catalog failed: ${res.status}`);
+  }
+  const body = (await res.json()) as { atoms: AtomCatalogEntry[] };
+  return body.atoms;
+}
 
 /**
  * Inclusion-threshold fallback used only when the probe response omits
@@ -166,6 +190,17 @@ export function DevAtomsProbe() {
     [jurisdictionsQuery.data],
   );
 
+  // Registered atom catalog — surfaces `AtomRegistration.eventTypes` (Task
+  // #26) so an operator can see, on the same page they probe retrieval
+  // from, what every registered atom is allowed to emit. Stale time is
+  // long because the catalog only changes on server restart.
+  const catalogQuery = useQuery({
+    queryKey: ["atoms", "catalog"],
+    queryFn: fetchAtomCatalog,
+    staleTime: 5 * 60_000,
+  });
+  const catalog = catalogQuery.data ?? [];
+
   // Custom mutation rather than the generated `useRetrieveAtomsProbe` so we
   // can close over the operator-pasted secret and inject it as the
   // `x-snapshot-secret` header on every call. The generated hook wires its
@@ -264,6 +299,91 @@ export function DevAtomsProbe() {
           to browse the full atom corpus.
         </p>
       </header>
+
+      {/* Registered atoms — surfaces the framework's `eventTypes` field
+          (Task #26). Collapsed by default so it doesn't crowd the probe;
+          opens to a small per-atom table the operator can scan to see
+          what each atom is allowed to emit. */}
+      <details
+        className="rounded border border-zinc-700"
+        data-testid="atoms-catalog-details"
+      >
+        <summary className="cursor-pointer px-3 py-2 text-sm">
+          Registered atoms{" "}
+          <span className="opacity-60">
+            ({catalogQuery.isLoading
+              ? "loading…"
+              : catalogQuery.error
+                ? "failed"
+                : `${catalog.length}`})
+          </span>
+        </summary>
+        <div className="border-t border-zinc-700 p-3 text-xs">
+          {catalogQuery.error && (
+            <div
+              className="text-red-300"
+              data-testid="atoms-catalog-error"
+            >
+              Failed to load atom catalog.
+            </div>
+          )}
+          {catalog.length > 0 && (
+            <table className="w-full table-auto">
+              <thead className="text-[10px] uppercase opacity-70">
+                <tr>
+                  <th className="px-2 py-1 text-left">Type</th>
+                  <th className="px-2 py-1 text-left">Domain</th>
+                  <th className="px-2 py-1 text-left">Modes</th>
+                  <th className="px-2 py-1 text-left">Composes</th>
+                  <th className="px-2 py-1 text-left">Event vocabulary</th>
+                </tr>
+              </thead>
+              <tbody>
+                {catalog.map((a) => (
+                  <tr
+                    key={a.entityType}
+                    data-testid="atoms-catalog-row"
+                    className="border-t border-zinc-800 align-top"
+                  >
+                    <td className="px-2 py-1 font-mono">{a.entityType}</td>
+                    <td className="px-2 py-1 font-mono opacity-80">
+                      {a.domain}
+                    </td>
+                    <td className="px-2 py-1 font-mono opacity-80">
+                      {a.supportedModes.join(", ")}{" "}
+                      <span className="opacity-50">
+                        (default {a.defaultMode})
+                      </span>
+                    </td>
+                    <td className="px-2 py-1 font-mono opacity-80">
+                      {a.composes.length === 0 ? "—" : a.composes.join(", ")}
+                    </td>
+                    <td
+                      className="px-2 py-1 font-mono"
+                      data-testid={`atoms-catalog-events-${a.entityType}`}
+                    >
+                      {a.eventTypes.length === 0 ? (
+                        <span className="opacity-50">none declared</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {a.eventTypes.map((et) => (
+                            <span
+                              key={et}
+                              className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px]"
+                            >
+                              {et}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </details>
 
       {/* Snapshot secret — local-only, never in URL */}
       <div className="rounded border border-amber-700/60 bg-amber-950/30 p-3 text-xs">

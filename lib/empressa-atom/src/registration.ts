@@ -155,6 +155,27 @@ export interface AtomRegistration<
    * unread; in A0 it is multi-child, required, and consumed.
    */
   composition: ReadonlyArray<AtomComposition>;
+
+  /**
+   * Optional, machine-readable list of event-type strings this atom is
+   * allowed to emit (and that downstream consumers — audit logs, history
+   * filters, contract tests, the Dev Atoms catalog surface — can rely on
+   * to be the canonical vocabulary for the atom).
+   *
+   * The registry does **not** enforce that producers call
+   * {@link EventAnchoringService.appendEvent} with one of these strings;
+   * the framework treats the field as documentation that the registry
+   * exposes through {@link AtomPromptDescription.eventTypes} so tooling
+   * can introspect it without sniffing source files. Atoms that don't
+   * emit events may omit the field — the catalog surface treats a
+   * missing field as "no declared events" (empty array).
+   *
+   * Convention: dotted names namespaced by `entityType` (e.g.
+   * `"sheet.created"`, `"snapshot.referenced-in-submission"`). Producers
+   * should reference the same constant the registration carries so a
+   * rename surfaces as a typecheck failure.
+   */
+  eventTypes?: ReadonlyArray<string>;
 }
 
 /**

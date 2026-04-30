@@ -70,6 +70,24 @@ function parseScopeParam(raw: unknown): Scope {
   return scope;
 }
 
+/**
+ * GET /atoms/catalog — read-only directory of every atom registered in
+ * the process-wide registry. Returns the same shape `describeForPrompt()`
+ * exposes (entityType, domain, supportedModes, defaultMode, composes,
+ * eventTypes), so operator surfaces (the Dev Atoms Probe page's
+ * "Registered atoms" panel) can introspect the framework's vocabulary
+ * without sniffing source files. No auth — the catalog is metadata about
+ * the running server, not data, and it powers a dev-time UI that
+ * already lives behind operator-only routes.
+ *
+ * Listed BEFORE the parametric `:slug` route so Express doesn't match
+ * `/atoms/catalog` against the `:slug=catalog, :id=undefined` shape.
+ */
+router.get("/atoms/catalog", (_req: Request, res: Response) => {
+  const registry = getAtomRegistry();
+  res.json({ atoms: registry.describeForPrompt() });
+});
+
 router.get(
   "/atoms/:slug/:id/summary",
   async (req: Request, res: Response) => {

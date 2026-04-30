@@ -83,6 +83,24 @@ describe("createAtomRegistry", () => {
     expect(board?.composes).toEqual(["task"]);
   });
 
+  it("describeForPrompt surfaces declared eventTypes (and normalizes a missing field to [])", () => {
+    // One atom declares an event vocabulary, the other omits the field
+    // entirely — the catalog must still expose both as arrays so
+    // downstream tooling can map without a nullish guard.
+    const registry = createAtomRegistry();
+    const withEvents: AtomRegistration<"task", ["card"]> = {
+      ...makeStub("task", "sprint"),
+      eventTypes: ["task.created", "task.completed"] as const,
+    };
+    registry.register(withEvents);
+    registry.register(makeStub("blocker", "sprint"));
+    const desc = registry.describeForPrompt();
+    const task = desc.find((d) => d.entityType === "task");
+    const blocker = desc.find((d) => d.entityType === "blocker");
+    expect(task?.eventTypes).toEqual(["task.created", "task.completed"]);
+    expect(blocker?.eventTypes).toEqual([]);
+  });
+
   it("validate detects dangling composition refs", () => {
     const registry = createAtomRegistry();
     registry.register(

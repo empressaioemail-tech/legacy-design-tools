@@ -36,6 +36,27 @@ export const SHEET_SUPPORTED_MODES = ["card", "compact", "expanded"] as const;
 export type SheetSupportedModes = typeof SHEET_SUPPORTED_MODES;
 
 /**
+ * Event types this atom is allowed to emit. Wired onto the registration
+ * via the `eventTypes` field so the registry catalog (and any
+ * `describeForPrompt`-driven surface) can introspect the vocabulary
+ * without sniffing source files. Producers (notably the snapshot sheet
+ * ingest path in `routes/sheets.ts`) reference these names when
+ * appending events.
+ *
+ * - `sheet.created` — a fresh sheet row was inserted (snapshot ingest).
+ * - `sheet.updated` — placeholder for a future re-upload / metadata
+ *   producer (Task #20 territory; declared so the contract is
+ *   discoverable today).
+ * - `sheet.removed` — placeholder for the future "sheet disappeared in a
+ *   newer snapshot" producer.
+ */
+export const SHEET_EVENT_TYPES = [
+  "sheet.created",
+  "sheet.updated",
+  "sheet.removed",
+] as const;
+
+/**
  * Typed payload returned by `sheet`'s `contextSummary.typed`. Kept narrow
  * (per A0 the `typed` field is `Record<string, unknown>`, but a real shape
  * here lets the FE render a card without `as` casts).
@@ -83,6 +104,7 @@ export function makeSheetAtom(
     supportedModes: SHEET_SUPPORTED_MODES,
     defaultMode: "card",
     composition: [],
+    eventTypes: SHEET_EVENT_TYPES,
     async contextSummary(
       entityId: string,
       _scope,

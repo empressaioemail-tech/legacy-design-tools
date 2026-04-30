@@ -66,6 +66,14 @@ export interface AtomPromptDescription {
   supportedModes: ReadonlyArray<AtomMode>;
   defaultMode: AtomMode;
   composes: ReadonlyArray<string>;
+  /**
+   * Event-type vocabulary the atom self-declares via
+   * {@link AtomRegistration.eventTypes}. Always an array — atoms that
+   * don't declare events surface as `[]` rather than `undefined` so
+   * downstream tooling (catalog UIs, audit-log filters) can map over
+   * the field without nullish guards.
+   */
+  eventTypes: ReadonlyArray<string>;
 }
 
 /**
@@ -179,6 +187,11 @@ export function createAtomRegistry(): AtomRegistry {
         supportedModes: reg.supportedModes,
         defaultMode: reg.defaultMode,
         composes: reg.composition.map((c) => c.childEntityType),
+        // Normalize undefined → empty array so consumers can map over the
+        // field without a nullish guard. The registration field itself is
+        // optional (undeclared = "no declared events"); the catalog
+        // surfaces always returns an array.
+        eventTypes: reg.eventTypes ?? [],
       }));
     },
   };

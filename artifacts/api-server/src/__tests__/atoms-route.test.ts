@@ -209,3 +209,50 @@ describe("GET /api/atoms/:slug/:id/summary", () => {
     expect(res.body.scopeFiltered).toBe(false);
   });
 });
+
+describe("GET /api/atoms/catalog", () => {
+  it("returns every registered atom with its declared event vocabulary", async () => {
+    // The catalog endpoint exists so the Dev Atoms Probe (and any other
+    // operator surface) can introspect what's registered without a
+    // grep — must include the `eventTypes` field surfaced by Task #26
+    // for sheet and snapshot.
+    const res = await request(getApp()).get("/api/atoms/catalog");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.atoms)).toBe(true);
+
+    const byType = new Map<
+      string,
+      {
+        entityType: string;
+        domain: string;
+        defaultMode: string;
+        composes: string[];
+        eventTypes: string[];
+      }
+    >(res.body.atoms.map((a: { entityType: string }) => [a.entityType, a]));
+
+    const sheet = byType.get("sheet");
+    expect(sheet).toBeDefined();
+    expect(sheet?.eventTypes).toEqual([
+      "sheet.created",
+      "sheet.updated",
+      "sheet.removed",
+    ]);
+    expect(sheet?.composes).toEqual([]);
+
+    const snapshot = byType.get("snapshot");
+    expect(snapshot).toBeDefined();
+    expect(snapshot?.eventTypes).toEqual([
+      "snapshot.created",
+      "snapshot.received",
+      "snapshot.referenced-in-submission",
+    ]);
+    expect(snapshot?.composes).toEqual(["sheet"]);
+
+    // Engagement doesn't declare events today — the catalog must still
+    // surface it with `eventTypes: []` so the UI can map without a guard.
+    const engagement = byType.get("engagement");
+    expect(engagement).toBeDefined();
+    expect(engagement?.eventTypes).toEqual([]);
+  });
+});
