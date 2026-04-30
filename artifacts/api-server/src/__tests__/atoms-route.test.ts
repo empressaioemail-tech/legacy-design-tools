@@ -348,8 +348,8 @@ describe("GET /api/atoms/catalog", () => {
     expect(snapshot).toBeDefined();
     expect(snapshot?.eventTypes).toEqual([
       "snapshot.created",
-      "snapshot.received",
-      "snapshot.referenced-in-submission",
+      "snapshot.sheets_attached",
+      "snapshot.replaced",
     ]);
     expect(snapshot?.composes).toEqual(["sheet"]);
 
