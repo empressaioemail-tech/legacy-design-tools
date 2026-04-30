@@ -34,6 +34,17 @@ export {
 } from "./embeddings";
 
 export {
+  ensureCodeAtomSources,
+  type BootstrapLogger,
+  type EnsureCodeAtomSourcesResult,
+} from "./bootstrap";
+
+export {
+  REQUIRED_CODE_ATOM_SOURCES,
+  type RequiredCodeAtomSource,
+} from "./sourceRegistry";
+
+export {
   buildChatPrompt,
   relativeTime,
   MAX_ATOM_BODY_CHARS,
