@@ -18,6 +18,9 @@
     },
     {
       "path": "../../lib/site-context"
+    },
+    {
+      "path": "../../lib/empressa-atom"
     }
   ]
 }

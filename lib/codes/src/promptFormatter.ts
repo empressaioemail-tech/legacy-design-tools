@@ -14,6 +14,42 @@ import type { RetrievedAtom } from "./retrieval";
 /** Atom body is hard-truncated at this many chars when injected into the prompt. */
 export const MAX_ATOM_BODY_CHARS = 1800;
 
+/** Framework-atom prose is hard-truncated at this many chars when injected. */
+export const MAX_FRAMEWORK_ATOM_PROSE_CHARS = 1200;
+
+/**
+ * One framework-atom payload to inject into the system prompt. Mirrors the
+ * subset of `ContextSummary` from `@workspace/empressa-atom` that the
+ * prompt cares about — the formatter intentionally does not depend on the
+ * framework package so this lib stays free of cross-cutting deps.
+ *
+ * Source of truth: `chat.ts` resolves the atom via the registry, calls
+ * its `contextSummary`, and maps the result onto this shape.
+ */
+export interface PromptFrameworkAtom {
+  entityType: string;
+  entityId: string;
+  /** Human-readable summary suitable for direct prompt insertion. */
+  prose: string;
+  /** History anchor for the latest event on this atom. */
+  historyProvenance: {
+    latestEventId: string;
+    latestEventAt: string;
+  };
+}
+
+/**
+ * Per-atom-type description used to enumerate the inline-reference
+ * vocabulary in the prompt. Mirrors `AtomPromptDescription` from
+ * `@workspace/empressa-atom` — see comment on {@link PromptFrameworkAtom}
+ * for why we duplicate the shape rather than depending on the framework.
+ */
+export interface PromptAtomTypeDescription {
+  entityType: string;
+  domain: string;
+  composes: ReadonlyArray<string>;
+}
+
 export interface PromptEngagement {
   name: string;
   address: string | null;
@@ -57,6 +93,20 @@ export interface BuildChatPromptInput {
   question: string;
   history?: PromptHistoryMessage[];
   /**
+   * Resolved framework atoms (from `@workspace/empressa-atom`'s registry).
+   * Each entry is a typed `ContextSummary` produced by the atom's
+   * registration, narrowed to the prose + provenance the prompt cares
+   * about. Empty/undefined → no `<framework_atoms>` block.
+   */
+  frameworkAtoms?: PromptFrameworkAtom[];
+  /**
+   * Output of `registry.describeForPrompt()`. Drives the
+   * `<atom_vocabulary>` enumeration so the LLM knows exactly which
+   * `{{atom:type:id:label}}` types it may emit. Empty/undefined → no
+   * vocabulary block (and no inline-reference instruction).
+   */
+  atomTypeDescriptions?: ReadonlyArray<PromptAtomTypeDescription>;
+  /**
    * Injectable clock so {@link relativeTime} branches are deterministic in
    * tests. Defaults to `() => new Date()`.
    */
@@ -93,6 +143,53 @@ export function formatReferenceCodeAtoms(atoms: RetrievedAtom[]): string {
     })
     .join("\n");
   return `<reference_code_atoms>\n${inner}\n</reference_code_atoms>`;
+}
+
+/**
+ * Assemble the `<atom_vocabulary>` block enumerating every registered
+ * atom type the LLM may emit via `{{atom:type:id:label}}`. Returns `""`
+ * when there are no descriptions so the prompt stays compact for the
+ * common case (no atoms wired up yet).
+ *
+ * The framework's contract (Spec 20 §F) is that atom types are *resolved*
+ * via the registry — the prompt no longer hardcodes "you can render
+ * tasks/sheets/snapshots". This block is the single hand-off between
+ * registry state and the prompt.
+ */
+export function formatAtomVocabulary(
+  descriptions: ReadonlyArray<PromptAtomTypeDescription>,
+): string {
+  if (descriptions.length === 0) return "";
+  const inner = descriptions
+    .map((d) => {
+      const composes = d.composes.length > 0 ? d.composes.join(",") : "";
+      return `<atom_type entity_type="${d.entityType}" domain="${d.domain}" composes="${composes}" />`;
+    })
+    .join("\n");
+  return `<atom_vocabulary>\n${inner}\n</atom_vocabulary>`;
+}
+
+/**
+ * Assemble the `<framework_atoms>` block carrying typed atom payloads
+ * (one per resolved entity). Each entry is wrapped in an `<atom>` tag
+ * carrying the entity type + id + the latest history event id so the
+ * model can attribute its answer; the prose body is the atom's
+ * `contextSummary.prose`, hard-truncated.
+ *
+ * Returns `""` when there are no atoms to inject.
+ */
+export function formatFrameworkAtoms(atoms: PromptFrameworkAtom[]): string {
+  if (atoms.length === 0) return "";
+  const inner = atoms
+    .map((a) => {
+      const prose =
+        a.prose.length > MAX_FRAMEWORK_ATOM_PROSE_CHARS
+          ? a.prose.slice(0, MAX_FRAMEWORK_ATOM_PROSE_CHARS - 1) + "…"
+          : a.prose;
+      return `<atom entity_type="${a.entityType}" entity_id="${a.entityId}" latest_event_id="${a.historyProvenance.latestEventId}" latest_event_at="${a.historyProvenance.latestEventAt}">\n${prose}\n</atom>`;
+    })
+    .join("\n");
+  return `<framework_atoms>\n${inner}\n</framework_atoms>`;
 }
 
 /**
@@ -135,6 +232,8 @@ export function buildChatPrompt(
     attachedSheets,
     question,
     history,
+    frameworkAtoms,
+    atomTypeDescriptions,
     now = () => new Date(),
   } = input;
 
@@ -153,17 +252,48 @@ export function buildChatPrompt(
   const atomBlock =
     allAtoms.length > 0 ? "\n\n" + formatReferenceCodeAtoms(allAtoms) : "";
 
+  // Framework atoms (typed `ContextSummary` payloads from
+  // `@workspace/empressa-atom`) and the registry-driven atom vocabulary
+  // are appended after the reference-code atoms so the LLM sees code
+  // context first (which is jurisdiction-scoped retrieval) and the
+  // engagement's typed atom payloads second (deterministic lookup by id).
+  const frameworkAtomList = frameworkAtoms ?? [];
+  const atomTypeList = atomTypeDescriptions ?? [];
+  const frameworkAtomBlock =
+    frameworkAtomList.length > 0
+      ? "\n\n" + formatFrameworkAtoms(frameworkAtomList)
+      : "";
+  const atomVocabularyBlock =
+    atomTypeList.length > 0
+      ? "\n\n" + formatAtomVocabulary(atomTypeList)
+      : "";
+
   const codeCitationInstruction =
     allAtoms.length > 0
       ? "\n\nWhen you cite a Reference Code Atom in your answer, include a marker of the form `[[CODE:atomId]]` at the end of the relevant sentence (the architect's UI will render these as clickable chips). Use only atom ids that appear in <reference_code_atoms> above. Prefer paraphrasing over quoting; quote sparingly and only when the exact wording matters."
+      : "";
+
+  // Inline-reference instruction: emitted only when at least one atom
+  // type is registered. Lists the registered entityTypes verbatim from
+  // `registry.describeForPrompt()` rather than hardcoding them, so adding
+  // a new atom registration automatically expands the prompt vocabulary
+  // (Spec 20 §F / recon H6).
+  const atomReferenceInstruction =
+    atomTypeList.length > 0
+      ? `\n\nWhen you reference an entity from <framework_atoms> or one the user can plausibly drill into, embed an inline reference of the form \`{{atom:type:id:label}}\` where \`type\` is one of: ${atomTypeList
+          .map((d) => `\`${d.entityType}\``)
+          .join(", ")}. Use only entity ids that appear in <framework_atoms> or in the snapshot data — never invent ids.`
       : "";
 
   const systemPrompt =
     `You are helping an architect understand their Revit model for the engagement '${engagement.name}'${addressSuffix}${jurisdictionSuffix}. The most recent snapshot was captured ${captured}.\n\n` +
     "Answer grounded in the snapshot data below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot." +
     codeCitationInstruction +
+    atomReferenceInstruction +
     `\n\n<snapshot received_at='${isoReceivedAt}'>\n${JSON.stringify(latestSnapshot.payload, null, 2)}\n</snapshot>` +
-    atomBlock;
+    atomBlock +
+    frameworkAtomBlock +
+    atomVocabularyBlock;
 
   const userBlocks: PromptContentBlock[] = [];
   if (attachedSheets.length > 0) {

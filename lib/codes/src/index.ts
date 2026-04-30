@@ -47,8 +47,11 @@ export {
 export {
   buildChatPrompt,
   formatReferenceCodeAtoms,
+  formatAtomVocabulary,
+  formatFrameworkAtoms,
   relativeTime,
   MAX_ATOM_BODY_CHARS,
+  MAX_FRAMEWORK_ATOM_PROSE_CHARS,
   type BuildChatPromptInput,
   type BuildChatPromptOutput,
   type PromptEngagement,
@@ -57,4 +60,6 @@ export {
   type PromptHistoryMessage,
   type PromptContentBlock,
   type PromptOutputMessage,
+  type PromptFrameworkAtom,
+  type PromptAtomTypeDescription,
 } from "./promptFormatter";

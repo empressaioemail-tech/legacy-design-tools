@@ -1,6 +1,7 @@
 import { ensureCodeAtomSources } from "@workspace/codes";
 import app from "./app";
 import { logger } from "./lib/logger";
+import { bootstrapAtomRegistry } from "./atoms/registry";
 
 const rawPort = process.env["PORT"];
 
@@ -28,6 +29,13 @@ ensureCodeAtomSources(logger).catch((err) => {
     "ensureCodeAtomSources: unexpected boot-time failure — continuing",
   );
 });
+
+// Empressa atom framework: register every catalog atom this artifact owns
+// and run the registry's composition validator. This is a hard boot gate
+// per `lib/empressa-atom/README.md` — a dangling composition reference
+// here would otherwise surface only at the first chat turn that touched
+// the broken atom, hours after deploy.
+bootstrapAtomRegistry(logger);
 
 app.listen(port, (err) => {
   if (err) {

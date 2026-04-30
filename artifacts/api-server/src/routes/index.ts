@@ -7,6 +7,7 @@ import sheetsRouter from "./sheets";
 import chatRouter from "./chat";
 import codesRouter from "./codes";
 import devAtomsRouter from "./devAtoms";
+import atomsRouter from "./atoms";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(sheetsRouter);
 router.use(chatRouter);
 router.use(codesRouter);
 router.use(devAtomsRouter);
+router.use(atomsRouter);
 
 export default router;

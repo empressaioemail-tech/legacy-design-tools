@@ -10,8 +10,11 @@ import {
   buildChatPrompt,
   type RetrievedAtom,
   type PromptAttachedSheet,
+  type PromptFrameworkAtom,
 } from "@workspace/codes";
+import { defaultScope } from "@workspace/empressa-atom";
 import { logger } from "../lib/logger";
+import { getAtomRegistry } from "../atoms/registry";
 
 const router: IRouter = Router();
 
@@ -68,7 +71,16 @@ router.post("/chat", async (req: Request, res: Response) => {
 
   // Resolve attached sheets, scoped to this engagement so the user can't
   // hand-craft a request that exfiltrates someone else's images.
+  //
+  // Two parallel resolutions happen for each referenced sheet id:
+  //   1. The full PNG is loaded so vision-enabled models receive an image
+  //      block (existing behavior).
+  //   2. The `sheet` atom's `contextSummary` is fetched through the
+  //      registry so the system prompt also carries a typed,
+  //      provenance-stamped prose block describing the sheet. The two
+  //      paths use the same id list, so they always agree.
   const attachedSheets: PromptAttachedSheet[] = [];
+  const frameworkAtoms: PromptFrameworkAtom[] = [];
   if (referencedSheetIds && referencedSheetIds.length > 0) {
     const ids = referencedSheetIds.slice(0, MAX_REFERENCED_SHEETS);
     try {
@@ -96,6 +108,41 @@ router.post("/chat", async (req: Request, res: Response) => {
           sheetName: r.sheetName,
           pngBase64: buf.toString("base64"),
         });
+      }
+
+      // Resolve each tenant-scoped sheet id through the atom registry so
+      // the prompt carries the typed summary, not just the image. The
+      // registry is the single source of truth — adding a new atom here
+      // means registering it in src/atoms/registry.ts, no chat.ts edit.
+      const registry = getAtomRegistry();
+      const sheetAtom = registry.resolve("sheet");
+      if (sheetAtom.ok) {
+        const validIds = new Set(rows.map((r) => r.id));
+        for (const id of ids) {
+          if (!validIds.has(id)) continue;
+          try {
+            const summary = await sheetAtom.registration.contextSummary(
+              id,
+              defaultScope(),
+            );
+            frameworkAtoms.push({
+              entityType: "sheet",
+              entityId: id,
+              prose: summary.prose,
+              historyProvenance: summary.historyProvenance,
+            });
+          } catch (err) {
+            logger.warn(
+              { err, engagementId, sheetId: id },
+              "chat: sheet atom contextSummary threw — skipping",
+            );
+          }
+        }
+      } else {
+        logger.warn(
+          { err: sheetAtom.error.message },
+          "chat: sheet atom not registered — typed summaries skipped",
+        );
       }
     } catch (err) {
       logger.warn(
@@ -171,6 +218,12 @@ router.post("/chat", async (req: Request, res: Response) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
+  // Pull the inline-reference vocabulary directly from the registry so
+  // the prompt enumerates registered atoms instead of hardcoding them.
+  // Adding a new atom registration → it shows up in <atom_vocabulary>
+  // automatically (Spec 20 §F / recon H6).
+  const atomTypeDescriptions = getAtomRegistry().describeForPrompt();
+
   const { systemPrompt, messages } = buildChatPrompt({
     engagement: {
       name: engagement.name,
@@ -185,6 +238,8 @@ router.post("/chat", async (req: Request, res: Response) => {
     attachedSheets,
     question,
     history,
+    frameworkAtoms,
+    atomTypeDescriptions,
   });
 
   if (attachedSheets.length > 0) {
