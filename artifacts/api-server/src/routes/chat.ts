@@ -13,9 +13,58 @@ import {
   type PromptFrameworkAtom,
 } from "@workspace/codes";
 import type { ContextSummary, Scope } from "@workspace/empressa-atom";
+import { INLINE_ATOM_REGEX } from "@workspace/empressa-atom";
 import { logger } from "../lib/logger";
 import { getAtomRegistry } from "../atoms/registry";
 import type { EngagementTypedPayload } from "../atoms/engagement.atom";
+import { SNAPSHOT_SUPPORTED_MODES } from "../atoms/snapshot.atom";
+
+/**
+ * Render-mode token the inline-reference syntax uses to opt a chat
+ * turn into snapshot focus mode (Task #39). Must be a member of
+ * {@link SNAPSHOT_SUPPORTED_MODES} — the snapshot atom registration
+ * already lists `focus` as a supported mode at the type level, and
+ * this constant is the single hand-off between that registry vocabulary
+ * and the chat path's parser. If the snapshot atom ever drops `focus`
+ * from its supported modes, the assignment below stops type-checking,
+ * which is the canary we want.
+ */
+const SNAPSHOT_FOCUS_MODE: (typeof SNAPSHOT_SUPPORTED_MODES)[number] = "focus";
+
+/**
+ * Scan `question` for any inline `{{atom:snapshot:<latestSnapshotId>:focus}}`
+ * reference. The third capture group of {@link INLINE_ATOM_REGEX} is
+ * the displayLabel slot — chat repurposes it as the focus opt-in
+ * token, matching the documented opt-in path on the OpenAPI spec
+ * (`ChatRequest.snapshotFocus`).
+ *
+ * Only references that target the **current** latest snapshot id flip
+ * focus on. A stale id (e.g. the user pasted a reference from a chat
+ * a week ago, before the engagement got a fresher snapshot) is
+ * intentionally ignored — focus mode is always about the snapshot
+ * the rest of the prompt is already framed around.
+ */
+function questionRequestsSnapshotFocus(
+  question: string,
+  latestSnapshotId: string,
+): boolean {
+  // Defensive copy: regex is module-scoped + `g`-flagged so we reset
+  // lastIndex (parseInlineReferences upstream relies on the same dance).
+  INLINE_ATOM_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = INLINE_ATOM_REGEX.exec(question)) !== null) {
+    const [, entityType, entityId, label] = match;
+    if (
+      entityType === "snapshot" &&
+      entityId === latestSnapshotId &&
+      label === SNAPSHOT_FOCUS_MODE
+    ) {
+      INLINE_ATOM_REGEX.lastIndex = 0;
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Narrow an engagement atom's `ContextSummary.typed` (declared as
@@ -81,8 +130,14 @@ router.post("/chat", async (req: Request, res: Response) => {
     res.status(400).json({ error: "Invalid chat request" });
     return;
   }
-  const { engagementId, question, history, referencedSheetIds, referencedAtomIds } =
-    parse.data;
+  const {
+    engagementId,
+    question,
+    history,
+    referencedSheetIds,
+    referencedAtomIds,
+    snapshotFocus: explicitSnapshotFocus,
+  } = parse.data;
 
   // Resolve the engagement through the framework registry instead of a
   // hand-rolled Drizzle read (sprint A3 follow-up). Two reasons this
@@ -189,24 +244,54 @@ router.post("/chat", async (req: Request, res: Response) => {
     );
   }
 
+  // Snapshot focus mode (Task #39). Two opt-in channels feed the same
+  // boolean: an explicit `snapshotFocus: true` flag on the request body
+  // (programmatic callers / a future "deep dive" UI button), and an
+  // inline `{{atom:snapshot:<latestSnapshotId>:focus}}` reference
+  // embedded in the question text (so a power user can opt in by
+  // chaining off the snapshot atom card). Either path triggers the
+  // raw `snapshots.payload` blob to be loaded and threaded through to
+  // the prompt formatter inside a dedicated `<snapshot_focus>` block;
+  // the default path stays JSON-free per Task #34.
+  const snapshotFocusOn =
+    explicitSnapshotFocus === true ||
+    questionRequestsSnapshotFocus(question, latestSnapshotId);
+
   let snapshotReceivedAt: Date | undefined;
+  let snapshotFocusPayload: unknown = undefined;
   try {
-    // Only `receivedAt` is read here (Task #34). The chat prompt no
-    // longer pastes the entire snapshot `payload` blob into the system
-    // prompt — the snapshot framework atom's prose carries the project
-    // name, headline counts, and compact list of sheet identities, so
-    // the only field still needed at this layer is the timestamp that
-    // drives the "captured <relative-time> ago" framing sentence.
-    //
-    // The lookup is keyed off the atom-resolved snapshot id (single-row
-    // by primary key) rather than re-running the engagement +
-    // receivedAt-desc scan the route used before A3.
-    const sRows = await db
-      .select({ receivedAt: snapshots.receivedAt })
-      .from(snapshots)
-      .where(eq(snapshots.id, latestSnapshotId))
-      .limit(1);
+    // `receivedAt` is always needed (it drives the "captured
+    // <relative-time> ago" framing sentence). `payload` is only loaded
+    // when focus mode is on for this turn — by default the snapshot
+    // framework atom's prose carries everything the model needs and we
+    // skip paying the tens-of-KB tax (Task #34 contract). When focus
+    // mode IS on, the same single-row primary-key lookup pulls both
+    // columns so we don't issue a second round-trip.
+    const sRows = snapshotFocusOn
+      ? await db
+          .select({
+            receivedAt: snapshots.receivedAt,
+            payload: snapshots.payload,
+          })
+          .from(snapshots)
+          .where(eq(snapshots.id, latestSnapshotId))
+          .limit(1)
+      : await db
+          .select({ receivedAt: snapshots.receivedAt })
+          .from(snapshots)
+          .where(eq(snapshots.id, latestSnapshotId))
+          .limit(1);
     snapshotReceivedAt = sRows[0]?.receivedAt;
+    if (snapshotFocusOn) {
+      // The narrowed `select` shape above means `payload` is only
+      // populated on the focus branch; the cast lets us read it without
+      // re-narrowing every consumer. `payload` is intentionally typed
+      // as `unknown` downstream — buildChatPrompt JSON-stringifies it
+      // verbatim, no schema assumed.
+      snapshotFocusPayload = (
+        sRows[0] as { payload?: unknown } | undefined
+      )?.payload;
+    }
   } catch (err) {
     logger.error(
       { err, engagementId, snapshotId: latestSnapshotId },
@@ -429,6 +514,21 @@ router.post("/chat", async (req: Request, res: Response) => {
     },
     latestSnapshot: {
       receivedAt: snapshotReceivedAt,
+      // Focus mode (Task #39): only set when the caller opted in via
+      // explicit flag or inline `{{atom:snapshot:<id>:focus}}` reference.
+      // The payload is forwarded as-is — the formatter owns the
+      // serialization + size-cap. When `snapshotFocusPayload` is null
+      // (the row exists but `payload` happens to be JSON null) we still
+      // honor focus mode and the formatter emits `null` in the block,
+      // making it obvious the snapshot has no structured detail to mine.
+      ...(snapshotFocusOn
+        ? {
+            focusPayload: {
+              snapshotId: latestSnapshotId,
+              payload: snapshotFocusPayload,
+            },
+          }
+        : {}),
     },
     allAtoms,
     attachedSheets,
@@ -461,6 +561,25 @@ router.post("/chat", async (req: Request, res: Response) => {
         retrievalModes: Array.from(new Set(allAtoms.map((a) => a.retrievalMode))),
       },
       "chat with code-atom context",
+    );
+  }
+  if (snapshotFocusOn) {
+    // One-line audit so prod observability can answer "how often is
+    // focus mode actually used?" without having to parse the prompt.
+    // The payload itself isn't logged — it's tenant data and may run
+    // tens of KB. `triggeredBy` distinguishes the explicit body flag
+    // from the inline-reference path so a regression that breaks
+    // either channel surfaces here.
+    const triggeredBy: "flag" | "inline_reference" =
+      explicitSnapshotFocus === true ? "flag" : "inline_reference";
+    logger.info(
+      {
+        engagementId,
+        snapshotId: latestSnapshotId,
+        triggeredBy,
+        payloadIsNull: snapshotFocusPayload === null,
+      },
+      "chat with snapshot focus payload",
     );
   }
 

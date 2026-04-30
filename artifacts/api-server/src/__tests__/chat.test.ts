@@ -422,6 +422,165 @@ describe("POST /api/chat", () => {
     expect(system).toContain("7 sheets");
   });
 
+  it("snapshot focus mode (Task #39): explicit `snapshotFocus: true` flag injects the raw payload into a <snapshot_focus> block", async () => {
+    // Default chat is JSON-free (Task #34); focus mode is the opt-in
+    // escape hatch for questions that need structured payload data
+    // ("what's the area of room 204?", "list every door schedule
+    // entry"). We seed a snapshot with a unique marker string in its
+    // payload, fire a chat with `snapshotFocus: true`, and assert the
+    // marker now lands in the system prompt — proving the prompt
+    // assembly actually flips on focus mode end-to-end (route → DB
+    // payload load → buildChatPrompt → <snapshot_focus> block).
+    if (!ctx.schema) throw new Error("schema not ready");
+    const FOCUS_MARKER = "FOCUS_MODE_FLAG_CANARY_b3e7f1";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Focus Mode Flag",
+        nameLower: `focus-mode-flag-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    const [snap] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Focus Project",
+        payload: {
+          markerField: FOCUS_MARKER,
+          rooms: [{ number: "204", areaSqft: 312 }],
+        },
+        sheetCount: 0,
+        roomCount: 1,
+        levelCount: 0,
+        wallCount: 0,
+      })
+      .returning({ id: snapshots.id });
+
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({
+        engagementId: eng.id,
+        question: "what's the area of room 204?",
+        snapshotFocus: true,
+      });
+    expect(res.status).toBe(200);
+
+    const system = String(anthropicMocks.lastArgs.system);
+    // Focus block + marker payload + snapshot id in attribution.
+    expect(system).toContain("<snapshot_focus");
+    expect(system).toContain(`snapshot_id="${snap.id}"`);
+    expect(system).toContain(FOCUS_MARKER);
+    expect(system).toContain('"number": "204"');
+    // The instruction line names the snapshot id in the citation form
+    // so the model has an unambiguous attribution target.
+    expect(system).toContain(`{{atom:snapshot:${snap.id}:focus}}`);
+  });
+
+  it("snapshot focus mode (Task #39): inline {{atom:snapshot:<id>:focus}} reference in the question text triggers payload injection", async () => {
+    // Equivalent to the explicit-flag path above, but exercising the
+    // inline-reference channel. A power user (or the chat orchestrator
+    // chaining off a snapshot atom card) embeds
+    // `{{atom:snapshot:<latestSnapshotId>:focus}}` in the question
+    // and the route should reach the same focus-mode branch.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const INLINE_MARKER = "FOCUS_MODE_INLINE_CANARY_c2a4d8";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Focus Mode Inline",
+        nameLower: `focus-mode-inline-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    const [snap] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Inline Focus Project",
+        payload: { markerField: INLINE_MARKER, doorSchedule: [{ tag: "D-101" }] },
+        sheetCount: 0,
+        roomCount: 0,
+        levelCount: 0,
+        wallCount: 0,
+      })
+      .returning({ id: snapshots.id });
+
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({
+        engagementId: eng.id,
+        // Note: NO `snapshotFocus: true` flag. The inline reference
+        // alone has to flip focus on.
+        question: `list the door schedule {{atom:snapshot:${snap.id}:focus}} please`,
+      });
+    expect(res.status).toBe(200);
+
+    const system = String(anthropicMocks.lastArgs.system);
+    expect(system).toContain("<snapshot_focus");
+    expect(system).toContain(`snapshot_id="${snap.id}"`);
+    expect(system).toContain(INLINE_MARKER);
+    expect(system).toContain('"tag": "D-101"');
+  });
+
+  it("snapshot focus mode (Task #39): inline reference targeting a STALE snapshot id does NOT trigger focus mode", async () => {
+    // The inline-reference channel only opts in when the id matches
+    // the engagement's *current* latest snapshot — a copy-pasted
+    // reference from a chat turn before a new push landed should not
+    // cause focus mode to fire against the new snapshot's payload
+    // (which would be confusing) and equally must not leak the stale
+    // snapshot's payload (cross-snapshot leakage).
+    if (!ctx.schema) throw new Error("schema not ready");
+    const STALE_MARKER = "FOCUS_STALE_CANARY_e4f9a2";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Focus Stale Id",
+        nameLower: `focus-stale-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    // Newer snapshot (engagement atom returns this one as the latest).
+    await ctx.schema.db.insert(snapshots).values({
+      engagementId: eng.id,
+      projectName: "Newer Focus Project",
+      payload: { markerField: STALE_MARKER },
+      sheetCount: 0,
+      roomCount: 0,
+      levelCount: 0,
+      wallCount: 0,
+      receivedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({
+        engagementId: eng.id,
+        // Reference points at a snapshot id that doesn't exist on this
+        // engagement at all — the route's focus check matches against
+        // the resolved latestSnapshotId, so this should fall through.
+        question:
+          "what's in here? {{atom:snapshot:00000000-0000-0000-0000-deadbeef0000:focus}}",
+      });
+    expect(res.status).toBe(200);
+
+    const system = String(anthropicMocks.lastArgs.system);
+    expect(system).not.toContain("<snapshot_focus");
+    expect(system).not.toContain(STALE_MARKER);
+  });
+
   it("does NOT inline the raw snapshot JSON payload in the system prompt (Task #34)", async () => {
     // Pre-Task-#34 the chat route loaded the entire snapshots.payload
     // blob and pasted it into a `<snapshot received_at='…'>{full

@@ -1106,4 +1106,10 @@ export const SendChatMessageBody = zod.object({
     .describe(
       "Optional list of code atom UUIDs the user has explicitly attached\nto this question. Capped server-side. Atoms are fetched, scoped\nto the engagement's jurisdiction, and injected into the system\nprompt alongside any retrieval-discovered atoms.\n",
     ),
+  snapshotFocus: zod
+    .boolean()
+    .optional()
+    .describe(
+      'Opt this turn into \"snapshot focus mode\". When true, the\nserver loads the full structured `snapshots.payload` blob\nfor the engagement\'s latest snapshot and injects it into the\nsystem prompt inside a dedicated `<snapshot_focus>` block,\non top of the always-on snapshot atom summary. Use it for\ndeep questions like \"what\'s the area of room 204?\" or\n\"list every door schedule entry\" — the cost stays bounded\nto the turns that need it. Equivalent to embedding a\n`{{atom:snapshot:<latestSnapshotId>:focus}}` inline\nreference in the question text.\n',
+    ),
 });

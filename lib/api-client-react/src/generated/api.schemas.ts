@@ -262,6 +262,18 @@ to the engagement's jurisdiction, and injected into the system
 prompt alongside any retrieval-discovered atoms.
  */
   referencedAtomIds?: string[];
+  /** Opt this turn into "snapshot focus mode". When true, the
+server loads the full structured `snapshots.payload` blob
+for the engagement's latest snapshot and injects it into the
+system prompt inside a dedicated `<snapshot_focus>` block,
+on top of the always-on snapshot atom summary. Use it for
+deep questions like "what's the area of room 204?" or
+"list every door schedule entry" — the cost stays bounded
+to the turns that need it. Equivalent to embedding a
+`{{atom:snapshot:<latestSnapshotId>:focus}}` inline
+reference in the question text.
+ */
+  snapshotFocus?: boolean;
 }
 
 export interface ErrorResponse {

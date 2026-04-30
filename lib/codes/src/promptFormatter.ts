@@ -66,22 +66,53 @@ export interface PromptEngagement {
 }
 
 /**
- * Per-turn snapshot framing data. Only the timestamp is consumed today
- * — the chat prompt opens with "The most recent snapshot was captured
+ * Per-turn snapshot framing data. The timestamp is always consumed —
+ * the chat prompt opens with "The most recent snapshot was captured
  * <relative-time>" and the snapshot atom (in `<framework_atoms>`)
  * carries the project name, counts, and sheet listing.
  *
  * Pre-Task #34 this carried the full snapshot `payload: unknown` blob
- * that was JSON-stringified into a `<snapshot>` system-prompt block.
- * That block dominated the token budget for real Revit pushes, so it
- * was dropped in favor of the atom-driven summary. If a future
- * "snapshot focus mode" needs structured payload access again, add it
- * here behind an explicit opt-in field rather than restoring the
- * always-on dump.
+ * that was JSON-stringified into a `<snapshot>` system-prompt block on
+ * every turn. That block dominated the token budget for real Revit
+ * pushes, so it was dropped in favor of the atom-driven summary.
+ *
+ * Task #39 reintroduces structured payload access via the optional
+ * {@link focusPayload} field — populated only when the chat route
+ * detects the caller has opted *this turn* into "snapshot focus mode"
+ * (an explicit `snapshotFocus: true` request flag, or an inline
+ * `{{atom:snapshot:<id>:focus}}` reference embedded in the question).
+ * When set, {@link buildChatPrompt} emits a dedicated
+ * `<snapshot_focus>` block separate from `<framework_atoms>` so the
+ * model can mine the raw payload for questions like "what's the area
+ * of room 204?". The default chat path stays JSON-free.
  */
 export interface PromptSnapshot {
   receivedAt: Date;
+  /**
+   * When set, the prompt enters focus mode for this turn: the raw
+   * `snapshots.payload` blob is JSON-stringified into a
+   * `<snapshot_focus>` block alongside an instruction directing the
+   * model to use it for structured lookups. `snapshotId` is included
+   * so the LLM can attribute its answer back to the same atom id the
+   * `<framework_atoms>` snapshot entry advertises.
+   */
+  focusPayload?: {
+    snapshotId: string;
+    payload: unknown;
+  };
 }
+
+/**
+ * Hard cap on the JSON-serialized snapshot payload when focus mode is
+ * on. Real Revit pushes can be tens of KB — far below Claude Sonnet's
+ * context but worth bounding so a degenerate payload (e.g. an
+ * accidentally-attached BIM family library) cannot starve the rest of
+ * the prompt. The truncation is byte-naive (post-`JSON.stringify`
+ * substring) so the resulting block is *not* guaranteed to be valid
+ * JSON when the cap fires; we add an explicit ellipsis + warning line
+ * inside the block so the model knows the payload was clipped.
+ */
+export const MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS = 60_000;
 
 export interface PromptAttachedSheet {
   id: string;
@@ -215,6 +246,37 @@ export function formatFrameworkAtoms(atoms: PromptFrameworkAtom[]): string {
 }
 
 /**
+ * Assemble the `<snapshot_focus>` block carrying the raw structured
+ * `snapshots.payload` JSON for the engagement's latest snapshot. Only
+ * emitted when chat is in focus mode for this turn (see
+ * {@link PromptSnapshot.focusPayload}); the default chat path does NOT
+ * call this helper, preserving the Task #34 contract that the
+ * always-on prompt is JSON-free.
+ *
+ * The block is a sibling of `<framework_atoms>` rather than a child —
+ * the model treats them independently, but the `snapshot_id` attribute
+ * matches the `entity_id` on the snapshot atom so any answer the model
+ * attributes via inline `{{atom:snapshot:<id>:…}}` references stays
+ * consistent across the two surfaces.
+ *
+ * Payload longer than {@link MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS} is
+ * tail-truncated with an explicit `…` and a `[truncated]` marker on a
+ * new line so the LLM knows it cannot rely on the JSON being complete.
+ */
+export function formatSnapshotFocus(
+  snapshotId: string,
+  payload: unknown,
+): string {
+  const json = JSON.stringify(payload, null, 2);
+  const body =
+    json.length > MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS
+      ? json.slice(0, MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS - 1) +
+        "…\n[truncated: payload exceeded the focus-mode size cap]"
+      : json;
+  return `<snapshot_focus snapshot_id="${snapshotId}">\n${body}\n</snapshot_focus>`;
+}
+
+/**
  * Human-friendly age string for the snapshot timestamp. Round-trips through
  * second/minute/hour/day buckets. Exported for direct testing.
  */
@@ -312,19 +374,42 @@ export function buildChatPrompt(
           .join(", ")}. Use only entity ids that appear in <framework_atoms> — never invent ids.`
       : "";
 
-  // The legacy `<snapshot received_at='…'>{full JSON}</snapshot>` block
-  // is intentionally absent (Task #34). The snapshot atom's prose,
-  // appended below in `<framework_atoms>`, now carries project name,
-  // counts (sheets/levels/rooms/walls), and a compact list of sheet
-  // identities — everything the model used to dig out of the JSON dump.
+  // Snapshot focus mode (Task #39). When the chat route detects the
+  // caller has opted *this turn* into focus mode — explicit
+  // `snapshotFocus: true` flag or an inline
+  // `{{atom:snapshot:<id>:focus}}` reference — it forwards the raw
+  // `snapshots.payload` blob through `latestSnapshot.focusPayload`.
+  // We then emit a dedicated `<snapshot_focus>` block (sibling of
+  // `<framework_atoms>`) plus an instruction line telling the model
+  // it may use the JSON for structured lookups. Default chat path
+  // leaves `focusPayload` undefined, both blocks stay empty, and the
+  // Task #34 JSON-free contract is preserved.
+  const focusPayload = latestSnapshot.focusPayload;
+  const snapshotFocusBlock = focusPayload
+    ? "\n\n" +
+      formatSnapshotFocus(focusPayload.snapshotId, focusPayload.payload)
+    : "";
+  const snapshotFocusInstruction = focusPayload
+    ? "\n\nA `<snapshot_focus>` block below carries the raw structured snapshot payload for this turn. Use it to answer fine-grained questions about specific rooms, doors, schedules, or any item the snapshot atom's prose would have summarised away. Cite the snapshot you draw from with `{{atom:snapshot:" +
+      focusPayload.snapshotId +
+      ":focus}}` so the answer stays attributable."
+    : "";
+
+  // The legacy *always-on* `<snapshot received_at='…'>{full JSON}</snapshot>`
+  // block from before Task #34 stays retired — focus mode is opt-in
+  // per turn and uses the new `<snapshot_focus>` shape above. The
+  // snapshot atom's prose (in `<framework_atoms>`) keeps carrying
+  // project name, counts, and the compact sheet listing on every turn.
   const systemPrompt =
     `You are helping an architect understand their Revit model for the engagement '${engagement.name}'${addressSuffix}${jurisdictionSuffix}. The most recent snapshot was captured ${captured}.\n\n` +
     "Answer grounded in the structured atoms below. If the data does not contain what's asked, say so plainly. Be terse and operational in tone — this is a professional tool, not a chatbot." +
     codeCitationInstruction +
     atomReferenceInstruction +
+    snapshotFocusInstruction +
     atomBlock +
     frameworkAtomBlock +
-    atomVocabularyBlock;
+    atomVocabularyBlock +
+    snapshotFocusBlock;
 
   const userBlocks: PromptContentBlock[] = [];
   if (attachedSheets.length > 0) {

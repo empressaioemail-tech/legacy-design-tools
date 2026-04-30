@@ -15,8 +15,10 @@
 import { describe, it, expect } from "vitest";
 import {
   buildChatPrompt,
+  formatSnapshotFocus,
   relativeTime,
   MAX_ATOM_BODY_CHARS,
+  MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS,
   type BuildChatPromptInput,
 } from "./promptFormatter";
 import type { RetrievedAtom } from "./retrieval";
@@ -360,5 +362,101 @@ describe("buildChatPrompt: snapshot framing without raw payload (Task #34)", () 
     expect(systemPrompt).toContain(
       "Answer grounded in the structured atoms below.",
     );
+  });
+});
+
+describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
+  // Marker string the chat route's payload-leak canary uses; we reuse
+  // it here so a regression that lets the formatter swallow the raw
+  // payload (or stop emitting the focus block entirely) trips both
+  // suites consistently.
+  const MARKER = "FOCUS_PAYLOAD_MARKER_a91b3c";
+  const SNAPSHOT_ID = "snap-focus-aaaa-bbbb";
+
+  it("default chat (no focusPayload) does NOT emit a <snapshot_focus> block or instruction", () => {
+    // Regression guard for the Task #34 contract: opting OUT of focus
+    // mode (the default) keeps the prompt JSON-free. If a future
+    // refactor accidentally always-passes focusPayload through, this
+    // assertion catches it before it lands in production.
+    const { systemPrompt } = buildChatPrompt(
+      baseInput({
+        latestSnapshot: { receivedAt: new Date("2026-04-01T12:00:00Z") },
+      }),
+    );
+    expect(systemPrompt).not.toContain("<snapshot_focus");
+    expect(systemPrompt).not.toContain("</snapshot_focus>");
+    expect(systemPrompt).not.toMatch(/snapshot focus.*block below/i);
+  });
+
+  it("focus mode emits a <snapshot_focus> block with the JSON payload AND an instruction line", () => {
+    // The block carries the snapshot id (so it lines up with the
+    // <framework_atoms> snapshot entry) and the JSON-stringified
+    // payload verbatim. The instruction line names the snapshot id
+    // in the citation form so the model has an unambiguous attribution
+    // target — without that, multi-snapshot debugging becomes a guess.
+    const payload = {
+      canary: MARKER,
+      rooms: [{ number: "204", areaSqft: 312 }],
+    };
+    const { systemPrompt } = buildChatPrompt(
+      baseInput({
+        latestSnapshot: {
+          receivedAt: new Date("2026-04-01T12:00:00Z"),
+          focusPayload: { snapshotId: SNAPSHOT_ID, payload },
+        },
+      }),
+    );
+
+    expect(systemPrompt).toContain(`<snapshot_focus snapshot_id="${SNAPSHOT_ID}">`);
+    expect(systemPrompt).toContain("</snapshot_focus>");
+    // Marker proves the actual structured payload is present, not a
+    // summary or a placeholder. The room area is the kind of question
+    // focus mode exists to answer — assert the data the model would
+    // need is in the prompt verbatim.
+    expect(systemPrompt).toContain(MARKER);
+    expect(systemPrompt).toContain('"number": "204"');
+    expect(systemPrompt).toContain('"areaSqft": 312');
+    // Instruction line: presence + snapshot-id citation hint.
+    expect(systemPrompt).toContain("`<snapshot_focus>` block below");
+    expect(systemPrompt).toContain(
+      `{{atom:snapshot:${SNAPSHOT_ID}:focus}}`,
+    );
+  });
+
+  it("focus mode payload is hard-truncated when JSON exceeds the cap, with a [truncated] marker", () => {
+    // Build a payload whose JSON form clears the cap. We ship a
+    // single string field full of `x`s — its JSON-encoded length is
+    // (chars + 2) for the surrounding quotes, plus the field-name
+    // overhead, all comfortably above MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS
+    // when we feed in cap+200 raw chars.
+    const big = "x".repeat(MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 200);
+    const block = formatSnapshotFocus(SNAPSHOT_ID, { blob: big });
+    // The `[truncated: …]` marker is what the LLM sees; absence of it
+    // would mean the cap silently failed and the prompt could blow
+    // budget on a degenerate payload.
+    expect(block).toContain("[truncated:");
+    // Body length stays bounded — the cap (and a small fixed marker
+    // suffix) is the upper bound on the inner block size.
+    const inner = block.replace(
+      `<snapshot_focus snapshot_id="${SNAPSHOT_ID}">\n`,
+      "",
+    ).replace("\n</snapshot_focus>", "");
+    expect(inner.length).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 100,
+    );
+  });
+
+  it("formatSnapshotFocus emits valid JSON when payload fits under the cap", () => {
+    // Round-trip sanity: under the cap we should ship parseable JSON
+    // so a human reading the prompt (or a future tool that parses it)
+    // can rely on the contents. Above the cap we explicitly do NOT
+    // promise valid JSON (see the cap test above).
+    const payload = { rooms: [{ id: "r1" }, { id: "r2" }] };
+    const block = formatSnapshotFocus(SNAPSHOT_ID, payload);
+    const inner = block
+      .replace(`<snapshot_focus snapshot_id="${SNAPSHOT_ID}">\n`, "")
+      .replace("\n</snapshot_focus>", "");
+    expect(() => JSON.parse(inner)).not.toThrow();
+    expect(JSON.parse(inner)).toEqual(payload);
   });
 });
