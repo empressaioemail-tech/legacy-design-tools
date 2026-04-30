@@ -42,7 +42,11 @@ vi.mock("./embeddings", () => ({
   }),
 }));
 
-import { retrieveAtomsForQuestion, getAtomsByIds } from "./retrieval";
+import {
+  retrieveAtomsForQuestion,
+  getAtomsByIds,
+  MIN_VECTOR_SCORE,
+} from "./retrieval";
 
 beforeEach(() => {
   mocks.dbResponses = [];
@@ -115,6 +119,53 @@ describe("retrieveAtomsForQuestion: vector path", () => {
     expect(out).toHaveLength(1);
     expect(out[0].retrievalMode).toBe("lexical");
     expect(out[0].score).toBeGreaterThan(0);
+  });
+
+  it("filters out vector results below MIN_VECTOR_SCORE by default", async () => {
+    // Two raw rows: one comfortably above the floor, one well below.
+    // Default behavior (chat path) should drop the below-floor row.
+    mocks.embedQueryResult = Array.from({ length: 1536 }, () => 0);
+    mocks.dbResponses.push([
+      stubAtomRow({ id: "above", distance: 1 - (MIN_VECTOR_SCORE + 0.05) }),
+      stubAtomRow({ id: "below", distance: 1 - (MIN_VECTOR_SCORE - 0.05) }),
+    ]);
+    const out = await retrieveAtomsForQuestion({
+      jurisdictionKey: "grand_county_ut",
+      question: "setbacks",
+    });
+    expect(out.map((r) => r.id)).toEqual(["above"]);
+    expect(out[0].score).toBeGreaterThanOrEqual(MIN_VECTOR_SCORE);
+  });
+
+  it("returns the unfiltered top-N when applyMinScore=false (probe path)", async () => {
+    mocks.embedQueryResult = Array.from({ length: 1536 }, () => 0);
+    mocks.dbResponses.push([
+      stubAtomRow({ id: "above", distance: 1 - (MIN_VECTOR_SCORE + 0.05) }),
+      stubAtomRow({ id: "below", distance: 1 - (MIN_VECTOR_SCORE - 0.05) }),
+    ]);
+    const out = await retrieveAtomsForQuestion({
+      jurisdictionKey: "grand_county_ut",
+      question: "setbacks",
+      applyMinScore: false,
+    });
+    expect(out.map((r) => r.id)).toEqual(["above", "below"]);
+  });
+
+  it("returns [] (does NOT fall back to lexical) when vector rows exist but all are below the floor", async () => {
+    // Vector path returned 2 rows, but both are below the floor. Returning
+    // [] is a *true negative* — backfilling with lexical would just inject
+    // even-less-relevant atoms into chat. The lexical fallback only fires
+    // when the raw DB query returned 0 rows.
+    mocks.embedQueryResult = Array.from({ length: 1536 }, () => 0);
+    mocks.dbResponses.push([
+      stubAtomRow({ id: "low1", distance: 1 - (MIN_VECTOR_SCORE - 0.1) }),
+      stubAtomRow({ id: "low2", distance: 1 - (MIN_VECTOR_SCORE - 0.2) }),
+    ]);
+    const out = await retrieveAtomsForQuestion({
+      jurisdictionKey: "grand_county_ut",
+      question: "setbacks",
+    });
+    expect(out).toEqual([]);
   });
 
   it("falls through to lexical when vector returns 0 rows", async () => {

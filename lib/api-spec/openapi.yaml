@@ -1416,9 +1416,23 @@ components:
             - model
             - dimension
             - available
+        inclusionThreshold:
+          type: number
+          format: float
+          description: |
+            The minimum cosine-similarity score the chat path requires for a
+            vector-retrieved atom to be included in the LLM's reference block.
+            The probe itself does NOT filter by this — it returns the full
+            top-N — but echoes the value so the UI can render an accurate
+            "above this line is what chat actually sends" divider. Has no
+            meaning in lexical-fallback mode (`queryEmbedding.available =
+            false`); the UI hides the divider in that case.
         results:
           type: array
-          description: ALL retrieved atoms (threshold not applied server-side).
+          description: |
+            ALL retrieved atoms (probe passes `applyMinScore: false`); rows
+            below `inclusionThreshold` are still returned for diagnostic
+            visibility.
           items:
             $ref: "#/components/schemas/RetrievalProbeResultItem"
         assembledPromptBlock:
@@ -1432,6 +1446,7 @@ components:
         - resolvedFromEngagement
         - query
         - queryEmbedding
+        - inclusionThreshold
         - results
         - assembledPromptBlock
 

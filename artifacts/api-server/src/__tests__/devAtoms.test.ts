@@ -225,6 +225,13 @@ describe("POST /api/dev/atoms/retrieve — jurisdiction path", () => {
     expect(res.body.assembledPromptBlock).toContain(`<atom id="${top.atomId}"`);
     expect(res.body.assembledPromptBlock).toContain('mode="lexical"');
     expect(res.body.assembledPromptBlock).toContain("</reference_code_atoms>");
+    // Echoes the canonical chat-path inclusion threshold so the probe UI
+    // never drifts from server behavior. Value is owned by
+    // `MIN_VECTOR_SCORE` in @workspace/codes; assert it's a sane cosine
+    // similarity (probe doesn't filter, but the field must be present).
+    expect(typeof res.body.inclusionThreshold).toBe("number");
+    expect(res.body.inclusionThreshold).toBeGreaterThan(0);
+    expect(res.body.inclusionThreshold).toBeLessThan(1);
   });
 
   it("returns empty results AND empty prompt block when no atoms match", async () => {

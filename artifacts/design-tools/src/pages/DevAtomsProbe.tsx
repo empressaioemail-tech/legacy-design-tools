@@ -5,9 +5,12 @@
  * what does Claude actually see?" by hitting POST /api/dev/atoms/retrieve,
  * which runs the SAME retrieval module + assembles the SAME
  * `<reference_code_atoms>` XML block /api/chat does. The response carries
- * ALL retrieved atoms — the 0.6 threshold (matching MAX_RETRIEVED_ATOMS=8
- * default in chat) is a UI-only signal here, drawn as a horizontal divider
- * between rows whose similarity crosses it.
+ * ALL retrieved atoms — the inclusion threshold the chat path actually
+ * applies (cosine similarity floor; see `MIN_VECTOR_SCORE` in
+ * `@workspace/codes`) is echoed in the response as `inclusionThreshold` and
+ * drawn here as a horizontal divider between rows whose similarity crosses
+ * it. We also accept a `THRESHOLD_FALLBACK` so the page still renders if a
+ * hypothetical older server didn't include the field.
  *
  * Browser-side secret handling: this is the FIRST design-tools surface to
  * call a snapshot-secret-gated endpoint (POST /snapshots and POST
@@ -33,7 +36,14 @@ import type { RetrievalProbeResponse } from "@workspace/api-client-react";
 import { useMutation } from "@tanstack/react-query";
 import { Copy, Search } from "lucide-react";
 
-const THRESHOLD = 0.6;
+/**
+ * Inclusion-threshold fallback used only when the probe response omits
+ * `inclusionThreshold` (e.g. talking to an older server build). Kept in sync
+ * with `MIN_VECTOR_SCORE` in `lib/codes/src/retrieval.ts` — that constant is
+ * the canonical source of truth; this is just a safety net so the page
+ * doesn't crash on a missing field.
+ */
+const THRESHOLD_FALLBACK = 0.35;
 const SECRET_KEY = "devSnapshotSecret";
 const TOPN_DEFAULT = 10;
 const TOPN_MIN = 1;
@@ -102,16 +112,17 @@ function writeSecretToStorage(s: string): void {
 }
 
 /**
- * Where in the result list does the similarity drop below THRESHOLD?
+ * Where in the result list does the similarity drop below `threshold`?
  * Returns the index of the FIRST below-threshold row, or results.length
  * if every row passes (no divider needed). The UI draws the divider
  * BEFORE that row.
  */
 function findThresholdSplitIndex(
   results: RetrievalProbeResponse["results"],
+  threshold: number,
 ): number {
   for (let i = 0; i < results.length; i++) {
-    if (results[i].similarity < THRESHOLD) return i;
+    if (results[i].similarity < threshold) return i;
   }
   return results.length;
 }
@@ -229,7 +240,12 @@ export function DevAtomsProbe() {
   }
 
   const results = response?.results ?? [];
-  const splitIdx = findThresholdSplitIndex(results);
+  // The server echoes the canonical inclusion threshold so this divider can
+  // never drift from what /api/chat actually applies. Fall back to a local
+  // constant only if the server omitted the field (e.g. older build).
+  const threshold = response?.inclusionThreshold ?? THRESHOLD_FALLBACK;
+  const thresholdLabel = threshold.toFixed(2);
+  const splitIdx = findThresholdSplitIndex(results, threshold);
   const aboveCount = splitIdx;
   const belowCount = results.length - splitIdx;
   const lexicalMode = response?.queryEmbedding.available === false;
@@ -399,7 +415,7 @@ export function DevAtomsProbe() {
               <span className="opacity-70">returned:</span> {results.length}{" "}
               {results.length > 0 && (
                 <span className="opacity-60">
-                  ({aboveCount} above 0.6, {belowCount} below)
+                  ({aboveCount} above {thresholdLabel}, {belowCount} below)
                 </span>
               )}
             </span>
@@ -409,8 +425,8 @@ export function DevAtomsProbe() {
             <div className="rounded border border-amber-700/60 bg-amber-950/30 p-2 text-xs text-amber-200">
               No OPENAI_API_KEY on the server — retrieval fell back to lexical
               bag-of-words. Scores below are <strong>integer match counts</strong>,
-              not cosine similarities; the 0.6 threshold doesn't apply in this
-              mode.
+              not cosine similarities; the {thresholdLabel} threshold doesn't
+              apply in this mode.
             </div>
           )}
 
@@ -441,8 +457,8 @@ export function DevAtomsProbe() {
                           colSpan={6}
                           className="border-y-2 border-amber-600/70 bg-amber-950/20 px-2 py-1 text-center text-[11px] uppercase tracking-wider text-amber-200"
                         >
-                          0.6 threshold — atoms above are included in chat
-                          context
+                          {thresholdLabel} threshold — atoms above are
+                          included in chat context
                         </td>
                       </tr>,
                     );

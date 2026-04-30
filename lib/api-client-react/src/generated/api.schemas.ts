@@ -341,7 +341,19 @@ export interface RetrievalProbeResponse {
   resolvedFromEngagement: boolean;
   query: string;
   queryEmbedding: RetrievalProbeResponseQueryEmbedding;
-  /** ALL retrieved atoms (threshold not applied server-side). */
+  /** The minimum cosine-similarity score the chat path requires for a
+vector-retrieved atom to be included in the LLM's reference block.
+The probe itself does NOT filter by this — it returns the full
+top-N — but echoes the value so the UI can render an accurate
+"above this line is what chat actually sends" divider. Has no
+meaning in lexical-fallback mode (`queryEmbedding.available =
+false`); the UI hides the divider in that case.
+ */
+  inclusionThreshold: number;
+  /** ALL retrieved atoms (probe passes `applyMinScore: false`); rows
+below `inclusionThreshold` are still returned for diagnostic
+visibility.
+ */
   results: RetrievalProbeResultItem[];
   /** The literal `<reference_code_atoms>...</reference_code_atoms>` XML
 block that would be embedded in Claude's system prompt for this

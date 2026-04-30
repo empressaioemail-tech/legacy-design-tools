@@ -34,17 +34,55 @@ export interface RetrievedAtom {
   retrievalMode: string;
 }
 
+/**
+ * Minimum cosine-similarity score for a vector-retrieved atom to be eligible
+ * for inclusion in the chat reference block (i.e. actually injected into the
+ * LLM's system prompt as `<reference_code_atoms>`).
+ *
+ * Calibrated against the Grand County, UT Land Use Code corpus (215 atoms in
+ * `LAND_USE`). For the canonical "what are the setbacks for this property"
+ * query, the literal "Required Yards (Setbacks)" definition (§5.6) and the
+ * residential setback table (§5.4) score in the 0.36–0.38 range — clearly
+ * the most relevant hits, but well below the legacy 0.6 cutoff that was
+ * picked before any HTML/zoning corpus existed (and was tuned for a different
+ * embedding distribution entirely).
+ *
+ * 0.35 was chosen as a *soft floor* paired with the existing top-K limit
+ * (caller-provided `limit`, default 8): we still take at most K results, but
+ * drop anything below this score so genuinely irrelevant atoms don't pollute
+ * the prompt. Empirically, on the same corpus, off-topic queries score
+ * <0.30, so 0.35 keeps top-1..3 zoning hits while filtering noise.
+ *
+ * Lexical-fallback scores are integer match counts (not cosine similarities)
+ * and are NOT subject to this threshold — `applyMinScore` only affects the
+ * vector path. The DevAtomsProbe UI reads this constant via the probe
+ * response so the operator-facing divider always matches the chat path.
+ */
+export const MIN_VECTOR_SCORE = 0.35;
+
 export interface RetrieveOptions {
   jurisdictionKey: string;
   question: string;
   limit?: number;
   logger?: OrchestratorLogger;
+  /**
+   * When true (default), filter vector-path results below
+   * {@link MIN_VECTOR_SCORE} before returning. The chat path uses the default
+   * so weak matches never reach the LLM. The /dev/atoms/retrieve probe
+   * passes `false` so the operator sees the full ranked list with the
+   * threshold rendered as a visual divider.
+   *
+   * Has no effect on the lexical-fallback path (integer match counts are not
+   * comparable to cosine similarities).
+   */
+  applyMinScore?: boolean;
 }
 
 export async function retrieveAtomsForQuestion(
   opts: RetrieveOptions,
 ): Promise<RetrievedAtom[]> {
   const limit = opts.limit ?? 8;
+  const applyMinScore = opts.applyMinScore ?? true;
   const log = opts.logger;
 
   // 1. Try the vector path.
@@ -75,7 +113,13 @@ export async function retrieveAtomsForQuestion(
       .orderBy(sql`distance ASC`)
       .limit(limit);
     if (rows.length > 0) {
-      return rows.map((r) => ({
+      // Hydrate first, then optionally apply the soft floor. The fallback
+      // to lexical only fires when the *raw* DB query returned 0 rows
+      // (empty corpus / no embeddings). If we filter every vector hit out
+      // because nothing crossed the floor, that's a true negative — we
+      // intentionally return [] rather than backfilling with lexical
+      // matches that would be even less relevant.
+      const hydrated = rows.map((r) => ({
         id: r.id,
         sourceName: r.sourceName,
         jurisdictionKey: r.jurisdictionKey,
@@ -88,6 +132,9 @@ export async function retrieveAtomsForQuestion(
         score: 1 - Number(r.distance ?? 1),
         retrievalMode: "vector",
       }));
+      return applyMinScore
+        ? hydrated.filter((r) => r.score >= MIN_VECTOR_SCORE)
+        : hydrated;
     }
   }
 

@@ -119,8 +119,11 @@ afterEach(() => {
 
 describe("DevAtomsProbe", () => {
   it("runs the probe for a selected engagement and renders the threshold divider in the correct position", async () => {
-    // Two atoms above 0.6, two below — divider should land between rank 2
-    // and rank 3.
+    // Two atoms above the server-echoed inclusion threshold (0.35), two
+    // below — divider should land between rank 2 and rank 3. The chosen
+    // scores (0.55 / 0.42 above; 0.30 / 0.20 below) bracket the 0.35
+    // floor cleanly so the test isn't sensitive to small calibration
+    // tweaks.
     retrieveAtomsProbeMock.mockResolvedValueOnce({
       resolvedJurisdiction: "grand_county_ut",
       resolvedFromEngagement: true,
@@ -130,7 +133,8 @@ describe("DevAtomsProbe", () => {
         dimension: 1536,
         available: true,
       },
-      results: makeResults([0.91, 0.74, 0.55, 0.42]),
+      inclusionThreshold: 0.35,
+      results: makeResults([0.55, 0.42, 0.3, 0.2]),
       assembledPromptBlock:
         "<reference_code_atoms>\n<atom>...</atom>\n</reference_code_atoms>",
     });
@@ -189,6 +193,7 @@ describe("DevAtomsProbe", () => {
         dimension: 1536,
         available: true,
       },
+      inclusionThreshold: 0.35,
       results: makeResults([0.81]),
       assembledPromptBlock: promptBlock,
     });

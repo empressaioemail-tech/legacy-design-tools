@@ -9,8 +9,11 @@
  *   - Use the SAME modules /api/chat uses: keyFromEngagement,
  *     retrieveAtomsForQuestion, formatReferenceCodeAtoms — all from
  *     @workspace/codes. Do NOT reimplement.
- *   - Return ALL retrieved atoms (no threshold filter); the UI renders the
- *     0.6 threshold line visually.
+ *   - Return ALL retrieved atoms (probe passes `applyMinScore: false`); the
+ *     UI renders the inclusion threshold as a visual divider. The threshold
+ *     value itself comes from `MIN_VECTOR_SCORE` (single source of truth)
+ *     and is echoed in the response so the operator-facing line always
+ *     matches the value chat actually applies.
  *   - Header-gated by x-snapshot-secret to match POST /snapshots and
  *     POST /engagements/match.
  */
@@ -25,6 +28,7 @@ import {
   isEmbeddingAvailable,
   EMBEDDING_MODEL,
   EMBEDDING_DIMENSIONS,
+  MIN_VECTOR_SCORE,
   type RetrievedAtom,
 } from "@workspace/codes";
 import {
@@ -142,7 +146,11 @@ router.post(
       }
     }
 
-    // 5. Run retrieval through the SAME module /api/chat imports.
+    // 5. Run retrieval through the SAME module /api/chat imports. The probe
+    //    intentionally passes `applyMinScore: false` so the operator sees
+    //    the FULL ranked top-N — including atoms below the inclusion floor
+    //    that the chat path drops. The UI then renders the threshold as a
+    //    horizontal divider in the result table.
     let atoms: RetrievedAtom[] = [];
     try {
       atoms = await retrieveAtomsForQuestion({
@@ -150,6 +158,7 @@ router.post(
         question: query,
         limit: topN,
         logger,
+        applyMinScore: false,
       });
     } catch (err) {
       logger.error(
@@ -195,6 +204,10 @@ router.post(
         dimension: EMBEDDING_DIMENSIONS,
         available,
       },
+      // Echo the canonical inclusion threshold the chat path uses so the
+      // probe UI's divider can never drift from server behavior. Lexical
+      // mode ignores it (the UI guards on queryEmbedding.available).
+      inclusionThreshold: MIN_VECTOR_SCORE,
       results,
       assembledPromptBlock,
     });

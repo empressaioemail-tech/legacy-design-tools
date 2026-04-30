@@ -857,6 +857,11 @@ export const RetrieveAtomsProbeResponse = zod.object({
         "False if no OPENAI_API_KEY is configured (retrieval falls back\nto lexical bag-of-words; similarity scores are integer match\ncounts, not cosine).\n",
       ),
   }),
+  inclusionThreshold: zod
+    .number()
+    .describe(
+      'The minimum cosine-similarity score the chat path requires for a\nvector-retrieved atom to be included in the LLM\'s reference block.\nThe probe itself does NOT filter by this — it returns the full\ntop-N — but echoes the value so the UI can render an accurate\n\"above this line is what chat actually sends\" divider. Has no\nmeaning in lexical-fallback mode (`queryEmbedding.available =\nfalse`); the UI hides the divider in that case.\n',
+    ),
   results: zod
     .array(
       zod.object({
@@ -885,7 +890,9 @@ export const RetrieveAtomsProbeResponse = zod.object({
           ),
       }),
     )
-    .describe("ALL retrieved atoms (threshold not applied server-side)."),
+    .describe(
+      "ALL retrieved atoms (probe passes `applyMinScore: false`); rows\nbelow `inclusionThreshold` are still returned for diagnostic\nvisibility.\n",
+    ),
   assembledPromptBlock: zod
     .string()
     .describe(
