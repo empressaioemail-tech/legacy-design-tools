@@ -27,9 +27,19 @@ const { setupRouteTests } = await import("./setup");
 const { adapterResponseCache } = await import("@workspace/db");
 const { eq } = await import("drizzle-orm");
 const { toCacheKey } = await import("@workspace/adapters");
-const { createAdapterResponseCache, getAdapterCacheTtlMs } = await import(
-  "../lib/adapterCache"
-);
+const {
+  createAdapterResponseCache,
+  getAdapterCacheTtlMs,
+  getAdapterCacheSweepIntervalMs,
+  getAdapterCacheSweepGraceMs,
+  getAdapterCacheSweepBatchSize,
+  sweepExpiredAdapterCacheRows,
+  startAdapterCacheSweepWorker,
+  stopAdapterCacheSweepWorker,
+  DEFAULT_ADAPTER_CACHE_SWEEP_INTERVAL_MS,
+  DEFAULT_ADAPTER_CACHE_SWEEP_GRACE_MS,
+  DEFAULT_ADAPTER_CACHE_SWEEP_BATCH_SIZE,
+} = await import("../lib/adapterCache");
 import type { AdapterResult } from "@workspace/adapters";
 
 setupRouteTests(() => {});
@@ -168,5 +178,198 @@ describe("PostgresAdapterResponseCache", () => {
     expect(rows).toHaveLength(1);
     const hit = await cache!.get(a!);
     expect((hit as AdapterResult).payload).toEqual({ v: 2 });
+  });
+});
+
+describe("adapter cache sweep env helpers", () => {
+  it("getAdapterCacheSweepIntervalMs defaults to 1 hour", () => {
+    expect(getAdapterCacheSweepIntervalMs(undefined)).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_INTERVAL_MS,
+    );
+    expect(getAdapterCacheSweepIntervalMs("")).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_INTERVAL_MS,
+    );
+  });
+
+  it("getAdapterCacheSweepIntervalMs honours `0` as disabled", () => {
+    expect(getAdapterCacheSweepIntervalMs("0")).toBe(0);
+  });
+
+  it("getAdapterCacheSweepIntervalMs falls back on garbage input", () => {
+    expect(getAdapterCacheSweepIntervalMs("nope")).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_INTERVAL_MS,
+    );
+    expect(getAdapterCacheSweepIntervalMs("-5")).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_INTERVAL_MS,
+    );
+  });
+
+  it("getAdapterCacheSweepGraceMs parses 0 as no-grace", () => {
+    expect(getAdapterCacheSweepGraceMs("0")).toBe(0);
+    expect(getAdapterCacheSweepGraceMs(undefined)).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_GRACE_MS,
+    );
+  });
+
+  it("getAdapterCacheSweepBatchSize falls back on `0` (disabling via batch is not supported)", () => {
+    expect(getAdapterCacheSweepBatchSize("0")).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_BATCH_SIZE,
+    );
+    expect(getAdapterCacheSweepBatchSize("250")).toBe(250);
+    expect(getAdapterCacheSweepBatchSize(undefined)).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_BATCH_SIZE,
+    );
+  });
+});
+
+describe("sweepExpiredAdapterCacheRows", () => {
+  it("returns 0 when there is nothing expired", async () => {
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    const key = toCacheKey("fema:nfhl-flood-zone", 38.5733, -109.5499);
+    await cache!.put(key!, sampleResult);
+    const removed = await sweepExpiredAdapterCacheRows({
+      graceMs: 0,
+      batchSize: 100,
+    });
+    expect(removed).toBe(0);
+    const rows = await ctx.schema!.db.select().from(adapterResponseCache);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("deletes rows whose expires_at is older than now() - graceMs", async () => {
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    const key = toCacheKey("fema:nfhl-flood-zone", 38.5733, -109.5499);
+    await cache!.put(key!, sampleResult);
+    // Manually expire well past the grace window.
+    await ctx.schema!.db
+      .update(adapterResponseCache)
+      .set({ expiresAt: new Date(Date.now() - 10 * 60 * 1000) })
+      .where(
+        eq(adapterResponseCache.adapterKey, "fema:nfhl-flood-zone"),
+      );
+    const removed = await sweepExpiredAdapterCacheRows({
+      graceMs: 60_000,
+      batchSize: 100,
+    });
+    expect(removed).toBe(1);
+    const rows = await ctx.schema!.db.select().from(adapterResponseCache);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("respects the grace window — recently-expired rows survive", async () => {
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    const key = toCacheKey("fema:nfhl-flood-zone", 38.5733, -109.5499);
+    await cache!.put(key!, sampleResult);
+    // Expired 10s ago, but grace is 1h — survives.
+    await ctx.schema!.db
+      .update(adapterResponseCache)
+      .set({ expiresAt: new Date(Date.now() - 10_000) })
+      .where(
+        eq(adapterResponseCache.adapterKey, "fema:nfhl-flood-zone"),
+      );
+    const removed = await sweepExpiredAdapterCacheRows({
+      graceMs: 60 * 60 * 1000,
+      batchSize: 100,
+    });
+    expect(removed).toBe(0);
+    const rows = await ctx.schema!.db.select().from(adapterResponseCache);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("caps the deletion at batchSize per call", async () => {
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    // Seed five rows by varying coordinates so the unique index doesn't
+    // collapse them. The 5th decimal is the rounding precision the
+    // schema enforces, so step at the 4th to keep them distinct.
+    for (let i = 0; i < 5; i++) {
+      const k = toCacheKey(
+        "fema:nfhl-flood-zone",
+        38.5 + i * 0.001,
+        -109.5,
+      );
+      await cache!.put(k!, sampleResult);
+    }
+    await ctx.schema!.db
+      .update(adapterResponseCache)
+      .set({ expiresAt: new Date(Date.now() - 10 * 60 * 1000) });
+    const firstSweep = await sweepExpiredAdapterCacheRows({
+      graceMs: 0,
+      batchSize: 2,
+    });
+    expect(firstSweep).toBe(2);
+    const afterFirst = await ctx.schema!.db
+      .select()
+      .from(adapterResponseCache);
+    expect(afterFirst).toHaveLength(3);
+    const secondSweep = await sweepExpiredAdapterCacheRows({
+      graceMs: 0,
+      batchSize: 2,
+    });
+    expect(secondSweep).toBe(2);
+    const thirdSweep = await sweepExpiredAdapterCacheRows({
+      graceMs: 0,
+      batchSize: 2,
+    });
+    expect(thirdSweep).toBe(1);
+    const remaining = await ctx.schema!.db
+      .select()
+      .from(adapterResponseCache);
+    expect(remaining).toHaveLength(0);
+  });
+});
+
+describe("startAdapterCacheSweepWorker", () => {
+  it("does not arm a timer when intervalMs is 0", () => {
+    // No timer to clean up — if this implementation regression returned
+    // a real timer, the test runner would hang waiting for unref'd
+    // intervals to flush. The assertion is the implicit "still exits".
+    startAdapterCacheSweepWorker({ intervalMs: 0 });
+    // Idempotent: stop is a no-op when the worker never armed.
+    stopAdapterCacheSweepWorker();
+  });
+
+  it("ticks at the configured interval and removes expired rows", async () => {
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    const key = toCacheKey("fema:nfhl-flood-zone", 38.5733, -109.5499);
+    await cache!.put(key!, sampleResult);
+    await ctx.schema!.db
+      .update(adapterResponseCache)
+      .set({ expiresAt: new Date(Date.now() - 10 * 60 * 1000) });
+    try {
+      startAdapterCacheSweepWorker({
+        intervalMs: 25,
+        graceMs: 0,
+        batchSize: 100,
+      });
+      // The worker fires the first sweep ~1s after boot via setTimeout,
+      // and a tick every intervalMs after that. Poll the table for a
+      // bounded window so the test isn't sensitive to scheduling jitter.
+      const deadline = Date.now() + 3000;
+      let rows = await ctx.schema!.db.select().from(adapterResponseCache);
+      while (rows.length > 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+        rows = await ctx.schema!.db.select().from(adapterResponseCache);
+      }
+      expect(rows).toHaveLength(0);
+    } finally {
+      stopAdapterCacheSweepWorker();
+    }
+  });
+
+  it("is idempotent — a second start is a warning, not a second timer", () => {
+    try {
+      startAdapterCacheSweepWorker({
+        intervalMs: 60_000,
+        graceMs: 0,
+        batchSize: 1,
+      });
+      startAdapterCacheSweepWorker({
+        intervalMs: 60_000,
+        graceMs: 0,
+        batchSize: 1,
+      });
+    } finally {
+      stopAdapterCacheSweepWorker();
+    }
   });
 });

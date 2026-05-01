@@ -32,7 +32,13 @@ import {
  * `expires_at` is the TTL gate; readers filter on `expires_at > now()`.
  * No background sweep is required to enforce correctness — expired
  * rows just stop serving and get overwritten on the next run via the
- * unique index's `ON CONFLICT DO UPDATE` upsert.
+ * unique index's `ON CONFLICT DO UPDATE` upsert. Task #203 added a
+ * periodic capacity-only sweep (`startAdapterCacheSweepWorker` in
+ * `artifacts/api-server/src/lib/adapterCache.ts`) that deletes rows
+ * already past their TTL plus a grace window, in bounded batches —
+ * this keeps the table from growing without bound for parcels that
+ * are looked up once and never re-cached, but it is not required for
+ * correctness.
  */
 export const adapterResponseCache = pgTable(
   "adapter_response_cache",

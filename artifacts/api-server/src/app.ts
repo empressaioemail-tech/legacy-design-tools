@@ -7,6 +7,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
+import { startAdapterCacheSweepWorker } from "./lib/adapterCache";
 
 // Start the code-atom fetch queue drainer at module load. Polls every
 // CODE_ATOM_QUEUE_TICK_MS (default 10s) for pending entries.
@@ -18,6 +19,13 @@ startQueueWorker(logger);
 // architect-driven kickoff cadence accrues completed/failed history.
 // See `lib/briefingGenerationJobsSweep.ts` for the retention contract.
 startBriefingGenerationJobsSweep(logger);
+
+// Sweep expired federal-adapter cache rows (Task #203). Reads filter
+// `expires_at > now()` so expired rows never serve, but the table
+// would otherwise grow without bound for parcels that are looked up
+// once and never re-cached. Disabled with
+// ADAPTER_CACHE_SWEEP_INTERVAL_MS=0.
+startAdapterCacheSweepWorker({ log: logger });
 
 const app: Express = express();
 
