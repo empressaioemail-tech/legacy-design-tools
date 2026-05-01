@@ -55,7 +55,7 @@ const hoisted = vi.hoisted(() => {
       engagementId: "eng-1",
       activeBriefingId: "brief-1",
       briefingVersion: 3,
-      materializedAt: "2025-01-02T00:00:00.000Z",
+      materializedAt: "2025-01-02T00:00:00.000Z" as string | null,
       revitDocumentPath: null as string | null,
       refreshStatus: "current" as
         | "current"
@@ -105,6 +105,7 @@ const hoisted = vi.hoisted(() => {
     },
     pushMutate: vi.fn(),
     pushIsPending: false,
+    pushIsError: false,
   };
 });
 
@@ -218,7 +219,7 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
       return {
         mutate: hoisted.pushMutate,
         isPending: hoisted.pushIsPending,
-        isError: false,
+        isError: hoisted.pushIsError,
       };
     },
   };
@@ -267,7 +268,8 @@ function renderPanel() {
  * `invalidateQueries` spy — same shape as the Task #126 banner test
  * does for `useCreateEngagementSubmission`.
  */
-function renderPushAffordance() {
+function renderPushAffordance(opts: { hasBriefing?: boolean } = {}) {
+  const hasBriefing = opts.hasBriefing ?? true;
   const client = makeQueryClient();
   client.setQueryData(["getEngagementBimModel", hoisted.bimModel.engagementId], {
     bimModel: { ...hoisted.bimModel },
@@ -285,7 +287,7 @@ function renderPushAffordance() {
     <QueryClientProvider client={client}>
       <PushToRevitAffordance
         engagementId={hoisted.bimModel.engagementId}
-        hasBriefing
+        hasBriefing={hasBriefing}
       />
     </QueryClientProvider>
   );
@@ -324,6 +326,7 @@ beforeEach(() => {
   hoisted.capturedPushOptions = null;
   hoisted.pushMutate.mockReset();
   hoisted.pushIsPending = false;
+  hoisted.pushIsError = false;
 });
 
 afterEach(() => {
@@ -734,6 +737,195 @@ describe("PushToRevitAffordance → divergences invalidation (Task #172)", () =>
         ["getBimModelRefresh", hoisted.bimModel.id],
         ["listBimModelDivergences", hoisted.bimModel.id],
       ]),
+    );
+  });
+});
+
+/**
+ * PushToRevitAffordance status-pill / CTA / explainer mapping
+ * (Task #207).
+ *
+ * Task #192 pinned the post-push divergences invalidation above, but
+ * the affordance's three visible states (`refreshStatus` →
+ * palette / CTA-label / explainer) and its disabled-without-briefing
+ * guard had no coverage. A regression in any of those branches would
+ * let the wrong reassurance ship to architects — e.g. a "Current"
+ * pill on top of a stale model, a "Push to Revit" CTA after a
+ * successful push, or a clickable button on an engagement that has
+ * no briefing — so each branch is locked in here.
+ *
+ * The five cases mirror the bullets in the task brief:
+ *   1. not-pushed → info palette + "Push to Revit" + generic copy.
+ *   2. current    → success palette + "Push again to Revit" +
+ *                   "Materialized at … against briefing v<n>".
+ *   3. stale      → warning palette + "Re-push to Revit" + the
+ *                   "(N added, M modified)" diff tail.
+ *   4. hasBriefing=false → button disabled + "Upload a briefing
+ *      source first…" hint regardless of refreshStatus.
+ *   5. pushMutation.isError → push-to-revit-error alert renders.
+ */
+describe("PushToRevitAffordance status / CTA / explainer mapping (Task #207)", () => {
+  function badgeFor() {
+    return screen.getByTestId("push-to-revit-status-badge");
+  }
+  function explainerText() {
+    return screen.getByTestId("push-to-revit-explainer").textContent ?? "";
+  }
+  function ctaText() {
+    return screen.getByTestId("push-to-revit-button").textContent ?? "";
+  }
+
+  it("renders the info palette + generic CTA + generic explainer when refreshStatus is not-pushed", () => {
+    // First-render shape: no prior materialization, no diff. Both
+    // the bim-model row and the /refresh payload report
+    // `not-pushed`, mirroring what the api-server returns before
+    // any architect has run a sync.
+    hoisted.bimModel.refreshStatus = "not-pushed";
+    hoisted.bimModel.materializedAt = null;
+    hoisted.refresh = {
+      bimModelId: "bim-1",
+      briefingId: "brief-1",
+      briefingVersion: 3,
+      materializedAt: null,
+      refreshStatus: "not-pushed",
+      diff: {
+        addedCount: 0,
+        modifiedCount: 0,
+        unchangedCount: 0,
+        elements: [],
+      },
+    };
+
+    renderPushAffordance();
+
+    const badge = badgeFor();
+    expect(badge).toHaveAttribute("data-status", "not-pushed");
+    expect(badge).toHaveTextContent("Not pushed");
+    expect(badge.style.background).toBe("var(--info-dim)");
+    expect(badge.style.color).toBe("var(--info-text)");
+
+    expect(ctaText()).toBe("Push to Revit");
+    // Generic explainer copy — no version / diff tail because nothing
+    // has been materialized yet.
+    expect(explainerText()).toBe(
+      "Materializes the engagement's briefing into the architect's active Revit model.",
+    );
+    expect(screen.getByTestId("push-to-revit-button")).not.toBeDisabled();
+  });
+
+  it("renders the success palette + 'Push again' CTA + 'Materialized at … against briefing v<n>' explainer when refreshStatus is current", () => {
+    // The default beforeEach state already models a freshly-pushed
+    // engagement (refreshStatus=current, materializedAt set,
+    // briefingVersion=3) — exactly the shape this branch fires on.
+    renderPushAffordance();
+
+    const badge = badgeFor();
+    expect(badge).toHaveAttribute("data-status", "current");
+    expect(badge).toHaveTextContent("Current");
+    expect(badge.style.background).toBe("var(--success-dim)");
+    expect(badge.style.color).toBe("var(--success-text)");
+
+    expect(ctaText()).toBe("Push again to Revit");
+    // The relative-time prefix ("just now" / "N min ago" / "N h
+    // ago" / "N d ago") depends on Date.now() so we assert the
+    // surrounding scaffolding rather than a brittle exact string.
+    // The version tail is the wording Task #172's code review
+    // pinned and is what an operator scans for to cross-reference
+    // with the C# add-in.
+    const explainer = explainerText();
+    expect(explainer).toMatch(/^Materialized at .+ against briefing v3\.$/);
+  });
+
+  it("renders the warning palette + 'Re-push' CTA + '(N added, M modified)' explainer when refreshStatus is stale", () => {
+    // Stale shape: bim-model + /refresh agree the model is behind,
+    // and /refresh exposes a non-zero diff so the explainer can
+    // surface the per-element delta the operator is about to push.
+    hoisted.bimModel.refreshStatus = "stale";
+    hoisted.refresh = {
+      bimModelId: "bim-1",
+      briefingId: "brief-1",
+      briefingVersion: 4,
+      materializedAt: "2025-01-02T00:00:00.000Z",
+      refreshStatus: "stale",
+      diff: {
+        addedCount: 2,
+        modifiedCount: 3,
+        unchangedCount: 7,
+        elements: [],
+      },
+    };
+
+    renderPushAffordance();
+
+    const badge = badgeFor();
+    expect(badge).toHaveAttribute("data-status", "stale");
+    expect(badge).toHaveTextContent("Stale");
+    expect(badge.style.background).toBe("var(--warning-dim)");
+    expect(badge.style.color).toBe("var(--warning-text)");
+
+    expect(ctaText()).toBe("Re-push to Revit");
+    const explainer = explainerText();
+    // The diff tail is the bug this case guards against — the
+    // operator decides whether to re-push based on those numbers,
+    // so a swap of added↔modified would be a real regression.
+    expect(explainer).toContain("(2 added, 3 modified)");
+    expect(explainer).toContain(
+      "The briefing has changed since the last push",
+    );
+    expect(explainer).toContain("Re-push to refresh the architect's Revit model.");
+    // The "Last materialized at … against briefing v<n>." tail must
+    // also be present whenever both materializedAt and version are
+    // known, so the operator can still see what the model is
+    // currently aligned to.
+    expect(explainer).toMatch(/Last materialized at .+ against briefing v4\./);
+  });
+
+  it("disables the button and surfaces the 'Upload a briefing source first…' hint when hasBriefing is false, regardless of refreshStatus", () => {
+    // The hint must win over the refreshStatus-driven copy so an
+    // operator on an engagement with no briefing isn't told to
+    // "Re-push" something that doesn't exist. Pin that by setting
+    // refreshStatus to `stale` (the loudest non-disabled branch)
+    // and confirming the disabled-without-briefing copy still wins.
+    hoisted.bimModel.refreshStatus = "stale";
+    hoisted.refresh = {
+      bimModelId: "bim-1",
+      briefingId: "brief-1",
+      briefingVersion: 4,
+      materializedAt: "2025-01-02T00:00:00.000Z",
+      refreshStatus: "stale",
+      diff: {
+        addedCount: 5,
+        modifiedCount: 1,
+        unchangedCount: 0,
+        elements: [],
+      },
+    };
+
+    renderPushAffordance({ hasBriefing: false });
+
+    expect(screen.getByTestId("push-to-revit-button")).toBeDisabled();
+    expect(explainerText()).toBe(
+      "Upload a briefing source first — the briefing is what gets materialized.",
+    );
+    // Make sure no diff tail or "Re-push" copy bled through.
+    expect(explainerText()).not.toContain("(");
+    expect(explainerText()).not.toContain("Re-push");
+  });
+
+  it("renders the push-to-revit-error alert when pushMutation.isError flips true", () => {
+    // The alert is the operator's only signal that the previous
+    // click failed — a regression that hides it (e.g. a refactor
+    // that drops the `pushMutation.isError &&` branch) would leave
+    // them clicking a "Push" button that silently does nothing.
+    hoisted.pushIsError = true;
+
+    renderPushAffordance();
+
+    const alert = screen.getByTestId("push-to-revit-error");
+    expect(alert).toBeInTheDocument();
+    expect(alert).toHaveAttribute("role", "alert");
+    expect(alert).toHaveTextContent(
+      "Failed to push to Revit. Try again in a moment.",
     );
   });
 });
