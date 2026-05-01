@@ -403,7 +403,7 @@ function makeQueryClient() {
   });
 }
 
-function renderPage() {
+function renderPage(opts?: { search?: string }) {
   const client = makeQueryClient();
   // Pre-seed the caches the page reads on first paint so it lands
   // fully on the Site Context tab without async waits.
@@ -415,7 +415,13 @@ function renderPage() {
   // The page reads the active tab from `?tab=…` once on mount, so
   // this lands directly on the Site Context tab where
   // BriefingNarrativePanel (and its Recent runs disclosure) is mounted.
-  window.history.replaceState(null, "", "/?tab=site-context");
+  // Tests that need the disclosure pre-opened or pre-filtered (Task
+  // #275) pass an `opts.search` that augments the base query string.
+  const baseSearch = "tab=site-context";
+  const search = opts?.search
+    ? `${baseSearch}&${opts.search.replace(/^\?/, "")}`
+    : baseSearch;
+  window.history.replaceState(null, "", `/?${search}`);
   const node: ReactNode = (
     <QueryClientProvider client={client}>
       <EngagementDetail />
@@ -1185,5 +1191,173 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     expect(
       screen.queryByTestId("briefing-run-current-pill-gen-orphaned"),
     ).not.toBeInTheDocument();
+  });
+
+  // Task #275 — the active recent-runs filter (and the open/closed
+  // state of the disclosure) are mirrored to the URL so an auditor
+  // who notices a suspicious failed-then-rerun pattern can drop a
+  // link in a Slack thread that lands a teammate on the same
+  // filtered, already-open view. These tests pin three behaviors:
+  //
+  //   1. Loading the page with `?recentRunsOpen=1&recentRunsFilter=failed`
+  //      lands the disclosure already open AND already filtered to
+  //      Failed on first paint, with no extra clicks needed.
+  //   2. Toggling the disclosure or changing the filter writes the
+  //      new state back to the URL via `replaceState` (no full
+  //      navigation, no back-button entry per click).
+  //   3. The defaults — collapsed + "All" — are encoded by *removing*
+  //      the params, so the canonical engagement URL stays bare when
+  //      no filter is applied.
+  it("restores the open disclosure and active filter from the URL on first paint", async () => {
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-pending",
+        state: "pending",
+        startedAt: "2026-04-04T10:00:00.000Z",
+        completedAt: null,
+      }),
+      makeRun({
+        generationId: "gen-completed-clean",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+      makeRun({
+        generationId: "gen-failed",
+        state: "failed",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        completedAt: "2026-04-01T10:00:03.000Z",
+        error: "OpenAI 503 — upstream unavailable",
+      }),
+    ];
+
+    renderPage({ search: "recentRunsOpen=1&recentRunsFilter=failed" });
+
+    // The disclosure is open on first paint — no toggle click needed.
+    // The toggle's `aria-expanded` confirms the open state was
+    // hydrated from the URL, not from a delayed effect.
+    const toggle = await screen.findByTestId("briefing-recent-runs-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(
+      await screen.findByTestId("briefing-recent-runs-body"),
+    ).toBeInTheDocument();
+
+    // The Failed filter chip is pre-pressed and the list is already
+    // narrowed — only the failed row is visible. The other two rows
+    // (pending + clean completed) drop out, proving the filter ran
+    // on the first render rather than waiting for a click.
+    const failedChip = await screen.findByTestId(
+      "briefing-recent-runs-filter-failed",
+    );
+    expect(failedChip).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByTestId("briefing-recent-runs-filter-all"),
+    ).toHaveAttribute("aria-pressed", "false");
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveAttribute("data-testid", "briefing-run-gen-failed");
+  });
+
+  it("restores the 'invalid' filter from the URL and ignores hand-edited unknown values", async () => {
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-completed-invalid",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:05.000Z",
+        invalidCitationCount: 3,
+      }),
+      makeRun({
+        generationId: "gen-completed-clean",
+        state: "completed",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        completedAt: "2026-04-01T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+    ];
+
+    renderPage({ search: "recentRunsOpen=1&recentRunsFilter=invalid" });
+
+    // The filter chips only mount once the runs query resolves
+    // (`count > 0`), so wait on the chip itself before asserting its
+    // pressed state.
+    expect(
+      await screen.findByTestId("briefing-recent-runs-filter-invalid"),
+    ).toHaveAttribute("aria-pressed", "true");
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveAttribute(
+      "data-testid",
+      "briefing-run-gen-completed-invalid",
+    );
+
+    // A second mount with a hand-edited unknown value falls back to
+    // the "All" default rather than wedging the panel in an undefined
+    // state. This mirrors the allow-list pattern `readTabFromUrl`
+    // and `readBackfillFilterFromUrl` use upstream.
+    cleanup();
+    renderPage({ search: "recentRunsOpen=1&recentRunsFilter=bogus" });
+    expect(
+      await screen.findByTestId("briefing-recent-runs-filter-all"),
+    ).toHaveAttribute("aria-pressed", "true");
+    const fallbackList = await screen.findByTestId(
+      "briefing-recent-runs-list",
+    );
+    expect(within(fallbackList).getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("writes the open state and active filter back to the URL via replaceState as the auditor toggles them", async () => {
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-failed",
+        state: "failed",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        completedAt: "2026-04-01T10:00:03.000Z",
+        error: "OpenAI 503 — upstream unavailable",
+      }),
+    ];
+
+    renderPage();
+
+    // Defaults: collapsed + "All" are encoded by *omitting* the
+    // params, so the canonical engagement URL stays bare on first
+    // paint.
+    expect(
+      new URLSearchParams(window.location.search).get("recentRunsOpen"),
+    ).toBeNull();
+    expect(
+      new URLSearchParams(window.location.search).get("recentRunsFilter"),
+    ).toBeNull();
+
+    // Open the disclosure — the URL gains `recentRunsOpen=1`.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    await screen.findByTestId("briefing-recent-runs-list");
+    expect(
+      new URLSearchParams(window.location.search).get("recentRunsOpen"),
+    ).toBe("1");
+
+    // Switch to the Failed filter — the URL gains `recentRunsFilter=failed`.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-failed"));
+    expect(
+      new URLSearchParams(window.location.search).get("recentRunsFilter"),
+    ).toBe("failed");
+
+    // Switching back to "All" *removes* the param rather than writing
+    // `recentRunsFilter=all` — the canonical URL stays clean for the
+    // default state.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-all"));
+    expect(
+      new URLSearchParams(window.location.search).get("recentRunsFilter"),
+    ).toBeNull();
+
+    // Collapsing the disclosure removes `recentRunsOpen` for the
+    // same reason — both defaults are encoded by omission.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    expect(
+      new URLSearchParams(window.location.search).get("recentRunsOpen"),
+    ).toBeNull();
   });
 });

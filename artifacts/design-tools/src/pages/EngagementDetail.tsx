@@ -248,6 +248,71 @@ function writeBackfillFilterToUrl(next: BackfillFilter): void {
   window.history.replaceState(null, "", url.toString());
 }
 
+/**
+ * Recent-runs disclosure URL state (Task #275).
+ *
+ * Task #262 added the All / Failed / Has invalid citations filter on
+ * top of the recent-runs disclosure, but the active filter (and the
+ * disclosure's open/closed state) only lived in component state.
+ * Mirroring the URL-share pattern the tab + backfill filter use lets
+ * an auditor drop a link in a Slack thread that lands a teammate on
+ * the same filtered view, with the disclosure already expanded.
+ *
+ * Two params are reflected in the URL:
+ *   - `recentRunsFilter=failed|invalid` — the active filter chip.
+ *     Omitted when the default ("all") is active so the canonical
+ *     URL stays bare.
+ *   - `recentRunsOpen=1` — the disclosure's open state. Omitted when
+ *     collapsed (the default), again to keep the canonical URL bare.
+ *
+ * Both helpers are SSR-safe and the read uses an allow-list so a
+ * stale or hand-edited link can't push the panel into an undefined
+ * filter state.
+ */
+const RECENT_RUNS_FILTER_QUERY_PARAM = "recentRunsFilter";
+const RECENT_RUNS_OPEN_QUERY_PARAM = "recentRunsOpen";
+
+type RecentRunsFilter = "all" | "failed" | "invalid";
+
+function readRecentRunsFilterFromUrl(): RecentRunsFilter {
+  if (typeof window === "undefined") return "all";
+  const raw = new URLSearchParams(window.location.search).get(
+    RECENT_RUNS_FILTER_QUERY_PARAM,
+  );
+  if (raw === "failed" || raw === "invalid") return raw;
+  return "all";
+}
+
+function writeRecentRunsFilterToUrl(next: RecentRunsFilter): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (next === "all") {
+    url.searchParams.delete(RECENT_RUNS_FILTER_QUERY_PARAM);
+  } else {
+    url.searchParams.set(RECENT_RUNS_FILTER_QUERY_PARAM, next);
+  }
+  window.history.replaceState(null, "", url.toString());
+}
+
+function readRecentRunsOpenFromUrl(): boolean {
+  if (typeof window === "undefined") return false;
+  const raw = new URLSearchParams(window.location.search).get(
+    RECENT_RUNS_OPEN_QUERY_PARAM,
+  );
+  return raw === "1";
+}
+
+function writeRecentRunsOpenToUrl(next: boolean): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (next) {
+    url.searchParams.set(RECENT_RUNS_OPEN_QUERY_PARAM, "1");
+  } else {
+    url.searchParams.delete(RECENT_RUNS_OPEN_QUERY_PARAM);
+  }
+  window.history.replaceState(null, "", url.toString());
+}
+
 function TabBar({
   active,
   onChange,
@@ -3022,8 +3087,6 @@ function BriefingRunStateBadge({
  * which the parent (`BriefingNarrativePanel`) wires up on
  * generation kickoff and on the pending → terminal transition.
  */
-type RecentRunsFilter = "all" | "failed" | "invalid";
-
 function BriefingRecentRunsPanel({
   engagementId,
   narrativeGeneratedAt,
@@ -3044,14 +3107,34 @@ function BriefingRecentRunsPanel({
    */
   narrativeGeneratedAt: string | null;
 }) {
-  const [open, setOpen] = useState(false);
+  // Task #275 — both the open/closed state of the disclosure and the
+  // active filter are mirrored to the URL so an auditor who finds a
+  // suspicious failed-then-rerun pattern can drop a link in a Slack
+  // thread that lands a teammate on the same filtered, already-open
+  // view. The setters below sync to `replaceState` on every change to
+  // avoid polluting back-button history with one entry per click.
+  // (`RecentRunsFilter` is declared next to the URL helpers at the
+  // top of the file so the helpers can reference it.)
+  const [open, setOpenState] = useState<boolean>(() =>
+    readRecentRunsOpenFromUrl(),
+  );
+  const setOpen = (next: boolean): void => {
+    setOpenState(next);
+    writeRecentRunsOpenToUrl(next);
+  };
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   // Task #262 — auditors comparing the failed-then-rerun pattern on a
   // noisy engagement need a way to slice the retained list down to the
   // suspicious rows. The filter is purely client-side (the route
   // contract is unchanged) and "All" is the default so the disclosure
   // still opens onto the full history.
-  const [filter, setFilter] = useState<RecentRunsFilter>("all");
+  const [filter, setFilterState] = useState<RecentRunsFilter>(() =>
+    readRecentRunsFilterFromUrl(),
+  );
+  const setFilter = (next: RecentRunsFilter): void => {
+    setFilterState(next);
+    writeRecentRunsFilterToUrl(next);
+  };
   // Only fetch when the disclosure is open. The status poll above
   // already drives the at-a-glance "what is the latest run doing?"
   // story — this list is the deeper comparison view, so it can stay
@@ -3145,7 +3228,7 @@ function BriefingRecentRunsPanel({
     >
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-controls="briefing-recent-runs-body"
         data-testid="briefing-recent-runs-toggle"
