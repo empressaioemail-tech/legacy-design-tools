@@ -3010,6 +3010,54 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
         </div>
       </div>
 
+      {/*
+        Task #232 — surface the supported pilot jurisdictions *before*
+        any Generate Layers click. Task #188 already lists the pilot
+        set inside the empty-pilot banner, but that banner only renders
+        after a click + 422 round-trip on out-of-pilot projects, so an
+        architect scoping a Boulder CO project still hits a dead-end
+        before discovering the supported set is systemically narrow.
+        Rendering the list as an unobtrusive disclosure under the
+        action row lets the architect spot the dead-end up front.
+
+        The list is sourced from the same `PILOT_JURISDICTIONS`
+        registry the empty-pilot banner consumes (and that the
+        server's `appliesTo` gate filters on), so the pre-click
+        and post-click surfaces cannot drift from each other or
+        from the route. The disclosure stays mounted regardless of
+        whether the empty-pilot banner is up — an architect on a
+        non-pilot project sees both surfaces (banner with the
+        actionable upload CTA, disclosure as the always-on
+        reference) without one hiding the other.
+      */}
+      <details
+        data-testid="generate-layers-supported-jurisdictions"
+        style={{
+          fontSize: 12,
+          color: "var(--text-muted)",
+          marginTop: -4,
+        }}
+      >
+        <summary
+          data-testid="generate-layers-supported-jurisdictions-summary"
+          style={{ cursor: "pointer", userSelect: "none" }}
+        >
+          Supported jurisdictions ({PILOT_JURISDICTIONS.length})
+        </summary>
+        <div
+          data-testid="generate-layers-supported-jurisdictions-list"
+          style={{
+            marginTop: 6,
+            color: "var(--text-secondary)",
+          }}
+        >
+          Generate Layers currently runs against:{" "}
+          {PILOT_JURISDICTIONS.map((j) => j.label).join(" • ")}. Projects
+          outside this set need a manual QGIS overlay upload to seed the
+          briefing.
+        </div>
+      </details>
+
       {lastGenerateErrorSlug === "no_applicable_adapters" ? (
         // Distinct empty-pilot-jurisdiction banner (Task #177). The
         // POST already returns a structured 422 with a human-readable

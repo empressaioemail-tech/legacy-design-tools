@@ -49,9 +49,11 @@ import {
   fireEvent,
   cleanup,
   act,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { PILOT_JURISDICTIONS } from "@workspace/adapters";
 
 // ── Hoisted mock state ──────────────────────────────────────────────────
 //
@@ -567,6 +569,107 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     expect(screen.getByTestId("generate-layers-error")).toHaveTextContent(
       "Internal failure that happened to share the slug",
     );
+  });
+
+  /**
+   * Task #232 — the supported-jurisdictions disclosure must render
+   * before any Generate Layers click. Task #188 already lists the
+   * pilot set inside the empty-pilot banner, but the banner only
+   * appears *after* a click + 422 round-trip on out-of-pilot
+   * projects. An architect scoping a Boulder CO project would still
+   * waste a click before discovering the systemic dead-end. The
+   * pre-click disclosure closes that gap.
+   *
+   * The assertion iterates `PILOT_JURISDICTIONS` directly so a future
+   * adapter addition extends the visible set without touching this
+   * test, and any drift between the disclosure and the registry
+   * breaks here instead of hiding behind stale copy.
+   */
+  it("renders the supported-jurisdictions disclosure with the pilot list before any Generate Layers click", () => {
+    renderPage();
+
+    // Sanity: the disclosure is mounted on first paint, with no
+    // mutation having fired. Both error/banner surfaces must stay
+    // absent so this test is unambiguously about the pre-click
+    // state.
+    expect(
+      screen.queryByTestId("generate-layers-no-adapters-banner"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("generate-layers-error"),
+    ).not.toBeInTheDocument();
+
+    const disclosure = screen.getByTestId(
+      "generate-layers-supported-jurisdictions",
+    );
+    expect(disclosure).toBeInTheDocument();
+    // The summary trigger names the count so an architect can size
+    // the dead-end at a glance — three pilot jurisdictions today
+    // (Bastrop TX, Moab UT, Salmon ID), so a future addition would
+    // bump this without breaking the assertion.
+    expect(
+      within(disclosure).getByTestId(
+        "generate-layers-supported-jurisdictions-summary",
+      ),
+    ).toHaveTextContent(
+      `Supported jurisdictions (${PILOT_JURISDICTIONS.length})`,
+    );
+    // Sanity: at least one entry — guards against a future
+    // refactor that empties the registry but keeps the disclosure
+    // shell. The pre-click surface is meaningless if the list is
+    // empty.
+    expect(PILOT_JURISDICTIONS.length).toBeGreaterThan(0);
+    const list = within(disclosure).getByTestId(
+      "generate-layers-supported-jurisdictions-list",
+    );
+    for (const j of PILOT_JURISDICTIONS) {
+      expect(list).toHaveTextContent(j.label);
+    }
+  });
+
+  /**
+   * Companion check: when the empty-pilot banner *does* render
+   * (post-click 422), it must surface the same pilot labels the
+   * pre-click disclosure already exposed. The two surfaces share
+   * the `PILOT_JURISDICTIONS` source, so this guards against a
+   * future refactor that forks one of them onto a separate copy.
+   */
+  it("post-click empty-pilot banner exposes the same labels as the pre-click disclosure", () => {
+    renderPage();
+
+    const preClickList = screen.getByTestId(
+      "generate-layers-supported-jurisdictions-list",
+    );
+    for (const j of PILOT_JURISDICTIONS) {
+      expect(preClickList).toHaveTextContent(j.label);
+    }
+
+    act(() => {
+      hoisted.capturedGenerateOptions!.mutation!.onError!(
+        makeApiErrorLike(422, {
+          error: "no_applicable_adapters",
+          message:
+            'No adapters configured for jurisdiction "CO" / "Boulder".',
+        }),
+        { id: hoisted.engagement.id },
+        undefined,
+      );
+    });
+
+    const postClickList = screen.getByTestId(
+      "generate-layers-no-adapters-supported",
+    );
+    for (const j of PILOT_JURISDICTIONS) {
+      expect(postClickList).toHaveTextContent(j.label);
+    }
+    // The pre-click disclosure stays mounted alongside the banner —
+    // the two surfaces are intentionally additive (banner is the
+    // actionable upload prompt, disclosure is the always-on
+    // reference) so an architect on a non-pilot project can still
+    // see the supported set after acting on the banner.
+    expect(
+      screen.getByTestId("generate-layers-supported-jurisdictions"),
+    ).toBeInTheDocument();
   });
 
   it("falls through to the generic generate-layers-error alert for non-422 failures", () => {

@@ -282,6 +282,35 @@ test("Generate Layers: POST → outcome panel + cache-invalidation re-renders th
   await expect(page.getByTestId("briefing-sources-tier-local")).toHaveCount(0);
   await expect(page.getByTestId("generate-layers-outcomes")).toHaveCount(0);
 
+  // Task #232 — the supported-jurisdictions disclosure must render
+  // before any Generate Layers click. The empty-pilot banner only
+  // appears after the 422 round-trip, so an architect on a non-
+  // pilot project would otherwise hit a dead-end before discovering
+  // the supported set is systemically narrow. Iterating
+  // `PILOT_JURISDICTIONS` here pins the visible labels to the same
+  // registry the empty-pilot banner consumes — a future drift
+  // between the two surfaces breaks this assertion instead of
+  // hiding behind stale copy.
+  const preClickSupported = page.getByTestId(
+    "generate-layers-supported-jurisdictions",
+  );
+  await expect(preClickSupported).toBeVisible();
+  await expect(
+    page.getByTestId("generate-layers-supported-jurisdictions-summary"),
+  ).toContainText(`Supported jurisdictions (${PILOT_JURISDICTIONS.length})`);
+  // Expand the disclosure so the per-label list is visible (and
+  // not just present in the DOM behind the closed `<details>`).
+  await page
+    .getByTestId("generate-layers-supported-jurisdictions-summary")
+    .click();
+  const preClickSupportedList = page.getByTestId(
+    "generate-layers-supported-jurisdictions-list",
+  );
+  await expect(preClickSupportedList).toBeVisible();
+  for (const j of PILOT_JURISDICTIONS) {
+    await expect(preClickSupportedList).toContainText(j.label);
+  }
+
   const button = page.getByTestId("generate-layers-button");
   await expect(button).toBeVisible();
   await expect(button).toHaveText("Generate Layers");
