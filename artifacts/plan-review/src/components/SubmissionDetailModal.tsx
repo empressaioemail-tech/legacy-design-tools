@@ -125,7 +125,10 @@ export function SubmissionDetailModal({
                * they need to frame the submission without bouncing to
                * the engagement page or the design-tools artifact.
                */}
-              <EngagementContextTab engagementId={engagementId} />
+              <EngagementContextTab
+                engagementId={engagementId}
+                onNavigateToBriefing={onClose}
+              />
             </TabsContent>
           </Tabs>
         )}

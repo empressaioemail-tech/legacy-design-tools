@@ -1,3 +1,4 @@
+import { Link } from "wouter";
 import {
   useGetEngagement,
   useGetEngagementBriefing,
@@ -150,9 +151,13 @@ function ParcelInfoCard({ engagement }: { engagement: EngagementDetail }) {
 }
 
 function BriefingSummaryCard({
+  engagementId,
   narrative,
+  onNavigateToBriefing,
 }: {
+  engagementId: string;
   narrative: EngagementBriefingNarrative | null;
+  onNavigateToBriefing?: () => void;
 }) {
   const generatedAtAbsolute = narrative?.generatedAt
     ? new Date(narrative.generatedAt).toLocaleString()
@@ -220,16 +225,72 @@ function BriefingSummaryCard({
           briefing generator, Section A will appear here.
         </div>
       )}
+      {/*
+       * Task #348 — "View full briefing" deep-link. The Engagement
+       * Context tab only renders Section A (the TL;DR); reviewers
+       * who want sections B–G, sources, citations, or the prior-
+       * narrative diff would otherwise have to close the modal and
+       * navigate to the engagement page on their own. This link
+       * routes them directly to `/engagements/:id` with the briefing
+       * disclosure pre-opened (`?recentRunsOpen=1`) and the panel
+       * scrolled into view (`#briefing`). Hidden when Section A is
+       * empty — the briefing has not been generated yet, so the
+       * empty-state hint above is the only honest affordance and a
+       * "View full briefing" link would deep-link to a panel that
+       * has nothing to show.
+       *
+       * Clicking also fires `onNavigateToBriefing` so the parent
+       * modal closes — without it the reviewer lands on the right
+       * page but the modal stays mounted on top of the briefing
+       * panel they were just sent to see.
+       */}
+      {sectionA && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            paddingTop: 4,
+            borderTop: "1px solid var(--border-subtle)",
+            marginTop: 4,
+          }}
+        >
+          <Link
+            href={`/engagements/${engagementId}?recentRunsOpen=1#briefing`}
+            data-testid="engagement-context-briefing-view-full"
+            onClick={() => {
+              onNavigateToBriefing?.();
+            }}
+            style={{
+              fontSize: 12,
+              color: "var(--text-link, var(--text-secondary))",
+              textDecoration: "none",
+              fontWeight: 600,
+            }}
+          >
+            View full briefing →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
 
 export interface EngagementContextTabProps {
   engagementId: string;
+  /**
+   * Fired when the reviewer clicks the "View full briefing" deep-link
+   * in the briefing summary card. The host modal should close itself
+   * so the reviewer actually sees the briefing panel they were just
+   * sent to (otherwise the modal stays mounted on top of the page
+   * they navigated to). Optional — when omitted, the link still
+   * navigates but the host stays open.
+   */
+  onNavigateToBriefing?: () => void;
 }
 
 export function EngagementContextTab({
   engagementId,
+  onNavigateToBriefing,
 }: EngagementContextTabProps) {
   const engagementQuery = useGetEngagement(engagementId, {
     query: {
@@ -281,7 +342,11 @@ export function EngagementContextTab({
       {engagement && <ParcelInfoCard engagement={engagement} />}
 
       {engagement && (
-        <BriefingSummaryCard narrative={briefing?.narrative ?? null} />
+        <BriefingSummaryCard
+          engagementId={engagementId}
+          narrative={briefing?.narrative ?? null}
+          onNavigateToBriefing={onNavigateToBriefing}
+        />
       )}
     </div>
   );

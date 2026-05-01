@@ -261,6 +261,35 @@ export default function EngagementDetail() {
     });
   }, [audience]);
 
+  // Task #348 — `#briefing` deep-link auto-scroll. The Engagement
+  // Context tab's "View full briefing" link routes here with the
+  // hash so the briefing panel is what the reviewer lands on. The
+  // browser's native anchor behavior fires only on the very first
+  // navigation that establishes the hash; an in-page wouter Link
+  // click that just rewrites the URL doesn't re-trigger it. We
+  // run the scroll ourselves on every hash change so the link
+  // works whether the reviewer lands here from the modal (same
+  // page) or pastes the URL into a fresh tab. `requestAnimationFrame`
+  // defers the scroll until after the first paint so the briefing
+  // wrapper exists in the DOM by the time we look it up.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const scrollIfHashMatches = () => {
+      if (window.location.hash !== "#briefing") return;
+      window.requestAnimationFrame(() => {
+        const node = document.getElementById("briefing");
+        if (node) {
+          node.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+    };
+    scrollIfHashMatches();
+    window.addEventListener("hashchange", scrollIfHashMatches);
+    return () => {
+      window.removeEventListener("hashchange", scrollIfHashMatches);
+    };
+  }, []);
+
   // Top-bar search filters the past-submissions list by jurisdiction,
   // status, note, or reviewer comment (Task #111). The query is held
   // here so the layout's `Header` and the list both see the same
@@ -376,8 +405,18 @@ export default function EngagementDetail() {
           panel only fetches `/engagements/:id/briefing/runs` once the
           disclosure is actually opened, so a page load that never
           touches it costs zero extra round trips.
+
+          Task #348 — `id="briefing"` is the deep-link anchor the
+          Engagement Context tab's "View full briefing" link targets
+          (`/engagements/:id?recentRunsOpen=1#briefing`). The wrapper
+          is also where the auto-scroll handler below grabs a node
+          to center on so the panel is in view immediately on land.
         */}
-        {id && <BriefingRecentRunsPanel engagementId={id} />}
+        {id && (
+          <div id="briefing">
+            <BriefingRecentRunsPanel engagementId={id} />
+          </div>
+        )}
       </div>
 
       {engagement && (

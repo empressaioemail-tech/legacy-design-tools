@@ -303,6 +303,67 @@ describe("SubmissionDetailModal — Plan Review (Task #306 / #319)", () => {
     ).toBeNull();
   });
 
+  // Task #348 — the briefing summary card now exposes a deep-link
+  // back into the engagement page's full briefing surface so the
+  // reviewer doesn't have to close the modal and hunt for the page
+  // themselves. The link is hidden when there's no executive
+  // summary to anchor against (briefing not yet generated → the
+  // empty-state hint is the only honest affordance), and clicking
+  // it must close the modal so the reviewer actually sees the
+  // briefing panel they were just sent to.
+  it("renders a 'View full briefing' deep-link in the briefing summary card", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(
+      screen.getByTestId("submission-detail-modal-tab-engagement-context"),
+    );
+    const briefingCard = await screen.findByTestId(
+      "engagement-context-briefing-card",
+    );
+    const link = within(briefingCard).getByTestId(
+      "engagement-context-briefing-view-full",
+    );
+    expect(link).toHaveTextContent(/View full briefing/);
+    // The href routes back to the engagement detail page, opens the
+    // recent-runs disclosure (?recentRunsOpen=1), and anchors to the
+    // briefing wrapper (#briefing) so the panel is what the reviewer
+    // lands on rather than the top of the page.
+    expect(link.getAttribute("href")).toBe(
+      "/engagements/eng-1?recentRunsOpen=1#briefing",
+    );
+  });
+
+  it("hides the 'View full briefing' deep-link when no narrative has been generated", async () => {
+    const user = userEvent.setup();
+    hoisted.briefingNarrative = null;
+    renderModal();
+    await user.click(
+      screen.getByTestId("submission-detail-modal-tab-engagement-context"),
+    );
+    const briefingCard = await screen.findByTestId(
+      "engagement-context-briefing-card",
+    );
+    expect(
+      within(briefingCard).queryByTestId(
+        "engagement-context-briefing-view-full",
+      ),
+    ).toBeNull();
+  });
+
+  it("closes the modal when the 'View full briefing' deep-link is clicked", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderModal({ onClose });
+    await user.click(
+      screen.getByTestId("submission-detail-modal-tab-engagement-context"),
+    );
+    const link = await screen.findByTestId(
+      "engagement-context-briefing-view-full",
+    );
+    await user.click(link);
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it("surfaces the jurisdiction + relative-time subtitle in the modal header", async () => {
     renderModal();
     const subtitle = await screen.findByTestId(

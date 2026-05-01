@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearch } from "wouter";
 import {
   useGetEngagementBriefing,
   useListEngagementBriefingGenerationRuns,
@@ -258,6 +259,24 @@ export function BriefingRecentRunsPanel({
     setOpenState(next);
     writeRecentRunsOpenToUrl(next);
   };
+  // Task #348 — keep the disclosure in sync with the URL on
+  // post-mount navigations as well as the initial mount. The original
+  // wiring only seeded `open` from the URL once (via `useState`'s
+  // initializer); a wouter `Link` click that lands on the same
+  // engagement page (e.g. the new "View full briefing" deep-link
+  // from the Engagement Context tab in the submission detail modal)
+  // would rewrite the search string to `recentRunsOpen=1` but leave
+  // the panel collapsed because the panel was already mounted.
+  // `useSearch` re-renders on wouter pushState navigations, so this
+  // effect picks the new value off the URL and syncs `open` to it.
+  // Manual toggle clicks go through `setOpen` (above), which writes
+  // via `replaceState` — wouter does not observe `replaceState`, so
+  // the user's own toggle does not loop back through this effect.
+  const search = useSearch();
+  useEffect(() => {
+    const next = readRecentRunsOpenFromUrl();
+    setOpenState((prev) => (prev === next ? prev : next));
+  }, [search]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   // Task #338 — closes the loop on the "Copy plain text" button
   // (Task #333, mirroring design-tools Task #303 B.4). Clipboard
