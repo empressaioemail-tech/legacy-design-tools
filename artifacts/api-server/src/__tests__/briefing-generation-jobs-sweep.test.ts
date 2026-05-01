@@ -42,9 +42,10 @@ const { briefingGenerationJobs, engagements } = await import(
   "@workspace/db"
 );
 const { eq } = await import("drizzle-orm");
-const { pruneOldBriefingGenerationJobs } = await import(
-  "../lib/briefingGenerationJobsSweep"
-);
+const {
+  pruneOldBriefingGenerationJobs,
+  BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE,
+} = await import("../lib/briefingGenerationJobsSweep");
 
 let schema: TestSchemaContext;
 
@@ -593,6 +594,200 @@ describe("pruneOldBriefingGenerationJobs (keepPerEngagement: 5, default)", () =>
     });
     // Default of 5 applied → 6 - 5 = 1 reaped.
     expect(deleted).toBe(1);
+    expect((await liveJobIds(eng.id)).length).toBe(5);
+  });
+});
+
+describe("pruneOldBriefingGenerationJobs (multi-instance safety, Task #238)", () => {
+  // The sweep runs as a node-local setInterval inside every api-server
+  // process, so once we run more than one instance every instance
+  // would independently scan the table and contend on row locks for
+  // the same DELETE every 24h. The helper now wraps its DELETE in a
+  // transaction that first tries `pg_try_advisory_xact_lock` on a
+  // cluster-wide key; the loser short-circuits to 0 without scanning.
+  //
+  // These tests pin both the "peer holds the lock" short-circuit and
+  // the "two ticks race in parallel" invariant that the table is
+  // pruned exactly once per tick across all contenders.
+
+  async function seedAncientHistoryFor(name: string) {
+    // Helper for the concurrency tests: an engagement with 6 ancient
+    // terminal rows. With the production cap of 5, a single sweep
+    // tick should reap exactly one row (the oldest). The reap count
+    // is what we use as the "did this tick do the work?" signal.
+    const eng = await seedEngagement(name);
+    const days = (n: number) => n * 24 * 60 * 60 * 1000;
+    for (let i = 6; i >= 1; i--) {
+      await seedJob({
+        engagementId: eng.id,
+        state: "completed",
+        startedAt: OLD(days(i)),
+      });
+    }
+    return eng;
+  }
+
+  it("returns 0 and deletes nothing when a peer instance holds the sweep advisory lock", async () => {
+    // Simulates two api-server instances ticking simultaneously: a
+    // peer holds the cluster-wide sweep lock on its own connection
+    // (session-scoped), so this instance's tick must short-circuit
+    // and delete nothing. We then release the peer lock and re-run
+    // the sweep to prove the helper isn't permanently wedged — the
+    // rows are pruned exactly once total, never zero times after
+    // contention clears.
+    const eng = await seedAncientHistoryFor("Peer Holds Lock");
+
+    // Borrow a dedicated client from the test schema's pool and
+    // acquire a SESSION-scoped lock on the same key the production
+    // sweeper uses. Session and xact advisory locks share one
+    // keyspace, so this blocks the helper's pg_try_advisory_xact_lock
+    // from acquiring. `current_schema()` resolves to the per-suite
+    // test schema (set via the pool's search_path), so this peer
+    // lock only contends with sweeps inside this suite.
+    const peer = await schema.pool.connect();
+    try {
+      await peer.query(
+        `SELECT pg_advisory_lock(
+           hashtextextended($1 || '|' || current_schema(), 0)
+         )`,
+        [BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE],
+      );
+
+      const skipped = await pruneOldBriefingGenerationJobs({
+        db: schema.db,
+        retentionMs: RETENTION_MS,
+        now: NOW,
+        keepPerEngagement: 5,
+      });
+      expect(skipped).toBe(0);
+      // All 6 rows are still there — the peer's lock kept the helper
+      // from scanning or DELETE-ing anything.
+      expect((await liveJobIds(eng.id)).length).toBe(6);
+
+      // Release the peer's lock and re-run: this tick should now do
+      // the work the first one would have done.
+      await peer.query(
+        `SELECT pg_advisory_unlock(
+           hashtextextended($1 || '|' || current_schema(), 0)
+         )`,
+        [BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE],
+      );
+    } finally {
+      peer.release();
+    }
+
+    const swept = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      keepPerEngagement: 5,
+    });
+    // Cap is 5 → 1 ancient row reaped, 5 survive.
+    expect(swept).toBe(1);
+    expect((await liveJobIds(eng.id)).length).toBe(5);
+  });
+
+  it("two concurrent ticks together prune each row at most once", async () => {
+    // Fires two pruneOldBriefingGenerationJobs() calls in parallel.
+    // Each runs in its own transaction on its own pool connection,
+    // and both try to acquire the same advisory lock. Only one wins;
+    // the other returns 0 immediately. The total work performed
+    // across both must equal the single-tick reap count — never
+    // double it (which is what the pre-fix sweep would have done).
+    //
+    // To guarantee both ticks observe contention (rather than one
+    // winning, finishing, and releasing before the other arrives)
+    // we hold the lock on a peer connection first, fire both ticks,
+    // give them a beat to BEGIN and try the lock, then release.
+    const eng = await seedAncientHistoryFor("Concurrent Ticks");
+
+    const peer = await schema.pool.connect();
+    let firstResult: number;
+    let secondResult: number;
+    try {
+      await peer.query(
+        `SELECT pg_advisory_lock(
+           hashtextextended($1 || '|' || current_schema(), 0)
+         )`,
+        [BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE],
+      );
+      const ticks = Promise.all([
+        pruneOldBriefingGenerationJobs({
+          db: schema.db,
+          retentionMs: RETENTION_MS,
+          now: NOW,
+          keepPerEngagement: 5,
+        }),
+        pruneOldBriefingGenerationJobs({
+          db: schema.db,
+          retentionMs: RETENTION_MS,
+          now: NOW,
+          keepPerEngagement: 5,
+        }),
+      ]);
+      // Give both ticks a moment to BEGIN and observe the lock as
+      // taken by `peer`.
+      await new Promise((r) => setTimeout(r, 50));
+      await peer.query(
+        `SELECT pg_advisory_unlock(
+           hashtextextended($1 || '|' || current_schema(), 0)
+         )`,
+        [BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE],
+      );
+      [firstResult, secondResult] = await ticks;
+    } finally {
+      peer.release();
+    }
+
+    // Both contenders saw the peer holding the lock and short-
+    // circuited to 0. Neither double-deleted; neither raced into the
+    // DELETE. The table still has all 6 rows.
+    expect(firstResult).toBe(0);
+    expect(secondResult).toBe(0);
+    expect((await liveJobIds(eng.id)).length).toBe(6);
+
+    // A follow-up tick (peer no longer holding the lock) does the
+    // actual cleanup, proving the worker isn't permanently wedged.
+    const cleanup = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      keepPerEngagement: 5,
+    });
+    expect(cleanup).toBe(1);
+    expect((await liveJobIds(eng.id)).length).toBe(5);
+  });
+
+  it("racing ticks elect exactly one winner — sum of reap counts equals one tick's work, never twice", async () => {
+    // Natural-race variant: no pre-held peer lock. Both ticks fire
+    // simultaneously and contend on the cluster-wide advisory lock
+    // directly. The invariant we assert is the strong one a multi-
+    // instance deploy depends on — across the two contenders the
+    // table is pruned exactly once, never zero times and never twice.
+    //
+    // Concretely with 6 ancient terminal rows and cap=5, one caller
+    // returns 1 (it acquired the lock and did the DELETE) and the
+    // other returns 0 (it either lost the lock race, OR it acquired
+    // cleanly after the winner finished but found nothing left to
+    // reap). Either way: sum is 1 and product is 0.
+    const eng = await seedAncientHistoryFor("Racing Ticks");
+
+    const [a, b] = await Promise.all([
+      pruneOldBriefingGenerationJobs({
+        db: schema.db,
+        retentionMs: RETENTION_MS,
+        now: NOW,
+        keepPerEngagement: 5,
+      }),
+      pruneOldBriefingGenerationJobs({
+        db: schema.db,
+        retentionMs: RETENTION_MS,
+        now: NOW,
+        keepPerEngagement: 5,
+      }),
+    ]);
+    expect(a + b).toBe(1);
+    expect(a * b).toBe(0);
     expect((await liveJobIds(eng.id)).length).toBe(5);
   });
 });

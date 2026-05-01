@@ -47,6 +47,21 @@ import { sql } from "drizzle-orm";
 import { db, briefingGenerationJobs } from "@workspace/db";
 import type { Logger } from "pino";
 
+/**
+ * Namespace for the cluster-wide Postgres advisory lock that
+ * serializes sweep ticks across api-server instances (Task #238,
+ * mirroring Task #218's `ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE`). The
+ * key is hashed in-DB together with `current_schema()` so the lock
+ * is automatically scoped to whichever schema the table lives in —
+ * concurrent test schemas stay isolated from each other while every
+ * production instance (all on `public`) shares one key.
+ *
+ * Exposed so tests can compute the same hash and simulate a peer
+ * instance holding the lock.
+ */
+export const BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE =
+  "briefing_generation_jobs_sweep";
+
 /** Default retention: 30 days. Overridable via env at boot. */
 const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** Default interval: daily. Overridable via env at boot. */
@@ -90,6 +105,13 @@ export interface PruneOptions {
    * never reaped. Pending rows count toward this cap.
    */
   keepPerEngagement?: number;
+  /**
+   * Optional logger. When provided, the helper emits a debug line
+   * when it short-circuits because a peer api-server instance is
+   * already holding the cluster-wide advisory lock. Production wires
+   * this through via `tick`; tests typically omit it.
+   */
+  log?: Logger;
 }
 
 /**
@@ -113,7 +135,20 @@ export interface PruneOptions {
  *
  * Implemented as one DELETE … (SELECT COUNT(*)) statement so we never
  * need to hold a transaction across a SELECT-then-DELETE pair (which
- * would race against a concurrent kickoff).
+ * would race against a concurrent kickoff). The wrapping transaction
+ * exists solely to scope the advisory lock — the DELETE itself is
+ * still a single statement, so a concurrent kickoff inserting a new
+ * row mid-tick is still safe.
+ *
+ * Multi-instance safety (Task #238): the whole tick runs inside a
+ * transaction that first tries to acquire a transaction-scoped
+ * Postgres advisory lock keyed on
+ * {@link BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE} +
+ * `current_schema()`. If a peer api-server instance already holds
+ * the lock for this tick, this call short-circuits and returns `0`
+ * without scanning the index or contending on the DELETE's row
+ * locks. The lock auto-releases at COMMIT/ROLLBACK so a crashed
+ * sweeper can't strand the lock.
  */
 export async function pruneOldBriefingGenerationJobs(
   opts: PruneOptions = {},
@@ -131,25 +166,52 @@ export async function pruneOldBriefingGenerationJobs(
       ? Math.floor(rawKeep)
       : DEFAULT_KEEP_PER_ENGAGEMENT;
 
-  // The "newer" comparison uses the row-value `(started_at, id)`
-  // tuple instead of `started_at` alone so two rows that happen to
-  // share an identical `started_at` (default `now()` resolution is
-  // microseconds, but a backfill or rapid test seed can still tie)
-  // get a deterministic order. Without the tiebreaker, tied rows
-  // each see "no newer sibling" and the keep cap silently retains
-  // more than N rows per engagement.
-  const result = await dbHandle.execute(sql`
-    DELETE FROM ${briefingGenerationJobs} AS j
-    WHERE j.state IN ('completed', 'failed')
-      AND j.started_at < ${cutoff}
-      AND (
-        SELECT COUNT(*) FROM ${briefingGenerationJobs} AS k
-        WHERE k.engagement_id = j.engagement_id
-          AND (k.started_at, k.id) > (j.started_at, j.id)
-      ) >= ${keepPerEngagement}
-    RETURNING j.id
-  `);
-  return result.rows.length;
+  return await dbHandle.transaction(async (tx) => {
+    // pg_try_advisory_xact_lock returns true if it acquired the
+    // lock, false if any other session is already holding it. The
+    // hash key is derived in-DB from the namespace + current schema
+    // so production instances (all on `public`) share one key while
+    // concurrent test schemas stay isolated from each other.
+    const lockResult = (await tx.execute(
+      sql`SELECT pg_try_advisory_xact_lock(
+            hashtextextended(
+              ${BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE} || '|' || current_schema(),
+              0
+            )
+          ) AS locked`,
+    )) as unknown as { rows: Array<{ locked?: unknown }> };
+    const locked = lockResult.rows?.[0]?.locked === true;
+    if (!locked) {
+      // Another instance is already sweeping this tick. Logging at
+      // debug because in a multi-instance deploy this is the steady
+      // state for every instance except the lucky one each tick.
+      opts.log?.debug(
+        {},
+        "briefing-generation-jobs sweep: peer holds advisory lock, skipping tick",
+      );
+      return 0;
+    }
+
+    // The "newer" comparison uses the row-value `(started_at, id)`
+    // tuple instead of `started_at` alone so two rows that happen to
+    // share an identical `started_at` (default `now()` resolution is
+    // microseconds, but a backfill or rapid test seed can still tie)
+    // get a deterministic order. Without the tiebreaker, tied rows
+    // each see "no newer sibling" and the keep cap silently retains
+    // more than N rows per engagement.
+    const result = await tx.execute(sql`
+      DELETE FROM ${briefingGenerationJobs} AS j
+      WHERE j.state IN ('completed', 'failed')
+        AND j.started_at < ${cutoff}
+        AND (
+          SELECT COUNT(*) FROM ${briefingGenerationJobs} AS k
+          WHERE k.engagement_id = j.engagement_id
+            AND (k.started_at, k.id) > (j.started_at, j.id)
+        ) >= ${keepPerEngagement}
+      RETURNING j.id
+    `);
+    return result.rows.length;
+  });
 }
 
 /**
@@ -218,6 +280,7 @@ async function tick(
     const deleted = await pruneOldBriefingGenerationJobs({
       retentionMs,
       keepPerEngagement,
+      log,
     });
     if (deleted > 0) {
       log.info(
