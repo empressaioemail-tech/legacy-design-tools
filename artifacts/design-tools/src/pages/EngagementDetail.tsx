@@ -17,6 +17,7 @@ import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
+import { SubmitToJurisdictionDialog } from "../components/SubmitToJurisdictionDialog";
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
@@ -484,6 +485,7 @@ export function EngagementDetail() {
   };
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"intake" | "edit">("edit");
+  const [submitOpen, setSubmitOpen] = useState(false);
 
   const { data: engagement } = useGetEngagement(id, {
     query: {
@@ -637,6 +639,14 @@ export function EngagementDetail() {
             <button className="sc-btn-ghost" onClick={openEdit}>
               Edit details
             </button>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              onClick={() => setSubmitOpen(true)}
+              data-testid="submit-jurisdiction-open"
+            >
+              Submit to jurisdiction
+            </button>
           </div>
         </div>
 
@@ -783,6 +793,14 @@ export function EngagementDetail() {
         onClose={handleModalClose}
         mode={modalMode}
         onSkip={handleIntakeSkip}
+      />
+
+      <SubmitToJurisdictionDialog
+        engagementId={engagement.id}
+        engagementName={engagement.name}
+        jurisdiction={engagement.jurisdiction}
+        isOpen={submitOpen}
+        onClose={() => setSubmitOpen(false)}
       />
     </AppShell>
   );
