@@ -34,9 +34,11 @@ import { parcelBriefings } from "./parcelBriefings";
  *
  * History: terminal rows (`completed` / `failed`) are kept so a later
  * status poll always returns the most recent run's outcome (ordered by
- * `started_at DESC`). The table grows one row per generation request,
- * which is bounded by the architect-driven kickoff cadence; if it ever
- * needs reaping a future task can prune by age.
+ * `started_at DESC`). Older terminal rows that are no longer the most
+ * recent for their engagement are reaped by the periodic sweeper at
+ * `artifacts/api-server/src/lib/briefingGenerationJobsSweep.ts` once
+ * they age out of the retention window — pending rows and the latest
+ * row per engagement are always preserved (audit story).
  *
  * `briefing_id` is a back-pointer to the parcel briefing row the run
  * targets. It is nullable strictly to satisfy the FK during the brief

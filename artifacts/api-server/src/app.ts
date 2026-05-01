@@ -6,10 +6,18 @@ import { startQueueWorker } from "@workspace/codes";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
+import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
 
 // Start the code-atom fetch queue drainer at module load. Polls every
 // CODE_ATOM_QUEUE_TICK_MS (default 10s) for pending entries.
 startQueueWorker(logger);
+
+// Start the briefing-generation-jobs sweeper. Daily-cadence DELETE of
+// terminal rows older than the retention window AND not the latest
+// row for their engagement — keeps the table bounded as the
+// architect-driven kickoff cadence accrues completed/failed history.
+// See `lib/briefingGenerationJobsSweep.ts` for the retention contract.
+startBriefingGenerationJobsSweep(logger);
 
 const app: Express = express();
 
