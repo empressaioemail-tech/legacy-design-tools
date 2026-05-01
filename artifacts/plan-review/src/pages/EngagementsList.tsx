@@ -1,9 +1,11 @@
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { ChevronRight } from "lucide-react";
 import { DashboardLayout } from "@workspace/portal-ui";
 import {
   useListEngagements,
   getListEngagementsQueryKey,
+  EngagementStatus,
   type EngagementSummary,
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
@@ -100,6 +102,33 @@ function EngagementRow({ engagement }: { engagement: EngagementSummary }) {
   );
 }
 
+type StatusFilter = EngagementStatus | "all";
+
+const FILTER_TABS: ReadonlyArray<{
+  value: StatusFilter;
+  label: string;
+  testId: string;
+}> = [
+  { value: "active", label: "Active", testId: "engagements-filter-active" },
+  { value: "on_hold", label: "On hold", testId: "engagements-filter-on-hold" },
+  { value: "archived", label: "Archived", testId: "engagements-filter-archived" },
+  { value: "all", label: "All", testId: "engagements-filter-all" },
+];
+
+const FILTER_HEADER: Record<StatusFilter, string> = {
+  active: "ACTIVE ENGAGEMENTS",
+  on_hold: "ON-HOLD ENGAGEMENTS",
+  archived: "ARCHIVED ENGAGEMENTS",
+  all: "ALL ENGAGEMENTS",
+};
+
+const FILTER_EMPTY: Record<StatusFilter, string> = {
+  active: "No active engagements right now.",
+  on_hold: "Nothing is on hold.",
+  archived: "No archived engagements.",
+  all: "No engagements yet. They'll appear here once a snapshot is ingested from Revit.",
+};
+
 export default function EngagementsList() {
   const navGroups = useNavGroups();
   const { data, isLoading, isError, refetch, isFetching } = useListEngagements({
@@ -108,7 +137,33 @@ export default function EngagementsList() {
     },
   });
   const engagements = data ?? [];
-  const activeCount = engagements.filter((e) => e.status === "active").length;
+  const [filter, setFilter] = useState<StatusFilter>("active");
+
+  const counts = useMemo(() => {
+    const c: Record<EngagementStatus, number> = {
+      active: 0,
+      on_hold: 0,
+      archived: 0,
+    };
+    for (const e of engagements) {
+      c[e.status] = (c[e.status] ?? 0) + 1;
+    }
+    return c;
+  }, [engagements]);
+
+  const filtered = useMemo(
+    () =>
+      filter === "all"
+        ? engagements
+        : engagements.filter((e) => e.status === filter),
+    [engagements, filter],
+  );
+
+  const total = engagements.length;
+  const summary =
+    filter === "all"
+      ? `${total} total · ${counts.active} active`
+      : `${filtered.length} ${FILTER_TABS.find((t) => t.value === filter)!.label.toLowerCase()} · ${total} total`;
 
   return (
     <DashboardLayout
@@ -124,8 +179,11 @@ export default function EngagementsList() {
             <h2 className="text-[22px] font-bold font-['Oxygen'] text-[var(--text-primary)] m-0">
               Engagements
             </h2>
-            <div className="sc-body mt-1">
-              {engagements.length} total · {activeCount} active
+            <div
+              className="sc-body mt-1"
+              data-testid="engagements-summary"
+            >
+              {summary}
             </div>
           </div>
           <button
@@ -138,10 +196,37 @@ export default function EngagementsList() {
           </button>
         </div>
 
+        <div
+          role="tablist"
+          aria-label="Filter engagements by status"
+          className="flex items-center gap-2 flex-wrap"
+          data-testid="engagements-filter"
+        >
+          {FILTER_TABS.map((tab) => {
+            const tabCount =
+              tab.value === "all" ? total : counts[tab.value];
+            const selected = filter === tab.value;
+            return (
+              <button
+                key={tab.value}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setFilter(tab.value)}
+                data-testid={tab.testId}
+                className={selected ? "sc-btn-primary" : "sc-btn-sm"}
+              >
+                {tab.label}
+                <span className="ml-1.5 opacity-70">({tabCount})</span>
+              </button>
+            );
+          })}
+        </div>
+
         <div className="sc-card">
           <div className="sc-card-header sc-row-sb">
-            <span className="sc-label">ALL ENGAGEMENTS</span>
-            <span className="sc-meta">{engagements.length} items</span>
+            <span className="sc-label">{FILTER_HEADER[filter]}</span>
+            <span className="sc-meta">{filtered.length} items</span>
           </div>
           <div className="flex flex-col" data-testid="engagements-list">
             {isLoading ? (
@@ -158,16 +243,15 @@ export default function EngagementsList() {
               >
                 Couldn't load engagements. Try refreshing.
               </div>
-            ) : engagements.length === 0 ? (
+            ) : filtered.length === 0 ? (
               <div
                 className="p-8 text-center sc-body"
                 data-testid="engagements-empty"
               >
-                No engagements yet. They'll appear here once a snapshot is
-                ingested from Revit.
+                {total === 0 ? FILTER_EMPTY.all : FILTER_EMPTY[filter]}
               </div>
             ) : (
-              engagements.map((e) => (
+              filtered.map((e) => (
                 <EngagementRow key={e.id} engagement={e} />
               ))
             )}
