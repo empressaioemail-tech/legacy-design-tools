@@ -782,6 +782,29 @@ export function BriefingSourceRow({
       },
     },
   });
+  // Fetch the per-layer history eagerly so the row's collapsed
+  // "View history" toggle can advertise the count + date range of
+  // prior versions waiting under the panel. Sharing the exact same
+  // query key as `BriefingSourceHistoryPanel` (engagementId,
+  // {layerKind, includeSuperseded:true}) means React Query dedupes
+  // the request — expanding the panel doesn't re-fetch, and the
+  // toggle hint and the panel pills can't go out of sync on count.
+  const historyHintQuery = useListEngagementBriefingSources(engagementId, {
+    layerKind: source.layerKind,
+    includeSuperseded: true,
+  });
+  const historyHint = useMemo(() => {
+    const sources = historyHintQuery.data?.sources ?? [];
+    const priors = sources.filter(
+      (s: { id: string }) => s.id !== source.id,
+    );
+    if (priors.length === 0) return null;
+    const range = computeBriefingSourceRange(priors);
+    const rangeShort = range
+      ? formatBriefingSourceRangeShort(range.oldest, range.newest)
+      : null;
+    return { count: priors.length, rangeShort };
+  }, [historyHintQuery.data, source.id]);
   const conversionStatus = source.conversionStatus;
   const conversionStyle = conversionStatus
     ? CONVERSION_STATUS_STYLE[conversionStatus]
@@ -1031,6 +1054,18 @@ export function BriefingSourceRow({
             }}
           >
             {expanded ? "Hide history" : "View history"}
+            {!expanded && historyHint && (
+              <>
+                {" "}
+                <span
+                  data-testid={`briefing-source-history-toggle-hint-${source.id}`}
+                  style={{ opacity: 0.8 }}
+                >
+                  ({historyHint.count} prior
+                  {historyHint.rangeShort ? ` · ${historyHint.rangeShort}` : ""})
+                </span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -1060,6 +1095,92 @@ export function BriefingSourceRow({
       )}
     </div>
   );
+}
+
+// Threshold (in days) past which a layer's newest prior version is
+// considered "stale" and worth re-running. Surfaced visually on the
+// history filter pill so an architect can spot overdue tabs without
+// reading the date and doing the math themselves. Pinned as a single
+// named constant so the value stays tunable in one place.
+const BRIEFING_SOURCE_STALE_THRESHOLD_DAYS = 30;
+
+// Reduces a row set to its `createdAt` range, returning `null` for
+// an empty set. Pulled out so the panel's per-tier ranges and the
+// row's collapsed-toggle hint share one derivation — keeping the
+// two surfaces from drifting on what counts as "oldest" / "newest".
+function computeBriefingSourceRange(
+  rows: ReadonlyArray<{ createdAt: string }>,
+): { oldest: string; newest: string } | null {
+  if (rows.length === 0) return null;
+  let oldest = rows[0]!.createdAt;
+  let newest = rows[0]!.createdAt;
+  for (let i = 1; i < rows.length; i += 1) {
+    const c = rows[i]!.createdAt;
+    if (c < oldest) oldest = c;
+    if (c > newest) newest = c;
+  }
+  return { oldest, newest };
+}
+
+// True when `range.newest` is older than the stale threshold. Returns
+// false for `null` ranges so empty tiers stay neutral. `now` is
+// injected so callers can pin a deterministic clock if needed; in
+// production it defaults to the current wall time.
+function isBriefingSourceRangeStale(
+  range: { oldest: string; newest: string } | null,
+  now: number = Date.now(),
+): boolean {
+  if (range === null) return false;
+  const newest = new Date(range.newest).getTime();
+  if (Number.isNaN(newest)) return false;
+  const ageMs = now - newest;
+  return ageMs > BRIEFING_SOURCE_STALE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
+}
+
+// Compact range string surfaced inside a history filter pill —
+// e.g. "Apr 3 → May 1". When `oldest` and `newest` resolve to the
+// same calendar day, collapses to a single date so the pill doesn't
+// read "Apr 3 → Apr 3". Returns `null` if either timestamp is
+// unparseable so the caller can skip rendering rather than show an
+// "Invalid Date" placeholder.
+function formatBriefingSourceRangeShort(
+  oldestIso: string,
+  newestIso: string,
+): string | null {
+  const oldest = new Date(oldestIso);
+  const newest = new Date(newestIso);
+  if (Number.isNaN(oldest.getTime()) || Number.isNaN(newest.getTime())) {
+    return null;
+  }
+  const fmt = (d: Date) =>
+    d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const a = fmt(oldest);
+  const b = fmt(newest);
+  return a === b ? a : `${a} → ${b}`;
+}
+
+// Long-form range string used as the pill's `title` (hover) attribute
+// — e.g. "oldest April 3, 2026 → newest May 1, 2026". Mirrors the
+// example phrasing in the task description so a hover gives the full
+// signal even when the visible caption is the compact form.
+function formatBriefingSourceRangeTitle(
+  oldestIso: string,
+  newestIso: string,
+): string | undefined {
+  const oldest = new Date(oldestIso);
+  const newest = new Date(newestIso);
+  if (Number.isNaN(oldest.getTime()) || Number.isNaN(newest.getTime())) {
+    return undefined;
+  }
+  const fmt = (d: Date) =>
+    d.toLocaleDateString(undefined, {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  const a = fmt(oldest);
+  const b = fmt(newest);
+  return a === b ? a : `oldest ${a} → newest ${b}`;
 }
 
 /**
@@ -1291,6 +1412,54 @@ export function BriefingSourceHistoryPanel({
     return { all: allPriorVersions.length, adapter, manual };
   }, [allPriorVersions]);
 
+  // Per-tier `createdAt` ranges surfaced inside each filter pill so
+  // the architect can prioritise stale-vs-fresh tabs without opening
+  // them — a "Generate Layers (12)" pill that covers a single week
+  // reads very differently from one that spans a year. Derived from
+  // the same `allPriorVersions` list the counts use so the two
+  // signals stay in lockstep across restore-mutation invalidations.
+  // Empty tiers stay `null` so the pill can skip the range cleanly,
+  // and the single-pass `for…of` mirrors `tierCounts` so the two
+  // derivations don't go out of step on adapter-tier classification.
+  const tierRanges = useMemo(() => {
+    type Range = { oldest: string; newest: string } | null;
+    const ranges: { all: Range; adapter: Range; manual: Range } = {
+      all: null,
+      adapter: null,
+      manual: null,
+    };
+    const widen = (key: "all" | "adapter" | "manual", createdAt: string) => {
+      const cur = ranges[key];
+      if (cur === null) {
+        ranges[key] = { oldest: createdAt, newest: createdAt };
+        return;
+      }
+      if (createdAt < cur.oldest) cur.oldest = createdAt;
+      if (createdAt > cur.newest) cur.newest = createdAt;
+    };
+    for (const s of allPriorVersions) {
+      widen("all", s.createdAt);
+      if (isAdapterSourceKind(s.sourceKind)) widen("adapter", s.createdAt);
+      else if (s.sourceKind === "manual-upload") widen("manual", s.createdAt);
+    }
+    return ranges;
+  }, [allPriorVersions]);
+
+  // Per-tier "stale" flags computed from the ranges above. A tier is
+  // stale when its newest prior `createdAt` is older than the
+  // `BRIEFING_SOURCE_STALE_THRESHOLD_DAYS` constant; empty tiers stay
+  // neutral so a layer with no prior runs isn't flagged as overdue.
+  // The pill renders a subtle amber border + dot when stale so the
+  // architect can spot overdue tabs at a glance.
+  const tierStale = useMemo(
+    () => ({
+      all: isBriefingSourceRangeStale(tierRanges.all),
+      adapter: isBriefingSourceRangeStale(tierRanges.adapter),
+      manual: isBriefingSourceRangeStale(tierRanges.manual),
+    }),
+    [tierRanges],
+  );
+
   const emptyMessage =
     tierFilter === "adapter"
       ? "No prior Generate Layers runs of this layer."
@@ -1334,6 +1503,21 @@ export function BriefingSourceHistoryPanel({
           ).map((opt) => {
             const active = tierFilter === opt.value;
             const count = tierCounts[opt.value];
+            const range = tierRanges[opt.value];
+            const stale = tierStale[opt.value];
+            const rangeShort = range
+              ? formatBriefingSourceRangeShort(range.oldest, range.newest)
+              : null;
+            const baseTitle = range
+              ? formatBriefingSourceRangeTitle(range.oldest, range.newest)
+              : undefined;
+            // Append a stale-marker phrase to the hover so users who
+            // notice the amber styling can read the "why" without
+            // hunting for the threshold in code.
+            const pillTitle =
+              baseTitle && stale
+                ? `${baseTitle} (stale — newest is over ${BRIEFING_SOURCE_STALE_THRESHOLD_DAYS} days old)`
+                : baseTitle;
             return (
               <button
                 key={opt.value}
@@ -1341,7 +1525,9 @@ export function BriefingSourceHistoryPanel({
                 role="radio"
                 aria-checked={active}
                 data-testid={`briefing-source-history-filter-${opt.value}-${currentSourceId}`}
+                data-stale={stale ? "true" : undefined}
                 onClick={() => setTierFilter(opt.value)}
+                title={pillTitle}
                 style={{
                   background: active
                     ? "var(--info-dim)"
@@ -1349,19 +1535,50 @@ export function BriefingSourceHistoryPanel({
                   color: active
                     ? "var(--info-text)"
                     : "var(--text-secondary)",
-                  border: "1px solid var(--border-subtle)",
+                  border: stale
+                    ? "1px solid var(--warning-text, #b45309)"
+                    : "1px solid var(--border-subtle)",
                   borderRadius: 999,
                   padding: "1px 8px",
                   cursor: "pointer",
                   fontSize: 11,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
                 }}
               >
-                {opt.label}{" "}
-                <span
-                  data-testid={`briefing-source-history-filter-${opt.value}-count-${currentSourceId}`}
-                  style={{ opacity: 0.8 }}
-                >
-                  ({count})
+                {stale && (
+                  <span
+                    aria-hidden="true"
+                    data-testid={`briefing-source-history-filter-${opt.value}-stale-dot-${currentSourceId}`}
+                    style={{
+                      display: "inline-block",
+                      width: 6,
+                      height: 6,
+                      borderRadius: 999,
+                      background: "var(--warning-text, #b45309)",
+                    }}
+                  />
+                )}
+                <span>
+                  {opt.label}{" "}
+                  <span
+                    data-testid={`briefing-source-history-filter-${opt.value}-count-${currentSourceId}`}
+                    style={{ opacity: 0.8 }}
+                  >
+                    ({count})
+                  </span>
+                  {rangeShort && (
+                    <>
+                      {" "}
+                      <span
+                        data-testid={`briefing-source-history-filter-${opt.value}-range-${currentSourceId}`}
+                        style={{ opacity: 0.7 }}
+                      >
+                        · {rangeShort}
+                      </span>
+                    </>
+                  )}
                 </span>
               </button>
             );

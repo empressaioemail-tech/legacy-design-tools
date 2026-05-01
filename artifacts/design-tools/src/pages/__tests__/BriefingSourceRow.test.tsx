@@ -1545,6 +1545,341 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     ).toBeInTheDocument();
   });
 
+  it("stamps the oldest→newest createdAt range next to each filter pill so an architect can prioritise stale-vs-fresh tabs (Task #202)", () => {
+    // Mixed history with two adapter prior rows of clearly different
+    // createdAt days plus one manual prior row sandwiched between
+    // them. The "All" pill range must span the outermost two days
+    // across both tiers; the per-tier pills must collapse to the
+    // dates that actually belong to that tier — the adapter range
+    // must NOT be widened by the manual row's date and vice versa.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const priorAdapterOldest = mkSource({
+      id: "src-prior-adapter-oldest",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      createdAt: "2026-04-03T12:00:00.000Z",
+      supersededAt: "2026-04-04T00:00:00.000Z",
+    });
+    const priorAdapterNewest = mkSource({
+      id: "src-prior-adapter-newest",
+      layerKind: "fema-flood",
+      sourceKind: "state-adapter",
+      provider: "ut:fema-flood",
+      createdAt: "2026-04-28T12:00:00.000Z",
+      supersededAt: "2026-04-29T00:00:00.000Z",
+    });
+    const priorManual = mkSource({
+      id: "src-prior-manual",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: "2026-05-01T12:00:00.000Z",
+      supersededAt: "2026-05-02T00:00:00.000Z",
+    });
+    hoisted.historySources = [
+      current,
+      priorAdapterOldest,
+      priorAdapterNewest,
+      priorManual,
+    ];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const allRange = screen.getByTestId(
+      `briefing-source-history-filter-all-range-${current.id}`,
+    );
+    expect(allRange.textContent).toBe("· Apr 3 → May 1");
+
+    const adapterRange = screen.getByTestId(
+      `briefing-source-history-filter-adapter-range-${current.id}`,
+    );
+    // Adapter range only covers the two adapter rows (Apr 3 → Apr 28),
+    // not the manual row's May 1 — that would mean the per-tier
+    // range was being computed off the wrong row set.
+    expect(adapterRange.textContent).toBe("· Apr 3 → Apr 28");
+
+    const manualRange = screen.getByTestId(
+      `briefing-source-history-filter-manual-range-${current.id}`,
+    );
+    // A single-row tier collapses to one date — no "May 1 → May 1".
+    expect(manualRange.textContent).toBe("· May 1");
+
+    // Hover/title carries the long-form phrasing from the task copy
+    // so screen-reader / hover users get the full signal too.
+    const allPill = screen.getByTestId(
+      `briefing-source-history-filter-all-${current.id}`,
+    );
+    expect(allPill.getAttribute("title")).toBe(
+      "oldest April 3, 2026 → newest May 1, 2026",
+    );
+  });
+
+  it("skips the date range on a tier pill that has zero prior versions (Task #202)", () => {
+    // Only an adapter prior row in history — the Manual uploads pill
+    // is empty (count 0) so the range caption must not render at all
+    // (no stray "·" separator, no "Invalid Date" placeholder).
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const priorAdapter = mkSource({
+      id: "src-prior-adapter-only",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      createdAt: "2026-04-03T12:00:00.000Z",
+      supersededAt: "2026-04-04T00:00:00.000Z",
+    });
+    hoisted.historySources = [current, priorAdapter];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-filter-adapter-range-${current.id}`,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-filter-manual-range-${current.id}`,
+      ),
+    ).not.toBeInTheDocument();
+    // The empty pill must also NOT carry a `title` attribute — there
+    // is no range to describe on hover either.
+    const manualPill = screen.getByTestId(
+      `briefing-source-history-filter-manual-${current.id}`,
+    );
+    expect(manualPill.getAttribute("title")).toBeNull();
+  });
+
+  it("flags a filter pill as stale when its newest prior version is older than the threshold (follow-up)", () => {
+    // Two adapter prior rows whose newest createdAt is ~60 days old
+    // — well beyond the 30-day stale threshold — and one manual prior
+    // row from yesterday. The Generate Layers + All pills should be
+    // marked stale; the Manual uploads pill must stay neutral so a
+    // recently re-uploaded manual layer isn't misflagged.
+    const dayMs = 24 * 60 * 60 * 1000;
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const oldAdapter = mkSource({
+      id: "src-prior-old-adapter",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 90 * dayMs).toISOString(),
+      supersededAt: new Date(Date.now() - 65 * dayMs).toISOString(),
+    });
+    const stillOldAdapter = mkSource({
+      id: "src-prior-still-old-adapter",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 60 * dayMs).toISOString(),
+      supersededAt: new Date(Date.now() - 59 * dayMs).toISOString(),
+    });
+    const freshManual = mkSource({
+      id: "src-prior-fresh-manual",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: new Date(Date.now() - 1 * dayMs).toISOString(),
+      supersededAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [
+      current,
+      oldAdapter,
+      stillOldAdapter,
+      freshManual,
+    ];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const adapterPill = screen.getByTestId(
+      `briefing-source-history-filter-adapter-${current.id}`,
+    );
+    expect(adapterPill.getAttribute("data-stale")).toBe("true");
+    // Long-form title carries the explanation so users who notice
+    // the amber styling can read the "why" without hunting in code.
+    expect(adapterPill.getAttribute("title")).toMatch(/stale/);
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-filter-adapter-stale-dot-${current.id}`,
+      ),
+    ).toBeInTheDocument();
+
+    // Manual pill is fresh — must NOT be flagged.
+    const manualPill = screen.getByTestId(
+      `briefing-source-history-filter-manual-${current.id}`,
+    );
+    expect(manualPill.getAttribute("data-stale")).toBeNull();
+    expect(manualPill.getAttribute("title")).not.toMatch(/stale/);
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-filter-manual-stale-dot-${current.id}`,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT flag an empty filter pill as stale (follow-up)", () => {
+    // Only an adapter prior row — the Manual uploads pill is empty
+    // (count 0) and must therefore stay neutral. A pill that has no
+    // prior versions has nothing to be "overdue" about.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const oldAdapter = mkSource({
+      id: "src-prior-old-adapter",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 65 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, oldAdapter];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const manualPill = screen.getByTestId(
+      `briefing-source-history-filter-manual-${current.id}`,
+    );
+    expect(manualPill.getAttribute("data-stale")).toBeNull();
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-filter-manual-stale-dot-${current.id}`,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("advertises the prior-version count + date range on the collapsed history toggle (follow-up)", () => {
+    // Three prior rows of mixed dates — when the row is rendered
+    // collapsed, the toggle button should read "View history (3 prior
+    // · Apr 3 → May 1)" so an architect can triage without expanding.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 30 * 1000).toISOString(),
+    });
+    const priorOldest = mkSource({
+      id: "src-prior-oldest",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: "2026-04-03T12:00:00.000Z",
+      supersededAt: "2026-04-04T00:00:00.000Z",
+    });
+    const priorMid = mkSource({
+      id: "src-prior-mid",
+      layerKind: "fema-flood",
+      sourceKind: "state-adapter",
+      createdAt: "2026-04-15T12:00:00.000Z",
+      supersededAt: "2026-04-16T00:00:00.000Z",
+    });
+    const priorNewest = mkSource({
+      id: "src-prior-newest",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: "2026-05-01T12:00:00.000Z",
+      supersededAt: "2026-05-02T00:00:00.000Z",
+    });
+    hoisted.historySources = [current, priorOldest, priorMid, priorNewest];
+
+    renderRow(current);
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-toggle-hint-${current.id}`,
+    );
+    expect(hint.textContent).toBe("(3 prior · Apr 3 → May 1)");
+
+    // Toggling the panel open hides the hint — the same information
+    // is now visible on the filter pills below, so duplicating it on
+    // the toggle would just be visual noise.
+    fireEvent.click(
+      screen.getByTestId(`briefing-source-history-toggle-${current.id}`),
+    );
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-toggle-hint-${current.id}`,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("collapses the toggle hint to a single date when there is exactly one prior version (follow-up)", () => {
+    // One prior row only — the hint must read "(1 prior · Apr 3)"
+    // rather than "(1 prior · Apr 3 → Apr 3)". Mirrors the same
+    // collapse behaviour the filter-pill range uses.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 30 * 1000).toISOString(),
+    });
+    const prior = mkSource({
+      id: "src-prior-only",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: "2026-04-03T12:00:00.000Z",
+      supersededAt: "2026-04-04T00:00:00.000Z",
+    });
+    hoisted.historySources = [current, prior];
+
+    renderRow(current);
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-toggle-hint-${current.id}`,
+    );
+    expect(hint.textContent).toBe("(1 prior · Apr 3)");
+  });
+
+  it("does NOT render the toggle hint when there are no prior versions (follow-up)", () => {
+    // Only the current row in history — the toggle stays clean so
+    // a layer with no rerun trail doesn't pretend to have one.
+    const current = mkSource({
+      id: "src-only",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 30 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current];
+
+    renderRow(current);
+
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-toggle-hint-${current.id}`,
+      ),
+    ).not.toBeInTheDocument();
+    // The toggle text itself collapses back to the bare label.
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-toggle-${current.id}`)
+        .textContent,
+    ).toBe("View history");
+  });
+
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {
     const current = mkSource({
       id: "src-only",
