@@ -10,6 +10,7 @@ import devAtomsRouter from "./devAtoms";
 import atomsRouter from "./atoms";
 import usersRouter from "./users";
 import storageRouter from "./storage";
+import sessionRouter from "./session";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(devAtomsRouter);
 router.use(atomsRouter);
 router.use(usersRouter);
 router.use(storageRouter);
+router.use(sessionRouter);
 
 export default router;

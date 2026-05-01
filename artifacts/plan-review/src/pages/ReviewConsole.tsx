@@ -1,11 +1,12 @@
 import { DashboardLayout } from "@workspace/portal-ui";
-import { navGroups } from "../components/NavGroups";
+import { useNavGroups } from "../components/NavGroups";
 import { KPIS, SUBMITTALS } from "../data/mock";
 import { KpiTile } from "../components/KpiTile";
 import { SubmittalQueueRow } from "../components/SubmittalQueueRow";
 import { AIBriefingPanel } from "../components/AIBriefingPanel";
 
 export default function ReviewConsole() {
+  const navGroups = useNavGroups();
   const inReviewCount = SUBMITTALS.filter(s => s.status === "in-review").length;
   const aiWaitCount = SUBMITTALS.filter(s => s.status === "ai-review").length;
   const rejectedCount = SUBMITTALS.filter(s => s.status === "rejected").length;

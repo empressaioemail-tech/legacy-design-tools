@@ -9,12 +9,15 @@
  *
  * Auth posture
  * ------------
- * There is no real auth layer yet (see `middlewares/session.ts`), so
- * these endpoints are not gated server-side beyond the dev-vs-prod
- * baseline of `sessionMiddleware`. Once an auth layer lands the right
- * gate is `req.session.permissions?.includes("users:manage")` (or the
- * equivalent role check). Documented inline rather than left as a
- * silent gap so the follow-up is easy to find.
+ * Write operations (POST/PATCH/DELETE) are gated server-side on
+ * `req.session.permissions?.includes("users:manage")` — non-admin
+ * sessions get a 403 with a uniform error body. Reads (GET list,
+ * GET by id) stay open so the timeline-hydration helper and the
+ * read-only "Users & Roles" view can fetch profile rows without
+ * elevating the caller. Once a real auth layer mints verified
+ * sessions (Spec 20 follow-up, task #29) the same permission check
+ * keeps working — only the *source* of `req.session.permissions`
+ * changes, not the gate itself.
  *
  * Validation
  * ----------
@@ -26,7 +29,14 @@
  * (the zod schema enforces `.optional()`, not `.nullish()`).
  */
 
-import { Router, type IRouter, type Request, type Response } from "express";
+import {
+  Router,
+  type IRouter,
+  type NextFunction,
+  type Request,
+  type RequestHandler,
+  type Response,
+} from "express";
 import { db, users } from "@workspace/db";
 import { asc, eq } from "drizzle-orm";
 import {
@@ -39,6 +49,38 @@ import {
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+/**
+ * Permission name required by every write to the `users` profile
+ * table. Centralised here (rather than copy-pasted into each handler)
+ * so the gate stays in lock-step with the OpenAPI description and the
+ * future permissions-mapping module — when real auth lands, only this
+ * single string needs to move.
+ */
+const USERS_MANAGE = "users:manage";
+
+/**
+ * Express middleware that 403s any caller whose session does not carry
+ * the {@link USERS_MANAGE} permission claim. Mounted in front of the
+ * write handlers below; the read handlers stay open so that the
+ * timeline-hydration helper and the read-only "Users & Roles" view
+ * (when an admin first lands on it) can still fetch profile rows.
+ *
+ * Returns the same `ErrorResponse` body shape the rest of the route
+ * uses so the FE's `extractErrorMessage` helper picks up the message
+ * uniformly.
+ */
+const requireUsersManage: RequestHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (req.session.permissions?.includes(USERS_MANAGE)) {
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Requires users:manage permission" });
+};
 
 type UserRow = typeof users.$inferSelect;
 
@@ -75,7 +117,7 @@ router.get("/users", async (_req: Request, res: Response) => {
   }
 });
 
-router.post("/users", async (req: Request, res: Response) => {
+router.post("/users", requireUsersManage, async (req: Request, res: Response) => {
   const parsed = CreateUserBody.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request body" });
@@ -156,7 +198,7 @@ router.get("/users/:id", async (req: Request, res: Response) => {
   }
 });
 
-router.patch("/users/:id", async (req: Request, res: Response) => {
+router.patch("/users/:id", requireUsersManage, async (req: Request, res: Response) => {
   const params = UpdateUserParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });
@@ -220,7 +262,7 @@ router.patch("/users/:id", async (req: Request, res: Response) => {
   }
 });
 
-router.delete("/users/:id", async (req: Request, res: Response) => {
+router.delete("/users/:id", requireUsersManage, async (req: Request, res: Response) => {
   const params = DeleteUserParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "Invalid id" });

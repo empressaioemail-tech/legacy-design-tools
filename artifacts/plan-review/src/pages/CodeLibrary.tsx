@@ -1,7 +1,8 @@
 import { DashboardLayout } from "@workspace/portal-ui";
-import { navGroups } from "../components/NavGroups";
+import { useNavGroups } from "../components/NavGroups";
 
 export default function CodeLibrary() {
+  const navGroups = useNavGroups();
   return (
     <DashboardLayout
       title="Code Library"

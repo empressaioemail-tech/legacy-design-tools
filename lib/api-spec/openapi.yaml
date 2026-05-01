@@ -22,6 +22,8 @@ tags:
     description: User profile administration (display names, emails, avatars)
   - name: storage
     description: Object storage (presigned uploads, file serving)
+  - name: session
+    description: Current session — audience, requestor, permission claims
 paths:
   /healthz:
     get:
@@ -1062,6 +1064,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /session:
+    get:
+      operationId: getSession
+      tags: [session]
+      summary: Get current session
+      description: |
+        Returns whatever `req.session` the server has attached for the
+        caller. Today this is derived from the dev `pr_session` cookie
+        / `x-requestor` / `x-permissions` header overrides outside
+        production, and is locked to the anonymous applicant default
+        in production. Frontends use this to gate admin-only UI (e.g.
+        the "Users & Roles" sidebar entry only renders when
+        `permissions` contains `users:manage`).
+      responses:
+        "200":
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+
   /users:
     get:
       operationId: listUsers
@@ -1088,7 +1111,9 @@ paths:
       description: |
         Inserts a new row into the `users` profile table. Fails with 409
         if a row with the same `id` already exists — use PATCH to edit
-        an existing profile instead.
+        an existing profile instead. Requires the `users:manage`
+        permission claim on the caller's session; anything else is
+        rejected with 403.
       requestBody:
         required: true
         content:
@@ -1104,6 +1129,12 @@ paths:
                 $ref: "#/components/schemas/User"
         "400":
           description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller lacks the `users:manage` permission
           content:
             application/json:
               schema:
@@ -1147,6 +1178,8 @@ paths:
         Partial update — only the fields included in the request body are
         changed. Pass `null` for `email` or `avatarUrl` to clear them.
         `displayName` is non-nullable: omit it to leave it unchanged.
+        Requires the `users:manage` permission claim; non-admin callers
+        get 403.
       parameters:
         - name: id
           in: path
@@ -1172,6 +1205,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller lacks the `users:manage` permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Not found
           content:
@@ -1187,7 +1226,8 @@ paths:
         cascaded — historical events keep the raw actor id and the
         timeline simply falls back to "Unknown user" for the deleted
         profile from then on. This matches the contract documented on
-        `lib/db/src/schema/users.ts`.
+        `lib/db/src/schema/users.ts`. Requires the `users:manage`
+        permission claim; non-admin callers get 403.
       parameters:
         - name: id
           in: path
@@ -1197,6 +1237,12 @@ paths:
       responses:
         "204":
           description: Deleted
+        "403":
+          description: Caller lacks the `users:manage` permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Not found
           content:
@@ -2084,6 +2130,46 @@ components:
         - uploadURL
         - objectPath
         - metadata
+
+    SessionRequestor:
+      type: object
+      description: |
+        The actor on whose behalf the request is being made. `kind`
+        distinguishes a human user from a machine agent; `id` is opaque
+        to the framework (today: dev cookie ids like `u1`; once real
+        auth lands: the verified subject id from the auth provider).
+      properties:
+        kind:
+          type: string
+          enum: [user, agent]
+        id:
+          type: string
+      required:
+        - kind
+        - id
+
+    Session:
+      type: object
+      description: |
+        The session attached to the current request by
+        `middlewares/session.ts`. Frontends consume this to gate
+        admin-only UI — e.g. the "Users & Roles" sidebar entry only
+        renders for sessions whose `permissions` include
+        `users:manage`. In production the server returns the
+        anonymous-applicant default until a real auth layer lands.
+      properties:
+        audience:
+          type: string
+          enum: [internal, user, ai]
+        requestor:
+          $ref: "#/components/schemas/SessionRequestor"
+        permissions:
+          type: array
+          items:
+            type: string
+      required:
+        - audience
+        - permissions
 
     AtomKeyMetric:
       description: One row of the atom `keyMetrics` layer.

@@ -1,11 +1,12 @@
 import { useParams } from "wouter";
 import { DashboardLayout } from "@workspace/portal-ui";
-import { navGroups } from "../components/NavGroups";
+import { useNavGroups } from "../components/NavGroups";
 import { SUBMITTALS, FINDINGS } from "../data/mock";
 import { AIBriefingPanel } from "../components/AIBriefingPanel";
 import { Folder, FileText } from "lucide-react";
 
 export default function SubmittalDetail() {
+  const navGroups = useNavGroups();
   const params = useParams();
   const id = params.id as string;
   const submittal = SUBMITTALS.find(s => s.id === id);

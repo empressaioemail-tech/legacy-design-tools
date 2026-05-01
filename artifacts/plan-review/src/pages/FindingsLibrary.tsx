@@ -1,10 +1,11 @@
 import { DashboardLayout } from "@workspace/portal-ui";
-import { navGroups } from "../components/NavGroups";
+import { useNavGroups } from "../components/NavGroups";
 import { FINDINGS } from "../data/mock";
 import { DisciplineBadge } from "../components/DisciplineBadge";
 import { Link } from "wouter";
 
 export default function FindingsLibrary() {
+  const navGroups = useNavGroups();
   return (
     <DashboardLayout
       title="Saved Findings"

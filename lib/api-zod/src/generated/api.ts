@@ -1293,6 +1293,35 @@ export const SendChatMessageBody = zod.object({
 });
 
 /**
+ * Returns whatever `req.session` the server has attached for the
+caller. Today this is derived from the dev `pr_session` cookie
+/ `x-requestor` / `x-permissions` header overrides outside
+production, and is locked to the anonymous applicant default
+in production. Frontends use this to gate admin-only UI (e.g.
+the "Users & Roles" sidebar entry only renders when
+`permissions` contains `users:manage`).
+
+ * @summary Get current session
+ */
+export const GetSessionResponse = zod
+  .object({
+    audience: zod.enum(["internal", "user", "ai"]),
+    requestor: zod
+      .object({
+        kind: zod.enum(["user", "agent"]),
+        id: zod.string(),
+      })
+      .optional()
+      .describe(
+        "The actor on whose behalf the request is being made. `kind`\ndistinguishes a human user from a machine agent; `id` is opaque\nto the framework (today: dev cookie ids like `u1`; once real\nauth lands: the verified subject id from the auth provider).\n",
+      ),
+    permissions: zod.array(zod.string()),
+  })
+  .describe(
+    'The session attached to the current request by\n`middlewares\/session.ts`. Frontends consume this to gate\nadmin-only UI — e.g. the \"Users & Roles\" sidebar entry only\nrenders for sessions whose `permissions` include\n`users:manage`. In production the server returns the\nanonymous-applicant default until a real auth layer lands.\n',
+  );
+
+/**
  * Returns every row in the `users` profile table, ordered by
 `displayName`. Used by the admin "Users & Roles" screen to
 manage the names/emails/avatars that hydrate timeline actor
@@ -1317,7 +1346,9 @@ export const ListUsersResponse = zod.array(ListUsersResponseItem);
 /**
  * Inserts a new row into the `users` profile table. Fails with 409
 if a row with the same `id` already exists — use PATCH to edit
-an existing profile instead.
+an existing profile instead. Requires the `users:manage`
+permission claim on the caller's session; anything else is
+rejected with 403.
 
  * @summary Create a user profile
  */
@@ -1358,6 +1389,8 @@ export const GetUserResponse = zod
  * Partial update — only the fields included in the request body are
 changed. Pass `null` for `email` or `avatarUrl` to clear them.
 `displayName` is non-nullable: omit it to leave it unchanged.
+Requires the `users:manage` permission claim; non-admin callers
+get 403.
 
  * @summary Update a user profile
  */
@@ -1393,7 +1426,8 @@ export const UpdateUserResponse = zod
 cascaded — historical events keep the raw actor id and the
 timeline simply falls back to "Unknown user" for the deleted
 profile from then on. This matches the contract documented on
-`lib/db/src/schema/users.ts`.
+`lib/db/src/schema/users.ts`. Requires the `users:manage`
+permission claim; non-admin callers get 403.
 
  * @summary Delete a user profile
  */

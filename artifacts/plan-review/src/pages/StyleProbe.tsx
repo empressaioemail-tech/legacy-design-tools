@@ -1,11 +1,12 @@
 import { DashboardLayout } from "@workspace/portal-ui";
-import { navGroups } from "../components/NavGroups";
+import { useNavGroups } from "../components/NavGroups";
 import { KpiTile } from "../components/KpiTile";
 import { DisciplineBadge } from "../components/DisciplineBadge";
 import { FindingCard } from "../components/FindingCard";
 import { Finding } from "../data/mock";
 
 export default function StyleProbe() {
+  const navGroups = useNavGroups();
   const dummyFinding: Finding = {
     id: "F-PROBE-001",
     submittalId: "SUB-PROBE",

@@ -9,11 +9,12 @@ import {
   type AtomHistoryEvent,
   type SnapshotSummary,
 } from "@workspace/api-client-react";
-import { navGroups } from "../components/NavGroups";
+import { useNavGroups } from "../components/NavGroups";
 import { SheetCard, TIMELINE_HISTORY_LIMIT } from "../components/SheetCard";
 import { relativeTime } from "../lib/relativeTime";
 
 export default function Sheets() {
+  const navGroups = useNavGroups();
   const { data: snapshots, isLoading: snapshotsLoading } = useListSnapshots();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 

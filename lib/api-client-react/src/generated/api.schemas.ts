@@ -474,6 +474,50 @@ export interface UpdateUserBody {
   avatarUrl?: string | null;
 }
 
+export type SessionRequestorKind =
+  (typeof SessionRequestorKind)[keyof typeof SessionRequestorKind];
+
+export const SessionRequestorKind = {
+  user: "user",
+  agent: "agent",
+} as const;
+
+/**
+ * The actor on whose behalf the request is being made. `kind`
+distinguishes a human user from a machine agent; `id` is opaque
+to the framework (today: dev cookie ids like `u1`; once real
+auth lands: the verified subject id from the auth provider).
+
+ */
+export interface SessionRequestor {
+  kind: SessionRequestorKind;
+  id: string;
+}
+
+export type SessionAudience =
+  (typeof SessionAudience)[keyof typeof SessionAudience];
+
+export const SessionAudience = {
+  internal: "internal",
+  user: "user",
+  ai: "ai",
+} as const;
+
+/**
+ * The session attached to the current request by
+`middlewares/session.ts`. Frontends consume this to gate
+admin-only UI — e.g. the "Users & Roles" sidebar entry only
+renders for sessions whose `permissions` include
+`users:manage`. In production the server returns the
+anonymous-applicant default until a real auth layer lands.
+
+ */
+export interface Session {
+  audience: SessionAudience;
+  requestor?: SessionRequestor;
+  permissions: string[];
+}
+
 /**
  * File metadata sent to obtain a presigned PUT URL. The file bytes
 themselves are NOT sent to this endpoint — they are PUT directly

@@ -8,6 +8,12 @@
  * profile row so the timeline never has to render "Unknown user" for
  * a freshly-seen id.
  *
+ * The write endpoints (POST/PATCH/DELETE) are gated on the
+ * `users:manage` permission claim; happy-path tests opt in via the
+ * dev `x-permissions` header (mirroring how the chat tests opt into a
+ * specific audience). A separate suite below exercises the forbidden
+ * path with no permission claim attached.
+ *
  * The mock-`db` proxy wires every drizzle call in the route + the
  * `ensureUserProfile` helper to the per-file test schema; without the
  * proxy both would hit the production singleton pool.
@@ -17,6 +23,14 @@ import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
+
+/**
+ * Standing-in for an authenticated admin: the dev session middleware
+ * honours `x-permissions` outside production, so attaching this header
+ * is enough to satisfy the `requireUsersManage` gate without minting a
+ * real cookie.
+ */
+const ADMIN_HEADERS = { "x-permissions": "users:manage" } as const;
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -79,6 +93,7 @@ describe("POST /api/users", () => {
   it("creates a new profile and returns 201", async () => {
     const res = await request(getApp())
       .post("/api/users")
+      .set(ADMIN_HEADERS)
       .send({ id: "u-new", displayName: "Newcomer" });
     expect(res.status).toBe(201);
     expect(res.body.id).toBe("u-new");
@@ -95,12 +110,15 @@ describe("POST /api/users", () => {
   });
 
   it("accepts optional email and avatarUrl", async () => {
-    const res = await request(getApp()).post("/api/users").send({
-      id: "u-full",
-      displayName: "Full Profile",
-      email: "full@example.com",
-      avatarUrl: "https://example.com/full.png",
-    });
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-full",
+        displayName: "Full Profile",
+        email: "full@example.com",
+        avatarUrl: "https://example.com/full.png",
+      });
     expect(res.status).toBe(201);
     expect(res.body.email).toBe("full@example.com");
     expect(res.body.avatarUrl).toBe("https://example.com/full.png");
@@ -109,16 +127,19 @@ describe("POST /api/users", () => {
   it("rejects bodies missing required fields with 400", async () => {
     const r1 = await request(getApp())
       .post("/api/users")
+      .set(ADMIN_HEADERS)
       .send({ displayName: "No Id" });
     expect(r1.status).toBe(400);
 
     const r2 = await request(getApp())
       .post("/api/users")
+      .set(ADMIN_HEADERS)
       .send({ id: "u-no-name" });
     expect(r2.status).toBe(400);
 
     const r3 = await request(getApp())
       .post("/api/users")
+      .set(ADMIN_HEADERS)
       .send({ id: "u-empty", displayName: "" });
     expect(r3.status).toBe(400);
   });
@@ -131,6 +152,7 @@ describe("POST /api/users", () => {
 
     const res = await request(getApp())
       .post("/api/users")
+      .set(ADMIN_HEADERS)
       .send({ id: "u-dup", displayName: "Duplicate" });
     expect(res.status).toBe(409);
     // Original row is untouched.
@@ -175,6 +197,7 @@ describe("PATCH /api/users/:id", () => {
 
     const res = await request(getApp())
       .patch("/api/users/u-edit")
+      .set(ADMIN_HEADERS)
       .send({ displayName: "New Name" });
     expect(res.status).toBe(200);
     expect(res.body.displayName).toBe("New Name");
@@ -194,6 +217,7 @@ describe("PATCH /api/users/:id", () => {
 
     const res = await request(getApp())
       .patch("/api/users/u-clear")
+      .set(ADMIN_HEADERS)
       .send({ email: null });
     expect(res.status).toBe(200);
     expect(res.body.email).toBeNull();
@@ -207,7 +231,10 @@ describe("PATCH /api/users/:id", () => {
     await ctx.schema.db
       .insert(users)
       .values({ id: "u-noop", displayName: "Noop" });
-    const res = await request(getApp()).patch("/api/users/u-noop").send({});
+    const res = await request(getApp())
+      .patch("/api/users/u-noop")
+      .set(ADMIN_HEADERS)
+      .send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("Empty update");
   });
@@ -219,6 +246,7 @@ describe("PATCH /api/users/:id", () => {
       .values({ id: "u-null-name", displayName: "Original" });
     const res = await request(getApp())
       .patch("/api/users/u-null-name")
+      .set(ADMIN_HEADERS)
       .send({ displayName: null });
     expect(res.status).toBe(400);
   });
@@ -226,6 +254,7 @@ describe("PATCH /api/users/:id", () => {
   it("returns 404 when the id does not exist", async () => {
     const res = await request(getApp())
       .patch("/api/users/u-ghost")
+      .set(ADMIN_HEADERS)
       .send({ displayName: "Ghost" });
     expect(res.status).toBe(404);
   });
@@ -238,7 +267,9 @@ describe("DELETE /api/users/:id", () => {
       .insert(users)
       .values({ id: "u-del", displayName: "Delete Me" });
 
-    const res = await request(getApp()).delete("/api/users/u-del");
+    const res = await request(getApp())
+      .delete("/api/users/u-del")
+      .set(ADMIN_HEADERS);
     expect(res.status).toBe(204);
 
     const rows = await ctx.schema.db
@@ -249,8 +280,84 @@ describe("DELETE /api/users/:id", () => {
   });
 
   it("returns 404 when the id does not exist", async () => {
-    const res = await request(getApp()).delete("/api/users/u-ghost");
+    const res = await request(getApp())
+      .delete("/api/users/u-ghost")
+      .set(ADMIN_HEADERS);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("users:manage permission gate", () => {
+  // The forbidden path the task explicitly calls out: any session
+  // without the `users:manage` permission claim must be turned away
+  // from POST/PATCH/DELETE before the request even reaches drizzle.
+  // Reads stay open by design (the timeline-hydration helper needs
+  // them), so the GET tests above already cover the read path
+  // without elevating the caller.
+  it("rejects POST /api/users without the permission claim", async () => {
+    const res = await request(getApp())
+      .post("/api/users")
+      .send({ id: "u-nope", displayName: "Should Not Land" });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Requires users:manage permission");
+
+    if (!ctx.schema) throw new Error("schema not ready");
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-nope"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects PATCH /api/users/:id without the permission claim", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db
+      .insert(users)
+      .values({ id: "u-locked", displayName: "Locked" });
+
+    const res = await request(getApp())
+      .patch("/api/users/u-locked")
+      .send({ displayName: "Tampered" });
+    expect(res.status).toBe(403);
+
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-locked"));
+    expect(rows[0]?.displayName).toBe("Locked");
+  });
+
+  it("rejects DELETE /api/users/:id without the permission claim", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db
+      .insert(users)
+      .values({ id: "u-keep", displayName: "Keep" });
+
+    const res = await request(getApp()).delete("/api/users/u-keep");
+    expect(res.status).toBe(403);
+
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-keep"));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("rejects when the session has unrelated permissions but not users:manage", async () => {
+    // Guards against an over-broad check (e.g. truthy `permissions`
+    // array) — the gate must look for the specific claim.
+    const res = await request(getApp())
+      .post("/api/users")
+      .set("x-permissions", "plan-review:architect,codes:read")
+      .send({ id: "u-other", displayName: "Other" });
+    expect(res.status).toBe(403);
+  });
+
+  it("still allows GET /api/users without the permission claim", async () => {
+    // Reads must stay open — the timeline-hydration helper relies on
+    // anonymous lookups to resolve actor display names.
+    const res = await request(getApp()).get("/api/users");
+    expect(res.status).toBe(200);
   });
 });
 

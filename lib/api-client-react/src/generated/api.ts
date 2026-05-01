@@ -44,6 +44,7 @@ import type {
   RequestUploadUrlResponse,
   RetrievalProbeBody,
   RetrievalProbeResponse,
+  Session,
   SheetSummary,
   SheetUploadResponse,
   SnapshotDetail,
@@ -2694,6 +2695,87 @@ export const useSendChatMessage = <
 };
 
 /**
+ * Returns whatever `req.session` the server has attached for the
+caller. Today this is derived from the dev `pr_session` cookie
+/ `x-requestor` / `x-permissions` header overrides outside
+production, and is locked to the anonymous applicant default
+in production. Frontends use this to gate admin-only UI (e.g.
+the "Users & Roles" sidebar entry only renders when
+`permissions` contains `users:manage`).
+
+ * @summary Get current session
+ */
+export const getGetSessionUrl = () => {
+  return `/api/session`;
+};
+
+export const getSession = async (options?: RequestInit): Promise<Session> => {
+  return customFetch<Session>(getGetSessionUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSessionQueryKey = () => {
+  return [`/api/session`] as const;
+};
+
+export const getGetSessionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSession>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSession>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSessionQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getSession>>> = ({
+    signal,
+  }) => getSession({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSession>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSessionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSession>>
+>;
+export type GetSessionQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get current session
+ */
+
+export function useGetSession<
+  TData = Awaited<ReturnType<typeof getSession>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSession>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSessionQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * Returns every row in the `users` profile table, ordered by
 `displayName`. Used by the admin "Users & Roles" screen to
 manage the names/emails/avatars that hydrate timeline actor
@@ -2766,7 +2848,9 @@ export function useListUsers<
 /**
  * Inserts a new row into the `users` profile table. Fails with 409
 if a row with the same `id` already exists — use PATCH to edit
-an existing profile instead.
+an existing profile instead. Requires the `users:manage`
+permission claim on the caller's session; anything else is
+rejected with 403.
 
  * @summary Create a user profile
  */
@@ -2934,6 +3018,8 @@ export function useGetUser<
  * Partial update — only the fields included in the request body are
 changed. Pass `null` for `email` or `avatarUrl` to clear them.
 `displayName` is non-nullable: omit it to leave it unchanged.
+Requires the `users:manage` permission claim; non-admin callers
+get 403.
 
  * @summary Update a user profile
  */
@@ -3026,7 +3112,8 @@ export const useUpdateUser = <
 cascaded — historical events keep the raw actor id and the
 timeline simply falls back to "Unknown user" for the deleted
 profile from then on. This matches the contract documented on
-`lib/db/src/schema/users.ts`.
+`lib/db/src/schema/users.ts`. Requires the `users:manage`
+permission claim; non-admin callers get 403.
 
  * @summary Delete a user profile
  */

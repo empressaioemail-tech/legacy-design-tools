@@ -10,7 +10,7 @@ import {
   type User,
 } from "@workspace/api-client-react";
 import { useUpload } from "@workspace/object-storage-web";
-import { navGroups } from "../components/NavGroups";
+import { useNavGroups } from "../components/NavGroups";
 
 /**
  * Admin "Users & Roles" view — manages the `users` profile table that
@@ -24,6 +24,7 @@ import { navGroups } from "../components/NavGroups";
  * re-fetches without a manual refresh.
  */
 export default function Users() {
+  const navGroups = useNavGroups();
   const { data: users, isLoading, error } = useListUsers();
   const [editing, setEditing] = useState<User | null>(null);
   const [creating, setCreating] = useState(false);
