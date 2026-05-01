@@ -171,7 +171,8 @@ CREATE TABLE @@SCHEMA@@.submissions (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
     reviewer_comment text,
-    responded_at timestamp with time zone
+    responded_at timestamp with time zone,
+    response_recorded_at timestamp with time zone
 );
 
 

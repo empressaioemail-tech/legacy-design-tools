@@ -179,6 +179,15 @@ export interface EngagementSubmissionSummary {
   status: SubmissionStatus;
   reviewerComment: string | null;
   respondedAt: string | null;
+  /** Wall-clock timestamp the server stamped when the response
+row was committed. Distinct from `respondedAt` so consumers
+can distinguish a backfilled reply (where `respondedAt`
+reflects when the jurisdiction actually replied) from a
+live one (where the two timestamps are essentially equal).
+Null while the submission is still pending; set to the
+server clock on every response update.
+ */
+  responseRecordedAt: string | null;
 }
 
 /**
@@ -240,6 +249,14 @@ export interface SubmissionResponse {
   status: SubmissionStatus;
   reviewerComment: string | null;
   respondedAt: string | null;
+  /** Wall-clock timestamp the server stamped when this response
+update was committed. Always non-null on the route's own
+return value (the response route stamps it on every call);
+kept nullable to mirror the `EngagementSubmissionSummary`
+shape used by the list endpoint, where rows still in the
+pending state never set the field.
+ */
+  responseRecordedAt: string | null;
   submittedAt: string;
 }
 

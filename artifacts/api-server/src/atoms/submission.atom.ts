@@ -113,6 +113,7 @@ export interface SubmissionTypedPayload {
   status?: SubmissionStatus;
   reviewerComment?: string | null;
   respondedAt?: string | null;
+  responseRecordedAt?: string | null;
   createdAt?: string;
 }
 
@@ -157,6 +158,7 @@ export function makeSubmissionAtom(
           status: submissions.status,
           reviewerComment: submissions.reviewerComment,
           respondedAt: submissions.respondedAt,
+          responseRecordedAt: submissions.responseRecordedAt,
           createdAt: submissions.createdAt,
         })
         .from(submissions)
@@ -341,6 +343,9 @@ export function makeSubmissionAtom(
         status,
         reviewerComment: row.reviewerComment,
         respondedAt: row.respondedAt ? row.respondedAt.toISOString() : null,
+        responseRecordedAt: row.responseRecordedAt
+          ? row.responseRecordedAt.toISOString()
+          : null,
         createdAt: row.createdAt.toISOString(),
       };
 

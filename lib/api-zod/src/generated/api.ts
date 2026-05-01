@@ -416,6 +416,12 @@ export const ListEngagementSubmissionsResponseItem = zod
       ),
     reviewerComment: zod.string().nullable(),
     respondedAt: zod.coerce.date().nullable(),
+    responseRecordedAt: zod.coerce
+      .date()
+      .nullable()
+      .describe(
+        "Wall-clock timestamp the server stamped when the response\nrow was committed. Distinct from `respondedAt` so consumers\ncan distinguish a backfilled reply (where `respondedAt`\nreflects when the jurisdiction actually replied) from a\nlive one (where the two timestamps are essentially equal).\nNull while the submission is still pending; set to the\nserver clock on every response update.\n",
+      ),
   })
   .describe(
     'One past plan-review submission for an engagement, as returned\nby `GET \/engagements\/{id}\/submissions`. The `jurisdiction`\nlabel is the denormalized snapshot captured at submission time\n(so a later jurisdiction change on the parent engagement does\nnot retroactively rewrite the audit trail). `note` is the\noptional free-text note from the submission body, surfaced\nverbatim (capped to 2 KB by the create route\'s contract).\n\n`status`, `reviewerComment`, and `respondedAt` reflect the\njurisdiction\'s recorded reply. `status` is always present and\ndefaults to `pending` until a reviewer records a response via\n`POST \/engagements\/{id}\/submissions\/{submissionId}\/response`,\nat which point `respondedAt` is set and `reviewerComment` may\nbe populated. The fields stay null while the submission is\nstill pending so consumers can drive a \"no response yet\" UI\noff `status === \"pending\"` without a presence check.\n',
@@ -530,6 +536,12 @@ export const RecordSubmissionResponseResponse = zod
       ),
     reviewerComment: zod.string().nullable(),
     respondedAt: zod.coerce.date().nullable(),
+    responseRecordedAt: zod.coerce
+      .date()
+      .nullable()
+      .describe(
+        "Wall-clock timestamp the server stamped when this response\nupdate was committed. Always non-null on the route's own\nreturn value (the response route stamps it on every call);\nkept nullable to mirror the `EngagementSubmissionSummary`\nshape used by the list endpoint, where rows still in the\npending state never set the field.\n",
+      ),
     submittedAt: zod.coerce.date(),
   })
   .describe(

@@ -34,4 +34,13 @@ export interface EngagementSubmissionSummary {
   status: SubmissionStatus;
   reviewerComment: string | null;
   respondedAt: Date | null;
+  /** Wall-clock timestamp the server stamped when the response
+row was committed. Distinct from `respondedAt` so consumers
+can distinguish a backfilled reply (where `respondedAt`
+reflects when the jurisdiction actually replied) from a
+live one (where the two timestamps are essentially equal).
+Null while the submission is still pending; set to the
+server clock on every response update.
+ */
+  responseRecordedAt: Date | null;
 }

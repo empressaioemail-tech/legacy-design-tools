@@ -545,6 +545,7 @@ router.get(
           status: submissions.status,
           reviewerComment: submissions.reviewerComment,
           respondedAt: submissions.respondedAt,
+          responseRecordedAt: submissions.responseRecordedAt,
         })
         .from(submissions)
         .where(eq(submissions.engagementId, params.data.id))
@@ -559,6 +560,14 @@ router.get(
           status: r.status,
           reviewerComment: r.reviewerComment,
           respondedAt: r.respondedAt ? r.respondedAt.toISOString() : null,
+          // Server-stamped wall-clock timestamp set when the
+          // response route commits the row update (Task #106). Lets
+          // the timeline distinguish a backfilled reply (where
+          // `respondedAt` is well before this stamp) from a live
+          // one (where the two are essentially equal).
+          responseRecordedAt: r.responseRecordedAt
+            ? r.responseRecordedAt.toISOString()
+            : null,
         })),
       );
     } catch (err) {
@@ -777,6 +786,14 @@ router.post(
         return;
       }
       const respondedAt = providedRespondedAt ?? now;
+      // `responseRecordedAt` is the wall-clock time the server commits
+      // this update — always stamped here (never read from the body)
+      // so a backfilled `respondedAt` is paired with an honest
+      // recording timestamp the timeline can use to surface the
+      // backfill (Task #106). Reuse `now` (captured above before any
+      // I/O) so the stamp reflects the moment validation passed, not
+      // post-UPDATE wall-clock.
+      const responseRecordedAt = now;
       const status = bodyParse.data.status;
 
       const [updated] = await db
@@ -785,6 +802,7 @@ router.post(
           status,
           reviewerComment,
           respondedAt,
+          responseRecordedAt,
         })
         .where(eq(submissions.id, existing.id))
         .returning();
@@ -825,6 +843,9 @@ router.post(
         reviewerComment: updated.reviewerComment,
         respondedAt: updated.respondedAt
           ? updated.respondedAt.toISOString()
+          : null,
+        responseRecordedAt: updated.responseRecordedAt
+          ? updated.responseRecordedAt.toISOString()
           : null,
         submittedAt: updated.submittedAt.toISOString(),
       });

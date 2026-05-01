@@ -542,6 +542,10 @@ describe("GET /api/engagements/:id/submissions — list past submissions", () =>
       status: "pending",
       reviewerComment: null,
       respondedAt: null,
+      // Pending rows have never been responded to, so the
+      // server-stamped recording timestamp (Task #106) stays null
+      // until the response route commits an update.
+      responseRecordedAt: null,
     });
     expect(res.body[1]).toEqual({
       id: first!.id,
@@ -551,6 +555,7 @@ describe("GET /api/engagements/:id/submissions — list past submissions", () =>
       status: "pending",
       reviewerComment: null,
       respondedAt: null,
+      responseRecordedAt: null,
     });
   });
 
@@ -692,6 +697,19 @@ describe("POST /api/engagements/:id/submissions/:submissionId/response — submi
     });
     expect(typeof res.body.respondedAt).toBe("string");
     expect(typeof res.body.submittedAt).toBe("string");
+    // The response route (Task #106) always stamps the
+    // server-side `responseRecordedAt` and surfaces it on the
+    // route's own return value so the FE can pair it with
+    // `respondedAt` to flag backfilled replies.
+    expect(typeof res.body.responseRecordedAt).toBe("string");
+    // The recording stamp must be at-or-after the reply timestamp
+    // (the only way it would be behind is if `respondedAt` was
+    // backfilled; in this test the user did not pick a past time so
+    // both values come from the server clock and are essentially
+    // equal).
+    expect(
+      new Date(res.body.responseRecordedAt).getTime(),
+    ).toBeGreaterThanOrEqual(new Date(res.body.respondedAt).getTime());
 
     // Submission-scoped event row was appended (not on the engagement).
     const submissionEvents = await readSubmissionEvents(sub.id);
@@ -836,6 +854,49 @@ describe("POST /api/engagements/:id/submissions/:submissionId/response — submi
     // And no submission-scoped event was appended for the rejected call.
     const events = await readSubmissionEvents(sub.id);
     expect(events).toHaveLength(0);
+  });
+
+  it("stamps responseRecordedAt at the server clock even when respondedAt is backfilled to the past", async () => {
+    // The whole point of Task #106: a user backfilling a past reply
+    // should NOT be able to also push the recording stamp into the
+    // past. The server always uses its own clock for the
+    // `responseRecordedAt` column.
+    //
+    // NOTE: we pre-date the submission row's `submittedAt` because the
+    // route now rejects a `respondedAt` earlier than it (Task #114
+    // symmetric lower-bound guard). The backfill flow we model here is
+    // a real-world late entry, not a logically-impossible reply before
+    // the package was even sent.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const { submissions: subTable } = await import("@workspace/db");
+    const eng = await seedEngagement();
+    const sub = await seedSubmissionFor(eng.id);
+    const backfilledReply = new Date("2024-03-12T14:30:00.000Z");
+    await ctx.schema.db
+      .update(subTable)
+      .set({ submittedAt: new Date("2024-03-10T09:00:00.000Z") })
+      .where(eq(subTable.id, sub.id));
+    const before = Date.now();
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({
+        status: "approved",
+        respondedAt: backfilledReply.toISOString(),
+      });
+    const after = Date.now();
+    expect(res.status).toBe(200);
+    expect(res.body.respondedAt).toBe(backfilledReply.toISOString());
+    expect(typeof res.body.responseRecordedAt).toBe("string");
+    const recordedMs = new Date(res.body.responseRecordedAt).getTime();
+    // Recording stamp must fall in the request window (server clock,
+    // not the user-picked past time).
+    expect(recordedMs).toBeGreaterThanOrEqual(before);
+    expect(recordedMs).toBeLessThanOrEqual(after);
+    // And the divergence between the two is the signal the timeline
+    // uses to render the "backfilled on" annotation.
+    expect(recordedMs - backfilledReply.getTime()).toBeGreaterThan(
+      60 * 60 * 1000,
+    );
   });
 
   it("allows overwriting the response (each call appends a new event)", async () => {

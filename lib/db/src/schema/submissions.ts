@@ -44,6 +44,17 @@ import { engagements } from "./engagements";
  * matches the locked decision #5 (rows over events) for the response
  * surface; the `submission.response-recorded` event remains the
  * audit trail.
+ *
+ * `responseRecordedAt` (Task #106) is the wall-clock timestamp the
+ * server stamps when the response route commits the row update. It
+ * is intentionally separate from `respondedAt` (the user-supplied
+ * reply time, which can be backfilled to the past) so consumers can
+ * tell when the jurisdiction actually replied apart from when the
+ * reply was typed into the system. Mirrors the `submittedAt` /
+ * `createdAt` pairing already on this table. Stays null while the
+ * submission is still pending; set to the server clock on every
+ * response update (so re-recording a response also refreshes the
+ * stamp).
  */
 export const submissions = pgTable(
   "submissions",
@@ -63,6 +74,9 @@ export const submissions = pgTable(
     status: text("status").notNull().default("pending"),
     reviewerComment: text("reviewer_comment"),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
+    responseRecordedAt: timestamp("response_recorded_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

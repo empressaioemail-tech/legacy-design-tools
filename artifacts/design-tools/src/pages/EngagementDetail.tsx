@@ -29,6 +29,7 @@ import { ReviewerComment, SubmitToJurisdictionDialog } from "@workspace/portal-u
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
+import { backfillAnnotation } from "../lib/submissionBackfill";
 
 const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
   active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },
@@ -740,10 +741,10 @@ function SubmissionsTab({
         <div className="flex flex-col">
           {submissions.map((s: EngagementSubmissionSummary) => {
             // The OpenAPI contract guarantees `status` is always
-            // present on the row; reviewer comment and respondedAt
-            // remain optional. We still consult the local mirror so a
-            // just-recorded reply renders immediately, before the
-            // listing query refetches.
+            // present on the row; reviewer comment, respondedAt, and
+            // responseRecordedAt remain optional. We still consult the
+            // local mirror so a just-recorded reply renders
+            // immediately, before the listing query refetches.
             const localResponse = recordedResponses[s.id] ?? null;
             const status: SubmissionStatus =
               localResponse?.status ?? s.status;
@@ -751,6 +752,17 @@ function SubmissionsTab({
               localResponse?.reviewerComment ?? s.reviewerComment;
             const respondedAt: string | null =
               localResponse?.respondedAt ?? s.respondedAt;
+            // `responseRecordedAt` is the wall-clock instant the
+            // server stamped this reply (Task #106). Pair it with
+            // `respondedAt` to surface a "backfilled on" annotation
+            // when the user-picked reply date is meaningfully earlier
+            // than the recording event.
+            const responseRecordedAt: string | null =
+              localResponse?.responseRecordedAt ?? s.responseRecordedAt;
+            const backfillNote = backfillAnnotation(
+              respondedAt,
+              responseRecordedAt,
+            );
             const hasResponse = status !== "pending" && respondedAt != null;
             return (
               // Row container is a `<div role="button">` rather than a
@@ -871,6 +883,24 @@ function SubmissionsTab({
                     >
                       Responded {relativeTime(respondedAt)}
                     </span>
+                    {backfillNote && (
+                      <span
+                        className="sc-meta"
+                        data-testid={`submission-backfill-${s.id}`}
+                        title={
+                          responseRecordedAt
+                            ? new Date(responseRecordedAt).toLocaleString()
+                            : undefined
+                        }
+                        style={{
+                          color: "var(--text-secondary)",
+                          fontSize: 11,
+                          fontStyle: "italic",
+                        }}
+                      >
+                        {backfillNote}
+                      </span>
+                    )}
                   </div>
                 )}
                 {s.note && (
