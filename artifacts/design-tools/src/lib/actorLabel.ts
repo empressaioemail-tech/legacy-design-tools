@@ -10,9 +10,10 @@
  *
  * This re-export is preserved so the existing in-artifact imports
  * (e.g. `SubmissionDetailModal.tsx`, `EngagementDetail.tsx`) and the
- * companion `__tests__/actorLabel.test.ts` suite keep working without
- * a wide-ranging import sweep — both paths resolve to the same
- * symbols from the shared lib.
+ * companion `__tests__/actorLabel.test.ts` suite (which still owns
+ * the `SERVER_ACTOR_IDS`-driven tripwire from Task #283) keep
+ * working without a wide-ranging import sweep — both paths resolve
+ * to the same symbols from the shared lib.
  */
 export {
   FRIENDLY_AGENT_LABELS,

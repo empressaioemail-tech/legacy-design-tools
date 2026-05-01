@@ -208,6 +208,9 @@ importers:
       '@workspace/integrations-anthropic-ai':
         specifier: workspace:*
         version: link:../../lib/integrations-anthropic-ai
+      '@workspace/server-actor-ids':
+        specifier: workspace:*
+        version: link:../../lib/server-actor-ids
       '@workspace/site-context':
         specifier: workspace:*
         version: link:../../lib/site-context
@@ -465,6 +468,9 @@ importers:
       '@workspace/portal-ui':
         specifier: workspace:*
         version: link:../../lib/portal-ui
+      '@workspace/server-actor-ids':
+        specifier: workspace:*
+        version: link:../../lib/server-actor-ids
       '@workspace/site-context':
         specifier: workspace:*
         version: link:../../lib/site-context
@@ -1214,6 +1220,9 @@ importers:
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../api-zod
+      '@workspace/server-actor-ids':
+        specifier: workspace:*
+        version: link:../server-actor-ids
       lucide-react:
         specifier: 'catalog:'
         version: 0.545.0(react@19.1.0)
@@ -1236,6 +1245,12 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.1.0(react@19.1.0)
+
+  lib/server-actor-ids:
+    devDependencies:
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
 
   lib/site-context:
     dependencies:

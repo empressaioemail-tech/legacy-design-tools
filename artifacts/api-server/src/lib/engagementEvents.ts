@@ -36,6 +36,11 @@ import type { EventAnchoringService } from "@workspace/empressa-atom";
 import type { Logger } from "pino";
 import type { SubmissionStatus } from "@workspace/db";
 import { keyFromEngagement } from "@workspace/codes";
+import {
+  ENGAGEMENT_EDIT_ACTOR_ID,
+  SUBMISSION_INGEST_ACTOR_ID,
+  SUBMISSION_RESPONSE_ACTOR_ID,
+} from "@workspace/server-actor-ids";
 import type { EngagementEventType } from "../atoms/engagement.atom";
 import type { SubmissionEventType } from "../atoms/submission.atom";
 
@@ -62,7 +67,7 @@ const SUBMISSION_STATUS_CHANGED_EVENT_TYPE: SubmissionEventType =
  */
 export const ENGAGEMENT_EDIT_ACTOR = {
   kind: "system" as const,
-  id: "engagement-edit",
+  id: ENGAGEMENT_EDIT_ACTOR_ID,
 };
 
 /**
@@ -76,7 +81,7 @@ export const ENGAGEMENT_EDIT_ACTOR = {
  */
 export const SUBMISSION_INGEST_ACTOR = {
   kind: "system" as const,
-  id: "submission-ingest",
+  id: SUBMISSION_INGEST_ACTOR_ID,
 };
 
 /**
@@ -90,7 +95,7 @@ export const SUBMISSION_INGEST_ACTOR = {
  */
 export const SUBMISSION_RESPONSE_ACTOR = {
   kind: "system" as const,
-  id: "submission-response",
+  id: SUBMISSION_RESPONSE_ACTOR_ID,
 };
 
 export interface EngagementEventActor {

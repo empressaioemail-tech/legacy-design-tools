@@ -27,6 +27,7 @@ import {
   enqueueWarmupForJurisdiction,
 } from "@workspace/codes";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
+import { SNAPSHOT_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { getHistoryService } from "../atoms/registry";
@@ -76,7 +77,7 @@ interface SnapshotAttachOutcome {
 /** Stable system actor for snapshot lifecycle events emitted by the ingest path. */
 const SNAPSHOT_INGEST_ACTOR = {
   kind: "system" as const,
-  id: "snapshot-ingest",
+  id: SNAPSHOT_INGEST_ACTOR_ID,
 };
 
 /**

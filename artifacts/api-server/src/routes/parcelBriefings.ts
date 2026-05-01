@@ -53,6 +53,10 @@ import {
 } from "@workspace/api-zod";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import {
+  BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
+  BRIEFING_ENGINE_ACTOR_ID,
+} from "@workspace/server-actor-ids";
+import {
   generateBriefing,
   type BriefingSourceInput,
   type GenerateBriefingResult,
@@ -109,7 +113,7 @@ const BRIEFING_SOURCE_FETCHED_EVENT_TYPE: BriefingSourceEventType =
 /** Stable system actor for manual-upload briefing-source events. */
 const BRIEFING_MANUAL_UPLOAD_ACTOR = {
   kind: "system" as const,
-  id: "briefing-manual-upload",
+  id: BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
 };
 
 /**
@@ -1231,7 +1235,7 @@ const MATERIALIZABLE_ELEMENT_IDENTIFIED_EVENT_TYPE: MaterializableElementEventTy
 /** Stable system actor for engine-driven generation events. */
 const BRIEFING_ENGINE_ACTOR = {
   kind: "system" as const,
-  id: "briefing-engine",
+  id: BRIEFING_ENGINE_ACTOR_ID,
 };
 
 /**

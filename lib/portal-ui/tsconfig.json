@@ -13,6 +13,7 @@
   "include": ["src"],
   "references": [
     { "path": "../api-client-react" },
-    { "path": "../api-zod" }
+    { "path": "../api-zod" },
+    { "path": "../server-actor-ids" }
   ]
 }

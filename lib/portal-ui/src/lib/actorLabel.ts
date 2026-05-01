@@ -1,3 +1,16 @@
+import {
+  BIM_MODEL_DIVERGENCE_ACTOR_ID,
+  BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID,
+  BIM_MODEL_PUSH_ACTOR_ID,
+  BIM_MODEL_REFRESH_ACTOR_ID,
+  BRIEFING_ENGINE_ACTOR_ID,
+  BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
+  ENGAGEMENT_EDIT_ACTOR_ID,
+  SNAPSHOT_INGEST_ACTOR_ID,
+  SUBMISSION_INGEST_ACTOR_ID,
+  SUBMISSION_RESPONSE_ACTOR_ID,
+} from "@workspace/server-actor-ids";
+
 /**
  * Friendly labels for non-user actor identities the API surfaces on
  * audit-trail / timeline rows (Resolved divergences attribution,
@@ -9,16 +22,15 @@
  * `"bim-model-push"`) and the operator-facing label should not depend
  * on whether the back-end stamped the event with `agent` or `system`.
  *
- * Keep this map in lockstep with the `id:` constants the API server
- * declares for its system / agent actors:
- *   - `artifacts/api-server/src/routes/snapshots.ts`
- *   - `artifacts/api-server/src/routes/bimModels.ts`
- *   - `artifacts/api-server/src/routes/parcelBriefings.ts`
- *   - `artifacts/api-server/src/lib/engagementEvents.ts`
- *
- * A missing entry degrades gracefully: callers fall back to the raw
- * id so a newly-introduced producer still attributes itself, just
- * with a less polished label until we add the mapping here.
+ * Keys come from `@workspace/server-actor-ids` so a typo on either
+ * side is a compile error, and the actorLabel test in design-tools
+ * asserts every id in `SERVER_ACTOR_IDS` is present here — a new
+ * server-side actor that forgets to add a friendly label fails CI
+ * rather than silently rendering the raw id in the audit trail
+ * (Task #283). A missing entry still degrades gracefully at runtime:
+ * callers fall back to the raw id so a newly-introduced producer
+ * still attributes itself, just with a less polished label until the
+ * mapping lands.
  *
  * Lives in `@workspace/portal-ui` so every artifact that renders an
  * audit-trail surface (design-tools' Resolved divergences panel and
@@ -28,18 +40,19 @@
  */
 export const FRIENDLY_AGENT_LABELS: Readonly<Record<string, string>> = {
   // snapshot lifecycle (routes/snapshots.ts)
-  "snapshot-ingest": "Site-context automation",
+  [SNAPSHOT_INGEST_ACTOR_ID]: "Site-context automation",
   // engagement lifecycle (lib/engagementEvents.ts)
-  "engagement-edit": "Engagement editor",
-  "submission-ingest": "Submission ingest",
-  "submission-response": "Submission response",
+  [ENGAGEMENT_EDIT_ACTOR_ID]: "Engagement editor",
+  [SUBMISSION_INGEST_ACTOR_ID]: "Submission ingest",
+  [SUBMISSION_RESPONSE_ACTOR_ID]: "Submission response",
   // bim-model lifecycle (routes/bimModels.ts)
-  "bim-model-push": "Push-to-Revit automation",
-  "bim-model-refresh": "Revit refresh automation",
-  "bim-model-divergence": "Revit divergence automation",
+  [BIM_MODEL_PUSH_ACTOR_ID]: "Push-to-Revit automation",
+  [BIM_MODEL_REFRESH_ACTOR_ID]: "Revit refresh automation",
+  [BIM_MODEL_DIVERGENCE_ACTOR_ID]: "Revit divergence automation",
+  [BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID]: "Revit divergence acknowledgement",
   // briefing-source lifecycle (routes/parcelBriefings.ts)
-  "briefing-manual-upload": "Manual briefing upload",
-  "briefing-engine": "Briefing engine",
+  [BRIEFING_MANUAL_UPLOAD_ACTOR_ID]: "Manual briefing upload",
+  [BRIEFING_ENGINE_ACTOR_ID]: "Briefing engine",
 };
 
 /**

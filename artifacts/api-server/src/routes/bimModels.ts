@@ -65,6 +65,12 @@ import {
   ResolveBimModelDivergenceParams,
 } from "@workspace/api-zod";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
+import {
+  BIM_MODEL_PUSH_ACTOR_ID,
+  BIM_MODEL_REFRESH_ACTOR_ID,
+  BIM_MODEL_DIVERGENCE_ACTOR_ID,
+  BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID,
+} from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
 import { hydrateActors } from "../lib/userLookup";
 import { getHistoryService } from "../atoms/registry";
@@ -102,19 +108,19 @@ const BRIEFING_DIVERGENCE_RESOLVED_EVENT_TYPE: BriefingDivergenceEventType =
 /** Stable system actor for design-tools-driven bim-model writes. */
 const BIM_MODEL_PUSH_ACTOR = {
   kind: "system" as const,
-  id: "bim-model-push",
+  id: BIM_MODEL_PUSH_ACTOR_ID,
 };
 
 /** Stable system actor for the refresh-diff polling path. */
 const BIM_MODEL_REFRESH_ACTOR = {
   kind: "system" as const,
-  id: "bim-model-refresh",
+  id: BIM_MODEL_REFRESH_ACTOR_ID,
 };
 
 /** Stable system actor for divergences the C# add-in records. */
 const BIM_MODEL_DIVERGENCE_ACTOR = {
   kind: "system" as const,
-  id: "bim-model-divergence",
+  id: BIM_MODEL_DIVERGENCE_ACTOR_ID,
 };
 
 /**
@@ -127,7 +133,7 @@ const BIM_MODEL_DIVERGENCE_ACTOR = {
  */
 const BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR = {
   kind: "system" as const,
-  id: "bim-model-divergence-resolve",
+  id: BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID,
 };
 
 // ---------------------------------------------------------------------------

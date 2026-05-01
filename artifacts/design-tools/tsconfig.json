@@ -22,6 +22,9 @@
       "path": "../../lib/portal-ui"
     },
     {
+      "path": "../../lib/server-actor-ids"
+    },
+    {
       "path": "../../lib/site-context"
     }
   ]

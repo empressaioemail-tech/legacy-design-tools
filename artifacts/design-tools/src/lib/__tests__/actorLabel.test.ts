@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { SERVER_ACTOR_IDS } from "@workspace/server-actor-ids";
+
 import {
   FRIENDLY_AGENT_LABELS,
   formatActorLabel,
@@ -92,23 +94,32 @@ describe("formatActorLabel", () => {
 
 describe("FRIENDLY_AGENT_LABELS", () => {
   it("covers every server-side stable actor id we emit today", () => {
-    // Tripwire: if a new server-side actor id is added without a
-    // matching label here, this test fails so the operator-facing
-    // attribution stays in lockstep with the back-end. Adding an
-    // entry to the map and updating this list keeps the contract
-    // mutually documented.
-    expect(Object.keys(FRIENDLY_AGENT_LABELS).sort()).toEqual(
-      [
-        "bim-model-divergence",
-        "bim-model-push",
-        "bim-model-refresh",
-        "briefing-engine",
-        "briefing-manual-upload",
-        "engagement-edit",
-        "snapshot-ingest",
-        "submission-ingest",
-        "submission-response",
-      ].sort(),
+    // Tripwire: if a new server-side actor id is added to
+    // `SERVER_ACTOR_IDS` (the source of truth the api-server route
+    // files import from) without a matching friendly label here,
+    // this test fails so operator-facing attribution stays in
+    // lockstep with the back-end. The previous incarnation of this
+    // test maintained a hand-coded list that drifted whenever a
+    // route added a new producer (e.g. `bim-model-divergence-resolve`
+    // shipped without a label and rendered the raw id in the
+    // audit trail until someone noticed). Sourcing the expected
+    // set from the shared lib closes that gap.
+    const missing = SERVER_ACTOR_IDS.filter(
+      (id) => !(id in FRIENDLY_AGENT_LABELS),
     );
+    expect(missing).toEqual([]);
+  });
+
+  it("does not carry stale labels for ids the server no longer emits", () => {
+    // Companion check: a label for an id that is not in
+    // `SERVER_ACTOR_IDS` is dead code at best and a misleading
+    // attribution at worst (an operator could legitimately wonder
+    // whose audit-trail row would render with that label). This
+    // assertion catches that drift in the other direction.
+    const expected = new Set<string>(SERVER_ACTOR_IDS);
+    const stale = Object.keys(FRIENDLY_AGENT_LABELS).filter(
+      (id) => !expected.has(id),
+    );
+    expect(stale).toEqual([]);
   });
 });

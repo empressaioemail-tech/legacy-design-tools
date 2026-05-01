@@ -64,6 +64,7 @@
     "@workspace/db": "workspace:*",
     "@workspace/object-storage-web": "workspace:*",
     "@workspace/portal-ui": "workspace:*",
+    "@workspace/server-actor-ids": "workspace:*",
     "@workspace/site-context": "workspace:*",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
