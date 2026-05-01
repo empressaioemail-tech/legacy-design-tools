@@ -5,11 +5,19 @@
  *
  * Boundary cases (kept vs deleted):
  *   - pending rows are NEVER deleted, even if older than the cutoff;
- *   - the most recent row per engagement is ALWAYS kept (audit story);
- *   - terminal rows older than the cutoff AND not the latest for their
- *     engagement ARE deleted;
- *   - terminal rows newer than the cutoff are kept regardless of
- *     whether a newer row exists.
+ *   - the most recent N rows per engagement are ALWAYS kept regardless
+ *     of age (audit story — auditors need to compare the last few
+ *     attempts when investigating a regression);
+ *   - terminal rows older than the cutoff AND with at least N newer
+ *     rows for the same engagement ARE deleted;
+ *   - terminal rows newer than the cutoff are kept regardless of how
+ *     many newer rows exist.
+ *
+ * The first block exercises the legacy "keep the latest only" mode by
+ * passing `keepPerEngagement: 1`. The second block exercises the new
+ * default N=5 behavior, including the (Nth-most-recent kept) vs
+ * (N+1)th-most-recent deleted boundary that defines the per-engagement
+ * cap.
  *
  * The test seeds rows directly via the per-file test schema's drizzle
  * client. The sweep helper accepts a `db` override so the DELETE
@@ -101,25 +109,31 @@ async function liveJobIds(engagementId: string): Promise<string[]> {
   return rows.map((r) => r.id).sort();
 }
 
-describe("pruneOldBriefingGenerationJobs", () => {
-  // Pin "now" so the cutoff math is independent of wall-clock drift.
-  const NOW = new Date("2026-05-01T00:00:00.000Z");
-  const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-  const cutoff = new Date(NOW.getTime() - RETENTION_MS); // 2026-04-01
+// Pin "now" so the cutoff math is independent of wall-clock drift.
+const NOW = new Date("2026-05-01T00:00:00.000Z");
+const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const cutoff = new Date(NOW.getTime() - RETENTION_MS); // 2026-04-01
 
-  // Convenience builders for "old vs young" timestamps relative to
-  // the cutoff. Old rows are eligible for the older-than-cutoff arm
-  // of the WHERE; young rows protect the "newer than cutoff" path.
-  const OLD = (offsetMs: number) =>
-    new Date(cutoff.getTime() - offsetMs); // < cutoff
-  const YOUNG = (offsetMs: number) =>
-    new Date(cutoff.getTime() + offsetMs); // > cutoff
+// Convenience builders for "old vs young" timestamps relative to
+// the cutoff. Old rows are eligible for the older-than-cutoff arm
+// of the WHERE; young rows protect the "newer than cutoff" path.
+const OLD = (offsetMs: number) =>
+  new Date(cutoff.getTime() - offsetMs); // < cutoff
+const YOUNG = (offsetMs: number) =>
+  new Date(cutoff.getTime() + offsetMs); // > cutoff
+
+describe("pruneOldBriefingGenerationJobs (keepPerEngagement: 1)", () => {
+  // The original "keep only the latest row per engagement" contract
+  // is still supported by passing keepPerEngagement: 1. Each test
+  // below pins it explicitly so the boundary they exercise stays the
+  // single-row case even though the production default is now 5.
 
   it("returns 0 and deletes nothing when the table is empty", async () => {
     const deleted = await pruneOldBriefingGenerationJobs({
       db: schema.db,
       retentionMs: RETENTION_MS,
       now: NOW,
+      keepPerEngagement: 1,
     });
     expect(deleted).toBe(0);
   });
@@ -146,6 +160,7 @@ describe("pruneOldBriefingGenerationJobs", () => {
       db: schema.db,
       retentionMs: RETENTION_MS,
       now: NOW,
+      keepPerEngagement: 1,
     });
     expect(deleted).toBe(0);
 
@@ -158,8 +173,9 @@ describe("pruneOldBriefingGenerationJobs", () => {
     // The sole terminal row for an engagement is what GET
     // /briefing/status returns. Pruning it would surface as "no run
     // on record" to the UI — strictly worse than letting one ancient
-    // row stick around. The "newer row exists" arm of the WHERE
-    // protects this.
+    // row stick around. The "N newer rows exist" arm of the WHERE
+    // protects this (with N=1, the latest row has 0 newer siblings
+    // and is therefore safe).
     const eng = await seedEngagement("Sole Old Row Kept");
     const ancientCompleted = await seedJob({
       engagementId: eng.id,
@@ -171,6 +187,7 @@ describe("pruneOldBriefingGenerationJobs", () => {
       db: schema.db,
       retentionMs: RETENTION_MS,
       now: NOW,
+      keepPerEngagement: 1,
     });
     expect(deleted).toBe(0);
     expect(await liveJobIds(eng.id)).toEqual([ancientCompleted.id]);
@@ -200,9 +217,11 @@ describe("pruneOldBriefingGenerationJobs", () => {
       db: schema.db,
       retentionMs: RETENTION_MS,
       now: NOW,
+      keepPerEngagement: 1,
     });
     // ancient + middleOld removed; latestOld is the most-recent and
-    // therefore protected by the EXISTS predicate.
+    // therefore protected by the per-engagement keep cap (N=1 keeps
+    // the single latest row regardless of age).
     expect(deleted).toBe(2);
     expect(await liveJobIds(eng.id)).toEqual([latestOld.id]);
     // Belt-and-suspenders: confirm the specific ids that were
@@ -232,6 +251,7 @@ describe("pruneOldBriefingGenerationJobs", () => {
       db: schema.db,
       retentionMs: RETENTION_MS,
       now: NOW,
+      keepPerEngagement: 1,
     });
     expect(deleted).toBe(0);
     expect(await liveJobIds(eng.id)).toEqual(
@@ -260,6 +280,7 @@ describe("pruneOldBriefingGenerationJobs", () => {
       db: schema.db,
       retentionMs: RETENTION_MS,
       now: NOW,
+      keepPerEngagement: 1,
     });
     expect(deleted).toBe(0);
     expect(await liveJobIds(eng.id)).toEqual(
@@ -269,7 +290,7 @@ describe("pruneOldBriefingGenerationJobs", () => {
 
   it("scopes 'latest per engagement' correctly across multiple engagements", async () => {
     // A newer row in engagement A must NOT protect old rows in
-    // engagement B. The EXISTS predicate is keyed on
+    // engagement B. The newer-rows COUNT is keyed on
     // `engagement_id`, so a cross-engagement leak would surface as
     // engagement-B history sticking around forever.
     const engA = await seedEngagement("Engagement A");
@@ -297,11 +318,282 @@ describe("pruneOldBriefingGenerationJobs", () => {
       db: schema.db,
       retentionMs: RETENTION_MS,
       now: NOW,
+      keepPerEngagement: 1,
     });
     expect(deleted).toBe(1);
     expect(await liveJobIds(engA.id)).toEqual([aLatest.id]);
     expect(await liveJobIds(engB.id)).toEqual([bSole.id]);
     void aOld;
+  });
+});
+
+describe("pruneOldBriefingGenerationJobs (keepPerEngagement: 5, default)", () => {
+  // The production sweep keeps the most recent 5 rows per engagement
+  // so auditors comparing a regression can look at "the run before the
+  // bad one" without it having been reaped. These tests pin the
+  // Nth-vs-(N+1)th boundary that defines that cap.
+
+  it("keeps the 5 most recent terminal rows per engagement when 5 or fewer rows exist (all old)", async () => {
+    // Even though every row is older than the cutoff and terminal,
+    // none should be deleted because none has 5 newer siblings.
+    const eng = await seedEngagement("Five Or Fewer All Kept");
+    const days = (n: number) => n * 24 * 60 * 60 * 1000;
+    // Seed 5 ancient terminal rows, each progressively newer.
+    const rows = [];
+    for (let i = 5; i >= 1; i--) {
+      rows.push(
+        await seedJob({
+          engagementId: eng.id,
+          state: "completed",
+          startedAt: OLD(days(i)),
+        }),
+      );
+    }
+
+    const deleted = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      // Default — but pinned for clarity at the boundary.
+      keepPerEngagement: 5,
+    });
+    expect(deleted).toBe(0);
+    expect(await liveJobIds(eng.id)).toEqual(rows.map((r) => r.id).sort());
+  });
+
+  it("keeps the 5th-most-recent and deletes the 6th-most-recent (Nth vs (N+1)th boundary)", async () => {
+    // The headline boundary the task asks for. Six ancient terminal
+    // rows for the same engagement: the most recent 5 stay, the 6th
+    // (oldest) is reaped. A future regression that swaps `>= N` for
+    // `> N` (off-by-one) or `> N - 1` would be caught here.
+    const eng = await seedEngagement("Sixth Reaped Fifth Kept");
+    const days = (n: number) => n * 24 * 60 * 60 * 1000;
+    // i=6 is oldest, i=1 is newest. All older than the cutoff so the
+    // age arm of the WHERE matches; the keep cap is the only thing
+    // protecting the kept rows.
+    const seeded = [];
+    for (let i = 6; i >= 1; i--) {
+      seeded.push(
+        await seedJob({
+          engagementId: eng.id,
+          state: "completed",
+          startedAt: OLD(days(i)),
+        }),
+      );
+    }
+    const oldest = seeded[0]!; // i=6
+    const keptFifth = seeded[1]!; // i=5 — the Nth-most-recent
+    const keptRest = seeded.slice(2); // i=4..1 — the 4 newest
+
+    const deleted = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      keepPerEngagement: 5,
+    });
+    expect(deleted).toBe(1);
+    const survivors = await liveJobIds(eng.id);
+    expect(survivors).toEqual(
+      [keptFifth.id, ...keptRest.map((r) => r.id)].sort(),
+    );
+    // Belt-and-suspenders: the specific row dropped is the oldest.
+    expect(survivors).not.toContain(oldest.id);
+  });
+
+  it("counts a pending row toward the keep cap (so it shields one fewer terminal row)", async () => {
+    // A pending row is the auditor's "currently in flight" attempt
+    // and it counts as one of the most-recent N. Concretely: with a
+    // pending row + 5 older terminal rows, the pending row + 4
+    // youngest terminal rows survive, and the 5th-oldest terminal
+    // row is reaped (it has 5 newer siblings: the 4 newer terminals
+    // plus the pending).
+    const eng = await seedEngagement("Pending Counts Toward Cap");
+    const days = (n: number) => n * 24 * 60 * 60 * 1000;
+    const oldest = await seedJob({
+      engagementId: eng.id,
+      state: "completed",
+      startedAt: OLD(days(10)),
+    });
+    const t4 = await seedJob({
+      engagementId: eng.id,
+      state: "completed",
+      startedAt: OLD(days(8)),
+    });
+    const t3 = await seedJob({
+      engagementId: eng.id,
+      state: "completed",
+      startedAt: OLD(days(6)),
+    });
+    const t2 = await seedJob({
+      engagementId: eng.id,
+      state: "failed",
+      startedAt: OLD(days(4)),
+    });
+    const t1 = await seedJob({
+      engagementId: eng.id,
+      state: "completed",
+      startedAt: OLD(days(2)),
+    });
+    // Pending row is the newest of all — it occupies one of the 5
+    // slots, pushing `oldest` out.
+    const pending = await seedJob({
+      engagementId: eng.id,
+      state: "pending",
+      startedAt: OLD(days(1)),
+    });
+
+    const deleted = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      keepPerEngagement: 5,
+    });
+    expect(deleted).toBe(1);
+    expect(await liveJobIds(eng.id)).toEqual(
+      [pending.id, t1.id, t2.id, t3.id, t4.id].sort(),
+    );
+    // The reaped row is the oldest terminal, not the pending row.
+    expect(await liveJobIds(eng.id)).not.toContain(oldest.id);
+  });
+
+  it("scopes the per-engagement cap correctly across multiple engagements", async () => {
+    // Engagement A has 7 ancient terminals (cap of 5 → 2 reaped),
+    // engagement B has 3 ancient terminals (under the cap → none
+    // reaped). A cross-engagement leak in the COUNT subquery would
+    // either spuriously protect A's 6th/7th rows or spuriously reap
+    // B's history.
+    const engA = await seedEngagement("Multi-Eng A");
+    const engB = await seedEngagement("Multi-Eng B");
+    const days = (n: number) => n * 24 * 60 * 60 * 1000;
+    const aRows = [];
+    for (let i = 7; i >= 1; i--) {
+      aRows.push(
+        await seedJob({
+          engagementId: engA.id,
+          state: "completed",
+          startedAt: OLD(days(i)),
+        }),
+      );
+    }
+    const bRows = [];
+    for (let i = 3; i >= 1; i--) {
+      bRows.push(
+        await seedJob({
+          engagementId: engB.id,
+          state: "completed",
+          startedAt: OLD(days(i + 20)), // even older than A's, to be sure
+        }),
+      );
+    }
+
+    const deleted = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      keepPerEngagement: 5,
+    });
+    expect(deleted).toBe(2); // 7 - 5 = 2 reaped from A; 0 from B
+    // A keeps its 5 newest (i=5..1, indices 2..6 in seed order).
+    expect(await liveJobIds(engA.id)).toEqual(
+      aRows.slice(2).map((r) => r.id).sort(),
+    );
+    // B keeps every row.
+    expect(await liveJobIds(engB.id)).toEqual(
+      bRows.map((r) => r.id).sort(),
+    );
+  });
+
+  it("never deletes a row inside the retention window even if it's beyond the keep cap", async () => {
+    // The two trim arms are AND-ed together: a row must be BOTH
+    // older than the cutoff AND beyond the keep cap. So 6 young
+    // terminal rows all stay, even though one of them is the 6th
+    // most recent and would be reaped if it were old.
+    const eng = await seedEngagement("Young Beyond Cap Still Kept");
+    const minutes = (n: number) => n * 60 * 1000;
+    const rows = [];
+    for (let i = 6; i >= 1; i--) {
+      rows.push(
+        await seedJob({
+          engagementId: eng.id,
+          state: "completed",
+          startedAt: YOUNG(minutes(i)),
+        }),
+      );
+    }
+
+    const deleted = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      keepPerEngagement: 5,
+    });
+    expect(deleted).toBe(0);
+    expect(await liveJobIds(eng.id)).toEqual(rows.map((r) => r.id).sort());
+  });
+
+  it("breaks ties on identical started_at deterministically using id (still keeps exactly N)", async () => {
+    // If two rows share the same `started_at`, the keep cap must
+    // still admit exactly N survivors. Without a tiebreaker, both
+    // tied rows would each see "no newer sibling" and the cap would
+    // silently let an extra row through. Six rows seeded at the SAME
+    // ancient timestamp — exactly 1 must be reaped (cap of 5).
+    const eng = await seedEngagement("Tie Breaker Boundary");
+    const tied = OLD(60 * 24 * 60 * 60 * 1000); // single shared timestamp
+    const rows = [];
+    for (let i = 0; i < 6; i++) {
+      rows.push(
+        await seedJob({
+          engagementId: eng.id,
+          state: "completed",
+          startedAt: tied,
+        }),
+      );
+    }
+
+    const deleted = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      keepPerEngagement: 5,
+    });
+    expect(deleted).toBe(1);
+    expect((await liveJobIds(eng.id)).length).toBe(5);
+    // The deterministic tiebreaker is `id ASC`, so the row with the
+    // smallest UUID is the one that gets reaped (it has 5 newer
+    // siblings under the (started_at, id) comparator). Compute the
+    // expected survivor set the same way the SQL does.
+    const sortedIds = rows.map((r) => r.id).sort();
+    expect(await liveJobIds(eng.id)).toEqual(sortedIds.slice(1));
+  });
+
+  it("falls back to the default keep cap when keepPerEngagement is 0 or negative", async () => {
+    // Defensive clamp: a misconfigured env var (`KEEP=0`) must not
+    // be allowed to delete the latest row per engagement. The helper
+    // falls through to the default of 5 in that case.
+    const eng = await seedEngagement("Defensive Clamp");
+    const days = (n: number) => n * 24 * 60 * 60 * 1000;
+    // 6 ancient terminal rows. With cap=5 (the default), one is
+    // reaped; with cap=0 (no clamp), all six would be reaped.
+    const rows = [];
+    for (let i = 6; i >= 1; i--) {
+      rows.push(
+        await seedJob({
+          engagementId: eng.id,
+          state: "completed",
+          startedAt: OLD(days(i)),
+        }),
+      );
+    }
+
+    const deleted = await pruneOldBriefingGenerationJobs({
+      db: schema.db,
+      retentionMs: RETENTION_MS,
+      now: NOW,
+      keepPerEngagement: 0,
+    });
+    // Default of 5 applied → 6 - 5 = 1 reaped.
+    expect(deleted).toBe(1);
+    expect((await liveJobIds(eng.id)).length).toBe(5);
   });
 });
 
