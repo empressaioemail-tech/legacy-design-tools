@@ -68,6 +68,7 @@ describe("lib/db schema integration", () => {
         "findings_code_atoms",
         "sheets",
         "snapshots",
+        "users",
       ]);
     });
   });

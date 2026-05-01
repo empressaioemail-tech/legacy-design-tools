@@ -6,6 +6,7 @@ import FindingsLibrary from "./pages/FindingsLibrary";
 import CodeLibrary from "./pages/CodeLibrary";
 import StyleProbe from "./pages/StyleProbe";
 import Sheets from "./pages/Sheets";
+import Users from "./pages/Users";
 import ComingSoon from "./pages/ComingSoon";
 
 const queryClient = new QueryClient();
@@ -28,7 +29,7 @@ function Router() {
       <Route path="/firms" component={ComingSoon} />
       <Route path="/projects" component={ComingSoon} />
       <Route path="/integrations" component={ComingSoon} />
-      <Route path="/users" component={ComingSoon} />
+      <Route path="/users" component={Users} />
       <Route path="/reviewers" component={ComingSoon} />
       <Route path="/settings" component={ComingSoon} />
 

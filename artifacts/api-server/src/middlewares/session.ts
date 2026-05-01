@@ -45,6 +45,7 @@
 
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { logger } from "../lib/logger";
+import { ensureUserProfile } from "../lib/userProfiles";
 
 /**
  * Identity attached to every request after this middleware runs. The
@@ -233,5 +234,17 @@ export const sessionMiddleware: RequestHandler = (
   const fromCookie = parseSessionCookie(cookies?.[SESSION_COOKIE]);
   const base = fromCookie ?? ANONYMOUS_APPLICANT;
   req.session = applyDevOverrides(base, req);
+
+  // Best-effort profile backfill. The first time we see a given user
+  // id, insert a default `users` row so the timeline does not have to
+  // render "Unknown user" for them. `ensureUserProfile` swallows its
+  // own errors and the call is fire-and-forget — a transient DB blip
+  // must never delay a request. Only `kind === "user"` actors get a
+  // profile row; agents/system have stable code-side labels and the
+  // hydration helper passes them through unchanged.
+  if (req.session.requestor && req.session.requestor.kind === "user") {
+    void ensureUserProfile(req.session.requestor.id);
+  }
+
   next();
 };

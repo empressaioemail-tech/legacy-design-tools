@@ -18,6 +18,8 @@ tags:
     description: Claude chat about an engagement
   - name: codes
     description: Atom-anchored municipal/building code knowledge
+  - name: users
+    description: User profile administration (display names, emails, avatars)
 paths:
   /healthz:
     get:
@@ -964,6 +966,148 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List user profiles
+      description: |
+        Returns every row in the `users` profile table, ordered by
+        `displayName`. Used by the admin "Users & Roles" screen to
+        manage the names/emails/avatars that hydrate timeline actor
+        labels.
+      responses:
+        "200":
+          description: Array of user profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create a user profile
+      description: |
+        Inserts a new row into the `users` profile table. Fails with 409
+        if a row with the same `id` already exists — use PATCH to edit
+        an existing profile instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserBody"
+      responses:
+        "201":
+          description: Created user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A profile with this id already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get a single user profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Update a user profile
+      description: |
+        Partial update — only the fields included in the request body are
+        changed. Pass `null` for `email` or `avatarUrl` to clear them.
+        `displayName` is non-nullable: omit it to leave it unchanged.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserBody"
+      responses:
+        "200":
+          description: Updated user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      summary: Delete a user profile
+      description: |
+        Removes the profile row. Atom-event actor records are not
+        cascaded — historical events keep the raw actor id and the
+        timeline simply falls back to "Unknown user" for the deleted
+        profile from then on. This matches the contract documented on
+        `lib/db/src/schema/users.ts`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -1585,6 +1729,81 @@ components:
           type: string
       required:
         - error
+
+    User:
+      description: |
+        A row in the `users` profile table — display name / email / avatar
+        used to hydrate timeline actor labels. The `id` is the same opaque
+        identifier the session layer carries (today: dev cookie ids like
+        `u1`; once real auth lands: the verified subject id from the auth
+        provider). See `lib/db/src/schema/users.ts` for the rationale on
+        why this is intentionally NOT FK'd from `atom_events.actor.id`.
+      type: object
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - displayName
+        - email
+        - avatarUrl
+        - createdAt
+        - updatedAt
+
+    CreateUserBody:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: |
+            Opaque profile id. Must match whatever the session layer
+            will surface for this user — for the dev cookie path that
+            means values like `u1` / `u_abc123`; once real auth lands
+            it should be the auth subject id.
+        displayName:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+      required:
+        - id
+        - displayName
+
+    UpdateUserBody:
+      type: object
+      description: |
+        Partial update. Omit a field to leave it unchanged. `email` and
+        `avatarUrl` accept `null` to clear them; `displayName` is
+        non-nullable so passing `null` is a 400.
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
 
     AtomKeyMetric:
       description: One row of the atom `keyMetrics` layer.

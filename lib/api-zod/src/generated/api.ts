@@ -1194,3 +1194,112 @@ export const SendChatMessageBody = zod.object({
       'Explicit list of snapshot ids to enter focus mode against\nfor this turn (Task #44). Each id must belong to the same\nengagement; foreign ids cause a 400. The server emits one\n`<snapshot_focus snapshot_id=\"…\">` block per id so the\nmodel can answer comparison-style questions that need to\nmine more than just the latest snapshot\'s payload (e.g.\n\"how did the room schedule change between yesterday\'s push\nand today\'s?\"). May be combined with `snapshotFocus: true`\n(the latest id is added if not already present). Capped\nserver-side; ids are de-duplicated.\n',
     ),
 });
+
+/**
+ * Returns every row in the `users` profile table, ordered by
+`displayName`. Used by the admin "Users & Roles" screen to
+manage the names/emails/avatars that hydrate timeline actor
+labels.
+
+ * @summary List user profiles
+ */
+export const ListUsersResponseItem = zod
+  .object({
+    id: zod.string(),
+    displayName: zod.string(),
+    email: zod.string().nullable(),
+    avatarUrl: zod.string().nullable(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .describe(
+    "A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK'd from `atom_events.actor.id`.\n",
+  );
+export const ListUsersResponse = zod.array(ListUsersResponseItem);
+
+/**
+ * Inserts a new row into the `users` profile table. Fails with 409
+if a row with the same `id` already exists — use PATCH to edit
+an existing profile instead.
+
+ * @summary Create a user profile
+ */
+
+export const CreateUserBody = zod.object({
+  id: zod
+    .string()
+    .min(1)
+    .describe(
+      "Opaque profile id. Must match whatever the session layer\nwill surface for this user — for the dev cookie path that\nmeans values like `u1` \/ `u_abc123`; once real auth lands\nit should be the auth subject id.\n",
+    ),
+  displayName: zod.string().min(1),
+  email: zod.string().nullish(),
+  avatarUrl: zod.string().nullish(),
+});
+
+/**
+ * @summary Get a single user profile
+ */
+export const GetUserParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetUserResponse = zod
+  .object({
+    id: zod.string(),
+    displayName: zod.string(),
+    email: zod.string().nullable(),
+    avatarUrl: zod.string().nullable(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .describe(
+    "A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK'd from `atom_events.actor.id`.\n",
+  );
+
+/**
+ * Partial update — only the fields included in the request body are
+changed. Pass `null` for `email` or `avatarUrl` to clear them.
+`displayName` is non-nullable: omit it to leave it unchanged.
+
+ * @summary Update a user profile
+ */
+export const UpdateUserParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateUserBody = zod
+  .object({
+    displayName: zod.string().min(1).optional(),
+    email: zod.string().nullish(),
+    avatarUrl: zod.string().nullish(),
+  })
+  .describe(
+    "Partial update. Omit a field to leave it unchanged. `email` and\n`avatarUrl` accept `null` to clear them; `displayName` is\nnon-nullable so passing `null` is a 400.\n",
+  );
+
+export const UpdateUserResponse = zod
+  .object({
+    id: zod.string(),
+    displayName: zod.string(),
+    email: zod.string().nullable(),
+    avatarUrl: zod.string().nullable(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .describe(
+    "A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK'd from `atom_events.actor.id`.\n",
+  );
+
+/**
+ * Removes the profile row. Atom-event actor records are not
+cascaded — historical events keep the raw actor id and the
+timeline simply falls back to "Unknown user" for the deleted
+profile from then on. This matches the contract documented on
+`lib/db/src/schema/users.ts`.
+
+ * @summary Delete a user profile
+ */
+export const DeleteUserParams = zod.object({
+  id: zod.coerce.string(),
+});

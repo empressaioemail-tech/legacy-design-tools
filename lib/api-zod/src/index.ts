@@ -27,4 +27,15 @@ export type {
   SnapshotReceipt,
   SnapshotSummary,
   SubmissionReceipt,
+  User,
 } from "./generated/types";
+
+// `CreateUserBody` and `UpdateUserBody` are intentionally NOT re-exported
+// as types here — they collide with the zod consts of the same name from
+// `./generated/api`, and adding them to a `type`-only re-export would
+// shadow the value side at compile time (matching the existing pattern
+// for `UpdateEngagementBody` and `CreateEngagementSubmissionBody`, which
+// flow through the `export *` value+type pair only). Consumers that need
+// the TS type can derive it via `z.infer<typeof CreateUserBody>` or
+// import from `@workspace/api-client-react` (which re-exports the
+// generated interface alongside the React Query hooks).

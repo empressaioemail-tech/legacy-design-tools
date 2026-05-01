@@ -334,6 +334,53 @@ export interface ErrorResponse {
 }
 
 /**
+ * A row in the `users` profile table — display name / email / avatar
+used to hydrate timeline actor labels. The `id` is the same opaque
+identifier the session layer carries (today: dev cookie ids like
+`u1`; once real auth lands: the verified subject id from the auth
+provider). See `lib/db/src/schema/users.ts` for the rationale on
+why this is intentionally NOT FK'd from `atom_events.actor.id`.
+
+ */
+export interface User {
+  id: string;
+  displayName: string;
+  email: string | null;
+  avatarUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateUserBody {
+  /**
+   * Opaque profile id. Must match whatever the session layer
+will surface for this user — for the dev cookie path that
+means values like `u1` / `u_abc123`; once real auth lands
+it should be the auth subject id.
+
+   * @minLength 1
+   */
+  id: string;
+  /** @minLength 1 */
+  displayName: string;
+  email?: string | null;
+  avatarUrl?: string | null;
+}
+
+/**
+ * Partial update. Omit a field to leave it unchanged. `email` and
+`avatarUrl` accept `null` to clear them; `displayName` is
+non-nullable so passing `null` is a 400.
+
+ */
+export interface UpdateUserBody {
+  /** @minLength 1 */
+  displayName?: string;
+  email?: string | null;
+  avatarUrl?: string | null;
+}
+
+/**
  * One row of the atom `keyMetrics` layer.
  */
 export interface AtomKeyMetric {

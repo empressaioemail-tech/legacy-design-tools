@@ -8,6 +8,7 @@ import chatRouter from "./chat";
 import codesRouter from "./codes";
 import devAtomsRouter from "./devAtoms";
 import atomsRouter from "./atoms";
+import usersRouter from "./users";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(chatRouter);
 router.use(codesRouter);
 router.use(devAtomsRouter);
 router.use(atomsRouter);
+router.use(usersRouter);
 
 export default router;
