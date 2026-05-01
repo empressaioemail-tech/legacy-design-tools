@@ -37,16 +37,39 @@ const DEFAULT_TESTID_PREFIX = "briefing-run-prior-narrative-copy";
  */
 const COPY_FEEDBACK_MS = 2000;
 
-const BUTTON_STYLE: CSSProperties = {
+type CopyState = "idle" | "success" | "error";
+
+const STATE_STYLE: Record<
+  CopyState,
+  { color: string; border: string; background: string }
+> = {
+  idle: {
+    color: "var(--text-default)",
+    border: "1px solid var(--border-subtle)",
+    background: "transparent",
+  },
+  success: {
+    color: "var(--success-text)",
+    border: "1px solid var(--success-text)",
+    background: "var(--success-dim)",
+  },
+  error: {
+    color: "var(--danger-text)",
+    border: "1px solid var(--danger-text)",
+    background: "var(--danger-dim)",
+  },
+};
+
+const buttonStyleFor = (state: CopyState): CSSProperties => ({
   fontSize: 11,
   padding: "2px 8px",
-  background: "transparent",
-  border: "1px solid var(--border-subtle)",
+  background: STATE_STYLE[state].background,
+  border: STATE_STYLE[state].border,
   borderRadius: 4,
   cursor: "pointer",
-  color: "var(--text-default)",
+  color: STATE_STYLE[state].color,
   whiteSpace: "nowrap",
-};
+});
 
 /**
  * Shared "Copy plain text" button used by the prior-narrative block
@@ -124,11 +147,19 @@ export function CopyPlainTextButton({
     copyResult?.id === generationId && copyResult.kind === "success";
   const hasCopyError =
     copyResult?.id === generationId && copyResult.kind === "error";
+  // Task #351 — danger/success tokens make the outcome legible at
+  // a glance. `data-copy-state` is also pinned for regression tests.
+  const copyState: CopyState = isCopied
+    ? "success"
+    : hasCopyError
+      ? "error"
+      : "idle";
 
   return (
     <button
       type="button"
       data-testid={`${testIdPrefix}-${generationId}`}
+      data-copy-state={copyState}
       onClick={() => {
         // Capture the id at click time so a fast row-swap doesn't
         // confirm or error the wrong row.
@@ -150,11 +181,12 @@ export function CopyPlainTextButton({
             flashCopyResult(id, "error");
           });
       }}
-      style={BUTTON_STYLE}
+      style={buttonStyleFor(copyState)}
     >
       {isCopied ? (
         <span
           data-testid={`${testIdPrefix}-confirm-${generationId}`}
+          data-copy-state="success"
           aria-live="polite"
         >
           Copied!
@@ -162,6 +194,7 @@ export function CopyPlainTextButton({
       ) : hasCopyError ? (
         <span
           data-testid={`${testIdPrefix}-error-${generationId}`}
+          data-copy-state="error"
           aria-live="polite"
         >
           Couldn&apos;t copy

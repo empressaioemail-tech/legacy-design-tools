@@ -924,11 +924,15 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
     // The confirmation pill mounts once the writeText promise
     // resolves — `findByTestId` polls until React flushes the
     // resulting state update.
+    const confirmPill = await screen.findByTestId(
+      "briefing-run-prior-narrative-copy-confirm-gen-prior",
+    );
+    expect(confirmPill).toHaveTextContent(/copied/i);
+    // Task #351 — guard the success treatment.
+    expect(confirmPill).toHaveAttribute("data-copy-state", "success");
     expect(
-      await screen.findByTestId(
-        "briefing-run-prior-narrative-copy-confirm-gen-prior",
-      ),
-    ).toHaveTextContent(/copied/i);
+      screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
+    ).toHaveAttribute("data-copy-state", "success");
     // After ~2s the label reverts so the disclosure doesn't
     // stay frozen on a stale "Copied!" indicator. waitFor's
     // default 1 s budget is too tight for the 2 s revert, so
@@ -947,6 +951,10 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
     expect(
       screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
     ).toHaveTextContent("Copy plain text");
+    // Task #351 — guard the revert to `idle`.
+    expect(
+      screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
+    ).toHaveAttribute("data-copy-state", "idle");
   });
 
   // Task #338 / #345 — explicit no-false-positive coverage on the
@@ -994,6 +1002,11 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
         "briefing-run-prior-narrative-copy-error-gen-prior",
       );
       expect(errorPill).toHaveTextContent(/couldn.?t copy/i);
+      // Task #351 — guard the danger treatment.
+      expect(errorPill).toHaveAttribute("data-copy-state", "error");
+      expect(
+        screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
+      ).toHaveAttribute("data-copy-state", "error");
       // The success pill must NEVER appear on the failure path —
       // the auditor's whole signal is that the copy did NOT
       // land, so a stray "Copied!" would be a false positive.
@@ -1076,11 +1089,18 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
       // The error pill mounts once the rejection settles —
       // `findByTestId` polls until React flushes the resulting
       // state update from the `.catch(...)` branch.
+      const rejectedErrorPill = await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-error-gen-prior",
+      );
+      expect(rejectedErrorPill).toHaveTextContent(/couldn.?t copy/i);
+      // Task #351 — guard the danger treatment.
+      expect(rejectedErrorPill).toHaveAttribute(
+        "data-copy-state",
+        "error",
+      );
       expect(
-        await screen.findByTestId(
-          "briefing-run-prior-narrative-copy-error-gen-prior",
-        ),
-      ).toHaveTextContent(/couldn.?t copy/i);
+        screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
+      ).toHaveAttribute("data-copy-state", "error");
       // Mutually-exclusive invariant — only one of {success,
       // error} can be in the tree at a time. A stray "Copied!"
       // pill on a rejected write would tell the auditor the
