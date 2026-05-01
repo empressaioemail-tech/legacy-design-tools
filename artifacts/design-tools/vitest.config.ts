@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import path from "path";
 
 /**
  * Tests-only Vite/Vitest config. Intentionally separate from `vite.config.ts`
@@ -8,6 +9,14 @@ import react from "@vitejs/plugin-react";
  */
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    // Mirror the `@/*` alias from `vite.config.ts` so test files (and any
+    // app modules they pull in — e.g. shadcn `ui/avatar` importing
+    // `@/lib/utils`) resolve in test context the same way they do in dev.
+    alias: {
+      "@": path.resolve(import.meta.dirname, "src"),
+    },
+  },
   test: {
     environment: "happy-dom",
     globals: false,

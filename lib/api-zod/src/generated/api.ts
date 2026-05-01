@@ -2089,9 +2089,15 @@ export const ListBimModelDivergencesResponse = zod
                 .describe(
                   "Friendly label for the actor when one is known. Optional\non the wire — surfaces that do not hydrate identities\n(e.g. service-to-service callbacks) omit it, and\nconsumers must fall back to `id`.\n",
                 ),
+              avatarUrl: zod
+                .string()
+                .optional()
+                .describe(
+                  'Best-effort hydration of `users.avatarUrl` for\n`kind === \"user\"` actors. Optional on the wire — absent\nwhen no profile is hydrated or the user has no avatar\non file. Consumers should fall back to an initials chip.\n',
+                ),
             })
             .describe(
-              'Stable shape for a session-bound caller\'s identity, mirroring\n`SessionUser.requestor` on the api-server. `id` is the opaque\nidentifier the upstream identity layer hands us — not an FK\nto anything, deliberately, so a swap of identity providers\ncannot retroactively break the audit trail (see\n`lib\/db\/src\/schema\/users.ts` for the rationale).\n\n`displayName` is an optional, best-effort hydration of the\nunderlying `users.displayName` for `kind === \"user\"` actors\n(Task #212). It is populated for surfaces that join through\nthe `users` table when the identity is known; consumers must\nfall back to the raw `id` when the field is absent so a\nmissing or transiently-unavailable profile does not blank\nthe audit trail.\n',
+              'Stable shape for a session-bound caller\'s identity, mirroring\n`SessionUser.requestor` on the api-server. `id` is the opaque\nidentifier the upstream identity layer hands us — not an FK\nto anything, deliberately, so a swap of identity providers\ncannot retroactively break the audit trail (see\n`lib\/db\/src\/schema\/users.ts` for the rationale).\n\n`displayName` is an optional, best-effort hydration of the\nunderlying `users.displayName` for `kind === \"user\"` actors\n(Task #212). It is populated for surfaces that join through\nthe `users` table when the identity is known; consumers must\nfall back to the raw `id` when the field is absent so a\nmissing or transiently-unavailable profile does not blank\nthe audit trail.\n\n`avatarUrl` is the matching best-effort hydration of\n`users.avatarUrl` (Task #269) so audit-trail surfaces that\nalready render an avatar\/initials chip beside the name (e.g.\nthe design-tools \"Resolved by …\" attribution on the Site\nContext divergence panel) can show the image when one is\non file. Same fallback contract as `displayName`: absent on\nthe wire when no profile is hydrated, and consumers must\ngracefully render an initials chip (or neutral system glyph)\nwhen missing.\n',
             )
             .nullable()
             .describe(
@@ -2177,9 +2183,15 @@ export const ResolveBimModelDivergenceResponse = zod
               .describe(
                 "Friendly label for the actor when one is known. Optional\non the wire — surfaces that do not hydrate identities\n(e.g. service-to-service callbacks) omit it, and\nconsumers must fall back to `id`.\n",
               ),
+            avatarUrl: zod
+              .string()
+              .optional()
+              .describe(
+                'Best-effort hydration of `users.avatarUrl` for\n`kind === \"user\"` actors. Optional on the wire — absent\nwhen no profile is hydrated or the user has no avatar\non file. Consumers should fall back to an initials chip.\n',
+              ),
           })
           .describe(
-            'Stable shape for a session-bound caller\'s identity, mirroring\n`SessionUser.requestor` on the api-server. `id` is the opaque\nidentifier the upstream identity layer hands us — not an FK\nto anything, deliberately, so a swap of identity providers\ncannot retroactively break the audit trail (see\n`lib\/db\/src\/schema\/users.ts` for the rationale).\n\n`displayName` is an optional, best-effort hydration of the\nunderlying `users.displayName` for `kind === \"user\"` actors\n(Task #212). It is populated for surfaces that join through\nthe `users` table when the identity is known; consumers must\nfall back to the raw `id` when the field is absent so a\nmissing or transiently-unavailable profile does not blank\nthe audit trail.\n',
+            'Stable shape for a session-bound caller\'s identity, mirroring\n`SessionUser.requestor` on the api-server. `id` is the opaque\nidentifier the upstream identity layer hands us — not an FK\nto anything, deliberately, so a swap of identity providers\ncannot retroactively break the audit trail (see\n`lib\/db\/src\/schema\/users.ts` for the rationale).\n\n`displayName` is an optional, best-effort hydration of the\nunderlying `users.displayName` for `kind === \"user\"` actors\n(Task #212). It is populated for surfaces that join through\nthe `users` table when the identity is known; consumers must\nfall back to the raw `id` when the field is absent so a\nmissing or transiently-unavailable profile does not blank\nthe audit trail.\n\n`avatarUrl` is the matching best-effort hydration of\n`users.avatarUrl` (Task #269) so audit-trail surfaces that\nalready render an avatar\/initials chip beside the name (e.g.\nthe design-tools \"Resolved by …\" attribution on the Site\nContext divergence panel) can show the image when one is\non file. Same fallback contract as `displayName`: absent on\nthe wire when no profile is hydrated, and consumers must\ngracefully render an initials chip (or neutral system glyph)\nwhen missing.\n',
           )
           .nullable()
           .describe(

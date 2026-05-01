@@ -76,12 +76,17 @@ const hoisted = vi.hoisted(() => {
       createdAt: string;
       elementKind: string | null;
       elementLabel: string | null;
-      // Resolved-row fields (Task #191 / #212). Default omitted so
-      // existing fixtures stay untouched; the inline attribution
-      // test populates them explicitly.
+      // Resolved-row fields (Task #191 / #212 / #269). Default
+      // omitted so existing fixtures stay untouched; the inline
+      // attribution + avatar tests populate them explicitly.
       resolvedAt?: string | null;
       resolvedByRequestor?:
-        | { kind: "user" | "agent"; id: string; displayName?: string }
+        | {
+            kind: "user" | "agent";
+            id: string;
+            displayName?: string;
+            avatarUrl?: string;
+          }
         | null;
     }>,
     divergencesQueryState: {
@@ -822,25 +827,39 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
     );
     // Inline copy carries both the relative time and the friendly
     // display name — no need to hover the badge to learn either.
-    expect(friendlyAttr).toHaveTextContent("1 h ago by Alex Architect");
+    // The chip nested inside the attribution also renders the
+    // avatar's initials fallback (e.g. "AA") between "by" and the
+    // name, so we assert against the relative-time prefix and the
+    // chip's own text content separately rather than as one
+    // contiguous substring.
+    expect(friendlyAttr).toHaveTextContent(/^1 h ago by/);
+    expect(
+      within(friendlyAttr).getByTestId("briefing-divergences-resolver-chip"),
+    ).toHaveTextContent("Alex Architect");
 
     const rawRow = screen
       .getAllByTestId("briefing-divergences-row")
       .find((r) => r.getAttribute("data-divergence-id") === "div-raw-id");
     expect(rawRow).toBeDefined();
+    const rawAttr = within(rawRow!).getByTestId(
+      "briefing-divergences-resolved-attribution",
+    );
+    expect(rawAttr).toHaveTextContent(/^1 h ago by/);
     expect(
-      within(rawRow!).getByTestId("briefing-divergences-resolved-attribution"),
-    ).toHaveTextContent("1 h ago by user-22");
+      within(rawAttr).getByTestId("briefing-divergences-resolver-chip"),
+    ).toHaveTextContent("user-22");
 
     const systemRow = screen
       .getAllByTestId("briefing-divergences-row")
       .find((r) => r.getAttribute("data-divergence-id") === "div-system");
     expect(systemRow).toBeDefined();
+    const systemAttr = within(systemRow!).getByTestId(
+      "briefing-divergences-resolved-attribution",
+    );
+    expect(systemAttr).toHaveTextContent(/^1 h ago by/);
     expect(
-      within(systemRow!).getByTestId(
-        "briefing-divergences-resolved-attribution",
-      ),
-    ).toHaveTextContent("1 h ago by system");
+      within(systemAttr).getByTestId("briefing-divergences-resolver-chip"),
+    ).toHaveTextContent("system");
 
     // Task #270: a known agent id renders the friendly label
     // sourced from the shared FRIENDLY_AGENT_LABELS map rather
@@ -854,9 +873,13 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
     const agentKnownAttr = within(agentKnownRow!).getByTestId(
       "briefing-divergences-resolved-attribution",
     );
-    expect(agentKnownAttr).toHaveTextContent(
-      "1 h ago by Site-context automation",
-    );
+    // Avatar initials live inside the chip (Task #269) so we assert
+    // the time prefix on the row and the friendly label on the chip
+    // separately rather than as one contiguous substring.
+    expect(agentKnownAttr).toHaveTextContent(/^1 h ago by/);
+    expect(
+      within(agentKnownAttr).getByTestId("briefing-divergences-resolver-chip"),
+    ).toHaveTextContent("Site-context automation");
     // Defensive: the raw id must NOT leak into the audit row when
     // the friendly label is available.
     expect(agentKnownAttr).not.toHaveTextContent("snapshot-ingest");
@@ -870,17 +893,173 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
         (r) => r.getAttribute("data-divergence-id") === "div-agent-unknown",
       );
     expect(agentUnknownRow).toBeDefined();
+    const agentUnknownAttr = within(agentUnknownRow!).getByTestId(
+      "briefing-divergences-resolved-attribution",
+    );
+    expect(agentUnknownAttr).toHaveTextContent(/^1 h ago by/);
     expect(
-      within(agentUnknownRow!).getByTestId(
-        "briefing-divergences-resolved-attribution",
+      within(agentUnknownAttr).getByTestId(
+        "briefing-divergences-resolver-chip",
       ),
-    ).toHaveTextContent("1 h ago by future-agent");
+    ).toHaveTextContent("future-agent");
 
     // The absolute ISO timestamp is still tucked into the title
     // attribute so an operator can hover for second-precision when
     // they need it. The relative copy in the body covers the at-a-
     // glance need; the title covers the audit-precision need.
     expect(friendlyAttr).toHaveAttribute("title", oneHourAgo);
+  });
+
+  it("renders an avatar / initials / system glyph beside the resolver name (Task #269)", () => {
+    // Four resolved rows so we exercise every branch the
+    // ResolvedByChip has to render:
+    //   - hydrated user with avatarUrl  → image avatar
+    //   - hydrated user, no avatarUrl   → initials from displayName
+    //   - un-hydrated user (raw id)     → initials from raw id
+    //   - null requestor (system)       → neutral "·" glyph
+    // Each branch must surface in the chip's data attributes /
+    // fallback text so the test can assert without relying on
+    // computed styles.
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    hoisted.divergences = [
+      {
+        id: "div-with-avatar",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: {
+          kind: "user",
+          id: "user-7",
+          displayName: "Alex Architect",
+          avatarUrl: "https://cdn.example.test/avatars/user-7.png",
+        },
+      },
+      {
+        id: "div-initials",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-B",
+        briefingId: "brief-1",
+        reason: "unpinned",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T11:00:00.000Z",
+        elementKind: "property-line",
+        elementLabel: "South property line",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: {
+          kind: "user",
+          id: "user-9",
+          displayName: "Morgan Mason",
+        },
+      },
+      {
+        id: "div-raw-id",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-C",
+        briefingId: "brief-1",
+        reason: "unpinned",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T10:30:00.000Z",
+        elementKind: "property-line",
+        elementLabel: "West property line",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: { kind: "user", id: "user-22" },
+      },
+      {
+        id: "div-system",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-D",
+        briefingId: "brief-1",
+        reason: "deleted",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T10:00:00.000Z",
+        elementKind: "terrain",
+        elementLabel: "Site terrain",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: null,
+      },
+    ];
+    renderPanel();
+    fireEvent.click(
+      screen.getByTestId("briefing-divergences-resolved-toggle"),
+    );
+
+    const findRow = (id: string) =>
+      screen
+        .getAllByTestId("briefing-divergences-row")
+        .find((r) => r.getAttribute("data-divergence-id") === id);
+
+    // ── 1. Hydrated user with avatarUrl ──────────────────────────
+    // Radix's `AvatarImage` only mounts an `<img>` after a real
+    // browser fires a `load` event, which never happens in
+    // happy-dom — so we mirror the avatar URL onto the chip itself
+    // (see `data-resolver-avatar-url`) and assert that here.
+    const avatarRow = findRow("div-with-avatar");
+    expect(avatarRow).toBeDefined();
+    const avatarChip = within(avatarRow!).getByTestId(
+      "briefing-divergences-resolver-chip",
+    );
+    expect(avatarChip).toHaveAttribute("data-resolver-kind", "user");
+    expect(avatarChip).toHaveTextContent("Alex Architect");
+    expect(avatarChip).toHaveAttribute(
+      "data-resolver-avatar-url",
+      "https://cdn.example.test/avatars/user-7.png",
+    );
+
+    // ── 2. Hydrated user without avatarUrl → initials ────────────
+    const initialsRow = findRow("div-initials");
+    expect(initialsRow).toBeDefined();
+    const initialsChip = within(initialsRow!).getByTestId(
+      "briefing-divergences-resolver-chip",
+    );
+    expect(initialsChip).not.toHaveAttribute("data-resolver-avatar-url");
+    const initialsFallback = within(initialsRow!).getByTestId(
+      "briefing-divergences-resolver-avatar-fallback",
+    );
+    expect(initialsFallback).toHaveTextContent("MM");
+
+    // ── 3. Un-hydrated user → initials derived from raw id ───────
+    // The chip still renders a label + initials so the row is
+    // never blank, even when the API couldn't hydrate the profile.
+    const rawRow = findRow("div-raw-id");
+    expect(rawRow).toBeDefined();
+    const rawFallback = within(rawRow!).getByTestId(
+      "briefing-divergences-resolver-avatar-fallback",
+    );
+    // "user-22" → first letter "U", no second word, so the chip
+    // collapses to a single-letter fallback rather than padding.
+    expect(rawFallback).toHaveTextContent("U");
+    expect(
+      within(rawRow!).getByTestId("briefing-divergences-resolver-chip"),
+    ).toHaveTextContent("user-22");
+
+    // ── 4. Null requestor → neutral system glyph ─────────────────
+    // We render "·" instead of an initials chip so a system /
+    // unattributed resolve can't be confused with a real user
+    // whose initials happen to be "S".
+    const systemRow = findRow("div-system");
+    expect(systemRow).toBeDefined();
+    const systemChip = within(systemRow!).getByTestId(
+      "briefing-divergences-resolver-chip",
+    );
+    expect(systemChip).toHaveAttribute("data-resolver-kind", "system");
+    expect(systemChip).toHaveTextContent("system");
+    const systemFallback = within(systemRow!).getByTestId(
+      "briefing-divergences-resolver-avatar-fallback",
+    );
+    expect(systemFallback).toHaveTextContent("·");
+    expect(
+      within(systemRow!).queryByRole("img", { hidden: true }),
+    ).toBeNull();
   });
 
   it("renders the loading-state copy while the divergences query is loading", () => {

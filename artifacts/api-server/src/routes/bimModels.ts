@@ -172,6 +172,14 @@ interface RequestorRefWire {
    * transiently-unavailable profile still renders an attribution.
    */
   displayName?: string;
+  /**
+   * Best-effort hydration of `users.avatarUrl` (Task #269) for the
+   * same `kind === "user"` actor. Lets the design-tools "Resolved by …"
+   * chip render the user's avatar image when one is on file; absent
+   * when the profile isn't hydrated or the user has no avatar, in
+   * which case the FE falls back to an initials chip.
+   */
+  avatarUrl?: string;
 }
 
 interface BriefingDivergenceWire {
@@ -243,9 +251,21 @@ function toElementWire(e: MaterializableElement): MaterializableElementWire {
   };
 }
 
+/**
+ * Cached profile fields for a `kind === "user"` resolver. Both fields
+ * are optional so a hydrated row that only carries a display name
+ * (no avatar on file) doesn't pretend to have an `avatarUrl`. The
+ * caller treats either field's absence as "fall back to the
+ * UI-side default" (raw id / initials chip).
+ */
+interface ResolverProfile {
+  displayName?: string;
+  avatarUrl?: string;
+}
+
 function toDivergenceWire(
   d: BriefingDivergence,
-  displayNameByUserId?: ReadonlyMap<string, string>,
+  profileByUserId?: ReadonlyMap<string, ResolverProfile>,
 ): BriefingDivergenceWire {
   return {
     id: d.id,
@@ -257,7 +277,7 @@ function toDivergenceWire(
     detail: (d.detail ?? {}) as Record<string, unknown>,
     createdAt: d.createdAt.toISOString(),
     resolvedAt: d.resolvedAt ? d.resolvedAt.toISOString() : null,
-    resolvedByRequestor: toResolvedByRequestor(d, displayNameByUserId),
+    resolvedByRequestor: toResolvedByRequestor(d, profileByUserId),
   };
 }
 
@@ -268,17 +288,19 @@ function toDivergenceWire(
  * the wire field to populate; a half-populated row degrades to
  * `null` so the FE never has to handle a partially-typed actor.
  *
- * When a `displayNameByUserId` map is supplied (the engagement-side
+ * When a `profileByUserId` map is supplied (the engagement-side
  * surfaces hydrate identities via the `users` table — see
  * `hydrateActors`), a matching `kind === "user"` row gains an
  * optional `displayName` so the FE can render "Resolved by Jane Doe"
- * (Task #212) instead of an opaque user id. The lookup is best
- * effort: an unknown id (e.g. profile deleted) leaves the field
- * absent and the FE falls back to the raw id.
+ * (Task #212) instead of an opaque user id, plus an optional
+ * `avatarUrl` so the FE can render the user's avatar in the
+ * "Resolved by …" chip (Task #269). Both lookups are best effort:
+ * an unknown id (e.g. profile deleted) leaves the fields absent and
+ * the FE falls back to the raw id / an initials chip.
  */
 function toResolvedByRequestor(
   d: BriefingDivergence,
-  displayNameByUserId?: ReadonlyMap<string, string>,
+  profileByUserId?: ReadonlyMap<string, ResolverProfile>,
 ): RequestorRefWire | null {
   const kind = d.resolvedByRequestorKind;
   const id = d.resolvedByRequestorId;
@@ -286,18 +308,22 @@ function toResolvedByRequestor(
   if (kind !== "user" && kind !== "agent") return null;
   const ref: RequestorRefWire = { kind, id };
   if (kind === "user") {
-    const displayName = displayNameByUserId?.get(id);
-    if (displayName) ref.displayName = displayName;
+    const profile = profileByUserId?.get(id);
+    if (profile?.displayName) ref.displayName = profile.displayName;
+    if (profile?.avatarUrl) ref.avatarUrl = profile.avatarUrl;
   }
   return ref;
 }
 
 /**
- * Best-effort batched display-name lookup for the user-kind
- * resolvers across a set of divergence rows (Task #212). The list /
- * resolve endpoints feed the resulting map straight into
- * `toDivergenceWire` so the wire's `resolvedByRequestor.displayName`
- * gets populated in a single round-trip regardless of how many rows
+ * Best-effort batched profile lookup for the user-kind resolvers
+ * across a set of divergence rows. Originally added for displayName
+ * hydration (Task #212) and extended in Task #269 to also surface
+ * `avatarUrl` so the design-tools "Resolved by …" chip can render
+ * the user's avatar image alongside their name. The list / resolve
+ * endpoints feed the resulting map straight into `toDivergenceWire`
+ * so the wire's `resolvedByRequestor.{displayName,avatarUrl}` get
+ * populated in a single round-trip regardless of how many rows
  * we're returning.
  *
  * Mirrors the posture of the snapshot/atom-history hydration paths:
@@ -305,10 +331,10 @@ function toResolvedByRequestor(
  * degrades silently to the empty map so the audit-trail row still
  * renders with the raw id rather than failing the whole request.
  */
-async function lookupResolverDisplayNames(
+async function lookupResolverProfiles(
   rows: ReadonlyArray<{ divergence: BriefingDivergence }>,
   reqLog: typeof logger,
-): Promise<Map<string, string>> {
+): Promise<Map<string, ResolverProfile>> {
   const userIds: { kind: "user"; id: string }[] = [];
   const seen = new Set<string>();
   for (const r of rows) {
@@ -319,19 +345,26 @@ async function lookupResolverDisplayNames(
     seen.add(id);
     userIds.push({ kind: "user", id });
   }
-  const out = new Map<string, string>();
+  const out = new Map<string, ResolverProfile>();
   if (userIds.length === 0) return out;
   try {
     const hydrated = await hydrateActors(userIds);
     for (const a of hydrated) {
-      if (a.kind === "user" && a.displayName) {
-        out.set(a.id, a.displayName);
+      if (a.kind !== "user") continue;
+      const profile: ResolverProfile = {};
+      if (a.displayName) profile.displayName = a.displayName;
+      if (a.avatarUrl) profile.avatarUrl = a.avatarUrl;
+      // Skip empty entries so the FE-side fall-back path is the
+      // only one that handles missing profiles — avoids carrying
+      // `{}` placeholders that would muddy assertions.
+      if (profile.displayName || profile.avatarUrl) {
+        out.set(a.id, profile);
       }
     }
   } catch (err) {
     reqLog.warn(
       { err },
-      "bim-model divergence: resolver display-name hydration failed",
+      "bim-model divergence: resolver profile hydration failed",
     );
   }
   return out;
@@ -1066,17 +1099,15 @@ router.get(
           desc(briefingDivergences.createdAt),
         );
 
-      // Batched display-name hydration so each Resolved row's
-      // `resolvedByRequestor.displayName` is populated without a
-      // per-row round-trip. Best-effort: a failed lookup degrades
-      // to the raw id (the helper logs and returns an empty map).
-      const displayNameByUserId = await lookupResolverDisplayNames(
-        rows,
-        reqLog,
-      );
+      // Batched profile hydration so each Resolved row's
+      // `resolvedByRequestor.{displayName,avatarUrl}` is populated
+      // without a per-row round-trip. Best-effort: a failed lookup
+      // degrades to the raw id / initials chip (the helper logs and
+      // returns an empty map).
+      const profileByUserId = await lookupResolverProfiles(rows, reqLog);
 
       const divergences: BimModelDivergenceListEntryWire[] = rows.map((r) => ({
-        ...toDivergenceWire(r.divergence, displayNameByUserId),
+        ...toDivergenceWire(r.divergence, profileByUserId),
         elementKind: r.elementKind ?? null,
         elementLabel: r.elementLabel ?? null,
       }));
@@ -1298,17 +1329,18 @@ router.post(
       );
     }
 
-    // Hydrate the resolver's display name so the splice the FE
-    // performs against its cached list (Task #212) carries the
-    // friendly attribution rather than a raw id. The lookup is
-    // best-effort — a failed hydration degrades to the raw id.
-    const displayNameByUserId = await lookupResolverDisplayNames(
+    // Hydrate the resolver's profile so the splice the FE performs
+    // against its cached list (Task #212 / Task #269) carries the
+    // friendly attribution and avatar rather than a raw id. The
+    // lookup is best-effort — a failed hydration degrades to the
+    // raw id / initials chip on the FE side.
+    const profileByUserId = await lookupResolverProfiles(
       [{ divergence: resolved.divergence }],
       reqLog,
     );
 
     const wire: BimModelDivergenceListEntryWire = {
-      ...toDivergenceWire(resolved.divergence, displayNameByUserId),
+      ...toDivergenceWire(resolved.divergence, profileByUserId),
       elementKind: resolved.elementKind,
       elementLabel: resolved.elementLabel,
     };

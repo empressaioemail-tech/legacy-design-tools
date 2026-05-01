@@ -1851,6 +1851,16 @@ fall back to the raw `id` when the field is absent so a
 missing or transiently-unavailable profile does not blank
 the audit trail.
 
+`avatarUrl` is the matching best-effort hydration of
+`users.avatarUrl` (Task #269) so audit-trail surfaces that
+already render an avatar/initials chip beside the name (e.g.
+the design-tools "Resolved by …" attribution on the Site
+Context divergence panel) can show the image when one is
+on file. Same fallback contract as `displayName`: absent on
+the wire when no profile is hydrated, and consumers must
+gracefully render an initials chip (or neutral system glyph)
+when missing.
+
  */
 export interface RequestorRef {
   kind: RequestorRefKind;
@@ -1861,6 +1871,12 @@ on the wire — surfaces that do not hydrate identities
 consumers must fall back to `id`.
  */
   displayName?: string;
+  /** Best-effort hydration of `users.avatarUrl` for
+`kind === "user"` actors. Optional on the wire — absent
+when no profile is hydrated or the user has no avatar
+on file. Consumers should fall back to an initials chip.
+ */
+  avatarUrl?: string;
 }
 
 /**

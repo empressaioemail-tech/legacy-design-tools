@@ -730,6 +730,52 @@ describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
     });
   });
 
+  it("hydrates the resolver's avatarUrl onto the resolve + list response (Task #269)", async () => {
+    // Companion to the displayName hydration test above: when the
+    // `users` row carries an `avatarUrl`, both the resolve + list
+    // endpoints must thread it through to
+    // `resolvedByRequestor.avatarUrl` so the design-tools chip can
+    // render the user's avatar image instead of an initials
+    // fallback. Profiles without an avatar still hydrate, just
+    // without the optional field — that "displayName-only" case is
+    // exercised by the Task #212 test directly above.
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    await ctx.schema.db
+      .insert(users)
+      .values({
+        id: "operator-9",
+        displayName: "Avatar Operator",
+        email: null,
+        avatarUrl: "https://cdn.example.test/avatars/operator-9.png",
+      })
+      .onConflictDoNothing({ target: users.id });
+
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+    const resolveRes = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:operator-9");
+    expect(resolveRes.status).toBe(200);
+    expect(resolveRes.body.divergence.resolvedByRequestor).toEqual({
+      kind: "user",
+      id: "operator-9",
+      displayName: "Avatar Operator",
+      avatarUrl: "https://cdn.example.test/avatars/operator-9.png",
+    });
+
+    const listRes = await asArchitect(
+      request(getApp()).get(`/api/bim-models/${bimModelId}/divergences`),
+    );
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.divergences[0].resolvedByRequestor).toEqual({
+      kind: "user",
+      id: "operator-9",
+      displayName: "Avatar Operator",
+      avatarUrl: "https://cdn.example.test/avatars/operator-9.png",
+    });
+  });
+
   it("resolves successfully without a session requestor (resolvedByRequestor null)", async () => {
     const { bimModelId, divergenceId } = await setupOpenDivergence();
     // Architect-audience but no `x-requestor` header → the row

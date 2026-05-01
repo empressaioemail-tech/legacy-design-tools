@@ -75,6 +75,7 @@ import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionRe
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
+import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import {
   ReviewerComment,
   SubmissionRecordedBanner,
@@ -4721,36 +4722,133 @@ function formatRelativeMaterializedAt(iso: string): string {
 }
 
 /**
- * Build the inline "Resolved {time} by {who}" attribution string
- * shown on each Resolved divergence row (Task #212). Mirrors the
- * server-side `resolvedByRequestor` posture: a `null` requestor —
- * meaning the resolve was recorded without a session-bound caller —
- * renders as "by system"; an attributed user falls back from
- * `displayName` to the raw `id` when the API hasn't (or couldn't)
- * hydrate the profile.
- *
- * For `kind === "agent"` resolvers we delegate to
- * {@link formatActorLabel} so a stable code-side id like
- * `snapshot-ingest` renders as a human-friendly label (e.g.
- * "Site-context automation") instead of leaking the raw identifier
- * into the audit trail. Unknown agent ids still fall back to the
- * raw id so a newly-introduced producer keeps attributing itself.
- *
- * `resolvedAt` should always be non-null for a Resolved row, but we
- * tolerate `null` defensively so a partial-shape row never crashes
- * the panel — the badge above already carries the visual cue.
+ * Compact 1–2 letter avatar fallback derived from the resolver's
+ * display name (or raw id when the API hasn't hydrated a friendlier
+ * label). Mirrors the helper of the same name on the plan-review
+ * `SheetCard` actor badge so the two audit-trail surfaces stay in
+ * lockstep visually. Falls back to a generic `?` when no usable
+ * letters are available so the avatar slot never collapses to an
+ * empty circle.
  */
-function formatResolvedAttribution(
-  resolvedAt: string | null | undefined,
-  resolvedByRequestor: { kind: string; id: string; displayName?: string } | null,
+function resolverInitials(name: string): string {
+  const parts = name
+    .split(/\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.[0] ?? "";
+  const second = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
+  const initials = `${first}${second}`.toUpperCase();
+  return initials || "?";
+}
+
+/**
+ * Pick the human-friendly label for a divergence resolver. Falls
+ * back from the API-hydrated `displayName` to the raw `id` so a
+ * profile that the server couldn't (or didn't) hydrate still
+ * renders an attribution rather than blanking the row. A null
+ * requestor means the resolve was recorded without a session-bound
+ * caller (e.g. dev / system path) and shows up as `system`,
+ * matching the wording the timeline already uses.
+ */
+function resolverLabel(
+  resolvedByRequestor:
+    | { kind: string; id: string; displayName?: string }
+    | null,
 ): string {
-  const when = resolvedAt
-    ? formatRelativeMaterializedAt(resolvedAt)
-    : null;
-  const who = resolvedByRequestor
-    ? formatActorLabel(resolvedByRequestor)
-    : "system";
-  return when ? `${when} by ${who}` : `by ${who}`;
+  // `null` requestor → "system" (matches the timeline wording for
+  // resolves recorded without a session-bound caller).
+  // Otherwise delegate to {@link formatActorLabel}, which handles
+  //   - `kind === "user"`: hydrated `displayName` → raw `id`
+  //   - `kind === "agent"` / `"system"`: friendly label from
+  //     {@link FRIENDLY_AGENT_LABELS} (Task #270) → raw `id`
+  // so a stable code-side id like `snapshot-ingest` reads as
+  // "Site-context automation" instead of leaking into the audit
+  // trail, while unknown ids still attribute themselves.
+  if (!resolvedByRequestor) return "system";
+  return formatActorLabel(resolvedByRequestor);
+}
+
+/**
+ * Avatar + name chip rendered beside each "Resolved {time} by …"
+ * row on the divergence panel (Task #269). Mirrors the visual
+ * treatment of the plan-review `ActorBadge` so the two audit-trail
+ * surfaces (sheet timeline and divergence panel) read the same at
+ * a glance:
+ *
+ *   - Hydrated user with `avatarUrl` → image avatar + display name
+ *   - Hydrated user without `avatarUrl` → initials fallback + name
+ *   - Un-hydrated user → initials derived from raw id + raw id
+ *   - `null` requestor (system / unattributed) → neutral "·" glyph
+ *     instead of an initials chip so it can't be confused with a
+ *     real user named "S"
+ *
+ * Kept inline in EngagementDetail rather than promoted to a shared
+ * component because the second consumer (the submission timeline
+ * avatar work) is still queued — once both surfaces have landed,
+ * the two ActorBadge implementations should be folded into a
+ * shared `lib/portal-ui` chip.
+ */
+function ResolvedByChip({
+  resolvedByRequestor,
+}: {
+  resolvedByRequestor:
+    | { kind: string; id: string; displayName?: string; avatarUrl?: string }
+    | null;
+}) {
+  const isSystem = resolvedByRequestor == null;
+  const name = resolverLabel(resolvedByRequestor);
+  // 14px keeps the chip height aligned with the surrounding 11px
+  // `var(--text-muted)` line so the row doesn't grow vertically.
+  const avatarSize = 14;
+  const sizeStyle = { height: avatarSize, width: avatarSize };
+  return (
+    <span
+      data-testid="briefing-divergences-resolver-chip"
+      data-resolver-kind={isSystem ? "system" : resolvedByRequestor.kind}
+      // Radix's `AvatarImage` only mounts an actual `<img>` after the
+      // browser fires a `load` event, which never happens in
+      // happy-dom — so tests can't reach for the rendered image. We
+      // mirror the avatar URL onto the chip itself so test assertions
+      // (and any external automation) can verify the URL flowed
+      // through without depending on the Radix image-load gating.
+      data-resolver-avatar-url={
+        !isSystem && resolvedByRequestor.avatarUrl
+          ? resolvedByRequestor.avatarUrl
+          : undefined
+      }
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        minWidth: 0,
+      }}
+    >
+      <Avatar
+        className="h-auto w-auto"
+        style={sizeStyle}
+        data-testid="briefing-divergences-resolver-avatar"
+      >
+        {!isSystem && resolvedByRequestor.avatarUrl ? (
+          <AvatarImage src={resolvedByRequestor.avatarUrl} alt="" />
+        ) : null}
+        <AvatarFallback
+          className="bg-muted text-[var(--text-secondary)]"
+          style={{
+            fontSize: Math.max(8, Math.round(avatarSize * 0.55)),
+            lineHeight: 1,
+          }}
+          data-testid="briefing-divergences-resolver-avatar-fallback"
+        >
+          {/* `·` (middle dot) reads as "no specific person" without
+           *  collapsing to an empty circle the way a blank string
+           *  would. Real users get their initials. */}
+          {isSystem ? "·" : resolverInitials(name)}
+        </AvatarFallback>
+      </Avatar>
+      <span style={{ minWidth: 0 }}>{name}</span>
+    </span>
+  );
 }
 
 /**
@@ -5270,12 +5368,18 @@ function BriefingDivergenceRow({
                   ? new Date(row.resolvedAt).toISOString()
                   : undefined
               }
-              style={{ fontSize: 11, color: "var(--text-muted)" }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 11,
+                color: "var(--text-muted)",
+              }}
             >
-              {formatResolvedAttribution(
-                row.resolvedAt,
-                row.resolvedByRequestor,
-              )}
+              {row.resolvedAt
+                ? `${formatRelativeMaterializedAt(row.resolvedAt)} by`
+                : "by"}
+              <ResolvedByChip resolvedByRequestor={row.resolvedByRequestor} />
             </span>
           </>
         ) : (
