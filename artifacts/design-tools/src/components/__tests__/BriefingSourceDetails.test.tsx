@@ -1012,3 +1012,179 @@ describe("BriefingSourceDetails local snapshot staleness badge", () => {
     ).toBeNull();
   });
 });
+
+describe("BriefingSourceDetails federal snapshot stale-badge Re-run pairing (Task #255)", () => {
+  // Same pinned "now" the staleness suite uses — keeps the FEMA
+  // 12-month freshness window the source of truth.
+  const NOW = new Date("2026-05-01T00:00:00.000Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function staleFemaSource() {
+    return mkSource({
+      id: "src-fema-stale-rerun",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      // Packed `<adapterKey> (<provider-label>)` shape the
+      // generate-layers route writes — this is what the badge
+      // parses to recover the adapterKey for the ?adapterKey= scope.
+      provider: "fema:nfhl-flood-zone (FEMA National Flood Hazard Layer)",
+      // 14 months before NOW — past the 12-month FEMA window so the
+      // badge renders.
+      snapshotDate: "2025-03-01T12:00:00.000Z",
+      payload: {
+        kind: "flood-zone",
+        inSpecialFloodHazardArea: true,
+        floodZone: "AE",
+        features: [{ attributes: { FLD_ZONE: "AE" } }],
+      },
+    });
+  }
+
+  it("renders the paired Re-run button next to the stale badge and forwards the parsed adapterKey on click", () => {
+    const onRerun = vi.fn();
+    render(
+      <BriefingSourceDetails
+        source={staleFemaSource()}
+        onRerunStaleAdapter={onRerun}
+      />,
+    );
+    const badge = screen.getByTestId(
+      "briefing-source-federal-stale-src-fema-stale-rerun",
+    );
+    expect(badge).toBeInTheDocument();
+
+    const btn = screen.getByTestId(
+      "briefing-source-federal-rerun-src-fema-stale-rerun",
+    );
+    expect(btn).toBeInTheDocument();
+    expect(btn.textContent).toBe("Re-run");
+    expect(btn).not.toBeDisabled();
+    // adapterKey round-trips through `data-*` so e2e can assert on
+    // the ?adapterKey= the click would target.
+    expect(btn.getAttribute("data-adapter-key")).toBe(
+      "fema:nfhl-flood-zone",
+    );
+    // aria-label mentions the adapter key so screen readers
+    // announce *which* layer is about to be refreshed.
+    expect(btn.getAttribute("aria-label")).toContain(
+      "fema:nfhl-flood-zone",
+    );
+
+    fireEvent.click(btn);
+    expect(onRerun).toHaveBeenCalledTimes(1);
+    expect(onRerun).toHaveBeenCalledWith("fema:nfhl-flood-zone");
+  });
+
+  it("disables the button and swaps to a 'Re-running…' spinner label while a rerun is in flight", () => {
+    const onRerun = vi.fn();
+    render(
+      <BriefingSourceDetails
+        source={staleFemaSource()}
+        onRerunStaleAdapter={onRerun}
+        isRerunningStaleAdapter
+      />,
+    );
+    const btn = screen.getByTestId(
+      "briefing-source-federal-rerun-src-fema-stale-rerun",
+    );
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    expect(btn.textContent).toContain("Re-running…");
+    expect(
+      screen.getByTestId(
+        "briefing-source-federal-rerun-spinner-src-fema-stale-rerun",
+      ),
+    ).toBeInTheDocument();
+
+    // Clicking while in-flight is a no-op — the button is the
+    // disabled DOM control so React swallows the click.
+    fireEvent.click(btn);
+    expect(onRerun).not.toHaveBeenCalled();
+  });
+
+  it("renders an inline error message under the badge when the rerun fails", () => {
+    const onRerun = vi.fn();
+    render(
+      <BriefingSourceDetails
+        source={staleFemaSource()}
+        onRerunStaleAdapter={onRerun}
+        rerunStaleAdapterError="FEMA upstream timed out after 15s"
+      />,
+    );
+    const err = screen.getByTestId(
+      "briefing-source-federal-rerun-error-src-fema-stale-rerun",
+    );
+    expect(err).toBeInTheDocument();
+    expect(err.textContent).toContain("Couldn't re-run this layer");
+    expect(err.textContent).toContain("FEMA upstream timed out after 15s");
+    // Kept role="alert" so the SR reads it on render — the architect
+    // needs to know the click didn't take.
+    expect(err).toHaveAttribute("role", "alert");
+  });
+
+  it("does NOT render the Re-run button when no callback is provided (legacy Task #222 status-only behavior)", () => {
+    render(<BriefingSourceDetails source={staleFemaSource()} />);
+    expect(
+      screen.getByTestId(
+        "briefing-source-federal-stale-src-fema-stale-rerun",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        "briefing-source-federal-rerun-src-fema-stale-rerun",
+      ),
+    ).toBeNull();
+  });
+
+  it("does NOT render the Re-run button when the provider doesn't follow the packed `<key> (<label>)` convention", () => {
+    // Free-text provider (no `<key> (<label>)` shape) means we can't
+    // safely round-trip an adapterKey — the backend would 422 on
+    // ?adapterKey="FEMA NFHL". The badge stays rendered (the
+    // snapshot is still stale and that warning is independent of
+    // whether we can re-run from here).
+    const source = mkSource({
+      id: "src-fema-legacy-provider",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "FEMA National Flood Hazard Layer (NFHL)",
+      snapshotDate: "2025-03-01T12:00:00.000Z",
+      payload: {
+        kind: "flood-zone",
+        inSpecialFloodHazardArea: true,
+        floodZone: "AE",
+        features: [{ attributes: { FLD_ZONE: "AE" } }],
+      },
+    });
+    const onRerun = vi.fn();
+    render(
+      <BriefingSourceDetails
+        source={source}
+        onRerunStaleAdapter={onRerun}
+      />,
+    );
+    expect(
+      screen.getByTestId(
+        "briefing-source-federal-stale-src-fema-legacy-provider",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        "briefing-source-federal-rerun-src-fema-legacy-provider",
+      ),
+    ).toBeNull();
+  });
+});

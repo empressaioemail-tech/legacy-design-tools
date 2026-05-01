@@ -907,6 +907,7 @@ export function BriefingSourceRow({
   cacheInfo = null,
   onRefreshLayer = null,
   isRefreshing = false,
+  rerunStaleAdapterError = null,
 }: {
   engagementId: string;
   source: EngagementBriefingSource;
@@ -958,6 +959,14 @@ export function BriefingSourceRow({
    * mutation's `variables` shape directly.
    */
   isRefreshing?: boolean;
+  /**
+   * Task #255 — human-readable error message attributed to THIS row's
+   * adapter key (parent gates on `error.adapterKey === thisRowKey`).
+   * Forwarded into `BriefingSourceDetails` so the stale-snapshot
+   * badge can render an inline error string under itself when its
+   * paired Re-run button just failed. `null` while idle / on success.
+   */
+  rerunStaleAdapterError?: string | null;
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const isAdapter = isAdapterSourceKind(source.sourceKind);
@@ -1400,7 +1409,20 @@ export function BriefingSourceRow({
         </div>
       </div>
       {detailsExpanded && !isManual && (
-        <BriefingSourceDetails source={source} />
+        <BriefingSourceDetails
+          source={source}
+          // Task #255 — re-use the same single-layer rerun callback
+          // the row's metadata "Refresh this layer" link wires to,
+          // so the badge-paired "Re-run" button shares one
+          // mutation. The badge gates rendering on
+          // `source.sourceKind === federal-adapter` (via the
+          // freshness window check, which is federal-only) so
+          // passing the callback unconditionally is safe — non-
+          // federal rows never instantiate `FederalSnapshotStaleBadge`.
+          onRerunStaleAdapter={onRefreshLayer}
+          isRerunningStaleAdapter={isRefreshing}
+          rerunStaleAdapterError={rerunStaleAdapterError}
+        />
       )}
       {isAdapter && (
         <div
@@ -3437,6 +3459,19 @@ function SiteContextTab({
   const [refreshingAdapterKey, setRefreshingAdapterKey] = useState<
     string | null
   >(null);
+  // Task #255 — tracks the most recent per-adapter rerun failure so
+  // the paired stale-badge "Re-run" button can render an inline
+  // error string under the badge. Cleared whenever a new rerun is
+  // started (so the prior message doesn't linger under the spinner)
+  // or whenever a rerun for a *different* adapter takes its place.
+  // We store both the key and the message so the badge can guard the
+  // error display on `error.adapterKey === thisRowAdapterKey` —
+  // otherwise an unrelated full-run failure could leak into a
+  // bystander row's footer.
+  const [lastRerunError, setLastRerunError] = useState<{
+    adapterKey: string;
+    message: string;
+  } | null>(null);
   const handleRefreshLayer = useCallback(
     (adapterKey: string) => {
       // Don't fire a second single-layer mutation while one is in
@@ -3445,6 +3480,9 @@ function SiteContextTab({
       // race against each other.
       if (generateMutation.isPending) return;
       setRefreshingAdapterKey(adapterKey);
+      // Clear any prior per-adapter error so the spinner isn't
+      // stacked on top of a stale failure message.
+      setLastRerunError(null);
       generateMutation.mutate(
         {
           id: engagementId,
@@ -3456,6 +3494,34 @@ function SiteContextTab({
           params: { adapterKey, forceRefresh: true },
         },
         {
+          onSuccess: async () => {
+            // Task #255 — the page-level mutation onSuccess already
+            // invalidates the briefing query, but the per-row history
+            // hint (`useListEngagementBriefingSources`) is keyed
+            // independently and would otherwise still show the prior
+            // count after a single-layer rerun supersedes a row.
+            // Invalidate by URL prefix so every variant of the list
+            // (per-layerKind, includeSuperseded on/off) refetches.
+            await queryClient.invalidateQueries({
+              queryKey: [
+                `/api/engagements/${engagementId}/briefing/sources`,
+              ],
+            });
+          },
+          onError: (err) => {
+            const apiErr = err as
+              | {
+                  status?: number;
+                  data?: { error?: string; message?: string } | null;
+                }
+              | undefined;
+            const message =
+              apiErr?.data?.message ??
+              apiErr?.data?.error ??
+              (err as { message?: string } | undefined)?.message ??
+              "Re-run failed.";
+            setLastRerunError({ adapterKey, message });
+          },
           onSettled: () => {
             setRefreshingAdapterKey((curr) =>
               curr === adapterKey ? null : curr,
@@ -3464,7 +3530,7 @@ function SiteContextTab({
         },
       );
     },
-    [engagementId, generateMutation],
+    [engagementId, generateMutation, queryClient],
   );
 
   const sources = briefingQuery.data?.briefing?.sources ?? [];
@@ -4138,6 +4204,17 @@ function SiteContextTab({
                   const adapterKey = extractAdapterKeyFromProvider(
                     source.provider,
                   );
+                  // Task #255 — only pass the rerun error down to the
+                  // row whose adapterKey was actually targeted by the
+                  // most recent failed rerun, so a fault on one
+                  // federal layer can't leak its message into a
+                  // sibling row's footer.
+                  const rerunError =
+                    lastRerunError !== null &&
+                    adapterKey !== null &&
+                    lastRerunError.adapterKey === adapterKey
+                      ? lastRerunError.message
+                      : null;
                   return (
                     <BriefingSourceRow
                       key={source.id}
@@ -4150,6 +4227,7 @@ function SiteContextTab({
                         refreshingAdapterKey !== null &&
                         adapterKey === refreshingAdapterKey
                       }
+                      rerunStaleAdapterError={rerunError}
                     />
                   );
                 })}

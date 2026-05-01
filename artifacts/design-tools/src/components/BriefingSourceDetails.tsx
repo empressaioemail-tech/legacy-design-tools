@@ -48,8 +48,38 @@ type SnapshotFreshnessVerdict = {
  */
 export function BriefingSourceDetails({
   source,
+  onRerunStaleAdapter = null,
+  isRerunningStaleAdapter = false,
+  rerunStaleAdapterError = null,
 }: {
   source: EngagementBriefingSource;
+  /**
+   * Task #255 — when the parent passes a callback, the stale-snapshot
+   * badge inside `ProvenanceFooter` renders a paired "Re-run" button
+   * that hands back the adapter key parsed out of the row's packed
+   * `provider` string (`<adapterKey> (<provider-label>)`). The parent
+   * (`EngagementDetail`) fires the same `useGenerateEngagementLayers`
+   * mutation but with `?adapterKey=<key>&forceRefresh=true`, so the
+   * architect can refresh just the stale layer in one click without
+   * leaving the engagement. `null` (the default) renders the badge
+   * without an action — used by tests + by surfaces that don't have
+   * a mutation in scope.
+   */
+  onRerunStaleAdapter?: ((adapterKey: string) => void) | null;
+  /**
+   * Task #255 — true while the single-layer rerun mutation for THIS
+   * row's adapter key is in flight. Drives the button's disabled +
+   * label state without needing the badge to inspect the mutation's
+   * `variables` shape directly.
+   */
+  isRerunningStaleAdapter?: boolean;
+  /**
+   * Task #255 — human-readable error message to show under the badge
+   * when the most recent rerun for this row's adapter failed (e.g.
+   * upstream timeout, no_applicable_adapters). `null` while idle or
+   * after a successful rerun.
+   */
+  rerunStaleAdapterError?: string | null;
 }) {
   const payload = (source.payload ?? {}) as Record<string, unknown>;
   const kind =
@@ -116,7 +146,14 @@ export function BriefingSourceDetails({
        * parcels, floodplain features, etc. The `unknown` branch
        * (RawPayload fallback) is suppressed since we have no
        * structured body to attach it to. */}
-      {kind !== "unknown" && <ProvenanceFooter source={source} />}
+      {kind !== "unknown" && (
+        <ProvenanceFooter
+          source={source}
+          onRerunStaleAdapter={onRerunStaleAdapter}
+          isRerunningStaleAdapter={isRerunningStaleAdapter}
+          rerunStaleAdapterError={rerunStaleAdapterError}
+        />
+      )}
 
       {/* Federal-only one-line markdown digest button. Rendered
        * outside KindBody so the order stays
@@ -388,8 +425,14 @@ function CopyMarkdownButton({
  */
 function ProvenanceFooter({
   source,
+  onRerunStaleAdapter = null,
+  isRerunningStaleAdapter = false,
+  rerunStaleAdapterError = null,
 }: {
   source: EngagementBriefingSource;
+  onRerunStaleAdapter?: ((adapterKey: string) => void) | null;
+  isRerunningStaleAdapter?: boolean;
+  rerunStaleAdapterError?: string | null;
 }) {
   // Reuse the same `formatSnapshotDate` helper the federal-summary
   // markdown digest uses (Task #210) so the YYYY-MM-DD value the
@@ -403,7 +446,6 @@ function ProvenanceFooter({
     typeof source.provider === "string" && source.provider.trim().length > 0
       ? source.provider.trim()
       : null;
-  // Compare the snapshot to "now" using the per-dataset freshness
   // window declared with each adapter — federal (Task #222) plus
   // state/local (Task #254). Each evaluator returns `null` when the
   // layer kind isn't in its tier so we can probe each in turn and
@@ -426,17 +468,33 @@ function ProvenanceFooter({
     if (loc) return { tier: "local", verdict: loc };
     return null;
   }, [source.layerKind, source.snapshotDate]);
+  // Task #255 — recover the original adapterKey from the row's packed
+  // `provider` string. The generate-layers route writes
+  // `<adapterKey> (<provider-label>)`, so the adapterKey is everything
+  // before the first " (". `extractAdapterKeyFromProvider` enforces a
+  // namespace `:` prefix so a manual-upload row (or a malformed
+  // provider) cannot accidentally surface a re-run affordance whose
+  // key the backend would 422 on. Now that Task #254 generalized the
+  // stale-badge across all three tiers, the rerun pairing rides along
+  // for any tier whose provider string follows the packed convention.
+  const adapterKeyForRerun = useMemo(
+    () => extractAdapterKeyFromProvider(source.provider),
+    [source.provider],
+  );
+  // The re-run pairing is only meaningful when (a) the parent wired a
+  // mutation callback, and (b) we successfully recovered an adapterKey
+  // from the provider — without one the backend would reject the
+  // ?adapterKey=… scope.
+  const showRerunAction =
+    onRerunStaleAdapter !== null && adapterKeyForRerun !== null;
   if (!snapshot && !provider) return null;
   return (
     <div
       data-testid={`briefing-source-provenance-${source.id}`}
       style={{
         display: "flex",
-        gap: 8,
-        flexWrap: "wrap",
-        alignItems: "center",
-        fontSize: 11,
-        color: "var(--text-muted)",
+        flexDirection: "column",
+        gap: 4,
         marginTop: 2,
       }}
     >
@@ -448,8 +506,37 @@ function ProvenanceFooter({
           sourceId={source.id}
           tier={freshness.tier}
           freshness={freshness.verdict}
+          onRerun={
+            showRerunAction
+              ? () => onRerunStaleAdapter!(adapterKeyForRerun!)
+              : null
+          }
+          adapterKey={showRerunAction ? adapterKeyForRerun : null}
+          isRerunning={isRerunningStaleAdapter}
         />
       )}
+      {/*
+        Task #255 — surface the most recent rerun failure inline below
+        the badge so the architect sees *why* the click didn't take.
+        Rendered only when the mutation actually targeted this row's
+        adapterKey (the parent gates `rerunStaleAdapterError` on that),
+        so an unrelated full-run failure can't leak into this row's
+        footer.
+      */}
+      {freshness?.verdict.isStale &&
+        showRerunAction &&
+        rerunStaleAdapterError !== null && (
+          <span
+            role="alert"
+            data-testid={`briefing-source-${freshness.tier}-rerun-error-${source.id}`}
+            style={{
+              fontSize: 11,
+              color: "var(--danger-text, #b00020)",
+            }}
+          >
+            Couldn't re-run this layer: {rerunStaleAdapterError}
+          </span>
+        )}
     </div>
   );
 }
@@ -475,10 +562,32 @@ function SnapshotStaleBadge({
   sourceId,
   tier,
   freshness,
+  onRerun = null,
+  adapterKey = null,
+  isRerunning = false,
 }: {
   sourceId: string;
   tier: ProvenanceTier;
   freshness: SnapshotFreshnessVerdict;
+  /**
+   * Task #255 — when set, render a small "Re-run" button next to the
+   * stale pill. Clicking it calls `onRerun()`; the parent owns the
+   * mutation and supersession contract. `null` keeps the badge as a
+   * pure status indicator (the legacy Task #222 behavior).
+   */
+  onRerun?: (() => void) | null;
+  /**
+   * Task #255 — adapterKey surfaced on the button as a `data-*`
+   * attribute + tooltip so QA / e2e can pin which adapter the click
+   * targets without mocking the parent's `extractAdapterKeyFromProvider`
+   * extraction.
+   */
+  adapterKey?: string | null;
+  /**
+   * Task #255 — true while a rerun targeting THIS adapterKey is in
+   * flight. Drives the spinner label + disabled state.
+   */
+  isRerunning?: boolean;
 }) {
   const { ageMonths, thresholdMonths } = freshness;
   // Round small / huge ages into a reader-friendly label. Snapshots
@@ -489,40 +598,124 @@ function SnapshotStaleBadge({
       ? `~${Math.floor(ageMonths / 12)}y`
       : `${ageMonths} month${ageMonths === 1 ? "" : "s"}`;
   const ariaLabel = `Snapshot is ${ageLabel} old; freshness window is ${thresholdMonths} months. Re-run the adapter to refresh.`;
+  const showRerun = onRerun !== null;
+  // Wrap badge + button in an inline-flex group so they sit visually
+  // together as one unit, regardless of whether the surrounding
+  // provenance row wraps onto a new line.
   return (
     <span
-      role="status"
-      data-testid={`briefing-source-${tier}-stale-${sourceId}`}
-      aria-label={ariaLabel}
-      title={ariaLabel}
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 4,
-        padding: "1px 6px",
-        borderRadius: 999,
-        // Warning palette borrowed from the existing var(--warn-*)
-        // tokens used elsewhere on the engagement page; falls back
-        // to amber-ish defaults for surfaces that haven't defined
-        // them yet so the badge degrades gracefully.
-        background: "var(--warn-dim, #fff4e5)",
-        color: "var(--warn-text, #8a4b00)",
-        border: "1px solid var(--warn-border, #f5c98c)",
-        fontSize: 11,
-        lineHeight: 1.4,
+        gap: 6,
       }}
     >
       <span
-        aria-hidden="true"
+        role="status"
+        data-testid={`briefing-source-${tier}-stale-${sourceId}`}
+        aria-label={ariaLabel}
+        title={ariaLabel}
         style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: "var(--warn-text, #b86e00)",
-          display: "inline-block",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "1px 6px",
+          borderRadius: 999,
+          // Warning palette borrowed from the existing var(--warn-*)
+          // tokens used elsewhere on the engagement page; falls back
+          // to amber-ish defaults for surfaces that haven't defined
+          // them yet so the badge degrades gracefully.
+          background: "var(--warn-dim, #fff4e5)",
+          color: "var(--warn-text, #8a4b00)",
+          border: "1px solid var(--warn-border, #f5c98c)",
+          fontSize: 11,
+          lineHeight: 1.4,
         }}
-      />
-      <span>snapshot is {ageLabel} old</span>
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: "var(--warn-text, #b86e00)",
+            display: "inline-block",
+          }}
+        />
+        <span>snapshot is {ageLabel} old</span>
+      </span>
+      {showRerun && (
+        // Task #255 — paired "Re-run" button. Rendered as a small
+        // underlined link to match the row's existing
+        // "View layer details" / "View history" / "Refresh this
+        // layer" controls so it doesn't compete visually with the
+        // page-level Generate Layers CTA. The aria-label echoes the
+        // adapter-key target so a screen reader announces *which*
+        // layer is about to be refreshed, and `aria-busy` flips
+        // while the mutation is in flight so assistive tech can
+        // pick up the spinner state.
+        <button
+          type="button"
+          onClick={() => onRerun!()}
+          disabled={isRerunning}
+          aria-busy={isRerunning}
+          data-testid={`briefing-source-${tier}-rerun-${sourceId}`}
+          data-adapter-key={adapterKey ?? ""}
+          aria-label={
+            adapterKey
+              ? `Re-run the ${adapterKey} adapter to refresh this layer`
+              : "Re-run this layer to refresh the snapshot"
+          }
+          title={
+            adapterKey
+              ? `Re-fetch this layer live from the upstream feed (adapter: ${adapterKey}). Other adapters are not re-run.`
+              : "Re-fetch this layer live from the upstream feed. Other adapters are not re-run."
+          }
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: isRerunning ? "not-allowed" : "pointer",
+            fontSize: 11,
+            color: "var(--info-text, #0b5cad)",
+            textDecoration: "underline",
+            opacity: isRerunning ? 0.5 : 1,
+          }}
+        >
+          {isRerunning ? (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                data-testid={`briefing-source-${tier}-rerun-spinner-${sourceId}`}
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  border: "1.5px solid currentColor",
+                  borderRightColor: "transparent",
+                  display: "inline-block",
+                  animation: "sc-rerun-spin 0.8s linear infinite",
+                }}
+              />
+              <span>Re-running…</span>
+            </span>
+          ) : (
+            "Re-run"
+          )}
+        </button>
+      )}
+      {showRerun && (
+        // Inline keyframes so the spinner doesn't depend on a global
+        // CSS file. Scoped via the unique animation name so it can
+        // coexist with any other in-app spinners.
+        <style>{`@keyframes sc-rerun-spin { to { transform: rotate(360deg); } }`}</style>
+      )}
     </span>
   );
 }
@@ -974,6 +1167,32 @@ function formatScalar(v: unknown): string {
   // raw value, and we don't want to misinterpret a column that
   // happens to be named like a date but isn't one.
   return JSON.stringify(v);
+}
+
+/**
+ * Pull the original `adapterKey` back out of the packed `provider`
+ * column the generate-layers route writes:
+ *   `<adapterKey> (<provider-label>)` → `fema:nfhl-flood-zone (FEMA NFHL)`.
+ *
+ * Mirrors the contract enforced by `extractAdapterKeyFromProvider` in
+ * `EngagementDetail.tsx` (Task #228) — kept as a sibling rather than
+ * imported from `pages/` so this component can stay free of page-
+ * level imports. The colon check guards against a manual-upload row
+ * whose architect-typed free-text provider happens to begin with
+ * something that *looks* like an adapter key, so the badge can never
+ * surface a re-run button whose ?adapterKey= the backend would 422
+ * on.
+ */
+function extractAdapterKeyFromProvider(
+  provider: string | null,
+): string | null {
+  if (!provider) return null;
+  const tailStart = provider.indexOf(" (");
+  if (tailStart <= 0) return null;
+  if (!provider.endsWith(")")) return null;
+  const key = provider.slice(0, tailStart).trim();
+  if (!key.includes(":")) return null;
+  return key;
 }
 
 /**
