@@ -1,23 +1,31 @@
 /**
  * SubmissionDetailModal — Plan Review submission detail modal shell
- * (Wave 2 Sprint B / Task #306, extended in Task #319).
+ * (Wave 2 Sprint A / Task #305 + #319, Sprint B / Task #306).
  *
  * Covers the modal-shell behavior the reviewer relies on:
  *
  *   1. Renders nothing when `submission` is null (closed state).
- *   2. Mounts the BIM Model tab as the default-active tab when a
- *      submission is supplied.
- *   3. Switches to the Engagement Context tab (Task #319) and
- *      renders the briefing snapshot + parcel info pulled from
- *      the engagement / briefing endpoints.
- *   4. Calls `onClose` when the Radix Dialog's overlay-close fires.
+ *   2. Mounts the Note tab as the default-active tab when a
+ *      submission is supplied (Task #305 — preserves the previous
+ *      one-click read affordance).
+ *   3. Switches into the Engagement Context tab and mounts BOTH the
+ *      `EngagementContextTab` (parcel info + briefing snapshot from
+ *      Task #319) AND the shared `EngagementContextPanel` from
+ *      `@workspace/portal-ui` (richer briefing sources / recent runs
+ *      from Task #305).
+ *   4. Renders the briefing-summary empty hint when no narrative has
+ *      been generated yet.
+ *   5. Switches into the BIM Model tab (Task #306) and mounts the
+ *      bim-model + briefing-divergences feedback loop.
  *
- * The BimModelTab itself is mocked to a thin marker component so the
- * shell test stays focused on tab routing and modal lifecycle —
- * `BimModelTab.test.tsx` covers the tab body's behavior end-to-end.
- * The Engagement Context tab is the real component, with
- * `@workspace/api-client-react` mocked so the engagement + briefing
- * reads resolve to test fixtures without crossing the network.
+ * `BimModelTab` and the shared `EngagementContextPanel` are mocked
+ * to thin marker components so this shell test stays focused on tab
+ * routing and modal lifecycle — `BimModelTab.test.tsx` and
+ * `EngagementContextPanel.test.tsx` cover the panel bodies'
+ * behavior end-to-end. `EngagementContextTab` is rendered for real
+ * with `@workspace/api-client-react` mocked so the engagement +
+ * briefing reads resolve to test fixtures without crossing the
+ * network.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import {
@@ -85,6 +93,24 @@ vi.mock("../findings/FindingsTab", () => ({
   ),
 }));
 
+vi.mock("@workspace/portal-ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/portal-ui")>(
+      "@workspace/portal-ui",
+    );
+  return {
+    ...actual,
+    EngagementContextPanel: ({ engagementId }: { engagementId: string }) => (
+      <div
+        data-testid="engagement-context-panel-mock"
+        data-engagement-id={engagementId}
+      >
+        Engagement Context panel
+      </div>
+    ),
+  };
+});
+
 // Pin `relativeTime` so the subtitle string is deterministic across
 // machine clocks (the modal renders "5 min ago"-style copy off the
 // submission's submittedAt).
@@ -144,7 +170,7 @@ const baseSubmission: EngagementSubmissionSummary = {
   id: "sub-1",
   submittedAt: "2026-04-01T10:00:00.000Z",
   jurisdiction: "Boulder, CO",
-  note: null,
+  note: "Please review the parcel briefing before approving.",
   status: "pending",
   reviewerComment: null,
   respondedAt: null,
@@ -239,48 +265,51 @@ afterEach(() => {
   cleanup();
 });
 
-describe("SubmissionDetailModal — Plan Review (Task #306 / #319)", () => {
+describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () => {
   it("renders nothing when submission is null", () => {
     renderModal({ submission: null });
     expect(screen.queryByTestId("submission-detail-modal")).toBeNull();
   });
 
-  it("mounts the BIM Model tab content by default when opened", async () => {
+  it("mounts the Note tab content by default when opened (Task #305)", async () => {
     renderModal();
     expect(
       await screen.findByTestId("submission-detail-modal-title"),
     ).toBeInTheDocument();
-    // Tab shell renders.
+    // Tab shell renders all three triggers.
     expect(
       screen.getByTestId("submission-detail-modal-tabs"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("submission-detail-modal-tab-bim-model"),
+      screen.getByTestId("submission-detail-modal-tab-note"),
     ).toBeInTheDocument();
     expect(
       screen.getByTestId("submission-detail-modal-tab-engagement-context"),
     ).toBeInTheDocument();
-    // BIM Model tab content is the default-active tab.
-    const tabContent = await screen.findByTestId(
-      "submission-detail-modal-bim-model-content",
+    expect(
+      screen.getByTestId("submission-detail-modal-tab-bim-model"),
+    ).toBeInTheDocument();
+    // Note tab content is the default-active tab.
+    const notePane = await screen.findByTestId(
+      "submission-detail-modal-note-content",
     );
-    expect(tabContent).toBeInTheDocument();
-    const tab = screen.getByTestId("bim-model-tab-mock");
-    expect(tab).toBeInTheDocument();
-    expect(tab).toHaveAttribute("data-engagement-id", "eng-1");
+    expect(notePane).toBeInTheDocument();
+    // The note body surfaces the architect's outbound note.
+    expect(
+      await screen.findByTestId("submission-detail-note"),
+    ).toHaveTextContent(
+      "Please review the parcel briefing before approving.",
+    );
   });
 
-  it("switches to the Engagement Context tab and renders parcel info + briefing summary", async () => {
+  it("switches to the Engagement Context tab and renders parcel info + briefing summary + the shared portal-ui panel", async () => {
+    // Radix Tabs activates on `pointerdown` rather than synthetic
+    // click events, so we drive the trigger through `userEvent`
+    // (which delivers pointerDown/pointerUp + click). `fireEvent.click`
+    // alone leaves the pane in its inactive (children-not-rendered)
+    // state.
     const user = userEvent.setup();
     renderModal();
-    // BIM Model is the default-active tab.
-    expect(
-      await screen.findByTestId("bim-model-tab-mock"),
-    ).toBeInTheDocument();
-    // Click the Engagement Context tab. `userEvent` is required
-    // because Radix Tabs activates on `pointerdown` rather than
-    // synthetic click events; `fireEvent.click` leaves the pane in
-    // its inactive (children-not-rendered) state.
     await user.click(
       screen.getByTestId("submission-detail-modal-tab-engagement-context"),
     );
@@ -289,7 +318,8 @@ describe("SubmissionDetailModal — Plan Review (Task #306 / #319)", () => {
     );
     expect(pane).toBeInTheDocument();
 
-    // Parcel-info card renders the engagement's site fields.
+    // Task #319 surface — parcel-info card renders the engagement's
+    // site fields.
     const parcelCard = await within(pane).findByTestId(
       "engagement-context-parcel-card",
     );
@@ -309,8 +339,8 @@ describe("SubmissionDetailModal — Plan Review (Task #306 / #319)", () => {
       within(parcelCard).getByTestId("engagement-context-lot-area"),
     ).toHaveTextContent("8,400 sqft");
 
-    // Briefing-summary card renders Section A + the generation
-    // provenance line.
+    // Task #319 surface — briefing-summary card renders Section A +
+    // the generation provenance line.
     const briefingCard = await within(pane).findByTestId(
       "engagement-context-briefing-card",
     );
@@ -322,6 +352,16 @@ describe("SubmissionDetailModal — Plan Review (Task #306 / #319)", () => {
         "engagement-context-briefing-generated-at",
       ),
     ).toHaveTextContent(/Generated /);
+
+    // Task #305 surface — the shared `EngagementContextPanel` from
+    // `@workspace/portal-ui` is stacked beneath the Task #319 cards
+    // so the reviewer also sees the richer briefing sources +
+    // recent-runs disclosure without bouncing across to design-tools.
+    const sharedPanel = await within(pane).findByTestId(
+      "engagement-context-panel-mock",
+    );
+    expect(sharedPanel).toBeInTheDocument();
+    expect(sharedPanel).toHaveAttribute("data-engagement-id", "eng-1");
   });
 
   it("renders the briefing-summary empty hint when no narrative has been generated", async () => {
@@ -486,6 +526,17 @@ describe("SubmissionDetailModal — Plan Review (Task #306 / #319)", () => {
     expect(
       await screen.findByTestId("bim-model-tab-mock"),
     ).toHaveAttribute("data-highlight-element-ref", "");
+  });
+
+  it("switches into the BIM Model tab and mounts the bim-model panel (Task #306)", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(
+      screen.getByTestId("submission-detail-modal-tab-bim-model"),
+    );
+    const tab = await screen.findByTestId("bim-model-tab-mock");
+    expect(tab).toBeInTheDocument();
+    expect(tab).toHaveAttribute("data-engagement-id", "eng-1");
   });
 
   it("surfaces the jurisdiction + relative-time subtitle in the modal header", async () => {

@@ -1,0 +1,813 @@
+import { useMemo, useState, type ReactNode } from "react";
+import {
+  useGetEngagementBriefing,
+  useListEngagementBriefingGenerationRuns,
+  getGetEngagementBriefingQueryKey,
+  getListEngagementBriefingGenerationRunsQueryKey,
+  type EngagementBriefing,
+  type EngagementBriefingSource,
+  type EngagementBriefingNarrative,
+} from "@workspace/api-client-react";
+import { BriefingSourceDetails } from "./BriefingSourceDetails";
+import { renderBriefingBody, scrollToBriefingSource } from "./briefingCitations";
+import { BriefingRecentRunsPanel } from "./BriefingRecentRunsPanel";
+import { SiteContextViewer } from "./SiteContextViewer";
+
+/**
+ * Read-only briefing context surface — Task #305 (Wave 2 Sprint A).
+ *
+ * Composes the "what does the architect see when they open this
+ * engagement's briefing" view for surfaces that should NOT mutate
+ * the briefing (i.e. plan-review's reviewer modal). The architect-
+ * side equivalent lives inline in
+ * `artifacts/design-tools/src/pages/EngagementDetail.tsx` and adds
+ * upload, regenerate, and re-run-stale-adapter affordances on top of
+ * the same wire data; this component intentionally omits all of
+ * those — reviewers are auditors, not editors.
+ *
+ * Sections rendered (top to bottom):
+ *   1. Empty / loading / error envelope.
+ *   2. Parcel briefing card — header summarising engagement id,
+ *      briefing id, created/updated timestamps, and the current
+ *      narrative's generation metadata so the auditor sees the
+ *      "what am I looking at" frame before drilling into details.
+ *   3. Briefing-source list, **tier-grouped** (Federal / State /
+ *      Local / Manual) to mirror design-tools' tier-grouped layout.
+ *      Each row reuses the shared {@link BriefingSourceDetails}
+ *      expander so the structured payload (parcel id, zoning
+ *      district, FEMA flood-zone, etc.) is one click away. The
+ *      "Re-run stale adapter" callback is intentionally NOT wired
+ *      — staleness still surfaces as a badge so the auditor can
+ *      see it, but they cannot trigger a refresh from the reviewer
+ *      surface.
+ *   4. A–G narrative panel (`renderBriefingBody` stitches in the
+ *      `{{atom|briefing-source|...}}` and `[[CODE:...]]` citation
+ *      pills). Clicking a source pill scrolls to the matching row
+ *      in the source list via the imperative
+ *      {@link scrollToBriefingSource} helper that targets the
+ *      `data-testid="briefing-source-<id>"` attribute every row in
+ *      this component stamps.
+ *   5. Prior-narrative comparison disclosure — when the runs envelope
+ *      carries a `priorNarrative`, the auditor can read the body
+ *      the briefing held *before* its current narrative was written
+ *      inline so they can compare side-by-side without remembering
+ *      or screenshotting the previous wording.
+ *   6. Recent generation runs (read-only collapsed disclosure).
+ *      When the briefing has a current `generationId`, the matching
+ *      row is highlighted with a "Current" pill.
+ *   7. 3D site-context viewer for `ready` glb sources.
+ */
+
+export interface EngagementContextPanelProps {
+  engagementId: string;
+  /**
+   * Optional — id of the briefing generation that produced the BIM
+   * model attached to the submission the reviewer is investigating.
+   * Forwarded to {@link BriefingRecentRunsPanel} so the matching
+   * historical run is tagged with a "Submitted" pill alongside the
+   * "Current" pill on the run that produced the on-screen narrative.
+   * Surfaces that don't have this id yet (it does not live on
+   * `EngagementSubmissionSummary` today) should leave it unset.
+   */
+  producingGenerationId?: string | null;
+  /**
+   * Optional render-prop forwarded to {@link BriefingRecentRunsPanel}
+   * for the Task #355 prior-narrative header. Forwarded as a
+   * render-prop because the shared component lives in
+   * `@workspace/briefing-prior-snapshot`, which already depends on
+   * `@workspace/portal-ui` — importing it directly here would close
+   * a workspace dependency cycle. Plan Review's SubmissionDetailModal
+   * passes `BriefingPriorSnapshotHeader` from the lib it already
+   * depends on.
+   */
+  renderPriorSnapshotHeader?: (args: {
+    runGenerationId: string;
+    priorNarrative: EngagementBriefingNarrative;
+  }) => ReactNode;
+}
+
+const SECTION_LABELS: Record<
+  Exclude<keyof EngagementBriefingNarrative, "generatedAt" | "generatedBy" | "generationId">,
+  string
+> = {
+  sectionA: "A — Executive Summary",
+  sectionB: "B — Threshold Issues",
+  sectionC: "C — Regulatory Gates",
+  sectionD: "D — Site Infrastructure",
+  sectionE: "E — Buildable Envelope",
+  sectionF: "F — Neighboring Context",
+  sectionG: "G — Next-Step Checklist",
+};
+
+type SourceTier = "federal" | "state" | "local" | "manual";
+
+const TIER_ORDER: SourceTier[] = ["federal", "state", "local", "manual"];
+
+const TIER_LABELS: Record<SourceTier, string> = {
+  federal: "Federal layers",
+  state: "State layers",
+  local: "Local layers",
+  manual: "Manually uploaded",
+};
+
+/**
+ * Mirrors `tierForSource` in
+ * `artifacts/design-tools/src/pages/EngagementDetail.tsx` so the two
+ * surfaces tier-group identically. Unrecognized future enum values
+ * fall through to "manual" so the UI degrades gracefully instead of
+ * crashing before this map is updated.
+ */
+function tierForSource(
+  kind: EngagementBriefingSource["sourceKind"],
+): SourceTier {
+  if (kind === "federal-adapter") return "federal";
+  if (kind === "state-adapter") return "state";
+  if (kind === "local-adapter") return "local";
+  return "manual";
+}
+
+export function EngagementContextPanel({
+  engagementId,
+  producingGenerationId,
+  renderPriorSnapshotHeader,
+}: EngagementContextPanelProps) {
+  const briefingQuery = useGetEngagementBriefing(engagementId, {
+    query: {
+      queryKey: getGetEngagementBriefingQueryKey(engagementId),
+      enabled: !!engagementId,
+    },
+  });
+
+  if (briefingQuery.isLoading) {
+    return (
+      <div
+        data-testid="engagement-context-panel-loading"
+        className="sc-body"
+        style={{ padding: 16, color: "var(--text-muted)" }}
+      >
+        Loading engagement briefing…
+      </div>
+    );
+  }
+
+  if (briefingQuery.isError) {
+    return (
+      <div
+        role="alert"
+        data-testid="engagement-context-panel-error"
+        className="sc-body"
+        style={{ padding: 16, color: "var(--danger-text)" }}
+      >
+        Couldn&apos;t load the engagement briefing. Try again later.
+      </div>
+    );
+  }
+
+  const briefing = briefingQuery.data?.briefing ?? null;
+
+  if (!briefing) {
+    return (
+      <div
+        data-testid="engagement-context-panel-empty"
+        className="sc-body"
+        style={{
+          padding: 16,
+          color: "var(--text-muted)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+          No engagement briefing yet.
+        </div>
+        <div>
+          The architect hasn&apos;t generated a parcel briefing for this
+          engagement. Once a briefing exists, its adapter sources, the
+          A–G narrative, and the 3D site-context viewer will appear
+          here.
+        </div>
+        <BriefingRecentRunsPanel
+          engagementId={engagementId}
+          producingGenerationId={producingGenerationId ?? undefined}
+          renderPriorSnapshotHeader={renderPriorSnapshotHeader}
+        />
+      </div>
+    );
+  }
+
+  const currentGenerationId = briefing.narrative?.generationId ?? null;
+
+  return (
+    <div
+      data-testid="engagement-context-panel"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
+      <ParcelBriefingCard briefing={briefing} />
+      <BriefingSourcesSection sources={briefing.sources} />
+      <NarrativeSection
+        narrative={briefing.narrative}
+        sourceIds={briefing.sources.map((s) => s.id)}
+      />
+      <PriorNarrativeSection engagementId={engagementId} />
+      <BriefingRecentRunsPanel
+        engagementId={engagementId}
+        currentGenerationId={currentGenerationId}
+        producingGenerationId={producingGenerationId ?? undefined}
+        renderPriorSnapshotHeader={renderPriorSnapshotHeader}
+      />
+      <SiteContextSection sources={briefing.sources} />
+    </div>
+  );
+}
+
+/**
+ * Header card summarising the parcel briefing row itself — the
+ * "what am I looking at" frame the auditor sees before scanning
+ * sources or narrative. Renders briefing id, engagement id,
+ * created/updated timestamps, and the current narrative's
+ * generation metadata when present.
+ */
+function ParcelBriefingCard({ briefing }: { briefing: EngagementBriefing }) {
+  const narrative = briefing.narrative;
+  return (
+    <section
+      data-testid="engagement-context-parcel-briefing-card"
+      style={{
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        padding: 12,
+        background: "var(--surface-1, transparent)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <header
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          color: "var(--text-muted)",
+        }}
+      >
+        Parcel briefing
+      </header>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "max-content 1fr",
+          rowGap: 4,
+          columnGap: 12,
+          fontSize: 12,
+        }}
+      >
+        <span style={{ color: "var(--text-muted)" }}>Briefing id</span>
+        <code
+          data-testid="parcel-briefing-id"
+          style={{ color: "var(--text-primary)", fontSize: 11 }}
+        >
+          {briefing.id}
+        </code>
+        <span style={{ color: "var(--text-muted)" }}>Created</span>
+        <span style={{ color: "var(--text-primary)" }}>
+          {new Date(briefing.createdAt).toLocaleString()}
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>Updated</span>
+        <span style={{ color: "var(--text-primary)" }}>
+          {new Date(briefing.updatedAt).toLocaleString()}
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>Sources</span>
+        <span style={{ color: "var(--text-primary)" }}>
+          {briefing.sources.length}
+        </span>
+        {narrative ? (
+          <>
+            <span style={{ color: "var(--text-muted)" }}>Narrative</span>
+            <span
+              data-testid="parcel-briefing-narrative-status"
+              style={{ color: "var(--success-text, #16a34a)" }}
+            >
+              Generated
+              {narrative.generatedAt
+                ? ` ${new Date(narrative.generatedAt).toLocaleString()}`
+                : ""}
+              {narrative.generatedBy ? ` by ${narrative.generatedBy}` : ""}
+            </span>
+          </>
+        ) : (
+          <>
+            <span style={{ color: "var(--text-muted)" }}>Narrative</span>
+            <span
+              data-testid="parcel-briefing-narrative-status"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Not yet generated
+            </span>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Read-only "Briefing sources" list, tier-grouped to mirror the
+ * Federal / State / Local / Manual layout the architect sees on
+ * design-tools. Stamps the `data-testid="briefing-source-<id>"`
+ * attribute every row needs so the narrative panel's citation pills
+ * can scroll to it via the shared {@link scrollToBriefingSource}
+ * helper.
+ *
+ * Reuses the shared {@link BriefingSourceDetails} expander for the
+ * structured layer payload. The "Re-run stale adapter" callback is
+ * intentionally NOT wired — reviewers don't trigger adapter reruns
+ * from this surface; the stale badge still surfaces so the auditor
+ * can spot freshness regressions.
+ */
+function BriefingSourcesSection({
+  sources,
+}: {
+  sources: EngagementBriefingSource[];
+}) {
+  const grouped = useMemo(() => {
+    const out: Record<SourceTier, EngagementBriefingSource[]> = {
+      federal: [],
+      state: [],
+      local: [],
+      manual: [],
+    };
+    for (const s of sources) out[tierForSource(s.sourceKind)].push(s);
+    return out;
+  }, [sources]);
+
+  const totalCount = sources.length;
+  const populatedTiers = TIER_ORDER.filter((t) => grouped[t].length > 0);
+
+  return (
+    <section
+      data-testid="engagement-context-sources"
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <header
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          color: "var(--text-muted)",
+        }}
+      >
+        Briefing sources ({totalCount})
+      </header>
+      {totalCount === 0 ? (
+        <div
+          data-testid="engagement-context-sources-empty"
+          style={{
+            padding: 12,
+            color: "var(--text-muted)",
+            fontSize: 13,
+            border: "1px dashed var(--border-subtle)",
+            borderRadius: 6,
+          }}
+        >
+          No briefing sources have been gathered for this engagement yet.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {populatedTiers.map((tier) => (
+            <TierGroup
+              key={tier}
+              tier={tier}
+              sources={grouped[tier]}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TierGroup({
+  tier,
+  sources,
+}: {
+  tier: SourceTier;
+  sources: EngagementBriefingSource[];
+}) {
+  return (
+    <div
+      data-testid={`engagement-context-tier-${tier}`}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--text-secondary)",
+          letterSpacing: 0.2,
+        }}
+      >
+        {TIER_LABELS[tier]} ({sources.length})
+      </div>
+      <ul
+        style={{
+          listStyle: "none",
+          margin: 0,
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        {sources.map((source) => (
+          <BriefingSourceReadonlyRow key={source.id} source={source} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function BriefingSourceReadonlyRow({
+  source,
+}: {
+  source: EngagementBriefingSource;
+}) {
+  const [open, setOpen] = useState(false);
+  const canExpand = source.sourceKind !== "manual-upload";
+
+  const headerText = useMemo(() => {
+    const parts: string[] = [source.layerKind];
+    if (source.provider) parts.push(source.provider);
+    return parts.join(" · ");
+  }, [source.layerKind, source.provider]);
+
+  return (
+    <li
+      data-testid={`briefing-source-${source.id}`}
+      style={{
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        padding: "8px 10px",
+        background: "var(--surface-1, transparent)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div
+          style={{ display: "flex", flexDirection: "column", minWidth: 0 }}
+        >
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {headerText}
+          </span>
+          {source.snapshotDate && (
+            <span
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+              }}
+            >
+              as of {new Date(source.snapshotDate).toLocaleDateString()}
+            </span>
+          )}
+        </div>
+        {canExpand && (
+          <button
+            type="button"
+            data-testid={`briefing-source-toggle-${source.id}`}
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              border: "1px solid var(--border-default, #444)",
+              borderRadius: 4,
+              background: "transparent",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+            }}
+          >
+            {open ? "Hide layer details" : "View layer details"}
+          </button>
+        )}
+      </div>
+      {source.note && (
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {source.note}
+        </div>
+      )}
+      {canExpand && open && <BriefingSourceDetails source={source} />}
+    </li>
+  );
+}
+
+function NarrativeSection({
+  narrative,
+  sourceIds,
+}: {
+  narrative: EngagementBriefingNarrative | null;
+  sourceIds: string[];
+}) {
+  const knownIds = useMemo(() => new Set(sourceIds), [sourceIds]);
+
+  return (
+    <section
+      data-testid="engagement-context-narrative"
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <header
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          color: "var(--text-muted)",
+        }}
+      >
+        Briefing narrative (A–G)
+      </header>
+      {!narrative ? (
+        <div
+          data-testid="engagement-context-narrative-empty"
+          style={{
+            padding: 12,
+            color: "var(--text-muted)",
+            fontSize: 13,
+            border: "1px dashed var(--border-subtle)",
+            borderRadius: 6,
+          }}
+        >
+          The architect hasn&apos;t generated the A–G narrative for this
+          engagement yet.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {(Object.keys(SECTION_LABELS) as Array<keyof typeof SECTION_LABELS>).map(
+            (key) => {
+              const body = narrative[key];
+              if (!body) return null;
+              return (
+                <article
+                  key={key}
+                  data-testid={`engagement-context-narrative-${key}`}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                  }}
+                >
+                  <h4
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "var(--text-primary)",
+                      margin: 0,
+                    }}
+                  >
+                    {SECTION_LABELS[key]}
+                  </h4>
+                  <div
+                    className="sc-prose"
+                    style={{
+                      fontSize: 13,
+                      color: "var(--text-secondary)",
+                      whiteSpace: "pre-wrap",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {renderBriefingBody(body, knownIds, (id) =>
+                      scrollToBriefingSource(id),
+                    )}
+                  </div>
+                </article>
+              );
+            },
+          )}
+          {narrative.generatedAt && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+              }}
+            >
+              Generated{" "}
+              {new Date(narrative.generatedAt).toLocaleString()}
+              {narrative.generatedBy ? ` · by ${narrative.generatedBy}` : ""}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Prior-narrative comparison — reads the `priorNarrative` snapshot
+ * the briefing held *before* its current narrative was written from
+ * the runs envelope. Collapsed by default and only fetches when the
+ * auditor opens it (lazy parity with {@link BriefingRecentRunsPanel}).
+ *
+ * When the briefing has never been regenerated (the first generation
+ * has no prior) or no briefing row exists, the wire envelope sets
+ * `priorNarrative` to null and the disclosure renders the empty
+ * state — clarifying *why* there's nothing to compare rather than
+ * silently hiding.
+ */
+function PriorNarrativeSection({ engagementId }: { engagementId: string }) {
+  const [open, setOpen] = useState(false);
+  const runsQuery = useListEngagementBriefingGenerationRuns(engagementId, {
+    query: {
+      queryKey: getListEngagementBriefingGenerationRunsQueryKey(engagementId),
+      enabled: open,
+      refetchOnWindowFocus: false,
+    },
+  });
+  const prior = runsQuery.data?.priorNarrative ?? null;
+
+  return (
+    <section
+      data-testid="engagement-context-prior-narrative"
+      style={{
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        background: "var(--surface-1, transparent)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        data-testid="engagement-context-prior-narrative-toggle"
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "8px 12px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 600 }}>
+          Prior narrative (compare with current)
+        </span>
+        <span
+          aria-hidden
+          style={{ fontSize: 12, color: "var(--text-muted)" }}
+        >
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open && (
+        <div style={{ padding: "0 12px 12px 12px" }}>
+          {runsQuery.isLoading && (
+            <div
+              data-testid="engagement-context-prior-narrative-loading"
+              style={{ fontSize: 12, color: "var(--text-muted)" }}
+            >
+              Loading prior narrative…
+            </div>
+          )}
+          {runsQuery.isError && !runsQuery.isLoading && (
+            <div
+              role="alert"
+              data-testid="engagement-context-prior-narrative-error"
+              style={{ fontSize: 12, color: "var(--danger-text)" }}
+            >
+              Couldn&apos;t load the prior narrative.
+            </div>
+          )}
+          {!runsQuery.isLoading && !runsQuery.isError && !prior && (
+            <div
+              data-testid="engagement-context-prior-narrative-empty"
+              style={{ fontSize: 12, color: "var(--text-muted)" }}
+            >
+              No prior narrative on file. The briefing either has never been
+              regenerated (the first generation has no prior) or no briefing
+              row exists yet.
+            </div>
+          )}
+          {prior && (
+            <div
+              data-testid="engagement-context-prior-narrative-body"
+              style={{ display: "flex", flexDirection: "column", gap: 8 }}
+            >
+              {prior.generatedAt && (
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  Prior generation:{" "}
+                  {new Date(prior.generatedAt).toLocaleString()}
+                  {prior.generatedBy ? ` · by ${prior.generatedBy}` : ""}
+                </div>
+              )}
+              {(Object.keys(SECTION_LABELS) as Array<keyof typeof SECTION_LABELS>).map(
+                (key) => {
+                  const body = prior[key];
+                  if (!body) return null;
+                  return (
+                    <article
+                      key={key}
+                      data-testid={`engagement-context-prior-narrative-${key}`}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                      }}
+                    >
+                      <h5
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                          margin: 0,
+                        }}
+                      >
+                        {SECTION_LABELS[key]} (prior)
+                      </h5>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text-secondary)",
+                          whiteSpace: "pre-wrap",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {body}
+                      </div>
+                    </article>
+                  );
+                },
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SiteContextSection({
+  sources,
+}: {
+  sources: EngagementBriefingSource[];
+}) {
+  return (
+    <section
+      data-testid="engagement-context-site-viewer"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        minHeight: 360,
+      }}
+    >
+      <header
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          color: "var(--text-muted)",
+        }}
+      >
+        3D site context
+      </header>
+      <SiteContextViewer sources={sources} />
+    </section>
+  );
+}

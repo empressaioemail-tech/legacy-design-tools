@@ -4,25 +4,34 @@
  * Houses four tabs, surfacing distinct slices of the reviewer
  * workflow:
  *
- *   - `bim-model` (Wave 2 Sprint B / Task #306) — bim-model +
- *     briefing-divergences feedback loop.
- *   - `engagement-context` (Task #319) — read-only briefing snapshot
- *     (Section A executive summary + generation provenance) and the
- *     parcel info (jurisdiction, address, project type, zoning code,
- *     lot area).
- *   - `note` (AIR-2 / Task #310) — minimal package-note view
- *     (jurisdiction, status, submitted-at, reviewer comment,
- *     submission note).
+ *   - `note` (default — Wave 2 Sprint A / Task #305) reproduces the
+ *     inline row's data (jurisdiction, status, submitted/responded
+ *     timestamps, the architect's outbound note, the reviewer's
+ *     reply) in a tighter read-only layout. Default tab so opening
+ *     the modal preserves the previous one-click read affordance.
+ *   - `engagement-context` (Wave 2 Sprint A / Tasks #305 + #319)
+ *     stacks two read-only surfaces:
+ *       1. {@link EngagementContextTab} (Task #319) — parcel info
+ *          (jurisdiction, address, project type, zoning code, lot
+ *          area) + briefing snapshot (Section A executive summary +
+ *          generation provenance + the Task #348 "View full
+ *          briefing" deep-link back into the engagement page).
+ *       2. {@link EngagementContextPanel} (Task #305) from
+ *          `@workspace/portal-ui` — the richer architect briefing
+ *          snapshot (A–G prior narrative, tier-grouped briefing
+ *          sources, recent generation runs) shared with design-tools.
+ *          Reviewers no longer have to bounce across to design-tools
+ *          for the briefing context.
  *   - `findings` (AIR-2 / Task #310) — auto-generated reviewer
  *     findings with drill-in + accept/reject/override.
+ *   - `bim-model` (Wave 2 Sprint B / Task #306) — bim-model +
+ *     briefing-divergences feedback loop.
  *
  * The modal supports both *uncontrolled* and *controlled* modes:
  *
- *   - Uncontrolled (Sprint B / Task #306 default): callers omit the
- *     `tab` / `selectedFindingId` / `onTabChange` / `onSelectFinding`
- *     props and the modal manages its own tab state, defaulting to
- *     the BIM Model tab. This is what `SubmissionDetailModal.test`
- *     exercises today.
+ *   - Uncontrolled: callers omit the `tab` / `selectedFindingId` /
+ *     `onTabChange` / `onSelectFinding` props and the modal manages
+ *     its own tab state, defaulting to `note` (Task #305 spec).
  *   - Controlled (AIR-2 / Task #310): callers thread the URL-derived
  *     tab + drill-in selection through props. This is the path
  *     `EngagementDetail` uses so a paste-link can land directly on
@@ -30,8 +39,14 @@
  *
  * URL params owned by this modal (when controlled):
  *   - `?submission=<id>` opens the modal
- *   - `?tab=findings|bim-model|engagement-context` switches tabs
+ *   - `?tab=note|findings|bim-model|engagement-context` switches tabs
  *   - `?finding=<atomId>` opens the Findings tab + drill-in panel
+ *
+ * Modal chrome uses the existing shadcn Dialog primitive (already
+ * in plan-review for SubmitToJurisdictionDialog and other surfaces)
+ * for keyboard / focus / backdrop semantics. Sized wider than the
+ * default Dialog max-width so the divergences table doesn't wrap
+ * awkwardly.
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -42,10 +57,17 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  EngagementContextPanel,
+  ReviewerComment,
+} from "@workspace/portal-ui";
+import { BriefingPriorSnapshotHeader } from "@workspace/briefing-prior-snapshot";
+import type {
+  EngagementSubmissionSummary,
+  SubmissionStatus,
+} from "@workspace/api-client-react";
 import { BimModelTab } from "./BimModelTab";
 import { EngagementContextTab } from "./EngagementContextTab";
-import type { EngagementSubmissionSummary } from "@workspace/api-client-react";
-import { ReviewerComment } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
 import { FindingsTab } from "./findings/FindingsTab";
 import type { SubmissionDetailTab } from "../lib/findingUrl";
@@ -58,25 +80,31 @@ export interface SubmissionDetailModalProps {
   submission: EngagementSubmissionSummary | null;
   /**
    * Engagement that owns the submission. Forwarded to the BIM Model
-   * tab's bim-model + divergences queries — the divergence audit
-   * trail is engagement-scoped, not submission-scoped, so a single
-   * submission detail surfaces the engagement's whole bim-model
-   * history.
+   * tab's bim-model + divergences queries (the divergence audit
+   * trail is engagement-scoped, not submission-scoped) and to the
+   * Engagement Context tab's parcel-briefing / source / runs queries.
    */
   engagementId: string;
   onClose: () => void;
   /**
    * Controlled tab + drill-in props (AIR-2 / Task #310). When
    * omitted, the modal manages its own tab state internally and
-   * defaults to BIM Model (Sprint B / Task #306). When provided,
-   * the parent fully controls the active tab and the selected
-   * finding, and the modal becomes a thin presentation layer.
+   * defaults to the Note tab (Task #305 spec). When provided, the
+   * parent fully controls the active tab and the selected finding,
+   * and the modal becomes a thin presentation layer.
    */
   tab?: SubmissionDetailTab;
   selectedFindingId?: string | null;
   onTabChange?: (tab: SubmissionDetailTab) => void;
   onSelectFinding?: (id: string | null) => void;
 }
+
+const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
+  corrections_requested: "Corrections requested",
+  rejected: "Rejected",
+};
 
 export function SubmissionDetailModal({
   submission,
@@ -89,11 +117,14 @@ export function SubmissionDetailModal({
 }: SubmissionDetailModalProps) {
   const isOpen = submission !== null;
 
-  // Internal tab state for uncontrolled mode. Defaults to the BIM
-  // Model tab to preserve Sprint B / Task #306 behavior — the AIR-2
-  // controlled path overrides this via the `tab` prop.
+  // Internal tab state for uncontrolled mode. Defaults to the Note
+  // tab per Task #305 spec — preserves the one-click read affordance
+  // the modal had before the briefing-context + findings tabs
+  // landed. The AIR-2 controlled path overrides this via the `tab`
+  // prop so URL deep-links still land on whichever tab the link
+  // names.
   const [internalTab, setInternalTab] =
-    useState<SubmissionDetailTab>("bim-model");
+    useState<SubmissionDetailTab>("note");
   const isControlled = tab !== undefined;
   const activeTab = isControlled ? tab : internalTab;
 
@@ -172,11 +203,18 @@ export function SubmissionDetailModal({
             data-testid="submission-detail-modal-tabs"
           >
             <TabsList data-testid="submission-detail-modal-tabs-list">
+              {/*
+               * Tab order: Note (default — preserves the previous
+               * one-click read affordance), Engagement Context (the
+               * read-only briefing snapshot lifted from design-tools),
+               * Findings (AIR-2 reviewer findings drill-in), BIM Model
+               * (Sprint B's bim-model + divergences feedback loop).
+               */}
               <TabsTrigger
-                value="bim-model"
-                data-testid="submission-detail-modal-tab-bim-model"
+                value="note"
+                data-testid="submission-detail-modal-tab-note"
               >
-                BIM Model
+                Note
               </TabsTrigger>
               <TabsTrigger
                 value="engagement-context"
@@ -184,49 +222,64 @@ export function SubmissionDetailModal({
               >
                 Engagement Context
               </TabsTrigger>
-              <TabsTrigger value="note" data-testid="submission-tab-note">
-                Note
-              </TabsTrigger>
               <TabsTrigger
                 value="findings"
                 data-testid="submission-tab-findings"
               >
                 Findings
               </TabsTrigger>
+              <TabsTrigger
+                value="bim-model"
+                data-testid="submission-detail-modal-tab-bim-model"
+              >
+                BIM Model
+              </TabsTrigger>
             </TabsList>
             <TabsContent
-              value="bim-model"
-              data-testid="submission-detail-modal-bim-model-content"
+              value="note"
+              data-testid="submission-detail-modal-note-content"
             >
-              <BimModelTab
-                engagementId={engagementId}
-                highlightElementRef={highlightedElementRef}
-                onHighlightConsumed={() => setHighlightedElementRef(null)}
-              />
+              <NoteTabContent submission={submission} />
             </TabsContent>
             <TabsContent
               value="engagement-context"
               data-testid="submission-detail-modal-engagement-context-pane"
             >
               {/*
-               * Task #319 — Sprint A's "Engagement Context" tab. The
-               * pane surfaces the briefing snapshot (Section A
-               * executive summary + generation provenance) and the
-               * parcel info (jurisdiction, address, project type,
-               * zoning code, lot area) so the reviewer has the context
-               * they need to frame the submission without bouncing to
-               * the engagement page or the design-tools artifact.
+               * Stack BOTH engagement-context surfaces inside the
+               * same pane — neither side is a strict superset of the
+               * other:
+               *
+               *   - `EngagementContextTab` (Task #319) brings the
+               *     parcel-info card (jurisdiction / address /
+               *     project type / zoning / lot area), a tight
+               *     Section A executive-summary card, and the Task
+               *     #348 "View full briefing" deep-link.
+               *   - `EngagementContextPanel` (Task #305) brings the
+               *     richer A–G prior-narrative disclosure,
+               *     tier-grouped briefing sources, and the
+               *     recent-runs panel from `@workspace/portal-ui`.
                */}
               <EngagementContextTab
                 engagementId={engagementId}
                 onNavigateToBriefing={onClose}
               />
-            </TabsContent>
-            <TabsContent
-              value="note"
-              data-testid="submission-tab-content-note"
-            >
-              <NoteTabContent submission={submission} />
+              <EngagementContextPanel
+                engagementId={engagementId}
+                renderPriorSnapshotHeader={({
+                  runGenerationId,
+                  priorNarrative,
+                }) => (
+                  <BriefingPriorSnapshotHeader
+                    runGenerationId={runGenerationId}
+                    priorNarrative={priorNarrative}
+                    formatGeneratedAt={(raw: string) => ({
+                      text: relativeTime(raw),
+                      title: new Date(raw).toLocaleString(),
+                    })}
+                  />
+                )}
+              />
             </TabsContent>
             <TabsContent
               value="findings"
@@ -246,6 +299,16 @@ export function SubmissionDetailModal({
                 selectedFindingId={selectedFindingId}
                 onSelectFinding={onSelectFinding ?? (() => {})}
                 onShowInViewer={handleShowInViewer}
+              />
+            </TabsContent>
+            <TabsContent
+              value="bim-model"
+              data-testid="submission-detail-modal-bim-model-content"
+            >
+              <BimModelTab
+                engagementId={engagementId}
+                highlightElementRef={highlightedElementRef}
+                onHighlightConsumed={() => setHighlightedElementRef(null)}
               />
             </TabsContent>
           </Tabs>
@@ -278,97 +341,124 @@ function SubmissionSummaryLine({
   );
 }
 
+/**
+ * Read-only reproduction of the row's note + reviewer reply data in
+ * a tighter layout. The Note tab is the default so opening the
+ * modal mirrors the previous "click a row to read the note"
+ * affordance — reviewers who only want the note never pay the cost
+ * of mounting the briefing panel or BIM model tab.
+ */
 function NoteTabContent({
   submission,
 }: {
   submission: EngagementSubmissionSummary;
 }) {
+  const hasResponse =
+    submission.status !== "pending" && submission.respondedAt != null;
   return (
     <div
+      data-testid="submission-detail-note-pane"
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 14,
-        maxWidth: 720,
+        gap: 16,
+        padding: 16,
       }}
     >
-      <FieldRow label="Status" value={submission.status} />
-      <FieldRow
-        label="Jurisdiction"
-        value={submission.jurisdiction ?? "Not recorded"}
-      />
-      <FieldRow
-        label="Submitted at"
-        value={new Date(submission.submittedAt).toLocaleString()}
-      />
-      {submission.respondedAt && (
-        <FieldRow
-          label="Responded at"
-          value={new Date(submission.respondedAt).toLocaleString()}
-        />
-      )}
+      <section
+        data-testid="submission-detail-meta"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "max-content 1fr",
+          rowGap: 6,
+          columnGap: 12,
+          fontSize: 13,
+        }}
+      >
+        <span style={{ color: "var(--text-muted)" }}>Jurisdiction</span>
+        <span style={{ color: "var(--text-primary)" }}>
+          {submission.jurisdiction ?? "Not recorded"}
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>Status</span>
+        <span style={{ color: "var(--text-primary)" }}>
+          {SUBMISSION_STATUS_LABELS[submission.status] ?? submission.status}
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>Submitted</span>
+        <span
+          style={{ color: "var(--text-primary)" }}
+          title={new Date(submission.submittedAt).toLocaleString()}
+        >
+          {relativeTime(submission.submittedAt)}
+        </span>
+        {hasResponse && (
+          <>
+            <span style={{ color: "var(--text-muted)" }}>Responded</span>
+            <span
+              style={{ color: "var(--text-primary)" }}
+              title={new Date(submission.respondedAt!).toLocaleString()}
+            >
+              {relativeTime(submission.respondedAt)}
+            </span>
+          </>
+        )}
+      </section>
+
       {submission.reviewerComment && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span className="sc-label" style={{ fontSize: 11 }}>
-            REVIEWER COMMENT
-          </span>
+        <section data-testid="submission-detail-reviewer-comment">
+          <div
+            style={{
+              fontSize: 11,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              color: "var(--text-muted)",
+              marginBottom: 4,
+            }}
+          >
+            Reviewer comment
+          </div>
           <ReviewerComment
             submissionId={submission.id}
             comment={submission.reviewerComment}
           />
-        </div>
+        </section>
       )}
-      {submission.note ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span className="sc-label" style={{ fontSize: 11 }}>
-            SUBMISSION NOTE
-          </span>
+
+      <section data-testid="submission-detail-note">
+        <div
+          style={{
+            fontSize: 11,
+            textTransform: "uppercase",
+            letterSpacing: 0.5,
+            color: "var(--text-muted)",
+            marginBottom: 4,
+          }}
+        >
+          Submission note
+        </div>
+        {submission.note ? (
           <div
-            data-testid="submission-detail-note"
             style={{
-              background: "var(--bg-default)",
-              border: "1px solid var(--border-default)",
-              borderRadius: 4,
-              padding: 10,
-              fontSize: 13,
               whiteSpace: "pre-wrap",
+              fontSize: 13,
               color: "var(--text-primary)",
+              lineHeight: 1.5,
             }}
           >
             {submission.note}
           </div>
-        </div>
-      ) : (
-        <div
-          className="sc-body opacity-60"
-          data-testid="submission-detail-no-note"
-          style={{ fontSize: 12 }}
-        >
-          No submission note recorded.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FieldRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 12,
-        alignItems: "baseline",
-      }}
-    >
-      <span
-        className="sc-label"
-        style={{ fontSize: 11, minWidth: 120, color: "var(--text-secondary)" }}
-      >
-        {label.toUpperCase()}
-      </span>
-      <span style={{ fontSize: 13, color: "var(--text-primary)" }}>
-        {value}
-      </span>
+        ) : (
+          <div
+            data-testid="submission-detail-no-note"
+            style={{
+              fontSize: 13,
+              color: "var(--text-muted)",
+              fontStyle: "italic",
+            }}
+          >
+            No note was attached to this submission.
+          </div>
+        )}
+      </section>
     </div>
   );
 }

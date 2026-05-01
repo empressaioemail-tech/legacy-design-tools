@@ -184,8 +184,11 @@ test("opens the submission detail modal and renders the BIM Model tab end-to-end
   const modal = page.getByTestId("submission-detail-modal");
   await expect(modal).toBeVisible();
 
-  // The modal opens on the BIM Model tab by default — assert the
-  // tab content is visible without an extra click.
+  // Wave 2 Sprint A (Task #305) introduced the Note tab as the new
+  // default landing pane in the submission detail modal. The BIM
+  // Model tab is now reachable via an explicit click — switch into
+  // it before asserting that the BIM panel is mounted.
+  await modal.getByTestId("submission-detail-modal-tab-bim-model").click();
   const bimTab = modal.getByTestId("bim-model-tab");
   await expect(bimTab).toBeVisible();
 
@@ -225,10 +228,13 @@ test("opens the submission detail modal and renders the BIM Model tab end-to-end
   await expect(modal).toBeHidden();
 
   await row.click();
-  await expect(page.getByTestId("submission-detail-modal")).toBeVisible();
+  const reopened = page.getByTestId("submission-detail-modal");
+  await expect(reopened).toBeVisible();
+  // After Wave 2 Sprint A (Task #305) the modal re-opens on the
+  // Note tab, so we must explicitly switch back to BIM Model before
+  // asserting the summary card mounts on re-entry.
+  await reopened.getByTestId("submission-detail-modal-tab-bim-model").click();
   await expect(
-    page.getByTestId("submission-detail-modal").getByTestId(
-      "bim-model-summary-card",
-    ),
+    reopened.getByTestId("bim-model-summary-card"),
   ).toBeVisible();
 });

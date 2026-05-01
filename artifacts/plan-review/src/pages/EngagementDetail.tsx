@@ -20,7 +20,8 @@ import {
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
-import { BriefingRecentRunsPanel } from "../components/BriefingRecentRunsPanel";
+import { BriefingRecentRunsPanel } from "@workspace/portal-ui";
+import { BriefingPriorSnapshotHeader } from "@workspace/briefing-prior-snapshot";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
 import { relativeTime } from "../lib/relativeTime";
 import {
@@ -480,7 +481,22 @@ export default function EngagementDetail() {
         */}
         {id && (
           <div id="briefing">
-            <BriefingRecentRunsPanel engagementId={id} />
+            <BriefingRecentRunsPanel
+              engagementId={id}
+              renderPriorSnapshotHeader={({
+                runGenerationId,
+                priorNarrative,
+              }) => (
+                <BriefingPriorSnapshotHeader
+                  runGenerationId={runGenerationId}
+                  priorNarrative={priorNarrative}
+                  formatGeneratedAt={(raw: string) => ({
+                    text: relativeTime(raw),
+                    title: new Date(raw).toLocaleString(),
+                  })}
+                />
+              )}
+            />
           </div>
         )}
       </div>

@@ -13,8 +13,10 @@
   "include": ["src"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test-setup.ts"],
   "references": [
+    { "path": "../adapters" },
     { "path": "../api-client-react" },
     { "path": "../api-zod" },
+    { "path": "../briefing-diff" },
     { "path": "../server-actor-ids" }
   ]
 }

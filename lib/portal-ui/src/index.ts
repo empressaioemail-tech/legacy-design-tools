@@ -69,6 +69,35 @@ export type {
   RenderCodeAtomTokensOptions,
 } from "./components/CodeAtomPill";
 
+// Briefing context surface — Task #305 (Wave 2 Sprint A).
+//
+// These four components were previously inline in
+// `artifacts/design-tools/src/components/` (or, for
+// `BriefingRecentRunsPanel`, duplicated in plan-review). They are
+// hoisted here so plan-review's reviewer surface can render the same
+// read-only "Engagement Context" view that the architect sees in
+// design-tools without either artifact importing the other.
+export { SiteContextViewer } from "./components/SiteContextViewer";
+export type { SiteContextViewerProps } from "./components/SiteContextViewer";
+export {
+  BriefingSourceCitationPill,
+  BriefingCodeAtomPill,
+  BriefingInvalidCitationPill,
+  renderBriefingBody,
+  scrollToBriefingSource,
+} from "./components/briefingCitations";
+export {
+  BriefingSourceDetails,
+  formatFederalSummaryMarkdown,
+  formatSetbackSummaryMarkdown,
+} from "./components/BriefingSourceDetails";
+export { BriefingRecentRunsPanel } from "./components/BriefingRecentRunsPanel";
+
+// Composite read-only briefing surface used by the plan-review
+// submission detail modal's "Engagement Context" tab.
+export { EngagementContextPanel } from "./components/EngagementContextPanel";
+export type { EngagementContextPanelProps } from "./components/EngagementContextPanel";
+
 export {
   initTheme,
   setTheme,

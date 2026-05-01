@@ -81,8 +81,6 @@ import type { SheetSummary } from "@workspace/api-client-react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { AppShell } from "../components/AppShell";
 import { BriefingSourceUploadModal } from "../components/BriefingSourceUploadModal";
-import { BriefingSourceDetails } from "../components/BriefingSourceDetails";
-import { SiteContextViewer } from "../components/SiteContextViewer";
 import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
 import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionResponseDialog";
@@ -93,13 +91,22 @@ import {
   BriefingDivergenceDetailDialog,
   BriefingDivergenceRow as PortalBriefingDivergenceRow,
   BriefingDivergencesPanel as PortalBriefingDivergencesPanel,
+  BriefingSourceDetails,
+  // Task #350 — shared "Copy plain text" button used by the prior-
+  // narrative block on both this surface and the Plan Review one.
+  // Lifted out of EngagementDetail so the discriminated success/
+  // failure pill state, ~2 s feedback timer, unmount cleanup, and
+  // `briefing-run-prior-narrative-copy-*` testids can't drift
+  // between the two consumers.
+  CopyPlainTextButton,
   ReviewerComment,
+  SiteContextViewer,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
   formatRelativeMaterializedAt,
+  useSidebarState,
 } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
-import { useSidebarState } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
 import { formatActorLabel } from "../lib/actorLabel";
 import {
@@ -115,7 +122,7 @@ import {
   BriefingInvalidCitationPill,
   renderBriefingBody,
   scrollToBriefingSource,
-} from "../components/briefingCitations";
+} from "@workspace/portal-ui";
 
 const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
   active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },

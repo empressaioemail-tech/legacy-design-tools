@@ -27,5 +27,16 @@ export default defineConfig({
     css: false,
     pool: "forks",
     testTimeout: 10_000,
+    server: {
+      // Workspace TS packages must be inlined so vi.mock works on them
+      // and so vite transforms their JSX/TS source.
+      deps: {
+        inline: [
+          "@workspace/api-client-react",
+          "@workspace/api-zod",
+          "@workspace/adapters",
+        ],
+      },
+    },
   },
 });

@@ -2,106 +2,86 @@
 
 ## Overview
 
-pnpm workspace monorepo with two React+Vite apps that share a common design system, plus an Express API backed by Postgres (Drizzle) with real Claude streaming chat.
+SmartCity OS is a pnpm monorepo project designed to manage urban development engagements and plan reviews. It consists of two React+Vite frontend applications and an Express API, all sharing a common design system. The platform integrates with a Postgres database and features real-time AI chat capabilities using Claude.
 
-## Domain Model (Wave 1)
+Its core purpose is to streamline the process of managing project engagements, ingesting design snapshots from tools like Revit, performing plan reviews, and generating comprehensive site briefings. The system aims to provide a centralized platform for urban planning, incorporating various data sources and AI-driven insights to facilitate efficient decision-making and project oversight.
 
-- **Engagement** — top-level concept. One per real project (Seguin Residence, Snowdon Towers, etc.). Has name, jurisdiction, address, status (`active|on_hold|archived`), `nameLower` (for case-insensitive matching), timestamps. Persisted in Postgres.
-- **Snapshot** — child of an engagement. Each Revit `POST /api/snapshots` creates one row holding the full JSON payload plus derived counts (sheets/rooms/levels/walls). Belongs to exactly one engagement.
-- **Auto-create**: if a snapshot arrives with a `projectName` that does not match any existing engagement (case-insensitive), the API transactionally creates a new engagement first, then attaches the snapshot. The Revit add-in keeps working unchanged.
+Key capabilities include:
+- Managing top-level project engagements with status tracking.
+- Ingesting and processing design snapshots from external tools, automatically creating engagements if necessary.
+- Providing a plan-review console to visualize and analyze design data.
+- Offering AI-powered chat for querying engagement and snapshot data.
+- Generating multi-section site briefings based on integrated data sources and AI analysis.
+- Integrating with various federal, state, and local data adapters for site context analysis.
+- Handling secure file uploads and object storage.
 
-## Artifacts
+## User Preferences
 
-- **artifacts/design-tools** — `/` — Engagements workspace.
-  - `/` engagement list (cards with KPI counts from latest snapshot, status pill, refetch every 5s)
-  - `/engagements/:id` engagement detail (KPI strip + snapshot timeline + raw JSON viewer + Claude chat in right panel)
-  - `/style-probe`, `/health` for dev
-- **artifacts/plan-review** — `/plan-review/` — Plan-review console (mostly mock data). The "Sheets" nav entry (`/plan-review/sheets`) lists real Revit snapshots and renders sheet cards with a "First ingested" chip backed by `sheet.created` history events via `GET /api/atoms/sheet/{id}/summary`. Legacy rows render "Not tracked".
-- **artifacts/api-server** — `/api/*` — Express + Pino + Drizzle:
-  - `GET  /api/healthz`
-  - `GET  /api/engagements` — list with `snapshotCount` + `latestSnapshot` summary
-  - `GET  /api/engagements/:id` — engagement + full snapshot list
-  - `GET  /api/snapshots` / `GET /api/snapshots/:id` — kept for back-compat
-  - `POST /api/snapshots` — guarded by `X-Snapshot-Secret`. Returns `{id, receivedAt, engagementId, engagementName, autoCreated}`. Handles `walls.count` or `walls[]` shapes.
-  - `POST /api/chat` — SSE stream. Body: `{engagementId, question, history}`. Looks up engagement + latest snapshot; returns 400 `{error:"no_snapshots"}` if none. Model `claude-sonnet-4-5` via `@workspace/integrations-anthropic-ai`.
-  - `GET  /api/atoms/:slug/:id/summary` — empressa-atom `contextSummary` for a single atom. Returns `{prose, typed, keyMetrics, relatedAtoms, historyProvenance:{latestEventId, latestEventAt}, scopeFiltered}`. `latestEventId === ""` is the "no events yet" sentinel.
-  - `POST /api/storage/uploads/request-url` — returns `{uploadURL, objectPath, metadata}` for the presigned-PUT flow (avatar uploads). Bytes go directly to GCS.
-  - `GET  /api/storage/objects/*` — serves uploaded object entities (avatar images, etc.).
-  - `GET  /api/storage/public-objects/*` — serves public assets from `PUBLIC_OBJECT_SEARCH_PATHS`.
-- **artifacts/mockup-sandbox** — design exploration sandbox.
+- I prefer a clear and concise summary of the project.
+- I want the agent to focus on essential information for guiding its coding tasks.
+- I need the information to be structured in a specific order: Overview, User Preferences, System Architecture, and External Dependencies.
+- I do not want any changelogs, update logs, or date-wise entries.
+- I want the agent to prioritize high-level features and architectural decisions over granular implementation details.
+- I prefer consolidated and non-redundant information.
+- I want the external dependencies to list only those actually integrated into the project.
 
-## Shared Libraries
+## System Architecture
 
-- `lib/portal-ui` (`@workspace/portal-ui`) — design system. `DashboardLayout`, `Sidebar`, `Header`, `initTheme`, two style entrypoints.
-- `lib/api-client-react` — Orval-generated React Query hooks: `useListEngagements`, `useGetEngagement`, `useListSnapshots`, `useGetSnapshot`, `useCreateSnapshot`, `useHealthCheck`. SSE chat is consumed via raw `fetch` + `ReadableStream` in `artifacts/design-tools/src/store/engagements.ts` (Zustand UI state only — server data lives in React Query).
-- `lib/api-spec` — OpenAPI source of truth.
-- `lib/api-zod` — generated Zod schemas.
-- `lib/db` (`@workspace/db`) — Drizzle schema (`engagements`, `snapshots`), `drizzle-orm/node-postgres` with TCP `pg.Pool`. Scripts: `push`, `seed` (idempotent, onConflictDoNothing on `nameLower`).
-- `lib/integrations-anthropic-ai`, `lib/integrations-base`.
-- `lib/object-storage-web` (`@workspace/object-storage-web`) — browser upload helpers (`useUpload` hook, `ObjectUploader` Uppy modal). Wraps the presigned-URL flow against `/api/storage/uploads/request-url`.
-- `lib/adapters` (`@workspace/adapters`) — DA-PI-4 + DA-PI-2. Federal + state + local site-context adapters for the Empressa pilots. Federal tier (DA-PI-2): FEMA NFHL flood zones, USGS NED elevation (EPQS point query), EPA EJScreen block-group indicators, and FCC National Broadband Map availability — all gate on `jurisdiction.stateKey !== null` so they apply for any pilot state. State tier (Utah/UGRC, Idaho/INSIDE Idaho, Texas/TCEQ) and local tier (Grand County UT, Lemhi County ID, Bastrop TX) gate on the resolved local/state key. Exports `ALL_ADAPTERS` (federal first, then state, then local), a synchronous `runAdapters` runner with per-adapter timeout + `AdapterRunError` failure isolation, a `resolveJurisdiction` helper that scans `engagements.jurisdiction_city` / `jurisdiction_state` / freeform `jurisdiction` / `address`, and a per-jurisdiction setback table loader (`local/setbacks/*.json`). The runner emits `AdapterRunOutcome[]` with `tier` + `status` (`ok` | `no-coverage` | `failed`) consumed by `POST /api/engagements/:id/generate-layers`, which persists OK rows as `briefing_sources` (sourceKind `federal-adapter` / `state-adapter` / `local-adapter`) under the same supersession contract as the manual-upload path. The Site Context tab groups sources by tier (federal / state / local / manual) and exposes a "Generate Layers" button that calls the new endpoint. Task #180: the runner accepts an optional `AdapterResultCache` (interface in `cache.ts`) keyed on `(adapterKey, lat/lng rounded to 5 decimals)`. Cache hits skip the network and replay the cached `AdapterResult` envelope verbatim; failures are never cached. The api-server wires a Postgres-backed implementation (`adapter_response_cache` table, default TTL 24h, configurable via `ADAPTER_CACHE_TTL_MS`; set to `0` to disable) so re-runs of generate-layers against the same parcel skip slow / rate-limited federal feeds. Task #203: a periodic in-process sweep (`startAdapterCacheSweepWorker`, booted from `app.ts`) deletes rows whose `expires_at` is older than `now() - ADAPTER_CACHE_SWEEP_GRACE_MS` (default 1h) in batches capped at `ADAPTER_CACHE_SWEEP_BATCH_SIZE` (default 1000) every `ADAPTER_CACHE_SWEEP_INTERVAL_MS` (default 1h). Set the interval to `0` to disable the sweep. Task #239: the worker tracks consecutive lock-skipped ticks per process and emits a single warn log once an instance has been starved on the Task #218 advisory lock for `ADAPTER_CACHE_SWEEP_SKIP_WARN_MS` (default 24h); the streak and warning latch reset on the next successful tick. Set the threshold to `0` to disable the warning.
+The project is structured as a pnpm monorepo containing multiple packages:
 
-## Stack
+**Frontend Applications:**
+- **artifacts/design-tools:** Manages engagements, displays detailed engagement information, snapshot timelines, raw JSON viewers, and integrates Claude chat.
+- **artifacts/plan-review:** A console for plan reviews, displaying real Revit snapshots and sheet summaries.
 
-- pnpm workspaces, Node 24, TypeScript 5.9
-- Express 5, Pino, Zod (`zod/v4`), Drizzle ORM, node-postgres
-- React 18 + Vite 7, TanStack Query, Zustand, Wouter, Tailwind, Lucide
-- Anthropic SDK (proxied via Replit AI Integrations)
-- Orval for API codegen, esbuild for server bundle, tsx for seed scripts
+**Backend API:**
+- **artifacts/api-server:** An Express.js API using Pino for logging and Drizzle ORM with Postgres. It handles:
+    - Engagement and snapshot management (list, retrieve, create snapshots).
+    - AI chat streaming via SSE, leveraging Anthropic's Claude model.
+    - Atom summaries for single entities.
+    - Secure presigned URL generation for object uploads to GCS.
+    - Serving public and private uploaded objects.
+    - Generating site briefings and managing their status.
+    - Integrating with various data adapters (federal, state, local) to generate layers for site context analysis, with caching mechanisms for adapter results.
 
-## Environment
+**Shared Libraries:**
+- **lib/portal-ui:** A common design system for UI components (e.g., `DashboardLayout`, `Sidebar`, `Header`).
+- **lib/api-client-react:** Orval-generated React Query hooks for API interaction.
+- **lib/api-spec:** OpenAPI specification as the source of truth for the API.
+- **lib/api-zod:** Generated Zod schemas for validation.
+- **lib/db:** Drizzle schema for Postgres (`engagements`, `snapshots`) and database migration/seeding scripts.
+- **lib/integrations-anthropic-ai:** Integration with Anthropic's AI services.
+- **lib/object-storage-web:** Browser-side helpers for object uploads.
+- **lib/adapters:** Implements DA-PI-4 and DA-PI-2 for federal, state, and local site context data. It provides a runner for various adapters, jurisdiction resolution, and setback table loading.
+- **lib/briefing-engine:** Synthesizes multi-section site briefings using AI (Claude Sonnet 4.5) or a mock generator, handling citation resolution and event emission.
 
-- `SNAPSHOT_SECRET` — required for non-dev. In dev, a temporary secret is generated for the process and a generic warning is logged (the value is **never** logged).
-- `DATABASE_URL` — Replit-managed Postgres. Used by Drizzle.
-- `TEST_DATABASE_URL` — optional; falls back to `DATABASE_URL`. Lib integration tests use a per-run schema named `test_<unix_ts>_<rand8hex>` and drop it on completion. A reaper drops `test_*` schemas older than 1h (cap 50/pass).
-- `MUNICODE_MIN_GAP_MS` / `MUNICODE_JITTER_MAX_MS` — optional rate-limit overrides for the municode HTTP client (used in tests to avoid sleeping). Defaults preserve production behavior.
-- AI integration credentials provided by Replit AI Integrations.
+**Technology Stack:**
+- **Monorepo:** pnpm workspaces
+- **Backend:** Node.js 24, Express 5, Pino, Zod, Drizzle ORM, node-postgres, esbuild (for server bundle), tsx (for seed scripts).
+- **Frontend:** React 18, Vite 7, TanStack Query, Zustand, Wouter, Tailwind CSS, Lucide.
+- **AI:** Anthropic SDK (proxied via Replit AI Integrations).
+- **API Codegen:** Orval.
+- **Testing:** Vitest (unit), Playwright (end-to-end).
 
-## End-to-End Tests
+**UI/UX Decisions:**
+- The design system (`lib/portal-ui`) ensures a consistent look and feel across both React applications.
+- Dashboards present engagement lists with KPI counts and status pills.
+- Engagement details include KPI strips, snapshot timelines, and raw JSON viewers.
+- Site Context tab in the UI displays A–G section cards for briefings with dynamic expansion and a "Generate/Regenerate Briefing" button with status polling.
 
-- `artifacts/design-tools` ships a Playwright suite under `e2e/` (config: `playwright.config.ts`). Run with `pnpm --filter @workspace/design-tools run test:e2e`. The suite is excluded from Vitest (`vitest.config` only matches `src/**/*.test.{ts,tsx}`).
-- `e2e/submission-detail.spec.ts` pins the submission-detail modal flow: seeds an isolated engagement via `@workspace/db`, ingests a submission via `POST /api/engagements/:id/submissions` (which fires `engagement.submitted`), navigates to `/engagements/<id>?tab=submissions`, opens the row, asserts the modal note, the "Submitted to <jurisdiction>" header, and the `engagement.submitted` event panel; closes and re-opens to verify idempotency. The engagement is deleted in `afterAll` (FK cascades to submissions).
-- The config auto-discovers `mesa-libgbm-*` in `/nix/store` and prepends its `lib/` dir to `LD_LIBRARY_PATH` so the bundled `chrome-headless-shell` can resolve `libgbm.so.1` on Replit's NixOS image without per-developer setup. Other store paths that ship the same soname are deliberately ignored (some bundle older `libstdc++.so.6` and would shadow the system one and break Node).
-- The suite is self-orchestrating: `playwright.config.ts` declares a `webServer` block that spawns the API Server (`PORT=8080`) and design-tools (`PORT=20295`, `BASE_PATH=/`) when they are not already responding through `localhost:80`. With `reuseExistingServer: true`, an active workflow is reused and nothing is spawned. Override with `E2E_BASE_URL` to point at a different environment (this also suppresses the spawn).
-- `pnpm --filter @workspace/design-tools run test:e2e` runs `playwright install chromium` first (idempotent), so the suite is a one-command invocation in a fresh sandbox.
+**Key Features:**
+- **Auto-creation of Engagements:** Snapshots automatically create new engagements if a matching project name is not found.
+- **Real-time Chat:** Claude-powered chat for interactive querying of engagement data.
+- **Site Briefing Engine:** Generates comprehensive, multi-section site briefings based on aggregated data and AI analysis.
+- **Adapter-based Site Context:** Integrates diverse geographical and regulatory data sources to enrich engagement information.
+- **DXF→glb Converter:** Supports conversion of DXF files to glb format, with a mock and an HTTP-based production implementation.
 
-## CI / Pre-merge validation
+## External Dependencies
 
-- Pre-merge gating runs through Replit's validation mechanism, not GitHub Actions. Three named commands are registered: `typecheck` (`pnpm run typecheck`), `test` (`pnpm run test`), `e2e` (`pnpm --filter @workspace/design-tools run test:e2e`). They run together on every `mark_task_complete`; a failure in any one blocks the merge. See `TESTING.md` § "CI — Replit pre-merge validation" for details, including the wall-clock budget (~2 min total, run in parallel).
-
-## Testing (Sprint H01 Part 1)
-
-- Per-package Vitest with v8 coverage in `lib/db`, `lib/codes`, `lib/codes-sources`. Root: `pnpm test` runs all three.
-- `lib/codes` and `lib/codes-sources`: pure unit tests with mocked HTTP/OpenAI/DB. No live network.
-- `lib/db`: Postgres integration tests. `withTestSchema()` creates an isolated schema, replays `lib/db/src/__tests__/__fixtures__/schema.sql.template` (sed-rewritten from a real `pg_dump`), runs the test, then drops the schema.
-- After any drizzle-kit push that changes tables/columns/FKs, refresh the fixture: `pnpm --filter @workspace/db run test:fixture:schema`. The script strips pg_dump preamble and rewrites `public.` → `@@SCHEMA@@.`, but preserves `public.vector(...)` because pgvector's type lives in the public schema.
-- Refactors landed for testability: extracted `parseDesignCriteriaHtml`, `chunkByHeader`, `parseSectionResponse`, `contentHash`; added test-only resets `__resetMunicodeClientStateForTesting` / `__setRateLimitOverridesForTesting`.
-- Out of scope (Part 2): orchestrator + queue tests, prompt formatter (if extracted), api-server route tests, frontend tests, CI, coverage thresholds. See `TESTS_DEFERRED.md`.
-
-## Key Commands
-
-- `pnpm run typecheck` — full typecheck
-- `pnpm run build` — typecheck + build all
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate hooks and Zod from OpenAPI
-- `pnpm --filter @workspace/db run push` — push Drizzle schema to Postgres
-- `pnpm --filter @workspace/db run seed` — idempotent seed (Seguin + Musgrave)
-- `pnpm --filter <pkg> run dev` — start any artifact
-
-## DA-PI-3 — Briefing engine
-
-- `lib/briefing-engine` is the workspace lib that synthesizes the seven-section A–G site briefing (Spec 51 §2). `generateBriefing()` takes the engagement's current `briefing_sources`, groups them by category, builds the prompt, and either returns a deterministic `mockGenerator` payload (default) or calls Claude Sonnet 4.5 via `@workspace/integrations-anthropic-ai` (when `BRIEFING_LLM_MODE=anthropic`). Unresolved citation tokens (`{{atom|briefing-source|<id>|<label>}}`, `[[CODE:<atomId>]]`) are stripped and reported via `invalidCitations`.
-- `parcel_briefings` carries `section_a..g`, `generated_at`, `generated_by`, plus `prior_section_*` / `prior_generated_*` backup columns that the route copies the previous narrative into on regenerate, all in one transaction.
-- API: `POST /api/engagements/:id/briefing/generate` returns 202 + `generationId` and runs the engine fire-and-forget; `GET /api/engagements/:id/briefing/status` reports the in-process job state (idle/pending/completed/failed). The persisted briefing on `GET /briefing` is the source of truth.
-- Events: `parcel-briefing.generated` (first run) / `parcel-briefing.regenerated` (subsequent) appended best-effort. The route also emits one `materializable-element.identified` event per requirement extracted from sections C/D/F (DA-PI-5) — entityId is `materializable-element:{briefingId}:{section}:{index}`, payload carries the section letter, index, and claim text.
-- UI: the Site Context tab renders an A–G section card stack (A always expanded, B+E auto-expanded when non-empty, C/D/F/G collapsed) plus a "Generate Briefing" / "Regenerate Briefing" button that polls status every ~2s while pending and re-fetches the briefing read on completion.
-
-## One-off Maintenance Scripts
-
-- **Sweep orphaned avatar files** — `pnpm --filter @workspace/scripts run sweep:orphan-avatars`. Lists every object under `<PRIVATE_OBJECT_DIR>/uploads/` in the private bucket, cross-references against live `users.avatar_url` values, and reports the unreferenced ones. Runs in dry-run mode by default and only prints what *would* be deleted; pass `-- --apply` to actually delete (e.g. `pnpm --filter @workspace/scripts run sweep:orphan-avatars -- --apply`). Use this once after the avatar-cleanup fix from Task #90 to clear out the historical backlog of orphans; the api-server now deletes the prior object on every replace/clear, so repeated runs should report zero orphans.
-- **Smoke-test the live DXF→glb converter** — `pnpm --filter @workspace/scripts run smoke:converter`. Reads `CONVERTER_URL` and `CONVERTER_SHARED_SECRET` from env, posts a tiny DXF fixture for each of the seven Spec 52 §2 layer kinds, and validates the response is a binary glTF (header `glTF\0`, JSON+BIN chunks, byteLength matches). Optional `--fixture-dir <dir>` to use real per-layer fixtures (`<dir>/<layerKind>.dxf`); otherwise falls back to a minimal DXF with a warning. Exits non-zero if any variant fails.
-
-## DXF→glb Converter (Spec 52)
-
-- Dev default: `DXF_CONVERTER_MODE=mock` — in-process mock client returns a stub glb. No external dependency.
-- Production: when `DXF_CONVERTER_MODE=http` the api-server selects `HttpConverterClient`, which signs each request with HMAC-SHA256 over `${requestId}.${layerKind}` using `CONVERTER_SHARED_SECRET` and posts a multipart body (`dxf` blob + `layerKind`) to `CONVERTER_URL`. Built-in retry/backoff: 2 retries (3 attempts total), 250 ms initial backoff, 2× multiplier, capped at 4000 ms; retries on network errors, timeouts, and 5xx; never retries on 4xx (`converter_rejected`), invalid content-type, or empty body. Each attempt is logged via pino with `requestId`, `layerKind`, `attempt`, `durationMs`, `byteSize`, `status`, and `code` (on failure).
-- **PENDING (Task #160 follow-up #167):** Production is intentionally still on the `mock` default (no `DXF_CONVERTER_MODE` set in the production env). The flip to `http` is gated on provisioning the production secrets `CONVERTER_URL` and `CONVERTER_SHARED_SECRET` — without them, `validateConverterEnvAtBoot` would hard-fail. Once the secrets are in place via the secrets pane, set `DXF_CONVERTER_MODE=http` in the production env and run `pnpm --filter @workspace/scripts run smoke:converter` to verify schema parity per layer kind before publishing.
+- **PostgreSQL:** Primary database for persistent storage (Replit-managed Postgres).
+- **Anthropic AI:** Used for AI chat and briefing generation (accessed via Replit AI Integrations).
+- **Revit:** External design tool that posts snapshots to the API.
+- **Google Cloud Storage (GCS):** Used for object storage (e.g., avatar uploads).
+- **Federal Data Sources (via Adapters):** FEMA NFHL, USGS NED, EPA EJScreen, FCC National Broadband Map.
+- **State Data Sources (via Adapters):** Utah/UGRC, Idaho/INSIDE Idaho, Texas/TCEQ.
+- **Local Data Sources (via Adapters):** Grand County UT, Lemhi County ID, Bastrop TX.
+- **DXF Converter Service:** An external service (mocked in dev, HTTP in prod) for converting DXF files to glb format.

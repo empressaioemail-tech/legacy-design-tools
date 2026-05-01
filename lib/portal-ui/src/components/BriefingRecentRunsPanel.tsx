@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearch } from "wouter";
 import {
   useGetEngagementBriefing,
@@ -18,14 +18,17 @@ import {
 import { diffWords } from "@workspace/briefing-diff";
 // Task #355 — the prior-narrative title row, "Generated <when> by
 // <actor>" meta line, and "Copy plain text" button (with its 2 s
-// "Copied!" confirmation) live in this shared lib so the testids,
-// copy payload shape, and revert timing stay byte-identical with
-// the design-tools surface without copy-pasting two parallel JSX
-// subtrees. Plan Review still owns its `relativeTime`-vs-
-// `.toLocaleString()` formatting choice via the `formatGeneratedAt`
-// prop the component takes, so the existing Task #332 test contract
-// ("5 min ago" with absolute tooltip) still holds.
-import { BriefingPriorSnapshotHeader } from "@workspace/briefing-prior-snapshot";
+// "Copied!" confirmation) live in `@workspace/briefing-prior-snapshot`
+// so the testids, copy payload shape, and revert timing stay byte-
+// identical with the design-tools surface without copy-pasting two
+// parallel JSX subtrees. We accept it via the optional
+// `renderPriorSnapshotHeader` render-prop instead of importing it
+// directly here because `briefing-prior-snapshot` already imports
+// `CopyPlainTextButton` from this package — a direct import would
+// create a workspace-level dependency cycle (portal-ui ↔
+// briefing-prior-snapshot). Artifact-level consumers
+// (plan-review's SubmissionDetailModal / EngagementDetail) supply
+// the header from the lib they already depend on.
 // Task #332 — the prior-narrative meta line renders the snapshot's
 // `generatedAt` as a relative-time string ("5 min ago", "3d ago",
 // etc.) instead of a raw locale stamp so an auditor scanning the
@@ -213,6 +216,93 @@ function BriefingRunStateBadge({
 }
 
 /**
+ * Pill rendered next to a run row when it matches one of the
+ * "interesting" generation ids the parent passed in (current
+ * briefing run vs. the run that produced the submission's BIM
+ * model). Both pills can render on the same row when the same
+ * generation produced the current narrative AND the submitted BIM
+ * model — that's the steady-state "everything's in sync" case.
+ *
+ * Surfacing these inline on the runs list is the core auditor cue
+ * for "is what the reviewer is reading the same body the architect
+ * submitted?" — the disclosure stays compact, but a glance at the
+ * pills tells them whether the briefing has drifted since
+ * submission.
+ */
+function RunRoleBadge({
+  kind,
+}: {
+  kind: "current" | "submitted";
+}) {
+  const palette =
+    kind === "current"
+      ? { bg: "var(--accent-dim, rgba(0,180,216,0.18))", fg: "var(--cyan, #00b4d8)" }
+      : { bg: "var(--warning-dim, rgba(245,158,11,0.18))", fg: "var(--warning-text, #f59e0b)" };
+  const label = kind === "current" ? "Current" : "Submitted";
+  return (
+    <span
+      data-testid={`briefing-run-role-badge-${kind}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "1px 6px",
+        borderRadius: 4,
+        background: palette.bg,
+        color: palette.fg,
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: 0.2,
+        textTransform: "uppercase",
+        lineHeight: 1.4,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+export interface BriefingRecentRunsPanelProps {
+  engagementId: string;
+  /**
+   * Optional — id of the run that produced the briefing's currently-
+   * visible A–G narrative (i.e. `briefing.narrative.generationId`).
+   * When provided, the matching row in the runs list is highlighted
+   * and tagged with a "Current" pill so auditors can match the on-
+   * screen narrative to its producing run by id rather than
+   * inferring it from a timestamp window.
+   */
+  currentGenerationId?: string | null;
+  /**
+   * Optional — id of the run that produced the BIM model attached to
+   * the submission the auditor is investigating. When this differs
+   * from `currentGenerationId`, both pills render on different rows,
+   * making it visually obvious that the briefing has drifted since
+   * submission. This wire field does not exist on
+   * `EngagementSubmissionSummary` today; surfaces that don't yet
+   * have it should leave this prop unset.
+   */
+  producingGenerationId?: string | null;
+  /**
+   * Optional render-prop for the Task #355 prior-narrative header
+   * (title row + "Generated <when> by <actor>" meta + "Copy plain
+   * text" button). Accepted as a render-prop instead of an inline
+   * import because the shared component lives in
+   * `@workspace/briefing-prior-snapshot`, which already depends on
+   * `@workspace/portal-ui` (for `CopyPlainTextButton`) — importing it
+   * here would create a workspace cycle. Consumers that already
+   * depend on `briefing-prior-snapshot` (plan-review,
+   * design-tools — though design-tools uses its own local panel)
+   * pass `BriefingPriorSnapshotHeader` here. When omitted (e.g. in
+   * unit tests that don't exercise the prior-narrative branch), the
+   * header is simply not rendered above the per-section diff.
+   */
+  renderPriorSnapshotHeader?: (args: {
+    runGenerationId: string;
+    priorNarrative: EngagementBriefingNarrative;
+  }) => ReactNode;
+}
+
+/**
  * BriefingRecentRunsPanel — Plan Review-side audit view (Task #261).
  *
  * Mirrors the disclosure of the same name in
@@ -249,12 +339,18 @@ function BriefingRunStateBadge({
  *      byte-identical between the prior and current bodies render
  *      a small "(unchanged)" pill in place of the diff so the
  *      auditor isn't asked to re-read identical paragraphs.
+ *   5. Task #305 — when `currentGenerationId` and/or
+ *      `producingGenerationId` are passed, the matching row(s) are
+ *      highlighted and tagged with "Current" / "Submitted" pills so
+ *      the auditor can instantly see whether what the reviewer is
+ *      reading matches what the architect submitted.
  */
 export function BriefingRecentRunsPanel({
   engagementId,
-}: {
-  engagementId: string;
-}) {
+  currentGenerationId,
+  producingGenerationId,
+  renderPriorSnapshotHeader,
+}: BriefingRecentRunsPanelProps) {
   // Task #303 B.6 — both the open/closed state of the disclosure and
   // the active filter are mirrored to the URL on every change so an
   // auditor who lands on a suspicious failed-then-rerun pattern can
@@ -402,6 +498,17 @@ export function BriefingRecentRunsPanel({
     return null;
   }, [priorNarrative, runs]);
 
+  // Task #305 — the drift summary, rendered in the disclosure header
+  // so the auditor sees "current and submitted match" or
+  // "current ≠ submitted" without expanding any row. Only meaningful
+  // when both ids are known.
+  const driftSummary =
+    currentGenerationId && producingGenerationId
+      ? currentGenerationId === producingGenerationId
+        ? "in sync"
+        : "drifted"
+      : null;
+
   return (
     <div
       data-testid="briefing-recent-runs"
@@ -430,15 +537,42 @@ export function BriefingRecentRunsPanel({
         }}
       >
         <span style={{ fontSize: 12, fontWeight: 600 }}>Recent runs</span>
-        <span
-          aria-hidden
-          style={{
-            fontSize: 12,
-            color: "var(--text-muted)",
-            marginLeft: 12,
-          }}
-        >
-          {open ? "▾" : "▸"}
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {driftSummary && (
+            <span
+              data-testid={`briefing-recent-runs-drift-${driftSummary === "in sync" ? "in-sync" : "drifted"}`}
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                textTransform: "uppercase",
+                padding: "1px 6px",
+                borderRadius: 4,
+                background:
+                  driftSummary === "in sync"
+                    ? "var(--success-dim)"
+                    : "var(--warning-dim, rgba(245,158,11,0.18))",
+                color:
+                  driftSummary === "in sync"
+                    ? "var(--success-text)"
+                    : "var(--warning-text, #f59e0b)",
+              }}
+            >
+              {driftSummary === "in sync"
+                ? "current = submitted"
+                : "current ≠ submitted"}
+            </span>
+          )}
+          <span
+            aria-hidden
+            style={{
+              fontSize: 12,
+              color: "var(--text-muted)",
+              marginLeft: 4,
+            }}
+          >
+            {open ? "▾" : "▸"}
+          </span>
         </span>
       </button>
       {open && (
@@ -573,14 +707,27 @@ export function BriefingRecentRunsPanel({
                   (run.state === "failed" && !!run.error) ||
                   (run.state === "completed" &&
                     (run.invalidCitationCount ?? 0) > 0);
+                const isCurrent =
+                  !!currentGenerationId &&
+                  run.generationId === currentGenerationId;
+                const isProducing =
+                  !!producingGenerationId &&
+                  run.generationId === producingGenerationId;
+                const highlight = isCurrent || isProducing;
                 return (
                   <li
                     key={run.generationId}
                     data-testid={`briefing-run-${run.generationId}`}
+                    data-current={isCurrent ? "true" : undefined}
+                    data-producing={isProducing ? "true" : undefined}
                     style={{
-                      border: "1px solid var(--border-subtle)",
+                      border: highlight
+                        ? "1px solid var(--cyan, #00b4d8)"
+                        : "1px solid var(--border-subtle)",
                       borderRadius: 4,
-                      background: "transparent",
+                      background: highlight
+                        ? "var(--accent-dim, rgba(0,180,216,0.08))"
+                        : "transparent",
                     }}
                   >
                     <button
@@ -631,6 +778,8 @@ export function BriefingRecentRunsPanel({
                           Prior
                         </span>
                       )}
+                      {isCurrent && <RunRoleBadge kind="current" />}
+                      {isProducing && <RunRoleBadge kind="submitted" />}
                       <span style={{ flex: 1, color: "var(--text-default)" }}>
                         {startedLabel}
                       </span>
@@ -731,14 +880,10 @@ export function BriefingRecentRunsPanel({
                               paddingTop: 6,
                             }}
                           >
-                            <BriefingPriorSnapshotHeader
-                              runGenerationId={run.generationId}
-                              priorNarrative={priorNarrative}
-                              formatGeneratedAt={(raw) => ({
-                                text: relativeTime(raw),
-                                title: new Date(raw).toLocaleString(),
-                              })}
-                            />
+                            {renderPriorSnapshotHeader?.({
+                              runGenerationId: run.generationId,
+                              priorNarrative,
+                            })}
                             {SECTION_ORDER.map(({ key, label }) => {
                               const priorBody = pickSection(
                                 priorNarrative,

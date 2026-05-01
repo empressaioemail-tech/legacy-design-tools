@@ -10,14 +10,18 @@
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",
+    "@workspace/adapters": "workspace:*",
     "@workspace/api-client-react": "workspace:*",
     "@workspace/api-zod": "workspace:*",
+    "@workspace/briefing-diff": "workspace:*",
     "@workspace/server-actor-ids": "workspace:*",
     "lucide-react": "catalog:",
+    "three": "catalog:",
     "wouter": "^3.7.1",
     "zustand": "^5.0.12"
   },
@@ -30,6 +34,7 @@
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@types/three": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "happy-dom": "catalog:",
     "react": "catalog:",
