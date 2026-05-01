@@ -10,14 +10,12 @@ import react from "@vitejs/plugin-react";
  * mounts a portal-ui component in isolation behaves the same way as
  * the surface-level integration tests on the two consuming artifacts.
  *
- * Added in Task #360 to back the standalone `<CopyPlainTextButton />`
- * unit test — the prior coverage was indirect, going through the
- * Plan Review and design-tools `BriefingRecentRunsPanel` integration
- * tests, so a future tweak to the shared button (icon swap, tooltip,
- * timing change) had to wait for both surface suites to fail before a
- * regression surfaced. Tests living next to the component are fast,
- * focused, and don't have to seed a prior-narrative row through
- * react-query before they can click.
+ * Originally added in Task #360 to back the standalone
+ * `<CopyPlainTextButton />` unit test, then extended in Task #362 to
+ * host component-level tests for the rest of the shared dialogs
+ * (`BriefingDivergenceDetailDialog`, `SubmitToJurisdictionDialog`,
+ * `ResolvedByChip`, …) so a refactor that touches only portal-ui can
+ * never ship without ever running a portal-ui-scoped test.
  */
 export default defineConfig({
   plugins: [react()],
