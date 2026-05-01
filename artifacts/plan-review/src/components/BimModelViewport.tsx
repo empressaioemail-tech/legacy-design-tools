@@ -1583,7 +1583,29 @@ export function BimModelViewport({
             aria-label="Show 3D viewer controls"
             aria-pressed={hintStickyOpen}
             title="Show 3D viewer controls"
-            onClick={() => setHintStickyOpen((prev) => !prev)}
+            onClick={(e) => {
+              setHintStickyOpen((prev) => !prev);
+              // Pointer-driven clicks (mouse / touch tap) also
+              // focus the button as part of the browser's tap
+              // pipeline, which fires `onFocus` → `hintRevealed
+              // = true`. Without the blur below, a tablet
+              // reviewer's *second* tap would toggle the sticky
+              // state back off but the legend would stay visible
+              // because the focus-driven reveal is still latched
+              // — effectively breaking the "tap to open / tap to
+              // close" contract this affordance was added for
+              // (Task #408). Detecting `e.detail > 0` is the
+              // standard distinguisher between pointer-initiated
+              // clicks (always >= 1) and keyboard-initiated
+              // clicks (always 0 from Enter / Space), so
+              // keyboard reviewers keep their focus position for
+              // continued Tab navigation. The Task #408 e2e spec
+              // pins this down for the touch path through real
+              // `page.touchscreen.tap` events.
+              if (e.detail > 0) {
+                e.currentTarget.blur();
+              }
+            }}
             onMouseEnter={() => setHintRevealed(true)}
             onMouseLeave={() => setHintRevealed(false)}
             onFocus={() => setHintRevealed(true)}
