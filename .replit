@@ -95,5 +95,7 @@ externalPort = 3000
 [userenv.shared]
 SNAPSHOT_SECRET = "sc_6d53f8f17946d466cb20a5f8a0d815aa4dfbcd6aaa6c295759240463733053a8"
 
+[userenv.production]
+
 [nix]
 channel = "stable-25_05"

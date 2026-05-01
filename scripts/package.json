@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "backfill:sheet-created": "tsx ./src/backfillSheetCreatedEvents.ts",
     "sweep:orphan-avatars": "tsx ./src/sweepOrphanAvatars.ts",
+    "smoke:converter": "tsx ./src/smokeConverter.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

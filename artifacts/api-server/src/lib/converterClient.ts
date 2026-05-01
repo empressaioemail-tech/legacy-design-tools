@@ -160,33 +160,176 @@ function buildMockGlb(layerKind: DxfLayerKind): Buffer {
  * Production HTTP client. Posts to `CONVERTER_URL` with a multipart
  * body and an HMAC-SHA256 signature in `x-converter-signature`
  * (signature input is `requestId.layerKind`, matching the Task #113
- * contract). Times out after 30 s.
+ * contract). Per attempt times out after `timeoutMs` (default 30 s);
+ * transient failures (network, timeout, 5xx) are retried with
+ * exponential backoff up to `maxRetries` additional attempts.
+ *
+ * Retry policy (deliberate):
+ *   - 5xx, network errors, timeouts → retry. Cloud Run cold-starts
+ *     and queue-side restarts manifest as 502/503/504, so a couple
+ *     of retries with backoff matches what the upstream queue
+ *     already does (Task #113 contract).
+ *   - 4xx (`converter_rejected`) → DO NOT retry. The converter is
+ *     telling us the input is bad — retrying would just burn budget
+ *     against a deterministic failure and stamp a more confusing
+ *     error on the row.
+ *   - `converter_invalid_response` (wrong content-type, empty body)
+ *     → DO NOT retry. The bytes came back with a 200 but we don't
+ *     trust them — that's a contract drift, not a flake.
+ *
+ * Structured logging: every attempt emits a pino record carrying
+ * `requestId`, `layerKind`, `attempt`, `durationMs`, `byteSize`,
+ * and (on failure) `code` so the log stream reconstructs the full
+ * retry timeline without re-correlating across the converter's logs.
  */
 export interface HttpConverterClientOptions {
   url: string;
   sharedSecret: string;
   fetchImpl?: typeof fetch;
+  /** Per-attempt timeout. Default 30 s. */
   timeoutMs?: number;
+  /** Additional attempts after the first one. Default 2 (3 total). */
+  maxRetries?: number;
+  /** Initial backoff in ms. Default 250. Doubles each retry. */
+  initialBackoffMs?: number;
+  /** Cap on a single backoff sleep. Default 4 000. */
+  maxBackoffMs?: number;
+  /** Sleep impl, swappable for tests. */
+  sleepImpl?: (ms: number) => Promise<void>;
+}
+
+interface AttemptOutcome {
+  kind: "ok" | "retryable" | "fatal";
+  /** Set when `kind === "ok"`. */
+  result?: ConvertDxfResult;
+  /** Set when `kind !== "ok"`. */
+  error?: ConverterError;
+  /** HTTP status, when the failure was a response (not a network error). */
+  status?: number;
+  /** Bytes returned on success. */
+  byteSize?: number;
 }
 
 export class HttpConverterClient implements ConverterClient {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly initialBackoffMs: number;
+  private readonly maxBackoffMs: number;
+  private readonly sleepImpl: (ms: number) => Promise<void>;
 
   constructor(private readonly opts: HttpConverterClientOptions) {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.maxRetries = opts.maxRetries ?? 2;
+    this.initialBackoffMs = opts.initialBackoffMs ?? 250;
+    this.maxBackoffMs = opts.maxBackoffMs ?? 4_000;
+    this.sleepImpl =
+      opts.sleepImpl ??
+      ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   async convert(req: ConvertDxfRequest): Promise<ConvertDxfResult> {
+    // Pin the requestId across retries so the converter sees the
+    // same id (it's also used in the HMAC input — re-minting per
+    // attempt would make every retry look like a different request
+    // in the converter's logs and break correlation).
     const requestId = randomUUID();
     const signature = createHmac("sha256", this.opts.sharedSecret)
       .update(`${requestId}.${req.layerKind}`)
       .digest("hex");
 
+    const totalAttempts = this.maxRetries + 1;
+    let lastError: ConverterError | null = null;
+
+    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+      const startedAt = Date.now();
+      const outcome = await this.runOneAttempt({
+        req,
+        requestId,
+        signature,
+      });
+      const durationMs = Date.now() - startedAt;
+
+      if (outcome.kind === "ok") {
+        logger.info(
+          {
+            requestId,
+            layerKind: req.layerKind,
+            attempt,
+            attempts: totalAttempts,
+            durationMs,
+            byteSize: outcome.byteSize,
+          },
+          "dxf converter attempt succeeded",
+        );
+        return outcome.result!;
+      }
+
+      lastError = outcome.error!;
+
+      if (outcome.kind === "fatal" || attempt >= totalAttempts) {
+        logger.warn(
+          {
+            requestId,
+            layerKind: req.layerKind,
+            attempt,
+            attempts: totalAttempts,
+            durationMs,
+            status: outcome.status,
+            code: lastError.code,
+            err: lastError,
+          },
+          outcome.kind === "fatal"
+            ? "dxf converter attempt failed (non-retryable)"
+            : "dxf converter attempts exhausted",
+        );
+        throw lastError;
+      }
+
+      const backoffMs = Math.min(
+        this.initialBackoffMs * 2 ** (attempt - 1),
+        this.maxBackoffMs,
+      );
+      logger.warn(
+        {
+          requestId,
+          layerKind: req.layerKind,
+          attempt,
+          attempts: totalAttempts,
+          durationMs,
+          status: outcome.status,
+          code: lastError.code,
+          backoffMs,
+          err: lastError,
+        },
+        "dxf converter attempt failed — retrying",
+      );
+      await this.sleepImpl(backoffMs);
+    }
+
+    // Unreachable — the loop either returns or throws above. Guarded
+    // here so the TS narrowing on `lastError` stays honest.
+    throw (
+      lastError ??
+      new ConverterError(
+        "converter_unknown",
+        "HttpConverterClient: retry loop exited without an outcome",
+      )
+    );
+  }
+
+  private async runOneAttempt(args: {
+    req: ConvertDxfRequest;
+    requestId: string;
+    signature: string;
+  }): Promise<AttemptOutcome> {
+    const { req, requestId, signature } = args;
+
     // Use the global FormData (Node 18+) so multipart works through
     // undici without an external dep. Blob is also a Node global
-    // since 18.
+    // since 18. Rebuilt per attempt because consuming a Blob's
+    // stream is one-shot.
     const form = new FormData();
     form.append(
       "dxf",
@@ -213,43 +356,73 @@ export class HttpConverterClient implements ConverterClient {
         (err as { name?: string } | null)?.name === "TimeoutError" ||
         (err as { name?: string } | null)?.name === "AbortError";
       if (isAbort) {
-        throw new ConverterError(
-          "converter_timeout",
-          `Converter did not respond within ${this.timeoutMs} ms`,
-        );
+        return {
+          kind: "retryable",
+          error: new ConverterError(
+            "converter_timeout",
+            `Converter did not respond within ${this.timeoutMs} ms`,
+          ),
+        };
       }
-      throw new ConverterError(
-        "converter_unavailable",
-        `Converter request failed: ${(err as Error).message}`,
-      );
+      return {
+        kind: "retryable",
+        error: new ConverterError(
+          "converter_unavailable",
+          `Converter request failed: ${(err as Error).message}`,
+        ),
+      };
     }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new ConverterError(
-        "converter_rejected",
-        `Converter returned ${response.status}: ${body.slice(0, 200) || "(no body)"}`,
-      );
+      // 5xx are queue / cold-start signals — retryable. 4xx is a
+      // deterministic rejection (bad signature, malformed body,
+      // unsupported layer kind) — fatal.
+      const retryable = response.status >= 500;
+      return {
+        kind: retryable ? "retryable" : "fatal",
+        status: response.status,
+        error: new ConverterError(
+          "converter_rejected",
+          `Converter returned ${response.status}: ${body.slice(0, 200) || "(no body)"}`,
+        ),
+      };
     }
 
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.includes("model/gltf-binary")) {
-      throw new ConverterError(
-        "converter_invalid_response",
-        `Converter returned unexpected content-type: ${contentType || "(missing)"}`,
-      );
+      // Wrong content-type means the converter answered with
+      // something other than the agreed glb wire format — that's a
+      // contract bug we shouldn't burn retries on.
+      return {
+        kind: "fatal",
+        status: response.status,
+        error: new ConverterError(
+          "converter_invalid_response",
+          `Converter returned unexpected content-type: ${contentType || "(missing)"}`,
+        ),
+      };
     }
 
     const arrayBuf = await response.arrayBuffer();
     if (arrayBuf.byteLength === 0) {
-      throw new ConverterError(
-        "converter_invalid_response",
-        "Converter returned an empty body",
-      );
+      return {
+        kind: "fatal",
+        status: response.status,
+        error: new ConverterError(
+          "converter_invalid_response",
+          "Converter returned an empty body",
+        ),
+      };
     }
     return {
-      glbBytes: Buffer.from(arrayBuf),
-      requestId,
+      kind: "ok",
+      status: response.status,
+      byteSize: arrayBuf.byteLength,
+      result: {
+        glbBytes: Buffer.from(arrayBuf),
+        requestId,
+      },
     };
   }
 }
@@ -280,8 +453,19 @@ function buildFromEnv(): ConverterClient {
         "DXF_CONVERTER_MODE=http requires CONVERTER_URL and CONVERTER_SHARED_SECRET to be set",
       );
     }
-    logger.info({ url, mode: "http" }, "DXF converter client wired in HTTP mode");
-    return new HttpConverterClient({ url, sharedSecret: secret });
+    const client = new HttpConverterClient({ url, sharedSecret: secret });
+    logger.info(
+      {
+        url,
+        mode: "http",
+        timeoutMs: 30_000,
+        maxRetries: 2,
+        initialBackoffMs: 250,
+        maxBackoffMs: 4_000,
+      },
+      "DXF converter client wired in HTTP mode",
+    );
+    return client;
   }
   if (mode !== "mock") {
     logger.warn(
