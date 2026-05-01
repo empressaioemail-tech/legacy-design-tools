@@ -8,6 +8,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { BimModelTab } from "./BimModelTab";
+import { EngagementContextTab } from "./EngagementContextTab";
 import type { EngagementSubmissionSummary } from "@workspace/api-client-react";
 import { relativeTime } from "../lib/relativeTime";
 
@@ -116,23 +117,15 @@ export function SubmissionDetailModal({
               data-testid="submission-detail-modal-engagement-context-pane"
             >
               {/*
-               * Sprint A placeholder: the briefing snapshot / parcel
-               * context view will land here in a follow-up. Rendered
-               * today so the Tabs shell ships with both panes wired
-               * (and so reviewers see *something* explanatory rather
-               * than an inert tab).
+               * Task #319 — Sprint A's "Engagement Context" tab. The
+               * pane surfaces the briefing snapshot (Section A
+               * executive summary + generation provenance) and the
+               * parcel info (jurisdiction, address, project type,
+               * zoning code, lot area) so the reviewer has the context
+               * they need to frame the submission without bouncing to
+               * the engagement page or the design-tools artifact.
                */}
-              <div
-                className="sc-body"
-                style={{
-                  padding: 16,
-                  fontSize: 13,
-                  color: "var(--text-muted)",
-                }}
-              >
-                The engagement-context view (briefing snapshot, parcel
-                info) is coming in a follow-up.
-              </div>
+              <EngagementContextTab engagementId={engagementId} />
             </TabsContent>
           </Tabs>
         )}
