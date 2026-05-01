@@ -6,9 +6,11 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "backfill:sheet-created": "tsx ./src/backfillSheetCreatedEvents.ts",
+    "sweep:orphan-avatars": "tsx ./src/sweepOrphanAvatars.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.19.0",
     "@workspace/db": "workspace:*",
     "@workspace/empressa-atom": "workspace:*",
     "drizzle-orm": "catalog:"

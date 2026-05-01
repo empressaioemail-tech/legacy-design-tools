@@ -73,3 +73,7 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
 - `pnpm --filter @workspace/db run push` — push Drizzle schema to Postgres
 - `pnpm --filter @workspace/db run seed` — idempotent seed (Seguin + Musgrave)
 - `pnpm --filter <pkg> run dev` — start any artifact
+
+## One-off Maintenance Scripts
+
+- **Sweep orphaned avatar files** — `pnpm --filter @workspace/scripts run sweep:orphan-avatars`. Lists every object under `<PRIVATE_OBJECT_DIR>/uploads/` in the private bucket, cross-references against live `users.avatar_url` values, and reports the unreferenced ones. Runs in dry-run mode by default and only prints what *would* be deleted; pass `-- --apply` to actually delete (e.g. `pnpm --filter @workspace/scripts run sweep:orphan-avatars -- --apply`). Use this once after the avatar-cleanup fix from Task #90 to clear out the historical backlog of orphans; the api-server now deletes the prior object on every replace/clear, so repeated runs should report zero orphans.
