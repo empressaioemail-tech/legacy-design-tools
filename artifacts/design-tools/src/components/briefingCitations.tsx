@@ -25,7 +25,8 @@
  * every render call.
  */
 import { type ReactNode } from "react";
-import { BookOpen, FileText, AlertTriangle } from "lucide-react";
+import { FileText, AlertTriangle } from "lucide-react";
+import { CodeAtomPill as PortalCodeAtomPill } from "@workspace/portal-ui";
 
 const BRIEFING_SOURCE_TOKEN_RE =
   /\{\{atom\|briefing-source\|([^|]+)\|([^}]+)\}\}/g;
@@ -89,31 +90,12 @@ export function BriefingSourceCitationPill({
  * stream, so deep-linking to the Code Library matters more.
  */
 export function BriefingCodeAtomPill({ atomId }: { atomId: string }) {
-  const short = atomId.slice(0, 8);
   return (
-    <a
-      href={`${CODE_LIBRARY_BASE}?atom=${atomId}`}
-      data-testid={`briefing-code-citation-${atomId}`}
-      title={`Open atom ${atomId} in Code Library`}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        background: "rgba(99, 152, 170, 0.18)",
-        color: "var(--cyan)",
-        fontSize: 10,
-        letterSpacing: "0.04em",
-        padding: "1px 6px",
-        borderRadius: 3,
-        textTransform: "uppercase",
-        textDecoration: "none",
-        verticalAlign: "baseline",
-        marginInline: 2,
-      }}
-    >
-      <BookOpen size={9} aria-hidden />
-      CODE·{short}
-    </a>
+    <PortalCodeAtomPill
+      atomId={atomId}
+      codeLibraryBase={CODE_LIBRARY_BASE}
+      testId={`briefing-code-citation-${atomId}`}
+    />
   );
 }
 

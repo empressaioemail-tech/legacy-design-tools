@@ -37,12 +37,16 @@ vi.mock("../../store/engagements", () => ({
   }),
 }));
 
-vi.mock("@workspace/portal-ui", () => ({
-  useSidebarState: makeStore({
-    rightCollapsed: stores.rightCollapsed,
-    toggleRight: vi.fn(),
-  }),
-}));
+vi.mock("@workspace/portal-ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@workspace/portal-ui")>();
+  return {
+    ...actual,
+    useSidebarState: makeStore({
+      rightCollapsed: stores.rightCollapsed,
+      toggleRight: vi.fn(),
+    }),
+  };
+});
 
 const { ClaudeChat } = await import("../ClaudeChat");
 

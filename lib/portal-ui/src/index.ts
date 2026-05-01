@@ -47,6 +47,20 @@ export {
   type BriefingDivergenceGroupShape,
 } from "./lib/briefing-divergences";
 
+// Code-atom pill — shared by design-tools (BriefingCodeAtomPill,
+// CodeAtomChip) and plan-review (Findings tab citations). Lifted in
+// AIR-2 (Task #310) so the three call sites render identical pills
+// against the shared `splitOnCodeAtomTokens` tokenizer.
+export {
+  CodeAtomPill,
+  CODE_SECTION_TOKEN_RE,
+  splitOnCodeAtomTokens,
+} from "./components/CodeAtomPill";
+export type {
+  CodeAtomPillProps,
+  RenderCodeAtomTokensOptions,
+} from "./components/CodeAtomPill";
+
 export {
   initTheme,
   setTheme,

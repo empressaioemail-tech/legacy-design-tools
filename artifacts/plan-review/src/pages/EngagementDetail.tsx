@@ -23,6 +23,15 @@ import { useNavGroups } from "../components/NavGroups";
 import { BriefingRecentRunsPanel } from "../components/BriefingRecentRunsPanel";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
 import { relativeTime } from "../lib/relativeTime";
+import {
+  readFindingFromUrl,
+  readSubmissionFromUrl,
+  readSubmissionTabFromUrl,
+  writeFindingToUrl,
+  writeSubmissionTabToUrl,
+  writeSubmissionToUrl,
+  type SubmissionDetailTab,
+} from "../lib/findingUrl";
 
 /**
  * Human-readable label for each {@link SubmissionStatus}, mirroring
@@ -308,6 +317,62 @@ export default function EngagementDetail() {
     receipt: SubmissionReceipt;
     jurisdiction: string | null;
   } | null>(null);
+
+  // ── AIR-2 (Task #310) submission-detail modal state ────────────────
+  //
+  // The modal is fully URL-controlled: opening / closing flips the
+  // `?submission=<id>` param, switching tabs flips `?tab=findings`,
+  // and the per-finding drill-in flips `?finding=<atomId>`. The
+  // mount-time `useEffect` reads the URL once so a paste-link lands
+  // on the right submission + tab + drill-in.
+  //
+  // The modal is layered over the past-submissions list — the user
+  // clicks a row to open it. AIR-2 does not change the underlying
+  // SubmissionRow chrome (only adds an open-modal click target).
+  const [openSubmissionId, setOpenSubmissionId] = useState<string | null>(null);
+  const [submissionTab, setSubmissionTab] = useState<SubmissionDetailTab>(
+    "note",
+  );
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    const initial = readSubmissionFromUrl();
+    if (initial) {
+      setOpenSubmissionId(initial);
+      setSubmissionTab(readSubmissionTabFromUrl());
+      setSelectedFindingId(readFindingFromUrl());
+    }
+  }, []);
+  const openSubmissionModal = (sid: string) => {
+    setOpenSubmissionId(sid);
+    setSubmissionTab("note");
+    setSelectedFindingId(null);
+    writeSubmissionToUrl(sid);
+    writeSubmissionTabToUrl("note");
+    writeFindingToUrl(null);
+  };
+  const closeSubmissionModal = () => {
+    setOpenSubmissionId(null);
+    setSelectedFindingId(null);
+    setSubmissionTab("note");
+    writeSubmissionToUrl(null);
+  };
+  const handleTabChange = (next: SubmissionDetailTab) => {
+    setSubmissionTab(next);
+    writeSubmissionTabToUrl(next);
+    if (next === "note") {
+      // Closing the Findings tab also clears the drill-in URL param
+      // so the canonical Note-tab URL doesn't carry a stale
+      // `?finding=` reference around.
+      setSelectedFindingId(null);
+      writeFindingToUrl(null);
+    }
+  };
+  const handleSelectFinding = (id: string | null) => {
+    setSelectedFindingId(id);
+    writeFindingToUrl(id);
+  };
   // Auto-dismiss the banner after 8s so it stays out of the way once
   // the user has seen it. The dialog itself already closed on success,
   // so the banner is the only remaining post-submit affordance. Within
@@ -394,6 +459,7 @@ export default function EngagementDetail() {
           onOpenAnnotations={(target) =>
             setAnnotationTarget({ ...target, highlightAnnotationId: null })
           }
+          onOpenSubmission={openSubmissionModal}
         />
 
         {/*
@@ -418,6 +484,23 @@ export default function EngagementDetail() {
           </div>
         )}
       </div>
+
+      {/*
+        AIR-2 modal lives outside the layout so it can render edge-to-
+        edge. We look the open submission up off the cached list rather
+        than refetching its row — the submissions list query is the
+        same one populating the row the user clicked to open the
+        modal, so the data is already in cache.
+      */}
+      <OpenSubmissionModalRenderer
+        engagementId={id}
+        openSubmissionId={openSubmissionId}
+        submissionTab={submissionTab}
+        selectedFindingId={selectedFindingId}
+        onTabChange={handleTabChange}
+        onSelectFinding={handleSelectFinding}
+        onClose={closeSubmissionModal}
+      />
 
       {engagement && (
         <SubmitToJurisdictionDialog
@@ -470,6 +553,7 @@ function SubmissionsList({
   searchQuery,
   audience,
   onOpenAnnotations,
+  onOpenSubmission,
 }: {
   engagementId: string;
   onSubmit: () => void;
@@ -487,6 +571,7 @@ function SubmissionsList({
       | "parcel-briefing";
     targetEntityId: string;
   }) => void;
+  onOpenSubmission: (id: string) => void;
 }) {
   const { data: submissions, isLoading } = useListEngagementSubmissions(
     engagementId,
@@ -554,7 +639,6 @@ function SubmissionsList({
   const visibleSubmissions = filteredSubmissions ?? [];
   return (
     <SubmissionsCardBody
-      engagementId={engagementId}
       submissions={submissions}
       visibleSubmissions={visibleSubmissions}
       trimmedQuery={trimmedQuery}
@@ -563,24 +647,24 @@ function SubmissionsList({
       canSubmit={canSubmit}
       audience={audience}
       onOpenAnnotations={onOpenAnnotations}
+      onOpenSubmission={onOpenSubmission}
     />
   );
 }
 
 /**
- * Inner body of {@link SubmissionsCard} that owns the per-submission
- * detail modal selection state. Split out so the surrounding card
- * (loading / empty / error rendering) stays a pure derivation of the
- * list query, and the click-to-open behavior is colocated with the
- * modal mount.
+ * Inner body of {@link SubmissionsCard} — renders the past-submissions
+ * list. Split out so the surrounding card (loading / empty / error
+ * rendering) stays a pure derivation of the list query.
  *
- * Wave 2 Sprint B (Task #306): each row is now an interactive
- * trigger — clicking opens the {@link SubmissionDetailModal} which
- * houses the new BIM Model tab surfacing the bim-model + briefing
- * divergences feedback loop to the reviewer.
+ * Wave 2 Sprint B (Task #306): each row is an interactive trigger
+ * that opens the {@link SubmissionDetailModal} (BIM Model + Engagement
+ * Context + Note + Findings tabs). AIR-2 (Task #310) moved the modal
+ * mount up to the page level so the URL-controlled selection state
+ * (open submission, active tab, drill-in finding) survives a paste
+ * link and stays out of this component's local state.
  */
 function SubmissionsCardBody({
-  engagementId,
   submissions,
   visibleSubmissions,
   trimmedQuery,
@@ -589,8 +673,8 @@ function SubmissionsCardBody({
   canSubmit,
   audience,
   onOpenAnnotations,
+  onOpenSubmission,
 }: {
-  engagementId: string;
   submissions: EngagementSubmissionSummary[];
   visibleSubmissions: EngagementSubmissionSummary[];
   trimmedQuery: string;
@@ -609,9 +693,8 @@ function SubmissionsCardBody({
       | "parcel-briefing";
     targetEntityId: string;
   }) => void;
+  onOpenSubmission: (id: string) => void;
 }) {
-  const [activeSubmission, setActiveSubmission] =
-    useState<EngagementSubmissionSummary | null>(null);
   return (
     <div className="sc-card flex flex-col" data-testid="submissions-list">
       <div
@@ -650,18 +733,13 @@ function SubmissionsCardBody({
             <SubmissionRow
               key={s.id}
               submission={s}
-              onOpenDetail={() => setActiveSubmission(s)}
+              onOpenDetail={() => onOpenSubmission(s.id)}
               audience={audience}
               onOpenAnnotations={onOpenAnnotations}
             />
           ))
         )}
       </div>
-      <SubmissionDetailModal
-        submission={activeSubmission}
-        engagementId={engagementId}
-        onClose={() => setActiveSubmission(null)}
-      />
     </div>
   );
 }
@@ -695,12 +773,13 @@ function SubmissionRow({
 }: {
   submission: EngagementSubmissionSummary;
   /**
-   * Wave 2 Sprint B (Task #306) — click handler that opens the
-   * submission detail modal where the BIM Model tab surfaces the
-   * bim-model + briefing divergences feedback loop. Wired by
-   * {@link SubmissionsCardBody} to set its `activeSubmission`
-   * state. The whole row becomes a button; nested elements stay as
-   * spans so they don't get their own button semantics.
+   * Wave 2 Sprint B (Task #306) + AIR-2 (Task #310) — click handler
+   * that opens the submission detail modal. After AIR-2 the modal
+   * lives at the page level and is URL-controlled, so this callback
+   * is a thin "set the open submission id" trigger rather than a
+   * local-state setter. The whole row becomes a button; nested
+   * elements stay as spans so they don't get their own button
+   * semantics.
    */
   onOpenDetail: () => void;
   /**
@@ -825,5 +904,61 @@ function SubmissionRow({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * OpenSubmissionModalRenderer — small wrapper that looks the open
+ * submission up in the cached `useListEngagementSubmissions` query
+ * before mounting the modal.
+ *
+ * Keeping this in its own component (rather than inlining the lookup
+ * in `EngagementDetail`) means the cache subscription only re-renders
+ * the modal subtree on submissions-list changes — the rest of the
+ * page (banner, recent runs disclosure, search bar) is unaffected.
+ *
+ * Returns `null` when:
+ *   - no submission is open
+ *   - the submission id from the URL doesn't match any row in the
+ *     cached list (stale link / deleted row); in that case we leave
+ *     the URL param in place so a future refetch can recover, but we
+ *     don't render an empty modal shell.
+ */
+function OpenSubmissionModalRenderer({
+  engagementId,
+  openSubmissionId,
+  submissionTab,
+  selectedFindingId,
+  onTabChange,
+  onSelectFinding,
+  onClose,
+}: {
+  engagementId: string;
+  openSubmissionId: string | null;
+  submissionTab: SubmissionDetailTab;
+  selectedFindingId: string | null;
+  onTabChange: (tab: SubmissionDetailTab) => void;
+  onSelectFinding: (id: string | null) => void;
+  onClose: () => void;
+}) {
+  const { data: submissions } = useListEngagementSubmissions(engagementId, {
+    query: {
+      enabled: !!engagementId,
+      queryKey: getListEngagementSubmissionsQueryKey(engagementId),
+    },
+  });
+  if (!openSubmissionId) return null;
+  const submission = submissions?.find((s) => s.id === openSubmissionId);
+  if (!submission) return null;
+  return (
+    <SubmissionDetailModal
+      submission={submission}
+      engagementId={engagementId}
+      tab={submissionTab}
+      selectedFindingId={selectedFindingId}
+      onTabChange={onTabChange}
+      onSelectFinding={onSelectFinding}
+      onClose={onClose}
+    />
   );
 }
