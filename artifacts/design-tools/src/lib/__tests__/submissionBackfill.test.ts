@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  BACKFILL_FILTER_QUERY_PARAM,
   SUBMISSION_BACKFILL_THRESHOLD_MS,
   backfillAnnotation,
+  isBackfilledResponse,
+  matchesBackfillFilter,
+  parseBackfillFilter,
 } from "../submissionBackfill";
 
 /**
@@ -68,5 +72,164 @@ describe("backfillAnnotation", () => {
   it("returns null when either timestamp is unparseable", () => {
     expect(backfillAnnotation("not-a-date", "2026-04-15T09:00:00.000Z")).toBeNull();
     expect(backfillAnnotation("2026-04-15T09:00:00.000Z", "not-a-date")).toBeNull();
+  });
+});
+
+/**
+ * Pin the URL-param key, parser, and the three filter modes so the
+ * engagement-timeline backfill chips (Task #124) keep filtering in
+ * sync with the visible "backfilled on" annotation. If a future
+ * change loosens the threshold, both `backfillAnnotation` and the
+ * `live`/`backfilled` modes must move together — these tests catch
+ * any drift between the two.
+ */
+describe("backfill filter (Task #124)", () => {
+  // Three reference rows, sized off the same threshold the
+  // annotation tests above use:
+  //   - `pendingRow` has neither a respondedAt nor a responseRecordedAt.
+  //   - `liveRow` was recorded 30 minutes after the reply (within the
+  //     1-hour threshold, so it renders without a backfill annotation).
+  //   - `backfilledRow` was recorded 5 days after the reply (well past
+  //     the threshold, so it would render the annotation).
+  const pendingRow = { respondedAt: null, responseRecordedAt: null };
+  const liveRow = {
+    respondedAt: "2026-04-15T10:00:00.000Z",
+    responseRecordedAt: "2026-04-15T10:30:00.000Z",
+  };
+  const backfilledRow = {
+    respondedAt: "2026-04-10T14:30:00.000Z",
+    responseRecordedAt: "2026-04-15T09:00:00.000Z",
+  };
+
+  it("pins the URL-param key", () => {
+    // The chip's URL persistence key is part of the deep-link
+    // contract; renaming it would silently break bookmarks.
+    expect(BACKFILL_FILTER_QUERY_PARAM).toBe("reply");
+  });
+
+  describe("parseBackfillFilter", () => {
+    it("accepts each known mode verbatim", () => {
+      expect(parseBackfillFilter("all")).toBe("all");
+      expect(parseBackfillFilter("backfilled")).toBe("backfilled");
+      expect(parseBackfillFilter("live")).toBe("live");
+    });
+
+    it("falls back to 'all' for missing or unknown values", () => {
+      expect(parseBackfillFilter(null)).toBe("all");
+      expect(parseBackfillFilter(undefined)).toBe("all");
+      expect(parseBackfillFilter("")).toBe("all");
+      expect(parseBackfillFilter("BACKFILLED")).toBe("all");
+      expect(parseBackfillFilter("anything-else")).toBe("all");
+    });
+  });
+
+  describe("isBackfilledResponse", () => {
+    it("agrees with backfillAnnotation on every row shape", () => {
+      // The chip filter and the inline annotation must answer the
+      // same question — pin the equivalence so a future tweak to one
+      // doesn't silently drift away from the other.
+      for (const row of [pendingRow, liveRow, backfilledRow]) {
+        expect(
+          isBackfilledResponse(row.respondedAt, row.responseRecordedAt),
+        ).toBe(
+          backfillAnnotation(row.respondedAt, row.responseRecordedAt) !== null,
+        );
+      }
+      expect(isBackfilledResponse(pendingRow.respondedAt, pendingRow.responseRecordedAt)).toBe(false);
+      expect(isBackfilledResponse(liveRow.respondedAt, liveRow.responseRecordedAt)).toBe(false);
+      expect(isBackfilledResponse(backfilledRow.respondedAt, backfilledRow.responseRecordedAt)).toBe(true);
+    });
+  });
+
+  describe("matchesBackfillFilter", () => {
+    it("'all' shows every row regardless of reply state", () => {
+      // 'all' is the default — every row in the timeline must pass
+      // through, including pending rows that have no reply yet.
+      for (const row of [pendingRow, liveRow, backfilledRow]) {
+        expect(
+          matchesBackfillFilter(
+            "all",
+            row.respondedAt,
+            row.responseRecordedAt,
+          ),
+        ).toBe(true);
+      }
+    });
+
+    it("'backfilled' shows only rows past the backfill threshold", () => {
+      expect(
+        matchesBackfillFilter(
+          "backfilled",
+          pendingRow.respondedAt,
+          pendingRow.responseRecordedAt,
+        ),
+      ).toBe(false);
+      expect(
+        matchesBackfillFilter(
+          "backfilled",
+          liveRow.respondedAt,
+          liveRow.responseRecordedAt,
+        ),
+      ).toBe(false);
+      expect(
+        matchesBackfillFilter(
+          "backfilled",
+          backfilledRow.respondedAt,
+          backfilledRow.responseRecordedAt,
+        ),
+      ).toBe(true);
+    });
+
+    it("'live' shows only rows whose reply was recorded close to the actual reply", () => {
+      // Pending rows must be excluded — 'live' answers the
+      // affirmative question "show me live replies" rather than the
+      // negative "everything that isn't backfilled".
+      expect(
+        matchesBackfillFilter(
+          "live",
+          pendingRow.respondedAt,
+          pendingRow.responseRecordedAt,
+        ),
+      ).toBe(false);
+      expect(
+        matchesBackfillFilter(
+          "live",
+          liveRow.respondedAt,
+          liveRow.responseRecordedAt,
+        ),
+      ).toBe(true);
+      expect(
+        matchesBackfillFilter(
+          "live",
+          backfilledRow.respondedAt,
+          backfilledRow.responseRecordedAt,
+        ),
+      ).toBe(false);
+    });
+
+    it("treats a row with respondedAt but no responseRecordedAt as live (pre-Task-#106 history)", () => {
+      // Older rows recorded before Task #106 shipped don't carry a
+      // `responseRecordedAt`. Treating them as live (rather than
+      // backfilled) preserves the inline annotation's behaviour and
+      // avoids a phantom "backfilled" badge on legacy data.
+      const legacyRow = {
+        respondedAt: "2025-12-01T10:00:00.000Z",
+        responseRecordedAt: null,
+      };
+      expect(
+        matchesBackfillFilter(
+          "live",
+          legacyRow.respondedAt,
+          legacyRow.responseRecordedAt,
+        ),
+      ).toBe(true);
+      expect(
+        matchesBackfillFilter(
+          "backfilled",
+          legacyRow.respondedAt,
+          legacyRow.responseRecordedAt,
+        ),
+      ).toBe(false);
+    });
   });
 });

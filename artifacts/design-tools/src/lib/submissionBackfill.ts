@@ -48,3 +48,79 @@ export function backfillAnnotation(
   const recordedDate = new Date(responseRecordedAt).toLocaleDateString();
   return `backfilled on ${recordedDate}`;
 }
+
+/**
+ * Reviewer-facing filter modes for the engagement timeline of past
+ * submissions. Task #124. The values double as the URL-param values
+ * so a deep link survives a page refresh.
+ *
+ * - `all` — no filter, every row is shown (the default).
+ * - `backfilled` — only rows whose jurisdiction reply was backfilled
+ *   (the user picked a past `respondedAt`, recorded later).
+ * - `live` — only rows whose reply was recorded close to the actual
+ *   reply time (no backfill annotation). Pending rows (no reply at
+ *   all) are excluded so the filter answers "show me live replies"
+ *   rather than "everything that isn't backfilled".
+ */
+export type BackfillFilter = "all" | "backfilled" | "live";
+
+/**
+ * URL search-param key used to persist the engagement timeline's
+ * backfill filter (Task #124). Pinned as a constant so the page,
+ * the tests, and any future deep-link helpers stay in lock-step.
+ *
+ * Named `reply` rather than `backfill` because the chips read as
+ * "Backfilled replies / Live replies / All replies" — the param
+ * mirrors what the user is filtering rather than the implementation
+ * detail.
+ */
+export const BACKFILL_FILTER_QUERY_PARAM = "reply";
+
+/**
+ * Coerce an arbitrary URL-param value into a known {@link BackfillFilter}.
+ * Unknown / missing values resolve to `"all"` so a stale or
+ * hand-edited link can't push the timeline into an undefined state.
+ */
+export function parseBackfillFilter(
+  raw: string | null | undefined,
+): BackfillFilter {
+  if (raw === "backfilled" || raw === "live" || raw === "all") return raw;
+  return "all";
+}
+
+/**
+ * True when this row's reply meets the threshold for being treated
+ * as a backfill (see {@link backfillAnnotation}). Returns `false`
+ * for pending rows, missing timestamps, and live recordings — i.e.
+ * it's `true` exactly when the row would render the "backfilled on
+ * <date>" annotation.
+ */
+export function isBackfilledResponse(
+  respondedAt: string | null | undefined,
+  responseRecordedAt: string | null | undefined,
+): boolean {
+  return backfillAnnotation(respondedAt, responseRecordedAt) !== null;
+}
+
+/**
+ * Decide whether a given submission row should be visible under the
+ * active {@link BackfillFilter}. Defined as a pure helper so the
+ * filtering rules are unit-tested in one place rather than re-derived
+ * inline in the timeline component.
+ *
+ * Pending rows (no `respondedAt`) are intentionally hidden from both
+ * the `backfilled` and `live` modes — the chips read as "show me
+ * <kind> replies", and a row with no reply yet is neither.
+ */
+export function matchesBackfillFilter(
+  filter: BackfillFilter,
+  respondedAt: string | null | undefined,
+  responseRecordedAt: string | null | undefined,
+): boolean {
+  if (filter === "all") return true;
+  const backfilled = isBackfilledResponse(respondedAt, responseRecordedAt);
+  if (filter === "backfilled") return backfilled;
+  // `live` — must have a reply, and that reply must not be flagged
+  // as backfilled.
+  return respondedAt != null && !backfilled;
+}

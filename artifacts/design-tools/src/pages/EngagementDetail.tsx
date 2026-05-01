@@ -29,7 +29,13 @@ import { ReviewerComment, SubmitToJurisdictionDialog } from "@workspace/portal-u
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
-import { backfillAnnotation } from "../lib/submissionBackfill";
+import {
+  BACKFILL_FILTER_QUERY_PARAM,
+  backfillAnnotation,
+  matchesBackfillFilter,
+  parseBackfillFilter,
+  type BackfillFilter,
+} from "../lib/submissionBackfill";
 
 const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
   active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },
@@ -207,6 +213,37 @@ function writeTabToUrl(next: TabId): void {
     url.searchParams.delete("tab");
   } else {
     url.searchParams.set("tab", next);
+  }
+  window.history.replaceState(null, "", url.toString());
+}
+
+/**
+ * Read the backfill filter (Task #124) from the URL. Reuses the
+ * same SSR-safe + allow-list pattern as `readTabFromUrl` so a stale
+ * or hand-edited link can't push the timeline into an undefined
+ * filter state. Defaults to `"all"` when the param is missing.
+ */
+function readBackfillFilterFromUrl(): BackfillFilter {
+  if (typeof window === "undefined") return "all";
+  const raw = new URLSearchParams(window.location.search).get(
+    BACKFILL_FILTER_QUERY_PARAM,
+  );
+  return parseBackfillFilter(raw);
+}
+
+/**
+ * Mirror the active backfill filter back into the URL via
+ * `replaceState`, matching the tab-state convention above. The
+ * default (`"all"`) is encoded by *removing* the param so the
+ * canonical engagement URL stays clean when no filter is applied.
+ */
+function writeBackfillFilterToUrl(next: BackfillFilter): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (next === "all") {
+    url.searchParams.delete(BACKFILL_FILTER_QUERY_PARAM);
+  } else {
+    url.searchParams.set(BACKFILL_FILTER_QUERY_PARAM, next);
   }
   window.history.replaceState(null, "", url.toString());
 }
@@ -635,11 +672,83 @@ function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
  * Pagination is still a follow-up: engagements typically accumulate
  * a handful of packages, so a bare array is fine for now.
  */
+/**
+ * Pill control for the engagement-timeline backfill filter (Task
+ * #124). Renders the three modes — All / Backfilled / Live — as a
+ * radiogroup so screen readers announce the selection model
+ * correctly. Visual styling intentionally mirrors the chips already
+ * used elsewhere in the design-tools UI (small, rounded, cyan when
+ * selected) so the affordance reads as familiar at a glance.
+ */
+function BackfillFilterChips({
+  value,
+  onChange,
+}: {
+  value: BackfillFilter;
+  onChange: (next: BackfillFilter) => void;
+}) {
+  const options: Array<{ id: BackfillFilter; label: string }> = [
+    { id: "all", label: "All" },
+    { id: "backfilled", label: "Backfilled" },
+    { id: "live", label: "Live" },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Filter replies by backfill"
+      data-testid="submissions-backfill-filter"
+      style={{ display: "inline-flex", gap: 4 }}
+    >
+      {options.map((opt) => {
+        const isActive = value === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            data-testid={`submissions-backfill-filter-${opt.id}`}
+            onClick={() => onChange(opt.id)}
+            style={{
+              padding: "2px 10px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontFamily: "Inter, sans-serif",
+              letterSpacing: 0.2,
+              cursor: "pointer",
+              border: "1px solid",
+              borderColor: isActive
+                ? "rgba(0,180,216,0.55)"
+                : "var(--border-default)",
+              background: isActive
+                ? "rgba(0,180,216,0.15)"
+                : "transparent",
+              color: isActive ? "var(--cyan)" : "var(--text-secondary)",
+              transition: "color 0.12s, background 0.12s, border-color 0.12s",
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SubmissionsTab({
   engagementId,
+  backfillFilter,
+  onBackfillFilterChange,
   onOpenSubmission,
 }: {
   engagementId: string;
+  /**
+   * Active backfill filter (Task #124). Lifted to the parent page so
+   * the URL param survives tab switches and the chip selection
+   * round-trips through `?reply=…` deep links.
+   */
+  backfillFilter: BackfillFilter;
+  onBackfillFilterChange: (next: BackfillFilter) => void;
   /**
    * Open the per-submission detail modal. Lifted to the parent so the
    * modal lives once per engagement page (rather than once per row)
@@ -716,6 +825,26 @@ function SubmissionsTab({
       ? (submissions.find((s) => s.id === responseDialogFor) ?? null)
       : null;
 
+  // Apply the backfill filter (Task #124) using the *resolved* row
+  // payload — i.e. the local optimistic mirror takes precedence over
+  // the listing query so a freshly-recorded reply is filtered by its
+  // new state, not the stale "pending" snapshot the server still
+  // returns until the next refetch.
+  const visibleSubmissions = useMemo(() => {
+    if (!submissions) return [];
+    return submissions.filter((s) => {
+      const local = recordedResponses[s.id] ?? null;
+      const respondedAt = local?.respondedAt ?? s.respondedAt;
+      const responseRecordedAt =
+        local?.responseRecordedAt ?? s.responseRecordedAt;
+      return matchesBackfillFilter(
+        backfillFilter,
+        respondedAt,
+        responseRecordedAt,
+      );
+    });
+  }, [submissions, recordedResponses, backfillFilter]);
+
   if (isLoading) {
     return (
       <div
@@ -746,10 +875,33 @@ function SubmissionsTab({
       <div className="sc-card flex flex-col" data-testid="submissions-list">
         <div className="sc-card-header sc-row-sb">
           <span className="sc-label">PAST SUBMISSIONS</span>
-          <span className="sc-meta">{submissions.length} total</span>
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 12 }}
+          >
+            <BackfillFilterChips
+              value={backfillFilter}
+              onChange={onBackfillFilterChange}
+            />
+            <span className="sc-meta" data-testid="submissions-count">
+              {backfillFilter === "all"
+                ? `${submissions.length} total`
+                : `${visibleSubmissions.length} of ${submissions.length}`}
+            </span>
+          </div>
         </div>
         <div className="flex flex-col">
-          {submissions.map((s: EngagementSubmissionSummary) => {
+          {visibleSubmissions.length === 0 && (
+            <div
+              className="p-6 text-center"
+              data-testid="submissions-filter-empty"
+            >
+              <div className="sc-prose opacity-70" style={{ maxWidth: 420, margin: "0 auto" }}>
+                No {backfillFilter === "backfilled" ? "backfilled" : "live"}{" "}
+                replies match this filter.
+              </div>
+            </div>
+          )}
+          {visibleSubmissions.map((s: EngagementSubmissionSummary) => {
             // The OpenAPI contract guarantees `status` is always
             // present on the row; reviewer comment, respondedAt, and
             // responseRecordedAt remain optional. We still consult the
@@ -976,6 +1128,17 @@ export function EngagementDetail() {
   const setTab = (next: TabId): void => {
     setTabState(next);
     writeTabToUrl(next);
+  };
+  // Backfill filter (Task #124) for the engagement timeline of past
+  // submissions. Lifted to the page so the URL param survives tab
+  // switches and so the same setter pattern as `tab` keeps the URL
+  // and React state in lock-step on every change.
+  const [backfillFilter, setBackfillFilterState] = useState<BackfillFilter>(
+    () => readBackfillFilterFromUrl(),
+  );
+  const setBackfillFilter = (next: BackfillFilter): void => {
+    setBackfillFilterState(next);
+    writeBackfillFilterToUrl(next);
   };
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"intake" | "edit">("edit");
@@ -1321,6 +1484,8 @@ export function EngagementDetail() {
         {tab === "submissions" && (
           <SubmissionsTab
             engagementId={engagement.id}
+            backfillFilter={backfillFilter}
+            onBackfillFilterChange={setBackfillFilter}
             onOpenSubmission={(sid) => setOpenSubmissionId(sid)}
           />
         )}
