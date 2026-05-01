@@ -1918,6 +1918,74 @@ export const GetBimModelRefreshResponse = zod
   );
 
 /**
+ * DA-PI-5 / Spec 51a §2.2 — returns the append-only audit
+trail of architect overrides recorded against locked
+materializable elements on this bim-model. Newest first.
+
+The design-tools Site Context tab reads this to surface the
+"what did the architect change inside Revit" feedback loop
+that closes the affordance opened by `POST /engagements/{id}/bim-model`.
+
+Each entry carries the parent materializable element's
+`elementKind` and `label` so the UI can group the rows by
+element without a follow-up fetch. Divergences against an
+element that has since been deleted out from under the
+bim-model are still returned (the cascade only fires when
+the element row itself is removed) and surface with a null
+`elementKind` / `label`.
+
+Engagement-scoped: requires the architect-audience guard the
+rest of the bim-model browser surface uses.
+
+ * @summary List recorded briefing divergences for a bim-model
+ */
+export const ListBimModelDivergencesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ListBimModelDivergencesResponse = zod
+  .object({
+    divergences: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          bimModelId: zod.string(),
+          materializableElementId: zod.string(),
+          briefingId: zod.string(),
+          reason: zod
+            .enum(["unpinned", "geometry-edited", "deleted", "other"])
+            .describe(
+              "DA-PI-5 \/ Spec 51a §2.2 — the closed set of reason buckets the\nC# Revit add-in is allowed to record when an architect\nmodifies a locked materializable element.\n",
+            ),
+          note: zod.string().nullable(),
+          detail: zod.record(zod.string(), zod.unknown()),
+          createdAt: zod.coerce.date(),
+          elementKind: zod
+            .enum([
+              "terrain",
+              "property-line",
+              "setback-plane",
+              "buildable-envelope",
+              "floodplain",
+              "wetland",
+              "neighbor-mass",
+            ])
+            .describe(
+              "DA-PI-5 \/ Spec 51a §2.4 — the seven element kinds the C# Revit\nadd-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on\nthe api-server `converterClient` so a materializable element\nsourced from a DXF round-trips through the same closed set.\n",
+            )
+            .nullable(),
+          elementLabel: zod.string().nullable(),
+        })
+        .describe(
+          'DA-PI-5 \/ Spec 51a §2.2 — one row in the\n`listBimModelDivergences` response. Joins each divergence\nwith the materializable element it diverged from so the\ndesign-tools Site Context tab can group rows by element\nkind\/label without a follow-up fetch. `elementKind` and\n`elementLabel` are nullable: a divergence whose parent\nelement has since been deleted out from under the bim-model\nstill surfaces (the row is preserved) but with both fields\nnull so the UI can render an \"element no longer in briefing\"\nfallback.\n',
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/bim-models\/{id}\/divergences`.\nNewest-first list of architect overrides the C# Revit add-in\nhas reported back against locked materializable elements.\n",
+  );
+
+/**
  * DA-PI-5 / Spec 51a §2.2 — service-to-service surface the C#
 Revit add-in calls when its element-watcher detects an
 unpin / geometry edit / deletion against a locked

@@ -1716,6 +1716,44 @@ export interface BimModelDivergenceResponse {
   divergence: BriefingDivergence;
 }
 
+export type BimModelDivergenceListEntryDetail = { [key: string]: unknown };
+
+/**
+ * DA-PI-5 / Spec 51a §2.2 — one row in the
+`listBimModelDivergences` response. Joins each divergence
+with the materializable element it diverged from so the
+design-tools Site Context tab can group rows by element
+kind/label without a follow-up fetch. `elementKind` and
+`elementLabel` are nullable: a divergence whose parent
+element has since been deleted out from under the bim-model
+still surfaces (the row is preserved) but with both fields
+null so the UI can render an "element no longer in briefing"
+fallback.
+
+ */
+export interface BimModelDivergenceListEntry {
+  id: string;
+  bimModelId: string;
+  materializableElementId: string;
+  briefingId: string;
+  reason: BriefingDivergenceReason;
+  note: string | null;
+  detail: BimModelDivergenceListEntryDetail;
+  createdAt: string;
+  elementKind: MaterializableElementKind | null;
+  elementLabel: string | null;
+}
+
+/**
+ * Wire envelope for `GET /bim-models/{id}/divergences`.
+Newest-first list of architect overrides the C# Revit add-in
+has reported back against locked materializable elements.
+
+ */
+export interface ListBimModelDivergencesResponse {
+  divergences: BimModelDivergenceListEntry[];
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;

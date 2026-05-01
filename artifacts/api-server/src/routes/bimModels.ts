@@ -59,6 +59,7 @@ import {
   PushEngagementBimModelParams,
   PushEngagementBimModelBody,
   GetBimModelRefreshParams,
+  ListBimModelDivergencesParams,
   RecordBimModelDivergenceParams,
   RecordBimModelDivergenceBody,
 } from "@workspace/api-zod";
@@ -150,6 +151,20 @@ interface BriefingDivergenceWire {
   note: string | null;
   detail: Record<string, unknown>;
   createdAt: string;
+}
+
+/**
+ * Wire row for `GET /bim-models/:id/divergences`. Joins each
+ * divergence with the parent materializable element so the FE can
+ * group rows by `elementKind` / `elementLabel` without a follow-up
+ * fetch. Both join fields are nullable: a divergence whose parent
+ * element has been deleted out from under the bim-model still
+ * surfaces here (we use a left join below) so the audit trail
+ * stays whole.
+ */
+interface BimModelDivergenceListEntryWire extends BriefingDivergenceWire {
+  elementKind: string | null;
+  elementLabel: string | null;
 }
 
 /** Wire row for the element-level diff returned by `/refresh`. */
@@ -717,6 +732,84 @@ router.get(
     } catch (err) {
       reqLog.error({ err, bimModelId }, "get bim-model refresh failed");
       res.status(500).json({ error: "Failed to compute bim-model refresh" });
+    }
+  },
+);
+
+/**
+ * GET /bim-models/:id/divergences — newest-first list of recorded
+ * architect overrides against this bim-model's locked materializable
+ * elements. Joins each divergence with its parent element so the
+ * design-tools Site Context tab can group by element kind/label
+ * without a follow-up fetch.
+ *
+ * Browser-facing — gated by the architect-audience guard the rest
+ * of the bim-model surface uses; the S2S divergence POST is the
+ * only writer and carries its own HMAC trust contract.
+ *
+ * The join is intentionally a left join: the
+ * `briefing_divergences.materializable_element_id` FK has
+ * `onDelete: cascade`, so today the materializable element will
+ * always be present at query time, but a follow-up that softens
+ * that cascade (e.g. tombstoning instead of deleting) would
+ * surface here as null `elementKind`/`elementLabel` rather than
+ * silently dropping the audit row.
+ */
+router.get(
+  "/bim-models/:id/divergences",
+  async (req: Request, res: Response) => {
+    if (requireArchitectAudience(req, res)) return;
+    const paramsParse = ListBimModelDivergencesParams.safeParse(req.params);
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_bim_model_id" });
+      return;
+    }
+    const bimModelId = paramsParse.data.id;
+    const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+
+    try {
+      const bmRows = await db
+        .select({ id: bimModels.id })
+        .from(bimModels)
+        .where(eq(bimModels.id, bimModelId))
+        .limit(1);
+      if (bmRows.length === 0) {
+        res.status(404).json({ error: "bim_model_not_found" });
+        return;
+      }
+
+      // Newest-first so the FE can render a chronological "most
+      // recent overrides" feed without an extra client-side sort.
+      const rows = await db
+        .select({
+          divergence: briefingDivergences,
+          elementKind: materializableElements.elementKind,
+          elementLabel: materializableElements.label,
+        })
+        .from(briefingDivergences)
+        .leftJoin(
+          materializableElements,
+          eq(
+            materializableElements.id,
+            briefingDivergences.materializableElementId,
+          ),
+        )
+        .where(eq(briefingDivergences.bimModelId, bimModelId))
+        .orderBy(desc(briefingDivergences.createdAt));
+
+      const divergences: BimModelDivergenceListEntryWire[] = rows.map((r) => ({
+        ...toDivergenceWire(r.divergence),
+        elementKind: r.elementKind ?? null,
+        elementLabel: r.elementLabel ?? null,
+      }));
+
+      res.json({ divergences });
+    } catch (err) {
+      reqLog.error(
+        { err, bimModelId },
+        "list bim-model divergences failed",
+      );
+      res.status(500).json({ error: "Failed to list divergences" });
     }
   },
 );

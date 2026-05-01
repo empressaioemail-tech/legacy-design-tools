@@ -45,6 +45,7 @@ import type {
   GetSnapshotSheetHistoryParams,
   HealthStatus,
   JurisdictionSummary,
+  ListBimModelDivergencesResponse,
   ListCodeAtomsParams,
   ListEngagementBriefingSourcesParams,
   ListJurisdictionAtomsParams,
@@ -2364,6 +2365,117 @@ export function useGetBimModelRefresh<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetBimModelRefreshQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * DA-PI-5 / Spec 51a §2.2 — returns the append-only audit
+trail of architect overrides recorded against locked
+materializable elements on this bim-model. Newest first.
+
+The design-tools Site Context tab reads this to surface the
+"what did the architect change inside Revit" feedback loop
+that closes the affordance opened by `POST /engagements/{id}/bim-model`.
+
+Each entry carries the parent materializable element's
+`elementKind` and `label` so the UI can group the rows by
+element without a follow-up fetch. Divergences against an
+element that has since been deleted out from under the
+bim-model are still returned (the cascade only fires when
+the element row itself is removed) and surface with a null
+`elementKind` / `label`.
+
+Engagement-scoped: requires the architect-audience guard the
+rest of the bim-model browser surface uses.
+
+ * @summary List recorded briefing divergences for a bim-model
+ */
+export const getListBimModelDivergencesUrl = (id: string) => {
+  return `/api/bim-models/${id}/divergences`;
+};
+
+export const listBimModelDivergences = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ListBimModelDivergencesResponse> => {
+  return customFetch<ListBimModelDivergencesResponse>(
+    getListBimModelDivergencesUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListBimModelDivergencesQueryKey = (id: string) => {
+  return [`/api/bim-models/${id}/divergences`] as const;
+};
+
+export const getListBimModelDivergencesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listBimModelDivergences>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listBimModelDivergences>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListBimModelDivergencesQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listBimModelDivergences>>
+  > = ({ signal }) =>
+    listBimModelDivergences(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listBimModelDivergences>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListBimModelDivergencesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listBimModelDivergences>>
+>;
+export type ListBimModelDivergencesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List recorded briefing divergences for a bim-model
+ */
+
+export function useListBimModelDivergences<
+  TData = Awaited<ReturnType<typeof listBimModelDivergences>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listBimModelDivergences>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListBimModelDivergencesQueryOptions(id, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

@@ -10,6 +10,7 @@ import {
   useGetEngagementBriefing,
   useGetEngagementBriefingGenerationStatus,
   useGetSnapshot,
+  useListBimModelDivergences,
   useListEngagementBriefingSources,
   useListEngagementSubmissions,
   usePushEngagementBimModel,
@@ -22,9 +23,11 @@ import {
   getGetEngagementBriefingQueryKey,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
+  getListBimModelDivergencesQueryKey,
   getListEngagementBriefingSourcesQueryKey,
   getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
+  type BimModelDivergenceListEntry,
   type EngagementBriefingNarrative,
   type EngagementBriefingSource,
   type EngagementDetail as EngagementDetailType,
@@ -2098,6 +2101,8 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
         hasBriefing={Boolean(briefingQuery.data?.briefing)}
       />
 
+      <BriefingDivergencesPanel engagementId={engagementId} />
+
       <BriefingSourceUploadModal
         engagementId={engagementId}
         isOpen={uploadOpen}
@@ -2165,6 +2170,15 @@ function PushToRevitAffordance({
         if (bimModelId !== null) {
           void queryClient.invalidateQueries({
             queryKey: getGetBimModelRefreshQueryKey(bimModelId),
+          });
+          // The divergence list lives on the same Site Context tab —
+          // a re-push usually means the architect has just reconciled
+          // their overrides, so closing the loop with a fresh fetch
+          // keeps the panel honest. The route is cheap (single
+          // indexed select) so an unconditional invalidation here is
+          // simpler than threading the prior refreshStatus through.
+          void queryClient.invalidateQueries({
+            queryKey: getListBimModelDivergencesQueryKey(bimModelId),
           });
         }
       },
@@ -2361,6 +2375,341 @@ function formatRelativeMaterializedAt(iso: string): string {
   if (deltaSec < 60 * 60 * 24)
     return `${Math.floor(deltaSec / 60 / 60)} h ago`;
   return `${Math.floor(deltaSec / 60 / 60 / 24)} d ago`;
+}
+
+/**
+ * Human-readable label for each {@link MaterializableElementKind}
+ * the C# Revit add-in can materialize. Mirrors the kinds defined in
+ * the OpenAPI spec at `MaterializableElementKind`.
+ */
+const MATERIALIZABLE_ELEMENT_KIND_LABELS: Record<string, string> = {
+  terrain: "Terrain",
+  "property-line": "Property line",
+  "setback-plane": "Setback plane",
+  "buildable-envelope": "Buildable envelope",
+  floodplain: "Floodplain",
+  wetland: "Wetland",
+  "neighbor-mass": "Neighbor mass",
+};
+
+/**
+ * Human-readable label for each {@link BriefingDivergenceReason}.
+ * The closed set mirrors `BriefingDivergenceReason` in the OpenAPI
+ * spec so renaming a reason bucket on the schema side surfaces here
+ * as a missing-label fallback rather than a runtime crash.
+ */
+const BRIEFING_DIVERGENCE_REASON_LABELS: Record<string, string> = {
+  unpinned: "Unpinned",
+  "geometry-edited": "Geometry edited",
+  deleted: "Deleted",
+  other: "Other override",
+};
+
+/**
+ * Per-reason badge palette, keyed off the SmartCity theme tokens so
+ * the pill picks the right dark/light contrast. We treat `deleted`
+ * as the loudest signal (danger) — a deleted locked element is the
+ * scenario the operator most needs to chase down — and the other
+ * three reasons land on the warning palette so they read as
+ * "noticed, not blocking".
+ */
+const BRIEFING_DIVERGENCE_REASON_COLORS: Record<
+  string,
+  { bg: string; fg: string }
+> = {
+  deleted: { bg: "var(--danger-dim)", fg: "var(--danger-text)" },
+  unpinned: { bg: "var(--warning-dim)", fg: "var(--warning-text)" },
+  "geometry-edited": {
+    bg: "var(--warning-dim)",
+    fg: "var(--warning-text)",
+  },
+  other: { bg: "var(--info-dim)", fg: "var(--info-text)" },
+};
+
+/**
+ * DA-PI-5 / Spec 51a §2.2 — the "what did the architect change
+ * inside Revit" feedback panel that closes the loop opened by the
+ * `PushToRevitAffordance` above. Reads the engagement's bim-model
+ * (to discover the bim-model id) and lists the recorded divergences
+ * grouped by element so the operator can scan "Buildable envelope:
+ * geometry edited" at a glance instead of paging through a flat
+ * stream of rows.
+ *
+ * Renders nothing while the bim-model query is still loading or
+ * when no bim-model has ever been pushed — the affordance card
+ * above already explains "Push to Revit first", and a second empty
+ * card on a fresh engagement would just be visual noise. Once the
+ * bim-model row exists, the panel always renders (with an empty
+ * state when no divergence has been recorded yet) so the operator
+ * has a stable place to look.
+ *
+ * The list refreshes automatically: the push mutation invalidates
+ * the divergence query key (so a re-push picks up any divergences
+ * the C# add-in recorded between the prior poll and now), and the
+ * 60s `staleTime` keeps the read cheap during normal browsing.
+ */
+function BriefingDivergencesPanel({
+  engagementId,
+}: {
+  engagementId: string;
+}) {
+  const bimModelQuery = useGetEngagementBimModel(engagementId);
+  const bimModelId = bimModelQuery.data?.bimModel?.id ?? null;
+
+  const divergencesQuery = useListBimModelDivergences(bimModelId ?? "", {
+    query: {
+      enabled: bimModelId !== null,
+      queryKey: getListBimModelDivergencesQueryKey(bimModelId ?? ""),
+      staleTime: 60_000,
+    },
+  });
+
+  // Hide the panel until the engagement has actually been pushed to
+  // Revit at least once. This is the same guard the affordance uses
+  // to flip from "Push" to "Push again" — if there's no bim-model
+  // row, there cannot be any divergences either, and the empty card
+  // would just duplicate the affordance's "not pushed yet" state.
+  if (bimModelQuery.isLoading || bimModelId === null) {
+    return null;
+  }
+
+  const divergences = divergencesQuery.data?.divergences ?? [];
+  const grouped = groupDivergencesByElement(divergences);
+
+  return (
+    <div
+      className="sc-card"
+      data-testid="briefing-divergences-panel"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        padding: 12,
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div className="sc-medium">Architect overrides in Revit</div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          The C# add-in records every edit an architect makes to a
+          locked element. Use this list to confirm the briefing still
+          matches what's in the model.
+        </div>
+      </div>
+
+      {divergencesQuery.isLoading && (
+        <div
+          data-testid="briefing-divergences-loading"
+          style={{ fontSize: 12, color: "var(--text-muted)" }}
+        >
+          Loading recent overrides…
+        </div>
+      )}
+
+      {divergencesQuery.isError && (
+        <div
+          role="alert"
+          data-testid="briefing-divergences-error"
+          style={{
+            fontSize: 12,
+            color: "var(--danger-text)",
+            background: "var(--danger-dim)",
+            padding: 8,
+            borderRadius: 4,
+          }}
+        >
+          Couldn't load recent overrides. Try refreshing in a moment.
+        </div>
+      )}
+
+      {!divergencesQuery.isLoading &&
+        !divergencesQuery.isError &&
+        divergences.length === 0 && (
+          <div
+            data-testid="briefing-divergences-empty"
+            style={{
+              fontSize: 12,
+              color: "var(--text-muted)",
+              fontStyle: "italic",
+              padding: "8px 0",
+            }}
+          >
+            No overrides recorded yet — the briefing matches what's in
+            Revit.
+          </div>
+        )}
+
+      {grouped.length > 0 && (
+        <div
+          data-testid="briefing-divergences-list"
+          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+        >
+          {grouped.map((group) => (
+            <BriefingDivergenceGroup key={group.elementId} group={group} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface BriefingDivergenceGroupShape {
+  elementId: string;
+  elementKind: string | null;
+  elementLabel: string | null;
+  rows: BimModelDivergenceListEntry[];
+}
+
+/**
+ * Group divergences by `materializableElementId` so the panel can
+ * render one card per element. Within a group, rows stay in the
+ * server's newest-first order so the most recent override is the
+ * first thing the operator reads. Groups themselves are ordered by
+ * the newest divergence in the group — an element the architect just
+ * touched bubbles to the top.
+ */
+function groupDivergencesByElement(
+  rows: ReadonlyArray<BimModelDivergenceListEntry>,
+): BriefingDivergenceGroupShape[] {
+  const byId = new Map<string, BriefingDivergenceGroupShape>();
+  for (const row of rows) {
+    const existing = byId.get(row.materializableElementId);
+    if (existing) {
+      existing.rows.push(row);
+      // Keep `elementKind` / `elementLabel` populated from whichever
+      // row in the group has them — a deleted-element fallback row
+      // shouldn't blank out a label that an earlier row carried.
+      if (!existing.elementKind && row.elementKind) {
+        existing.elementKind = row.elementKind;
+      }
+      if (!existing.elementLabel && row.elementLabel) {
+        existing.elementLabel = row.elementLabel;
+      }
+    } else {
+      byId.set(row.materializableElementId, {
+        elementId: row.materializableElementId,
+        elementKind: row.elementKind,
+        elementLabel: row.elementLabel,
+        rows: [row],
+      });
+    }
+  }
+  return Array.from(byId.values());
+}
+
+function BriefingDivergenceGroup({
+  group,
+}: {
+  group: BriefingDivergenceGroupShape;
+}) {
+  const kindLabel = group.elementKind
+    ? (MATERIALIZABLE_ELEMENT_KIND_LABELS[group.elementKind] ??
+      group.elementKind)
+    : "Element no longer in briefing";
+  return (
+    <div
+      data-testid="briefing-divergences-group"
+      data-element-id={group.elementId}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: 8,
+        border: "1px solid var(--border-default)",
+        borderRadius: 4,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div className="sc-medium" style={{ fontSize: 13 }}>
+          {kindLabel}
+        </div>
+        {group.elementLabel && (
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            {group.elementLabel}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {group.rows.map((row) => (
+          <BriefingDivergenceRow key={row.id} row={row} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BriefingDivergenceRow({
+  row,
+}: {
+  row: BimModelDivergenceListEntry;
+}) {
+  const reasonLabel =
+    BRIEFING_DIVERGENCE_REASON_LABELS[row.reason] ?? row.reason;
+  const palette =
+    BRIEFING_DIVERGENCE_REASON_COLORS[row.reason] ??
+    BRIEFING_DIVERGENCE_REASON_COLORS.other;
+  return (
+    <div
+      data-testid="briefing-divergences-row"
+      data-divergence-id={row.id}
+      data-divergence-reason={row.reason}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        padding: "6px 8px",
+        background: "var(--bg-subtle)",
+        borderRadius: 4,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <span
+          data-testid="briefing-divergences-reason-badge"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "2px 8px",
+            borderRadius: 999,
+            background: palette.bg,
+            color: palette.fg,
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: 0.2,
+            textTransform: "uppercase",
+            lineHeight: 1.4,
+          }}
+        >
+          {reasonLabel}
+        </span>
+        <span
+          title={new Date(row.createdAt).toISOString()}
+          style={{ fontSize: 11, color: "var(--text-muted)" }}
+        >
+          {formatRelativeMaterializedAt(row.createdAt)}
+        </span>
+      </div>
+      {row.note && (
+        <div
+          data-testid="briefing-divergences-note"
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {row.note}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**

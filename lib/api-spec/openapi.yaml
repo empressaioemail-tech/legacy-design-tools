@@ -1026,6 +1026,56 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /bim-models/{id}/divergences:
+    get:
+      operationId: listBimModelDivergences
+      tags: [engagements]
+      summary: List recorded briefing divergences for a bim-model
+      description: |
+        DA-PI-5 / Spec 51a §2.2 — returns the append-only audit
+        trail of architect overrides recorded against locked
+        materializable elements on this bim-model. Newest first.
+
+        The design-tools Site Context tab reads this to surface the
+        "what did the architect change inside Revit" feedback loop
+        that closes the affordance opened by `POST /engagements/{id}/bim-model`.
+
+        Each entry carries the parent materializable element's
+        `elementKind` and `label` so the UI can group the rows by
+        element without a follow-up fetch. Divergences against an
+        element that has since been deleted out from under the
+        bim-model are still returned (the cascade only fires when
+        the element row itself is removed) and surface with a null
+        `elementKind` / `label`.
+
+        Engagement-scoped: requires the architect-audience guard the
+        rest of the bim-model browser surface uses.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Newest-first list of recorded divergences.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListBimModelDivergencesResponse"
+        "403":
+          description: Caller is not architect-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Bim-model not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /bim-models/{id}/divergence:
     post:
       operationId: recordBimModelDivergence
@@ -4572,3 +4622,69 @@ components:
           $ref: "#/components/schemas/BriefingDivergence"
       required:
         - divergence
+
+    BimModelDivergenceListEntry:
+      type: object
+      description: |
+        DA-PI-5 / Spec 51a §2.2 — one row in the
+        `listBimModelDivergences` response. Joins each divergence
+        with the materializable element it diverged from so the
+        design-tools Site Context tab can group rows by element
+        kind/label without a follow-up fetch. `elementKind` and
+        `elementLabel` are nullable: a divergence whose parent
+        element has since been deleted out from under the bim-model
+        still surfaces (the row is preserved) but with both fields
+        null so the UI can render an "element no longer in briefing"
+        fallback.
+      properties:
+        id:
+          type: string
+        bimModelId:
+          type: string
+        materializableElementId:
+          type: string
+        briefingId:
+          type: string
+        reason:
+          $ref: "#/components/schemas/BriefingDivergenceReason"
+        note:
+          type: string
+          nullable: true
+        detail:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        elementKind:
+          allOf:
+            - $ref: "#/components/schemas/MaterializableElementKind"
+          nullable: true
+        elementLabel:
+          type: string
+          nullable: true
+      required:
+        - id
+        - bimModelId
+        - materializableElementId
+        - briefingId
+        - reason
+        - note
+        - detail
+        - createdAt
+        - elementKind
+        - elementLabel
+
+    ListBimModelDivergencesResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /bim-models/{id}/divergences`.
+        Newest-first list of architect overrides the C# Revit add-in
+        has reported back against locked materializable elements.
+      properties:
+        divergences:
+          type: array
+          items:
+            $ref: "#/components/schemas/BimModelDivergenceListEntry"
+      required:
+        - divergences

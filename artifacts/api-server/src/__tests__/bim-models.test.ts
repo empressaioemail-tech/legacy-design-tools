@@ -349,6 +349,103 @@ describe("GET /api/bim-models/:id/refresh", () => {
   });
 });
 
+describe("GET /api/bim-models/:id/divergences", () => {
+  it("returns an empty list when nothing has been recorded yet", async () => {
+    const { engagementId } = await seedEngagementAndBriefing();
+    const push = await asArchitect(
+      request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
+    ).send({});
+    const bimModelId = push.body.bimModel.id as string;
+
+    const res = await asArchitect(
+      request(getApp()).get(`/api/bim-models/${bimModelId}/divergences`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ divergences: [] });
+  });
+
+  it("returns recorded divergences newest-first joined with element kind+label", async () => {
+    const { engagementId, briefingId } = await seedEngagementAndBriefing();
+    const push = await asArchitect(
+      request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
+    ).send({});
+    const bimModelId = push.body.bimModel.id as string;
+
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const [elem] = await ctx.schema.db
+      .insert(materializableElements)
+      .values({
+        briefingId,
+        elementKind: "buildable-envelope",
+        label: "North envelope",
+        geometry: { ring: [] },
+      })
+      .returning();
+
+    // Two divergences with explicit createdAt timestamps so the
+    // newest-first ordering assertion is independent of clock
+    // granularity.
+    await ctx.schema.db.insert(briefingDivergences).values([
+      {
+        bimModelId,
+        materializableElementId: elem.id,
+        briefingId,
+        reason: "geometry-edited",
+        note: "moved a vertex",
+        detail: { revitElementId: 12345 },
+        createdAt: new Date("2026-04-01T12:00:00Z"),
+      },
+      {
+        bimModelId,
+        materializableElementId: elem.id,
+        briefingId,
+        reason: "unpinned",
+        note: null,
+        detail: {},
+        createdAt: new Date("2026-04-02T12:00:00Z"),
+      },
+    ]);
+
+    const res = await asArchitect(
+      request(getApp()).get(`/api/bim-models/${bimModelId}/divergences`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.divergences).toHaveLength(2);
+    expect(res.body.divergences[0].reason).toBe("unpinned");
+    expect(res.body.divergences[1].reason).toBe("geometry-edited");
+    expect(res.body.divergences[0].elementKind).toBe("buildable-envelope");
+    expect(res.body.divergences[0].elementLabel).toBe("North envelope");
+    expect(res.body.divergences[1].note).toBe("moved a vertex");
+    expect(res.body.divergences[1].detail).toMatchObject({
+      revitElementId: 12345,
+    });
+  });
+
+  it("404s on unknown bim-model id", async () => {
+    const res = await asArchitect(
+      request(getApp()).get(
+        `/api/bim-models/00000000-0000-0000-0000-000000000000/divergences`,
+      ),
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("bim_model_not_found");
+  });
+
+  it("403s when the caller is not architect-audience", async () => {
+    const { engagementId } = await seedEngagementAndBriefing();
+    const push = await asArchitect(
+      request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
+    ).send({});
+    const bimModelId = push.body.bimModel.id as string;
+
+    const res = await request(getApp()).get(
+      `/api/bim-models/${bimModelId}/divergences`,
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("bim_model_requires_architect_audience");
+  });
+});
+
 describe("POST /api/bim-models/:id/divergence (HMAC-authenticated)", () => {
   async function setupBimModelWithElement(): Promise<{
     bimModelId: string;
