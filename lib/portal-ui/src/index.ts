@@ -34,6 +34,14 @@ export type { BriefingDivergenceDetailDialogProps } from "./components/BriefingD
 export { ResolvedByChip } from "./components/ResolvedByChip";
 export type { ResolvedByChipProps } from "./components/ResolvedByChip";
 
+// Shared "Copy plain text" button used by the prior-narrative block on
+// both Plan Review and design-tools (Task #350). Lifted out of the two
+// surfaces so the discriminated copyResult state, ~2 s feedback timer,
+// unmount cleanup, and `*-copy-confirm-*` / `*-copy-error-*` testids
+// can't drift between the two copies.
+export { CopyPlainTextButton } from "./components/CopyPlainTextButton";
+export type { CopyPlainTextButtonProps } from "./components/CopyPlainTextButton";
+
 export {
   BRIEFING_DIVERGENCE_REASON_COLORS,
   BRIEFING_DIVERGENCE_REASON_LABELS,

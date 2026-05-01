@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearch } from "wouter";
 import {
   useGetEngagementBriefing,
@@ -8,6 +8,14 @@ import {
   type BriefingGenerationRun,
   type EngagementBriefingNarrative,
 } from "@workspace/api-client-react";
+// Task #350 — the "Copy plain text" button + its success/failure
+// pills + ~2 s revert timer used to live inline on both this file
+// and `artifacts/design-tools/src/pages/EngagementDetail.tsx` as
+// byte-identical copies (Tasks #333 / #338 / #345). Lifting the
+// pattern into `@workspace/portal-ui` collapses the surface area
+// and removes the drift risk the per-surface mirror tests existed
+// to catch — every future tweak now lives in one place.
+import { CopyPlainTextButton } from "@workspace/portal-ui";
 // Task #314 — the per-section word-level diff that powers the
 // prior-narrative panel was extracted into `@workspace/briefing-diff`
 // (originally lifted from `artifacts/design-tools/src/pages/
@@ -278,62 +286,11 @@ export function BriefingRecentRunsPanel({
     setOpenState((prev) => (prev === next ? prev : next));
   }, [search]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
-  // Task #338 — closes the loop on the "Copy plain text" button
-  // (Task #333, mirroring design-tools Task #303 B.4). Clipboard
-  // writes are silent on success, so an auditor who clicks the
-  // button can't tell whether the copy landed without pasting
-  // somewhere else to verify. Tracking the generationId of the row
-  // whose copy just resolved lets the button swap its label to
-  // "Copied!" for ~2s and then revert, without any modal or toast
-  // infrastructure. The 2000 ms duration and `*-copy-confirm-*`
-  // testid are kept byte-identical with the design-tools side
-  // (`artifacts/design-tools/src/pages/EngagementDetail.tsx`,
-  // search for `briefing-run-prior-narrative-copy-confirm-`) so a
-  // future shared-lib lift is a no-op and so an auditor moving
-  // between the two surfaces sees the same confirmation timing.
-  //
-  // Task #345 closes the symmetric failure path: when
-  // `navigator.clipboard` is unavailable (older browsers,
-  // locked-down contexts, no HTTPS) or `writeText` rejects, the
-  // button surfaces a "Couldn't copy" indicator with the same ~2s
-  // timing under a sibling `*-copy-error-*` testid. The success
-  // and error states are stored as a single discriminated value so
-  // only one of the two pills can ever be in the tree at a time —
-  // a back-to-back retry that flips error → success replaces the
-  // pill in place rather than briefly stacking both.
-  const [copyResult, setCopyResult] = useState<{
-    id: string;
-    kind: "success" | "error";
-  } | null>(null);
-  const copyResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const COPY_FEEDBACK_MS = 2000;
-  const flashCopyResult = (
-    generationId: string,
-    kind: "success" | "error",
-  ): void => {
-    if (copyResultTimerRef.current !== null) {
-      clearTimeout(copyResultTimerRef.current);
-    }
-    setCopyResult({ id: generationId, kind });
-    copyResultTimerRef.current = setTimeout(() => {
-      setCopyResult(null);
-      copyResultTimerRef.current = null;
-    }, COPY_FEEDBACK_MS);
-  };
-  // Clear the pending revert on unmount so a click that races the
-  // disclosure being collapsed (or the page being navigated away
-  // from) doesn't leak a setTimeout that fires against an
-  // already-unmounted tree.
-  useEffect(() => {
-    return () => {
-      if (copyResultTimerRef.current !== null) {
-        clearTimeout(copyResultTimerRef.current);
-        copyResultTimerRef.current = null;
-      }
-    };
-  }, []);
+  // Task #350 — the discriminated copyResult state, ~2 s revert
+  // timer, unmount cleanup useEffect, and per-row pill JSX that
+  // used to live inline here (Tasks #333 / #338 / #345) now live in
+  // `@workspace/portal-ui`'s shared `<CopyPlainTextButton />` so
+  // both surfaces consume one implementation.
   const [filter, setFilterState] = useState<RecentRunsFilter>(() =>
     readRecentRunsFilterFromUrl(),
   );
@@ -814,143 +771,32 @@ export function BriefingRecentRunsPanel({
                                     rendering site below is the
                                     canonical one. */}
                               </div>
-                              {/* Task #333 — "Copy plain text" button.
-                                  Concatenates the seven A–G bodies as
-                                  `Label\n\nbody` blocks separated by
-                                  blank lines so the pasted output is
-                                  readable in a Slack thread or ticket
-                                  without any post-processing. Empty
-                                  sections render as "—" so the
-                                  pasted snapshot preserves the
-                                  panel's own placeholder rather than
-                                  leaving the auditor staring at a
-                                  blank label. Uses the async
-                                  Clipboard API (which the test
-                                  environment polyfills via JSDOM's
-                                  `navigator.clipboard.writeText`).
-                                  Falls back silently when the API is
-                                  unavailable so we never throw
-                                  inside an event handler. Mirrors
-                                  the design-tools `briefing-run-
-                                  prior-narrative-copy-${"$"}{
-                                  generationId}` testid + payload
-                                  shape so a future shared lib lift
-                                  is a no-op. */}
-                              {/* Task #338 — flip the label to
-                                  "Copied!" for ~2s on a successful
-                                  write so the auditor sees the copy
-                                  landed. The flip only happens once
-                                  `writeText` resolves — an
-                                  unavailable API or a rejected
-                                  promise never shows the
-                                  confirmation, so the indicator
-                                  can't false-positive. The 2000 ms
-                                  duration and the
-                                  `*-copy-confirm-*` testid are kept
-                                  in lock-step with the design-tools
-                                  side (Task #303 B.4 / #338) so a
-                                  future shared-lib lift is a no-op
-                                  and an auditor moving between the
-                                  two surfaces sees the same
-                                  confirmation timing. */}
-                              {(() => {
-                                const isCopied =
-                                  copyResult?.id === run.generationId &&
-                                  copyResult.kind === "success";
-                                const hasCopyError =
-                                  copyResult?.id === run.generationId &&
-                                  copyResult.kind === "error";
-                                return (
-                                  <button
-                                    type="button"
-                                    data-testid={`briefing-run-prior-narrative-copy-${run.generationId}`}
-                                    onClick={() => {
-                                      const text = SECTION_ORDER.map(
-                                        ({ key, label }) => {
-                                          const body =
-                                            pickSection(priorNarrative, key) ??
-                                            "";
-                                          return `${label}\n\n${body.trim() || "—"}`;
-                                        },
-                                      ).join("\n\n");
-                                      // Capture the id at click time
-                                      // so a fast row-swap doesn't
-                                      // confirm or error the wrong
-                                      // row.
-                                      const generationId = run.generationId;
-                                      if (
-                                        typeof navigator === "undefined" ||
-                                        !navigator.clipboard ||
-                                        typeof navigator.clipboard
-                                          .writeText !== "function"
-                                      ) {
-                                        // Task #345 — symmetric failure
-                                        // path: when the Clipboard API
-                                        // isn't available the button
-                                        // surfaces the same ~2s
-                                        // "Couldn't copy" pill it would
-                                        // surface for a rejected
-                                        // promise, so the auditor
-                                        // always gets feedback.
-                                        flashCopyResult(
-                                          generationId,
-                                          "error",
-                                        );
-                                        return;
-                                      }
-                                      navigator.clipboard
-                                        .writeText(text)
-                                        .then(() => {
-                                          flashCopyResult(
-                                            generationId,
-                                            "success",
-                                          );
-                                        })
-                                        .catch(() => {
-                                          // Task #345 — surface the
-                                          // rejection symmetrically so
-                                          // the auditor knows to retry
-                                          // or hand-select the seven
-                                          // sections instead of
-                                          // silently believing the
-                                          // copy landed.
-                                          flashCopyResult(
-                                            generationId,
-                                            "error",
-                                          );
-                                        });
-                                    }}
-                                    style={{
-                                      fontSize: 11,
-                                      padding: "2px 8px",
-                                      background: "transparent",
-                                      border: "1px solid var(--border-subtle)",
-                                      borderRadius: 4,
-                                      cursor: "pointer",
-                                      color: "var(--text-default)",
-                                      whiteSpace: "nowrap",
-                                    }}
-                                  >
-                                    {isCopied ? (
-                                      <span
-                                        data-testid={`briefing-run-prior-narrative-copy-confirm-${run.generationId}`}
-                                        aria-live="polite"
-                                      >
-                                        Copied!
-                                      </span>
-                                    ) : hasCopyError ? (
-                                      <span
-                                        data-testid={`briefing-run-prior-narrative-copy-error-${run.generationId}`}
-                                        aria-live="polite"
-                                      >
-                                        Couldn&apos;t copy
-                                      </span>
-                                    ) : (
-                                      "Copy plain text"
-                                    )}
-                                  </button>
-                                );
-                              })()}
+                              {/* Task #350 — shared
+                                  `<CopyPlainTextButton />` from
+                                  `@workspace/portal-ui` owns the
+                                  discriminated success/error pill
+                                  state, the ~2 s revert timer, the
+                                  unmount cleanup, and the
+                                  `briefing-run-prior-narrative-copy-*`
+                                  testids the existing tests pin.
+                                  The payload shape (the seven A–G
+                                  bodies as `Label\n\nbody` blocks
+                                  separated by blank lines, with
+                                  empty sections rendered as "—" so
+                                  the pasted snapshot keeps visible
+                                  structure) stays computed here,
+                                  alongside the data that knows how
+                                  to render each section. */}
+                              <CopyPlainTextButton
+                                generationId={run.generationId}
+                                text={SECTION_ORDER.map(
+                                  ({ key, label }) => {
+                                    const body =
+                                      pickSection(priorNarrative, key) ?? "";
+                                    return `${label}\n\n${body.trim() || "—"}`;
+                                  },
+                                ).join("\n\n")}
+                              />
                             </div>
                             {/* Task #332 — mirror the design-tools Task #303
                                 B.3 meta line onto the Plan Review surface
