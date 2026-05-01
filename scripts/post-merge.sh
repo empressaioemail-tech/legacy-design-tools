@@ -11,3 +11,15 @@ pnpm --filter db push
 # surfaces that as "no producing run on file" rather than mislabelling
 # an unrelated later run as "Current".
 pnpm --filter @workspace/scripts run backfill:briefing-generation-ids
+# Task #324 — copy the producing job's `completed_at` into
+# `parcel_briefings.prior_generated_at` for legacy briefings whose
+# `prior_generated_by` is set but whose timestamp is null. Lets the
+# recent-runs panel render the full "Generated … by …" meta line on
+# legacy regenerations via the existing interval matcher (no UI
+# changes required). Idempotent: only acts on rows where
+# `prior_generated_at IS NULL AND prior_generated_by IS NOT NULL`,
+# so re-runs after the initial deploy are no-ops. Rows whose prior
+# producing job has aged out of the briefing-generation-jobs sweep
+# window stay NULL on purpose — the UI keeps the legacy "by …" only
+# rendering rather than synthesising a fictitious timestamp.
+pnpm --filter @workspace/scripts run backfill:prior-generated-at

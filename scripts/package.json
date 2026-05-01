@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "backfill:sheet-created": "tsx ./src/backfillSheetCreatedEvents.ts",
     "backfill:briefing-generation-ids": "tsx ./src/backfillBriefingGenerationIds.ts",
+    "backfill:prior-generated-at": "tsx ./src/backfillPriorGeneratedAt.ts",
     "sweep:orphan-avatars": "tsx ./src/sweepOrphanAvatars.ts",
     "smoke:converter": "tsx ./src/smokeConverter.ts",
     "test": "vitest run",
