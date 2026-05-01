@@ -253,11 +253,64 @@ export const BriefingSourceUploadKind = {
 } as const;
 
 /**
+ * One row of a per-jurisdiction setback table — front/rear/side/
+height/coverage in feet/percent for one zoning district.
+Schema mirrors `lib/adapters/src/local/setbacks/index.ts`'s
+`SetbackDistrict` so the FE can decode without depending on
+the adapters lib.
+
+ */
+export interface LocalSetbackDistrict {
+  district_name: string;
+  front_ft: number;
+  rear_ft: number;
+  side_ft: number;
+  side_corner_ft: number;
+  max_height_ft: number;
+  max_lot_coverage_pct: number;
+  max_impervious_pct: number;
+  citation_url: string;
+}
+
+/**
+ * Per-jurisdiction setback lookup served by
+`GET /local/setbacks/{jurisdictionKey}`. The `districts` array
+is the list the FE matches against the adapter's reported
+zoning district (case-insensitive on `district_name`).
+
+ */
+export interface LocalSetbackTable {
+  jurisdictionKey: string;
+  jurisdictionDisplayName: string;
+  /** Optional context note for fallback / statewide-default
+tables (e.g. "applies to unincorporated parcels only").
+ */
+  note?: string | null;
+  districts: LocalSetbackDistrict[];
+}
+
+/**
+ * Structured producer payload — adapter rows write the raw
+`AdapterResult.payload` (a `{ kind, ... }` object whose
+shape depends on the adapter); manual-upload rows default
+to `{}`. Treat as opaque JSON on the wire — consumers
+(e.g. the Site Context "view layer details" expander)
+switch on `payload.kind` to decide how to render.
+
+ */
+export type EngagementBriefingSourcePayload = { [key: string]: unknown };
+
+/**
  * One current (non-superseded) source attached to an engagement's
 parcel briefing. The `upload*` fields are populated only on
 `manual-upload` rows and describe the file the architect picked.
-`payload` is the structured data the briefing engine will read
-when DA-PI-3 ships; producers may store an empty object today.
+`payload` is the structured data the producer wrote — for an
+adapter row it is the adapter's `AdapterResult.payload` (e.g.
+`{ kind: "zoning", zoning: { attributes: { ZONING: "RR-1" } } }`),
+for a manual upload it is `{}` until the briefing engine starts
+attaching its own metadata. The Site Context tab's "View layer
+details" expander reads from this field, so producers must keep
+the shape stable rather than substitute placeholders.
 
  */
 export interface EngagementBriefingSource {
@@ -267,6 +320,14 @@ export interface EngagementBriefingSource {
   provider: string | null;
   snapshotDate: string;
   note: string | null;
+  /** Structured producer payload — adapter rows write the raw
+`AdapterResult.payload` (a `{ kind, ... }` object whose
+shape depends on the adapter); manual-upload rows default
+to `{}`. Treat as opaque JSON on the wire — consumers
+(e.g. the Site Context "view layer details" expander)
+switch on `payload.kind` to decide how to render.
+ */
+  payload: EngagementBriefingSourcePayload;
   uploadObjectPath: string | null;
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;

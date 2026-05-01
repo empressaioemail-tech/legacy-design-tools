@@ -7,13 +7,19 @@
  */
 import type { BriefingSourceConversionStatus } from "./briefingSourceConversionStatus";
 import type { BriefingSourceKind } from "./briefingSourceKind";
+import type { EngagementBriefingSourcePayload } from "./engagementBriefingSourcePayload";
 
 /**
  * One current (non-superseded) source attached to an engagement's
 parcel briefing. The `upload*` fields are populated only on
 `manual-upload` rows and describe the file the architect picked.
-`payload` is the structured data the briefing engine will read
-when DA-PI-3 ships; producers may store an empty object today.
+`payload` is the structured data the producer wrote — for an
+adapter row it is the adapter's `AdapterResult.payload` (e.g.
+`{ kind: "zoning", zoning: { attributes: { ZONING: "RR-1" } } }`),
+for a manual upload it is `{}` until the briefing engine starts
+attaching its own metadata. The Site Context tab's "View layer
+details" expander reads from this field, so producers must keep
+the shape stable rather than substitute placeholders.
 
  */
 export interface EngagementBriefingSource {
@@ -23,6 +29,14 @@ export interface EngagementBriefingSource {
   provider: string | null;
   snapshotDate: Date;
   note: string | null;
+  /** Structured producer payload — adapter rows write the raw
+`AdapterResult.payload` (a `{ kind, ... }` object whose
+shape depends on the adapter); manual-upload rows default
+to `{}`. Treat as opaque JSON on the wire — consumers
+(e.g. the Site Context "view layer details" expander)
+switch on `payload.kind` to decide how to render.
+ */
+  payload: EngagementBriefingSourcePayload;
   uploadObjectPath: string | null;
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;

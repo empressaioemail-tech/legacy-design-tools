@@ -17,6 +17,7 @@ import parcelBriefingsRouter from "./parcelBriefings";
 import briefingSourcesRouter from "./briefingSources";
 import bimModelsRouter from "./bimModels";
 import generateLayersRouter from "./generateLayers";
+import localSetbacksRouter from "./localSetbacks";
 
 const router: IRouter = Router();
 
@@ -44,6 +45,10 @@ router.use(briefingSourcesRouter);
 // parametric handler) plus the top-level `/bim-models/:id/*` group
 // the C# Revit add-in calls.
 router.use(bimModelsRouter);
+// localSetbacksRouter exposes `/local/setbacks/:jurisdictionKey` —
+// distinct path subtree from everything else so ordering is
+// indifferent.
+router.use(localSetbacksRouter);
 router.use(engagementsRouter);
 router.use(snapshotsRouter);
 router.use(sheetsRouter);

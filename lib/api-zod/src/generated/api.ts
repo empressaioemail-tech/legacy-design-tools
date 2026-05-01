@@ -591,6 +591,11 @@ export const GetEngagementBriefingResponse = zod
               provider: zod.string().nullable(),
               snapshotDate: zod.coerce.date(),
               note: zod.string().nullable(),
+              payload: zod
+                .record(zod.string(), zod.unknown())
+                .describe(
+                  'Structured producer payload — adapter rows write the raw\n`AdapterResult.payload` (a `{ kind, ... }` object whose\nshape depends on the adapter); manual-upload rows default\nto `{}`. Treat as opaque JSON on the wire — consumers\n(e.g. the Site Context \"view layer details\" expander)\nswitch on `payload.kind` to decide how to render.\n',
+                ),
               uploadObjectPath: zod.string().nullable(),
               uploadOriginalFilename: zod.string().nullable(),
               uploadContentType: zod.string().nullable(),
@@ -637,7 +642,7 @@ export const GetEngagementBriefingResponse = zod
               createdAt: zod.coerce.date(),
             })
             .describe(
-              "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+              'One current (non-superseded) source attached to an engagement\'s\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the producer wrote — for an\nadapter row it is the adapter\'s `AdapterResult.payload` (e.g.\n`{ kind: \"zoning\", zoning: { attributes: { ZONING: \"RR-1\" } } }`),\nfor a manual upload it is `{}` until the briefing engine starts\nattaching its own metadata. The Site Context tab\'s \"View layer\ndetails\" expander reads from this field, so producers must keep\nthe shape stable rather than substitute placeholders.\n',
             ),
         ),
         narrative: zod
@@ -759,6 +764,11 @@ export const ListEngagementBriefingSourcesResponse = zod
           provider: zod.string().nullable(),
           snapshotDate: zod.coerce.date(),
           note: zod.string().nullable(),
+          payload: zod
+            .record(zod.string(), zod.unknown())
+            .describe(
+              'Structured producer payload — adapter rows write the raw\n`AdapterResult.payload` (a `{ kind, ... }` object whose\nshape depends on the adapter); manual-upload rows default\nto `{}`. Treat as opaque JSON on the wire — consumers\n(e.g. the Site Context \"view layer details\" expander)\nswitch on `payload.kind` to decide how to render.\n',
+            ),
           uploadObjectPath: zod.string().nullable(),
           uploadOriginalFilename: zod.string().nullable(),
           uploadContentType: zod.string().nullable(),
@@ -805,7 +815,7 @@ export const ListEngagementBriefingSourcesResponse = zod
           createdAt: zod.coerce.date(),
         })
         .describe(
-          "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+          'One current (non-superseded) source attached to an engagement\'s\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the producer wrote — for an\nadapter row it is the adapter\'s `AdapterResult.payload` (e.g.\n`{ kind: \"zoning\", zoning: { attributes: { ZONING: \"RR-1\" } } }`),\nfor a manual upload it is `{}` until the briefing engine starts\nattaching its own metadata. The Site Context tab\'s \"View layer\ndetails\" expander reads from this field, so producers must keep\nthe shape stable rather than substitute placeholders.\n',
         ),
     ),
   })
@@ -968,6 +978,11 @@ export const RestoreEngagementBriefingSourceResponse = zod
               provider: zod.string().nullable(),
               snapshotDate: zod.coerce.date(),
               note: zod.string().nullable(),
+              payload: zod
+                .record(zod.string(), zod.unknown())
+                .describe(
+                  'Structured producer payload — adapter rows write the raw\n`AdapterResult.payload` (a `{ kind, ... }` object whose\nshape depends on the adapter); manual-upload rows default\nto `{}`. Treat as opaque JSON on the wire — consumers\n(e.g. the Site Context \"view layer details\" expander)\nswitch on `payload.kind` to decide how to render.\n',
+                ),
               uploadObjectPath: zod.string().nullable(),
               uploadOriginalFilename: zod.string().nullable(),
               uploadContentType: zod.string().nullable(),
@@ -1014,7 +1029,7 @@ export const RestoreEngagementBriefingSourceResponse = zod
               createdAt: zod.coerce.date(),
             })
             .describe(
-              "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+              'One current (non-superseded) source attached to an engagement\'s\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the producer wrote — for an\nadapter row it is the adapter\'s `AdapterResult.payload` (e.g.\n`{ kind: \"zoning\", zoning: { attributes: { ZONING: \"RR-1\" } } }`),\nfor a manual upload it is `{}` until the briefing engine starts\nattaching its own metadata. The Site Context tab\'s \"View layer\ndetails\" expander reads from this field, so producers must keep\nthe shape stable rather than substitute placeholders.\n',
             ),
         ),
         narrative: zod
@@ -1124,6 +1139,11 @@ export const RetryBriefingSourceConversionResponse = zod
               provider: zod.string().nullable(),
               snapshotDate: zod.coerce.date(),
               note: zod.string().nullable(),
+              payload: zod
+                .record(zod.string(), zod.unknown())
+                .describe(
+                  'Structured producer payload — adapter rows write the raw\n`AdapterResult.payload` (a `{ kind, ... }` object whose\nshape depends on the adapter); manual-upload rows default\nto `{}`. Treat as opaque JSON on the wire — consumers\n(e.g. the Site Context \"view layer details\" expander)\nswitch on `payload.kind` to decide how to render.\n',
+                ),
               uploadObjectPath: zod.string().nullable(),
               uploadOriginalFilename: zod.string().nullable(),
               uploadContentType: zod.string().nullable(),
@@ -1170,7 +1190,7 @@ export const RetryBriefingSourceConversionResponse = zod
               createdAt: zod.coerce.date(),
             })
             .describe(
-              "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+              'One current (non-superseded) source attached to an engagement\'s\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the producer wrote — for an\nadapter row it is the adapter\'s `AdapterResult.payload` (e.g.\n`{ kind: \"zoning\", zoning: { attributes: { ZONING: \"RR-1\" } } }`),\nfor a manual upload it is `{}` until the briefing engine starts\nattaching its own metadata. The Site Context tab\'s \"View layer\ndetails\" expander reads from this field, so producers must keep\nthe shape stable rather than substitute placeholders.\n',
             ),
         ),
         narrative: zod
@@ -1292,6 +1312,11 @@ export const GenerateEngagementLayersResponse = zod
               provider: zod.string().nullable(),
               snapshotDate: zod.coerce.date(),
               note: zod.string().nullable(),
+              payload: zod
+                .record(zod.string(), zod.unknown())
+                .describe(
+                  'Structured producer payload — adapter rows write the raw\n`AdapterResult.payload` (a `{ kind, ... }` object whose\nshape depends on the adapter); manual-upload rows default\nto `{}`. Treat as opaque JSON on the wire — consumers\n(e.g. the Site Context \"view layer details\" expander)\nswitch on `payload.kind` to decide how to render.\n',
+                ),
               uploadObjectPath: zod.string().nullable(),
               uploadOriginalFilename: zod.string().nullable(),
               uploadContentType: zod.string().nullable(),
@@ -1338,7 +1363,7 @@ export const GenerateEngagementLayersResponse = zod
               createdAt: zod.coerce.date(),
             })
             .describe(
-              "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+              'One current (non-superseded) source attached to an engagement\'s\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the producer wrote — for an\nadapter row it is the adapter\'s `AdapterResult.payload` (e.g.\n`{ kind: \"zoning\", zoning: { attributes: { ZONING: \"RR-1\" } } }`),\nfor a manual upload it is `{}` until the briefing engine starts\nattaching its own metadata. The Site Context tab\'s \"View layer\ndetails\" expander reads from this field, so producers must keep\nthe shape stable rather than substitute placeholders.\n',
             ),
         ),
         narrative: zod
@@ -1530,6 +1555,58 @@ export const GetEngagementBriefingGenerationStatusResponse = zod
   })
   .describe(
     "Wire envelope for `GET \/engagements\/{id}\/briefing\/status`. Job\nstate is process-local and best-effort; the persisted briefing\nnarrative on `GET \/briefing` is the source of truth.\n",
+  );
+
+/**
+ * Thin HTTP shim over `lib/adapters/src/local/setbacks/<jurisdictionKey>.json`
+so the Site Context tab can render the matching front/rear/side/
+height/coverage row next to a local-tier zoning briefing source
+without forcing the design-tools artifact to depend on the
+adapters lib at build time.
+
+The path parameter is one of the keys exported by
+`SETBACK_JURISDICTION_KEYS` (e.g. `grand-county-ut`,
+`lemhi-county-id`, `bastrop-tx`, `utah-unincorporated`,
+`idaho-unincorporated`). 404 for any other key — the FE treats
+a 404 as "no codified table for this jurisdiction" and shows
+the bare adapter payload instead.
+
+ * @summary Per-jurisdiction setback table for the Site Context expander
+ */
+export const GetLocalSetbackTableParams = zod.object({
+  jurisdictionKey: zod.coerce.string(),
+});
+
+export const GetLocalSetbackTableResponse = zod
+  .object({
+    jurisdictionKey: zod.string(),
+    jurisdictionDisplayName: zod.string(),
+    note: zod
+      .string()
+      .nullish()
+      .describe(
+        'Optional context note for fallback \/ statewide-default\ntables (e.g. \"applies to unincorporated parcels only\").\n',
+      ),
+    districts: zod.array(
+      zod
+        .object({
+          district_name: zod.string(),
+          front_ft: zod.number(),
+          rear_ft: zod.number(),
+          side_ft: zod.number(),
+          side_corner_ft: zod.number(),
+          max_height_ft: zod.number(),
+          max_lot_coverage_pct: zod.number(),
+          max_impervious_pct: zod.number(),
+          citation_url: zod.string(),
+        })
+        .describe(
+          "One row of a per-jurisdiction setback table — front\/rear\/side\/\nheight\/coverage in feet\/percent for one zoning district.\nSchema mirrors `lib\/adapters\/src\/local\/setbacks\/index.ts`'s\n`SetbackDistrict` so the FE can decode without depending on\nthe adapters lib.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Per-jurisdiction setback lookup served by\n`GET \/local\/setbacks\/{jurisdictionKey}`. The `districts` array\nis the list the FE matches against the adapter's reported\nzoning district (case-insensitive on `district_name`).\n",
   );
 
 /**

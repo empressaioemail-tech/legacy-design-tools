@@ -48,6 +48,7 @@ import type {
   ListCodeAtomsParams,
   ListEngagementBriefingSourcesParams,
   ListJurisdictionAtomsParams,
+  LocalSetbackTable,
   MatchEngagementBody,
   MatchEngagementResponse,
   PushBimModelBody,
@@ -1833,6 +1834,114 @@ export function useGetEngagementBriefingGenerationStatus<
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetEngagementBriefingGenerationStatusQueryOptions(
     id,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Thin HTTP shim over `lib/adapters/src/local/setbacks/<jurisdictionKey>.json`
+so the Site Context tab can render the matching front/rear/side/
+height/coverage row next to a local-tier zoning briefing source
+without forcing the design-tools artifact to depend on the
+adapters lib at build time.
+
+The path parameter is one of the keys exported by
+`SETBACK_JURISDICTION_KEYS` (e.g. `grand-county-ut`,
+`lemhi-county-id`, `bastrop-tx`, `utah-unincorporated`,
+`idaho-unincorporated`). 404 for any other key — the FE treats
+a 404 as "no codified table for this jurisdiction" and shows
+the bare adapter payload instead.
+
+ * @summary Per-jurisdiction setback table for the Site Context expander
+ */
+export const getGetLocalSetbackTableUrl = (jurisdictionKey: string) => {
+  return `/api/local/setbacks/${jurisdictionKey}`;
+};
+
+export const getLocalSetbackTable = async (
+  jurisdictionKey: string,
+  options?: RequestInit,
+): Promise<LocalSetbackTable> => {
+  return customFetch<LocalSetbackTable>(
+    getGetLocalSetbackTableUrl(jurisdictionKey),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetLocalSetbackTableQueryKey = (jurisdictionKey: string) => {
+  return [`/api/local/setbacks/${jurisdictionKey}`] as const;
+};
+
+export const getGetLocalSetbackTableQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLocalSetbackTable>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  jurisdictionKey: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLocalSetbackTable>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetLocalSetbackTableQueryKey(jurisdictionKey);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getLocalSetbackTable>>
+  > = ({ signal }) =>
+    getLocalSetbackTable(jurisdictionKey, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!jurisdictionKey,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLocalSetbackTable>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLocalSetbackTableQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLocalSetbackTable>>
+>;
+export type GetLocalSetbackTableQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Per-jurisdiction setback table for the Site Context expander
+ */
+
+export function useGetLocalSetbackTable<
+  TData = Awaited<ReturnType<typeof getLocalSetbackTable>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  jurisdictionKey: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLocalSetbackTable>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLocalSetbackTableQueryOptions(
+    jurisdictionKey,
     options,
   );
 

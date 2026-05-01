@@ -799,6 +799,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /local/setbacks/{jurisdictionKey}:
+    get:
+      operationId: getLocalSetbackTable
+      tags: [engagements]
+      summary: Per-jurisdiction setback table for the Site Context expander
+      description: |
+        Thin HTTP shim over `lib/adapters/src/local/setbacks/<jurisdictionKey>.json`
+        so the Site Context tab can render the matching front/rear/side/
+        height/coverage row next to a local-tier zoning briefing source
+        without forcing the design-tools artifact to depend on the
+        adapters lib at build time.
+
+        The path parameter is one of the keys exported by
+        `SETBACK_JURISDICTION_KEYS` (e.g. `grand-county-ut`,
+        `lemhi-county-id`, `bastrop-tx`, `utah-unincorporated`,
+        `idaho-unincorporated`). 404 for any other key — the FE treats
+        a 404 as "no codified table for this jurisdiction" and shows
+        the bare adapter payload instead.
+      parameters:
+        - name: jurisdictionKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Setback table for the jurisdiction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocalSetbackTable"
+        "404":
+          description: No setback table configured for this jurisdiction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /briefing-sources/{id}/glb:
     get:
       operationId: getBriefingSourceGlb
@@ -2421,14 +2459,84 @@ components:
         - qgis
         - dxf
 
+    LocalSetbackDistrict:
+      type: object
+      description: |
+        One row of a per-jurisdiction setback table — front/rear/side/
+        height/coverage in feet/percent for one zoning district.
+        Schema mirrors `lib/adapters/src/local/setbacks/index.ts`'s
+        `SetbackDistrict` so the FE can decode without depending on
+        the adapters lib.
+      properties:
+        district_name:
+          type: string
+        front_ft:
+          type: number
+        rear_ft:
+          type: number
+        side_ft:
+          type: number
+        side_corner_ft:
+          type: number
+        max_height_ft:
+          type: number
+        max_lot_coverage_pct:
+          type: number
+        max_impervious_pct:
+          type: number
+        citation_url:
+          type: string
+      required:
+        - district_name
+        - front_ft
+        - rear_ft
+        - side_ft
+        - side_corner_ft
+        - max_height_ft
+        - max_lot_coverage_pct
+        - max_impervious_pct
+        - citation_url
+
+    LocalSetbackTable:
+      type: object
+      description: |
+        Per-jurisdiction setback lookup served by
+        `GET /local/setbacks/{jurisdictionKey}`. The `districts` array
+        is the list the FE matches against the adapter's reported
+        zoning district (case-insensitive on `district_name`).
+      properties:
+        jurisdictionKey:
+          type: string
+        jurisdictionDisplayName:
+          type: string
+        note:
+          type: string
+          nullable: true
+          description: |
+            Optional context note for fallback / statewide-default
+            tables (e.g. "applies to unincorporated parcels only").
+        districts:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSetbackDistrict"
+      required:
+        - jurisdictionKey
+        - jurisdictionDisplayName
+        - districts
+
     EngagementBriefingSource:
       type: object
       description: |
         One current (non-superseded) source attached to an engagement's
         parcel briefing. The `upload*` fields are populated only on
         `manual-upload` rows and describe the file the architect picked.
-        `payload` is the structured data the briefing engine will read
-        when DA-PI-3 ships; producers may store an empty object today.
+        `payload` is the structured data the producer wrote — for an
+        adapter row it is the adapter's `AdapterResult.payload` (e.g.
+        `{ kind: "zoning", zoning: { attributes: { ZONING: "RR-1" } } }`),
+        for a manual upload it is `{}` until the briefing engine starts
+        attaching its own metadata. The Site Context tab's "View layer
+        details" expander reads from this field, so producers must keep
+        the shape stable rather than substitute placeholders.
       properties:
         id:
           type: string
@@ -2445,6 +2553,16 @@ components:
         note:
           type: string
           nullable: true
+        payload:
+          type: object
+          additionalProperties: true
+          description: |
+            Structured producer payload — adapter rows write the raw
+            `AdapterResult.payload` (a `{ kind, ... }` object whose
+            shape depends on the adapter); manual-upload rows default
+            to `{}`. Treat as opaque JSON on the wire — consumers
+            (e.g. the Site Context "view layer details" expander)
+            switch on `payload.kind` to decide how to render.
         uploadObjectPath:
           type: string
           nullable: true
@@ -2519,6 +2637,7 @@ components:
         - provider
         - snapshotDate
         - note
+        - payload
         - uploadObjectPath
         - uploadOriginalFilename
         - uploadContentType

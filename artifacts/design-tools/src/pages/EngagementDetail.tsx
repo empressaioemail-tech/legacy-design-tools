@@ -39,6 +39,7 @@ import type { SheetSummary } from "@workspace/api-client-react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { AppShell } from "../components/AppShell";
 import { BriefingSourceUploadModal } from "../components/BriefingSourceUploadModal";
+import { BriefingSourceDetails } from "../components/BriefingSourceDetails";
 import { SiteContextViewer } from "../components/SiteContextViewer";
 import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
@@ -597,6 +598,10 @@ function BriefingSourceRow({
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const [expanded, setExpanded] = useState(false);
+  // Layer-details panel is independent of the history panel; the
+  // architect should be able to keep "what does this layer say about
+  // my parcel" open while flipping between snapshots.
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const queryClient = useQueryClient();
   // Retry mutation re-runs the converter on an existing DXF row. The
   // route returns the updated source; on success we invalidate the
@@ -763,25 +768,50 @@ function BriefingSourceRow({
           Snapshot {new Date(source.snapshotDate).toLocaleDateString()} ·
           added {relativeTime(source.createdAt)}
         </span>
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          aria-controls={`briefing-source-history-${source.id}`}
-          data-testid={`briefing-source-history-toggle-${source.id}`}
-          style={{
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
-            fontSize: 11,
-            color: "var(--info-text)",
-            textDecoration: "underline",
-          }}
-        >
-          {expanded ? "Hide history" : "View history"}
-        </button>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          {!isManual && (
+            <button
+              type="button"
+              onClick={() => setDetailsExpanded((v) => !v)}
+              aria-expanded={detailsExpanded}
+              aria-controls={`briefing-source-details-${source.id}`}
+              data-testid={`briefing-source-details-toggle-${source.id}`}
+              style={{
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                fontSize: 11,
+                color: "var(--info-text)",
+                textDecoration: "underline",
+              }}
+            >
+              {detailsExpanded ? "Hide layer details" : "View layer details"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-controls={`briefing-source-history-${source.id}`}
+            data-testid={`briefing-source-history-toggle-${source.id}`}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: 11,
+              color: "var(--info-text)",
+              textDecoration: "underline",
+            }}
+          >
+            {expanded ? "Hide history" : "View history"}
+          </button>
+        </div>
       </div>
+      {detailsExpanded && !isManual && (
+        <BriefingSourceDetails source={source} />
+      )}
       {expanded && (
         <BriefingSourceHistoryPanel
           engagementId={engagementId}

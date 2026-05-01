@@ -88,6 +88,15 @@ interface BriefingSourceWire {
   provider: string | null;
   snapshotDate: string;
   note: string | null;
+  /**
+   * Structured producer payload — for an adapter row this is the
+   * adapter's `AdapterResult.payload` (preserved verbatim so the
+   * Site Context "view layer details" expander can switch on
+   * `payload.kind`); for a manual upload the column defaults to
+   * `{}`. Treated as opaque on the wire — see openapi.yaml's
+   * EngagementBriefingSource schema for the contract.
+   */
+  payload: Record<string, unknown>;
   uploadObjectPath: string | null;
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;
@@ -129,6 +138,13 @@ function toBriefingSourceWire(s: BriefingSource): BriefingSourceWire {
     provider: s.provider,
     snapshotDate: s.snapshotDate.toISOString(),
     note: s.note,
+    // Cast: the column is `jsonb` typed as `unknown` by drizzle but
+    // the writers in this codebase always insert a `Record<string,
+    // unknown>` (the adapter `AdapterResult.payload` shape, or an
+    // empty object). Anything else would be a producer bug we want
+    // surfaced as a `Object.keys` crash on render rather than a
+    // silent string-leak through the wire.
+    payload: (s.payload ?? {}) as Record<string, unknown>,
     uploadObjectPath: s.uploadObjectPath,
     uploadOriginalFilename: s.uploadOriginalFilename,
     uploadContentType: s.uploadContentType,
@@ -433,6 +449,13 @@ router.post(
               provider: `${result.adapterKey} (${result.provider})`,
               snapshotDate: new Date(result.snapshotDate),
               note: result.note ?? null,
+              // Persist the adapter's structured payload verbatim so
+              // the Site Context "view layer details" expander can
+              // read it back through the briefing wire shape. Without
+              // this assignment the column would default to `{}` and
+              // the FE would render an empty details panel even
+              // though the adapter actually returned data.
+              payload: result.payload,
               // Adapter rows do not carry an upload — every upload
               // field stays null so the wire shape's discriminated
               // union reads cleanly.

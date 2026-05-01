@@ -156,6 +156,7 @@ function mkSource(
     glbObjectPath: over.glbObjectPath ?? null,
     conversionStatus: over.conversionStatus ?? null,
     conversionError: over.conversionError ?? null,
+    payload: over.payload ?? {},
     createdAt: over.createdAt ?? "2026-01-02T12:00:00.000Z",
     supersededAt: over.supersededAt ?? null,
     supersededById: over.supersededById ?? null,

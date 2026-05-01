@@ -123,6 +123,15 @@ interface BriefingSourceWire {
   provider: string | null;
   snapshotDate: string;
   note: string | null;
+  /**
+   * Structured producer payload — `{}` for manual-upload rows, the
+   * adapter's `AdapterResult.payload` shape for adapter rows. The
+   * Site Context tab's "view layer details" expander reads this
+   * field, so producers must keep the shape stable. Treated as
+   * opaque on the wire — see openapi.yaml's EngagementBriefingSource
+   * schema for the contract.
+   */
+  payload: Record<string, unknown>;
   uploadObjectPath: string | null;
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;
@@ -191,6 +200,12 @@ function toBriefingSourceWire(s: BriefingSource): BriefingSourceWire {
     provider: s.provider,
     snapshotDate: s.snapshotDate.toISOString(),
     note: s.note,
+    // Cast: drizzle types `jsonb` as `unknown`; the producers in this
+    // codebase (this route + generateLayers.ts) only ever insert a
+    // `Record<string, unknown>` so the cast is a structural assertion
+    // rather than a type laundering. Empty object is the column
+    // default for manual-upload rows.
+    payload: (s.payload ?? {}) as Record<string, unknown>,
     uploadObjectPath: s.uploadObjectPath,
     uploadOriginalFilename: s.uploadOriginalFilename,
     uploadContentType: s.uploadContentType,
