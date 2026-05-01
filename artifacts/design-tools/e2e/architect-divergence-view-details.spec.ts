@@ -82,6 +82,7 @@ import {
   materializableElements,
   bimModels,
   briefingDivergences,
+  type BriefingDivergenceReason,
 } from "@workspace/db";
 
 const RUN_TAG = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -306,4 +307,431 @@ test("View details opens the divergence dialog with a diff table; Resolve still 
         .__divergenceNavSentinel,
   );
   expect(sentinelAfterResolve).toBe("still-here");
+});
+
+/**
+ * The dialog only renders the 3-column "Briefing locked / Architect
+ * actual" diff table when the divergence's `detail` payload carries
+ * a paired `before` / `after` envelope (the canonical
+ * `geometry-edited` shape covered by the test above). Every other
+ * `BRIEFING_DIVERGENCE_REASONS` value (`unpinned`, `deleted`,
+ * `other`) lands in the *flat-attributes* branch — `extractDetailViews`
+ * splits the envelope into a generic 2-column key/value table
+ * (`briefing-divergence-detail-attributes-table`) and skips the diff
+ * section entirely. A regression that broke the flat-attributes
+ * branch (for example, mis-handling a `detail` whose top-level keys
+ * are scalar instead of nested, or an empty envelope falling through
+ * to the wrong placeholder) would slip past the geometry-edited
+ * test above because the diff branch keeps its happy-path
+ * assertions intact.
+ *
+ * The cases below seed one engagement per scenario, drive the
+ * architect drill-in to mount the dialog, and pin:
+ *
+ *   - the diff table is *absent* (no `before`/`after` envelope to
+ *     extract from),
+ *   - the flat attributes table is *present* and contains exactly
+ *     the rows the seeded `detail` payload carries (one
+ *     `data-testid="briefing-divergence-detail-attribute-row"` per
+ *     top-level key, identified by `data-field`),
+ *   - the empty placeholder is *absent* (the row had structured
+ *     detail to render).
+ *
+ * The empty-detail case at the bottom of this file pins the
+ * complementary placeholder branch — `detail = {}` with neither a
+ * diff table nor an attributes table, just the
+ * `briefing-divergence-detail-empty` italic stub.
+ */
+
+interface FlatAttributesCase {
+  /** Suffix appended to the test title and the seeded engagement name. */
+  label: string;
+  reason: BriefingDivergenceReason;
+  /**
+   * The `detail` payload to seed. Must contain at least one
+   * top-level key (otherwise the row would render the empty
+   * placeholder, not the attributes table — see the dedicated empty
+   * case below).
+   */
+  detail: Record<string, unknown>;
+  /**
+   * Expected attribute rows in the flat table, keyed by the top-
+   * level field name. The dialog stringifies each value via
+   * `stringifyValue` (numbers → `String(n)`, strings passthrough,
+   * objects → `JSON.stringify(_, null, 2)`).
+   */
+  expectedRows: Array<{ field: string; value: string }>;
+}
+
+const FLAT_ATTRIBUTES_CASES: FlatAttributesCase[] = [
+  {
+    label: "unpinned",
+    reason: "unpinned",
+    detail: {
+      revitElementId: 8421,
+      previousPinState: "pinned",
+    },
+    expectedRows: [
+      { field: "revitElementId", value: "8421" },
+      { field: "previousPinState", value: "pinned" },
+    ],
+  },
+  {
+    label: "deleted",
+    reason: "deleted",
+    detail: {
+      revitElementId: 9123,
+      lastSeenAt: "2026-04-30T12:00:00.000Z",
+    },
+    expectedRows: [
+      { field: "revitElementId", value: "9123" },
+      { field: "lastSeenAt", value: "2026-04-30T12:00:00.000Z" },
+    ],
+  },
+];
+
+for (const flatCase of FLAT_ATTRIBUTES_CASES) {
+  test.describe(`flat-attributes branch — ${flatCase.label}`, () => {
+    let flatEngagementId = "";
+    let flatDivergenceId = "";
+
+    test.beforeAll(async () => {
+      // Per-case engagement so the parameterized scenarios stay
+      // independent of one another (and of the geometry-edited test
+      // at the top of the file). The seed graph mirrors the
+      // top-of-file fixture: engagement → briefing → element →
+      // bim-model → divergence. We only swap the `reason` and
+      // `detail` so the dialog's branching is the only variable
+      // under test.
+      const caseTag = `${RUN_TAG}-${flatCase.label}`;
+      const projectName = `e2e Architect Divergence Drill-In ${caseTag}`;
+
+      const [eng] = await db
+        .insert(engagements)
+        .values({
+          name: projectName,
+          nameLower: projectName.toLowerCase(),
+          jurisdiction: "Moab, UT",
+          jurisdictionCity: "Moab",
+          jurisdictionState: "UT",
+          jurisdictionFips: "49019",
+          address: "456 Drill-In Ave, Moab, UT 84532",
+          status: "active",
+        })
+        .returning();
+      if (!eng) throw new Error("seed: engagement insert returned no row");
+      flatEngagementId = eng.id;
+
+      const [briefing] = await db
+        .insert(parcelBriefings)
+        .values({ engagementId: flatEngagementId })
+        .returning();
+      if (!briefing) throw new Error("seed: briefing insert returned no row");
+
+      const [element] = await db
+        .insert(materializableElements)
+        .values({
+          briefingId: briefing.id,
+          elementKind: "buildable-envelope",
+          label: `e2e Buildable Envelope ${caseTag}`,
+          geometry: {
+            polygon: [
+              [0, 0, 0],
+              [10, 0, 0],
+              [10, 10, 0],
+              [0, 10, 0],
+            ],
+          },
+          locked: true,
+        })
+        .returning();
+      if (!element)
+        throw new Error("seed: materializable element insert returned no row");
+
+      const [model] = await db
+        .insert(bimModels)
+        .values({
+          engagementId: flatEngagementId,
+          activeBriefingId: briefing.id,
+          briefingVersion: 1,
+          revitDocumentPath: `e2e:${caseTag}.rvt`,
+          materializedAt: new Date(),
+        })
+        .returning();
+      if (!model) throw new Error("seed: bim-model insert returned no row");
+
+      const [div] = await db
+        .insert(briefingDivergences)
+        .values({
+          bimModelId: model.id,
+          materializableElementId: element.id,
+          briefingId: briefing.id,
+          reason: flatCase.reason,
+          note: `e2e flat-attributes ${flatCase.label} ${caseTag}`,
+          detail: flatCase.detail,
+        })
+        .returning();
+      if (!div) throw new Error("seed: divergence insert returned no row");
+      flatDivergenceId = div.id;
+    });
+
+    test.afterAll(async () => {
+      if (flatEngagementId) {
+        await db
+          .delete(engagements)
+          .where(eq(engagements.id, flatEngagementId));
+      }
+    });
+
+    test(`View details renders the flat attributes table for a ${flatCase.label} divergence`, async ({
+      page,
+    }) => {
+      // Same audience-promotion cookie the geometry-edited test
+      // uses so the architect-gated divergences GET returns 200.
+      const proxyOrigin = new URL(
+        process.env["E2E_BASE_URL"] ?? "http://localhost:80",
+      );
+      await page.context().addCookies([
+        {
+          name: "pr_session",
+          value: encodeURIComponent(JSON.stringify({ audience: "internal" })),
+          domain: proxyOrigin.hostname,
+          path: "/",
+          httpOnly: false,
+          secure: false,
+        },
+      ]);
+
+      await page.goto(
+        `/engagements/${flatEngagementId}?tab=site-context`,
+      );
+
+      const row = page.locator(
+        `[data-testid="briefing-divergences-row"][data-divergence-id="${flatDivergenceId}"]`,
+      );
+      await expect(row).toBeVisible();
+      // Pin the seeded `reason` made it onto the row's
+      // `data-divergence-reason` attribute — proves the row
+      // belonging to *this* case is the one we're about to drill
+      // into.
+      await expect(row).toHaveAttribute(
+        "data-divergence-reason",
+        flatCase.reason,
+      );
+
+      const viewDetailsButton = page.locator(
+        `[data-testid="briefing-divergences-view-details-button"][data-divergence-id="${flatDivergenceId}"]`,
+      );
+      await expect(viewDetailsButton).toBeVisible();
+      await viewDetailsButton.click();
+
+      const dialog = page.getByTestId("briefing-divergence-detail-dialog");
+      await expect(dialog).toBeVisible();
+
+      // Diff table must be absent — the seeded `detail` has no
+      // `before`/`after` envelope so `extractDetailViews` should
+      // skip the diff section entirely.
+      await expect(
+        dialog.getByTestId("briefing-divergence-detail-diff-table"),
+      ).toHaveCount(0);
+
+      // Flat attributes table is the branch this case exists to
+      // pin.
+      const attrTable = dialog.getByTestId(
+        "briefing-divergence-detail-attributes-table",
+      );
+      await expect(attrTable).toBeVisible();
+
+      // One attribute row per top-level key in the seeded `detail`
+      // payload. Scope inside the dialog so a future stray panel
+      // can't satisfy the count from elsewhere on the page.
+      const attrRows = dialog.getByTestId(
+        "briefing-divergence-detail-attribute-row",
+      );
+      await expect(attrRows).toHaveCount(flatCase.expectedRows.length);
+
+      for (const expected of flatCase.expectedRows) {
+        const fieldRow = dialog.locator(
+          `[data-testid="briefing-divergence-detail-attribute-row"][data-field="${expected.field}"]`,
+        );
+        await expect(fieldRow).toHaveCount(1);
+        await expect(fieldRow).toContainText(expected.value);
+      }
+
+      // The empty placeholder must *not* render — the row carried
+      // structured detail. Defends against a regression where an
+      // empty `beforeAfter` array (correct) plus a non-empty
+      // `rows` array (correct) accidentally triggered the
+      // `rows.length === 0 && beforeAfter.length === 0` empty
+      // branch.
+      await expect(
+        dialog.getByTestId("briefing-divergence-detail-empty"),
+      ).toHaveCount(0);
+    });
+  });
+}
+
+/**
+ * Empty-detail branch — covers the `briefing-divergence-detail-empty`
+ * placeholder that renders when the row's `detail` JSON is `{}` (the
+ * column default per `lib/db/src/schema/briefingDivergences.ts`). A
+ * regression that:
+ *
+ *   - dropped the placeholder (so the dialog renders nothing under
+ *     the header), or
+ *   - flipped the `rows.length === 0 && beforeAfter.length === 0`
+ *     guard the wrong way (so the placeholder appeared even when
+ *     real detail was present), or
+ *   - threw on an empty `detail` object instead of treating it as
+ *     "no structured detail recorded",
+ *
+ * would slip past both the geometry-edited test above and the
+ * flat-attributes parameterized cases. We use `reason: "other"`
+ * because that bucket is the most idiomatic place for a
+ * detail-less recording — Spec 51a §2.2 reserves it for "engine-
+ * side detections we have not categorized".
+ */
+test.describe("empty-detail branch", () => {
+  let emptyEngagementId = "";
+  let emptyDivergenceId = "";
+
+  test.beforeAll(async () => {
+    const caseTag = `${RUN_TAG}-empty`;
+    const projectName = `e2e Architect Divergence Drill-In ${caseTag}`;
+
+    const [eng] = await db
+      .insert(engagements)
+      .values({
+        name: projectName,
+        nameLower: projectName.toLowerCase(),
+        jurisdiction: "Moab, UT",
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        jurisdictionFips: "49019",
+        address: "456 Drill-In Ave, Moab, UT 84532",
+        status: "active",
+      })
+      .returning();
+    if (!eng) throw new Error("seed: engagement insert returned no row");
+    emptyEngagementId = eng.id;
+
+    const [briefing] = await db
+      .insert(parcelBriefings)
+      .values({ engagementId: emptyEngagementId })
+      .returning();
+    if (!briefing) throw new Error("seed: briefing insert returned no row");
+
+    const [element] = await db
+      .insert(materializableElements)
+      .values({
+        briefingId: briefing.id,
+        elementKind: "buildable-envelope",
+        label: `e2e Buildable Envelope ${caseTag}`,
+        geometry: {
+          polygon: [
+            [0, 0, 0],
+            [10, 0, 0],
+            [10, 10, 0],
+            [0, 10, 0],
+          ],
+        },
+        locked: true,
+      })
+      .returning();
+    if (!element)
+      throw new Error("seed: materializable element insert returned no row");
+
+    const [model] = await db
+      .insert(bimModels)
+      .values({
+        engagementId: emptyEngagementId,
+        activeBriefingId: briefing.id,
+        briefingVersion: 1,
+        revitDocumentPath: `e2e:${caseTag}.rvt`,
+        materializedAt: new Date(),
+      })
+      .returning();
+    if (!model) throw new Error("seed: bim-model insert returned no row");
+
+    // Detail-less divergence — the `detail` jsonb column defaults
+    // to `{}` so we omit it explicitly to mirror the production
+    // path where the C# add-in posted no structured payload. Using
+    // `reason: "other"` matches Spec 51a §2.2's
+    // "uncategorized-engine-detection" bucket (see
+    // BRIEFING_DIVERGENCE_REASONS).
+    const [div] = await db
+      .insert(briefingDivergences)
+      .values({
+        bimModelId: model.id,
+        materializableElementId: element.id,
+        briefingId: briefing.id,
+        reason: "other",
+        note: `e2e empty-detail ${caseTag}`,
+      })
+      .returning();
+    if (!div) throw new Error("seed: divergence insert returned no row");
+    emptyDivergenceId = div.id;
+  });
+
+  test.afterAll(async () => {
+    if (emptyEngagementId) {
+      await db
+        .delete(engagements)
+        .where(eq(engagements.id, emptyEngagementId));
+    }
+  });
+
+  test("View details renders the empty placeholder when the divergence carries no detail", async ({
+    page,
+  }) => {
+    const proxyOrigin = new URL(
+      process.env["E2E_BASE_URL"] ?? "http://localhost:80",
+    );
+    await page.context().addCookies([
+      {
+        name: "pr_session",
+        value: encodeURIComponent(JSON.stringify({ audience: "internal" })),
+        domain: proxyOrigin.hostname,
+        path: "/",
+        httpOnly: false,
+        secure: false,
+      },
+    ]);
+
+    await page.goto(`/engagements/${emptyEngagementId}?tab=site-context`);
+
+    const row = page.locator(
+      `[data-testid="briefing-divergences-row"][data-divergence-id="${emptyDivergenceId}"]`,
+    );
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute("data-divergence-reason", "other");
+
+    const viewDetailsButton = page.locator(
+      `[data-testid="briefing-divergences-view-details-button"][data-divergence-id="${emptyDivergenceId}"]`,
+    );
+    await expect(viewDetailsButton).toBeVisible();
+    await viewDetailsButton.click();
+
+    const dialog = page.getByTestId("briefing-divergence-detail-dialog");
+    await expect(dialog).toBeVisible();
+
+    // Both the diff table and the flat attributes table must be
+    // absent — `detail = {}` produces empty `beforeAfter` and
+    // `rows` arrays, and the dialog's render guards skip both
+    // sections.
+    await expect(
+      dialog.getByTestId("briefing-divergence-detail-diff-table"),
+    ).toHaveCount(0);
+    await expect(
+      dialog.getByTestId("briefing-divergence-detail-attributes-table"),
+    ).toHaveCount(0);
+
+    // The italic placeholder is the branch this case exists to
+    // pin. Asserting on the placeholder testid (rather than its
+    // copy) keeps the test stable if the wording is later
+    // tweaked.
+    await expect(
+      dialog.getByTestId("briefing-divergence-detail-empty"),
+    ).toBeVisible();
+  });
 });
