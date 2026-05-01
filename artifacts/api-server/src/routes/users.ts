@@ -50,6 +50,20 @@
  * applies — losing the rollback to a GCS blip leaves the orphan we
  * were already trying to mitigate, which is no worse than the
  * pre-existing failure mode.
+ *
+ * Avatar bytes-are-an-image gate
+ * ------------------------------
+ * The presigned-URL endpoint pre-checks the *declared* `contentType`
+ * against the image MIME allow-list, but the bytes themselves are
+ * PUT directly to GCS so a non-browser caller can declare
+ * `image/jpeg` and upload a JSON dump (or HTML page, or any other
+ * blob that fits under the size cap). Both POST and PATCH therefore
+ * sniff the head of the stored object via {@link enforceAvatarIsImage}
+ * before persisting `avatarUrl`; anything that doesn't decode to one
+ * of the formats {@link looksLikeImage} accepts surfaces as a 415 and
+ * the orphan blob is best-effort cleaned up. The DB row never gets
+ * to reference a non-image, even if the bytes briefly land in the
+ * bucket.
  */
 
 import {
@@ -71,6 +85,10 @@ import {
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
+import {
+  IMAGE_SIGNATURE_HEAD_BYTES,
+  looksLikeImage,
+} from "../lib/imageSignature";
 import { requestUploadUrlBodySizeMax } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -135,6 +153,74 @@ async function enforceAvatarSizeCap(
       );
     }
     return { kind: "too_large", actualSize };
+  }
+  return { kind: "ok" };
+}
+
+/**
+ * Outcome of {@link enforceAvatarIsImage}. Mirrors the shape of
+ * {@link AvatarSizeCheck} so the route handlers can map outcomes onto
+ * HTTP responses uniformly. The helper itself stays response-agnostic
+ * so it can be reused unchanged from POST and PATCH.
+ */
+type AvatarImageCheck =
+  | { kind: "ok" }
+  | { kind: "external" } // Caller supplied a URL we don't host (skip).
+  | { kind: "missing" } // Path looks like ours but the object isn't in the bucket.
+  | { kind: "not_image" };
+
+/**
+ * Confirm that the bytes stored under `rawAvatarUrl` actually decode
+ * to one of the image formats we accept on the avatar upload path.
+ *
+ * The presigned-URL endpoint pre-checks the *declared* `contentType`
+ * against the image MIME allow-list, but the bytes themselves are
+ * PUT directly to GCS via the signed URL — so a non-browser caller
+ * can declare `image/jpeg` and upload arbitrary bytes (a JSON dump,
+ * an executable, an HTML page, …). Without a second check, that
+ * arbitrary blob ends up referenced from `users.avatar_url` and gets
+ * served to other admins under an `<img>` tag.
+ *
+ * This helper closes that loop: we read the head of the stored object
+ * and run it through {@link looksLikeImage}. If the signature doesn't
+ * match, the row is never allowed to point at the object and the
+ * orphan is best-effort deleted on the way out (same posture as the
+ * `too_large` branch in {@link enforceAvatarSizeCap}). The cleanup is
+ * inside its own try/catch so a delete failure doesn't mask the real
+ * 415 we owe the caller — the orphan-sweep follow-up will mop up
+ * anything we still miss here.
+ */
+async function enforceAvatarIsImage(
+  rawAvatarUrl: string,
+): Promise<AvatarImageCheck> {
+  let head: Buffer | null;
+  try {
+    head = await objectStorage.getObjectEntityHead(
+      rawAvatarUrl,
+      IMAGE_SIGNATURE_HEAD_BYTES,
+    );
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      return { kind: "missing" };
+    }
+    throw err;
+  }
+  if (head === null) {
+    // Not one of ours — pasted external URL, public-objects path,
+    // etc. We can't sniff bytes we don't host, and the legacy "paste
+    // a URL" path needs to keep working, so treat it as a skip.
+    return { kind: "external" };
+  }
+  if (!looksLikeImage(head)) {
+    try {
+      await objectStorage.deleteObjectIfStored(rawAvatarUrl);
+    } catch (cleanupErr) {
+      logger.warn(
+        { err: cleanupErr, avatarUrl: rawAvatarUrl },
+        "failed to delete non-image avatar after rejection",
+      );
+    }
+    return { kind: "not_image" };
   }
   return { kind: "ok" };
 }
@@ -296,6 +382,27 @@ router.post("/users", requireUsersManage, async (req: Request, res: Response) =>
       }
     }
 
+    // Sniff the bytes themselves to confirm they actually decode to
+    // an image. The presigned-URL endpoint constrains the *declared*
+    // contentType to the image MIME allow-list, but a non-browser
+    // client can declare image/jpeg and PUT arbitrary bytes — see
+    // enforceAvatarIsImage for the threat model. Run after the size
+    // check so a malicious PUT with a huge JSON dump is rejected by
+    // the cheaper metadata round-trip first.
+    if (body.avatarUrl) {
+      const imgCheck = await enforceAvatarIsImage(body.avatarUrl);
+      if (imgCheck.kind === "not_image") {
+        res.status(415).json({
+          error: "Avatar bytes do not match a recognized image format",
+        });
+        return;
+      }
+      if (imgCheck.kind === "missing") {
+        res.status(400).json({ error: "Avatar object not found in storage" });
+        return;
+      }
+    }
+
     let row;
     try {
       [row] = await db
@@ -438,6 +545,27 @@ router.patch("/users/:id", requireUsersManage, async (req: Request, res: Respons
         return;
       }
       if (check.kind === "missing") {
+        res.status(400).json({ error: "Avatar object not found in storage" });
+        return;
+      }
+    }
+
+    // Same magic-number sniff as POST. The size check above already
+    // rejected the cheap "huge JSON dump" case via metadata; this is
+    // the smaller-but-still-non-image case (a 4 KB HTML page declared
+    // as image/jpeg, etc). Only the route handler 415s — the helper
+    // itself is response-agnostic so the same code can drive POST and
+    // PATCH. The previous avatar (if any) is left intact: only the
+    // freshly-uploaded non-image gets cleaned up inside the helper.
+    if (body.avatarUrl) {
+      const imgCheck = await enforceAvatarIsImage(body.avatarUrl);
+      if (imgCheck.kind === "not_image") {
+        res.status(415).json({
+          error: "Avatar bytes do not match a recognized image format",
+        });
+        return;
+      }
+      if (imgCheck.kind === "missing") {
         res.status(400).json({ error: "Avatar object not found in storage" });
         return;
       }

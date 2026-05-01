@@ -183,6 +183,67 @@ export class ObjectStorageService {
   }
 
   /**
+   * Read the leading `byteLen` bytes of a stored object entity.
+   *
+   * Used by write paths that need to *sniff* a client-supplied avatar
+   * — the presigned-URL endpoint locks down the declared `contentType`
+   * to the image MIME allow-list, but the bytes themselves are PUT
+   * directly to GCS so a non-browser caller can still declare
+   * `image/jpeg` and upload arbitrary bytes (a JSON dump, an
+   * executable, …). Pulling the head of the object lets a caller run
+   * a magic-number check before persisting `users.avatar_url` against
+   * the row.
+   *
+   * Returns `null` when the path isn't one of ours (external URL,
+   * malformed path) — same convention as {@link getObjectEntitySize},
+   * so callers can treat external resources as "skip the check".
+   * Throws `ObjectNotFoundError` when the path conceptually resolves
+   * to one of ours but the bytes aren't in the bucket.
+   *
+   * `byteLen` is a *hint* — GCS may return fewer bytes if the object
+   * is shorter than that. Avatar magic-number sniffs only need the
+   * first 16-32 bytes, but we leave the cap to the caller so the SVG
+   * sniff can ask for a few hundred and still fit any realistic head
+   * read.
+   */
+  async getObjectEntityHead(
+    rawPath: string,
+    byteLen: number,
+  ): Promise<Buffer | null> {
+    const normalized = this.normalizeObjectEntityPath(rawPath);
+    if (!normalized.startsWith("/objects/")) return null;
+    if (byteLen <= 0) return Buffer.alloc(0);
+
+    const objectFile = await this.getObjectEntityFile(normalized);
+    // GCS `start`/`end` are inclusive byte offsets, so reading the
+    // first `byteLen` bytes is `[0, byteLen - 1]`.
+    const stream = objectFile.createReadStream({ start: 0, end: byteLen - 1 });
+    const chunks: Array<Buffer> = [];
+    try {
+      for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+    } catch (err) {
+      // Race window: `getObjectEntityFile` already confirmed the
+      // object exists via a metadata HEAD, but the bytes can still
+      // disappear before the read stream drains (a parallel admin
+      // delete, an object-storage GC sweep, …). The Node GCS SDK
+      // surfaces this as a stream error with `code === 404`.
+      // Translate it back to `ObjectNotFoundError` so callers don't
+      // have to discover the GCS-specific error shape and so the
+      // route layer can respond 400 ("avatar object not found in
+      // storage") consistently with the existence-check branch
+      // instead of bubbling out as a 500.
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === 404) {
+        throw new ObjectNotFoundError();
+      }
+      throw err;
+    }
+    return Buffer.concat(chunks);
+  }
+
+  /**
    * Look up the byte size of a stored object entity by its
    * `/objects/<id>` path.
    *

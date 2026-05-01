@@ -65,6 +65,17 @@ const deleteObjectIfStoredMock = vi.fn(async () => true);
 const getObjectEntitySizeMock = vi.fn<(rawPath: string) => Promise<number | null>>(
   async () => null,
 );
+// Default to a real PNG magic signature so every existing happy-path
+// test reaches the DB write without each one having to seed bytes by
+// hand. Tests that exercise the 415 / missing-object branches override
+// per case (with non-image bytes or a thrown ObjectNotFoundError).
+// External-URL tests don't care about the value here — the real
+// ObjectStorageService returns null for non-`/objects/` paths, but
+// the route maps both null and "ok" onto "skip" so a PNG default
+// doesn't change the behaviour the external-URL tests are pinning.
+const getObjectEntityHeadMock = vi.fn<
+  (rawPath: string, byteLen: number) => Promise<Buffer | null>
+>();
 class ObjectNotFoundErrorClass extends Error {
   constructor() {
     super("Object not found");
@@ -76,10 +87,20 @@ vi.mock("../lib/objectStorage", () => {
     ObjectStorageService: vi.fn().mockImplementation(() => ({
       deleteObjectIfStored: deleteObjectIfStoredMock,
       getObjectEntitySize: getObjectEntitySizeMock,
+      getObjectEntityHead: getObjectEntityHeadMock,
     })),
     ObjectNotFoundError: ObjectNotFoundErrorClass,
   };
 });
+
+/**
+ * 8-byte PNG magic signature. Anything starting with these bytes will
+ * pass {@link looksLikeImage}, so tests that need the route's image
+ * sniff to succeed can return this from `getObjectEntityHeadMock`.
+ */
+const PNG_SIGNATURE = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
 
 const { setupRouteTests } = await import("./setup");
 const { users } = await import("@workspace/db");
@@ -98,6 +119,8 @@ beforeEach(() => {
   deleteObjectIfStoredMock.mockResolvedValue(true);
   getObjectEntitySizeMock.mockReset();
   getObjectEntitySizeMock.mockResolvedValue(null);
+  getObjectEntityHeadMock.mockReset();
+  getObjectEntityHeadMock.mockResolvedValue(PNG_SIGNATURE);
 });
 
 describe("GET /api/users", () => {
@@ -261,6 +284,136 @@ describe("POST /api/users", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.avatarUrl).toBe("/objects/uploads/just-fits");
+  });
+
+  it("rejects a create whose avatar bytes do not match an image signature with 415", async () => {
+    // The presigned-URL endpoint pre-checks the *declared* contentType,
+    // but a non-browser client can declare image/jpeg and PUT arbitrary
+    // bytes (e.g. a JSON dump that fits under the size cap). The route
+    // sniffs the head of the stored object before persisting the row;
+    // if the signature doesn't match an image format, we 415 and the
+    // orphan blob is best-effort cleaned up.
+    getObjectEntityHeadMock.mockResolvedValueOnce(
+      Buffer.from('{"not":"an image"}', "utf8"),
+    );
+
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-fake-image",
+        displayName: "Fake Image",
+        avatarUrl: "/objects/uploads/smuggled-json",
+      });
+
+    expect(res.status).toBe(415);
+    expect(res.body.error).toMatch(/image format/i);
+    // Orphan cleanup: the rejected blob is deleted so the bucket
+    // doesn't accumulate non-image junk after a rejected upload.
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/smuggled-json",
+    );
+    // The row itself must NOT have been inserted — the entire promise
+    // of this gate is that `users.avatar_url` never references a blob
+    // whose bytes aren't actually an image.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-fake-image"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects a create whose avatar object is missing from storage during the image sniff with 400", async () => {
+    // Same threat surface as the size-check missing branch, but the
+    // image sniff runs second so this exercises the path where size
+    // succeeded (no bytes claimed yet) and then the head read raised
+    // ObjectNotFoundError. The route surfaces it as a 400 so the
+    // FE can recover, instead of letting the row reference a phantom.
+    getObjectEntitySizeMock.mockResolvedValueOnce(1024);
+    getObjectEntityHeadMock.mockRejectedValueOnce(
+      new ObjectNotFoundErrorClass(),
+    );
+
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-vanished-during-sniff",
+        displayName: "Vanished",
+        avatarUrl: "/objects/uploads/vanished-during-sniff",
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Avatar object not found in storage");
+  });
+
+  it("rejects an HTML page with an embedded `<svg>` tag with 415", async () => {
+    // Specific bypass pin: a naïve "match `<svg` anywhere in the
+    // head bytes" sniff would falsely accept this payload because
+    // it contains the literal substring `<svg`. The strict prefix
+    // walker rejects it because the *first* meaningful tag is
+    // `<html>`, not `<svg>` — so the bytes would render as HTML in
+    // any consumer, making them ineligible for the avatar slot.
+    getObjectEntityHeadMock.mockResolvedValueOnce(
+      Buffer.from(
+        `<!DOCTYPE html><html><body>` +
+          `<svg xmlns="http://www.w3.org/2000/svg"></svg>` +
+          `</body></html>`,
+        "utf8",
+      ),
+    );
+
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-html-with-svg",
+        displayName: "HTML With Svg",
+        avatarUrl: "/objects/uploads/html-with-embedded-svg",
+      });
+
+    expect(res.status).toBe(415);
+    expect(res.body.error).toMatch(/image format/i);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/html-with-embedded-svg",
+    );
+    if (!ctx.schema) throw new Error("schema not ready");
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-html-with-svg"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("returns 415 (not 500) when the orphan cleanup itself fails after a non-image upload", async () => {
+    // Posture check: a transient GCS outage during cleanup of the
+    // rejected blob must not mask the real 415 the caller is owed.
+    // The orphan we failed to delete is precisely the failure mode
+    // this whole feature is mitigating, so we log and move on.
+    getObjectEntityHeadMock.mockResolvedValueOnce(
+      Buffer.from("<html>not an image</html>", "utf8"),
+    );
+    deleteObjectIfStoredMock.mockRejectedValueOnce(new Error("GCS down"));
+
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-cleanup-fails-415",
+        displayName: "Cleanup Fails",
+        avatarUrl: "/objects/uploads/will-stay-orphaned",
+      });
+
+    expect(res.status).toBe(415);
+    // The row still must not exist — the cleanup blip doesn't change
+    // the gate's verdict on whether the row gets to reference the blob.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-cleanup-fails-415"));
+    expect(rows).toHaveLength(0);
   });
 
   it("returns 409 when the id already exists", async () => {
@@ -816,6 +969,68 @@ describe("PATCH /api/users/:id", () => {
 
     expect(res.status).toBe(200);
     expect(getObjectEntitySizeMock).not.toHaveBeenCalled();
+    // Image sniff is also gated on a truthy new value — clearing the
+    // column should never pay for a GCS head-read either.
+    expect(getObjectEntityHeadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a patch whose new avatar bytes do not match an image signature with 415", async () => {
+    // Mirror of the POST 415 test on the patch path. The previous
+    // (valid) avatar must NOT be deleted — the row never changed, so
+    // it still references it. Only the freshly-uploaded non-image is
+    // best-effort cleaned up.
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-patch-fake-image",
+      displayName: "Patch Fake Image",
+      avatarUrl: "/objects/uploads/old-real-image",
+    });
+    getObjectEntityHeadMock.mockResolvedValueOnce(
+      Buffer.from("<html><body>not an image</body></html>", "utf8"),
+    );
+
+    const res = await request(getApp())
+      .patch("/api/users/u-patch-fake-image")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/smuggled-html" });
+
+    expect(res.status).toBe(415);
+    expect(res.body.error).toMatch(/image format/i);
+
+    // The smuggled blob gets cleaned up; the previous (valid) avatar
+    // is left intact because the row never changed.
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/smuggled-html",
+    );
+    expect(deleteObjectIfStoredMock).not.toHaveBeenCalledWith(
+      "/objects/uploads/old-real-image",
+    );
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-patch-fake-image"));
+    expect(rows[0]?.avatarUrl).toBe("/objects/uploads/old-real-image");
+  });
+
+  it("accepts a patch when the avatar bytes match a real image signature", async () => {
+    // Happy path: the route's image sniff sees a valid PNG header and
+    // lets the row land. This is the same default the beforeEach hook
+    // sets, but pinning it explicitly here documents the contract for
+    // the next reader.
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-patch-real-image",
+      displayName: "Patch Real Image",
+    });
+    getObjectEntityHeadMock.mockResolvedValueOnce(PNG_SIGNATURE);
+
+    const res = await request(getApp())
+      .patch("/api/users/u-patch-real-image")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/real-png" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.avatarUrl).toBe("/objects/uploads/real-png");
   });
 });
 
