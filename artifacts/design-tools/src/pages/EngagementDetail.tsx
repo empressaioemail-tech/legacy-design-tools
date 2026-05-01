@@ -3,6 +3,7 @@ import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetEngagement,
+  useGetEngagementBriefing,
   useGetSnapshot,
   useListEngagementSubmissions,
   useUpdateEngagement,
@@ -10,6 +11,7 @@ import {
   getGetSnapshotQueryKey,
   getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
+  type EngagementBriefingSource,
   type EngagementDetail as EngagementDetailType,
   type EngagementSubmissionSummary,
   type SubmissionReceipt,
@@ -19,6 +21,7 @@ import {
 import { SiteMap } from "@workspace/site-context/client";
 import type { SheetSummary } from "@workspace/api-client-react";
 import { AppShell } from "../components/AppShell";
+import { BriefingSourceUploadModal } from "../components/BriefingSourceUploadModal";
 import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
 import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionResponseDialog";
@@ -556,32 +559,231 @@ function SettingsTab({
 }
 
 /**
- * Site context tab — DA-PI-1 sprint scaffolding.
- *
- * The four parcel-intelligence atoms (parcel-briefing, intent,
- * briefing-source, neighboring-context) register shape-only this
- * sprint; the briefing engine that resolves them ships in DA-PI-3
- * (per Spec 51 §7's sprint table). This tab exists now so the IA is
- * stable, deep links work (`?tab=site-context`), and a follow-up
- * sprint can drop the briefing/intent/source list cards in without
- * having to plumb routing or tab state.
- *
- * Until the engine ships, the body is a deliberate empty state — no
- * hidden `useEffect` calls, no probe of unfinished endpoints — so
- * loading the tab has no side effects.
+ * Format a `byteSize` int as a compact human label. Mirrors the inline
+ * formatter in the upload modal — extracted here so the sources list
+ * and the modal pre-submit preview stay consistent.
  */
-function SiteContextTab() {
+function formatByteSize(bytes: number | null): string {
+  if (bytes === null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) {
+    const kb = bytes / 1024;
+    return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+  }
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+}
+
+/**
+ * Render one current briefing source as a card row. The presentation
+ * is intentionally producer-agnostic — both `manual-upload` and
+ * `federal-adapter` rows route through this component, with the
+ * `sourceKind` badge being the only visible difference.
+ */
+function BriefingSourceRow({
+  source,
+}: {
+  source: EngagementBriefingSource;
+}) {
+  const isManual = source.sourceKind === "manual-upload";
   return (
-    <div className="sc-card p-6 flex items-center justify-center flex-1">
-      <div className="sc-prose text-center opacity-70" style={{ maxWidth: 480 }}>
-        <div className="sc-medium mb-2">Site context</div>
-        <div>
-          Parcel briefing, intent, neighboring context, and cited briefing
-          sources will surface here once the briefing engine ships. The atom
-          shapes are registered so deep links (<code>?tab=site-context</code>)
-          and the chat inline-reference resolver already recognize this view.
-        </div>
+    <div
+      className="sc-card"
+      style={{
+        padding: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+      data-testid={`briefing-source-${source.id}`}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+          }}
+        >
+          {source.layerKind}
+        </span>
+        <span
+          className="sc-pill"
+          style={{
+            fontSize: 10,
+            padding: "2px 8px",
+            borderRadius: 999,
+            background: isManual ? "var(--info-dim)" : "var(--success-dim)",
+            color: isManual ? "var(--info-text)" : "var(--success-text)",
+            textTransform: "uppercase",
+            letterSpacing: 0.3,
+          }}
+        >
+          {isManual ? "Manual upload" : "Federal adapter"}
+        </span>
       </div>
+      {source.uploadOriginalFilename && (
+        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          {source.uploadOriginalFilename}
+          {source.uploadByteSize !== null && (
+            <span style={{ color: "var(--text-muted)" }}>
+              {" · "}
+              {formatByteSize(source.uploadByteSize)}
+            </span>
+          )}
+        </div>
+      )}
+      {source.provider && (
+        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          Provider: {source.provider}
+        </div>
+      )}
+      {source.note && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--text-muted)",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {source.note}
+        </div>
+      )}
+      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+        Snapshot {new Date(source.snapshotDate).toLocaleDateString()} · added{" "}
+        {relativeTime(source.createdAt)}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Site context tab — DA-PI-1B manual-QGIS upload path.
+ *
+ * Renders the engagement's current (non-superseded) briefing sources
+ * and exposes the "Upload QGIS layer" button that opens
+ * {@link BriefingSourceUploadModal}. The four parcel-intelligence
+ * atoms (parcel-briefing, intent, briefing-source, neighboring-
+ * context) are still shape-only — the briefing engine that resolves
+ * them lands in DA-PI-3 — but this sprint wires the source-list +
+ * upload UI so federal-data adapters (DA-PI-2) and the briefing
+ * engine (DA-PI-3) plug into a tab that is already shipping.
+ */
+function SiteContextTab({ engagementId }: { engagementId: string }) {
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const briefingQuery = useGetEngagementBriefing(engagementId);
+
+  const sources = briefingQuery.data?.briefing?.sources ?? [];
+  const existingLayerKinds = useMemo(
+    () => sources.map((s) => s.layerKind),
+    [sources],
+  );
+
+  return (
+    <div className="sc-card p-6 flex flex-col gap-4 flex-1">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div>
+          <div className="sc-medium">Briefing sources</div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-muted)",
+              marginTop: 2,
+            }}
+          >
+            Manually-uploaded QGIS layers and (soon) federal-data overlays
+            cited by the engagement's parcel briefing. Re-uploading a layer
+            supersedes the prior source while keeping it on the timeline.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="sc-btn sc-btn-primary"
+          onClick={() => setUploadOpen(true)}
+          data-testid="briefing-source-upload-button"
+        >
+          Upload QGIS layer
+        </button>
+      </div>
+
+      {briefingQuery.isLoading && (
+        <div
+          className="sc-prose"
+          style={{ opacity: 0.7, fontSize: 13 }}
+        >
+          Loading briefing sources…
+        </div>
+      )}
+
+      {briefingQuery.isError && (
+        <div
+          role="alert"
+          style={{
+            fontSize: 12,
+            color: "var(--danger-text)",
+            background: "var(--danger-dim)",
+            padding: 8,
+            borderRadius: 4,
+          }}
+        >
+          Failed to load briefing sources.
+        </div>
+      )}
+
+      {!briefingQuery.isLoading &&
+        !briefingQuery.isError &&
+        sources.length === 0 && (
+          <div
+            className="sc-prose"
+            style={{
+              opacity: 0.7,
+              fontSize: 13,
+              padding: 16,
+              border: "1px dashed var(--border-subtle)",
+              borderRadius: 6,
+            }}
+          >
+            No briefing sources yet. Upload a QGIS export to attach the first
+            cited overlay; the parcel briefing row is created on the first
+            upload.
+          </div>
+        )}
+
+      {sources.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+          data-testid="briefing-sources-list"
+        >
+          {sources.map((source) => (
+            <BriefingSourceRow key={source.id} source={source} />
+          ))}
+        </div>
+      )}
+
+      <BriefingSourceUploadModal
+        engagementId={engagementId}
+        isOpen={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        existingLayerKinds={existingLayerKinds}
+      />
     </div>
   );
 }
@@ -1479,7 +1681,9 @@ export function EngagementDetail() {
           <SiteTab engagement={engagement} onAddAddress={openEdit} />
         )}
 
-        {tab === "site-context" && <SiteContextTab />}
+        {tab === "site-context" && (
+          <SiteContextTab engagementId={engagement.id} />
+        )}
 
         {tab === "submissions" && (
           <SubmissionsTab

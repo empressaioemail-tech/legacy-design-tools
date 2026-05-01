@@ -36,6 +36,14 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "engagements",
   "snapshots",
   "sheets",
+  // Manual-QGIS upload tables (DA-PI-1B). `briefing_sources` cascades
+  // off `parcel_briefings` which cascades off `engagements`, so the
+  // engagements truncate above clears them transitively — but listing
+  // them explicitly keeps the "if a route writes to it, it's in this
+  // list" invariant honest and means a future test that seeds rows
+  // without touching engagements still gets a clean slate.
+  "parcel_briefings",
+  "briefing_sources",
   "code_atom_fetch_queue",
   "code_atoms",
   "code_atom_sources",

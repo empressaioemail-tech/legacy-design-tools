@@ -13,6 +13,7 @@ import reviewersRouter from "./reviewers";
 import settingsRouter from "./settings";
 import storageRouter from "./storage";
 import sessionRouter from "./session";
+import parcelBriefingsRouter from "./parcelBriefings";
 
 const router: IRouter = Router();
 
@@ -20,6 +21,10 @@ router.use(healthRouter);
 // /engagements/match must register BEFORE /engagements/:id otherwise Express
 // matches the literal path against the parametric route first.
 router.use(matchRouter);
+// parcelBriefingsRouter mounts under /engagements/:id/briefing — register
+// before engagementsRouter so its more-specific paths match first (mirrors
+// the matchRouter ordering note above).
+router.use(parcelBriefingsRouter);
 router.use(engagementsRouter);
 router.use(snapshotsRouter);
 router.use(sheetsRouter);

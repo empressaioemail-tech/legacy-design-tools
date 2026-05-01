@@ -191,6 +191,134 @@ server clock on every response update.
 }
 
 /**
+ * Producer flavor for a `briefing_sources` row. `manual-upload` is
+the DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`
+ships in DA-PI-2 when the federal-data adapters write into the
+same table. The two share the supersession contract so a
+consumer renders either kind without a producer-specific code
+path.
+
+ */
+export type BriefingSourceKind =
+  (typeof BriefingSourceKind)[keyof typeof BriefingSourceKind];
+
+export const BriefingSourceKind = {
+  "manual-upload": "manual-upload",
+  "federal-adapter": "federal-adapter",
+} as const;
+
+/**
+ * One current (non-superseded) source attached to an engagement's
+parcel briefing. The `upload*` fields are populated only on
+`manual-upload` rows and describe the file the architect picked.
+`payload` is the structured data the briefing engine will read
+when DA-PI-3 ships; producers may store an empty object today.
+
+ */
+export interface EngagementBriefingSource {
+  id: string;
+  layerKind: string;
+  sourceKind: BriefingSourceKind;
+  provider: string | null;
+  snapshotDate: string;
+  note: string | null;
+  uploadObjectPath: string | null;
+  uploadOriginalFilename: string | null;
+  uploadContentType: string | null;
+  uploadByteSize: number | null;
+  createdAt: string;
+}
+
+/**
+ * The engagement's parcel briefing row plus its current sources.
+
+ */
+export interface EngagementBriefing {
+  id: string;
+  engagementId: string;
+  createdAt: string;
+  updatedAt: string;
+  sources: EngagementBriefingSource[];
+}
+
+/**
+ * Wire envelope for the briefing read/write routes. `briefing` is
+`null` when no briefing has been created yet for the engagement
+— the first call to `POST /engagements/{id}/briefing/sources`
+is what creates it. The envelope exists because OpenAPI 3.0's
+`nullable` modifier on a `$ref` to an object schema does not
+generate a clean `T | null` in our codegen toolchain.
+
+ */
+export interface EngagementBriefingResponse {
+  briefing: EngagementBriefing | null;
+}
+
+/**
+ * Metadata for the file uploaded out-of-band to object storage.
+ */
+export type CreateBriefingSourceBodyUpload = {
+  /**
+   * Canonical `/objects/<id>` path returned by `POST
+/storage/uploads/request-url` and persisted on the row.
+
+   * @minLength 1
+   */
+  objectPath: string;
+  /**
+   * @minLength 1
+   * @maxLength 256
+   */
+  originalFilename: string;
+  /**
+   * @minLength 1
+   * @maxLength 128
+   */
+  contentType: string;
+  /** @minimum 0 */
+  byteSize: number;
+};
+
+/**
+ * Request body for `POST /engagements/{id}/briefing/sources`. The
+bytes are uploaded to object storage out-of-band via the
+presigned-URL flow; this body only carries the metadata + the
+canonical `/objects/...` path the bytes landed at. `layerKind`
+is the supersession key — a second upload with the same value
+marks the prior row superseded.
+
+ */
+export interface CreateBriefingSourceBody {
+  /**
+   * Slug identifying the overlay layer (e.g. `qgis-zoning`,
+`qgis-parcel`). Free-form text rather than a closed enum so
+new layer kinds can land without a schema change.
+
+   * @minLength 1
+   * @maxLength 64
+   */
+  layerKind: string;
+  /**
+   * Optional human-readable provider label.
+   * @maxLength 256
+   */
+  provider?: string | null;
+  /** Effective date for the data. Defaults to the server's clock
+at insert time when omitted or null.
+ */
+  snapshotDate?: string | null;
+  /**
+   * Optional free-text note. Empty / whitespace-only strings are
+coerced to null on the row.
+
+   * @maxLength 2048
+   */
+  note?: string | null;
+  /** Metadata for the file uploaded out-of-band to object storage. */
+  upload: CreateBriefingSourceBodyUpload;
+}
+
+/**
  * Jurisdiction's review outcome for the submission.
  */
 export type RecordSubmissionResponseBodyStatus =

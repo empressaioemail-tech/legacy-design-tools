@@ -549,6 +549,158 @@ export const RecordSubmissionResponseResponse = zod
   );
 
 /**
+ * Returns the engagement's `parcel_briefings` row (if any) along
+with its current (non-superseded) `briefing_sources`. Returns
+`null` when no briefing has been created yet — i.e. before the
+first manual-QGIS upload or federal-adapter fetch (DA-PI-1B
+first-upload-creates-briefing pattern).
+
+Sources are listed newest-first by `createdAt`. Superseded rows
+are deliberately omitted; the timeline view (future sprint) is
+the surface that exposes the full per-layer history.
+
+ * @summary Get the engagement's parcel briefing and current sources
+ */
+export const GetEngagementBriefingParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetEngagementBriefingResponse = zod
+  .object({
+    briefing: zod
+      .object({
+        id: zod.string(),
+        engagementId: zod.string(),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+        sources: zod.array(
+          zod
+            .object({
+              id: zod.string(),
+              layerKind: zod.string(),
+              sourceKind: zod
+                .enum(["manual-upload", "federal-adapter"])
+                .describe(
+                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table. The two share the supersession contract so a\nconsumer renders either kind without a producer-specific code\npath.\n",
+                ),
+              provider: zod.string().nullable(),
+              snapshotDate: zod.coerce.date(),
+              note: zod.string().nullable(),
+              uploadObjectPath: zod.string().nullable(),
+              uploadOriginalFilename: zod.string().nullable(),
+              uploadContentType: zod.string().nullable(),
+              uploadByteSize: zod.number().nullable(),
+              createdAt: zod.coerce.date(),
+            })
+            .describe(
+              "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+            ),
+        ),
+      })
+      .describe(
+        "The engagement's parcel briefing row plus its current sources.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the briefing read\/write routes. `briefing` is\n`null` when no briefing has been created yet for the engagement\n— the first call to `POST \/engagements\/{id}\/briefing\/sources`\nis what creates it. The envelope exists because OpenAPI 3.0's\n`nullable` modifier on a `$ref` to an object schema does not\ngenerate a clean `T | null` in our codegen toolchain.\n",
+  );
+
+/**
+ * Records that a manually-exported QGIS overlay (or any other
+manually-uploaded layer file) has been attached to the
+engagement's parcel briefing. The first call creates the
+engagement's `parcel_briefings` row on demand
+(first-upload-creates-briefing); subsequent calls of the same
+`layerKind` supersede the prior row for that layer per Spec 51
+§4 (the prior row's `supersededById` points at the new row's
+id, both rows stay readable).
+
+The file bytes themselves are uploaded to object storage via
+the existing presigned-URL flow (`POST
+/storage/uploads/request-url` → PUT to the returned URL). This
+route only records the metadata + the canonical `/objects/...`
+path the bytes landed at.
+
+Emits `briefing-source.fetched` against the new row through the
+event-anchoring service. Best-effort: a transient history
+outage cannot fail the HTTP request — the row is the source of
+truth, the event chain is observability.
+
+ * @summary Record a manually-uploaded QGIS layer as a briefing source
+ */
+export const CreateEngagementBriefingSourceParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const createEngagementBriefingSourceBodyLayerKindMax = 64;
+
+export const createEngagementBriefingSourceBodyProviderMax = 256;
+
+export const createEngagementBriefingSourceBodyNoteMax = 2048;
+
+export const createEngagementBriefingSourceBodyUploadOriginalFilenameMax = 256;
+
+export const createEngagementBriefingSourceBodyUploadContentTypeMax = 128;
+
+export const createEngagementBriefingSourceBodyUploadByteSizeMin = 0;
+
+export const CreateEngagementBriefingSourceBody = zod
+  .object({
+    layerKind: zod
+      .string()
+      .min(1)
+      .max(createEngagementBriefingSourceBodyLayerKindMax)
+      .describe(
+        "Slug identifying the overlay layer (e.g. `qgis-zoning`,\n`qgis-parcel`). Free-form text rather than a closed enum so\nnew layer kinds can land without a schema change.\n",
+      ),
+    provider: zod
+      .string()
+      .max(createEngagementBriefingSourceBodyProviderMax)
+      .nullish()
+      .describe("Optional human-readable provider label."),
+    snapshotDate: zod.coerce
+      .date()
+      .nullish()
+      .describe(
+        "Effective date for the data. Defaults to the server's clock\nat insert time when omitted or null.\n",
+      ),
+    note: zod
+      .string()
+      .max(createEngagementBriefingSourceBodyNoteMax)
+      .nullish()
+      .describe(
+        "Optional free-text note. Empty \/ whitespace-only strings are\ncoerced to null on the row.\n",
+      ),
+    upload: zod
+      .object({
+        objectPath: zod
+          .string()
+          .min(1)
+          .describe(
+            "Canonical `\/objects\/<id>` path returned by `POST\n\/storage\/uploads\/request-url` and persisted on the row.\n",
+          ),
+        originalFilename: zod
+          .string()
+          .min(1)
+          .max(createEngagementBriefingSourceBodyUploadOriginalFilenameMax),
+        contentType: zod
+          .string()
+          .min(1)
+          .max(createEngagementBriefingSourceBodyUploadContentTypeMax),
+        byteSize: zod
+          .number()
+          .min(createEngagementBriefingSourceBodyUploadByteSizeMin),
+      })
+      .describe(
+        "Metadata for the file uploaded out-of-band to object storage.",
+      ),
+  })
+  .describe(
+    "Request body for `POST \/engagements\/{id}\/briefing\/sources`. The\nbytes are uploaded to object storage out-of-band via the\npresigned-URL flow; this body only carries the metadata + the\ncanonical `\/objects\/...` path the bytes landed at. `layerKind`\nis the supersession key — a second upload with the same value\nmarks the prior row superseded.\n",
+  );
+
+/**
  * Returns all snapshots, newest first, joined with engagementName.
  * @summary List Revit snapshots across all engagements
  */

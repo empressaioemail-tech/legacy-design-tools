@@ -24,6 +24,27 @@ CREATE TABLE @@SCHEMA@@.atom_events (
 );
 
 
+-- Name: briefing_sources; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.briefing_sources (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    briefing_id uuid NOT NULL,
+    layer_kind text NOT NULL,
+    source_kind text NOT NULL,
+    provider text,
+    snapshot_date timestamp with time zone DEFAULT now() NOT NULL,
+    payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    upload_object_path text,
+    upload_original_filename text,
+    upload_content_type text,
+    upload_byte_size integer,
+    note text,
+    superseded_by_id uuid,
+    superseded_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: code_atom_fetch_queue; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.code_atom_fetch_queue (
@@ -120,6 +141,16 @@ CREATE TABLE @@SCHEMA@@.findings_code_atoms (
 );
 
 
+-- Name: parcel_briefings; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.parcel_briefings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: sheets; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.sheets (
@@ -194,6 +225,12 @@ ALTER TABLE ONLY @@SCHEMA@@.atom_events
     ADD CONSTRAINT atom_events_pkey PRIMARY KEY (id);
 
 
+-- Name: briefing_sources briefing_sources_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
+    ADD CONSTRAINT briefing_sources_pkey PRIMARY KEY (id);
+
+
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
@@ -236,6 +273,18 @@ ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
     ADD CONSTRAINT findings_code_atoms_pkey PRIMARY KEY (id);
 
 
+-- Name: parcel_briefings parcel_briefings_engagement_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
+    ADD CONSTRAINT parcel_briefings_engagement_id_unique UNIQUE (engagement_id);
+
+
+-- Name: parcel_briefings parcel_briefings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
+    ADD CONSTRAINT parcel_briefings_pkey PRIMARY KEY (id);
+
+
 -- Name: sheets sheets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.sheets
@@ -268,6 +317,16 @@ CREATE UNIQUE INDEX atom_events_chain_hash_uniq ON @@SCHEMA@@.atom_events USING 
 -- Name: atom_events_timeline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX atom_events_timeline_idx ON @@SCHEMA@@.atom_events USING btree (entity_type, entity_id, occurred_at);
+
+
+-- Name: briefing_sources_briefing_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX briefing_sources_briefing_idx ON @@SCHEMA@@.briefing_sources USING btree (briefing_id);
+
+
+-- Name: briefing_sources_current_layer_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX briefing_sources_current_layer_uniq ON @@SCHEMA@@.briefing_sources USING btree (briefing_id, layer_kind) WHERE (superseded_at IS NULL);
 
 
 -- Name: code_atom_fetch_queue_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
@@ -330,6 +389,11 @@ CREATE INDEX findings_code_atoms_atom_idx ON @@SCHEMA@@.findings_code_atoms USIN
 CREATE INDEX findings_code_atoms_finding_idx ON @@SCHEMA@@.findings_code_atoms USING btree (finding_id);
 
 
+-- Name: parcel_briefings_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
+
+
 -- Name: sheets_engagement_number_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX sheets_engagement_number_idx ON @@SCHEMA@@.sheets USING btree (engagement_id, sheet_number);
@@ -365,6 +429,18 @@ CREATE INDEX submissions_engagement_idx ON @@SCHEMA@@.submissions USING btree (e
 CREATE INDEX submissions_submitted_at_idx ON @@SCHEMA@@.submissions USING btree (submitted_at);
 
 
+-- Name: briefing_sources briefing_sources_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
+    ADD CONSTRAINT briefing_sources_briefing_id_parcel_briefings_id_fk FOREIGN KEY (briefing_id) REFERENCES @@SCHEMA@@.parcel_briefings(id) ON DELETE CASCADE;
+
+
+-- Name: briefing_sources briefing_sources_superseded_by_id_briefing_sources_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
+    ADD CONSTRAINT briefing_sources_superseded_by_id_briefing_sources_id_fk FOREIGN KEY (superseded_by_id) REFERENCES @@SCHEMA@@.briefing_sources(id) ON DELETE SET NULL;
+
+
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_source_id_code_atom_sources_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
@@ -381,6 +457,12 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
     ADD CONSTRAINT findings_code_atoms_atom_id_code_atoms_id_fk FOREIGN KEY (atom_id) REFERENCES @@SCHEMA@@.code_atoms(id) ON DELETE CASCADE;
+
+
+-- Name: parcel_briefings parcel_briefings_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
+    ADD CONSTRAINT parcel_briefings_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: sheets sheets_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

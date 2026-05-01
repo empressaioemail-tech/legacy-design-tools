@@ -61,11 +61,13 @@ describe("lib/db schema integration", () => {
       const names = res.rows.map((r) => r.tablename);
       expect(names).toEqual([
         "atom_events",
+        "briefing_sources",
         "code_atom_fetch_queue",
         "code_atom_sources",
         "code_atoms",
         "engagements",
         "findings_code_atoms",
+        "parcel_briefings",
         "sheets",
         "snapshots",
         "submissions",

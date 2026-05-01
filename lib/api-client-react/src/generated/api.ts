@@ -24,8 +24,10 @@ import type {
   CodeAtomDetail,
   CodeAtomListResponse,
   CodeAtomSummary,
+  CreateBriefingSourceBody,
   CreateEngagementSubmissionBody,
   CreateUserBody,
+  EngagementBriefingResponse,
   EngagementDetail,
   EngagementSubmissionSummary,
   EngagementSummary,
@@ -934,6 +936,219 @@ export const useRecordSubmissionResponse = <
   TContext
 > => {
   return useMutation(getRecordSubmissionResponseMutationOptions(options));
+};
+
+/**
+ * Returns the engagement's `parcel_briefings` row (if any) along
+with its current (non-superseded) `briefing_sources`. Returns
+`null` when no briefing has been created yet — i.e. before the
+first manual-QGIS upload or federal-adapter fetch (DA-PI-1B
+first-upload-creates-briefing pattern).
+
+Sources are listed newest-first by `createdAt`. Superseded rows
+are deliberately omitted; the timeline view (future sprint) is
+the surface that exposes the full per-layer history.
+
+ * @summary Get the engagement's parcel briefing and current sources
+ */
+export const getGetEngagementBriefingUrl = (id: string) => {
+  return `/api/engagements/${id}/briefing`;
+};
+
+export const getEngagementBriefing = async (
+  id: string,
+  options?: RequestInit,
+): Promise<EngagementBriefingResponse> => {
+  return customFetch<EngagementBriefingResponse>(
+    getGetEngagementBriefingUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetEngagementBriefingQueryKey = (id: string) => {
+  return [`/api/engagements/${id}/briefing`] as const;
+};
+
+export const getGetEngagementBriefingQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEngagementBriefing>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagementBriefing>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetEngagementBriefingQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEngagementBriefing>>
+  > = ({ signal }) => getEngagementBriefing(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEngagementBriefing>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEngagementBriefingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEngagementBriefing>>
+>;
+export type GetEngagementBriefingQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get the engagement's parcel briefing and current sources
+ */
+
+export function useGetEngagementBriefing<
+  TData = Awaited<ReturnType<typeof getEngagementBriefing>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagementBriefing>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEngagementBriefingQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Records that a manually-exported QGIS overlay (or any other
+manually-uploaded layer file) has been attached to the
+engagement's parcel briefing. The first call creates the
+engagement's `parcel_briefings` row on demand
+(first-upload-creates-briefing); subsequent calls of the same
+`layerKind` supersede the prior row for that layer per Spec 51
+§4 (the prior row's `supersededById` points at the new row's
+id, both rows stay readable).
+
+The file bytes themselves are uploaded to object storage via
+the existing presigned-URL flow (`POST
+/storage/uploads/request-url` → PUT to the returned URL). This
+route only records the metadata + the canonical `/objects/...`
+path the bytes landed at.
+
+Emits `briefing-source.fetched` against the new row through the
+event-anchoring service. Best-effort: a transient history
+outage cannot fail the HTTP request — the row is the source of
+truth, the event chain is observability.
+
+ * @summary Record a manually-uploaded QGIS layer as a briefing source
+ */
+export const getCreateEngagementBriefingSourceUrl = (id: string) => {
+  return `/api/engagements/${id}/briefing/sources`;
+};
+
+export const createEngagementBriefingSource = async (
+  id: string,
+  createBriefingSourceBody: CreateBriefingSourceBody,
+  options?: RequestInit,
+): Promise<EngagementBriefingResponse> => {
+  return customFetch<EngagementBriefingResponse>(
+    getCreateEngagementBriefingSourceUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createBriefingSourceBody),
+    },
+  );
+};
+
+export const getCreateEngagementBriefingSourceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagementBriefingSource>>,
+    TError,
+    { id: string; data: BodyType<CreateBriefingSourceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createEngagementBriefingSource>>,
+  TError,
+  { id: string; data: BodyType<CreateBriefingSourceBody> },
+  TContext
+> => {
+  const mutationKey = ["createEngagementBriefingSource"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createEngagementBriefingSource>>,
+    { id: string; data: BodyType<CreateBriefingSourceBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return createEngagementBriefingSource(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateEngagementBriefingSourceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createEngagementBriefingSource>>
+>;
+export type CreateEngagementBriefingSourceMutationBody =
+  BodyType<CreateBriefingSourceBody>;
+export type CreateEngagementBriefingSourceMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Record a manually-uploaded QGIS layer as a briefing source
+ */
+export const useCreateEngagementBriefingSource = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagementBriefingSource>>,
+    TError,
+    { id: string; data: BodyType<CreateBriefingSourceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createEngagementBriefingSource>>,
+  TError,
+  { id: string; data: BodyType<CreateBriefingSourceBody> },
+  TContext
+> => {
+  return useMutation(getCreateEngagementBriefingSourceMutationOptions(options));
 };
 
 /**
