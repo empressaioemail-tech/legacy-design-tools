@@ -330,6 +330,48 @@ export async function sweepExpiredAdapterCacheRows(opts?: {
   }
 }
 
+/**
+ * Read-side companion to {@link sweepExpiredAdapterCacheRows} — Task #234.
+ *
+ * Returns the total row count in `adapter_response_cache` plus the
+ * subset whose `expires_at` is already in the past. The "expired"
+ * count uses the same `expires_at <= now()` boundary that the `get`
+ * path uses to filter out stale rows (which gates on
+ * `expires_at > now()`), so an operator reading the stats sees
+ * exactly the rows that won't serve a cache hit anymore — not the
+ * grace-windowed subset the sweep would actually delete this tick.
+ *
+ * Implemented as a single SELECT so the two counts come from the same
+ * snapshot of the table; running them as separate queries could let
+ * a sweep land between them and produce a `expired > total` body.
+ *
+ * Never throws — DB errors are logged and reported as `{ total: 0,
+ * expired: 0 }` so the stats endpoint matches the failure contract
+ * of the sweep helper (a transient outage shouldn't 500 the
+ * operator's "do I need to sweep?" check).
+ */
+export async function getAdapterCacheStats(opts?: {
+  log?: Logger;
+}): Promise<{ total: number; expired: number }> {
+  const log = opts?.log ?? defaultLogger;
+  try {
+    const rows = await db
+      .select({
+        total: sql<number>`count(*)::int`,
+        expired: sql<number>`count(*) FILTER (WHERE ${adapterResponseCache.expiresAt} <= now())::int`,
+      })
+      .from(adapterResponseCache);
+    const row = rows[0];
+    return {
+      total: Number(row?.total ?? 0),
+      expired: Number(row?.expired ?? 0),
+    };
+  } catch (err) {
+    log.warn({ err }, "adapterCache stats: select failed");
+    return { total: 0, expired: 0 };
+  }
+}
+
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 let sweepBootstrapTimer: ReturnType<typeof setTimeout> | null = null;
 let sweepInFlight = false;

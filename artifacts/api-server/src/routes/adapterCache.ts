@@ -33,7 +33,10 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
-import { sweepExpiredAdapterCacheRows } from "../lib/adapterCache";
+import {
+  getAdapterCacheStats,
+  sweepExpiredAdapterCacheRows,
+} from "../lib/adapterCache";
 
 const router: IRouter = Router();
 
@@ -80,6 +83,27 @@ router.post(
   async (req: Request, res: Response) => {
     const deleted = await sweepExpiredAdapterCacheRows({ log: req.log });
     res.json({ deleted });
+  },
+);
+
+/**
+ * Read-side companion to the sweep endpoint — Task #234.
+ *
+ * Reports the current row count of `adapter_response_cache` plus the
+ * subset that's already past its `expires_at`, so an operator who's
+ * worried about a row-count surge can see at a glance whether a
+ * sweep is worth triggering instead of either querying Postgres
+ * directly or sweeping blindly to read the `{ deleted }` count.
+ *
+ * Same `settings:manage` gate as the sweep route — the table is an
+ * internal implementation detail and there's no separate "read-only"
+ * operator persona today.
+ */
+router.get(
+  "/admin/adapter-cache/stats",
+  async (req: Request, res: Response) => {
+    const stats = await getAdapterCacheStats({ log: req.log });
+    res.json(stats);
   },
 );
 

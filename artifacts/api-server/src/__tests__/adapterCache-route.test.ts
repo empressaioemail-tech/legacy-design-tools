@@ -1,16 +1,16 @@
 /**
- * /api/admin/adapter-cache/sweep — operator-triggered cache sweep
- * (Task #217).
+ * /api/admin/adapter-cache/* — operator-triggered cache surface.
  *
- * Covers two things together:
- *   1. The permission gate matches the rest of the admin/operator
- *      surface — a session without `settings:manage` gets a 403 before
- *      the handler runs (mirrors `reviewers.test.ts` / the
- *      `requireSettingsManage` pattern).
- *   2. A privileged caller actually triggers the same delete the
- *      periodic worker would, and the response body reports the row
- *      count so an operator can see at a glance how much pressure was
- *      relieved.
+ * Covers the sweep endpoint (Task #217) and the read-side stats
+ * endpoint (Task #234) together since they share the same auth gate
+ * and the same schema-redirect plumbing.
+ *
+ * For each endpoint we exercise:
+ *   1. The permission gate — a session without `settings:manage` gets
+ *      a 403 before the handler runs (mirrors `reviewers.test.ts` /
+ *      the `requireSettingsManage` pattern).
+ *   2. The handler actually reflects the table state (deletes for
+ *      the sweep, counts for the stats).
  *
  * Schema is wired the same way as `adapterCache.test.ts` — the route
  * imports `db` from `@workspace/db`, which we redirect at the module
@@ -37,6 +37,7 @@ vi.mock("@workspace/db", async () => {
 
 const { setupRouteTests } = await import("./setup");
 const { adapterResponseCache } = await import("@workspace/db");
+const { eq } = await import("drizzle-orm");
 const { toCacheKey } = await import("@workspace/adapters");
 const { createAdapterResponseCache } = await import("../lib/adapterCache");
 import type { AdapterResult } from "@workspace/adapters";
@@ -130,5 +131,64 @@ describe("POST /api/admin/adapter-cache/sweep — sweep behaviour", () => {
 
     const rows = await ctx.schema!.db.select().from(adapterResponseCache);
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("GET /api/admin/adapter-cache/stats — permission gate", () => {
+  it("rejects a caller without the settings:manage claim", async () => {
+    const res = await request(getApp()).get("/api/admin/adapter-cache/stats");
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Requires settings:manage permission");
+  });
+
+  it("rejects a caller with unrelated permissions only", async () => {
+    const res = await request(getApp())
+      .get("/api/admin/adapter-cache/stats")
+      .set("x-permissions", "users:manage,reviewers:manage");
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Requires settings:manage permission");
+  });
+});
+
+describe("GET /api/admin/adapter-cache/stats — counts", () => {
+  it("returns zeroes when the cache table is empty", async () => {
+    const res = await request(getApp())
+      .get("/api/admin/adapter-cache/stats")
+      .set(ADMIN_HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ total: 0, expired: 0 });
+  });
+
+  it("reports total and expired counts that reflect the table state", async () => {
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    // Seed five fresh rows under distinct cache keys so the unique
+    // index doesn't collapse them into one.
+    for (let i = 0; i < 5; i++) {
+      const k = toCacheKey(
+        "fema:nfhl-flood-zone",
+        38.5 + i * 0.001,
+        -109.5,
+      );
+      await cache!.put(k!, sampleResult);
+    }
+    // Force two of them past their `expires_at` so the "currently-
+    // expired" subset is non-trivial — the stats helper uses the same
+    // `<= now()` boundary the read path does, not the grace window
+    // the sweep applies, so backdating just `expires_at` is enough.
+    const allRows = await ctx.schema!.db.select().from(adapterResponseCache);
+    const past = new Date(Date.now() - 60_000);
+    for (const row of allRows.slice(0, 2)) {
+      await ctx.schema!.db
+        .update(adapterResponseCache)
+        .set({ expiresAt: past })
+        .where(eq(adapterResponseCache.id, row.id));
+    }
+
+    const res = await request(getApp())
+      .get("/api/admin/adapter-cache/stats")
+      .set(ADMIN_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ total: 5, expired: 2 });
   });
 });
