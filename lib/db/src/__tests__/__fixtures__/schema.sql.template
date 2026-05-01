@@ -61,7 +61,10 @@ CREATE TABLE @@SCHEMA@@.briefing_divergences (
     reason text NOT NULL,
     note text,
     detail jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone,
+    resolved_by_requestor_kind text,
+    resolved_by_requestor_id text
 );
 
 

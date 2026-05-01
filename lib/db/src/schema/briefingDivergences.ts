@@ -89,6 +89,35 @@ export const briefingDivergences = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    /**
+     * Operator acknowledgement (Task #191). Set the first time an
+     * architect-audience caller marks the divergence resolved via
+     * `POST /bim-models/:id/divergences/:divergenceId/resolve`.
+     * Null while the row is still Open.
+     *
+     * Resolution is a *soft* acknowledgement on top of the append-
+     * only record — the row is never removed, and a follow-up
+     * recording for the same element lands as a fresh row of its
+     * own. A re-resolve is a no-op (the route is idempotent and
+     * leaves the original timestamp + requestor in place).
+     */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /**
+     * The session-bound requestor (`{kind, id}`) that recorded the
+     * resolve. Stored as `text` (not an FK to `users.id`) for the
+     * same reason `users.id` itself is `text` — the api-server
+     * accepts arbitrary opaque ids from the upstream identity layer
+     * and nothing here should retroactively break the audit trail
+     * if the identity source is swapped or a profile row is removed.
+     *
+     * `kind` is one of {"user", "agent"} matching
+     * `SessionUser.requestor.kind` in the api-server's session
+     * middleware. Null when the resolve was performed without a
+     * session-bound caller (in which case `resolvedAt` is still set
+     * so the row still moves out of the Open list).
+     */
+    resolvedByRequestorKind: text("resolved_by_requestor_kind"),
+    resolvedByRequestorId: text("resolved_by_requestor_id"),
   },
   (t) => ({
     bimModelIdx: index("briefing_divergences_bim_model_idx").on(t.bimModelId),

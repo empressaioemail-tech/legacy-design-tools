@@ -7,10 +7,19 @@
  */
 import type { BriefingDivergenceDetail } from "./briefingDivergenceDetail";
 import type { BriefingDivergenceReason } from "./briefingDivergenceReason";
+import type { RequestorRef } from "./requestorRef";
 
 /**
  * DA-PI-5 / Spec 51a §2.2 — one append-only audit row produced
 when an architect modifies a locked materializable element.
+
+`resolvedAt` / `resolvedByRequestor` carry the operator
+acknowledgement (Task #191): null while the divergence is
+Open, populated once an architect-audience caller has called
+`POST /bim-models/{id}/divergences/{divergenceId}/resolve`.
+Resolution is a soft acknowledgement layered on top of the
+append-only record — a subsequent `POST /bim-models/{id}/divergence`
+for the same element lands as a fresh row.
 
  */
 export interface BriefingDivergence {
@@ -22,4 +31,6 @@ export interface BriefingDivergence {
   note: string | null;
   detail: BriefingDivergenceDetail;
   createdAt: Date;
+  resolvedAt: Date | null;
+  resolvedByRequestor: RequestorRef | null;
 }

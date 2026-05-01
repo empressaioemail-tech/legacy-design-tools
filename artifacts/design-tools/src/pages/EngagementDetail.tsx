@@ -14,6 +14,7 @@ import {
   useListEngagementBriefingSources,
   useListEngagementSubmissions,
   usePushEngagementBimModel,
+  useResolveBimModelDivergence,
   useRestoreEngagementBriefingSource,
   useRetryBriefingSourceConversion,
   useUpdateEngagement,
@@ -3448,6 +3449,13 @@ export function BriefingDivergencesPanel({
     },
   });
 
+  // Resolved rows are the long tail — most engagements will rack up
+  // far more acknowledged overrides than open ones over time. Start
+  // collapsed so the operator's eye lands on the Open section first
+  // (Task #191 spec), and persist nothing across reloads: this is a
+  // per-mount UI affordance, not user state.
+  const [resolvedExpanded, setResolvedExpanded] = useState(false);
+
   // Hide the panel until the engagement has actually been pushed to
   // Revit at least once. This is the same guard the affordance uses
   // to flip from "Push" to "Push again" — if there's no bim-model
@@ -3458,7 +3466,20 @@ export function BriefingDivergencesPanel({
   }
 
   const divergences = divergencesQuery.data?.divergences ?? [];
-  const grouped = groupDivergencesByElement(divergences);
+  // Partition into Open / Resolved. The server already returns Open
+  // rows first (NULLS FIRST on `resolvedAt`) so we don't re-sort —
+  // just split on the boundary marker. This preserves the
+  // newest-first order *within* each section that the server's
+  // secondary `createdAt DESC` clause guarantees.
+  // Tolerate `resolvedAt: undefined` as well as `null` so test
+  // fixtures and any forward-compat partial wire shape that omits
+  // the field both fall into the Open partition (the server contract
+  // returns `null` for open rows; treating undefined as Open keeps
+  // the FE robust).
+  const openRows = divergences.filter((row) => row.resolvedAt == null);
+  const resolvedRows = divergences.filter((row) => row.resolvedAt != null);
+  const openGrouped = groupDivergencesByElement(openRows);
+  const resolvedGrouped = groupDivergencesByElement(resolvedRows);
 
   return (
     <div
@@ -3474,7 +3495,40 @@ export function BriefingDivergencesPanel({
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <div className="sc-medium">Architect overrides in Revit</div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <div className="sc-medium">Architect overrides in Revit</div>
+          <span
+            data-testid="briefing-divergences-open-count"
+            data-open-count={openRows.length}
+            title={`${openRows.length} open override${openRows.length === 1 ? "" : "s"}`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "1px 8px",
+              borderRadius: 999,
+              background:
+                openRows.length > 0
+                  ? "var(--warning-dim)"
+                  : "var(--bg-subtle)",
+              color:
+                openRows.length > 0
+                  ? "var(--warning-text)"
+                  : "var(--text-muted)",
+              fontSize: 11,
+              fontWeight: 600,
+              lineHeight: 1.6,
+            }}
+          >
+            {openRows.length} open
+          </span>
+        </div>
         <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
           The C# add-in records every edit an architect makes to a
           locked element. Use this list to confirm the briefing still
@@ -3524,14 +3578,101 @@ export function BriefingDivergencesPanel({
           </div>
         )}
 
-      {grouped.length > 0 && (
+      {openGrouped.length > 0 && (
         <div
-          data-testid="briefing-divergences-list"
-          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+          data-testid="briefing-divergences-open-section"
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
         >
-          {grouped.map((group) => (
-            <BriefingDivergenceGroup key={group.elementId} group={group} />
-          ))}
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              color: "var(--text-muted)",
+            }}
+          >
+            Open
+          </div>
+          <div
+            data-testid="briefing-divergences-list"
+            style={{ display: "flex", flexDirection: "column", gap: 12 }}
+          >
+            {openGrouped.map((group) => (
+              <BriefingDivergenceGroup
+                key={group.elementId}
+                group={group}
+                bimModelId={bimModelId}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/*
+        Empty-Open hint: when every divergence has been acknowledged
+        but Resolved rows still exist, surface a positive
+        confirmation rather than rendering nothing — otherwise an
+        operator who just resolved the last row sees only the
+        collapsed Resolved chevron with no signal that the queue is
+        actually clear.
+      */}
+      {openGrouped.length === 0 && resolvedGrouped.length > 0 && (
+        <div
+          data-testid="briefing-divergences-open-empty"
+          style={{
+            fontSize: 12,
+            color: "var(--text-muted)",
+            fontStyle: "italic",
+          }}
+        >
+          No open overrides — every recorded override has been
+          acknowledged.
+        </div>
+      )}
+
+      {resolvedGrouped.length > 0 && (
+        <div
+          data-testid="briefing-divergences-resolved-section"
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          <button
+            type="button"
+            data-testid="briefing-divergences-resolved-toggle"
+            aria-expanded={resolvedExpanded}
+            onClick={() => setResolvedExpanded((v) => !v)}
+            style={{
+              all: "unset",
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              color: "var(--text-muted)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <span aria-hidden style={{ display: "inline-block", width: 10 }}>
+              {resolvedExpanded ? "▾" : "▸"}
+            </span>
+            Resolved ({resolvedRows.length})
+          </button>
+          {resolvedExpanded && (
+            <div
+              data-testid="briefing-divergences-resolved-list"
+              style={{ display: "flex", flexDirection: "column", gap: 12 }}
+            >
+              {resolvedGrouped.map((group) => (
+                <BriefingDivergenceGroup
+                  key={group.elementId}
+                  group={group}
+                  bimModelId={bimModelId}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -3584,8 +3725,10 @@ function groupDivergencesByElement(
 
 function BriefingDivergenceGroup({
   group,
+  bimModelId,
 }: {
   group: BriefingDivergenceGroupShape;
+  bimModelId: string;
 }) {
   const kindLabel = group.elementKind
     ? (MATERIALIZABLE_ELEMENT_KIND_LABELS[group.elementKind] ??
@@ -3616,7 +3759,11 @@ function BriefingDivergenceGroup({
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {group.rows.map((row) => (
-          <BriefingDivergenceRow key={row.id} row={row} />
+          <BriefingDivergenceRow
+            key={row.id}
+            row={row}
+            bimModelId={bimModelId}
+          />
         ))}
       </div>
     </div>
@@ -3625,19 +3772,39 @@ function BriefingDivergenceGroup({
 
 function BriefingDivergenceRow({
   row,
+  bimModelId,
 }: {
   row: BimModelDivergenceListEntry;
+  bimModelId: string;
 }) {
+  const queryClient = useQueryClient();
   const reasonLabel =
     BRIEFING_DIVERGENCE_REASON_LABELS[row.reason] ?? row.reason;
   const palette =
     BRIEFING_DIVERGENCE_REASON_COLORS[row.reason] ??
     BRIEFING_DIVERGENCE_REASON_COLORS.other;
+  const isResolved = row.resolvedAt != null;
+  const resolveMutation = useResolveBimModelDivergence({
+    mutation: {
+      onSuccess: () => {
+        // Invalidate the *list* query so the row physically moves
+        // from the Open into the Resolved section without us having
+        // to splice the cache by hand. The list endpoint is cheap
+        // enough (single indexed select) that a full re-fetch is
+        // simpler and impossible to drift from the server's
+        // Open / Resolved partition.
+        void queryClient.invalidateQueries({
+          queryKey: getListBimModelDivergencesQueryKey(bimModelId),
+        });
+      },
+    },
+  });
   return (
     <div
       data-testid="briefing-divergences-row"
       data-divergence-id={row.id}
       data-divergence-reason={row.reason}
+      data-divergence-resolved={isResolved ? "true" : "false"}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -3679,6 +3846,58 @@ function BriefingDivergenceRow({
         >
           {formatRelativeMaterializedAt(row.createdAt)}
         </span>
+        <div style={{ flex: 1 }} />
+        {isResolved ? (
+          <span
+            data-testid="briefing-divergences-resolved-badge"
+            title={
+              row.resolvedAt
+                ? `Resolved ${new Date(row.resolvedAt).toISOString()}`
+                : undefined
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              borderRadius: 999,
+              background: "var(--success-dim)",
+              color: "var(--success-text)",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: 0.2,
+              textTransform: "uppercase",
+              lineHeight: 1.4,
+            }}
+          >
+            Resolved
+          </span>
+        ) : (
+          <button
+            type="button"
+            data-testid="briefing-divergences-resolve-button"
+            disabled={resolveMutation.isPending}
+            onClick={() =>
+              resolveMutation.mutate({
+                id: bimModelId,
+                divergenceId: row.id,
+              })
+            }
+            style={{
+              all: "unset",
+              cursor: resolveMutation.isPending ? "wait" : "pointer",
+              padding: "3px 10px",
+              borderRadius: 4,
+              fontSize: 11,
+              fontWeight: 600,
+              background: "var(--bg-default)",
+              color: "var(--text-default)",
+              border: "1px solid var(--border-default)",
+              opacity: resolveMutation.isPending ? 0.6 : 1,
+            }}
+          >
+            {resolveMutation.isPending ? "Resolving…" : "Resolve"}
+          </button>
+        )}
       </div>
       {row.note && (
         <div
@@ -3690,6 +3909,18 @@ function BriefingDivergenceRow({
           }}
         >
           {row.note}
+        </div>
+      )}
+      {resolveMutation.isError && (
+        <div
+          role="alert"
+          data-testid="briefing-divergences-resolve-error"
+          style={{
+            fontSize: 11,
+            color: "var(--danger-text)",
+          }}
+        >
+          Couldn't mark as resolved. Try again in a moment.
         </div>
       )}
     </div>

@@ -1091,6 +1091,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /bim-models/{id}/divergences/{divergenceId}/resolve:
+    post:
+      operationId: resolveBimModelDivergence
+      tags: [engagements]
+      summary: Mark a recorded briefing divergence as resolved
+      description: |
+        Operators use this once a recorded architect override has been
+        addressed (the briefing was updated to match Revit, the
+        architect re-pinned, etc.) so the Site Context tab can move the
+        row out of the "open overrides" list and stop nagging.
+
+        Idempotent: re-resolving an already-resolved row is a no-op
+        (returns 200 with the existing `resolvedAt` / `resolvedByRequestor`
+        unchanged). The append-only history of *recorded* divergences
+        is preserved — resolution is a soft acknowledgement that
+        layers on top, not a delete.
+
+        Engagement-scoped browser surface: same architect-audience
+        guard the rest of the bim-model browser surface uses. The
+        S2S record route remains the only HMAC-authenticated writer.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: divergenceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: |
+            The divergence row, post-resolve. Same wire shape as
+            `listBimModelDivergences` returns so the FE can splice the
+            response into the list cache without a follow-up fetch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveBimModelDivergenceResponse"
+        "403":
+          description: Caller is not architect-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Bim-model or divergence not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /bim-models/{id}/divergence:
     post:
       operationId: recordBimModelDivergence
@@ -4616,6 +4670,14 @@ components:
       description: |
         DA-PI-5 / Spec 51a §2.2 — one append-only audit row produced
         when an architect modifies a locked materializable element.
+
+        `resolvedAt` / `resolvedByRequestor` carry the operator
+        acknowledgement (Task #191): null while the divergence is
+        Open, populated once an architect-audience caller has called
+        `POST /bim-models/{id}/divergences/{divergenceId}/resolve`.
+        Resolution is a soft acknowledgement layered on top of the
+        append-only record — a subsequent `POST /bim-models/{id}/divergence`
+        for the same element lands as a fresh row.
       properties:
         id:
           type: string
@@ -4636,6 +4698,14 @@ components:
         createdAt:
           type: string
           format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        resolvedByRequestor:
+          allOf:
+            - $ref: "#/components/schemas/RequestorRef"
+          nullable: true
       required:
         - id
         - bimModelId
@@ -4645,6 +4715,27 @@ components:
         - note
         - detail
         - createdAt
+        - resolvedAt
+        - resolvedByRequestor
+
+    RequestorRef:
+      type: object
+      description: |
+        Stable shape for a session-bound caller's identity, mirroring
+        `SessionUser.requestor` on the api-server. `id` is the opaque
+        identifier the upstream identity layer hands us — not an FK
+        to anything, deliberately, so a swap of identity providers
+        cannot retroactively break the audit trail (see
+        `lib/db/src/schema/users.ts` for the rationale).
+      properties:
+        kind:
+          type: string
+          enum: [user, agent]
+        id:
+          type: string
+      required:
+        - kind
+        - id
 
     BimModelDivergenceResponse:
       type: object
@@ -4689,6 +4780,23 @@ components:
         createdAt:
           type: string
           format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Set when an operator marks the divergence resolved via
+            `POST /bim-models/{id}/divergences/{divergenceId}/resolve`.
+            Null while the divergence is still Open.
+        resolvedByRequestor:
+          allOf:
+            - $ref: "#/components/schemas/RequestorRef"
+          nullable: true
+          description: |
+            The session-bound requestor that recorded the resolve.
+            Null while the divergence is still Open, or when the
+            resolve was performed without a session-bound caller (in
+            which case `resolvedAt` is still set).
         elementKind:
           allOf:
             - $ref: "#/components/schemas/MaterializableElementKind"
@@ -4705,8 +4813,23 @@ components:
         - note
         - detail
         - createdAt
+        - resolvedAt
+        - resolvedByRequestor
         - elementKind
         - elementLabel
+
+    ResolveBimModelDivergenceResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /bim-models/{id}/divergences/{divergenceId}/resolve`.
+        Carries the divergence row in the same shape the list endpoint
+        returns so the FE can splice the response into the cached
+        list without a follow-up fetch.
+      properties:
+        divergence:
+          $ref: "#/components/schemas/BimModelDivergenceListEntry"
+      required:
+        - divergence
 
     ListBimModelDivergencesResponse:
       type: object

@@ -58,6 +58,7 @@ import type {
   RecordSubmissionResponseBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  ResolveBimModelDivergenceResponse,
   RetrievalProbeBody,
   RetrievalProbeResponse,
   Session,
@@ -2500,6 +2501,112 @@ export function useListBimModelDivergences<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Operators use this once a recorded architect override has been
+addressed (the briefing was updated to match Revit, the
+architect re-pinned, etc.) so the Site Context tab can move the
+row out of the "open overrides" list and stop nagging.
+
+Idempotent: re-resolving an already-resolved row is a no-op
+(returns 200 with the existing `resolvedAt` / `resolvedByRequestor`
+unchanged). The append-only history of *recorded* divergences
+is preserved — resolution is a soft acknowledgement that
+layers on top, not a delete.
+
+Engagement-scoped browser surface: same architect-audience
+guard the rest of the bim-model browser surface uses. The
+S2S record route remains the only HMAC-authenticated writer.
+
+ * @summary Mark a recorded briefing divergence as resolved
+ */
+export const getResolveBimModelDivergenceUrl = (
+  id: string,
+  divergenceId: string,
+) => {
+  return `/api/bim-models/${id}/divergences/${divergenceId}/resolve`;
+};
+
+export const resolveBimModelDivergence = async (
+  id: string,
+  divergenceId: string,
+  options?: RequestInit,
+): Promise<ResolveBimModelDivergenceResponse> => {
+  return customFetch<ResolveBimModelDivergenceResponse>(
+    getResolveBimModelDivergenceUrl(id, divergenceId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getResolveBimModelDivergenceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveBimModelDivergence>>,
+    TError,
+    { id: string; divergenceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resolveBimModelDivergence>>,
+  TError,
+  { id: string; divergenceId: string },
+  TContext
+> => {
+  const mutationKey = ["resolveBimModelDivergence"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resolveBimModelDivergence>>,
+    { id: string; divergenceId: string }
+  > = (props) => {
+    const { id, divergenceId } = props ?? {};
+
+    return resolveBimModelDivergence(id, divergenceId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResolveBimModelDivergenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resolveBimModelDivergence>>
+>;
+
+export type ResolveBimModelDivergenceMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Mark a recorded briefing divergence as resolved
+ */
+export const useResolveBimModelDivergence = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveBimModelDivergence>>,
+    TError,
+    { id: string; divergenceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resolveBimModelDivergence>>,
+  TError,
+  { id: string; divergenceId: string },
+  TContext
+> => {
+  return useMutation(getResolveBimModelDivergenceMutationOptions(options));
+};
 
 /**
  * DA-PI-5 / Spec 51a §2.2 — service-to-service surface the C#

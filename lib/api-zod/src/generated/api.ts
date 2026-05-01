@@ -1987,6 +1987,24 @@ export const ListBimModelDivergencesResponse = zod
           note: zod.string().nullable(),
           detail: zod.record(zod.string(), zod.unknown()),
           createdAt: zod.coerce.date(),
+          resolvedAt: zod.coerce
+            .date()
+            .nullable()
+            .describe(
+              "Set when an operator marks the divergence resolved via\n`POST \/bim-models\/{id}\/divergences\/{divergenceId}\/resolve`.\nNull while the divergence is still Open.\n",
+            ),
+          resolvedByRequestor: zod
+            .object({
+              kind: zod.enum(["user", "agent"]),
+              id: zod.string(),
+            })
+            .describe(
+              "Stable shape for a session-bound caller's identity, mirroring\n`SessionUser.requestor` on the api-server. `id` is the opaque\nidentifier the upstream identity layer hands us — not an FK\nto anything, deliberately, so a swap of identity providers\ncannot retroactively break the audit trail (see\n`lib\/db\/src\/schema\/users.ts` for the rationale).\n",
+            )
+            .nullable()
+            .describe(
+              "The session-bound requestor that recorded the resolve.\nNull while the divergence is still Open, or when the\nresolve was performed without a session-bound caller (in\nwhich case `resolvedAt` is still set).\n",
+            ),
           elementKind: zod
             .enum([
               "terrain",
@@ -2010,6 +2028,87 @@ export const ListBimModelDivergencesResponse = zod
   })
   .describe(
     "Wire envelope for `GET \/bim-models\/{id}\/divergences`.\nNewest-first list of architect overrides the C# Revit add-in\nhas reported back against locked materializable elements.\n",
+  );
+
+/**
+ * Operators use this once a recorded architect override has been
+addressed (the briefing was updated to match Revit, the
+architect re-pinned, etc.) so the Site Context tab can move the
+row out of the "open overrides" list and stop nagging.
+
+Idempotent: re-resolving an already-resolved row is a no-op
+(returns 200 with the existing `resolvedAt` / `resolvedByRequestor`
+unchanged). The append-only history of *recorded* divergences
+is preserved — resolution is a soft acknowledgement that
+layers on top, not a delete.
+
+Engagement-scoped browser surface: same architect-audience
+guard the rest of the bim-model browser surface uses. The
+S2S record route remains the only HMAC-authenticated writer.
+
+ * @summary Mark a recorded briefing divergence as resolved
+ */
+export const ResolveBimModelDivergenceParams = zod.object({
+  id: zod.coerce.string(),
+  divergenceId: zod.coerce.string(),
+});
+
+export const ResolveBimModelDivergenceResponse = zod
+  .object({
+    divergence: zod
+      .object({
+        id: zod.string(),
+        bimModelId: zod.string(),
+        materializableElementId: zod.string(),
+        briefingId: zod.string(),
+        reason: zod
+          .enum(["unpinned", "geometry-edited", "deleted", "other"])
+          .describe(
+            "DA-PI-5 \/ Spec 51a §2.2 — the closed set of reason buckets the\nC# Revit add-in is allowed to record when an architect\nmodifies a locked materializable element.\n",
+          ),
+        note: zod.string().nullable(),
+        detail: zod.record(zod.string(), zod.unknown()),
+        createdAt: zod.coerce.date(),
+        resolvedAt: zod.coerce
+          .date()
+          .nullable()
+          .describe(
+            "Set when an operator marks the divergence resolved via\n`POST \/bim-models\/{id}\/divergences\/{divergenceId}\/resolve`.\nNull while the divergence is still Open.\n",
+          ),
+        resolvedByRequestor: zod
+          .object({
+            kind: zod.enum(["user", "agent"]),
+            id: zod.string(),
+          })
+          .describe(
+            "Stable shape for a session-bound caller's identity, mirroring\n`SessionUser.requestor` on the api-server. `id` is the opaque\nidentifier the upstream identity layer hands us — not an FK\nto anything, deliberately, so a swap of identity providers\ncannot retroactively break the audit trail (see\n`lib\/db\/src\/schema\/users.ts` for the rationale).\n",
+          )
+          .nullable()
+          .describe(
+            "The session-bound requestor that recorded the resolve.\nNull while the divergence is still Open, or when the\nresolve was performed without a session-bound caller (in\nwhich case `resolvedAt` is still set).\n",
+          ),
+        elementKind: zod
+          .enum([
+            "terrain",
+            "property-line",
+            "setback-plane",
+            "buildable-envelope",
+            "floodplain",
+            "wetland",
+            "neighbor-mass",
+          ])
+          .describe(
+            "DA-PI-5 \/ Spec 51a §2.4 — the seven element kinds the C# Revit\nadd-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on\nthe api-server `converterClient` so a materializable element\nsourced from a DXF round-trips through the same closed set.\n",
+          )
+          .nullable(),
+        elementLabel: zod.string().nullable(),
+      })
+      .describe(
+        'DA-PI-5 \/ Spec 51a §2.2 — one row in the\n`listBimModelDivergences` response. Joins each divergence\nwith the materializable element it diverged from so the\ndesign-tools Site Context tab can group rows by element\nkind\/label without a follow-up fetch. `elementKind` and\n`elementLabel` are nullable: a divergence whose parent\nelement has since been deleted out from under the bim-model\nstill surfaces (the row is preserved) but with both fields\nnull so the UI can render an \"element no longer in briefing\"\nfallback.\n',
+      ),
+  })
+  .describe(
+    "Wire envelope for `POST \/bim-models\/{id}\/divergences\/{divergenceId}\/resolve`.\nCarries the divergence row in the same shape the list endpoint\nreturns so the FE can splice the response into the cached\nlist without a follow-up fetch.\n",
   );
 
 /**

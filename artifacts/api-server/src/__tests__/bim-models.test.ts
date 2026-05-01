@@ -446,6 +446,247 @@ describe("GET /api/bim-models/:id/divergences", () => {
   });
 });
 
+describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
+  /**
+   * Helper that pushes a bim-model, seeds a materializable element,
+   * and inserts a single open divergence row pointing at it.
+   * Returns everything the resolve assertions need so each test can
+   * stay short.
+   */
+  async function setupOpenDivergence(): Promise<{
+    bimModelId: string;
+    divergenceId: string;
+    elementId: string;
+  }> {
+    const { engagementId, briefingId } = await seedEngagementAndBriefing();
+    const push = await asArchitect(
+      request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
+    ).send({});
+    const bimModelId = push.body.bimModel.id as string;
+
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const [elem] = await ctx.schema.db
+      .insert(materializableElements)
+      .values({
+        briefingId,
+        elementKind: "buildable-envelope",
+        label: "North envelope",
+      })
+      .returning();
+    const [div] = await ctx.schema.db
+      .insert(briefingDivergences)
+      .values({
+        bimModelId,
+        materializableElementId: elem.id,
+        briefingId,
+        reason: "geometry-edited",
+        note: "moved a vertex",
+        detail: { revitElementId: 12345 },
+      })
+      .returning();
+    return { bimModelId, divergenceId: div.id, elementId: elem.id };
+  }
+
+  it("marks an open divergence resolved + attributes to the session requestor", async () => {
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+
+    const before = Date.now();
+    const res = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:operator-1");
+    expect(res.status).toBe(200);
+
+    const wire = res.body.divergence;
+    expect(wire.id).toBe(divergenceId);
+    expect(wire.resolvedAt).not.toBeNull();
+    expect(new Date(wire.resolvedAt).getTime()).toBeGreaterThanOrEqual(before);
+    expect(wire.resolvedByRequestor).toEqual({
+      kind: "user",
+      id: "operator-1",
+    });
+    // The list-entry shape should ride along (so the FE can splice
+    // the response into the cache without a follow-up fetch).
+    expect(wire.elementKind).toBe("buildable-envelope");
+    expect(wire.elementLabel).toBe("North envelope");
+
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const [row] = await ctx.schema.db
+      .select()
+      .from(briefingDivergences)
+      .where(eq(briefingDivergences.id, divergenceId));
+    expect(row.resolvedAt).not.toBeNull();
+    expect(row.resolvedByRequestorKind).toBe("user");
+    expect(row.resolvedByRequestorId).toBe("operator-1");
+  });
+
+  it("is idempotent: re-resolving keeps the original timestamp + requestor", async () => {
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+
+    const first = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:first-operator");
+    expect(first.status).toBe(200);
+    const firstResolvedAt = first.body.divergence.resolvedAt as string;
+
+    // Second call by a *different* requestor must not overwrite the
+    // first acknowledger's attribution — the original audit trail
+    // sticks.
+    const second = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:second-operator");
+    expect(second.status).toBe(200);
+    expect(second.body.divergence.resolvedAt).toBe(firstResolvedAt);
+    expect(second.body.divergence.resolvedByRequestor).toEqual({
+      kind: "user",
+      id: "first-operator",
+    });
+  });
+
+  it("manually-resolved rows survive a re-push to Revit", async () => {
+    // Spec call-out (Task #191): "manually-Resolved rows stay
+    // Resolved unless re-recorded". Resolve a row, then trigger a
+    // second push (which is the moment most likely to clobber
+    // resolve state) and assert the row is still flagged Resolved.
+    const { engagementId, briefingId } = await seedEngagementAndBriefing();
+    const firstPush = await asArchitect(
+      request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
+    ).send({});
+    const bimModelId = firstPush.body.bimModel.id as string;
+
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const [elem] = await ctx.schema.db
+      .insert(materializableElements)
+      .values({ briefingId, elementKind: "terrain", label: "Site terrain" })
+      .returning();
+    const [div] = await ctx.schema.db
+      .insert(briefingDivergences)
+      .values({
+        bimModelId,
+        materializableElementId: elem.id,
+        briefingId,
+        reason: "deleted",
+      })
+      .returning();
+
+    const resolveRes = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${div.id}/resolve`,
+      ),
+    ).set("x-requestor", "user:operator-1");
+    expect(resolveRes.status).toBe(200);
+
+    // Re-push the bim-model (idempotent at engagement-id level).
+    const rePush = await asArchitect(
+      request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
+    ).send({});
+    expect(rePush.status).toBe(200);
+
+    const listRes = await asArchitect(
+      request(getApp()).get(`/api/bim-models/${bimModelId}/divergences`),
+    );
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.divergences).toHaveLength(1);
+    expect(listRes.body.divergences[0].resolvedAt).not.toBeNull();
+    expect(listRes.body.divergences[0].resolvedByRequestor).toEqual({
+      kind: "user",
+      id: "operator-1",
+    });
+  });
+
+  it("returns Open and Resolved rows in the list with Open first", async () => {
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    // Seed a *second* open divergence, resolve only the first.
+    const sib = await ctx.schema.db
+      .select()
+      .from(briefingDivergences)
+      .where(eq(briefingDivergences.id, divergenceId));
+    const [other] = await ctx.schema.db
+      .insert(briefingDivergences)
+      .values({
+        bimModelId,
+        materializableElementId: sib[0].materializableElementId,
+        briefingId: sib[0].briefingId,
+        reason: "unpinned",
+      })
+      .returning();
+    void other;
+
+    await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:operator-1");
+
+    const listRes = await asArchitect(
+      request(getApp()).get(`/api/bim-models/${bimModelId}/divergences`),
+    );
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.divergences).toHaveLength(2);
+    // Open row first (resolvedAt nulls first), resolved row last.
+    expect(listRes.body.divergences[0].resolvedAt).toBeNull();
+    expect(listRes.body.divergences[1].resolvedAt).not.toBeNull();
+  });
+
+  it("403s when the caller is not architect-audience", async () => {
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+    const res = await request(getApp()).post(
+      `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("bim_model_requires_architect_audience");
+  });
+
+  it("404s on unknown bim-model id", async () => {
+    const res = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/00000000-0000-0000-0000-000000000000/divergences/00000000-0000-0000-0000-000000000001/resolve`,
+      ),
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("bim_model_not_found");
+  });
+
+  it("404s on a divergence id from a different bim-model", async () => {
+    // Two engagements, each with its own bim-model + divergence.
+    // Try to resolve engagement A's divergence under engagement B's
+    // bim-model id — the route must refuse to acknowledge an
+    // override outside its own bim-model scope.
+    const a = await setupOpenDivergence();
+    const b = await setupOpenDivergence();
+
+    const res = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${b.bimModelId}/divergences/${a.divergenceId}/resolve`,
+      ),
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("divergence_not_found");
+  });
+
+  it("resolves successfully without a session requestor (resolvedByRequestor null)", async () => {
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+    // Architect-audience but no `x-requestor` header → the row
+    // still moves to Resolved, but the attribution column lands
+    // null so the FE can render "system / unattributed".
+    const res = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.divergence.resolvedAt).not.toBeNull();
+    expect(res.body.divergence.resolvedByRequestor).toBeNull();
+  });
+});
+
 describe("POST /api/bim-models/:id/divergence (HMAC-authenticated)", () => {
   async function setupBimModelWithElement(): Promise<{
     bimModelId: string;

@@ -53,7 +53,7 @@ import {
   type MaterializableElement,
   type BriefingDivergence,
 } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import {
   GetEngagementBimModelParams,
   PushEngagementBimModelParams,
@@ -62,6 +62,7 @@ import {
   ListBimModelDivergencesParams,
   RecordBimModelDivergenceParams,
   RecordBimModelDivergenceBody,
+  ResolveBimModelDivergenceParams,
 } from "@workspace/api-zod";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import { logger } from "../lib/logger";
@@ -142,6 +143,11 @@ interface BimModelWire {
   updatedAt: string;
 }
 
+interface RequestorRefWire {
+  kind: "user" | "agent";
+  id: string;
+}
+
 interface BriefingDivergenceWire {
   id: string;
   bimModelId: string;
@@ -151,6 +157,16 @@ interface BriefingDivergenceWire {
   note: string | null;
   detail: Record<string, unknown>;
   createdAt: string;
+  /** Set once an operator marks the divergence resolved. */
+  resolvedAt: string | null;
+  /**
+   * Identity of the session-bound caller that recorded the resolve.
+   * Null while the row is still Open, or when the resolve was
+   * recorded without a session-bound caller (in which case
+   * `resolvedAt` is still set so the row still moves out of the
+   * Open list).
+   */
+  resolvedByRequestor: RequestorRefWire | null;
 }
 
 /**
@@ -211,7 +227,26 @@ function toDivergenceWire(d: BriefingDivergence): BriefingDivergenceWire {
     note: d.note,
     detail: (d.detail ?? {}) as Record<string, unknown>,
     createdAt: d.createdAt.toISOString(),
+    resolvedAt: d.resolvedAt ? d.resolvedAt.toISOString() : null,
+    resolvedByRequestor: toResolvedByRequestor(d),
   };
+}
+
+/**
+ * Reconstruct the wire `{kind, id}` requestor pair from the two
+ * stored columns. Both must be present (and `kind` must be one of
+ * the closed `user` / `agent` set the session middleware emits) for
+ * the wire field to populate; a half-populated row degrades to
+ * `null` so the FE never has to handle a partially-typed actor.
+ */
+function toResolvedByRequestor(
+  d: BriefingDivergence,
+): RequestorRefWire | null {
+  const kind = d.resolvedByRequestorKind;
+  const id = d.resolvedByRequestorId;
+  if (!kind || !id) return null;
+  if (kind !== "user" && kind !== "agent") return null;
+  return { kind, id };
 }
 
 /**
@@ -778,8 +813,11 @@ router.get(
         return;
       }
 
-      // Newest-first so the FE can render a chronological "most
-      // recent overrides" feed without an extra client-side sort.
+      // Open rows first (NULLS FIRST on `resolvedAt`), then within
+      // each group newest-first by `createdAt`. The FE partitions
+      // into Open / Resolved sections (Task #191) and a server-side
+      // primary sort on `resolvedAt` keeps the order the operator
+      // sees stable across mounts without a client-side re-sort.
       const rows = await db
         .select({
           divergence: briefingDivergences,
@@ -795,7 +833,10 @@ router.get(
           ),
         )
         .where(eq(briefingDivergences.bimModelId, bimModelId))
-        .orderBy(desc(briefingDivergences.createdAt));
+        .orderBy(
+          sql`${briefingDivergences.resolvedAt} ASC NULLS FIRST`,
+          desc(briefingDivergences.createdAt),
+        );
 
       const divergences: BimModelDivergenceListEntryWire[] = rows.map((r) => ({
         ...toDivergenceWire(r.divergence),
@@ -811,6 +852,142 @@ router.get(
       );
       res.status(500).json({ error: "Failed to list divergences" });
     }
+  },
+);
+
+/**
+ * POST /bim-models/:id/divergences/:divergenceId/resolve — operator
+ * acknowledgement (Task #191). Marks a recorded divergence as
+ * Resolved so the Site Context tab can move it out of the "open
+ * overrides" list.
+ *
+ * Idempotent: re-resolving an already-resolved row is a no-op
+ * (returns 200 with the existing `resolvedAt` / `resolvedByRequestor`
+ * unchanged). Resolution is a *soft* acknowledgement layered on
+ * the append-only record — the row is never removed, and a
+ * follow-up `POST /bim-models/:id/divergence` for the same element
+ * lands as a fresh row.
+ *
+ * Engagement-scoped: gated by the same architect-audience guard
+ * the rest of the bim-model browser surface uses. The resolve is
+ * attributed to `req.session.requestor` when present so the
+ * timeline can show who acknowledged it; an unauthenticated dev
+ * request still resolves the row but lands with
+ * `resolvedByRequestor: null` (mirrors how
+ * `actorFromRequest` in `engagements.ts` falls back to a system
+ * actor for unauthenticated callers).
+ */
+router.post(
+  "/bim-models/:id/divergences/:divergenceId/resolve",
+  async (req: Request, res: Response) => {
+    if (requireArchitectAudience(req, res)) return;
+    const paramsParse = ResolveBimModelDivergenceParams.safeParse(req.params);
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_divergence_path" });
+      return;
+    }
+    const { id: bimModelId, divergenceId } = paramsParse.data;
+    const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+
+    // Resolve the requestor *before* the transaction so a missing
+    // session shape never blocks the write — the resolve still
+    // lands, but `resolvedByRequestor` ends up null so the FE can
+    // distinguish a system-side resolve from an attributed one.
+    const requestor = req.session?.requestor;
+    const resolvedByKind =
+      requestor && requestor.id ? requestor.kind : null;
+    const resolvedById =
+      requestor && requestor.id ? requestor.id : null;
+
+    let resolved: {
+      divergence: BriefingDivergence;
+      elementKind: string | null;
+      elementLabel: string | null;
+    };
+    try {
+      resolved = await db.transaction(async (tx) => {
+        const bmRows = await tx
+          .select({ id: bimModels.id })
+          .from(bimModels)
+          .where(eq(bimModels.id, bimModelId))
+          .limit(1);
+        if (bmRows.length === 0) {
+          throw new BimModelNotFoundError(bimModelId);
+        }
+
+        const existingRows = await tx
+          .select()
+          .from(briefingDivergences)
+          .where(eq(briefingDivergences.id, divergenceId))
+          .limit(1);
+        const existing = existingRows[0];
+        // The divergence must belong to the bim-model named in the
+        // path. Crossing bim-models would let an architect on
+        // engagement A acknowledge an override recorded on
+        // engagement B — refuse explicitly so that scenario surfaces
+        // as a 404 rather than a silent state change.
+        if (!existing || existing.bimModelId !== bimModelId) {
+          throw new DivergenceNotFoundError(divergenceId, bimModelId);
+        }
+
+        let row = existing;
+        // Idempotent re-resolve: leave the original timestamp +
+        // requestor in place. The first acknowledger keeps the
+        // attribution.
+        if (!existing.resolvedAt) {
+          const [updated] = await tx
+            .update(briefingDivergences)
+            .set({
+              resolvedAt: new Date(),
+              resolvedByRequestorKind: resolvedByKind,
+              resolvedByRequestorId: resolvedById,
+            })
+            .where(eq(briefingDivergences.id, divergenceId))
+            .returning();
+          row = updated;
+        }
+
+        // Pull element kind+label so the FE can splice the response
+        // into the list cache without a follow-up fetch (mirrors
+        // the join the list route does).
+        const elemRows = await tx
+          .select({
+            elementKind: materializableElements.elementKind,
+            elementLabel: materializableElements.label,
+          })
+          .from(materializableElements)
+          .where(eq(materializableElements.id, row.materializableElementId))
+          .limit(1);
+        const elem = elemRows[0];
+        return {
+          divergence: row,
+          elementKind: elem?.elementKind ?? null,
+          elementLabel: elem?.elementLabel ?? null,
+        };
+      });
+    } catch (err) {
+      if (err instanceof BimModelNotFoundError) {
+        res.status(404).json({ error: "bim_model_not_found" });
+        return;
+      }
+      if (err instanceof DivergenceNotFoundError) {
+        res.status(404).json({ error: "divergence_not_found" });
+        return;
+      }
+      reqLog.error(
+        { err, bimModelId, divergenceId },
+        "resolve bim-model divergence failed",
+      );
+      res.status(500).json({ error: "Failed to resolve divergence" });
+      return;
+    }
+
+    const wire: BimModelDivergenceListEntryWire = {
+      ...toDivergenceWire(resolved.divergence),
+      elementKind: resolved.elementKind,
+      elementLabel: resolved.elementLabel,
+    };
+    res.json({ divergence: wire });
   },
 );
 
@@ -1028,6 +1205,16 @@ class MaterializableElementNotFoundError extends Error {
     super(`materializable-element ${elementId} not found`);
     this.name = "MaterializableElementNotFoundError";
     Object.setPrototypeOf(this, MaterializableElementNotFoundError.prototype);
+  }
+}
+
+class DivergenceNotFoundError extends Error {
+  constructor(divergenceId: string, bimModelId: string) {
+    super(
+      `divergence ${divergenceId} not found under bim-model ${bimModelId}`,
+    );
+    this.name = "DivergenceNotFoundError";
+    Object.setPrototypeOf(this, DivergenceNotFoundError.prototype);
   }
 }
 

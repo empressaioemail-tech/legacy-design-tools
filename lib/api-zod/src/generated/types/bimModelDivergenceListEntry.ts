@@ -8,6 +8,7 @@
 import type { BimModelDivergenceListEntryDetail } from "./bimModelDivergenceListEntryDetail";
 import type { BriefingDivergenceReason } from "./briefingDivergenceReason";
 import type { MaterializableElementKind } from "./materializableElementKind";
+import type { RequestorRef } from "./requestorRef";
 
 /**
  * DA-PI-5 / Spec 51a §2.2 — one row in the
@@ -31,6 +32,17 @@ export interface BimModelDivergenceListEntry {
   note: string | null;
   detail: BimModelDivergenceListEntryDetail;
   createdAt: Date;
+  /** Set when an operator marks the divergence resolved via
+`POST /bim-models/{id}/divergences/{divergenceId}/resolve`.
+Null while the divergence is still Open.
+ */
+  resolvedAt: Date | null;
+  /** The session-bound requestor that recorded the resolve.
+Null while the divergence is still Open, or when the
+resolve was performed without a session-bound caller (in
+which case `resolvedAt` is still set).
+ */
+  resolvedByRequestor: RequestorRef | null;
   elementKind: MaterializableElementKind | null;
   elementLabel: string | null;
 }

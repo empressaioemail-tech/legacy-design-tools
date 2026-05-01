@@ -1705,9 +1705,39 @@ when omitted.
 
 export type BriefingDivergenceDetail = { [key: string]: unknown };
 
+export type RequestorRefKind =
+  (typeof RequestorRefKind)[keyof typeof RequestorRefKind];
+
+export const RequestorRefKind = {
+  user: "user",
+  agent: "agent",
+} as const;
+
+/**
+ * Stable shape for a session-bound caller's identity, mirroring
+`SessionUser.requestor` on the api-server. `id` is the opaque
+identifier the upstream identity layer hands us — not an FK
+to anything, deliberately, so a swap of identity providers
+cannot retroactively break the audit trail (see
+`lib/db/src/schema/users.ts` for the rationale).
+
+ */
+export interface RequestorRef {
+  kind: RequestorRefKind;
+  id: string;
+}
+
 /**
  * DA-PI-5 / Spec 51a §2.2 — one append-only audit row produced
 when an architect modifies a locked materializable element.
+
+`resolvedAt` / `resolvedByRequestor` carry the operator
+acknowledgement (Task #191): null while the divergence is
+Open, populated once an architect-audience caller has called
+`POST /bim-models/{id}/divergences/{divergenceId}/resolve`.
+Resolution is a soft acknowledgement layered on top of the
+append-only record — a subsequent `POST /bim-models/{id}/divergence`
+for the same element lands as a fresh row.
 
  */
 export interface BriefingDivergence {
@@ -1719,6 +1749,8 @@ export interface BriefingDivergence {
   note: string | null;
   detail: BriefingDivergenceDetail;
   createdAt: string;
+  resolvedAt: string | null;
+  resolvedByRequestor: RequestorRef | null;
 }
 
 /**
@@ -1753,8 +1785,30 @@ export interface BimModelDivergenceListEntry {
   note: string | null;
   detail: BimModelDivergenceListEntryDetail;
   createdAt: string;
+  /** Set when an operator marks the divergence resolved via
+`POST /bim-models/{id}/divergences/{divergenceId}/resolve`.
+Null while the divergence is still Open.
+ */
+  resolvedAt: string | null;
+  /** The session-bound requestor that recorded the resolve.
+Null while the divergence is still Open, or when the
+resolve was performed without a session-bound caller (in
+which case `resolvedAt` is still set).
+ */
+  resolvedByRequestor: RequestorRef | null;
   elementKind: MaterializableElementKind | null;
   elementLabel: string | null;
+}
+
+/**
+ * Wire envelope for `POST /bim-models/{id}/divergences/{divergenceId}/resolve`.
+Carries the divergence row in the same shape the list endpoint
+returns so the FE can splice the response into the cached
+list without a follow-up fetch.
+
+ */
+export interface ResolveBimModelDivergenceResponse {
+  divergence: BimModelDivergenceListEntry;
 }
 
 /**
