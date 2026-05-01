@@ -78,7 +78,7 @@ function makeAdapter(
   ) => Error,
   opts: {
     adapterKey: string;
-    tier: "state" | "local";
+    tier: "federal" | "state" | "local";
     layerKind: string;
     provider: string;
     state?: string;
@@ -97,7 +97,12 @@ function makeAdapter(
     noCoverage?: boolean;
   },
 ): FakeAdapter {
-  const sourceKind = opts.tier === "state" ? "state-adapter" : "local-adapter";
+  const sourceKind =
+    opts.tier === "federal"
+      ? "federal-adapter"
+      : opts.tier === "state"
+        ? "state-adapter"
+        : "local-adapter";
   return {
     adapterKey: opts.adapterKey,
     tier: opts.tier,
@@ -108,7 +113,9 @@ function makeAdapter(
     appliesTo: (c) => {
       if (opts.local) return c.jurisdiction.localKey === opts.local;
       if (opts.state) return c.jurisdiction.stateKey === opts.state;
-      return true;
+      // No state/local gate ⇒ federal: applies whenever a pilot state
+      // resolved (mirrors the real federal adapters' contract).
+      return c.jurisdiction.stateKey !== null;
     },
     run: async () => {
       if (opts.fail) {
@@ -150,6 +157,23 @@ function fakeAdapters(
   ) => Error,
 ): FakeAdapter[] {
   return [
+    // Federal — apply for any pilot state. FEMA NFHL succeeds, FCC
+    // broadband fails so the per-adapter failure-isolation contract
+    // is also covered at the federal tier.
+    makeAdapter(AdapterRunErrorCtor, {
+      adapterKey: "fema:nfhl-flood-zone",
+      tier: "federal",
+      layerKind: "fema-nfhl-flood-zone",
+      provider: "FEMA NFHL",
+      payload: { in_floodplain: true, zone: "AE" },
+    }),
+    makeAdapter(AdapterRunErrorCtor, {
+      adapterKey: "fcc:broadband",
+      tier: "federal",
+      layerKind: "fcc-broadband-availability",
+      provider: "FCC NBM",
+      fail: { code: "upstream-error", message: "FCC NBM returned 502" },
+    }),
     // Utah — state + Grand County local
     makeAdapter(AdapterRunErrorCtor, {
       adapterKey: "utah:ugrc-parcels",
@@ -311,7 +335,10 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     );
     expect(res.status).toBe(200);
 
-    // The Texas pilot has 3 applicable adapters (1 state + 2 local).
+    // The Texas pilot has 5 applicable adapters (2 federal + 1 state
+    // + 2 local). Three succeed (FEMA, TCEQ, Bastrop zoning), two
+    // fail (FCC NBM, Bastrop roads) — the run as a whole still
+    // succeeds because per-adapter failures are isolated.
     const outcomes = res.body.outcomes as Array<{
       adapterKey: string;
       tier: string;
@@ -321,6 +348,26 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       sourceId: string | null;
     }>;
     const byKey = new Map(outcomes.map((o) => [o.adapterKey, o]));
+    // Federal-tier success — the new DA-PI-2 surface. Asserts the
+    // federal outcome rides the same wire envelope as state/local.
+    expect(byKey.get("fema:nfhl-flood-zone")).toMatchObject({
+      tier: "federal",
+      sourceKind: "federal-adapter",
+      status: "ok",
+    });
+    expect(byKey.get("fema:nfhl-flood-zone")?.sourceId).toEqual(
+      expect.any(String),
+    );
+    // Federal-tier failure — proves the failure-isolation contract
+    // also applies at the federal tier (one bad federal adapter
+    // cannot break the rest of the run).
+    expect(byKey.get("fcc:broadband")).toMatchObject({
+      tier: "federal",
+      sourceKind: "federal-adapter",
+      status: "failed",
+      error: { code: "upstream-error", message: "FCC NBM returned 502" },
+      sourceId: null,
+    });
     expect(byKey.get("texas:tceq-floodplain")).toMatchObject({
       tier: "state",
       sourceKind: "state-adapter",
@@ -341,7 +388,7 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       sourceId: null,
     });
 
-    // Briefing wire envelope: only the OK rows show up, both with the
+    // Briefing wire envelope: only the OK rows show up, each with the
     // packed `<adapterKey> (<provider>)` provider string.
     const sources = res.body.briefing.sources as Array<{
       layerKind: string;
@@ -349,22 +396,29 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       provider: string;
     }>;
     const layers = sources.map((s) => s.layerKind).sort();
-    expect(layers).toEqual(["bastrop-zoning", "tceq-floodplain"]);
+    expect(layers).toEqual([
+      "bastrop-zoning",
+      "fema-nfhl-flood-zone",
+      "tceq-floodplain",
+    ]);
     const tceq = sources.find((s) => s.layerKind === "tceq-floodplain")!;
     expect(tceq.sourceKind).toBe("state-adapter");
     expect(tceq.provider).toBe("texas:tceq-floodplain (TCEQ)");
+    const fema = sources.find((s) => s.layerKind === "fema-nfhl-flood-zone")!;
+    expect(fema.sourceKind).toBe("federal-adapter");
+    expect(fema.provider).toBe("fema:nfhl-flood-zone (FEMA NFHL)");
 
     // briefing_sources rows landed and the briefing-source.fetched
     // event was emitted against each, with the adapter-driven actor.
     const dbSources = await ctx.schema.db
       .select()
       .from(briefingSources);
-    expect(dbSources).toHaveLength(2);
+    expect(dbSources).toHaveLength(3);
     const evRows = await ctx.schema.db
       .select()
       .from(atomEvents)
       .where(eq(atomEvents.entityType, "briefing-source"));
-    expect(evRows).toHaveLength(2);
+    expect(evRows).toHaveLength(3);
     expect(evRows[0]!.actor).toEqual({
       kind: "system",
       id: "briefing-generate-layers",
@@ -385,7 +439,11 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     const layers = (res.body.briefing.sources as Array<{ layerKind: string }>)
       .map((s) => s.layerKind)
       .sort();
-    expect(layers).toEqual(["grand-county-zoning", "ugrc-parcels"]);
+    expect(layers).toEqual([
+      "fema-nfhl-flood-zone",
+      "grand-county-zoning",
+      "ugrc-parcels",
+    ]);
   });
 
   it("Salmon ID parcel runs Idaho state + Lemhi County local adapters", async () => {
@@ -402,7 +460,11 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     const layers = (res.body.briefing.sources as Array<{ layerKind: string }>)
       .map((s) => s.layerKind)
       .sort();
-    expect(layers).toEqual(["inside-idaho-parcels", "lemhi-county-zoning"]);
+    expect(layers).toEqual([
+      "fema-nfhl-flood-zone",
+      "inside-idaho-parcels",
+      "lemhi-county-zoning",
+    ]);
   });
 
   it("re-run supersedes the prior row for the same layerKind (locked decision #4)", async () => {

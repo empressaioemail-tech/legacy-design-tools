@@ -26,6 +26,7 @@ export { runAdapters, type RunAdaptersInput } from "./runner";
 
 export {
   ALL_ADAPTERS,
+  FEDERAL_ADAPTERS,
   STATE_ADAPTERS,
   LOCAL_ADAPTERS,
 } from "./registry";

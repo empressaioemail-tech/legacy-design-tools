@@ -1067,7 +1067,7 @@ const TIER_DESCRIPTIONS: Record<
   string
 > = {
   federal:
-    "FEMA / USGS / EPA / FCC overlays (DA-PI-2 — federal adapters land in the next sprint).",
+    "FEMA flood zones, USGS NED elevation, EPA EJScreen demographics, and FCC broadband availability.",
   state:
     "State-tier sources (UGRC for Utah, INSIDE Idaho for Idaho, TCEQ for Texas).",
   local:
