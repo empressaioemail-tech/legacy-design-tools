@@ -260,6 +260,73 @@ describe("BriefingSourceDetails", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the FEMA flood-zone summary (zone + SFHA) from a flood-zone payload", () => {
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-fema",
+          layerKind: "fema-nfhl-flood-zone",
+          sourceKind: "federal-adapter",
+          provider: "FEMA National Flood Hazard Layer (NFHL)",
+          // Mirrors the `kind: "flood-zone"` payload the FEMA NFHL
+          // adapter persists (lib/adapters/src/federal/fema-nfhl.ts).
+          payload: {
+            kind: "flood-zone",
+            inSpecialFloodHazardArea: true,
+            floodZone: "AE",
+            zoneSubtype: null,
+            baseFloodElevation: 432,
+            features: [{ attributes: { FLD_ZONE: "AE" } }],
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("FEMA flood zone")).toBeInTheDocument();
+    expect(screen.getByText("AE")).toBeInTheDocument();
+    expect(screen.getByText("Special Flood Hazard Area")).toBeInTheDocument();
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+    expect(screen.getByText("Base flood elevation")).toBeInTheDocument();
+    expect(screen.getByText("432 ft")).toBeInTheDocument();
+  });
+
+  it("renders the FEMA flood-zone graceful empty hint when the parcel is unmapped", () => {
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-fema-empty",
+          layerKind: "fema-nfhl-flood-zone",
+          sourceKind: "federal-adapter",
+          provider: "FEMA National Flood Hazard Layer (NFHL)",
+          // The "no mapped flood zone" branch the FEMA adapter takes
+          // when the ArcGIS feature list comes back empty.
+          payload: {
+            kind: "flood-zone",
+            inSpecialFloodHazardArea: false,
+            floodZone: null,
+            features: [],
+          },
+        })}
+      />,
+    );
+    expect(
+      screen.getByText(
+        /Parcel does not intersect a mapped FEMA flood zone/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("does not render a setback panel for federal-adapter rows", () => {
     setbackHook.state = {
       data: undefined,

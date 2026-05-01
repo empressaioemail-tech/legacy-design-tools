@@ -262,9 +262,203 @@ function KindBody({
         />
       );
     }
+    case "flood-zone":
+      return <FemaFloodZoneSummary payload={payload} />;
+    case "elevation-point":
+      return <UsgsElevationSummary payload={payload} />;
+    case "ejscreen-blockgroup":
+      return <EpaEjscreenSummary payload={payload} />;
+    case "broadband-availability":
+      return <FccBroadbandSummary payload={payload} />;
     default:
       return <RawPayload payload={payload} />;
   }
+}
+
+/**
+ * One-line-per-field summary for the FEMA NFHL adapter
+ * (`lib/adapters/src/federal/fema-nfhl.ts`).
+ *
+ * The adapter persists `floodZone: null` + `features: []` for parcels
+ * that fall outside any mapped flood zone — surface that explicitly
+ * rather than rendering empty rows, since "no mapped zone" is a
+ * meaningful answer in the architect's workflow (treat as Zone X).
+ */
+function FemaFloodZoneSummary({
+  payload,
+}: {
+  payload: Record<string, unknown>;
+}) {
+  const floodZone = payload["floodZone"];
+  const features = payload["features"];
+  const noFeatures = Array.isArray(features) && features.length === 0;
+  if ((floodZone === null || floodZone === undefined) && noFeatures) {
+    return (
+      <EmptyHint>
+        Parcel does not intersect a mapped FEMA flood zone (treat as Zone X).
+      </EmptyHint>
+    );
+  }
+  const inSfha = payload["inSpecialFloodHazardArea"];
+  const zoneSubtype = payload["zoneSubtype"];
+  const bfe = payload["baseFloodElevation"];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <KvRow
+        label="FEMA flood zone"
+        value={typeof floodZone === "string" ? floodZone : "—"}
+      />
+      <KvRow
+        label="Special Flood Hazard Area"
+        value={typeof inSfha === "boolean" ? (inSfha ? "Yes" : "No") : "—"}
+      />
+      {typeof zoneSubtype === "string" && zoneSubtype.length > 0 && (
+        <KvRow label="Zone subtype" value={zoneSubtype} />
+      )}
+      {typeof bfe === "number" && (
+        <KvRow label="Base flood elevation" value={`${bfe} ft`} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Summary for the USGS NED elevation adapter
+ * (`lib/adapters/src/federal/usgs-ned.ts`).
+ *
+ * The adapter requests EPQS in feet and surfaces the literal `units`
+ * string so we don't hard-code "ft" here — if a future caller flips
+ * the request to meters the summary follows. `elevationFeet: null` is
+ * the adapter's "off-raster" sentinel and gets a graceful hint.
+ */
+function UsgsElevationSummary({
+  payload,
+}: {
+  payload: Record<string, unknown>;
+}) {
+  const elevation = payload["elevationFeet"];
+  if (elevation === null || elevation === undefined) {
+    return (
+      <EmptyHint>
+        USGS NED has no elevation value at this point (off-raster).
+      </EmptyHint>
+    );
+  }
+  const units = payload["units"];
+  const unitsLabel =
+    typeof units === "string" && units.length > 0 ? units : "Feet";
+  return (
+    <KvRow
+      label="Elevation"
+      value={
+        typeof elevation === "number"
+          ? `${elevation} ${unitsLabel}`
+          : String(elevation)
+      }
+    />
+  );
+}
+
+/** EPA EJScreen percentile fields the adapter promotes onto the
+ * top-level payload, in the order they should be considered for the
+ * "top percentiles" summary. */
+const EJSCREEN_PERCENTILE_FIELDS: ReadonlyArray<{
+  key: string;
+  label: string;
+}> = [
+  { key: "demographicIndexPercentile", label: "Demographic index" },
+  { key: "pm25Percentile", label: "PM2.5" },
+  { key: "ozonePercentile", label: "Ozone" },
+  { key: "leadPaintPercentile", label: "Lead paint" },
+];
+
+/**
+ * Summary for the EPA EJScreen adapter
+ * (`lib/adapters/src/federal/epa-ejscreen.ts`).
+ *
+ * EJScreen percentiles are 0–100; we sort the promoted fields by
+ * percentile descending and render the top three so the architect can
+ * see the most-elevated indicators at a glance. Falls back to a hint
+ * when none of the promoted percentile fields were populated (the
+ * `raw` envelope is still available in the parent adapter row).
+ */
+function EpaEjscreenSummary({
+  payload,
+}: {
+  payload: Record<string, unknown>;
+}) {
+  const population = payload["population"];
+  const ranked = EJSCREEN_PERCENTILE_FIELDS.map((f) => ({
+    label: f.label,
+    value: payload[f.key],
+  }))
+    .filter(
+      (f): f is { label: string; value: number } => typeof f.value === "number",
+    )
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 3);
+  if (ranked.length === 0 && typeof population !== "number") {
+    return (
+      <EmptyHint>
+        EJScreen returned no percentile indicators for this block group.
+      </EmptyHint>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {typeof population === "number" && (
+        <KvRow label="Block group population" value={String(population)} />
+      )}
+      {ranked.map((r) => (
+        <KvRow
+          key={r.label}
+          label={`${r.label} percentile`}
+          value={String(r.value)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Summary for the FCC National Broadband Map adapter
+ * (`lib/adapters/src/federal/fcc-broadband.ts`).
+ *
+ * `providerCount === 0` is the adapter's "no fixed-broadband
+ * deployment here" sentinel — surface that as a hint rather than
+ * rendering "0 providers / — Mbps". Otherwise show provider count
+ * plus the fastest advertised down/up tiers.
+ */
+function FccBroadbandSummary({
+  payload,
+}: {
+  payload: Record<string, unknown>;
+}) {
+  const providerCount = payload["providerCount"];
+  if (providerCount === 0) {
+    return (
+      <EmptyHint>
+        FCC reports no fixed-broadband deployment at this location.
+      </EmptyHint>
+    );
+  }
+  const down = payload["fastestDownstreamMbps"];
+  const up = payload["fastestUpstreamMbps"];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {typeof providerCount === "number" && (
+        <KvRow label="Providers" value={String(providerCount)} />
+      )}
+      <KvRow
+        label="Max advertised download"
+        value={typeof down === "number" ? `${down} Mbps` : "—"}
+      />
+      <KvRow
+        label="Max advertised upload"
+        value={typeof up === "number" ? `${up} Mbps` : "—"}
+      />
+    </div>
+  );
 }
 
 /**

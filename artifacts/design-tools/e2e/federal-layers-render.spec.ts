@@ -68,13 +68,17 @@ const sourceIdsByLayerKind = new Map<string, string>();
 
 /**
  * Federal adapter row catalogue — one entry per adapter under
- * `lib/adapters/src/federal/*`. The `layerKind` and `provider` here
- * mirror the literal values the corresponding adapter emits via
- * `AdapterResult` so this seed is an honest stand-in for what the
- * `/generate-layers` route would persist on a live run. The payload
- * is intentionally minimal: the briefing-source row component does
- * not key off these fields for the tier-group rendering this test
- * pins, and the briefing engine treats `payload` as opaque.
+ * `lib/adapters/src/federal/*`. The `layerKind`, `provider`, and
+ * `payload.kind` discriminator here mirror the literal values the
+ * corresponding adapter emits via `AdapterResult` so this seed is an
+ * honest stand-in for what the `/generate-layers` route would persist
+ * on a live run. Each `payload` carries the specific fields the
+ * Site Context inline summary renderer reads (FEMA: `floodZone` +
+ * `inSpecialFloodHazardArea`, USGS: `elevationFeet` + `units`, EPA:
+ * the promoted percentile fields, FCC: `providerCount` +
+ * `fastestDownstreamMbps` / `fastestUpstreamMbps`) plus the matching
+ * `summaryAssertion` substring the spec asserts is rendered on screen
+ * after the architect expands "View layer details".
  */
 const FEDERAL_SEED_ROWS = [
   {
@@ -82,41 +86,54 @@ const FEDERAL_SEED_ROWS = [
     provider: "FEMA National Flood Hazard Layer (NFHL)",
     payload: {
       kind: "flood-zone",
-      inSpecialFloodHazardArea: false,
-      floodZone: "X",
-      features: [],
+      inSpecialFloodHazardArea: true,
+      floodZone: "AE",
+      zoneSubtype: null,
+      baseFloodElevation: 432,
+      features: [{ attributes: { FLD_ZONE: "AE" } }],
     },
     note: "Seeded by federal-layers-render.spec.ts",
+    summaryAssertions: ["FEMA flood zone", "AE", "Special Flood Hazard Area"],
   },
   {
     layerKind: "usgs-ned-elevation",
-    provider: "USGS National Elevation Dataset (NED)",
+    provider: "USGS National Elevation Dataset (3DEP)",
     payload: {
-      kind: "elevation",
-      elevationMeters: 142.5,
-      resolutionMeters: 10,
+      kind: "elevation-point",
+      elevationFeet: 467.2,
+      units: "Feet",
+      location: { x: -97.3186, y: 30.1105 },
     },
     note: "Seeded by federal-layers-render.spec.ts",
+    summaryAssertions: ["Elevation", "467.2 Feet"],
   },
   {
     layerKind: "epa-ejscreen-blockgroup",
     provider: "EPA EJScreen",
     payload: {
       kind: "ejscreen-blockgroup",
-      blockgroupId: "480219501001",
-      indices: {},
+      population: 1234,
+      demographicIndexPercentile: 62,
+      pm25Percentile: 87,
+      ozonePercentile: 41,
+      leadPaintPercentile: 28,
+      raw: { RAW_D_POP: 1234, P_PM25: 87 },
     },
     note: "Seeded by federal-layers-render.spec.ts",
+    summaryAssertions: ["PM2.5 percentile", "87"],
   },
   {
     layerKind: "fcc-broadband-availability",
     provider: "FCC National Broadband Map",
     payload: {
       kind: "broadband-availability",
-      maxAdvertisedDownloadMbps: 1000,
+      providerCount: 3,
+      fastestDownstreamMbps: 1000,
+      fastestUpstreamMbps: 35,
       providers: [],
     },
     note: "Seeded by federal-layers-render.spec.ts",
+    summaryAssertions: ["Max advertised download", "1000 Mbps"],
   },
 ] as const;
 
@@ -225,6 +242,25 @@ test("federal-adapter briefing sources render under the Federal layers tier grou
     // regress if a future refactor collapsed the federal/state/local
     // labels back onto a single string.
     await expect(rowEl).toContainText("Federal adapter");
+
+    // Expand "View layer details" so the inline payload summary
+    // (Task #197) renders, then assert the per-adapter summary fields
+    // listed alongside the seed entry. These assertions pin the
+    // BriefingSourceDetails KindBody switch — a regression that drops
+    // a federal `kind` (`flood-zone`, `elevation-point`,
+    // `ejscreen-blockgroup`, `broadband-availability`) back onto
+    // RawPayload would fail here because the friendly KvRow labels
+    // would disappear from the DOM.
+    await rowEl
+      .getByTestId(`briefing-source-details-toggle-${sourceId}`)
+      .click();
+    const detailsEl = rowEl.getByTestId(
+      `briefing-source-details-${sourceId}`,
+    );
+    await expect(detailsEl).toBeVisible();
+    for (const expected of row.summaryAssertions) {
+      await expect(detailsEl).toContainText(expected);
+    }
   }
 
   // Negative guard: the seed only inserted federal-adapter rows, so
