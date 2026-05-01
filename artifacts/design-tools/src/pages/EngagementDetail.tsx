@@ -24,6 +24,7 @@ import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
 import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionResponseDialog";
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
+import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
 import { SubmitToJurisdictionDialog } from "../components/SubmitToJurisdictionDialog";
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
@@ -615,7 +616,18 @@ function SubmissionStatusPill({ status }: { status: SubmissionStatus }) {
  * Pagination is still a follow-up: engagements typically accumulate
  * a handful of packages, so a bare array is fine for now.
  */
-function SubmissionsTab({ engagementId }: { engagementId: string }) {
+function SubmissionsTab({
+  engagementId,
+  onOpenSubmission,
+}: {
+  engagementId: string;
+  /**
+   * Open the per-submission detail modal. Lifted to the parent so the
+   * modal lives once per engagement page (rather than once per row)
+   * and the active selection survives a tab switch.
+   */
+  onOpenSubmission: (submissionId: string) => void;
+}) {
   const { data: submissions, isLoading } = useListEngagementSubmissions(
     engagementId,
     {
@@ -709,16 +721,36 @@ function SubmissionsTab({ engagementId }: { engagementId: string }) {
             const respondedAt: string | null =
               localResponse?.respondedAt ?? null;
             return (
+              // Row container is a `<div role="button">` rather than a
+              // `<button>` because the row hosts an inner "Record
+              // response" `<button>` (Task #85) and HTML disallows
+              // nested interactive buttons. Clicking the row opens the
+              // per-submission detail modal (Task #84); the inner
+              // button stops propagation so its own action runs without
+              // also opening the modal.
               <div
                 key={s.id}
-                className="sc-card-row"
+                className="sc-card-row sc-card-clickable"
                 data-testid={`submission-row-${s.id}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenSubmission(s.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpenSubmission(s.id);
+                  }
+                }}
+                aria-label={`Open submission to ${
+                  s.jurisdiction ?? "jurisdiction not recorded"
+                }`}
                 style={{
                   padding: "12px 16px",
                   borderBottom: "1px solid var(--border-default)",
                   display: "flex",
                   flexDirection: "column",
                   gap: 6,
+                  cursor: "pointer",
                 }}
               >
                 <div
@@ -767,7 +799,12 @@ function SubmissionsTab({ engagementId }: { engagementId: string }) {
                   <button
                     type="button"
                     className="sc-btn-ghost"
-                    onClick={() => setResponseDialogFor(s.id)}
+                    onClick={(e) => {
+                      // Prevent the row click from also opening the
+                      // detail modal — this button has its own action.
+                      e.stopPropagation();
+                      setResponseDialogFor(s.id);
+                    }}
                     data-testid={`submission-record-response-${s.id}`}
                     style={{ padding: "2px 10px", fontSize: 12 }}
                   >
@@ -783,6 +820,13 @@ function SubmissionsTab({ engagementId }: { engagementId: string }) {
                       color: "var(--text-secondary)",
                       fontSize: 12,
                       whiteSpace: "pre-wrap",
+                      // The list note is intentionally clamped — the
+                      // full note is available in the per-submission
+                      // detail modal that opens on click.
+                      display: "-webkit-box",
+                      WebkitBoxOrient: "vertical",
+                      WebkitLineClamp: 2,
+                      overflow: "hidden",
                     }}
                   >
                     {s.note}
@@ -865,6 +909,15 @@ export function EngagementDetail() {
   // affordance can deep-link by `submissionId` without another round trip.
   const [lastSubmission, setLastSubmission] =
     useState<SubmissionReceipt | null>(null);
+  // Currently-open submission detail modal (Task #84). `null` ==
+  // closed; a string is the submission id whose ContextSummary the
+  // modal should fetch. Lifted to the page so the same modal instance
+  // serves the Submissions tab today and any other surface (chat
+  // inline reference, banner deep-link) that wants to open the same
+  // detail view tomorrow.
+  const [openSubmissionId, setOpenSubmissionId] = useState<string | null>(
+    null,
+  );
   // Auto-dismiss the banner after 8s so it stays out of the way once
   // the user has seen it. The dialog itself already closed on success,
   // so the banner is the only remaining post-submit affordance. Within
@@ -1182,7 +1235,10 @@ export function EngagementDetail() {
         {tab === "site-context" && <SiteContextTab />}
 
         {tab === "submissions" && (
-          <SubmissionsTab engagementId={engagement.id} />
+          <SubmissionsTab
+            engagementId={engagement.id}
+            onOpenSubmission={(sid) => setOpenSubmissionId(sid)}
+          />
         )}
 
         {tab === "settings" && (
@@ -1205,6 +1261,12 @@ export function EngagementDetail() {
         isOpen={submitOpen}
         onClose={() => setSubmitOpen(false)}
         onSubmitted={(receipt) => setLastSubmission(receipt)}
+      />
+
+      <SubmissionDetailModal
+        submissionId={openSubmissionId}
+        engagementId={engagement.id}
+        onClose={() => setOpenSubmissionId(null)}
       />
     </AppShell>
   );

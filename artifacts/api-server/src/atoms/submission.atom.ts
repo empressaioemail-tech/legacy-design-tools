@@ -259,13 +259,33 @@ export function makeSubmissionAtom(
       };
 
       // History provenance: best-effort lookup against the atom_event
-      // chain — same fallback contract as sheet/snapshot. The engagement-
-      // scoped `engagement.submitted` event (appended against the parent
-      // engagement, not the submission entity) doesn't surface here;
-      // submission-scoped events like `submission.response-recorded`
-      // do, so once a response is recorded the latest-event lookup
-      // returns it. Falls back to `submittedAt` when no submission-
-      // scoped event exists yet.
+      // chain — same fallback contract as sheet/snapshot.
+      //
+      // Today the canonical lifecycle event is `engagement.submitted`,
+      // which the create-submission route appends against the *parent*
+      // engagement (not the submission entity). Submission-scoped
+      // events like `submission.response-recorded` do land on the
+      // submission entity, so once a response is recorded the
+      // submission-scoped `latestEvent` lookup will return it.
+      //
+      // For the original send-off, to still surface the audit trail
+      // entry that corresponds to *this* submission, we additionally
+      // scan the engagement's recent history for an
+      // `engagement.submitted` event whose payload carries our
+      // `submissionId`. When found, that event's id and `occurredAt`
+      // become the historyProvenance — so the per-submission detail
+      // view can render an inline pointer to the matching audit entry
+      // without a second round trip.
+      //
+      // Order of preference (first non-null wins):
+      //   1. submission-scoped latest event (e.g. response-recorded)
+      //   2. matching `engagement.submitted` event on the engagement
+      //   3. fallback to the row's `submittedAt`
+      //
+      // Bounded scan: 50 events is more than enough for any real
+      // engagement's submission cadence and matches the
+      // `HISTORY_MAX_LIMIT` already enforced on the public history
+      // endpoint, so we never touch an unbounded slice of the chain.
       let latestEventId = "";
       let latestEventAt = row.submittedAt.toISOString();
       if (deps.history) {
@@ -281,6 +301,30 @@ export function makeSubmissionAtom(
           }
         } catch {
           // History is best-effort here — fallback already populated.
+        }
+        if (!latestEventId) {
+          try {
+            const engagementEvents = await deps.history.readHistory(
+              {
+                kind: "atom",
+                entityType: "engagement",
+                entityId: row.engagementId,
+              },
+              { limit: 50, reverse: true },
+            );
+            const match = engagementEvents.find(
+              (e) =>
+                e.eventType === "engagement.submitted" &&
+                typeof e.payload?.["submissionId"] === "string" &&
+                e.payload["submissionId"] === entityId,
+            );
+            if (match) {
+              latestEventId = match.id;
+              latestEventAt = match.occurredAt.toISOString();
+            }
+          } catch {
+            // Best-effort — fallback already populated above.
+          }
         }
       }
 

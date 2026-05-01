@@ -46,7 +46,7 @@ const { createTestSchema, dropTestSchema, truncateAll } = await import(
 );
 const dbModule = await import("@workspace/db");
 const { engagements, submissions } = dbModule;
-const { runAtomContractTests } = await import(
+const { runAtomContractTests, createInMemoryEventService } = await import(
   "@workspace/empressa-atom/testing"
 );
 const { defaultScope } = await import("@workspace/empressa-atom");
@@ -263,6 +263,107 @@ describe("submission atom (behavior)", () => {
     // Prose does NOT include a "Jurisdiction response" sentence yet.
     expect(summary.prose).not.toContain("Jurisdiction response");
   });
+
+  it(
+    "historyProvenance points at the matching `engagement.submitted` event " +
+      "anchored against the parent engagement",
+    async () => {
+      if (!ctx.schema) throw new Error("ctx.schema not set");
+      const db = ctx.schema.db;
+      const [eng] = await db
+        .insert(engagements)
+        .values({
+          name: "Provenance Test",
+          nameLower: "provenance-test",
+          jurisdiction: "Moab, UT",
+          address: "1 Provenance Way",
+        })
+        .returning({ id: engagements.id });
+      const [sub] = await db
+        .insert(submissions)
+        .values({
+          engagementId: eng.id,
+          jurisdiction: "Moab, UT",
+          jurisdictionCity: "Moab",
+          jurisdictionState: "UT",
+          note: "Targeted submission.",
+        })
+        .returning();
+
+      const history = createInMemoryEventService();
+      // An unrelated event the lookup should skip over.
+      await history.appendEvent({
+        entityType: "engagement",
+        entityId: eng.id,
+        eventType: "engagement.geocoded",
+        actor: { kind: "system", id: "test" },
+        payload: { foo: "bar" },
+      });
+      const submittedEvent = await history.appendEvent({
+        entityType: "engagement",
+        entityId: eng.id,
+        eventType: "engagement.submitted",
+        actor: { kind: "system", id: "test" },
+        payload: { submissionId: sub!.id, jurisdiction: "Moab, UT" },
+      });
+      // A second `engagement.submitted` for a *different* submission —
+      // the matcher must filter on `submissionId` payload, not just event
+      // type, otherwise it would latch on to the most recent one.
+      await history.appendEvent({
+        entityType: "engagement",
+        entityId: eng.id,
+        eventType: "engagement.submitted",
+        actor: { kind: "system", id: "test" },
+        payload: {
+          submissionId: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+          jurisdiction: "Moab, UT",
+        },
+      });
+
+      const atom = makeSubmissionAtom({ db: lazyDb, history });
+      const summary = await atom.contextSummary(sub!.id, defaultScope());
+
+      expect(summary.historyProvenance.latestEventId).toBe(submittedEvent.id);
+      expect(summary.historyProvenance.latestEventAt).toBe(
+        submittedEvent.occurredAt.toISOString(),
+      );
+    },
+  );
+
+  it(
+    "historyProvenance falls back to submittedAt when no matching " +
+      "`engagement.submitted` event exists",
+    async () => {
+      if (!ctx.schema) throw new Error("ctx.schema not set");
+      const db = ctx.schema.db;
+      const [eng] = await db
+        .insert(engagements)
+        .values({
+          name: "Fallback Test",
+          nameLower: "fallback-test",
+          jurisdiction: "Moab, UT",
+          address: "1 Fallback Way",
+        })
+        .returning({ id: engagements.id });
+      const [sub] = await db
+        .insert(submissions)
+        .values({
+          engagementId: eng.id,
+          jurisdiction: "Moab, UT",
+          note: "No event recorded.",
+        })
+        .returning();
+
+      const history = createInMemoryEventService();
+      const atom = makeSubmissionAtom({ db: lazyDb, history });
+      const summary = await atom.contextSummary(sub!.id, defaultScope());
+
+      expect(summary.historyProvenance.latestEventId).toBe("");
+      expect(summary.historyProvenance.latestEventAt).toBe(
+        sub!.submittedAt.toISOString(),
+      );
+    },
+  );
 
   it("not-found returns the structural shape with typed.found=false", async () => {
     const atom = makeSubmissionAtom({ db: lazyDb });
