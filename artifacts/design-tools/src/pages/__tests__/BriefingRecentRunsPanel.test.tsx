@@ -120,14 +120,17 @@ const hoisted = vi.hoisted(() => {
       };
     },
     generateBriefingMutate: vi.fn(),
-    // Task #263 — the briefing payload the GET /briefing query mock
+    // Task #281 — the briefing payload the GET /briefing query mock
     // returns. Tests that need a "narrative is currently on screen"
     // condition can replace this with a fixture that has a
-    // non-null `narrative.generatedAt`; the default keeps the
+    // non-null `narrative.generationId`; the default keeps the
     // existing "no narrative" shape so all of the prior tests
-    // continue to render the same way.
+    // continue to render the same way. The panel now matches
+    // by direct id equality against the `briefing_generation_jobs`
+    // row id stamped on `parcel_briefings.generation_id`, not by
+    // inferring from `generatedAt` timestamp intervals.
     briefing: null as null | {
-      narrative: { generatedAt: string | null } | null;
+      narrative: { generationId: string | null } | null;
     },
   };
 });
@@ -1017,27 +1020,33 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     ).not.toBeInTheDocument();
   });
 
-  // ── Task #263 ──────────────────────────────────────────────────────
+  // ── Task #281 ──────────────────────────────────────────────────────
   // Tagging the row whose generation produced the narrative on screen
-  // closes the comparison loop the Task #230 disclosure opened. The
-  // briefing engine only writes `section_a..g` on `completed` runs,
-  // so the row to mark is the most recent `completed` row in the
-  // newest-first list — `pending` rows haven't written anything yet
-  // and `failed` rows leave the previous narrative intact. With no
-  // narrative on screen (brand-new engagement, or the first run is
-  // still in flight) no row carries the pill.
-  it("marks the most recent completed run as 'Current' when a narrative is on screen", async () => {
-    // Narrative is loaded — the briefing-query mock returns a
-    // payload with a non-null `generatedAt`, so the parent passes
-    // that timestamp into the disclosure.
+  // closes the comparison loop the Task #230 disclosure opened. Task
+  // #263 originally inferred this by matching the narrative's
+  // `generatedAt` against each completed run's [startedAt, completedAt]
+  // window — correct in practice today but it quietly drifts the moment
+  // a backfill writes sections without inserting a job row, the runs
+  // route paginates, or two completions race. Task #281 replaces the
+  // heuristic with the producing job's id, stamped onto the briefing
+  // row in the same transaction that overwrites the section columns,
+  // so the panel matches by direct id equality. With no producing run
+  // on file (`narrative.generationId === null` — brand-new engagement,
+  // unbackfilled legacy row, or the producing job has been pruned)
+  // no row carries the pill.
+  it("marks the run whose id matches narrative.generationId as 'Current' when a narrative is on screen", async () => {
+    // Narrative is loaded and carries the producing job's id — the
+    // briefing-query mock returns a payload with a non-null
+    // `generationId`, so the parent passes that id into the
+    // disclosure. The id matches one of the retained rows.
     hoisted.briefing = {
-      narrative: { generatedAt: "2026-04-02T10:00:04.000Z" },
+      narrative: { generationId: "gen-current" },
     };
     // A pending newer run, then the completed run that produced
     // what's on screen, then an older failed attempt. Only the
     // middle row should carry the "Current" pill — the pending
-    // row hasn't written sections yet, and the failed older row
-    // never updated the briefing.
+    // row's id is `gen-pending` (no match) and the failed older
+    // row's id is `gen-old-fail` (no match either).
     hoisted.runs = [
       makeRun({
         generationId: "gen-pending",
@@ -1065,9 +1074,9 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
     const list = await screen.findByTestId("briefing-recent-runs-list");
 
-    // The middle (most-recent-completed) row carries the pill and
-    // is also marked with `aria-current="true"` so assistive tech
-    // can announce the same "this is what's on screen" cue the
+    // The middle (id-matching) row carries the pill and is also
+    // marked with `aria-current="true"` so assistive tech can
+    // announce the same "this is what's on screen" cue the
     // visual highlight conveys.
     const currentRow = within(list).getByTestId("briefing-run-gen-current");
     expect(currentRow).toHaveAttribute("aria-current", "true");
@@ -1077,9 +1086,8 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
       ),
     ).toHaveTextContent(/Current/i);
 
-    // No other row should carry the pill — the pending row is
-    // newer but hasn't completed, and the failed older row never
-    // updated the briefing.
+    // No other row should carry the pill — only id equality counts,
+    // not state ordering.
     expect(
       screen.queryByTestId("briefing-run-current-pill-gen-pending"),
     ).not.toBeInTheDocument();
@@ -1094,23 +1102,25 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     ).not.toHaveAttribute("aria-current");
   });
 
-  it("matches by narrative.generatedAt rather than picking the latest completed row", async () => {
+  it("matches by narrative.generationId rather than picking the latest completed row", async () => {
     // The newest completed row is NOT the one that produced the
     // narrative on screen — say a regeneration just landed but
     // the briefing read is still serving the previous body
     // (e.g. cache lag during the pending → terminal transition,
-    // or an external cache pin). The narrative's `generatedAt`
-    // falls inside the OLDER completed run's [startedAt,
-    // completedAt] window, so the disclosure must mark THAT
-    // row Current, not the newer one whose interval is
-    // strictly after the narrative's stamp.
+    // or an external cache pin). `narrative.generationId` points
+    // at the OLDER completed run's id, so the disclosure must
+    // mark THAT row Current, not the newer one. This test would
+    // pass under the old timestamp-window heuristic too — but
+    // only because the timestamps were constructed to agree;
+    // the pin is on id equality, so re-using the same row ids
+    // here would catch any future regression that silently
+    // re-introduced a state-ordering shortcut.
     hoisted.briefing = {
-      narrative: { generatedAt: "2026-04-02T10:00:02.000Z" },
+      narrative: { generationId: "gen-producer" },
     };
     hoisted.runs = [
-      // Newer completed run — its interval [10:00:00, 10:00:05]
-      // on April 3 is strictly after the narrative timestamp,
-      // so the narrative cannot have come from it.
+      // Newer completed run — its id doesn't match
+      // `narrative.generationId`, so it cannot be the producer.
       makeRun({
         generationId: "gen-newer-completed",
         state: "completed",
@@ -1118,9 +1128,8 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
         completedAt: "2026-04-03T10:00:05.000Z",
         invalidCitationCount: 0,
       }),
-      // Older completed run whose [startedAt, completedAt]
-      // window contains the narrative's generatedAt — this is
-      // the producer.
+      // Older completed run whose id matches the briefing's
+      // stamped `generationId` — this is the producer.
       makeRun({
         generationId: "gen-producer",
         state: "completed",
@@ -1135,7 +1144,7 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     const list = await screen.findByTestId("briefing-recent-runs-list");
 
     // The producing row gets the pill + aria-current — the
-    // matcher used the narrative timestamp, not "first completed".
+    // matcher used the narrative's stamped id, not "first completed".
     const producerRow = within(list).getByTestId(
       "briefing-run-gen-producer",
     );
@@ -1159,14 +1168,18 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("marks no row 'Current' when the narrative was produced by a run the sweep already pruned", async () => {
-    // Narrative is loaded and stamped at a timestamp that does
-    // NOT fall inside any retained run's interval — the
-    // producing job was pruned out of the keep-N window. The
-    // disclosure stays honest: rather than guessing, no row is
-    // marked Current.
+  it("marks no row 'Current' when the narrative's producing run is not in the retained list", async () => {
+    // Narrative is loaded and stamped with a `generationId` that
+    // does NOT appear in the retained runs — the producing job
+    // was pruned out of the keep-N window between the briefing
+    // fetch and the runs fetch (the FK is `ON DELETE SET NULL`,
+    // so this can also surface as `narrative.generationId ===
+    // null` after the sweep races; the case here is the older
+    // pre-sweep id still cached on the briefing's narrative).
+    // The disclosure stays honest: rather than guessing, no row
+    // is marked Current.
     hoisted.briefing = {
-      narrative: { generatedAt: "2025-12-31T23:59:59.000Z" },
+      narrative: { generationId: "gen-pruned-no-longer-in-list" },
     };
     hoisted.runs = [
       makeRun({
@@ -1200,7 +1213,7 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     // row's expanded details should *not* duplicate the
     // narrative (it's already rendered above the disclosure).
     hoisted.briefing = {
-      narrative: { generatedAt: "2026-04-03T10:00:02.000Z" },
+      narrative: { generationId: "gen-current" },
     };
     hoisted.priorNarrative = {
       sectionA: "Prior Section A — buildable thesis as of run 1.",
@@ -1286,7 +1299,7 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     // has no body to honestly surface — its expanded details
     // must NOT render a prior-narrative block.
     hoisted.briefing = {
-      narrative: { generatedAt: "2026-04-03T10:00:02.000Z" },
+      narrative: { generationId: "gen-current" },
     };
     hoisted.priorNarrative = {
       sectionA: "Prior Section A from run 2.",
@@ -1374,7 +1387,7 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     // Current and renders no Prior pill — the auditor isn't
     // told a prior body is recoverable when it isn't.
     hoisted.briefing = {
-      narrative: { generatedAt: "2026-04-03T10:00:02.000Z" },
+      narrative: { generationId: "gen-only" },
     };
     hoisted.priorNarrative = null;
     hoisted.runs = [

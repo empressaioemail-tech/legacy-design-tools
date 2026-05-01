@@ -186,6 +186,16 @@ describe("POST /api/engagements/:id/briefing/generate (mock mode)", () => {
     expect(row.sectionG).toBeTruthy();
     expect(row.generatedAt).toBeTruthy();
     expect(row.generatedBy).toBe("system:briefing-engine");
+    // Task #281 — `persistGenerationResult` stamps the producing
+    // job's id onto `parcel_briefings.generation_id` inside the
+    // same transaction that overwrites the section columns. The
+    // kickoff route returned that id as `kickoff.body.generationId`,
+    // so the persisted row must carry the same value. The UI
+    // matches "the narrative on screen" to "the row that
+    // produced it" by direct id equality against this column,
+    // so any drift here would silently mislabel the "Current"
+    // pill in `BriefingRecentRunsPanel`.
+    expect(row.generationId).toBe(generationId);
     // First-generation invariant: prior_* columns stay null until the
     // engine runs again.
     expect(row.priorSectionA).toBeNull();
@@ -362,11 +372,20 @@ describe("POST /api/engagements/:id/briefing/generate (mock mode)", () => {
       .post(`/api/engagements/${eng.id}/briefing/generate`)
       .send({ regenerate: true });
     expect(second.status).toBe(202);
+    const secondGenerationId = second.body.generationId as string;
     await waitForStatus(eng.id, "completed");
     const [afterSecond] = await ctx.schema.db
       .select()
       .from(parcelBriefings)
       .where(eq(parcelBriefings.id, briefing.id));
+    // Task #281 — regeneration overwrites `generation_id` with the
+    // *second* run's id, so the briefing always points at its
+    // current producer (not the first run that wrote whatever now
+    // lives in `prior_section_*`). This is the invariant the UI
+    // relies on to flip the "Current" pill from one row to the
+    // next when a regeneration completes.
+    expect(afterSecond.generationId).toBe(secondGenerationId);
+    expect(afterSecond.generationId).not.toBe(afterFirst.generationId);
     // Prior backup populated.
     expect(afterSecond.priorSectionA).toBe(firstSectionA);
     expect(afterSecond.priorGeneratedAt?.toISOString()).toBe(

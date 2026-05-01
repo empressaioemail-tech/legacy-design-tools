@@ -2914,7 +2914,7 @@ function BriefingNarrativePanel({
 
       <BriefingRecentRunsPanel
         engagementId={engagementId}
-        narrativeGeneratedAt={narrative?.generatedAt ?? null}
+        narrativeGenerationId={narrative?.generationId ?? null}
       />
 
       {hasNarrative && (
@@ -3089,23 +3089,27 @@ function BriefingRunStateBadge({
  */
 function BriefingRecentRunsPanel({
   engagementId,
-  narrativeGeneratedAt,
+  narrativeGenerationId,
 }: {
   engagementId: string;
   /**
-   * Task #263 — `generatedAt` of the narrative currently rendered in
-   * the parent `BriefingNarrativePanel`, or `null` when no narrative
-   * is on screen (the engine has never run for this engagement, or
-   * the very first generation is still pending). Used to pick the
-   * row that produced what the auditor is reading: of the retained
-   * runs, the most recent `completed` row is the one whose section
-   * columns currently live on `parcel_briefings` — `pending` rows
-   * haven't written anything yet and `failed` rows leave the
-   * previous narrative in place. When the narrative is `null` no
-   * row is marked, so a brand-new engagement (or one whose first
-   * attempt just failed) doesn't sport a misleading "Current" pill.
+   * Task #281 — id of the `briefing_generation_jobs` row that produced
+   * the narrative currently rendered in the parent
+   * `BriefingNarrativePanel`, or `null` when no producing run is on
+   * file (the engine has never run for this engagement, the very
+   * first generation is still pending, the producing job was
+   * already pruned out of the keep window, or the row pre-dates
+   * the column and the post-merge backfill didn't have a matching
+   * job to attribute to). The panel marks the row whose
+   * `generationId` equals this value with the "Current" pill —
+   * direct id equality, no timestamp inference — so the badge stays
+   * exact even when two completions race, the runs route paginates,
+   * or a backfill writes sections without inserting a job row.
+   * When this is `null` no row is marked, so a brand-new engagement
+   * (or one whose producing job has aged out) doesn't sport a
+   * misleading "Current" pill on an unrelated row.
    */
-  narrativeGeneratedAt: string | null;
+  narrativeGenerationId: string | null;
 }) {
   // Task #275 — both the open/closed state of the disclosure and the
   // active filter are mirrored to the URL so an auditor who finds a
@@ -3189,43 +3193,32 @@ function BriefingRecentRunsPanel({
     return true;
   });
   const visibleCount = visibleRuns.length;
-  // Resolve which row produced the narrative currently on screen
-  // (Task #263) by matching against `narrative.generatedAt`, not
-  // by picking "the latest completed row". Server-side, the
-  // engine stamps `result.generatedAt` between the job's
-  // `startedAt` and `completedAt` (`engine.ts` calls `now()` mid-
-  // run, then `finalizeJob` records `new Date()` after the
-  // briefing row update settles). That gives us a deterministic
-  // interval match: the producing run is the one whose
-  // [startedAt, completedAt] window contains the narrative's
-  // generatedAt — irrespective of how many newer completions
-  // landed afterwards or what other rows exist in the retained
-  // window. We match against the full `runs` list (not
-  // `visibleRuns`) so the Task #262 filter can't accidentally
-  // suppress the pill on the producing row when it would
-  // otherwise be hidden. We restrict the search to
-  // `state === "completed"` because the engine never stamps
-  // generatedAt on `pending` or `failed` rows. When no row's
-  // interval contains the timestamp — the narrative was produced
-  // by a run the sweep already pruned (or by a backfill that
-  // never inserted a job row at all) — we honestly mark nothing
-  // rather than mislabelling an unrelated row.
+  // Task #281 — match the on-screen narrative to its producing
+  // row by direct id equality. The server stamps the producing
+  // job's id onto `parcel_briefings.generation_id` inside the
+  // same transaction that overwrites the section columns, so
+  // the briefing's `narrative.generationId` *is* the row that
+  // produced what's on screen — no timestamp window inference
+  // required. We still confirm the matching id is actually
+  // present in the runs list (the producing job may have aged
+  // out of the keep window between the briefing fetch and the
+  // runs fetch, in which case no row should be marked) and we
+  // search the full `runs` list rather than `visibleRuns` so
+  // the Task #262 filter cannot accidentally suppress the pill
+  // when the producing row is filtered out of view. When
+  // `narrativeGenerationId` is null (legacy unbackfilled row,
+  // pruned producing job, or no generation has ever run on
+  // this briefing) we honestly mark nothing instead of
+  // mislabelling an unrelated row.
   const currentGenerationId = useMemo<string | null>(() => {
-    if (narrativeGeneratedAt === null) return null;
-    const stampedMs = Date.parse(narrativeGeneratedAt);
-    if (Number.isNaN(stampedMs)) return null;
+    if (narrativeGenerationId === null) return null;
     for (const run of runs as RecentRun[]) {
-      if (run.state !== "completed") continue;
-      if (run.completedAt === null) continue;
-      const startedMs = Date.parse(run.startedAt);
-      const completedMs = Date.parse(run.completedAt);
-      if (Number.isNaN(startedMs) || Number.isNaN(completedMs)) continue;
-      if (stampedMs >= startedMs && stampedMs <= completedMs) {
+      if (run.generationId === narrativeGenerationId) {
         return run.generationId;
       }
     }
     return null;
-  }, [narrativeGeneratedAt, runs]);
+  }, [narrativeGenerationId, runs]);
 
   // Task #280 — same interval-match shape as Current, but against
   // the prior narrative's `generatedAt`. Resolves to the

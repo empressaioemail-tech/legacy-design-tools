@@ -244,7 +244,8 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
     prior_section_f text,
     prior_section_g text,
     prior_generated_at timestamp with time zone,
-    prior_generated_by text
+    prior_generated_by text,
+    generation_id uuid
 );
 
 
@@ -705,6 +706,12 @@ ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: parcel_briefings parcel_briefings_generation_id_briefing_generation_jobs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
+    ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
 
 
 -- Name: sheets sheets_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

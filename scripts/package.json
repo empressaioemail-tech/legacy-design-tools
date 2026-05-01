@@ -6,6 +6,7 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "backfill:sheet-created": "tsx ./src/backfillSheetCreatedEvents.ts",
+    "backfill:briefing-generation-ids": "tsx ./src/backfillBriefingGenerationIds.ts",
     "sweep:orphan-avatars": "tsx ./src/sweepOrphanAvatars.ts",
     "smoke:converter": "tsx ./src/smokeConverter.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

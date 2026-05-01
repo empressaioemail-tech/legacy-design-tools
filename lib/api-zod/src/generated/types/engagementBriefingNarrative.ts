@@ -39,4 +39,19 @@ uuid for architect-initiated runs, `system:briefing-engine`
 for unattended runs.
  */
   generatedBy: string | null;
+  /** Task #281 — id of the `briefing_generation_jobs` row that
+produced the current `section_a..g` body. Stamped inside
+the same transaction that overwrites the section columns
+so the UI can match the on-screen narrative to its
+producing run by id rather than inferring it from a
+timestamp window. Null on briefings that have never been
+generated (the engine has not run on this row), on legacy
+rows that pre-date this column and have not yet been
+backfilled, and on rows whose producing job has been
+pruned out of the sweep's keep window (the FK is
+`ON DELETE SET NULL`). The UI uses null to honestly
+render "no producing run on file" instead of mislabelling
+an unrelated row "Current".
+ */
+  generationId: string | null;
 }

@@ -4,9 +4,11 @@ import {
   text,
   timestamp,
   index,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { engagements } from "./engagements";
+import { briefingGenerationJobs } from "./briefingGenerationJobs";
 
 /**
  * A *parcel briefing* is the model-readable bundle of parcel facts +
@@ -69,6 +71,28 @@ export const parcelBriefings = pgTable(
     priorSectionG: text("prior_section_g"),
     priorGeneratedAt: timestamp("prior_generated_at", { withTimezone: true }),
     priorGeneratedBy: text("prior_generated_by"),
+    /**
+     * Task #281 — direct back-pointer to the `briefing_generation_jobs`
+     * row that produced the *current* `section_a..g` body. Stamped
+     * inside the same transaction that overwrites the section columns
+     * so the briefing carries its true producer rather than relying
+     * on the UI to infer it from the runs list. Nullable because:
+     *   - briefings created before this column landed haven't been
+     *     backfilled yet (the post-merge backfill fills NULLs where
+     *     it can; rows whose producing job was already pruned stay
+     *     NULL on purpose, surfacing "this briefing's producing run
+     *     was pruned" honestly instead of mislabelling an unrelated
+     *     run "Current"),
+     *   - briefings that have never been generated at all carry
+     *     null section columns and a null `generated_at`,
+     *   - the FK is `ON DELETE SET NULL` so the periodic
+     *     `briefingGenerationJobsSweep` aging out the producing row
+     *     does not leave a dangling pointer.
+     */
+    generationId: uuid("generation_id").references(
+      (): AnyPgColumn => briefingGenerationJobs.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -87,6 +111,19 @@ export const parcelBriefingsRelations = relations(
     engagement: one(engagements, {
       fields: [parcelBriefings.engagementId],
       references: [engagements.id],
+    }),
+    /**
+     * Task #281 — the producing run for the *current* `section_a..g`
+     * body. Disambiguated with the `parcelBriefingsCurrentGeneration`
+     * relation name because `briefingGenerationJobs` already declares
+     * a relation in the other direction (`briefing` → parcel briefing
+     * the run targets) and Drizzle requires unique relation names on
+     * each side of a two-way FK.
+     */
+    currentGeneration: one(briefingGenerationJobs, {
+      fields: [parcelBriefings.generationId],
+      references: [briefingGenerationJobs.id],
+      relationName: "parcelBriefingsCurrentGeneration",
     }),
   }),
 );

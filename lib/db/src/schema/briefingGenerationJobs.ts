@@ -121,9 +121,19 @@ export const briefingGenerationJobsRelations = relations(
       fields: [briefingGenerationJobs.engagementId],
       references: [engagements.id],
     }),
+    /**
+     * The parcel briefing this run *targets* — the kickoff route stamps
+     * `briefingId` so a job row can be traced back to the briefing whose
+     * sections it intends to overwrite, even before the run completes.
+     * Distinct from the inverse `parcelBriefings.currentGeneration`
+     * relation (which points the other way: briefing → producing run);
+     * Drizzle requires unique relation names on each side of a
+     * two-way FK so this one is named explicitly.
+     */
     briefing: one(parcelBriefings, {
       fields: [briefingGenerationJobs.briefingId],
       references: [parcelBriefings.id],
+      relationName: "briefingGenerationJobsBriefing",
     }),
   }),
 );

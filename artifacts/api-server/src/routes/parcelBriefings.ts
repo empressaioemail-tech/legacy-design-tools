@@ -179,6 +179,16 @@ interface BriefingNarrativeWire {
   sectionG: string | null;
   generatedAt: string | null;
   generatedBy: string | null;
+  /**
+   * Task #281 — id of the `briefing_generation_jobs` row that produced
+   * the current `section_a..g` body. Null when no generation has been
+   * stamped on the briefing yet, when a legacy row has not been
+   * backfilled, or when the producing job was pruned (FK is
+   * `ON DELETE SET NULL`). The UI matches on this id directly rather
+   * than inferring "Current" from a timestamp window — see
+   * `BriefingRecentRunsPanel` in the design-tools page.
+   */
+  generationId: string | null;
 }
 
 interface BriefingWire {
@@ -268,6 +278,12 @@ function toBriefingNarrativeWire(
     sectionG: b.sectionG,
     generatedAt: b.generatedAt ? b.generatedAt.toISOString() : null,
     generatedBy: b.generatedBy,
+    // Task #281 — surface the producing job's id directly. The UI
+    // uses this to mark the matching row in the "Recent runs"
+    // disclosure as "Current" instead of guessing from a
+    // timestamp window. Null on legacy rows that pre-date the
+    // backfill and on briefings whose producing job was pruned.
+    generationId: b.generationId,
   };
 }
 
@@ -1277,6 +1293,7 @@ function toEngineSourceInput(s: BriefingSource): BriefingSourceInput {
  */
 async function persistGenerationResult(
   briefingId: string,
+  generationId: string,
   result: GenerateBriefingResult,
 ): Promise<{ row: ParcelBriefing; wasRegeneration: boolean }> {
   return db.transaction(async (tx) => {
@@ -1309,6 +1326,16 @@ async function persistGenerationResult(
         sectionG: result.sections.g,
         generatedAt: result.generatedAt,
         generatedBy: result.generatedBy,
+        // Task #281 — stamp the producing job's id in the same
+        // transaction that overwrites the section columns. Storing
+        // it on the briefing row directly means the UI can match
+        // "the narrative on screen" to "the run that produced it"
+        // by id rather than picking the latest completed row in
+        // the runs list — that heuristic was correct in practice
+        // today but quietly drifts the moment a backfill writes
+        // sections without inserting a job row, the runs route
+        // paginates, or two completions race.
+        generationId,
         // Backup columns: copy the previous narrative into the prior_*
         // slots (or clear them on first generation so the row's invariant
         // is "prior_* set ↔ current narrative was overwritten at least
@@ -1552,6 +1579,7 @@ async function runBriefingGeneration(args: {
     );
     const { row, wasRegeneration } = await persistGenerationResult(
       briefingId,
+      generationId,
       result,
     );
     await emitParcelBriefingGeneratedEvent(
