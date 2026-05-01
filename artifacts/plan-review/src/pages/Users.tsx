@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@workspace/portal-ui";
 import {
@@ -200,7 +200,15 @@ function CreateProfileModal({ onClose }: CreateProfileModalProps) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  const {
+    uploadFile,
+    isUploading,
+    error: uploadError,
+    progress: uploadProgress,
+  } = useUpload();
 
   const createUser = useCreateUser({
     mutation: {
@@ -225,14 +233,28 @@ function CreateProfileModal({ onClose }: CreateProfileModalProps) {
         onSubmit={(e) => {
           e.preventDefault();
           setServerError(null);
-          createUser.mutate({
-            data: {
-              id: id.trim(),
-              displayName: displayName.trim(),
-              email: email.trim() ? email.trim() : null,
-              avatarUrl: avatarUrl.trim() ? avatarUrl.trim() : null,
-            },
-          });
+          // Defer the GCS upload until Save click — so a failed PATCH/POST
+          // doesn't leave a stale serving URL in form state. If the user
+          // fixes the failure and clicks Save again, the file is re-uploaded
+          // fresh (the previous orphan is rolled back server-side).
+          void (async () => {
+            let resolvedAvatar: string | null = avatarUrl.trim()
+              ? avatarUrl.trim()
+              : null;
+            if (pendingAvatarFile) {
+              const result = await uploadFile(pendingAvatarFile);
+              if (!result) return; // useUpload already surfaced the error
+              resolvedAvatar = `/api/storage${result.objectPath}`;
+            }
+            createUser.mutate({
+              data: {
+                id: id.trim(),
+                displayName: displayName.trim(),
+                email: email.trim() ? email.trim() : null,
+                avatarUrl: resolvedAvatar,
+              },
+            });
+          })();
         }}
       >
         <Field label="Profile id" hint="Matches the session id (e.g. u1, u_abc123)">
@@ -267,6 +289,11 @@ function CreateProfileModal({ onClose }: CreateProfileModalProps) {
         <AvatarField
           value={avatarUrl}
           onChange={setAvatarUrl}
+          pendingFile={pendingAvatarFile}
+          onPendingFileChange={setPendingAvatarFile}
+          isUploading={isUploading}
+          uploadProgress={uploadProgress}
+          uploadError={uploadError}
           testIdPrefix="user-form"
         />
         {serverError ? (
@@ -274,8 +301,14 @@ function CreateProfileModal({ onClose }: CreateProfileModalProps) {
         ) : null}
         <ModalActions
           onClose={onClose}
-          submitLabel={createUser.isPending ? "Saving…" : "Create profile"}
-          submitDisabled={createUser.isPending}
+          submitLabel={
+            isUploading
+              ? `Uploading… ${uploadProgress}%`
+              : createUser.isPending
+                ? "Saving…"
+                : "Create profile"
+          }
+          submitDisabled={createUser.isPending || isUploading}
         />
       </form>
     </ModalShell>
@@ -292,7 +325,15 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
   const [displayName, setDisplayName] = useState(user.displayName);
   const [email, setEmail] = useState(user.email ?? "");
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  const {
+    uploadFile,
+    isUploading,
+    error: uploadError,
+    progress: uploadProgress,
+  } = useUpload();
 
   const updateUser = useUpdateUser({
     mutation: {
@@ -317,29 +358,42 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
         onSubmit={(e) => {
           e.preventDefault();
           setServerError(null);
-          // Build a minimal patch — only send fields the admin actually
-          // changed so the server's "empty update" guard is satisfied
-          // for no-op submits and `email`/`avatarUrl` clearing works as
-          // expected (empty input ⇒ explicit null).
-          const patch: {
-            displayName?: string;
-            email?: string | null;
-            avatarUrl?: string | null;
-          } = {};
-          if (displayName.trim() !== user.displayName) {
-            patch.displayName = displayName.trim();
-          }
-          const emailNext = email.trim() ? email.trim() : null;
-          if (emailNext !== (user.email ?? null)) patch.email = emailNext;
-          const avatarNext = avatarUrl.trim() ? avatarUrl.trim() : null;
-          if (avatarNext !== (user.avatarUrl ?? null)) {
-            patch.avatarUrl = avatarNext;
-          }
-          if (Object.keys(patch).length === 0) {
-            onClose();
-            return;
-          }
-          updateUser.mutate({ id: user.id, data: patch });
+          // Defer the GCS upload until Save click — re-uploading on every
+          // retry guarantees the persisted `avatarUrl` always points at a
+          // file that still exists, even after the server rolled back a
+          // previous failed PATCH (Task #98).
+          void (async () => {
+            let resolvedAvatar: string | null = avatarUrl.trim()
+              ? avatarUrl.trim()
+              : null;
+            if (pendingAvatarFile) {
+              const result = await uploadFile(pendingAvatarFile);
+              if (!result) return; // useUpload already surfaced the error
+              resolvedAvatar = `/api/storage${result.objectPath}`;
+            }
+            // Build a minimal patch — only send fields the admin actually
+            // changed so the server's "empty update" guard is satisfied
+            // for no-op submits and `email`/`avatarUrl` clearing works as
+            // expected (empty input ⇒ explicit null).
+            const patch: {
+              displayName?: string;
+              email?: string | null;
+              avatarUrl?: string | null;
+            } = {};
+            if (displayName.trim() !== user.displayName) {
+              patch.displayName = displayName.trim();
+            }
+            const emailNext = email.trim() ? email.trim() : null;
+            if (emailNext !== (user.email ?? null)) patch.email = emailNext;
+            if (resolvedAvatar !== (user.avatarUrl ?? null)) {
+              patch.avatarUrl = resolvedAvatar;
+            }
+            if (Object.keys(patch).length === 0) {
+              onClose();
+              return;
+            }
+            updateUser.mutate({ id: user.id, data: patch });
+          })();
         }}
       >
         <Field label="Profile id">
@@ -372,6 +426,11 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
         <AvatarField
           value={avatarUrl}
           onChange={setAvatarUrl}
+          pendingFile={pendingAvatarFile}
+          onPendingFileChange={setPendingAvatarFile}
+          isUploading={isUploading}
+          uploadProgress={uploadProgress}
+          uploadError={uploadError}
           testIdPrefix="user-edit"
           clearableHint
         />
@@ -380,8 +439,14 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
         ) : null}
         <ModalActions
           onClose={onClose}
-          submitLabel={updateUser.isPending ? "Saving…" : "Save changes"}
-          submitDisabled={updateUser.isPending}
+          submitLabel={
+            isUploading
+              ? `Uploading… ${uploadProgress}%`
+              : updateUser.isPending
+                ? "Saving…"
+                : "Save changes"
+          }
+          submitDisabled={updateUser.isPending || isUploading}
         />
       </form>
     </ModalShell>
@@ -391,6 +456,11 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
 interface AvatarFieldProps {
   value: string;
   onChange: (next: string) => void;
+  pendingFile: File | null;
+  onPendingFileChange: (next: File | null) => void;
+  isUploading: boolean;
+  uploadProgress: number;
+  uploadError: Error | null;
   testIdPrefix: string;
   clearableHint?: boolean;
 }
@@ -398,12 +468,14 @@ interface AvatarFieldProps {
 /**
  * Avatar input — supports two flows in one control:
  *
- *  1. Upload a local image file (drag-pick via the hidden `<input type=file>`),
- *     which goes through the presigned-URL flow in `useUpload`. The returned
- *     canonical `objectPath` (e.g. `/objects/uploads/<uuid>`) is rewritten to
- *     the server's serving URL (`/api/storage<objectPath>`) and dropped into
- *     the same `value` the URL-paste path uses, so `users.avatar_url` is
- *     written exactly the same way the timeline already consumes it.
+ *  1. Upload a local image file (drag-pick via the hidden `<input type=file>`).
+ *     The picked `File` is staged in the parent modal's state and shown via a
+ *     local object URL preview; the actual presigned-URL upload is deferred
+ *     until the modal's Save handler runs. This way a failed PATCH/POST never
+ *     leaves a now-deleted serving URL persisted in form state — clicking Save
+ *     again uploads a fresh copy and re-references it (Task #114). On success
+ *     the modal rewrites the canonical `objectPath` to a serving URL of the
+ *     form `/api/storage<objectPath>`, matching the timeline consumer.
  *  2. Paste any URL — fallback for external avatars (Gravatar, etc).
  *
  * The preview thumbnail uses an `onError` reset so a broken URL collapses
@@ -412,21 +484,39 @@ interface AvatarFieldProps {
 function AvatarField({
   value,
   onChange,
+  pendingFile,
+  onPendingFileChange,
+  isUploading,
+  uploadProgress,
+  uploadError,
   testIdPrefix,
   clearableHint,
 }: AvatarFieldProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [previewBroken, setPreviewBroken] = useState(false);
-  const { uploadFile, isUploading, error, progress } = useUpload({
-    onSuccess: (response) => {
-      // Persist the serving URL (storage mount + objectPath), which is what
-      // <img src> can resolve from the browser. The raw `objectPath` alone
-      // would not — it is only the canonical key.
-      const servingUrl = `/api/storage${response.objectPath}`;
-      setPreviewBroken(false);
-      onChange(servingUrl);
-    },
-  });
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+
+  // Manage the object-URL lifecycle for the staged file so the preview
+  // updates immediately and we don't leak blob URLs across picks/unmounts.
+  useEffect(() => {
+    if (!pendingFile) {
+      setLocalPreviewUrl(null);
+      return;
+    }
+    if (typeof URL.createObjectURL !== "function") {
+      // Test/SSR environments without object URL support — skip the preview.
+      setLocalPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(pendingFile);
+    setLocalPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [pendingFile]);
+
+  const previewSrc = localPreviewUrl ?? (value && !previewBroken ? value : null);
+  const showBrokenIcon = !localPreviewUrl && !!value && previewBroken;
 
   return (
     <Field
@@ -438,12 +528,14 @@ function AvatarField({
       }
     >
       <div className="flex items-center gap-3">
-        {value && !previewBroken ? (
+        {previewSrc ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={value}
+            src={previewSrc}
             alt=""
-            onError={() => setPreviewBroken(true)}
+            onError={() => {
+              if (!localPreviewUrl) setPreviewBroken(true);
+            }}
             onLoad={() => setPreviewBroken(false)}
             className="w-10 h-10 rounded-full object-cover shrink-0 border border-[var(--border-default)]"
             data-testid={`${testIdPrefix}-avatar-preview`}
@@ -461,7 +553,7 @@ function AvatarField({
             }}
             aria-hidden
           >
-            {value && previewBroken ? "!" : "+"}
+            {showBrokenIcon ? "!" : "+"}
           </div>
         )}
         <button
@@ -471,8 +563,23 @@ function AvatarField({
           disabled={isUploading}
           data-testid={`${testIdPrefix}-avatar-upload`}
         >
-          {isUploading ? `Uploading… ${progress}%` : "Upload image"}
+          {isUploading
+            ? `Uploading… ${uploadProgress}%`
+            : pendingFile
+              ? "Replace image"
+              : "Upload image"}
         </button>
+        {pendingFile ? (
+          <button
+            type="button"
+            className="sc-pill sc-pill-muted cursor-pointer disabled:opacity-50"
+            onClick={() => onPendingFileChange(null)}
+            disabled={isUploading}
+            data-testid={`${testIdPrefix}-avatar-clear-pending`}
+          >
+            Discard
+          </button>
+        ) : null}
         <input
           ref={fileInputRef}
           type="file"
@@ -488,8 +595,11 @@ function AvatarField({
               setPreviewBroken(false);
               // Downscale + re-encode in the browser so we don't push a
               // multi-megabyte phone photo through the presigned upload
-              // for something rendered at 14–36px in timelines.
-              void resizeAvatar(file).then((resized) => uploadFile(resized));
+              // for something rendered at 14–36px in timelines. The
+              // resized File is staged in parent state until Save fires.
+              void resizeAvatar(file).then((resized) =>
+                onPendingFileChange(resized),
+              );
             }
           }}
         />
@@ -499,14 +609,24 @@ function AvatarField({
         value={value}
         onChange={(e) => {
           setPreviewBroken(false);
+          // Typing/pasting a URL supersedes any staged file pick.
+          if (pendingFile) onPendingFileChange(null);
           onChange(e.target.value);
         }}
         placeholder="https://… (or upload above)"
         data-testid={`${testIdPrefix}-avatar`}
       />
-      {error ? (
+      {pendingFile ? (
+        <span
+          className="sc-meta"
+          data-testid={`${testIdPrefix}-avatar-pending-note`}
+        >
+          New image staged — it will upload when you click save.
+        </span>
+      ) : null}
+      {uploadError ? (
         <span className="sc-body text-[var(--danger)]">
-          Upload failed: {error.message}
+          Upload failed: {uploadError.message}
         </span>
       ) : null}
     </Field>
