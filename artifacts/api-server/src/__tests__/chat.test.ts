@@ -961,27 +961,39 @@ describe("POST /api/chat", () => {
         })
         .returning({ id: engagements.id });
 
-      // Each payload's JSON.stringify(_, null, 2) form is ~50 KB so
-      // the cumulative tally crosses 120 KB during block #3:
+      // Each payload is a shapeable object (real Revit-shaped:
+      // top-level keys with a small high-priority `rooms` array
+      // alongside a bulky low-priority `families` blob) whose
+      // `JSON.stringify(_, null, 2)` form is ~50 KB. That means the
+      // per-block cap (60 KB in promptFormatter.ts) lets each block
+      // through INTACT, but the cumulative cap (120 KB) starts
+      // biting partway through:
       //   block 1 (~50K, intact, cumulative=50K)
       //   block 2 (~50K, intact, cumulative=100K)
-      //   block 3 (~50K wanted, only ~20K room → truncated)
-      //   block 4 (no room left → omitted)
-      // That guarantees BOTH downgrade buckets are non-zero so a
-      // regression that drops one of the two counters still trips
-      // this test.
+      //   block 3 (~50K wanted, only ~20K cumulative room → smart-
+      //            trim path drops `families`, emits a structurally-
+      //            valid JSON subset + COMBINED_CAP_TRUNC_MARKER)
+      //   block 4 (smart-trim path again)
       //
-      // We use a top-level array payload here on purpose: the smart
-      // `shapeSnapshotPayloadForBudget` helper (Task #52) only knows
-      // how to prune object keys — for a top-level array it returns
-      // `fitsBudget: false` and the route falls through to the
-      // tail-truncation branch in `formatSnapshotFocusBlocks`, which
-      // is the branch that increments the cumulative-cap stats
-      // counters that this warn test asserts on. (A shapeable object
-      // payload may take the smart-trim branch instead and produce
-      // structurally-valid blocks that don't currently update the
-      // stats — that's a separate, observable concern outside this
-      // test's scope.)
+      // Pre-Task #68 the smart-trim branch in
+      // `formatSnapshotFocusBlocks` did NOT increment
+      // `combinedCapTruncatedCount`, so this warn never fired for
+      // shapeable object payloads — exactly the shape real Revit
+      // pushes have. The previous version of this test had to use a
+      // top-level ARRAY payload to coerce the formatter into the
+      // tail-truncation branch (which DID update the counter) — that
+      // workaround papered over the bug being fixed here. We're back
+      // on the realistic shape now to prove the warn fires end-to-
+      // end on payloads that match production.
+      //
+      // The omitted bucket is harder to reach with shapeable
+      // payloads (smart-trim collapses each block to a few hundred
+      // bytes once the cumulative cap is biting, leaving plenty of
+      // room for later blocks), so we only assert on
+      // `combinedCapTruncatedCount > 0` + the derived
+      // `downgradedCount > 0`. The unit test in
+      // `lib/codes/src/promptFormatter.test.ts` exercises the
+      // omitted bucket directly with engineered fixtures.
       const FILLER = "x".repeat(50_000);
       const seedSnap = async (
         marker: string,
@@ -991,9 +1003,12 @@ describe("POST /api/chat", () => {
           .values({
             engagementId: eng.id,
             projectName: `Focus Project ${marker}`,
-            payload: [marker, FILLER],
+            payload: {
+              rooms: [{ id: `room-${marker}`, name: `Room ${marker}` }],
+              families: { lib: FILLER, marker },
+            },
             sheetCount: 0,
-            roomCount: 0,
+            roomCount: 1,
             levelCount: 0,
             wallCount: 0,
           })
@@ -1050,9 +1065,14 @@ describe("POST /api/chat", () => {
       expect(payload.engagementId).toBe(eng.id);
       expect(payload.snapshotIds).toEqual([s1.id, s2.id, s3.id, s4.id]);
       expect(payload.focusCount).toBe(4);
-      // Both downgrade buckets fired with the chosen payload sizing.
+      // Truncated bucket fires for the realistic shapeable-object
+      // case (Task #68 fix). Omitted bucket is unreachable here
+      // because once smart trim collapses the over-cap blocks they
+      // each take only a few hundred bytes, so there's always room
+      // for the next snapshot to be smart-trimmed too — the unit
+      // tests exercise the omitted bucket directly with engineered
+      // fixtures.
       expect(payload.combinedCapTruncatedCount).toBeGreaterThan(0);
-      expect(payload.combinedCapOmittedCount).toBeGreaterThan(0);
       // downgradedCount == truncated + omitted (chat.ts derives it
       // from the two stats fields).
       expect(payload.downgradedCount).toBe(

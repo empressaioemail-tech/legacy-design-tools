@@ -966,6 +966,15 @@ export function formatSnapshotFocusBlocks(
           header + shaped.json + COMBINED_CAP_TRUNC_MARKER + footer;
         blocks.push(block);
         cumulative += block.length;
+        // The block carries COMBINED_CAP_TRUNC_MARKER, meaning the
+        // cumulative cap forced a downgrade from the intact form —
+        // even though smart trim landed a structurally-valid JSON
+        // subset rather than a tail-cut. Count it the same as the
+        // tail-truncation branch so the chat route's
+        // `downgradedCount > 0` warn fires for the realistic
+        // shapeable-object case (real Revit pushes), not just for
+        // top-level arrays / primitives.
+        stats.combinedCapTruncatedCount += 1;
         continue;
       }
       const json = shaped.json;

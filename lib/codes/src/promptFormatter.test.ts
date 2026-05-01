@@ -1051,7 +1051,7 @@ describe("shapeSnapshotPayloadForBudget: smart trim (Task #52)", () => {
     // cap would have to fire; with smart trim each block shape-trims
     // to a few hundred bytes and the prompt stays compact.
     const families = { lib: bigString(MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS) };
-    const { blocks } = formatSnapshotFocusBlocks([
+    const { blocks, stats } = formatSnapshotFocusBlocks([
       { snapshotId: "ss-1", payload: { families, rooms: [{ id: "r1" }] } },
       { snapshotId: "ss-2", payload: { families, rooms: [{ id: "r2" }] } },
       { snapshotId: "ss-3", payload: { families, rooms: [{ id: "r3" }] } },
@@ -1075,6 +1075,90 @@ describe("shapeSnapshotPayloadForBudget: smart trim (Task #52)", () => {
     expect(blocks[1]).toContain('"r2"');
     expect(blocks[2]).toContain('"r3"');
     expect(blocks[3]).toContain('"r4"');
+    // Per-block cap collapsed each block to a few hundred bytes via
+    // `formatSnapshotFocus`, so the cumulative cap was never under
+    // pressure — every block fits intact in the cumulative pass and
+    // no cumulative-cap downgrade fires. (The companion test below
+    // covers the case where the cumulative cap DOES drive the smart
+    // trim and stats counters must increment.)
+    expect(stats.totalCount).toBe(4);
+    expect(stats.intactCount).toBe(4);
+    expect(stats.combinedCapTruncatedCount).toBe(0);
+    expect(stats.combinedCapOmittedCount).toBe(0);
+  });
+
+  it("formatSnapshotFocusBlocks counts the smart-trim cumulative-cap branch as a downgrade (so chat-route warn fires for real Revit pushes)", () => {
+    // Task #68: the cumulative-cap smart-trim branch (the one that
+    // emits a structurally-valid JSON subset + COMBINED_CAP_TRUNC_MARKER
+    // because the per-snapshot budget LEFT by the running cumulative
+    // tally is too small for the intact block) used to NOT increment
+    // `combinedCapTruncatedCount`. As a result the chat route's
+    // `downgradedCount > 0` warn ("snapshot focus payloads downgraded
+    // by cumulative cap") never fired for shapeable object payloads
+    // — exactly the shape real Revit pushes have. This test pins the
+    // counter so the regression cannot recur silently.
+    //
+    // Sizing rationale (per-block cap = 60K, cumulative cap = 120K):
+    //   Each payload is ~45K stringified — under the per-block cap
+    //   (so `formatSnapshotFocus` returns it intact) and shapeable
+    //   (top-level object, low-priority bulk in `families`, small
+    //   high-priority `rooms`).
+    //
+    //   Cumulative pass:
+    //     block 1: emitted intact, cumulative ~45K
+    //     block 2: emitted intact, cumulative ~90K
+    //     block 3: full block ~45K wouldn't fit (remaining ~30K) →
+    //              re-enter smart trim with reduced budget → drops
+    //              `families`, fits → COMBINED_CAP_TRUNC_MARKER
+    //              branch + counter increment
+    //     block 4: even less remaining → smart-trimmed too
+    const families = { lib: bigString(45_000) };
+    const { blocks, stats } = formatSnapshotFocusBlocks([
+      { snapshotId: "ss-1", payload: { families, rooms: [{ id: "r1" }] } },
+      { snapshotId: "ss-2", payload: { families, rooms: [{ id: "r2" }] } },
+      { snapshotId: "ss-3", payload: { families, rooms: [{ id: "r3" }] } },
+      { snapshotId: "ss-4", payload: { families, rooms: [{ id: "r4" }] } },
+    ]);
+    expect(blocks).toHaveLength(4);
+
+    // The first two blocks are intact: no cumulative-cap marker, the
+    // bulky `families.lib` filler is preserved verbatim.
+    for (const b of blocks.slice(0, 2)) {
+      expect(b).not.toContain(
+        "combined snapshot focus payloads exceeded the cumulative size cap",
+      );
+    }
+    expect(blocks[0]).toContain(bigString(45_000));
+
+    // Blocks 3 + 4 carry the cumulative-cap marker AND a structurally-
+    // valid JSON subset (the smart-trim path, not the tail-cut path).
+    for (const b of blocks.slice(2)) {
+      expect(b).toContain(
+        "combined snapshot focus payloads exceeded the cumulative size cap",
+      );
+      // Smart-trim emits valid JSON (no trailing "…" tail-cut
+      // sentinel) and the high-priority `rooms` data survives.
+      expect(b).not.toContain("…");
+    }
+    expect(blocks[2]).toContain('"r3"');
+    expect(blocks[3]).toContain('"r4"');
+
+    // Cumulative cap is respected.
+    const combined = blocks.reduce((sum, b) => sum + b.length, 0);
+    expect(combined).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
+    );
+
+    // The point of the task: stats counters MUST attribute the smart-
+    // trim downgrade to `combinedCapTruncatedCount` so chat-route
+    // alerting (`downgradedCount = combinedCapTruncatedCount +
+    // combinedCapOmittedCount`) fires for the realistic shapeable-
+    // object case (real Revit pushes), not just for top-level arrays
+    // / primitives that fall through to the tail-truncation branch.
+    expect(stats.totalCount).toBe(4);
+    expect(stats.intactCount).toBe(2);
+    expect(stats.combinedCapTruncatedCount).toBe(2);
+    expect(stats.combinedCapOmittedCount).toBe(0);
   });
 
   // --------------------------------------------------------------
