@@ -796,6 +796,81 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
     expect(payload).toMatch(/—/);
   });
 
+  // Task #337 — mirrors design-tools Task #303 B.3. Closes the
+  // last remaining parity gap on the prior-narrative block (B.4
+  // landed via Task #333, B.5 via Task #314). The meta line shape
+  // — "Generated [time] by [author]", with the
+  // `system:briefing-engine` actor rewritten to "Briefing engine
+  // (mock)", and each half rendered conditionally so legacy rows
+  // with only one half don't show "by null" or "at —" — must
+  // stay byte-identical with the design-tools side so a future
+  // shared-lib lift is a no-op. If either side diverges, this
+  // mirror test will fail and surface the drift before auditors
+  // see two surfaces telling different provenance stories.
+  it("renders the prior narrative's generatedAt and generatedBy in the meta line", async () => {
+    seedPriorRow({
+      priorSectionA: "Same body in both runs.",
+      currentSectionA: "Same body in both runs.",
+    });
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const meta = await screen.findByTestId(
+      "briefing-run-prior-narrative-meta-gen-prior",
+    );
+    // The "system:briefing-engine" actor is rewritten to a
+    // friendly label so the auditor sees "Briefing engine (mock)"
+    // rather than the raw system actor token.
+    expect(
+      within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-by-gen-prior",
+      ),
+    ).toHaveTextContent(/Briefing engine \(mock\)/);
+    expect(
+      within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-at-gen-prior",
+      ),
+    ).toHaveTextContent(/Generated/);
+  });
+
+  it("renders only the half of the meta line that's present (legacy backups)", async () => {
+    // Legacy backups can carry `generatedAt` but no `generatedBy`
+    // (or vice versa) because the actor column post-dates the
+    // section_* backups on some installs. The panel must render
+    // only the half that's set so we never show "by null". We
+    // can't drop `generatedAt` here too — the prior-row matcher
+    // relies on its [startedAt, completedAt] interval containing
+    // `priorNarrative.generatedAt`, so a null on that field would
+    // also tear down the prior-narrative block entirely (a
+    // separate concern than this branch is testing).
+    seedPriorRow({
+      priorSectionA: "Body present, actor missing.",
+      currentSectionA: "Body present, actor missing.",
+    });
+    hoisted.priorNarrative!.generatedBy = null;
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const meta = await screen.findByTestId(
+      "briefing-run-prior-narrative-meta-gen-prior",
+    );
+    expect(
+      within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-at-gen-prior",
+      ),
+    ).toBeInTheDocument();
+    // The "by …" half is gone — proves we never show "by null".
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-generated-by-gen-prior",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   // Task #338 — closes the loop on the Task #333 copy button by
   // surfacing a short-lived "Copied!" confirmation when the
   // clipboard write resolves. The two surfaces (Plan Review and

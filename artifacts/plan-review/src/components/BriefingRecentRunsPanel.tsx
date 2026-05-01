@@ -698,10 +698,14 @@ export function BriefingRecentRunsPanel({
                           // an auditor on Plan Review can drop the
                           // pre-regeneration snapshot into a Slack
                           // thread or ticket without hand-selecting
-                          // each A–G section. The B.3 meta line is
-                          // still intentionally skipped — that's a
-                          // separate concern outside the parity gap
-                          // this task closes.
+                          // each A–G section.
+                          // Task #337 — mirrors the design-tools Task
+                          // #303 B.3 "Generated [time] by [author]"
+                          // meta line so the auditor sees the
+                          // snapshot's provenance in-place rather
+                          // than having to read it off the producing
+                          // run row above. Closes the last remaining
+                          // parity gap on the prior-narrative block.
                           <div
                             data-testid={`briefing-run-prior-narrative-${run.generationId}`}
                             style={{
@@ -723,15 +727,74 @@ export function BriefingRecentRunsPanel({
                             >
                               <div
                                 style={{
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  color: "var(--text-default)",
-                                  textTransform: "uppercase",
-                                  letterSpacing: 0.3,
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 2,
+                                  minWidth: 0,
                                 }}
                               >
-                                Narrative on screen before this run was
-                                overwritten
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    color: "var(--text-default)",
+                                    textTransform: "uppercase",
+                                    letterSpacing: 0.3,
+                                  }}
+                                >
+                                  Narrative on screen before this run was
+                                  overwritten
+                                </div>
+                                {/* Task #337 — meta line. The wire
+                                    envelope's `priorNarrative.generatedAt`
+                                    and `generatedBy` may be null for
+                                    legacy rows where the backup column
+                                    pre-dates per-row provenance; render
+                                    only the half that's present so we
+                                    never show "by null" or "at —".
+                                    Mirrors the design-tools Task #303
+                                    B.3 block byte-for-byte (same
+                                    testids, same "Briefing engine
+                                    (mock)" rewrite for the system
+                                    actor) so a future shared-lib
+                                    lift is a no-op. */}
+                                {(priorNarrative.generatedAt ||
+                                  priorNarrative.generatedBy) && (
+                                  <div
+                                    data-testid={`briefing-run-prior-narrative-meta-${run.generationId}`}
+                                    style={{
+                                      fontSize: 11,
+                                      color: "var(--text-muted)",
+                                    }}
+                                  >
+                                    {priorNarrative.generatedAt && (
+                                      <span
+                                        data-testid={`briefing-run-prior-narrative-generated-at-${run.generationId}`}
+                                      >
+                                        Generated{" "}
+                                        {new Date(
+                                          priorNarrative.generatedAt as
+                                            | Date
+                                            | string,
+                                        ).toLocaleString()}
+                                      </span>
+                                    )}
+                                    {priorNarrative.generatedBy && (
+                                      <>
+                                        {priorNarrative.generatedAt ? " " : ""}
+                                        <span
+                                          data-testid={`briefing-run-prior-narrative-generated-by-${run.generationId}`}
+                                        >
+                                          by{" "}
+                                          {priorNarrative.generatedBy ===
+                                          "system:briefing-engine"
+                                            ? "Briefing engine (mock)"
+                                            : priorNarrative.generatedBy}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                               {/* Task #333 — "Copy plain text" button.
                                   Concatenates the seven A–G bodies as
