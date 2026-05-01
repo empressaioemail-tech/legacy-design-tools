@@ -94,6 +94,43 @@ const hoisted = vi.hoisted(() => {
     }>,
     runs: initialRuns,
     runsFetchCalls: 0,
+    // Task #314 — the runs envelope also carries the `prior_section_*`
+    // backup snapshot the briefing held before its current narrative
+    // was written. Default to `null` so existing tests keep their
+    // previous semantics (no prior block rendered); tests that
+    // exercise the inline diff replace this with a populated
+    // payload via `seedPriorRow` below.
+    priorNarrative: null as null | {
+      sectionA: string | null;
+      sectionB: string | null;
+      sectionC: string | null;
+      sectionD: string | null;
+      sectionE: string | null;
+      sectionF: string | null;
+      sectionG: string | null;
+      generatedAt: string | null;
+      generatedBy: string | null;
+    },
+    // Task #314 — the briefing payload the GET /briefing query mock
+    // returns. The diff renderer needs the *current* narrative to
+    // diff each prior section against. Default `null` keeps the
+    // existing "no narrative" shape so all of the prior tests
+    // continue to render the same way; the B.5 tests below
+    // populate it via `seedPriorRow`.
+    briefing: null as null | {
+      narrative: {
+        generationId: string | null;
+        sectionA: string | null;
+        sectionB: string | null;
+        sectionC: string | null;
+        sectionD: string | null;
+        sectionE: string | null;
+        sectionF: string | null;
+        sectionG: string | null;
+        generatedAt: string | null;
+        generatedBy: string | null;
+      } | null;
+    },
   };
 });
 
@@ -137,6 +174,41 @@ vi.mock("@workspace/api-client-react", async () => {
       "listEngagementBriefingGenerationRuns",
       id,
     ],
+    // Task #314 — the panel now also pulls the current narrative so
+    // the prior-narrative block can diff each A–G section against
+    // the live body on screen.
+    getGetEngagementBriefingQueryKey: (id: string) => [
+      "getEngagementBriefing",
+      id,
+    ],
+    useGetEngagementBriefing: (
+      id: string,
+      opts?: {
+        query?: {
+          queryKey?: readonly unknown[];
+          enabled?: boolean;
+          refetchOnWindowFocus?: boolean;
+        };
+      },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["getEngagementBriefing", id] as const),
+        queryFn: async () => ({
+          // Cloned so a test that mutates the hoisted briefing
+          // post-render doesn't accidentally mutate the cached
+          // payload react-query is holding.
+          briefing: hoisted.briefing
+            ? {
+                narrative: hoisted.briefing.narrative
+                  ? { ...hoisted.briefing.narrative }
+                  : null,
+              }
+            : null,
+        }),
+        enabled: opts?.query?.enabled ?? true,
+        refetchOnWindowFocus: opts?.query?.refetchOnWindowFocus ?? true,
+      }),
     useGetSession: () =>
       useQuery({
         queryKey: ["getSession"],
@@ -186,7 +258,17 @@ vi.mock("@workspace/api-client-react", async () => {
           // The route returns `runs` newest-first; the hoisted array
           // is treated as already in newest-first order so each
           // test can shift new rows onto the front.
-          return { runs: hoisted.runs.map((r) => ({ ...r })) };
+          // Task #314 — the same envelope also carries the
+          // `prior_section_*` backup snapshot the briefing held
+          // before its current narrative was written. Cloned so a
+          // test that mutates it post-render doesn't accidentally
+          // mutate the cached payload.
+          return {
+            runs: hoisted.runs.map((r) => ({ ...r })),
+            priorNarrative: hoisted.priorNarrative
+              ? { ...hoisted.priorNarrative }
+              : null,
+          };
         },
         enabled: opts?.query?.enabled ?? true,
         refetchOnWindowFocus: opts?.query?.refetchOnWindowFocus ?? true,
@@ -248,6 +330,11 @@ beforeEach(() => {
   hoisted.submissions = [];
   hoisted.runs = [];
   hoisted.runsFetchCalls = 0;
+  // Task #314 — default to "no current narrative" + "no prior backup"
+  // so existing tests keep rendering as they did before; the B.5
+  // tests below override these via `seedPriorRow`.
+  hoisted.briefing = null;
+  hoisted.priorNarrative = null;
   // Task #303 B.6 — the panel now mirrors its open/filter state
   // into `?recentRunsOpen=` / `?recentRunsFilter=`, so a test that
   // flips the disclosure leaves those params behind in the JSDOM
@@ -539,6 +626,154 @@ describe("BriefingRecentRunsPanel — URL helpers (Task #303 B.6)", () => {
     ).toHaveTextContent(/No runs match the Failed only filter/i);
     expect(
       screen.queryByTestId("briefing-recent-runs-list"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Prior-narrative inline diff — Task #314.
+ *
+ * Mirrors the design-tools `BriefingRecentRunsPanel` Task #303 B.5
+ * cases onto the Plan Review surface so an auditor who lands in
+ * Plan Review sees the same per-A–G-section comparison the
+ * architect-facing surface renders. Both surfaces share the
+ * `@workspace/briefing-diff` helper this task lifted out of the
+ * design-tools page; if either side stops rendering the diff (or
+ * the unchanged pill) the matching mirror test will fail and
+ * surface the divergence before the surfaces drift apart.
+ *
+ * Tests below pin:
+ *   1. When prior + current bodies differ for a given section, the
+ *      diff span renders with a `removed` annotation for the
+ *      dropped token (and the inserted token reads in the same
+ *      span).
+ *   2. When a section is byte-identical between the prior and
+ *      current narratives, the diff span is suppressed in favour
+ *      of an `(unchanged)` pill — the unchanged-detection is
+ *      per-section, not a global flag.
+ */
+describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
+  // Helper that pre-stages a "current ran at 10:00:05, prior ran
+  // at 10:00:02" pair of runs plus a populated `priorNarrative` so
+  // the panel resolves `priorGenerationId` via interval matching
+  // and mounts the prior-narrative block on the prior row's
+  // expanded details. Mirrors the design-tools `seedPriorRow`.
+  function seedPriorRow(opts: {
+    priorSectionA?: string | null;
+    priorSectionG?: string | null;
+    currentSectionA?: string | null;
+    currentSectionG?: string | null;
+  }) {
+    hoisted.briefing = {
+      narrative: {
+        // The real wire envelope from useGetEngagementBriefing
+        // carries the section_* columns alongside generationId; this
+        // fixture mirrors that so the diff renderer has both sides
+        // of each A–G section to compare.
+        generationId: "gen-current",
+        sectionA: opts.currentSectionA ?? null,
+        sectionB: null,
+        sectionC: null,
+        sectionD: null,
+        sectionE: null,
+        sectionF: null,
+        sectionG: opts.currentSectionG ?? null,
+        generatedAt: "2026-04-03T10:00:05.000Z",
+        generatedBy: "system:briefing-engine",
+      },
+    };
+    hoisted.priorNarrative = {
+      sectionA: opts.priorSectionA ?? null,
+      sectionB: null,
+      sectionC: null,
+      sectionD: null,
+      sectionE: null,
+      sectionF: null,
+      sectionG: opts.priorSectionG ?? null,
+      // The prior backup's `generatedAt` lands inside the
+      // [startedAt, completedAt] interval of the `gen-prior` run
+      // below so the panel resolves that row as the Prior row.
+      generatedAt: "2026-04-02T10:00:02.000Z",
+      generatedBy: "system:briefing-engine",
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-current",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:05.000Z",
+        invalidCitationCount: 0,
+      }),
+      makeRun({
+        generationId: "gen-prior",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+    ];
+  }
+
+  it("renders an inline word diff when prior and current sections differ", async () => {
+    seedPriorRow({
+      priorSectionA: "The buildable area is 4500 square feet.",
+      currentSectionA: "The buildable area is 5200 square feet.",
+    });
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const diff = await screen.findByTestId(
+      "briefing-run-prior-section-diff-a-gen-prior",
+    );
+    // The dropped "4500" token survives in the prior body wrapped
+    // in a strike-through span; the inserted "5200" token shows
+    // up in the same diff span. Together they tell the auditor
+    // exactly what the regeneration changed — the same
+    // word-by-word story the architect-facing surface tells via
+    // the shared `@workspace/briefing-diff` helper.
+    expect(diff).toHaveTextContent(/4500/);
+    expect(diff).toHaveTextContent(/5200/);
+    expect(
+      within(diff).getByTestId(
+        "briefing-run-prior-section-diff-removed-a-gen-prior",
+      ),
+    ).toHaveTextContent("4500");
+  });
+
+  it("surfaces an (unchanged) pill when a section is byte-identical", async () => {
+    seedPriorRow({
+      priorSectionA: "Identical body.",
+      currentSectionA: "Identical body.",
+      priorSectionG: "Different prior G.",
+      currentSectionG: "Different current G.",
+    });
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    // Section A has the unchanged pill (and no diff span) — the
+    // auditor isn't asked to re-read identical paragraphs.
+    expect(
+      await screen.findByTestId(
+        "briefing-run-prior-section-unchanged-a-gen-prior",
+      ),
+    ).toHaveTextContent(/unchanged/i);
+    expect(
+      screen.queryByTestId("briefing-run-prior-section-diff-a-gen-prior"),
+    ).not.toBeInTheDocument();
+    // …while section G keeps the diff span (and no unchanged
+    // pill). Proves the unchanged-detection is per-section, not a
+    // global flag.
+    expect(
+      screen.getByTestId("briefing-run-prior-section-diff-g-gen-prior"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-section-unchanged-g-gen-prior",
+      ),
     ).not.toBeInTheDocument();
   });
 });

@@ -166,7 +166,39 @@ vi.mock("@workspace/api-client-react", async () => {
         queryKey:
           opts?.query?.queryKey ??
           (["listEngagementBriefingGenerationRuns", id] as const),
-        queryFn: async () => ({ runs: [] }),
+        // Task #314 — the panel now also reads `priorNarrative` off
+        // the same envelope; default the field to `null` so the
+        // submission-banner tests render the same "no prior body"
+        // shape they did before this task added the prior-diff
+        // block.
+        queryFn: async () => ({ runs: [], priorNarrative: null }),
+        enabled: opts?.query?.enabled ?? true,
+        refetchOnWindowFocus: opts?.query?.refetchOnWindowFocus ?? true,
+      }),
+    // Task #314 — BriefingRecentRunsPanel pulls the current narrative
+    // so its prior-narrative block can diff each A–G section against
+    // the live body on screen. The submission-banner tests never
+    // open the disclosure, so a default "no briefing" payload is
+    // enough; gating on `enabled` lets the panel honour its lazy
+    // fetch contract.
+    getGetEngagementBriefingQueryKey: (id: string) => [
+      "getEngagementBriefing",
+      id,
+    ],
+    useGetEngagementBriefing: (
+      id: string,
+      opts?: {
+        query?: {
+          queryKey?: readonly unknown[];
+          enabled?: boolean;
+          refetchOnWindowFocus?: boolean;
+        };
+      },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["getEngagementBriefing", id] as const),
+        queryFn: async () => ({ briefing: null }),
         enabled: opts?.query?.enabled ?? true,
         refetchOnWindowFocus: opts?.query?.refetchOnWindowFocus ?? true,
       }),

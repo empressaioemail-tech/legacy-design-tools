@@ -37,6 +37,9 @@
       "path": "./lib/briefing-engine"
     },
     {
+      "path": "./lib/briefing-diff"
+    },
+    {
       "path": "./lib/integrations-anthropic-ai"
     },
     {

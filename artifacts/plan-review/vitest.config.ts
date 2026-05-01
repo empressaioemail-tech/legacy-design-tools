@@ -38,6 +38,7 @@ export default defineConfig({
         inline: [
           "@workspace/portal-ui",
           "@workspace/api-client-react",
+          "@workspace/briefing-diff",
           "@workspace/object-storage-web",
         ],
       },

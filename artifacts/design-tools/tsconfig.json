@@ -19,6 +19,9 @@
       "path": "../../lib/api-client-react"
     },
     {
+      "path": "../../lib/briefing-diff"
+    },
+    {
       "path": "../../lib/portal-ui"
     },
     {
