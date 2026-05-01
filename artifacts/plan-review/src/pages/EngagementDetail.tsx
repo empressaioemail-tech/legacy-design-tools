@@ -7,7 +7,7 @@ import {
   getListEngagementSubmissionsQueryKey,
   type EngagementSubmissionSummary,
 } from "@workspace/api-client-react";
-import { navGroups } from "../components/NavGroups";
+import { useNavGroups } from "../components/NavGroups";
 import { relativeTime } from "../lib/relativeTime";
 
 /**
@@ -35,6 +35,7 @@ import { relativeTime } from "../lib/relativeTime";
 export default function EngagementDetail() {
   const params = useParams();
   const id = params.id as string;
+  const navGroups = useNavGroups();
 
   const { data: engagement, isLoading: engagementLoading } = useGetEngagement(
     id,
