@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link } from "wouter";
 import { DashboardLayout } from "@workspace/portal-ui";
 import {
@@ -9,6 +10,7 @@ import {
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
+import { SubmitToJurisdictionDialog } from "../components/SubmitToJurisdictionDialog";
 import { relativeTime } from "../lib/relativeTime";
 
 /**
@@ -96,16 +98,21 @@ function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
  * The submission row layout mirrors the `SubmissionsTab` in
  * `design-tools/src/pages/EngagementDetail.tsx` (jurisdiction label,
  * relative-time with a tooltip of the absolute timestamp, optional
- * pre-wrapped note) so the two surfaces stay visually consistent. We
- * deliberately do NOT host the "Submit to jurisdiction" action here
- * — that flow lives in the design-tools workflow and Task #75's
- * acceptance only required read-side parity inside plan-review.
+ * pre-wrapped note) so the two surfaces stay visually consistent.
+ *
+ * Task #88 added a parallel "Submit to jurisdiction" action next to
+ * the Past Submissions list so reviewers can record a new package
+ * without bouncing to design-tools. The dialog is mirrored from the
+ * design-tools copy (artifacts never import each other) and reuses
+ * the generated `useCreateEngagementSubmission` hook; on success it
+ * invalidates `getListEngagementSubmissionsQueryKey(id)` so the new
+ * row appears immediately.
  */
 export default function EngagementDetail() {
   const navGroups = useNavGroups();
   const params = useParams();
   const id = params.id as string;
-  const navGroups = useNavGroups();
+  const [submitOpen, setSubmitOpen] = useState(false);
 
   const { data: engagement, isLoading: engagementLoading } = useGetEngagement(
     id,
@@ -122,6 +129,12 @@ export default function EngagementDetail() {
     engagement?.jurisdiction,
     engagement?.site?.address ?? engagement?.address ?? null,
   ].filter((s): s is string => !!s);
+
+  // The submit affordance only makes sense once the engagement
+  // record has loaded — we need its name (and jurisdiction, when
+  // present) to title the confirmation dialog. Disable instead of
+  // hide so the button keeps its place in the layout while loading.
+  const canSubmit = !!engagement && !!id;
 
   return (
     <DashboardLayout
@@ -151,13 +164,35 @@ export default function EngagementDetail() {
           )}
         </div>
 
-        <SubmissionsList engagementId={id} />
+        <SubmissionsList
+          engagementId={id}
+          onSubmit={() => setSubmitOpen(true)}
+          canSubmit={canSubmit}
+        />
       </div>
+
+      {engagement && (
+        <SubmitToJurisdictionDialog
+          engagementId={engagement.id}
+          engagementName={engagement.name}
+          jurisdiction={engagement.jurisdiction ?? null}
+          isOpen={submitOpen}
+          onClose={() => setSubmitOpen(false)}
+        />
+      )}
     </DashboardLayout>
   );
 }
 
-function SubmissionsList({ engagementId }: { engagementId: string }) {
+function SubmissionsList({
+  engagementId,
+  onSubmit,
+  canSubmit,
+}: {
+  engagementId: string;
+  onSubmit: () => void;
+  canSubmit: boolean;
+}) {
   const { data: submissions, isLoading } = useListEngagementSubmissions(
     engagementId,
     {
@@ -184,20 +219,44 @@ function SubmissionsList({ engagementId }: { engagementId: string }) {
       <div
         className="sc-card p-6 text-center"
         data-testid="submissions-empty"
+        style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}
       >
         <div className="sc-prose opacity-70" style={{ maxWidth: 480 }}>
           No submissions recorded for this engagement yet. Once a
           package is submitted to a jurisdiction, it will appear here.
         </div>
+        <button
+          type="button"
+          className="sc-btn-primary"
+          onClick={onSubmit}
+          disabled={!canSubmit}
+          data-testid="submit-jurisdiction-trigger"
+        >
+          Submit to jurisdiction
+        </button>
       </div>
     );
   }
 
   return (
     <div className="sc-card flex flex-col" data-testid="submissions-list">
-      <div className="sc-card-header sc-row-sb">
+      <div
+        className="sc-card-header sc-row-sb"
+        style={{ display: "flex", alignItems: "center", gap: 12 }}
+      >
         <span className="sc-label">PAST SUBMISSIONS</span>
-        <span className="sc-meta">{submissions.length} total</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span className="sc-meta">{submissions.length} total</span>
+          <button
+            type="button"
+            className="sc-btn-primary"
+            onClick={onSubmit}
+            disabled={!canSubmit}
+            data-testid="submit-jurisdiction-trigger"
+          >
+            Submit to jurisdiction
+          </button>
+        </div>
       </div>
       <div className="flex flex-col">
         {submissions.map((s: EngagementSubmissionSummary) => (
