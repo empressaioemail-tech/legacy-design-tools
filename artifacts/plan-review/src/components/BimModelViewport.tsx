@@ -72,6 +72,19 @@ import {
  *     re-renders (e.g. a non-selected GLB finishing loading) so
  *     reviewers' manual pan/zoom isn't undone out from under
  *     them — see Task #380.
+ *   - `data-camera-live-target` — `"<x>,<y>,<z>"` of the live
+ *     OrbitControls target, written from the rAF render loop so
+ *     it tracks every pan/zoom/reset gesture (in contrast to
+ *     `data-camera-target`, which only reflects the auto-fit
+ *     center derived from React state). The values are
+ *     formatted to 2 decimals so an end-to-end spec can detect
+ *     "the camera moved off the auto-fit center" without
+ *     reading three.js internals from the page. Only populated
+ *     when WebGL is live and the controls' target exposes
+ *     numeric x/y/z (i.e. the real OrbitControls — under the
+ *     unit-test stub the attribute is absent). Added in
+ *     Task #401 to give the BIM-viewer pan/zoom + Reset view
+ *     e2e spec a stable, deterministic read-side proof.
  *
  * Reviewer interaction model (Task #380):
  *   - Wheel scroll zooms around the cursor (`zoomToCursor`).
@@ -463,6 +476,12 @@ export function BimModelViewport({
   // scene shows, and effects further down apply that state to
   // the scene (selection, camera fit, mesh add/remove).
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Separate ref for the outer viewport wrapper. The rAF render
+  // loop writes `data-camera-live-target` here (Task #401) so the
+  // attribute lives on the same element as `data-camera-target` /
+  // `data-camera-fit-applied-count` — anything else would be a
+  // surprise for callers walking the viewport's data attributes.
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -731,6 +750,32 @@ export function BimModelViewport({
       animationFrameRef.current = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
+      // Live test diagnostic (Task #401) — mirror the current
+      // OrbitControls target into a data attribute so e2e specs
+      // can detect that wheel-zoom / drag-pan / Reset view moved
+      // the camera off the auto-fit center. Defensive against the
+      // unit-test OrbitControls stub, whose `target` is a plain
+      // `{ set }` object with no x/y/z; in that environment the
+      // attribute is simply never set, which is what the unit
+      // tests expect.
+      const t = controls.target as { x?: unknown; y?: unknown; z?: unknown };
+      const viewportEl = viewportRef.current;
+      if (
+        viewportEl &&
+        typeof t.x === "number" &&
+        typeof t.y === "number" &&
+        typeof t.z === "number" &&
+        Number.isFinite(t.x) &&
+        Number.isFinite(t.y) &&
+        Number.isFinite(t.z)
+      ) {
+        const next = `${t.x.toFixed(2)},${t.y.toFixed(2)},${t.z.toFixed(2)}`;
+        // Avoid no-op writes so MutationObservers (and Playwright
+        // attribute waits) only fire when the value actually moved.
+        if (viewportEl.dataset.cameraLiveTarget !== next) {
+          viewportEl.dataset.cameraLiveTarget = next;
+        }
+      }
     };
     animate();
 
@@ -1073,6 +1118,7 @@ export function BimModelViewport({
 
   return (
     <div
+      ref={viewportRef}
       data-testid="bim-model-viewport"
       data-renderable-element-count={renderable.length}
       data-selected-element-id={selectedElementId}
