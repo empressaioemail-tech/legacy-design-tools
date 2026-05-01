@@ -22,6 +22,10 @@
  *      what they're about to do.
  *   5. The Save button is disabled when the trimmed draft equals the
  *      currently-persisted value (idle / no-op state).
+ *   6. The live PDF-header preview (Task #365) renders the seeded
+ *      value, updates as the architect types, and falls back to the
+ *      platform default — in a muted/italic style — when the input
+ *      is empty or whitespace-only.
  */
 import {
   describe,
@@ -348,5 +352,112 @@ describe("Settings — happy paths", () => {
       "settings-architect-pdf-header-save",
     ) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
+  });
+});
+
+describe("Settings — live PDF header preview (Task #365)", () => {
+  it("renders the platform default in a muted/italic style when the seeded value is empty", async () => {
+    // No override on the user — preview must show the fallback in
+    // its muted contract so the architect can see what an export
+    // would print today.
+    renderPage();
+
+    const preview = (await screen.findByTestId(
+      "settings-architect-pdf-header-preview",
+    )) as HTMLElement;
+
+    expect(preview.textContent).toBe(
+      "SmartCity Design Tools — Pre-Design Briefing",
+    );
+    expect(preview.getAttribute("data-preview-fallback")).toBe("true");
+    // Muted-style contract: italic + lighter colour than the live
+    // value. Inline styles are the source of truth for the preview's
+    // typography (mirrors the renderer's CSS literals), so we read
+    // them directly off the DOM rather than asserting on class names.
+    expect(preview.style.fontStyle).toBe("italic");
+    expect(preview.style.color).toBe("#888");
+  });
+
+  it("renders the seeded override verbatim and drops the muted styling", async () => {
+    hoisted.user = {
+      ...hoisted.user!,
+      architectPdfHeader: "Studio Foo — Pre-Design Briefing",
+    };
+    renderPage();
+
+    const preview = (await screen.findByTestId(
+      "settings-architect-pdf-header-preview",
+    )) as HTMLElement;
+
+    await waitFor(() =>
+      expect(preview.textContent).toBe("Studio Foo — Pre-Design Briefing"),
+    );
+    expect(preview.getAttribute("data-preview-fallback")).toBe("false");
+    expect(preview.style.fontStyle).toBe("normal");
+    // Live value uses the same #555 the PDF renderer's @top-left
+    // margin box does — the contract this test pins is "preview
+    // typography stays in lockstep with the rendered header".
+    expect(preview.style.color).toBe("#555");
+    expect(preview.style.fontSize).toBe("9pt");
+    expect(preview.style.fontFamily).toContain("system-ui");
+  });
+
+  it("updates live as the architect types and snaps back to the fallback when the input is cleared", async () => {
+    renderPage();
+
+    const input = (await screen.findByTestId(
+      "settings-architect-pdf-header-input",
+    )) as HTMLInputElement;
+    const preview = screen.getByTestId(
+      "settings-architect-pdf-header-preview",
+    ) as HTMLElement;
+
+    // Starts on the fallback (no override).
+    await waitFor(() =>
+      expect(preview.getAttribute("data-preview-fallback")).toBe("true"),
+    );
+
+    fireEvent.change(input, { target: { value: "Studio Bar" } });
+    await waitFor(() => expect(preview.textContent).toBe("Studio Bar"));
+    expect(preview.getAttribute("data-preview-fallback")).toBe("false");
+
+    // Clearing the input snaps back to the muted fallback in real
+    // time — no Save round-trip required.
+    fireEvent.change(input, { target: { value: "" } });
+    await waitFor(() =>
+      expect(preview.textContent).toBe(
+        "SmartCity Design Tools — Pre-Design Briefing",
+      ),
+    );
+    expect(preview.getAttribute("data-preview-fallback")).toBe("true");
+  });
+
+  it("treats whitespace-only input as the fallback, matching the server's trim semantics", async () => {
+    // Mirrors the server-side `header && header.trim().length > 0`
+    // check in `briefingHtml.ts` — a whitespace-only override
+    // resolves to the default at render time, so the preview must
+    // resolve the same way to avoid teaching the wrong contract.
+    hoisted.user = {
+      ...hoisted.user!,
+      architectPdfHeader: "Studio Foo",
+    };
+    renderPage();
+
+    const input = (await screen.findByTestId(
+      "settings-architect-pdf-header-input",
+    )) as HTMLInputElement;
+    const preview = screen.getByTestId(
+      "settings-architect-pdf-header-preview",
+    ) as HTMLElement;
+
+    await waitFor(() => expect(preview.textContent).toBe("Studio Foo"));
+
+    fireEvent.change(input, { target: { value: "   " } });
+    await waitFor(() =>
+      expect(preview.textContent).toBe(
+        "SmartCity Design Tools — Pre-Design Briefing",
+      ),
+    );
+    expect(preview.getAttribute("data-preview-fallback")).toBe("true");
   });
 });

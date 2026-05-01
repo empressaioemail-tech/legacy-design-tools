@@ -23,7 +23,29 @@ import {
  * The form intentionally has a single Save button — submitting an
  * empty / whitespace-only value clears the override server-side, so
  * the architect never has to think about a separate "reset" action.
+ *
+ * Task #365 — A live mini-preview underneath the input mirrors the
+ * PDF header's typography (font stack, size, colour) and the
+ * left-aligned `@top-left` positioning the renderer uses, so the
+ * architect can iterate on wording (truncation, ampersands, em-dashes)
+ * without round-tripping through a real export. When the input is
+ * empty / whitespace-only, the preview shows the platform default in
+ * a muted style so the fallback contract is visible at a glance.
  */
+
+/**
+ * Mirrors `DEFAULT_BRIEFING_PDF_HEADER` in
+ * `artifacts/api-server/src/lib/briefingHtml.ts` — the renderer's
+ * source of truth for the empty-override fallback. Inlined here
+ * because the design-tools artifact can't import from api-server, and
+ * this string is small enough that the duplicate-with-pointer is
+ * cheaper than spinning up a shared lib for a single constant. If the
+ * default ever changes, update both locations together — the
+ * Settings unit test pins the preview text so the duplicate can't
+ * silently drift.
+ */
+const DEFAULT_BRIEFING_PDF_HEADER =
+  "SmartCity Design Tools — Pre-Design Briefing";
 export function Settings() {
   const { data: session, isLoading: sessionLoading } = useGetSession({
     query: { queryKey: getGetSessionQueryKey() },
@@ -118,6 +140,18 @@ export function Settings() {
   const isDirty = trimmedDraft !== currentValue;
   const willClear = trimmedDraft.length === 0;
 
+  // Live-preview text mirrors what the PDF route would actually print
+  // for this draft today: a non-empty trimmed value renders verbatim,
+  // an empty / whitespace-only input falls back to the platform
+  // default (matching the server's `header ?? DEFAULT_…` resolution
+  // in `briefingHtml.ts`). The fallback flag drives the muted /
+  // italic styling so the architect can see at a glance which
+  // contract is in effect.
+  const isPreviewFallback = trimmedDraft.length === 0;
+  const previewText = isPreviewFallback
+    ? DEFAULT_BRIEFING_PDF_HEADER
+    : trimmedDraft;
+
   return (
     <div className="p-6 max-w-2xl mx-auto">
       <h1 className="text-2xl mb-6">Settings</h1>
@@ -160,19 +194,73 @@ export function Settings() {
             </div>
           </div>
         ) : (
-          <input
-            type="text"
-            className="sc-input"
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setSavedNote(null);
-            }}
-            placeholder="SmartCity Design Tools — Pre-Design Briefing"
-            data-testid="settings-architect-pdf-header-input"
-            maxLength={200}
-            aria-label="Stakeholder briefing PDF header"
-          />
+          <>
+            <input
+              type="text"
+              className="sc-input"
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setSavedNote(null);
+              }}
+              placeholder="SmartCity Design Tools — Pre-Design Briefing"
+              data-testid="settings-architect-pdf-header-input"
+              maxLength={200}
+              aria-label="Stakeholder briefing PDF header"
+            />
+
+            {/*
+              Live mini-preview of the PDF header. Inline styles
+              intentionally — the PDF renderer prints its header from
+              CSS literal tokens (font-family / font-size / color in
+              `briefingHtml.ts`'s `@page @top-left` margin box) rather
+              than from any shared design-token, so mirroring those
+              same literals here is the most direct way to keep the
+              two surfaces visually in sync. Wrapped in a card-like
+              frame with a dotted bottom rule so it reads as "the top
+              edge of a printed page" rather than just another text
+              line on the form.
+            */}
+            <div className="mt-1">
+              <div className="sc-meta mb-1">Live preview</div>
+              <div
+                aria-label="PDF header live preview"
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #ddd",
+                  borderRadius: 3,
+                  padding: "10px 14px 8px",
+                }}
+              >
+                <div
+                  data-testid="settings-architect-pdf-header-preview"
+                  data-preview-fallback={
+                    isPreviewFallback ? "true" : "false"
+                  }
+                  style={{
+                    fontFamily:
+                      '-apple-system, system-ui, "Helvetica Neue", Arial, sans-serif',
+                    fontSize: "9pt",
+                    fontWeight: 400,
+                    color: isPreviewFallback ? "#888" : "#555",
+                    fontStyle: isPreviewFallback ? "italic" : "normal",
+                    borderBottom: "1px dotted #ccc",
+                    paddingBottom: 6,
+                    lineHeight: 1.3,
+                    // Long headers truncate the same way they do in
+                    // the printed margin box (single line, clipped at
+                    // the right edge), so the architect sees how
+                    // their wording will actually fit before exporting.
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {previewText}
+                </div>
+              </div>
+            </div>
+          </>
         )}
 
         <div className="flex items-center gap-3">
