@@ -478,6 +478,11 @@ new status. Calling this route a second time on the same
 submission is allowed and overwrites the prior response (the
 event chain on the submission preserves the full history).
 
+`respondedAt` must not be later than the server clock at
+request time. Future-dated values are rejected with a 400 so
+a non-browser caller cannot backfill a reply into the future
+and silently corrupt the engagement timeline.
+
  * @summary Record the jurisdiction's response on a submission
  */
 export const RecordSubmissionResponseParams = zod.object({
@@ -503,7 +508,7 @@ export const RecordSubmissionResponseBody = zod
       .date()
       .optional()
       .describe(
-        "Optional explicit response timestamp. Defaults to the\nserver clock when omitted; supply when backfilling a\nhistorical jurisdiction reply.\n",
+        "Optional explicit response timestamp. Defaults to the\nserver clock when omitted; supply when backfilling a\nhistorical jurisdiction reply. Must not be later than the\nserver clock at request time — future-dated values are\nrejected with a 400 (the in-browser dialog mirrors this).\n",
       ),
   })
   .describe(

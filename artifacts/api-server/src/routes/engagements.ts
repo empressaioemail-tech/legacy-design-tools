@@ -743,7 +743,23 @@ router.post(
       // `respondedAt` is the canonical reply timestamp. Zod has already
       // coerced any provided value to a `Date` (orval `useDates: true`);
       // when omitted we stamp the server clock.
-      const respondedAt = bodyParse.data.respondedAt ?? new Date();
+      //
+      // Reject explicit values dated after the server clock so a non-
+      // browser caller (curl, scripts, future integrations) cannot
+      // backfill a reply into the future and silently corrupt the
+      // engagement timeline / audit trail. Mirrors the in-browser guard
+      // shipped in Task #104 so the rule holds regardless of client.
+      // The omitted-value branch is unaffected — the server stamp is
+      // by definition not in the future.
+      const now = new Date();
+      const providedRespondedAt = bodyParse.data.respondedAt;
+      if (providedRespondedAt && providedRespondedAt.getTime() > now.getTime()) {
+        res.status(400).json({
+          error: "respondedAt cannot be in the future",
+        });
+        return;
+      }
+      const respondedAt = providedRespondedAt ?? now;
       const status = bodyParse.data.status;
 
       const [updated] = await db

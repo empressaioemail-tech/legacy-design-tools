@@ -757,6 +757,42 @@ describe("POST /api/engagements/:id/submissions/:submissionId/response — submi
     expect(res.status).toBe(400);
   });
 
+  it("rejects a future-dated respondedAt with a 400 (server-side mirror of the in-browser guard)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const eng = await seedEngagement();
+    const sub = await seedSubmissionFor(eng.id);
+
+    // One day in the future relative to the server clock — well outside
+    // any plausible client/server clock skew, so the rejection is
+    // unambiguous.
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({
+        status: "approved",
+        reviewerComment: "Backfill from the future",
+        respondedAt: future,
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/future/i);
+
+    // The row must remain in its pre-call state — pending / no
+    // comment / no respondedAt — proving the rejection happened
+    // before the UPDATE ran.
+    const after = await ctx.schema.db
+      .select()
+      .from(submissions)
+      .where(eq(submissions.id, sub.id))
+      .limit(1);
+    expect(after[0]!.status).toBe("pending");
+    expect(after[0]!.reviewerComment).toBeNull();
+    expect(after[0]!.respondedAt).toBeNull();
+
+    // And no submission-scoped event was appended for the rejected call.
+    const events = await readSubmissionEvents(sub.id);
+    expect(events).toHaveLength(0);
+  });
+
   it("allows overwriting the response (each call appends a new event)", async () => {
     const eng = await seedEngagement();
     const sub = await seedSubmissionFor(eng.id);

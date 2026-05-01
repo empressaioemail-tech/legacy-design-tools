@@ -32,7 +32,9 @@ values are coerced to null on the stored row and event.
   reviewerComment?: string;
   /** Optional explicit response timestamp. Defaults to the
 server clock when omitted; supply when backfilling a
-historical jurisdiction reply.
+historical jurisdiction reply. Must not be later than the
+server clock at request time — future-dated values are
+rejected with a 400 (the in-browser dialog mirrors this).
  */
   respondedAt?: Date;
 }
