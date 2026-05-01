@@ -599,6 +599,69 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     ).not.toBeInTheDocument();
   });
 
+  it("stamps a per-tier count next to each filter pill so the architect can prioritise which slice to open (Task #195)", () => {
+    // Mixed history: 2 adapter prior rows + 1 manual prior row, plus
+    // the current row (which the panel filters out and which must
+    // therefore not be reflected in any of the three counts).
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const priorAdapter1 = mkSource({
+      id: "src-prior-adapter-1",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+    });
+    const priorAdapter2 = mkSource({
+      id: "src-prior-adapter-2",
+      layerKind: "fema-flood",
+      sourceKind: "state-adapter",
+      provider: "ut:fema-flood",
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    });
+    const priorManual = mkSource({
+      id: "src-prior-manual",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [
+      current,
+      priorAdapter1,
+      priorAdapter2,
+      priorManual,
+    ];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-filter-all-count-${current.id}`,
+      ).textContent,
+    ).toBe("(3)");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-filter-adapter-count-${current.id}`,
+      ).textContent,
+    ).toBe("(2)");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-filter-manual-count-${current.id}`,
+      ).textContent,
+    ).toBe("(1)");
+  });
+
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {
     const current = mkSource({
       id: "src-only",

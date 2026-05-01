@@ -1047,6 +1047,22 @@ export function BriefingSourceHistoryPanel({
     return allPriorVersions.filter((s) => s.sourceKind === "manual-upload");
   }, [allPriorVersions, tierFilter]);
 
+  // Per-tier counts surfaced inside each filter pill so an architect
+  // can see at a glance how many adapter runs vs. manual overrides
+  // are waiting under each tab without flipping through them. Derived
+  // from the same client-side `allPriorVersions` list the filter
+  // already uses, so the counts stay in sync if the underlying
+  // history list invalidates (e.g. after a restore mutation).
+  const tierCounts = useMemo(() => {
+    let adapter = 0;
+    let manual = 0;
+    for (const s of allPriorVersions) {
+      if (isAdapterSourceKind(s.sourceKind)) adapter += 1;
+      else if (s.sourceKind === "manual-upload") manual += 1;
+    }
+    return { all: allPriorVersions.length, adapter, manual };
+  }, [allPriorVersions]);
+
   const emptyMessage =
     tierFilter === "adapter"
       ? "No prior Generate Layers runs of this layer."
@@ -1089,6 +1105,7 @@ export function BriefingSourceHistoryPanel({
             ] as const
           ).map((opt) => {
             const active = tierFilter === opt.value;
+            const count = tierCounts[opt.value];
             return (
               <button
                 key={opt.value}
@@ -1111,7 +1128,13 @@ export function BriefingSourceHistoryPanel({
                   fontSize: 11,
                 }}
               >
-                {opt.label}
+                {opt.label}{" "}
+                <span
+                  data-testid={`briefing-source-history-filter-${opt.value}-count-${currentSourceId}`}
+                  style={{ opacity: 0.8 }}
+                >
+                  ({count})
+                </span>
               </button>
             );
           })}
