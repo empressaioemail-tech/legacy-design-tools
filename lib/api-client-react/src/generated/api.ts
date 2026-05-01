@@ -24,6 +24,7 @@ import type {
   CodeAtomDetail,
   CodeAtomListResponse,
   CodeAtomSummary,
+  CreateEngagementSubmissionBody,
   EngagementDetail,
   EngagementSummary,
   ErrorResponse,
@@ -45,6 +46,7 @@ import type {
   SnapshotReceipt,
   SnapshotSheetHistoryResponse,
   SnapshotSummary,
+  SubmissionReceipt,
   UpdateEngagementBody,
   UploadSnapshotSheetsBody,
   WarmupResult,
@@ -577,6 +579,110 @@ export const useRegeocodeEngagement = <
   TContext
 > => {
   return useMutation(getRegeocodeEngagementMutationOptions(options));
+};
+
+/**
+ * Records that a plan-review package has been submitted to the
+jurisdiction for this engagement. The submission flow is still a
+forward-ref child in the engagement atom's composition (no
+dedicated submissions table or catalog atom yet), so today's only
+side effect is appending an `engagement.submitted` event to the
+history chain. The returned `submissionId` is server-generated;
+when the catalog atom and table land it becomes the inserted
+row's id (the response shape stays stable).
+
+Best-effort emit by the same contract as the sibling lifecycle
+routes (`PATCH /engagements/{id}` address change,
+`POST /engagements/{id}/geocode`): a transient history outage
+cannot fail the submission HTTP request — the response 201s
+either way and the audit chain self-heals on the next successful
+append.
+
+ * @summary Record a plan-review submission against an engagement
+ */
+export const getCreateEngagementSubmissionUrl = (id: string) => {
+  return `/api/engagements/${id}/submissions`;
+};
+
+export const createEngagementSubmission = async (
+  id: string,
+  createEngagementSubmissionBody?: CreateEngagementSubmissionBody,
+  options?: RequestInit,
+): Promise<SubmissionReceipt> => {
+  return customFetch<SubmissionReceipt>(getCreateEngagementSubmissionUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createEngagementSubmissionBody),
+  });
+};
+
+export const getCreateEngagementSubmissionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagementSubmission>>,
+    TError,
+    { id: string; data: BodyType<CreateEngagementSubmissionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createEngagementSubmission>>,
+  TError,
+  { id: string; data: BodyType<CreateEngagementSubmissionBody> },
+  TContext
+> => {
+  const mutationKey = ["createEngagementSubmission"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createEngagementSubmission>>,
+    { id: string; data: BodyType<CreateEngagementSubmissionBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return createEngagementSubmission(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateEngagementSubmissionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createEngagementSubmission>>
+>;
+export type CreateEngagementSubmissionMutationBody =
+  BodyType<CreateEngagementSubmissionBody>;
+export type CreateEngagementSubmissionMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Record a plan-review submission against an engagement
+ */
+export const useCreateEngagementSubmission = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagementSubmission>>,
+    TError,
+    { id: string; data: BodyType<CreateEngagementSubmissionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createEngagementSubmission>>,
+  TError,
+  { id: string; data: BodyType<CreateEngagementSubmissionBody> },
+  TContext
+> => {
+  return useMutation(getCreateEngagementSubmissionMutationOptions(options));
 };
 
 /**

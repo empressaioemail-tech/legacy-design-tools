@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, engagements, snapshots } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
-import { GetEngagementParams, UpdateEngagementBody } from "@workspace/api-zod";
+import {
+  CreateEngagementSubmissionBody,
+  GetEngagementParams,
+  UpdateEngagementBody,
+} from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
 import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";
@@ -481,19 +485,23 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
  * the response 201s either way, the event-append failure is logged, and
  * the audit chain self-heals on the next successful append.
  *
- * Body is intentionally permissive (no zod schema yet, in line with the
- * placeholder nature of the submission flow): only an optional `note`
- * string is read off the request, capped at 2 KB to keep the event
- * payload bounded.
+ * Body shape and the 2 KB note cap live in the OpenAPI contract
+ * (`CreateEngagementSubmissionBody`); the generated zod schema rejects
+ * over-cap notes with a 400 here so callers see a contract-level error
+ * instead of a silently-truncated payload.
  */
-const SUBMISSION_NOTE_MAX_CHARS = 2048;
-
 router.post(
   "/engagements/:id/submissions",
   async (req: Request, res: Response) => {
     const params = GetEngagementParams.safeParse(req.params);
     if (!params.success) {
       res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    const bodyParse = CreateEngagementSubmissionBody.safeParse(req.body ?? {});
+    if (!bodyParse.success) {
+      res.status(400).json({ error: "Invalid request body" });
       return;
     }
 
@@ -509,10 +517,10 @@ router.post(
         return;
       }
 
-      const rawNote = (req.body ?? {})["note"];
+      const rawNote = bodyParse.data.note;
       const note =
         typeof rawNote === "string" && rawNote.trim().length > 0
-          ? rawNote.trim().slice(0, SUBMISSION_NOTE_MAX_CHARS)
+          ? rawNote.trim()
           : null;
 
       // Generate the submission id locally for now. When the

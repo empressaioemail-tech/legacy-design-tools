@@ -385,6 +385,45 @@ export const RegeocodeEngagementResponse = zod.object({
 });
 
 /**
+ * Records that a plan-review package has been submitted to the
+jurisdiction for this engagement. The submission flow is still a
+forward-ref child in the engagement atom's composition (no
+dedicated submissions table or catalog atom yet), so today's only
+side effect is appending an `engagement.submitted` event to the
+history chain. The returned `submissionId` is server-generated;
+when the catalog atom and table land it becomes the inserted
+row's id (the response shape stays stable).
+
+Best-effort emit by the same contract as the sibling lifecycle
+routes (`PATCH /engagements/{id}` address change,
+`POST /engagements/{id}/geocode`): a transient history outage
+cannot fail the submission HTTP request — the response 201s
+either way and the audit chain self-heals on the next successful
+append.
+
+ * @summary Record a plan-review submission against an engagement
+ */
+export const CreateEngagementSubmissionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const createEngagementSubmissionBodyNoteMax = 2048;
+
+export const CreateEngagementSubmissionBody = zod
+  .object({
+    note: zod
+      .string()
+      .max(createEngagementSubmissionBodyNoteMax)
+      .optional()
+      .describe(
+        'Optional free-text note about the submission (e.g. \"Permit\nset v1, all sheets cleaned.\"). Capped at 2 KB to keep the\nevent payload bounded — notes longer than 2048 chars are\nrejected with a 400 (the server does not silently truncate).\nAn empty or whitespace-only string is coerced to null on\nthe emitted event.\n',
+      ),
+  })
+  .describe(
+    "Request body for `POST \/engagements\/{id}\/submissions`. The\nsubmission flow is currently a forward-ref child in the\nengagement atom's composition (no dedicated submissions table\nyet), so the body is intentionally narrow: an optional free-text\n`note` that lands in the `engagement.submitted` event payload.\nWhen the catalog atom and table land this schema can grow\nadditional fields (package label, attached document refs, etc.)\nwithout breaking existing callers.\n",
+  );
+
+/**
  * Returns all snapshots, newest first, joined with engagementName.
  * @summary List Revit snapshots across all engagements
  */

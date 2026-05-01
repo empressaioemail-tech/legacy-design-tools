@@ -26,4 +26,5 @@ export type {
   SnapshotPayload,
   SnapshotReceipt,
   SnapshotSummary,
+  SubmissionReceipt,
 } from "./generated/types";
