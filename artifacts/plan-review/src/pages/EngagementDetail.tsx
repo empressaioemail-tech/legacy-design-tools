@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "wouter";
 import { DashboardLayout } from "@workspace/portal-ui";
 import {
@@ -7,6 +7,7 @@ import {
   getGetEngagementQueryKey,
   getListEngagementSubmissionsQueryKey,
   type EngagementSubmissionSummary,
+  type SubmissionReceipt,
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
@@ -82,6 +83,73 @@ function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
 }
 
 /**
+ * Non-blocking confirmation banner shown above the past-submissions
+ * list after a successful "Submit to jurisdiction" action (Task #100).
+ * Mirrors the design-tools banner so reviewers get the same visible
+ * receipt — the dialog itself already closed on success, so this
+ * banner is the only post-submit affordance reassuring them the
+ * package was actually recorded. The relative-time label ("just now")
+ * is paired with the absolute timestamp on hover so a teammate can
+ * verify exactly when the submission landed.
+ *
+ * Auto-dismiss and the close button are wired up by the parent so the
+ * banner stays presentational.
+ */
+function SubmissionRecordedBanner({
+  submittedAt,
+  jurisdiction,
+  onDismiss,
+}: {
+  submittedAt: string | Date;
+  jurisdiction: string | null;
+  onDismiss: () => void;
+}) {
+  const absolute = useMemo(() => {
+    const d = submittedAt instanceof Date ? submittedAt : new Date(submittedAt);
+    return Number.isNaN(d.getTime())
+      ? String(submittedAt)
+      : d.toLocaleString();
+  }, [submittedAt]);
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="submit-jurisdiction-success-banner"
+      className="sc-card flex items-center justify-between flex-shrink-0"
+      style={{
+        padding: "10px 14px",
+        background: "var(--info-dim)",
+        borderColor: "var(--info-text)",
+        color: "var(--text-primary)",
+      }}
+    >
+      <div className="flex items-center gap-2" style={{ fontSize: 13 }}>
+        <span aria-hidden style={{ color: "var(--info-text)", fontWeight: 600 }}>
+          ✓
+        </span>
+        <span>
+          Submitted to{" "}
+          <strong>{jurisdiction ?? "jurisdiction"}</strong> ·{" "}
+          <span title={absolute} style={{ color: "var(--text-secondary)" }}>
+            {relativeTime(submittedAt)}
+          </span>
+        </span>
+      </div>
+      <button
+        type="button"
+        className="sc-btn-ghost"
+        onClick={onDismiss}
+        aria-label="Dismiss submission confirmation"
+        data-testid="submit-jurisdiction-success-dismiss"
+        style={{ padding: "2px 8px", fontSize: 12 }}
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+/**
  * EngagementDetail — Plan Review's per-engagement surface (Task #83).
  *
  * Task #75 originally asked for the past-submissions list to live on
@@ -113,6 +181,33 @@ export default function EngagementDetail() {
   const params = useParams();
   const id = params.id as string;
   const [submitOpen, setSubmitOpen] = useState(false);
+  // Last successful jurisdiction submission, surfaced as a non-blocking
+  // confirmation banner above the past-submissions list (Task #100).
+  // We keep the full receipt (not just `submittedAt`) so a future
+  // "View on timeline" affordance can deep-link by `submissionId`
+  // without another round trip — matching the design-tools convention.
+  // The `jurisdiction` snapshot is captured separately because the
+  // server `SubmissionReceipt` shape does not carry it; pinning the
+  // value at submit-time means a same-session edit to the engagement's
+  // jurisdiction won't retroactively rewrite the banner copy.
+  const [lastSubmission, setLastSubmission] = useState<{
+    receipt: SubmissionReceipt;
+    jurisdiction: string | null;
+  } | null>(null);
+  // Auto-dismiss the banner after 8s so it stays out of the way once
+  // the user has seen it. The dialog itself already closed on success,
+  // so the banner is the only remaining post-submit affordance. Within
+  // an 8s window the relative-time label is always "just now", so no
+  // tick interval is needed to keep it fresh.
+  useEffect(() => {
+    if (!lastSubmission) return;
+    const dismiss = window.setTimeout(() => {
+      setLastSubmission(null);
+    }, 8_000);
+    return () => {
+      window.clearTimeout(dismiss);
+    };
+  }, [lastSubmission]);
 
   const { data: engagement, isLoading: engagementLoading } = useGetEngagement(
     id,
@@ -164,6 +259,14 @@ export default function EngagementDetail() {
           )}
         </div>
 
+        {lastSubmission && (
+          <SubmissionRecordedBanner
+            submittedAt={lastSubmission.receipt.submittedAt}
+            jurisdiction={lastSubmission.jurisdiction}
+            onDismiss={() => setLastSubmission(null)}
+          />
+        )}
+
         <SubmissionsList
           engagementId={id}
           onSubmit={() => setSubmitOpen(true)}
@@ -178,6 +281,12 @@ export default function EngagementDetail() {
           jurisdiction={engagement.jurisdiction ?? null}
           isOpen={submitOpen}
           onClose={() => setSubmitOpen(false)}
+          onSubmitted={(receipt) =>
+            setLastSubmission({
+              receipt,
+              jurisdiction: engagement.jurisdiction ?? null,
+            })
+          }
         />
       )}
     </DashboardLayout>
