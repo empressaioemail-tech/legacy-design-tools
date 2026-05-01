@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { DashboardLayout } from "@workspace/portal-ui";
 import { useNavGroups } from "../components/NavGroups";
 import { KPIS, SUBMITTALS } from "../data/mock";
@@ -12,6 +13,25 @@ export default function ReviewConsole() {
   const rejectedCount = SUBMITTALS.filter(s => s.status === "rejected").length;
   const queueCount = SUBMITTALS.length;
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const filteredSubmittals = useMemo(() => {
+    if (!trimmedQuery) return SUBMITTALS;
+    return SUBMITTALS.filter((s) => {
+      const haystack = [
+        s.id,
+        s.projectName,
+        s.address,
+        s.firm,
+        s.status,
+        ...s.disciplines,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(trimmedQuery);
+    });
+  }, [trimmedQuery]);
+
   return (
     <DashboardLayout
       title="Review Console"
@@ -19,7 +39,11 @@ export default function ReviewConsole() {
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
       rightPanel={<AIBriefingPanel />}
-      search={{ placeholder: "Search submittals..." }}
+      search={{
+        placeholder: "Search submittals...",
+        value: searchQuery,
+        onChange: setSearchQuery,
+      }}
     >
       <div className="flex flex-col gap-6">
         {/* Header Row */}
@@ -49,15 +73,27 @@ export default function ReviewConsole() {
           <div className="lg:col-span-2 sc-card">
             <div className="sc-card-header sc-row-sb">
               <span className="sc-label">REVIEW QUEUE</span>
-              <span className="sc-meta">{queueCount} items</span>
+              <span className="sc-meta">
+                {trimmedQuery
+                  ? `${filteredSubmittals.length} of ${queueCount} items`
+                  : `${queueCount} items`}
+              </span>
             </div>
-            <div className="flex flex-col">
-              {SUBMITTALS.length > 0 ? (
-                SUBMITTALS.map(sub => (
+            <div className="flex flex-col" data-testid="review-queue">
+              {SUBMITTALS.length === 0 ? (
+                <div className="p-8 text-center sc-body">No new submittals. The AI Reviewer is monitoring Procore and Bluebeam intake.</div>
+              ) : filteredSubmittals.length === 0 ? (
+                <div
+                  className="p-8 text-center sc-body"
+                  data-testid="review-queue-no-matches"
+                >
+                  No submittals match “{searchQuery.trim()}”. Try a different
+                  project, firm, address, or status.
+                </div>
+              ) : (
+                filteredSubmittals.map(sub => (
                   <SubmittalQueueRow key={sub.id} submittal={sub} />
                 ))
-              ) : (
-                <div className="p-8 text-center sc-body">No new submittals. The AI Reviewer is monitoring Procore and Bluebeam intake.</div>
               )}
             </div>
           </div>

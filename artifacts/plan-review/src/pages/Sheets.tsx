@@ -17,6 +17,12 @@ export default function Sheets() {
   const navGroups = useNavGroups();
   const { data: snapshots, isLoading: snapshotsLoading } = useListSnapshots();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Top-bar search filters the sheet grid for the currently selected
+  // snapshot by sheet number, sheet name, or revision (Task #111).
+  // The query is held at the page so the layout's `Header` and the
+  // `SheetGridForSnapshot` child both see the same value, mirroring
+  // the wiring in EngagementsList (Task #95).
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (selectedId === null && snapshots && snapshots.length > 0) {
@@ -30,7 +36,11 @@ export default function Sheets() {
       navGroups={navGroups}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
-      search={{ placeholder: "Search submittals..." }}
+      search={{
+        placeholder: "Search sheets...",
+        value: searchQuery,
+        onChange: setSearchQuery,
+      }}
     >
       <div className="flex flex-col gap-4">
         <div>
@@ -65,6 +75,7 @@ export default function Sheets() {
               snapshotName={
                 snapshots?.find((s) => s.id === selectedId)?.projectName ?? null
               }
+              searchQuery={searchQuery}
             />
           </div>
         </div>
@@ -151,10 +162,11 @@ function SnapshotList(props: SnapshotListProps) {
 interface SheetGridForSnapshotProps {
   snapshotId: string | null;
   snapshotName: string | null;
+  searchQuery: string;
 }
 
 function SheetGridForSnapshot(props: SheetGridForSnapshotProps) {
-  const { snapshotId, snapshotName } = props;
+  const { snapshotId, snapshotName, searchQuery } = props;
   const enabled = !!snapshotId;
   const { data: sheets, isLoading } = useGetSnapshotSheets(snapshotId ?? "", {
     query: {
@@ -197,6 +209,22 @@ function SheetGridForSnapshot(props: SheetGridForSnapshotProps) {
     return [...sheets].sort((a, b) => a.sortOrder - b.sortOrder);
   }, [sheets]);
 
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const filteredSheets = useMemo(() => {
+    if (!trimmedQuery) return sortedSheets;
+    return sortedSheets.filter((sheet) => {
+      const haystack = [
+        sheet.sheetNumber,
+        sheet.sheetName,
+        sheet.revisionNumber,
+      ]
+        .filter((v): v is string => !!v)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(trimmedQuery);
+    });
+  }, [sortedSheets, trimmedQuery]);
+
   if (!snapshotId) {
     return (
       <div className="sc-card p-6 text-center">
@@ -231,20 +259,34 @@ function SheetGridForSnapshot(props: SheetGridForSnapshotProps) {
         <span className="sc-label">
           SHEETS{snapshotName ? ` · ${snapshotName.toUpperCase()}` : ""}
         </span>
-        <span className="sc-meta">{sortedSheets.length} sheets</span>
+        <span className="sc-meta">
+          {trimmedQuery
+            ? `${filteredSheets.length} of ${sortedSheets.length} sheets`
+            : `${sortedSheets.length} sheets`}
+        </span>
       </div>
-      <div
-        className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4"
-        data-testid="sheets-grid"
-      >
-        {sortedSheets.map((sheet) => (
-          <SheetCard
-            key={sheet.id}
-            sheet={sheet}
-            historyEvents={eventsBySheetId.get(sheet.id) ?? null}
-          />
-        ))}
-      </div>
+      {filteredSheets.length === 0 ? (
+        <div
+          className="p-6 text-center sc-body"
+          data-testid="sheets-no-matches"
+        >
+          No sheets match “{searchQuery.trim()}”. Try a different sheet
+          number, name, or revision.
+        </div>
+      ) : (
+        <div
+          className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4"
+          data-testid="sheets-grid"
+        >
+          {filteredSheets.map((sheet) => (
+            <SheetCard
+              key={sheet.id}
+              sheet={sheet}
+              historyEvents={eventsBySheetId.get(sheet.id) ?? null}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

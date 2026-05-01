@@ -181,6 +181,11 @@ export default function EngagementDetail() {
   const params = useParams();
   const id = params.id as string;
   const [submitOpen, setSubmitOpen] = useState(false);
+  // Top-bar search filters the past-submissions list by jurisdiction,
+  // status, note, or reviewer comment (Task #111). The query is held
+  // here so the layout's `Header` and the list both see the same
+  // value, mirroring the wiring in EngagementsList (Task #95).
+  const [searchQuery, setSearchQuery] = useState("");
   // Last successful jurisdiction submission, surfaced as a non-blocking
   // confirmation banner above the past-submissions list (Task #100).
   // We keep the full receipt (not just `submittedAt`) so a future
@@ -237,7 +242,11 @@ export default function EngagementDetail() {
       navGroups={navGroups}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
-      search={{ placeholder: "Search submittals..." }}
+      search={{
+        placeholder: "Search submissions...",
+        value: searchQuery,
+        onChange: setSearchQuery,
+      }}
     >
       <div className="flex flex-col gap-6">
         <div>
@@ -271,6 +280,7 @@ export default function EngagementDetail() {
           engagementId={id}
           onSubmit={() => setSubmitOpen(true)}
           canSubmit={canSubmit}
+          searchQuery={searchQuery}
         />
       </div>
 
@@ -297,10 +307,12 @@ function SubmissionsList({
   engagementId,
   onSubmit,
   canSubmit,
+  searchQuery,
 }: {
   engagementId: string;
   onSubmit: () => void;
   canSubmit: boolean;
+  searchQuery: string;
 }) {
   const { data: submissions, isLoading } = useListEngagementSubmissions(
     engagementId,
@@ -311,6 +323,24 @@ function SubmissionsList({
       },
     },
   );
+
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const filteredSubmissions = useMemo(() => {
+    if (!submissions) return submissions;
+    if (!trimmedQuery) return submissions;
+    return submissions.filter((s) => {
+      const haystack = [
+        s.jurisdiction,
+        s.status,
+        s.note,
+        s.reviewerComment,
+      ]
+        .filter((v): v is string => !!v)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(trimmedQuery);
+    });
+  }, [submissions, trimmedQuery]);
 
   if (isLoading) {
     return (
@@ -347,6 +377,7 @@ function SubmissionsList({
     );
   }
 
+  const visibleSubmissions = filteredSubmissions ?? [];
   return (
     <div className="sc-card flex flex-col" data-testid="submissions-list">
       <div
@@ -355,7 +386,11 @@ function SubmissionsList({
       >
         <span className="sc-label">PAST SUBMISSIONS</span>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span className="sc-meta">{submissions.length} total</span>
+          <span className="sc-meta">
+            {trimmedQuery
+              ? `${visibleSubmissions.length} of ${submissions.length} items`
+              : `${submissions.length} total`}
+          </span>
           <button
             type="button"
             className="sc-btn-primary"
@@ -368,9 +403,19 @@ function SubmissionsList({
         </div>
       </div>
       <div className="flex flex-col">
-        {submissions.map((s: EngagementSubmissionSummary) => (
-          <SubmissionRow key={s.id} submission={s} />
-        ))}
+        {visibleSubmissions.length === 0 ? (
+          <div
+            className="p-6 text-center sc-body"
+            data-testid="submissions-no-matches"
+          >
+            No submissions match “{searchQuery.trim()}”. Try a different
+            jurisdiction, status, or note.
+          </div>
+        ) : (
+          visibleSubmissions.map((s: EngagementSubmissionSummary) => (
+            <SubmissionRow key={s.id} submission={s} />
+          ))
+        )}
       </div>
     </div>
   );

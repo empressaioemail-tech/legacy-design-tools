@@ -20,7 +20,6 @@ export default function SubmittalDetail() {
       navGroups={navGroups}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
-      search={{ placeholder: "Search submittals..." }}
     >
       <div className="flex h-[calc(100vh-64px)] -m-6"> {/* Negative margin to offset main padding in DashboardLayout and consume full space */}
         {/* Doc tree */}

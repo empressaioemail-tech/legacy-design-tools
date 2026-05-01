@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { DashboardLayout } from "@workspace/portal-ui";
 import { useNavGroups } from "../components/NavGroups";
 import { FINDINGS } from "../data/mock";
@@ -6,13 +7,40 @@ import { Link } from "wouter";
 
 export default function FindingsLibrary() {
   const navGroups = useNavGroups();
+  const [searchQuery, setSearchQuery] = useState("");
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const filteredFindings = useMemo(() => {
+    if (!trimmedQuery) return FINDINGS;
+    return FINDINGS.filter((f) => {
+      const haystack = [
+        f.id,
+        f.title,
+        f.detail,
+        f.codeRef,
+        f.edition,
+        f.discipline,
+        f.severity,
+        f.status,
+        f.submittalId,
+        f.source,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(trimmedQuery);
+    });
+  }, [trimmedQuery]);
+
   return (
     <DashboardLayout
       title="Saved Findings"
       navGroups={navGroups}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
-      search={{ placeholder: "Search findings..." }}
+      search={{
+        placeholder: "Search findings...",
+        value: searchQuery,
+        onChange: setSearchQuery,
+      }}
     >
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
@@ -28,7 +56,7 @@ export default function FindingsLibrary() {
         </div>
 
         <div className="sc-card overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse" data-testid="findings-table">
             <thead>
               <tr className="bg-[var(--depth-header-bg)] border-b border-[var(--border-default)]">
                 <th className="sc-label px-4 py-2 font-medium">Severity</th>
@@ -42,8 +70,23 @@ export default function FindingsLibrary() {
               </tr>
             </thead>
             <tbody>
-              {FINDINGS.length > 0 ? (
-                FINDINGS.map(f => {
+              {FINDINGS.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center sc-body">No findings match these filters.</td>
+                </tr>
+              ) : filteredFindings.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-8 text-center sc-body"
+                    data-testid="findings-no-matches"
+                  >
+                    No findings match “{searchQuery.trim()}”. Try a different
+                    title, code, discipline, or submittal.
+                  </td>
+                </tr>
+              ) : (
+                filteredFindings.map(f => {
                   let severityPillClass = "sc-pill-blue";
                   if (f.severity === "blocking") severityPillClass = "sc-pill-red";
                   else if (f.severity === "warning") severityPillClass = "sc-pill-amber";
@@ -67,10 +110,6 @@ export default function FindingsLibrary() {
                     </tr>
                   );
                 })
-              ) : (
-                <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center sc-body">No findings match these filters.</td>
-                </tr>
               )}
             </tbody>
           </table>
