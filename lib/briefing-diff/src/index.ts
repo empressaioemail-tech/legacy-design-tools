@@ -15,3 +15,9 @@
 
 export { diffWords, type WordDiffOp } from "./diffWords";
 export { formatBriefingActor } from "./formatBriefingActor";
+export {
+  SECTION_ORDER,
+  pickSection,
+  type BriefingSectionKey,
+  type PriorNarrativeSnapshot,
+} from "./sectionOrder";

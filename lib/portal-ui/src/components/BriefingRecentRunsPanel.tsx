@@ -21,6 +21,17 @@ import {
 // component from the lib they already depend on. When omitted (e.g.
 // in unit tests that don't exercise the prior-narrative branch), no
 // per-section rows render below the header.
+//
+// Task #314 / Task #373 / Task #388 — the per-section word-level
+// `diffWords` helper, the seven-section A–G tuple, and the
+// `pickSection` column-router are pure data + pure functions, so
+// they all live in `@workspace/briefing-diff` — a leaf lib both
+// this package and `@workspace/briefing-prior-snapshot` already
+// consume. Sourcing them here (instead of via
+// `@workspace/briefing-prior-snapshot`) keeps the dep arrow going
+// in one direction only (briefing-prior-snapshot → portal-ui via
+// `CopyPlainTextButton`) so `pnpm install` doesn't warn about a
+// cyclic workspace dependency.
 // Task #355 — the prior-narrative title row, "Generated <when> by
 // <actor>" meta line, and "Copy plain text" button (with its 2 s
 // "Copied!" confirmation) live in `@workspace/briefing-prior-snapshot`
@@ -35,18 +46,11 @@ import {
 // briefing-prior-snapshot). Artifact-level consumers
 // (plan-review's SubmissionDetailModal / EngagementDetail) supply
 // the header from the lib they already depend on.
-//
-// Task #373 — the seven-section A–G tuple and the `pickSection`
-// column-router are pure data + a pure function, so importing them
-// directly from the same lib is safe (no React component evaluation
-// at module-init time, ESM resolves the cycle lazily). Both consuming
-// surfaces (this panel and the design-tools mirror) now walk the
-// shared tuple instead of keeping byte-identical private copies that
-// would silently drift the moment the section labels widen.
 import {
+  diffWords,
   SECTION_ORDER,
   pickSection,
-} from "@workspace/briefing-prior-snapshot";
+} from "@workspace/briefing-diff";
 // Task #332 — the prior-narrative meta line renders the snapshot's
 // `generatedAt` as a relative-time string ("5 min ago", "3d ago",
 // etc.) instead of a raw locale stamp so an auditor scanning the

@@ -19,7 +19,6 @@
     "@workspace/api-client-react": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/briefing-diff": "workspace:*",
-    "@workspace/briefing-prior-snapshot": "workspace:*",
     "@workspace/server-actor-ids": "workspace:*",
     "lucide-react": "catalog:",
     "three": "catalog:",
