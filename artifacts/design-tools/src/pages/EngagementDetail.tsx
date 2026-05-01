@@ -138,9 +138,7 @@ import {
   // the symbols this surface still consumes internally.
   BriefingSourceRow,
   BriefingNarrativePanel as SharedBriefingNarrativePanel,
-  diffBriefingSourceFields,
   extractAdapterKeyFromProvider,
-  formatBriefingDiffValue,
 } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import { relativeTime } from "../lib/relativeTime";
