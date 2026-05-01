@@ -1,6 +1,14 @@
 import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  // The chat round-trip integration test (`chat-roundtrip.test.ts`)
+  // imports the design-tools store and chip renderer via relative path.
+  // The renderer is `.tsx`, so we need the React plugin to provide JSX
+  // transformation for any cross-artifact files vite pulls into the test
+  // graph. Pure-server tests don't render React; the plugin is a no-op
+  // for them.
+  plugins: [react()],
   test: {
     environment: "node",
     setupFiles: ["./src/__tests__/test-env.ts"],
