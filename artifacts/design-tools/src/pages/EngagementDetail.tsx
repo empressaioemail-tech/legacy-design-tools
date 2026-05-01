@@ -51,7 +51,13 @@ import {
   diffLocalPayload,
   summarizeLocalPayload,
 } from "@workspace/adapters/local/summaries";
-import { PILOT_JURISDICTIONS } from "@workspace/adapters";
+import {
+  PILOT_JURISDICTIONS,
+  filterApplicableAdapters,
+  noApplicableAdaptersMessage,
+  resolveJurisdiction,
+  type AdapterContext,
+} from "@workspace/adapters";
 import type { SheetSummary } from "@workspace/api-client-react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { AppShell } from "../components/AppShell";
@@ -2875,10 +2881,69 @@ function BriefingNarrativePanel({
   );
 }
 
-function SiteContextTab({ engagementId }: { engagementId: string }) {
+function SiteContextTab({
+  engagement,
+}: {
+  engagement: EngagementDetailType;
+}) {
+  const engagementId = engagement.id;
   const [uploadOpen, setUploadOpen] = useState(false);
   const briefingQuery = useGetEngagementBriefing(engagementId);
   const queryClient = useQueryClient();
+
+  // Pre-flight pilot eligibility from the cached engagement record
+  // (Task #189). Today the architect has to click "Generate Layers"
+  // before the empty-pilot 422 reveals that the jurisdiction is not
+  // in the pilot — which costs them an avoidable round-trip and a
+  // confusing "loading…" pulse on every out-of-pilot project.
+  //
+  // The same `appliesTo` gate the server runs is exposed by
+  // `@workspace/adapters/eligibility` so the FE pre-flight cannot
+  // disagree with the server's 422 — adding a new pilot jurisdiction
+  // flips both surfaces from a single registry edit. The resolver
+  // accepts the same site-context columns the server route reads, so
+  // an engagement that resolves to "out of pilot" here resolves the
+  // same on POST.
+  //
+  // We deliberately do NOT pre-flight while the engagement is still
+  // loading; the parent's react-query hook resolves before
+  // SiteContextTab is mounted (the parent gates the whole subtree on
+  // `engagement` being defined), so by the time we read the columns
+  // here they have their final values.
+  const eligibility = useMemo(() => {
+    const geocode = engagement.site?.geocode ?? null;
+    const jurisdiction = resolveJurisdiction({
+      jurisdictionCity: geocode?.jurisdictionCity ?? null,
+      jurisdictionState: geocode?.jurisdictionState ?? null,
+      jurisdiction: engagement.jurisdiction ?? null,
+      address: engagement.address ?? null,
+    });
+    // Build the same context shape the server constructs in
+    // `generateLayers.ts` — `appliesTo` only consults
+    // `ctx.jurisdiction` today but mirroring the parcel field keeps
+    // a future appliesTo that wants coords from silently mis-gating
+    // (NaN coords match the route's "no geocode" branch exactly).
+    const lat = geocode?.latitude ?? NaN;
+    const lng = geocode?.longitude ?? NaN;
+    const ctx: AdapterContext = {
+      parcel: { latitude: lat, longitude: lng },
+      jurisdiction,
+    };
+    const applicable = filterApplicableAdapters(ctx);
+    return {
+      isInPilot: applicable.length > 0,
+      // Pre-computed message reuses the same helper the server's 422
+      // envelope uses, so the proactive banner reads identically to
+      // the post-click banner an architect on a half-resolved
+      // engagement might still see if the address-level resolver
+      // ever produces a different verdict than the column-level one.
+      message: noApplicableAdaptersMessage(jurisdiction),
+    };
+  }, [
+    engagement.address,
+    engagement.jurisdiction,
+    engagement.site?.geocode,
+  ]);
 
   // DA-PI-4 — unified Generate Layers run. Successful outcomes are
   // committed as fresh `briefing_sources` rows on the server, so
@@ -3150,9 +3215,18 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
             type="button"
             className="sc-btn"
             onClick={() => generateMutation.mutate({ id: engagementId })}
-            disabled={generateMutation.isPending}
+            // Out-of-pilot engagements pre-empt the click entirely
+            // (Task #189). The pre-flight already knows the server
+            // would 422, so disabling the button removes the wasted
+            // round-trip and the tooltip explains the dead-end
+            // before the architect hovers over the banner below.
+            disabled={generateMutation.isPending || !eligibility.isInPilot}
             data-testid="generate-layers-button"
-            title="Run every applicable federal/state/local adapter and persist the results as briefing sources."
+            title={
+              eligibility.isInPilot
+                ? "Run every applicable federal/state/local adapter and persist the results as briefing sources."
+                : eligibility.message
+            }
           >
             {generateMutation.isPending ? "Generating…" : "Generate Layers"}
           </button>
@@ -3220,6 +3294,12 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
         non-pilot project sees both surfaces (banner with the
         actionable upload CTA, disclosure as the always-on
         reference) without one hiding the other.
+
+        Task #189 additionally pulls the empty-pilot banner forward
+        to pre-flight render via `eligibility.isInPilot`, so on a
+        non-pilot project the disclosure here and the actionable
+        banner below are *both* visible without the architect ever
+        clicking Generate Layers.
       */}
       <details
         data-testid="generate-layers-supported-jurisdictions"
@@ -3249,16 +3329,23 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
         </div>
       </details>
 
-      {lastGenerateErrorSlug === "no_applicable_adapters" ? (
-        // Distinct empty-pilot-jurisdiction banner (Task #177). The
-        // POST already returns a structured 422 with a human-readable
-        // `message` for engagements outside the three pilot
-        // jurisdictions (Bastrop TX, Moab UT, Salmon ID). Surfacing
-        // it through the generic `generate-layers-error` alert reads
-        // as an upstream failure; this branch instead frames it as
-        // an actionable dead-end and offers the manual-upload path
-        // the architect would otherwise have to discover on their
-        // own.
+      {!eligibility.isInPilot ||
+      lastGenerateErrorSlug === "no_applicable_adapters" ? (
+        // Distinct empty-pilot-jurisdiction banner. Originally this
+        // branch only fired after the server's 422 round-trip
+        // (Task #177); Task #189 pulls the same gate forward to
+        // pre-flight render so an architect on a non-pilot project
+        // sees the actionable upload-CTA before ever clicking
+        // Generate Layers. The empty-pilot eligibility check shares
+        // its `appliesTo` source-of-truth with `generateLayers.ts`
+        // through `@workspace/adapters/eligibility`, so the FE pre-
+        // flight cannot disagree with the server's 422 envelope.
+        // The proactive path uses the locally-computed
+        // `eligibility.message`; the post-error path prefers the
+        // server-supplied `lastGenerateError` so a future server
+        // tweak that wants to embed a richer hint (e.g. naming the
+        // adapter set the missing jurisdiction would unlock) flows
+        // through.
         <div
           role="status"
           data-testid="generate-layers-no-adapters-banner"
@@ -3282,7 +3369,7 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
               data-testid="generate-layers-no-adapters-message"
               style={{ color: "var(--text-secondary)" }}
             >
-              {lastGenerateError}
+              {lastGenerateError ?? eligibility.message}
             </div>
             {/*
               Task #188 — surface the actual pilot list inline so an
@@ -5407,7 +5494,7 @@ export function EngagementDetail() {
         )}
 
         {tab === "site-context" && (
-          <SiteContextTab engagementId={engagement.id} />
+          <SiteContextTab engagement={engagement} />
         )}
 
         {tab === "submissions" && (

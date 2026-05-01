@@ -500,3 +500,167 @@ test("Generate Layers: 422 no_applicable_adapters renders the empty-pilot banner
   // show the banner once but bump postCount above 1.
   expect(postCount).toBe(1);
 });
+
+/**
+ * Pre-flight pilot-eligibility e2e (Task #189).
+ *
+ * Companion case for the proactive empty-pilot banner. The earlier
+ * spec above stubs the POST so the 422 envelope still fires; this
+ * one seeds an out-of-pilot engagement (Boulder CO) and asserts that
+ *
+ *   - the empty-pilot banner is up before any click — the
+ *     `appliesTo` gate runs client-side from the cached engagement
+ *     record and shares its source-of-truth with `generateLayers.ts`
+ *     through `@workspace/adapters/eligibility`, so the FE pre-flight
+ *     produces the same verdict the server's 422 would have without
+ *     the wasted round-trip;
+ *   - the Generate Layers button is `disabled` and carries the same
+ *     human-readable message as a `title` tooltip;
+ *   - clicking the button does NOT fire a POST (a `page.route`
+ *     handler is registered to count any request that slips through
+ *     and assert it stays at zero);
+ *   - clicking the banner's CTA opens the existing
+ *     `BriefingSourceUploadModal`, proving the dead-end is
+ *     immediately recoverable.
+ *
+ * A dedicated Boulder seed mirrors the Moab one above — the FE wiring
+ * reads the city/state columns to make its pre-flight decision, so a
+ * Boulder seed is the only honest way to exercise the "out of pilot"
+ * branch in a real round-trip.
+ */
+test.describe("Generate Layers pre-flight (Task #189)", () => {
+  let outOfPilotEngagementId = "";
+
+  test.beforeAll(async () => {
+    const [eng] = await db
+      .insert(engagements)
+      .values({
+        name: `e2e Pre-flight Boulder ${RUN_TAG}`,
+        nameLower: `e2e pre-flight boulder ${RUN_TAG}`.toLowerCase(),
+        // Boulder CO — outside every DA-PI-4 pilot jurisdiction.
+        // The FE resolver consults `jurisdictionCity` /
+        // `jurisdictionState` first so these columns alone are
+        // enough for the pre-flight gate to pick "out of pilot"
+        // even before the address scan kicks in.
+        jurisdiction: "Boulder, CO",
+        jurisdictionCity: "Boulder",
+        jurisdictionState: "CO",
+        jurisdictionFips: "08013",
+        address: "100 Walnut St, Boulder, CO 80302",
+        latitude: "40.014984",
+        longitude: "-105.270546",
+        status: "active",
+      })
+      .returning();
+    if (!eng) throw new Error("seed: out-of-pilot engagement returned no row");
+    outOfPilotEngagementId = eng.id;
+  });
+
+  test.afterAll(async () => {
+    if (outOfPilotEngagementId) {
+      await db
+        .delete(engagements)
+        .where(eq(engagements.id, outOfPilotEngagementId));
+    }
+  });
+
+  test("disables Generate Layers + renders the proactive banner with a working upload CTA for an out-of-pilot engagement", async ({
+    page,
+  }) => {
+    // Stub both endpoints so the test is independent of any real
+    // server response. The briefing GET keeps the engagement empty
+    // (the proactive banner does not depend on briefing state). The
+    // generate-layers POST counts requests so we can prove the
+    // disabled button never fires a round-trip.
+    let postCount = 0;
+    await page.route(
+      `**/api/engagements/${outOfPilotEngagementId}/briefing`,
+      async (route) => {
+        if (route.request().method() !== "GET") {
+          await route.continue();
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ briefing: null }),
+        });
+      },
+    );
+    await page.route(
+      `**/api/engagements/${outOfPilotEngagementId}/generate-layers`,
+      async (route) => {
+        if (route.request().method() !== "POST") {
+          await route.continue();
+          return;
+        }
+        postCount += 1;
+        // If the disabled-button regression slips through and the
+        // POST fires anyway, return the same 422 the route would
+        // have so the rest of the page does not desync — the
+        // postCount assertion below is what fails the test.
+        await route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "no_applicable_adapters",
+            message:
+              'No adapters configured for jurisdiction "CO" / "Boulder".',
+          }),
+        });
+      },
+    );
+
+    await page.goto(
+      `/engagements/${outOfPilotEngagementId}?tab=site-context`,
+    );
+
+    // Proactive banner must be up *before* any click. The architect
+    // sees the dead-end on tab open instead of after a wasted POST.
+    const banner = page.getByTestId("generate-layers-no-adapters-banner");
+    await expect(banner).toBeVisible();
+    // Pre-flight message comes from the shared
+    // `noApplicableAdaptersMessage` helper — Boulder resolves to no
+    // `stateKey`, so the helper picks the "could not resolve a
+    // pilot jurisdiction" copy. The same helper is invoked by the
+    // server route's 422 envelope, so the FE pre-flight cannot
+    // disagree with the BE.
+    await expect(
+      page.getByTestId("generate-layers-no-adapters-message"),
+    ).toContainText(/Could not resolve a pilot jurisdiction/i);
+    await expect(banner).toContainText(
+      "No adapters configured for this jurisdiction yet",
+    );
+    await expect(banner).toContainText(
+      "Upload a QGIS overlay below to seed the briefing manually.",
+    );
+
+    // Generate Layers button is disabled — the architect cannot
+    // accidentally fire the wasted round-trip. Tooltip surfaces the
+    // shared message so a hover reveals the cause without scrolling.
+    const button = page.getByTestId("generate-layers-button");
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute(
+      "title",
+      /Could not resolve a pilot jurisdiction/i,
+    );
+
+    // Trying to click the disabled button is a no-op; Playwright's
+    // `force: true` bypasses the actionability check so we confirm
+    // the React handler also short-circuits even if a stray click
+    // event makes it through (e.g. via a future label-for binding).
+    await button.click({ force: true }).catch(() => {});
+    await expect(page.getByTestId("generate-layers-error")).toHaveCount(0);
+
+    // Banner CTA opens the BriefingSourceUploadModal — the dead-end
+    // is recoverable. Same anchor as the post-error variant: the
+    // unique `briefing-source-layer-kind` id the modal owns.
+    await expect(page.locator("#briefing-source-layer-kind")).toHaveCount(0);
+    await page.getByTestId("generate-layers-no-adapters-upload").click();
+    await expect(page.locator("#briefing-source-layer-kind")).toBeVisible();
+
+    // Pin the no-round-trip contract: the disabled button + the
+    // proactive gate must mean zero POSTs hit the route.
+    expect(postCount).toBe(0);
+  });
+});

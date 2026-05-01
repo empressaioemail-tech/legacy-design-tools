@@ -43,6 +43,8 @@ import {
 } from "@workspace/db";
 import {
   ALL_ADAPTERS,
+  filterApplicableAdapters,
+  noApplicableAdaptersMessage,
   resolveJurisdiction,
   runAdapters,
   type AdapterContext,
@@ -378,19 +380,22 @@ router.post(
 
     // Apply the jurisdiction gate eagerly so an out-of-pilot
     // engagement can be 422'd without spinning up a no-op runner.
-    const applicable = ALL_ADAPTERS.filter((a) => {
-      try {
-        return a.appliesTo(ctx);
-      } catch {
-        return false;
-      }
-    });
+    // The filter + message helpers live in `@workspace/adapters`'s
+    // `eligibility` module — the Site Context tab calls into the
+    // exact same helpers to disable the Generate Layers button +
+    // show the empty-pilot banner proactively, so the FE pre-flight
+    // gate cannot disagree with this 422 (Task #189). `ALL_ADAPTERS`
+    // is passed explicitly (rather than relying on the helper's
+    // default) so the route's own test suite, which `vi.mock`'s the
+    // package barrel's `ALL_ADAPTERS` export to swap in fake
+    // adapters, still sees its mock honored — the helper imports
+    // from `./registry` directly to avoid an internal circular
+    // import, which would bypass that mock if we let it default.
+    const applicable = filterApplicableAdapters(ctx, ALL_ADAPTERS);
     if (applicable.length === 0) {
       res.status(422).json({
         error: "no_applicable_adapters",
-        message: jurisdiction.stateKey
-          ? `No adapters configured for jurisdiction "${jurisdiction.stateKey}"${jurisdiction.localKey ? ` / ${jurisdiction.localKey}` : ""}.`
-          : "Could not resolve a pilot jurisdiction from this engagement's site context (city/state/address). Add a city + state and try again.",
+        message: noApplicableAdaptersMessage(jurisdiction),
       });
       return;
     }

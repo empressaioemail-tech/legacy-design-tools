@@ -64,20 +64,39 @@ import { PILOT_JURISDICTIONS } from "@workspace/adapters";
 // banner branches. The two pre-resolved query keys mirror the real
 // generated ones so `invalidateQueries` calls inside the page do not
 // no-op against a different key.
+// Default fixture is a Moab UT engagement so the in-pilot pre-flight
+// (Task #189) keeps the empty-pilot banner offscreen until a test
+// fires the post-error path on its own. The proactive-banner tests
+// below override this fixture before render to a Boulder CO
+// engagement that pre-flights as out-of-pilot.
 const hoisted = vi.hoisted(() => {
   return {
     engagement: {
       id: "eng-1",
-      name: "Boulder Studio",
-      jurisdiction: "Boulder, CO",
-      address: "100 Walnut St, Boulder, CO",
+      name: "Moab Pilot",
+      jurisdiction: "Moab, UT",
+      address: "100 Main St, Moab, UT",
       status: "active",
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
       snapshotCount: 0,
       latestSnapshot: null,
       snapshots: [] as unknown[],
-      site: null as unknown,
+      site: {
+        address: "100 Main St, Moab, UT",
+        geocode: {
+          latitude: 38.573,
+          longitude: -109.5494,
+          jurisdictionCity: "Moab",
+          jurisdictionState: "UT",
+          jurisdictionFips: "49019",
+          source: "manual",
+          geocodedAt: "2026-01-01T00:00:00.000Z",
+        },
+        projectType: null,
+        zoningCode: null,
+        lotAreaSqft: null,
+      } as unknown,
       revitCentralGuid: null as string | null,
       revitDocumentPath: null as string | null,
     },
@@ -425,16 +444,30 @@ function renderPage() {
 beforeEach(() => {
   hoisted.engagement = {
     id: "eng-1",
-    name: "Boulder Studio",
-    jurisdiction: "Boulder, CO",
-    address: "100 Walnut St, Boulder, CO",
+    name: "Moab Pilot",
+    jurisdiction: "Moab, UT",
+    address: "100 Main St, Moab, UT",
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     snapshotCount: 0,
     latestSnapshot: null,
     snapshots: [],
-    site: null,
+    site: {
+      address: "100 Main St, Moab, UT",
+      geocode: {
+        latitude: 38.573,
+        longitude: -109.5494,
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        jurisdictionFips: "49019",
+        source: "manual",
+        geocodedAt: "2026-01-01T00:00:00.000Z",
+      },
+      projectType: null,
+      zoningCode: null,
+      lotAreaSqft: null,
+    },
     revitCentralGuid: null,
     revitDocumentPath: null,
   };
@@ -958,6 +991,120 @@ describe("GenerateLayersSummaryBanner (Task #229)", () => {
     expect(banner).toBeInTheDocument();
     expect(banner).toHaveTextContent(
       /Last run just now.*1 of 2 layers served from cache\./,
+    );
+  });
+});
+
+/**
+ * Pre-flight pilot-eligibility tests (Task #189).
+ *
+ * The Site Context tab evaluates jurisdiction eligibility from the
+ * cached engagement record on render — no Generate Layers click is
+ * required for the empty-pilot banner to appear when the engagement
+ * resolves outside the three pilot jurisdictions. These tests pin
+ * three behaviors:
+ *
+ *   1. Boulder CO (out-of-pilot) renders the empty-pilot banner
+ *      proactively, with the same shared message helper the server's
+ *      422 envelope uses, and disables the Generate Layers button so
+ *      no wasted POST round-trip can fire.
+ *   2. The disabled button carries the same human-readable message
+ *      as a `title` tooltip so a hover before the architect's eye
+ *      reaches the banner still surfaces the cause.
+ *   3. Moab UT (in-pilot) leaves the button enabled and the banner
+ *      offscreen — the proactive gate is jurisdiction-driven, not a
+ *      catch-all that breaks the happy path.
+ */
+describe("SiteContextTab Generate Layers pre-flight (Task #189)", () => {
+  it("disables Generate Layers and renders the empty-pilot banner proactively for an out-of-pilot engagement", () => {
+    // Boulder CO: not in any of the three DA-PI-4 pilots
+    // (Bastrop TX, Moab UT, Salmon ID). The cached engagement
+    // record carries the city/state columns the resolver consults,
+    // so the proactive gate flips to "out of pilot" without the
+    // mutation ever firing.
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      jurisdiction: "Boulder, CO",
+      address: "100 Walnut St, Boulder, CO 80302",
+      site: {
+        address: "100 Walnut St, Boulder, CO 80302",
+        geocode: {
+          latitude: 40.0149,
+          longitude: -105.2705,
+          jurisdictionCity: "Boulder",
+          jurisdictionState: "CO",
+          jurisdictionFips: "08013",
+          source: "manual",
+          geocodedAt: "2026-01-01T00:00:00.000Z",
+        },
+        projectType: null,
+        zoningCode: null,
+        lotAreaSqft: null,
+      },
+    };
+
+    renderPage();
+
+    // The proactive banner is up before any click — that's the
+    // entire point of Task #189: the architect doesn't have to
+    // discover the dead-end through a wasted POST.
+    const banner = screen.getByTestId("generate-layers-no-adapters-banner");
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveAttribute("role", "status");
+    // Pre-flight message comes from the shared
+    // `noApplicableAdaptersMessage` helper the server route uses,
+    // so the FE pre-flight copy and the BE 422 copy cannot drift.
+    // Boulder resolves to no `stateKey`, so the helper yields the
+    // "could not resolve a pilot jurisdiction" branch.
+    expect(
+      screen.getByTestId("generate-layers-no-adapters-message"),
+    ).toHaveTextContent(/Could not resolve a pilot jurisdiction/i);
+    // The actionable manual-upload guidance must render alongside
+    // the headline so the dead-end is immediately recoverable.
+    expect(
+      screen.getByText(/No adapters configured for this jurisdiction yet/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Upload a QGIS overlay below to seed the briefing manually\./i,
+      ),
+    ).toBeInTheDocument();
+
+    // Generate Layers button is disabled — no wasted round-trip.
+    const button = screen.getByTestId(
+      "generate-layers-button",
+    ) as HTMLButtonElement;
+    expect(button).toBeDisabled();
+    // Tooltip surfaces the same shared message so a hover reveals
+    // the cause without scrolling to the banner.
+    expect(button).toHaveAttribute(
+      "title",
+      expect.stringMatching(/Could not resolve a pilot jurisdiction/i),
+    );
+    // The generic error alert must NOT also be rendered — the
+    // proactive gate is exclusive of the post-error branch.
+    expect(
+      screen.queryByTestId("generate-layers-error"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("leaves the Generate Layers button enabled and the banner absent for an in-pilot engagement", () => {
+    // Default fixture is Moab UT — keep it as-is. This test is the
+    // happy-path counter-assertion: the proactive gate must not
+    // false-fire on an in-pilot engagement (would block every
+    // architect from running the layers).
+    renderPage();
+
+    expect(
+      screen.queryByTestId("generate-layers-no-adapters-banner"),
+    ).not.toBeInTheDocument();
+    const button = screen.getByTestId(
+      "generate-layers-button",
+    ) as HTMLButtonElement;
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute(
+      "title",
+      expect.stringMatching(/Run every applicable federal\/state\/local/i),
     );
   });
 });

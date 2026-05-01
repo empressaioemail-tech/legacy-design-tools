@@ -56,6 +56,12 @@ export {
 } from "./pilotJurisdictions";
 
 export {
+  filterApplicableAdapters,
+  hasApplicableAdapters,
+  noApplicableAdaptersMessage,
+} from "./eligibility";
+
+export {
   getSetbackTable,
   getSetbackDistrict,
   listSetbackTables,
