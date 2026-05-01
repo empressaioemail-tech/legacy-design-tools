@@ -90,9 +90,6 @@ export function RecordSubmissionResponseDialog({
     formatForDateTimeLocal(new Date()),
   );
   const [respondedAtTouched, setRespondedAtTouched] = useState(false);
-  const [respondedAtError, setRespondedAtError] = useState<string | null>(
-    null,
-  );
 
   // Reset form whenever the dialog re-opens so the previous submission's
   // draft doesn't leak into the next one. Mirrors SubmitToJurisdictionDialog.
@@ -103,7 +100,6 @@ export function RecordSubmissionResponseDialog({
       setError(null);
       setRespondedAtInput(formatForDateTimeLocal(new Date()));
       setRespondedAtTouched(false);
-      setRespondedAtError(null);
     }
   }, [isOpen]);
 
@@ -159,51 +155,24 @@ export function RecordSubmissionResponseDialog({
     ? formatForDateTimeLocal(submittedAtDateForMin)
     : null;
 
-  const handleSubmit = () => {
-    if (overLimit || submitting) return;
-    setError(null);
+  // Reactively validate the picked `respondedAt` so the inline error
+  // and the submit button's disabled state both stay in lockstep with
+  // the input value (Task #127). Mirrors the `overLimit` pattern used
+  // by the comment field: a single derived value drives the visual
+  // error styling, the help-copy fallback, and the submit guard, so
+  // the reviewer never has to "discover" the validation by attempting
+  // submit on a date the dialog already knows is bad.
+  const respondedAtValidation = validateRespondedAt(
+    respondedAtTouched,
+    respondedAtInput,
+    submittedAt,
+  );
+  const respondedAtError = respondedAtValidation.error;
+  const respondedAtInvalid = respondedAtError !== null;
 
-    // Resolve the optional `respondedAt`. The field is genuinely
-    // optional: when the user hasn't touched it (or has touched it and
-    // then cleared it back to empty) we omit `respondedAt` from the
-    // request body so the server stamps its own clock — the canonical
-    // "now". When they leave a real value behind we parse + validate
-    // and surface a future-date error inline rather than letting the
-    // request go out and bounce off the server.
-    let respondedAtIso: string | undefined;
-    if (respondedAtTouched && respondedAtInput.trim().length > 0) {
-      const parsed = parseDateTimeLocal(respondedAtInput);
-      if (!parsed) {
-        setRespondedAtError("Enter a valid date and time.");
-        return;
-      }
-      if (parsed.getTime() > Date.now()) {
-        setRespondedAtError(
-          "Response time can't be in the future.",
-        );
-        return;
-      }
-      // Symmetric lower bound (Task #119): mirror the server guard
-      // shipped in Task #116 so the user sees the problem inline
-      // instead of bouncing off a 400. The submittedAt prop is the
-      // authoritative anchor (it's what the server compares against);
-      // when it's missing or unparseable we skip the local check and
-      // let the server stay authoritative.
-      const submittedAtDate = parseSubmittedAt(submittedAt);
-      if (submittedAtDate && parsed.getTime() < submittedAtDate.getTime()) {
-        setRespondedAtError(
-          `Reply date can't be before the package was sent on ${submittedAtDate.toLocaleString()}.`,
-        );
-        return;
-      }
-      setRespondedAtError(null);
-      respondedAtIso = parsed.toISOString();
-    } else {
-      // Cleared-after-touched (or never touched at all) — treat as
-      // unset and let the server clock win. Drop any stale inline
-      // error so the help copy reappears.
-      setRespondedAtError(null);
-    }
+  const handleSubmit = () => {
+    if (overLimit || submitting || respondedAtInvalid) return;
+    setError(null);
 
     const baseBody =
       trimmed.length > 0
@@ -213,8 +182,8 @@ export function RecordSubmissionResponseDialog({
       id: engagementId,
       submissionId,
       data:
-        respondedAtIso !== undefined
-          ? { ...baseBody, respondedAt: respondedAtIso }
+        respondedAtValidation.iso !== undefined
+          ? { ...baseBody, respondedAt: respondedAtValidation.iso }
           : baseBody,
     });
   };
@@ -413,7 +382,6 @@ export function RecordSubmissionResponseDialog({
               onChange={(e) => {
                 setRespondedAtInput(e.target.value);
                 setRespondedAtTouched(true);
-                setRespondedAtError(null);
               }}
               disabled={submitting}
               data-testid="record-response-responded-at"
@@ -470,7 +438,7 @@ export function RecordSubmissionResponseDialog({
             type="button"
             className="sc-btn-primary"
             onClick={handleSubmit}
-            disabled={submitting || overLimit}
+            disabled={submitting || overLimit || respondedAtInvalid}
             data-testid="record-response-confirm"
           >
             {submitting ? "Recording…" : "Record response"}
@@ -550,6 +518,60 @@ function parseDateTimeLocal(value: string): Date | null {
   const parsed = new Date(trimmed);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
+}
+
+/**
+ * Reactive validator for the optional `respondedAt` picker. Centralizes
+ * the rules so the inline error copy and the submit button's disabled
+ * state can both derive from the same source of truth (Task #127),
+ * mirroring the `overLimit` pattern used for the comment field.
+ *
+ * Returns:
+ * - `{ error: null, iso: undefined }` — field is unset (untouched, or
+ *   touched-then-cleared). Caller omits `respondedAt` from the request
+ *   so the server stamps its own clock.
+ * - `{ error: null, iso: <ISO string> }` — field holds a valid past
+ *   time on/after the package's `submittedAt`. Caller forwards the ISO
+ *   to the API.
+ * - `{ error: <message>, iso: undefined }` — field holds an invalid
+ *   value. Caller renders the message inline and disables submit.
+ *
+ * The future-bound check uses `Date.now()` at call time, which means
+ * the result reflects the moment of render — fine in practice because
+ * the dialog only re-renders on input changes, and any drift just
+ * makes the picker more permissive (a value that was "barely future"
+ * a moment ago becomes valid as the wall clock advances past it).
+ */
+function validateRespondedAt(
+  touched: boolean,
+  inputValue: string,
+  submittedAt: string | null | undefined,
+): { error: string | null; iso: string | undefined } {
+  if (!touched || inputValue.trim().length === 0) {
+    return { error: null, iso: undefined };
+  }
+  const parsed = parseDateTimeLocal(inputValue);
+  if (!parsed) {
+    return { error: "Enter a valid date and time.", iso: undefined };
+  }
+  if (parsed.getTime() > Date.now()) {
+    return {
+      error: "Response time can't be in the future.",
+      iso: undefined,
+    };
+  }
+  // Symmetric lower bound (Task #119): mirror the server guard shipped
+  // in Task #116. The submittedAt prop is the authoritative anchor;
+  // when it's missing or unparseable we skip the local check and let
+  // the server stay authoritative.
+  const submittedAtDate = parseSubmittedAt(submittedAt);
+  if (submittedAtDate && parsed.getTime() < submittedAtDate.getTime()) {
+    return {
+      error: `Reply date can't be before the package was sent on ${submittedAtDate.toLocaleString()}.`,
+      iso: undefined,
+    };
+  }
+  return { error: null, iso: parsed.toISOString() };
 }
 
 function extractApiDetail(err: ApiError<unknown>): string | null {

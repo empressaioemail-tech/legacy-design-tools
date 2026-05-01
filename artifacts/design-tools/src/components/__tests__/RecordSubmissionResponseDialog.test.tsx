@@ -622,6 +622,79 @@ describe("RecordSubmissionResponseDialog", () => {
     expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
   });
 
+  it("reactively disables Record while the picked respondedAt is in the future (Task #127)", () => {
+    // Mirrors the "comment too long" UX: the reviewer should not have
+    // to click Record to discover the date is bad. The button must
+    // disable on input change, before any submit attempt.
+    renderDialog();
+
+    // Sanity-check: with no input touched yet, Record is enabled.
+    const submit = screen.getByTestId(
+      "record-response-confirm",
+    ) as HTMLButtonElement;
+    expect(submit).not.toBeDisabled();
+
+    const future = new Date(Date.now() + 10 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const localFuture =
+      `${future.getFullYear()}-${pad(future.getMonth() + 1)}-` +
+      `${pad(future.getDate())}T${pad(future.getHours())}:` +
+      `${pad(future.getMinutes())}`;
+
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: localFuture },
+    });
+
+    // No click required — the disabled state must flip purely from the
+    // input change.
+    expect(submit).toBeDisabled();
+    // The inline error renders too, in lockstep with the disabled flag.
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/can't be in the future/i);
+
+    // And clicking the (now-disabled) button must not start a request.
+    fireEvent.click(submit);
+    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+
+    // Correcting to a clearly-past time re-enables Record without a
+    // round trip.
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2024-01-01T09:00" },
+    });
+    expect(submit).not.toBeDisabled();
+  });
+
+  it("reactively disables Record while the picked respondedAt is earlier than submittedAt (Task #127)", () => {
+    // Same UX as the future-date case, but for the lower-bound guard
+    // wired up in Task #119. Picking a pre-submission date must
+    // disable Record on input change, not on submit attempt.
+    renderDialog({ submittedAt: "2024-01-15T12:00:00.000Z" });
+
+    const submit = screen.getByTestId(
+      "record-response-confirm",
+    ) as HTMLButtonElement;
+    expect(submit).not.toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2024-01-10T09:00" },
+    });
+
+    expect(submit).toBeDisabled();
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/can't be before the package was sent/i);
+
+    fireEvent.click(submit);
+    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+
+    // Bumping to a post-submission date re-enables the button reactively.
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2024-01-20T09:00" },
+    });
+    expect(submit).not.toBeDisabled();
+  });
+
   it("clears the previous error when the user resubmits", async () => {
     renderDialog();
     fireEvent.click(screen.getByTestId("record-response-confirm"));
