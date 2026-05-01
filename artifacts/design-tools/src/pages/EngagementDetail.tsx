@@ -25,7 +25,7 @@ import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionRe
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
-import { SubmitToJurisdictionDialog } from "@workspace/portal-ui";
+import { ReviewerComment, SubmitToJurisdictionDialog } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
@@ -855,19 +855,10 @@ function SubmissionsTab({
                     }}
                   >
                     {reviewerComment && (
-                      <div
-                        className="sc-body"
-                        data-testid={`submission-reviewer-comment-${s.id}`}
-                        style={{
-                          color: "var(--text-primary)",
-                          fontSize: 12,
-                          whiteSpace: "pre-wrap",
-                          borderLeft: "2px solid var(--border-active)",
-                          paddingLeft: 8,
-                        }}
-                      >
-                        {reviewerComment}
-                      </div>
+                      <ReviewerComment
+                        submissionId={s.id}
+                        comment={reviewerComment}
+                      />
                     )}
                     <span
                       className="sc-meta"
