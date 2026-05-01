@@ -503,6 +503,245 @@ describe("SubmissionDetailModal", () => {
     },
   );
 
+  it(
+    "STATUS HISTORY appends a new row each time a response is recorded " +
+      "(Task #131)",
+    () => {
+      // The existing Task #93 spec proves that a fully-populated
+      // statusHistory renders correctly in a single pass. This test
+      // proves the *update* contract that the response dialog +
+      // query-cache invalidation rely on: when the submission atom
+      // refetches and `typed.statusHistory` grows by one entry, the
+      // timeline appends a row in place — preserving the previously
+      // rendered rows (their testids, status labels, actor labels,
+      // and notes), and surfacing the new row's status, actor, and
+      // optional note. A future refactor that re-keys, re-orders, or
+      // virtualises the timeline will fail here before it can break
+      // the e2e suite.
+
+      // Initial state: only the synthetic Pending seed is on the
+      // timeline — the package was sent, no response has been
+      // recorded yet.
+      setSummary({
+        data: {
+          prose: "x",
+          typed: {
+            id: "sub-1",
+            found: true,
+            submittedAt: "2026-04-30T12:00:00.000Z",
+            statusHistory: [
+              {
+                status: "pending",
+                occurredAt: "2026-04-30T12:00:00.000Z",
+                actor: {
+                  kind: "user",
+                  id: "u_send",
+                  displayName: "Sam Sender",
+                },
+                note: null,
+                eventId: null,
+              },
+            ],
+          },
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: {
+            latestEventId: "",
+            latestEventAt: "2026-04-30T12:00:00.000Z",
+          },
+          scopeFiltered: false,
+        },
+      });
+      setHistory({ data: { events: [] } });
+
+      const { rerender } = renderModal(
+        <SubmissionDetailModal
+          submissionId="sub-1"
+          engagementId="eng-1"
+          onClose={() => {}}
+        />,
+      );
+
+      // Only the seed row is on screen at first.
+      expect(
+        screen.getByTestId("submission-status-history-entry-0"),
+      ).toBeDefined();
+      expect(
+        screen.queryByTestId("submission-status-history-entry-1"),
+      ).toBeNull();
+      expect(
+        screen.getByTestId("submission-status-history-status-0").textContent,
+      ).toBe("Pending");
+      expect(
+        screen.getByTestId("submission-status-history-actor-0").textContent,
+      ).toContain("Sam Sender");
+
+      // Reviewer records a "corrections requested" response. The
+      // RecordSubmissionResponseDialog test pins the cache
+      // invalidation; here we simulate the resulting refetch by
+      // updating the mocked summary and rerendering the modal.
+      setSummary({
+        data: {
+          prose: "x",
+          typed: {
+            id: "sub-1",
+            found: true,
+            submittedAt: "2026-04-30T12:00:00.000Z",
+            statusHistory: [
+              {
+                status: "pending",
+                occurredAt: "2026-04-30T12:00:00.000Z",
+                actor: {
+                  kind: "user",
+                  id: "u_send",
+                  displayName: "Sam Sender",
+                },
+                note: null,
+                eventId: null,
+              },
+              {
+                status: "corrections_requested",
+                occurredAt: "2026-04-30T13:00:00.000Z",
+                actor: {
+                  kind: "user",
+                  id: "u_reviewer",
+                  displayName: "Jane Reviewer",
+                },
+                note: "Please clarify wall assemblies on A-101.",
+                eventId: "01HZZZZ0000000000000000777",
+              },
+            ],
+          },
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: {
+            latestEventId: "",
+            latestEventAt: "2026-04-30T13:00:00.000Z",
+          },
+          scopeFiltered: false,
+        },
+      });
+      rerender(
+        <SubmissionDetailModal
+          submissionId="sub-1"
+          engagementId="eng-1"
+          onClose={() => {}}
+        />,
+      );
+
+      // The seed row is still rendered — the timeline appended,
+      // not replaced.
+      expect(
+        screen.getByTestId("submission-status-history-entry-0"),
+      ).toBeDefined();
+      expect(
+        screen.getByTestId("submission-status-history-status-0").textContent,
+      ).toBe("Pending");
+      // The new row is rendered with status, actor, and note.
+      expect(
+        screen.getByTestId("submission-status-history-entry-1"),
+      ).toBeDefined();
+      expect(
+        screen.getByTestId("submission-status-history-status-1").textContent,
+      ).toBe("Corrections requested");
+      expect(
+        screen.getByTestId("submission-status-history-actor-1").textContent,
+      ).toContain("Jane Reviewer");
+      expect(
+        screen.getByTestId("submission-status-history-note-1").textContent,
+      ).toContain("Please clarify wall assemblies");
+
+      // A second response — Approved — lands. The timeline appends
+      // again. The Approved row has no note, so the optional note
+      // testid must be absent on that row while remaining present
+      // on the previous one.
+      setSummary({
+        data: {
+          prose: "x",
+          typed: {
+            id: "sub-1",
+            found: true,
+            submittedAt: "2026-04-30T12:00:00.000Z",
+            statusHistory: [
+              {
+                status: "pending",
+                occurredAt: "2026-04-30T12:00:00.000Z",
+                actor: {
+                  kind: "user",
+                  id: "u_send",
+                  displayName: "Sam Sender",
+                },
+                note: null,
+                eventId: null,
+              },
+              {
+                status: "corrections_requested",
+                occurredAt: "2026-04-30T13:00:00.000Z",
+                actor: {
+                  kind: "user",
+                  id: "u_reviewer",
+                  displayName: "Jane Reviewer",
+                },
+                note: "Please clarify wall assemblies on A-101.",
+                eventId: "01HZZZZ0000000000000000777",
+              },
+              {
+                status: "approved",
+                occurredAt: "2026-04-30T14:00:00.000Z",
+                actor: { kind: "system", id: "submission-response" },
+                note: null,
+                eventId: "01HZZZZ0000000000000000778",
+              },
+            ],
+          },
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: {
+            latestEventId: "",
+            latestEventAt: "2026-04-30T14:00:00.000Z",
+          },
+          scopeFiltered: false,
+        },
+      });
+      rerender(
+        <SubmissionDetailModal
+          submissionId="sub-1"
+          engagementId="eng-1"
+          onClose={() => {}}
+        />,
+      );
+
+      expect(
+        screen.getByTestId("submission-status-history-entry-2"),
+      ).toBeDefined();
+      expect(
+        screen.getByTestId("submission-status-history-status-2").textContent,
+      ).toBe("Approved");
+      // The system actor uses the "kind:id" convention from
+      // `actorLabel`, mirroring SheetCard.
+      expect(
+        screen.getByTestId("submission-status-history-actor-2").textContent,
+      ).toContain("system:submission-response");
+      // The new row has no note, so the optional note row must
+      // be absent. The previous row's note must still be present.
+      expect(
+        screen.queryByTestId("submission-status-history-note-2"),
+      ).toBeNull();
+      expect(
+        screen.getByTestId("submission-status-history-note-1").textContent,
+      ).toContain("Please clarify wall assemblies");
+
+      // The earlier rows are preserved (testids and labels) across
+      // the second response — the timeline grew, it didn't reset.
+      expect(
+        screen.getByTestId("submission-status-history-status-0").textContent,
+      ).toBe("Pending");
+      expect(
+        screen.getByTestId("submission-status-history-status-1").textContent,
+      ).toBe("Corrections requested");
+    },
+  );
+
   it("calls onClose when the close button is pressed", () => {
     setSummary({
       data: {
