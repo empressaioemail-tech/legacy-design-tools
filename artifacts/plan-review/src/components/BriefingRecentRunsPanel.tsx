@@ -654,12 +654,16 @@ export function BriefingRecentRunsPanel({
                           // backups have already been overwritten
                           // don't get a misleading "this is the
                           // prior body" block. Mirrors the
-                          // design-tools Task #303 B.5 block, but
-                          // intentionally skips the B.3 meta line
-                          // and the B.4 "Copy plain text" button —
-                          // those are separate concerns and the
-                          // task scope is the diff + (unchanged)
-                          // pill only.
+                          // design-tools Task #303 B.5 block.
+                          // Task #333 — also mirrors the design-tools
+                          // Task #303 B.4 "Copy plain text" button so
+                          // an auditor on Plan Review can drop the
+                          // pre-regeneration snapshot into a Slack
+                          // thread or ticket without hand-selecting
+                          // each A–G section. The B.3 meta line is
+                          // still intentionally skipped — that's a
+                          // separate concern outside the parity gap
+                          // this task closes.
                           <div
                             data-testid={`briefing-run-prior-narrative-${run.generationId}`}
                             style={{
@@ -673,15 +677,79 @@ export function BriefingRecentRunsPanel({
                           >
                             <div
                               style={{
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: "var(--text-default)",
-                                textTransform: "uppercase",
-                                letterSpacing: 0.3,
+                                display: "flex",
+                                alignItems: "flex-start",
+                                justifyContent: "space-between",
+                                gap: 12,
                               }}
                             >
-                              Narrative on screen before this run was
-                              overwritten
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: "var(--text-default)",
+                                  textTransform: "uppercase",
+                                  letterSpacing: 0.3,
+                                }}
+                              >
+                                Narrative on screen before this run was
+                                overwritten
+                              </div>
+                              {/* Task #333 — "Copy plain text" button.
+                                  Concatenates the seven A–G bodies as
+                                  `Label\n\nbody` blocks separated by
+                                  blank lines so the pasted output is
+                                  readable in a Slack thread or ticket
+                                  without any post-processing. Empty
+                                  sections render as "—" so the
+                                  pasted snapshot preserves the
+                                  panel's own placeholder rather than
+                                  leaving the auditor staring at a
+                                  blank label. Uses the async
+                                  Clipboard API (which the test
+                                  environment polyfills via JSDOM's
+                                  `navigator.clipboard.writeText`).
+                                  Falls back silently when the API is
+                                  unavailable so we never throw
+                                  inside an event handler. Mirrors
+                                  the design-tools `briefing-run-
+                                  prior-narrative-copy-${"$"}{
+                                  generationId}` testid + payload
+                                  shape so a future shared lib lift
+                                  is a no-op. */}
+                              <button
+                                type="button"
+                                data-testid={`briefing-run-prior-narrative-copy-${run.generationId}`}
+                                onClick={() => {
+                                  const text = SECTION_ORDER.map(
+                                    ({ key, label }) => {
+                                      const body =
+                                        pickSection(priorNarrative, key) ?? "";
+                                      return `${label}\n\n${body.trim() || "—"}`;
+                                    },
+                                  ).join("\n\n");
+                                  if (
+                                    typeof navigator !== "undefined" &&
+                                    navigator.clipboard &&
+                                    typeof navigator.clipboard.writeText ===
+                                      "function"
+                                  ) {
+                                    void navigator.clipboard.writeText(text);
+                                  }
+                                }}
+                                style={{
+                                  fontSize: 11,
+                                  padding: "2px 8px",
+                                  background: "transparent",
+                                  border: "1px solid var(--border-subtle)",
+                                  borderRadius: 4,
+                                  cursor: "pointer",
+                                  color: "var(--text-default)",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Copy plain text
+                              </button>
                             </div>
                             {SECTION_ORDER.map(({ key, label }) => {
                               const priorBody = pickSection(

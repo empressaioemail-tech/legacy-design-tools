@@ -742,6 +742,52 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
     ).toHaveTextContent("4500");
   });
 
+  // Task #333 — mirrors design-tools Task #303 B.4. Closes the
+  // parity gap left by Task #314 (which mirrored the diff but not
+  // the copy button). The clipboard payload shape — `Label\n\nbody`
+  // blocks separated by blank lines, with empty sections rendered
+  // as "—" — must stay byte-identical with the design-tools side
+  // so a future shared-lib lift is a no-op; if either side
+  // diverges this mirror test will fail and surface the drift
+  // before auditors paste two visibly different snapshots into
+  // the same Slack thread.
+  it("Copy plain text writes the concatenated A–G bodies to the clipboard", async () => {
+    seedPriorRow({
+      priorSectionA: "Prior A body.",
+      priorSectionG: "Prior G body.",
+      currentSectionA: "Current A body.",
+      currentSectionG: "Current G body.",
+    });
+    // JSDOM/happy-dom may or may not ship navigator.clipboard; pin
+    // a spy regardless so we can assert the button hit it with the
+    // right payload.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    fireEvent.click(
+      await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-gen-prior",
+      ),
+    );
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const payload = writeText.mock.calls[0][0] as string;
+    // The payload preserves both populated bodies so the auditor
+    // can paste the snapshot somewhere readable.
+    expect(payload).toMatch(/Prior A body\./);
+    expect(payload).toMatch(/Prior G body\./);
+    // Empty sections (B–F) render as "—" rather than blank lines
+    // so the pasted output has visible structure — matches the
+    // design-tools payload shape exactly.
+    expect(payload).toMatch(/—/);
+  });
+
   it("surfaces an (unchanged) pill when a section is byte-identical", async () => {
     seedPriorRow({
       priorSectionA: "Identical body.",
