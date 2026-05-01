@@ -19,6 +19,8 @@ export {
   type AdapterSourceKind,
   type AdapterStateKey,
   type AdapterTier,
+  type UpstreamFreshness,
+  type UpstreamFreshnessStatus,
   AdapterRunError,
 } from "./types";
 

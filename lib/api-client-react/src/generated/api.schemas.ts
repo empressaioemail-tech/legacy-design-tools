@@ -581,6 +581,53 @@ export type GenerateLayersOutcomeError = {
 } | null;
 
 /**
+ * `fresh` — upstream confirms the cached snapshot is
+still current. `stale` — upstream has published a
+newer revision; force-refresh recommended. `unknown`
+— the freshness check itself failed (network blip,
+metadata missing, malformed response); UI surfaces it
+as a soft hint without escalating to a warning.
+
+ */
+export type GenerateLayersOutcomeUpstreamFreshnessStatus =
+  (typeof GenerateLayersOutcomeUpstreamFreshnessStatus)[keyof typeof GenerateLayersOutcomeUpstreamFreshnessStatus];
+
+export const GenerateLayersOutcomeUpstreamFreshnessStatus = {
+  fresh: "fresh",
+  stale: "stale",
+  unknown: "unknown",
+} as const;
+
+/**
+ * Task #227 — verdict from the adapter's optional
+`getUpstreamFreshness()` hook, populated only on
+`fromCache=true` outcomes whose adapter implements the
+hook (today: FEMA NFHL). `null` for live runs, for cache
+hits whose adapter doesn't implement the hook, and for
+non-`ok` outcomes. The Site Context tab uses the verdict
+to flip the existing "cached <n>h ago" pill to a "cache
+may be stale" warning variant when the upstream feed has
+published a newer revision since the cache was written.
+
+ */
+export type GenerateLayersOutcomeUpstreamFreshness = {
+  /** `fresh` — upstream confirms the cached snapshot is
+still current. `stale` — upstream has published a
+newer revision; force-refresh recommended. `unknown`
+— the freshness check itself failed (network blip,
+metadata missing, malformed response); UI surfaces it
+as a soft hint without escalating to a warning.
+ */
+  status: GenerateLayersOutcomeUpstreamFreshnessStatus;
+  /** Short human-readable phrase the FE folds into the
+pill's tooltip, e.g. "FEMA published a NFHL revision
+at <iso> after this cache row was written". Optional
+— implementations may omit it.
+ */
+  reason?: string | null;
+} | null;
+
+/**
  * Per-adapter outcome for one `POST /engagements/{id}/generate-layers`
 invocation. `status=ok` means the adapter ran and a row was
 persisted (the row is included in `briefing.sources`); `status=
@@ -622,6 +669,17 @@ written (i.e. when the underlying upstream lookup actually
 ran). Always `null` when `fromCache` is `false`.
  */
   cachedAt: string | null;
+  /** Task #227 — verdict from the adapter's optional
+`getUpstreamFreshness()` hook, populated only on
+`fromCache=true` outcomes whose adapter implements the
+hook (today: FEMA NFHL). `null` for live runs, for cache
+hits whose adapter doesn't implement the hook, and for
+non-`ok` outcomes. The Site Context tab uses the verdict
+to flip the existing "cached <n>h ago" pill to a "cache
+may be stale" warning variant when the upstream feed has
+published a newer revision since the cache was written.
+ */
+  upstreamFreshness?: GenerateLayersOutcomeUpstreamFreshness;
 }
 
 /**

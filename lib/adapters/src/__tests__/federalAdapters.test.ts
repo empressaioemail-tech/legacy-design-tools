@@ -87,6 +87,107 @@ describe("FEMA NFHL flood-zone adapter", () => {
     expect(outcomes[0].status).toBe("no-coverage");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  describe("getUpstreamFreshness (Task #227)", () => {
+    /**
+     * The FEMA NFHL freshness probe GETs the layer's MapServer
+     * metadata (`?f=json`) and compares `editingInfo.lastEditDate`
+     * (Unix epoch ms) against the cached row's write time.
+     */
+    const cachedAt = new Date("2026-04-30T00:00:00.000Z");
+
+    it("returns `fresh` when FEMA's lastEditDate is older than the cached row", async () => {
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({
+          editingInfo: {
+            // Edited 10 days before the cache row was written.
+            lastEditDate: cachedAt.getTime() - 10 * 86_400_000,
+          },
+        }),
+      );
+      const verdict = await femaNfhlAdapter.getUpstreamFreshness!({
+        ctx: { ...bastrop, fetchImpl },
+        cachedAt,
+      });
+      expect(verdict.status).toBe("fresh");
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      // The probe hits the layer's metadata endpoint (no `/query`).
+      expect(fetchImpl.mock.calls[0][0]).toMatch(/MapServer\/28\?f=json$/);
+    });
+
+    it("returns `stale` when FEMA published a newer revision after the cache row was written", async () => {
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({
+          editingInfo: {
+            // Edited 1 day after the cache row was written.
+            lastEditDate: cachedAt.getTime() + 86_400_000,
+          },
+        }),
+      );
+      const verdict = await femaNfhlAdapter.getUpstreamFreshness!({
+        ctx: { ...bastrop, fetchImpl },
+        cachedAt,
+      });
+      expect(verdict.status).toBe("stale");
+      expect(verdict.reason).toMatch(/FEMA published a NFHL revision/);
+      // The reason includes both the upstream edit timestamp and
+      // the cached row's write time so the FE tooltip can show
+      // both without parsing the message back apart.
+      expect(verdict.reason).toContain(cachedAt.toISOString());
+    });
+
+    it("returns `unknown` when the metadata endpoint responds with HTTP 5xx", async () => {
+      const fetchImpl = vi.fn(
+        async () => new Response("oops", { status: 503 }),
+      );
+      const verdict = await femaNfhlAdapter.getUpstreamFreshness!({
+        ctx: { ...bastrop, fetchImpl },
+        cachedAt,
+      });
+      expect(verdict.status).toBe("unknown");
+      expect(verdict.reason).toMatch(/HTTP 503/);
+    });
+
+    it("treats a missing `editingInfo.lastEditDate` as `fresh` rather than unknown", async () => {
+      // ArcGIS only stamps lastEditDate on layers that have been
+      // edited at least once — absence means the layer has never
+      // changed, which is the strongest possible "still fresh".
+      const fetchImpl = vi.fn(async () => jsonResponse({}));
+      const verdict = await femaNfhlAdapter.getUpstreamFreshness!({
+        ctx: { ...bastrop, fetchImpl },
+        cachedAt,
+      });
+      expect(verdict.status).toBe("fresh");
+    });
+
+    it("returns `unknown` when `lastEditDate` is present but malformed (contract drift)", async () => {
+      // If FEMA ever changes the shape (e.g. strings instead of epoch
+      // numbers), we shouldn't silently call it "fresh" — that would
+      // mask real upstream changes. Surface as `unknown` so the FE
+      // pill stays neutral instead of falsely confident.
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({ editingInfo: { lastEditDate: "2026-05-01" } }),
+      );
+      const verdict = await femaNfhlAdapter.getUpstreamFreshness!({
+        ctx: { ...bastrop, fetchImpl },
+        cachedAt,
+      });
+      expect(verdict.status).toBe("unknown");
+      expect(verdict.reason).toMatch(/non-numeric lastEditDate/);
+    });
+
+    it("returns `unknown` when fetch throws (network error)", async () => {
+      const fetchImpl = vi.fn(async () => {
+        throw new Error("ENOTFOUND hazards.fema.gov");
+      });
+      const verdict = await femaNfhlAdapter.getUpstreamFreshness!({
+        ctx: { ...bastrop, fetchImpl },
+        cachedAt,
+      });
+      expect(verdict.status).toBe("unknown");
+      expect(verdict.reason).toContain("ENOTFOUND");
+    });
+  });
 });
 
 describe("USGS NED elevation adapter", () => {

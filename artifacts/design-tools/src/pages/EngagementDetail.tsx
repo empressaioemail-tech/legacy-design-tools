@@ -913,8 +913,21 @@ export function BriefingSourceRow({
    * `{ fromCache: true, cachedAt }` envelope here so we can render a
    * "cached <n>h ago" pill. `null` (or `fromCache: false`) renders
    * nothing — a fresh live run intentionally has no cache pill.
+   *
+   * Task #227 extension: `upstreamFreshness` carries the verdict
+   * from the adapter's optional `getUpstreamFreshness()` hook. When
+   * `status === "stale"` we flip the pill to a "cache may be stale"
+   * warning variant; `fresh` and `unknown` (and a missing verdict)
+   * keep the existing neutral "cached <n>h ago" pill.
    */
-  cacheInfo?: { fromCache: boolean; cachedAt: string | null } | null;
+  cacheInfo?: {
+    fromCache: boolean;
+    cachedAt: string | null;
+    upstreamFreshness?: {
+      status: "fresh" | "stale" | "unknown";
+      reason: string | null;
+    } | null;
+  } | null;
   /**
    * Task #228 — when the parent passes a callback, federal-adapter
    * rows render a "Refresh this layer" affordance that hands back
@@ -1088,7 +1101,7 @@ export function BriefingSourceRow({
           >
             {SOURCE_KIND_BADGE_LABEL[source.sourceKind] ?? source.sourceKind}
           </span>
-          {cacheInfo?.fromCache && (
+          {cacheInfo?.fromCache && (() => {
             // Task #204 — surface "served from cache" so the architect
             // knows the reading is not a fresh upstream lookup. The
             // pill renders the row's age in whole hours when the cache
@@ -1096,27 +1109,55 @@ export function BriefingSourceRow({
             // recent hits ("cached 12m ago"), or "cached just now" for
             // sub-minute hits. Missing/garbled `cachedAt` falls back
             // to a neutral "cached" so we still flag it.
-            <span
-              className="sc-pill"
-              data-testid={`briefing-source-cache-pill-${source.id}`}
-              title={
-                cacheInfo.cachedAt
-                  ? `Reused a cached upstream response captured at ${new Date(cacheInfo.cachedAt).toLocaleString()}. Click "Force refresh" above to bypass the cache.`
-                  : "Reused a cached upstream response. Click \"Force refresh\" above to bypass the cache."
-              }
-              style={{
-                fontSize: 10,
-                padding: "2px 8px",
-                borderRadius: 999,
-                background: "var(--surface-muted)",
-                color: "var(--text-secondary)",
-                textTransform: "uppercase",
-                letterSpacing: 0.3,
-              }}
-            >
-              {formatCacheAgeLabel(cacheInfo.cachedAt)}
-            </span>
-          )}
+            //
+            // Task #227 — when the adapter's optional freshness check
+            // says the upstream feed has likely moved (e.g. FEMA
+            // published a new NFHL revision after this row was
+            // cached), flip the pill to a danger-styled warning
+            // variant with a tooltip explaining why so the architect
+            // can decide to force-refresh. `fresh` and `unknown` keep
+            // the existing neutral pill — `unknown` is a soft signal,
+            // not an actionable warning.
+            const isStale = cacheInfo.upstreamFreshness?.status === "stale";
+            const baseAgeLabel = formatCacheAgeLabel(cacheInfo.cachedAt);
+            const label = isStale ? "cache may be stale" : baseAgeLabel;
+            const captureLine = cacheInfo.cachedAt
+              ? `Reused a cached upstream response captured at ${new Date(cacheInfo.cachedAt).toLocaleString()}.`
+              : "Reused a cached upstream response.";
+            const reasonLine = cacheInfo.upstreamFreshness?.reason
+              ? ` ${cacheInfo.upstreamFreshness.reason}`
+              : "";
+            const ctaLine = ' Click "Force refresh" above to bypass the cache.';
+            const tooltip = isStale
+              ? `Cache may be stale.${reasonLine}${" "}${captureLine}${ctaLine}`
+              : `${captureLine}${reasonLine}${ctaLine}`;
+            return (
+              <span
+                className="sc-pill"
+                data-testid={`briefing-source-cache-pill-${source.id}`}
+                data-cache-freshness={
+                  cacheInfo.upstreamFreshness?.status ?? "unchecked"
+                }
+                title={tooltip}
+                style={{
+                  fontSize: 10,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  background: isStale
+                    ? "var(--danger-dim)"
+                    : "var(--surface-muted)",
+                  color: isStale
+                    ? "var(--danger-text)"
+                    : "var(--text-secondary)",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.3,
+                  fontWeight: isStale ? 600 : undefined,
+                }}
+              >
+                {label}
+              </span>
+            );
+          })()}
         </div>
       </div>
       {adapterSummary && (
@@ -2843,16 +2884,35 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
   // with a non-null `sourceId` (the row was actually persisted) so
   // there's no entry at all for fresh-live or no-coverage outcomes —
   // the row component renders nothing in that case.
+  //
+  // Task #227 extension: when the runner attached an
+  // `upstreamFreshness` verdict (only on cache hits whose adapter
+  // implements `getUpstreamFreshness()`), pass it through too so the
+  // row can flip the pill to a "cache may be stale" warning when the
+  // upstream feed has likely moved.
   const cacheInfoBySourceId = useMemo(() => {
     const map = new Map<
       string,
-      { fromCache: boolean; cachedAt: string | null }
+      {
+        fromCache: boolean;
+        cachedAt: string | null;
+        upstreamFreshness: {
+          status: "fresh" | "stale" | "unknown";
+          reason: string | null;
+        } | null;
+      }
     >();
     for (const o of lastOutcomes) {
       if (o.fromCache && o.sourceId) {
         map.set(o.sourceId, {
           fromCache: true,
           cachedAt: o.cachedAt ?? null,
+          upstreamFreshness: o.upstreamFreshness
+            ? {
+                status: o.upstreamFreshness.status,
+                reason: o.upstreamFreshness.reason ?? null,
+              }
+            : null,
         });
       }
     }

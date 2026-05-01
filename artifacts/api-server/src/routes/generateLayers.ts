@@ -272,6 +272,18 @@ interface GenerateLayersOutcomeWire {
    * `null` when {@link fromCache} is false.
    */
   cachedAt: string | null;
+  /**
+   * Task #227: verdict from the adapter's optional
+   * `getUpstreamFreshness()` hook. `null` for live runs, for non-`ok`
+   * outcomes, and for cache hits whose adapter doesn't implement the
+   * hook. The Site Context tab branches on `status === "stale"` to
+   * render a warning pill instead of the existing "cached <n>h ago"
+   * variant.
+   */
+  upstreamFreshness: {
+    status: "fresh" | "stale" | "unknown";
+    reason: string | null;
+  } | null;
 }
 
 const router: IRouter = Router();
@@ -604,6 +616,17 @@ router.post(
       // outcomes so the FE never has to handle `undefined`.
       fromCache: o.fromCache === true,
       cachedAt: o.fromCache === true ? o.cachedAt ?? null : null,
+      // Task #227: only attach the freshness verdict for cache hits
+      // — for live runs and non-ok outcomes the runner returns null
+      // and we forward that. Normalize the optional `reason` field
+      // to `null` so the wire shape is always strict.
+      upstreamFreshness:
+        o.fromCache === true && o.upstreamFreshness
+          ? {
+              status: o.upstreamFreshness.status,
+              reason: o.upstreamFreshness.reason ?? null,
+            }
+          : null,
     }));
 
     if (!briefingRow) {

@@ -66,6 +66,8 @@ export * from "./generateLayersOutcomeError";
 export * from "./generateLayersOutcomeErrorCode";
 export * from "./generateLayersOutcomeStatus";
 export * from "./generateLayersOutcomeTier";
+export * from "./generateLayersOutcomeUpstreamFreshness";
+export * from "./generateLayersOutcomeUpstreamFreshnessStatus";
 export * from "./generateLayersResponse";
 export * from "./geocode";
 export * from "./geocodeSource";

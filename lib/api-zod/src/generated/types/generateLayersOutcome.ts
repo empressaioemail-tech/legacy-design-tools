@@ -9,6 +9,7 @@ import type { BriefingSourceKind } from "./briefingSourceKind";
 import type { GenerateLayersOutcomeError } from "./generateLayersOutcomeError";
 import type { GenerateLayersOutcomeStatus } from "./generateLayersOutcomeStatus";
 import type { GenerateLayersOutcomeTier } from "./generateLayersOutcomeTier";
+import type { GenerateLayersOutcomeUpstreamFreshness } from "./generateLayersOutcomeUpstreamFreshness";
 
 /**
  * Per-adapter outcome for one `POST /engagements/{id}/generate-layers`
@@ -52,4 +53,15 @@ written (i.e. when the underlying upstream lookup actually
 ran). Always `null` when `fromCache` is `false`.
  */
   cachedAt: Date | null;
+  /** Task #227 — verdict from the adapter's optional
+`getUpstreamFreshness()` hook, populated only on
+`fromCache=true` outcomes whose adapter implements the
+hook (today: FEMA NFHL). `null` for live runs, for cache
+hits whose adapter doesn't implement the hook, and for
+non-`ok` outcomes. The Site Context tab uses the verdict
+to flip the existing "cached <n>h ago" pill to a "cache
+may be stale" warning variant when the upstream feed has
+published a newer revision since the cache was written.
+ */
+  upstreamFreshness?: GenerateLayersOutcomeUpstreamFreshness;
 }

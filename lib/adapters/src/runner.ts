@@ -23,6 +23,7 @@ import {
   type AdapterContext,
   type AdapterError,
   type AdapterRunOutcome,
+  type UpstreamFreshness,
   AdapterRunError,
 } from "./types";
 import {
@@ -124,6 +125,17 @@ async function runOne(
     try {
       const hit = await cache.get(cacheKey);
       if (hit) {
+        // Task #227 — ask the adapter (when it implements the hook)
+        // whether the cached snapshot still tracks what the upstream
+        // would return now. The check is best-effort: a thrown error
+        // or a hook that doesn't exist both collapse to "no verdict
+        // attached", which the FE renders as the existing "cached
+        // <n>h ago" pill rather than the stale-warning variant.
+        const upstreamFreshness = await checkUpstreamFreshness(
+          adapter,
+          context,
+          hit.cachedAt,
+        );
         return {
           adapterKey: adapter.adapterKey,
           tier: adapter.tier,
@@ -132,6 +144,7 @@ async function runOne(
           result: hit.result,
           fromCache: true,
           cachedAt: hit.cachedAt.toISOString(),
+          upstreamFreshness,
         };
       }
     } catch {
@@ -168,6 +181,11 @@ async function runOne(
       result,
       fromCache: false,
       cachedAt: null,
+      // Live runs are by definition the source of truth — there's no
+      // stale cache to compare against, so the freshness verdict is
+      // always null (not "fresh"; the FE branches on null to mean
+      // "this row didn't go through the cache path").
+      upstreamFreshness: null,
     };
   } catch (err) {
     const error = toAdapterError(err, ac.signal.aborted, timeoutMs);
@@ -194,6 +212,46 @@ async function runOne(
 
 const defaultCachePredicate: AdapterCachePredicate = (a) =>
   a.tier === "federal";
+
+/**
+ * Call the adapter's optional freshness hook (Task #227) without
+ * letting a bad implementation break the cache-hit return path. The
+ * runner serves the cached row regardless of the verdict — the
+ * verdict is metadata the FE renders on top — so any throw or
+ * malformed return collapses to an `unknown` status.
+ */
+async function checkUpstreamFreshness(
+  adapter: Adapter,
+  ctx: AdapterContext,
+  cachedAt: Date,
+): Promise<UpstreamFreshness | null> {
+  if (typeof adapter.getUpstreamFreshness !== "function") return null;
+  try {
+    const verdict = await adapter.getUpstreamFreshness({ ctx, cachedAt });
+    if (
+      !verdict ||
+      typeof verdict !== "object" ||
+      typeof verdict.status !== "string" ||
+      (verdict.status !== "fresh" &&
+        verdict.status !== "stale" &&
+        verdict.status !== "unknown")
+    ) {
+      return { status: "unknown", reason: "Freshness hook returned a malformed verdict." };
+    }
+    return {
+      status: verdict.status,
+      reason: typeof verdict.reason === "string" ? verdict.reason : null,
+    };
+  } catch (err) {
+    return {
+      status: "unknown",
+      reason:
+        err instanceof Error && err.message
+          ? `Freshness check failed: ${err.message}`
+          : "Freshness check failed.",
+    };
+  }
+}
 
 function toAdapterError(
   err: unknown,

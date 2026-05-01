@@ -1495,6 +1495,24 @@ export const GenerateEngagementLayersResponse = zod
             .describe(
               "Task #204 — ISO8601 timestamp of when the cached row was\nwritten (i.e. when the underlying upstream lookup actually\nran). Always `null` when `fromCache` is `false`.\n",
             ),
+          upstreamFreshness: zod
+            .object({
+              status: zod
+                .enum(["fresh", "stale", "unknown"])
+                .describe(
+                  "`fresh` — upstream confirms the cached snapshot is\nstill current. `stale` — upstream has published a\nnewer revision; force-refresh recommended. `unknown`\n— the freshness check itself failed (network blip,\nmetadata missing, malformed response); UI surfaces it\nas a soft hint without escalating to a warning.\n",
+                ),
+              reason: zod
+                .string()
+                .nullish()
+                .describe(
+                  'Short human-readable phrase the FE folds into the\npill\'s tooltip, e.g. \"FEMA published a NFHL revision\nat <iso> after this cache row was written\". Optional\n— implementations may omit it.\n',
+                ),
+            })
+            .nullish()
+            .describe(
+              'Task #227 — verdict from the adapter\'s optional\n`getUpstreamFreshness()` hook, populated only on\n`fromCache=true` outcomes whose adapter implements the\nhook (today: FEMA NFHL). `null` for live runs, for cache\nhits whose adapter doesn\'t implement the hook, and for\nnon-`ok` outcomes. The Site Context tab uses the verdict\nto flip the existing \"cached <n>h ago\" pill to a \"cache\nmay be stale\" warning variant when the upstream feed has\npublished a newer revision since the cache was written.\n',
+            ),
         })
         .describe(
           "Per-adapter outcome for one `POST \/engagements\/{id}\/generate-layers`\ninvocation. `status=ok` means the adapter ran and a row was\npersisted (the row is included in `briefing.sources`); `status=\nno-coverage` means the adapter ran (or was skipped because its\njurisdiction gate did not match) and there is nothing to\npersist; `status=failed` means the adapter ran and threw — the\n`error` discriminates the reason so the UI can render an\nactionable message.\n",

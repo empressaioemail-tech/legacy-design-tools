@@ -310,6 +310,153 @@ describe("runAdapters with cache", () => {
     });
   });
 
+  it("attaches a fresh upstream-freshness verdict from the adapter on a cache hit (Task #227)", async () => {
+    const cache = new InMemoryCache();
+    const cachedResult: AdapterResult = {
+      adapterKey: "fema:nfhl-flood-zone",
+      tier: "federal",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "FEMA",
+      snapshotDate: "2025-12-01T00:00:00.000Z",
+      payload: { kind: "flood-zone", floodZone: "AE" },
+    };
+    const cachedAt = new Date("2026-04-30T12:00:00.000Z");
+    cache.store.set("fema:nfhl-flood-zone|38.5733|-109.5499", {
+      result: cachedResult,
+      cachedAt,
+    });
+    const freshnessHook = vi.fn(async () => ({
+      status: "fresh" as const,
+      reason: "Upstream layer matches the cached snapshot.",
+    }));
+    const adapter: Adapter = {
+      ...makeAdapter({ key: "fema:nfhl-flood-zone", tier: "federal" }),
+      getUpstreamFreshness: freshnessHook,
+    };
+    const outcomes = await runAdapters({
+      adapters: [adapter],
+      context: utahCtx,
+      cache,
+    });
+    expect(outcomes[0].fromCache).toBe(true);
+    expect(outcomes[0].upstreamFreshness).toEqual({
+      status: "fresh",
+      reason: "Upstream layer matches the cached snapshot.",
+    });
+    expect(freshnessHook).toHaveBeenCalledOnce();
+    const callArg = freshnessHook.mock.calls[0][0] as {
+      ctx: AdapterContext;
+      cachedAt: Date;
+    };
+    expect(callArg.cachedAt.toISOString()).toBe(cachedAt.toISOString());
+  });
+
+  it("attaches a stale upstream-freshness verdict on a cache hit when the adapter says the feed has moved (Task #227)", async () => {
+    const cache = new InMemoryCache();
+    const cachedResult: AdapterResult = {
+      adapterKey: "fema:nfhl-flood-zone",
+      tier: "federal",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "FEMA",
+      snapshotDate: "2025-12-01T00:00:00.000Z",
+      payload: { kind: "flood-zone", floodZone: "AE" },
+    };
+    cache.store.set("fema:nfhl-flood-zone|38.5733|-109.5499", {
+      result: cachedResult,
+      cachedAt: new Date("2026-04-30T12:00:00.000Z"),
+    });
+    const adapter: Adapter = {
+      ...makeAdapter({ key: "fema:nfhl-flood-zone", tier: "federal" }),
+      getUpstreamFreshness: async () => ({
+        status: "stale" as const,
+        reason: "Upstream published a newer revision at 2026-05-01T00:00:00Z.",
+      }),
+    };
+    const outcomes = await runAdapters({
+      adapters: [adapter],
+      context: utahCtx,
+      cache,
+    });
+    expect(outcomes[0].fromCache).toBe(true);
+    expect(outcomes[0].upstreamFreshness?.status).toBe("stale");
+    expect(outcomes[0].upstreamFreshness?.reason).toContain("newer revision");
+  });
+
+  it("collapses a thrown freshness hook into an unknown verdict without breaking the cache hit (Task #227)", async () => {
+    const cache = new InMemoryCache();
+    cache.store.set("fema:nfhl-flood-zone|38.5733|-109.5499", {
+      result: {
+        adapterKey: "fema:nfhl-flood-zone",
+        tier: "federal",
+        layerKind: "fema-nfhl-flood-zone",
+        sourceKind: "federal-adapter",
+        provider: "FEMA",
+        snapshotDate: "2025-12-01T00:00:00.000Z",
+        payload: { kind: "flood-zone" },
+      },
+      cachedAt: new Date("2026-04-30T12:00:00.000Z"),
+    });
+    const adapter: Adapter = {
+      ...makeAdapter({ key: "fema:nfhl-flood-zone", tier: "federal" }),
+      getUpstreamFreshness: async () => {
+        throw new Error("metadata endpoint timed out");
+      },
+    };
+    const outcomes = await runAdapters({
+      adapters: [adapter],
+      context: utahCtx,
+      cache,
+    });
+    expect(outcomes[0].status).toBe("ok");
+    expect(outcomes[0].fromCache).toBe(true);
+    expect(outcomes[0].upstreamFreshness?.status).toBe("unknown");
+    expect(outcomes[0].upstreamFreshness?.reason).toContain("metadata endpoint timed out");
+  });
+
+  it("leaves upstreamFreshness null on cache hits whose adapter does not implement the hook (Task #227)", async () => {
+    const cache = new InMemoryCache();
+    cache.store.set("fema:nfhl-flood-zone|38.5733|-109.5499", {
+      result: {
+        adapterKey: "fema:nfhl-flood-zone",
+        tier: "federal",
+        layerKind: "fema-nfhl-flood-zone",
+        sourceKind: "federal-adapter",
+        provider: "FEMA",
+        snapshotDate: "2025-12-01T00:00:00.000Z",
+        payload: { kind: "flood-zone" },
+      },
+      cachedAt: new Date("2026-04-30T12:00:00.000Z"),
+    });
+    const adapter = makeAdapter({
+      key: "fema:nfhl-flood-zone",
+      tier: "federal",
+    });
+    const outcomes = await runAdapters({
+      adapters: [adapter],
+      context: utahCtx,
+      cache,
+    });
+    expect(outcomes[0].fromCache).toBe(true);
+    expect(outcomes[0].upstreamFreshness).toBeNull();
+  });
+
+  it("leaves upstreamFreshness null on live (non-cached) runs (Task #227)", async () => {
+    const cache = new InMemoryCache();
+    const adapter: Adapter = {
+      ...makeAdapter({ key: "fema:nfhl-flood-zone", tier: "federal" }),
+      getUpstreamFreshness: async () => ({ status: "fresh" as const }),
+    };
+    const outcomes = await runAdapters({
+      adapters: [adapter],
+      context: utahCtx,
+      cache,
+    });
+    expect(outcomes[0].fromCache).toBe(false);
+    expect(outcomes[0].upstreamFreshness).toBeNull();
+  });
+
   it("skips the cache when the parcel coordinates are not finite", async () => {
     const cache = new InMemoryCache();
     const runMock = vi.fn(async () => ({

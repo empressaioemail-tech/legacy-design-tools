@@ -131,6 +131,34 @@ export interface AdapterError {
 }
 
 /**
+ * Verdict returned by an adapter's optional `getUpstreamFreshness`
+ * hook (Task #227). The runner asks this question only on cache hits
+ * — for live runs the result is by definition fresh and the field is
+ * never populated. Status semantics:
+ *
+ *   - `fresh`   — upstream confirms the cached snapshot still tracks
+ *                 what the feed would return now.
+ *   - `stale`   — upstream has published a newer revision since the
+ *                 cache was written; the architect should consider a
+ *                 "Force refresh" before trusting this row.
+ *   - `unknown` — the freshness check couldn't run (network blip,
+ *                 metadata missing, parse error). Treated as a soft
+ *                 signal — the UI surfaces it without escalating to a
+ *                 full warning.
+ *
+ * `reason` is a short, human-readable phrase the FE folds into the
+ * pill's tooltip so the architect can tell whether the warning is
+ * "the layer was edited 3h ago" vs "we couldn't reach the upstream
+ * metadata endpoint" without opening the dev tools.
+ */
+export type UpstreamFreshnessStatus = "fresh" | "stale" | "unknown";
+
+export interface UpstreamFreshness {
+  status: UpstreamFreshnessStatus;
+  reason?: string | null;
+}
+
+/**
  * One adapter's run outcome. Either `result` (success) or `error`
  * (deterministic failure) is set; never both. The runner returns an
  * array of these — per-source failure isolation per locked decision #6.
@@ -141,6 +169,14 @@ export interface AdapterError {
  * for non-`ok` statuses; `cachedAt` is the ISO8601 timestamp of when
  * the cache row was originally written so the UI can render a
  * "cached <n>h ago" pill without re-deriving the age elsewhere.
+ *
+ * `upstreamFreshness` (Task #227): set when a cache hit's adapter
+ * exposes the {@link Adapter.getUpstreamFreshness} hook and the
+ * runner was able to call it. `null`/absent for live runs, for
+ * non-`ok` statuses, and for cache hits whose adapter does not
+ * implement the hook. The Site Context tab uses the verdict to flip
+ * the existing "cached <n>h ago" pill to a "cache may be stale"
+ * variant when the upstream feed has likely moved.
  */
 export interface AdapterRunOutcome {
   adapterKey: string;
@@ -153,6 +189,12 @@ export interface AdapterRunOutcome {
   fromCache?: boolean;
   /** ISO8601 cache write time when {@link fromCache} is true; otherwise null. */
   cachedAt?: string | null;
+  /**
+   * Upstream freshness verdict for cache-hit outcomes whose adapter
+   * implements {@link Adapter.getUpstreamFreshness}. Null/absent for
+   * live runs and for cache hits where the hook is not implemented.
+   */
+  upstreamFreshness?: UpstreamFreshness | null;
 }
 
 /**
@@ -183,6 +225,28 @@ export interface Adapter {
    * mark it `unknown` without losing the trace.
    */
   run(ctx: AdapterContext): Promise<AdapterResult>;
+  /**
+   * Optional cheap "is the cached snapshot still current?" check
+   * (Task #227). The runner calls this only on cache hits and only
+   * when defined; live runs skip it because a fresh fetch is by
+   * definition the source of truth.
+   *
+   * Implementations should be cheap relative to {@link run} — a HEAD
+   * request, an ETag conditional GET, or a metadata-endpoint round-
+   * trip — because the whole point of consulting the cache was to
+   * avoid the expensive call. Anything that throws is collapsed by
+   * the runner to an `unknown` verdict, so implementations don't
+   * need their own error wrapping.
+   *
+   * `cachedAt` is the timestamp of the cached row the runner is
+   * about to serve — implementations compare it against the
+   * upstream's "last published" signal to decide between `fresh`
+   * and `stale`.
+   */
+  getUpstreamFreshness?(args: {
+    ctx: AdapterContext;
+    cachedAt: Date;
+  }): Promise<UpstreamFreshness>;
 }
 
 /**
