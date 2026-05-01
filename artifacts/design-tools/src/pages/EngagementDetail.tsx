@@ -93,10 +93,16 @@ function KpiTile({
   value: number | string | null | undefined;
   footnote?: string;
 }) {
+  // testid is keyed on a normalized lowercase label so e2e tests
+  // (`engagement-snapshot-timeline.spec.ts`) can target individual
+  // tiles without relying on visible text or DOM order.
+  const testId = `engagement-kpi-${label.toLowerCase()}`;
   return (
-    <div className="sc-card p-4">
+    <div className="sc-card p-4" data-testid={testId}>
       <div className="sc-label">{label}</div>
-      <div className="sc-kpi-md mt-2">{value ?? "—"}</div>
+      <div className="sc-kpi-md mt-2" data-testid={`${testId}-value`}>
+        {value ?? "—"}
+      </div>
       {footnote && <div className="sc-meta mt-1 opacity-70">{footnote}</div>}
     </div>
   );
@@ -1795,7 +1801,10 @@ export function EngagementDetail() {
                   <span className="sc-label">SNAPSHOTS</span>
                   <span className="sc-meta">{snapshots.length}</span>
                 </div>
-                <div className="flex-1 overflow-y-auto sc-scroll">
+                <div
+                  className="flex-1 overflow-y-auto sc-scroll"
+                  data-testid="engagement-snapshot-timeline"
+                >
                   {!hasSnapshots ? (
                     <div className="p-4 sc-body text-center opacity-70">
                       No snapshots yet. Send one from Revit.
@@ -1806,6 +1815,8 @@ export function EngagementDetail() {
                       return (
                         <div
                           key={s.id}
+                          data-testid={`snapshot-row-${s.id}`}
+                          data-selected={isSelected ? "true" : "false"}
                           className={`sc-card-row sc-card-clickable flex flex-col ${
                             isSelected ? "sc-accent-cyan" : ""
                           }`}
