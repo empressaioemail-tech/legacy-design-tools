@@ -1616,6 +1616,90 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     ).not.toBeInTheDocument();
   });
 
+  it("renders a 'Filtered: …' cue on the collapsed row when a non-default tier filter is persisted (Task #205)", () => {
+    // Pre-seed the persisted tier so the row's first render reads the
+    // restored value synchronously, mirroring the post-refresh flow
+    // an architect would hit. We pin both adapter and manual tiers so
+    // the cue label / data-tier attribute are exercised.
+    const adapterRow = mkSource({
+      id: "src-fed-cue-adapter",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    window.localStorage.setItem(
+      briefingSourceHistoryTierStorageKey("eng-cue"),
+      "adapter",
+    );
+    renderRow(adapterRow, "eng-cue");
+
+    const adapterCue = screen.getByTestId(
+      `briefing-source-history-filter-cue-${adapterRow.id}`,
+    );
+    expect(adapterCue).toBeInTheDocument();
+    expect(adapterCue.getAttribute("data-tier")).toBe("adapter");
+    expect(adapterCue.textContent).toMatch(/Generate Layers/);
+    cleanup();
+
+    // Manual tier — same fixture shape, different persisted value,
+    // separate engagement key so the previous spec's setItem can't
+    // bleed into this assertion.
+    const manualRow = mkSource({
+      id: "src-fed-cue-manual",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    window.localStorage.setItem(
+      briefingSourceHistoryTierStorageKey("eng-cue-manual"),
+      "manual",
+    );
+    renderRow(manualRow, "eng-cue-manual");
+
+    const manualCue = screen.getByTestId(
+      `briefing-source-history-filter-cue-${manualRow.id}`,
+    );
+    expect(manualCue.getAttribute("data-tier")).toBe("manual");
+    expect(manualCue.textContent).toMatch(/Manual uploads/);
+  });
+
+  it("does NOT render the 'Filtered: …' cue when the persisted tier is the default 'all' (Task #205)", () => {
+    // No `setItem` call before render — `readBriefingSourceHistoryTier`
+    // falls back to "all" and the cue must stay off so an unfiltered
+    // panel doesn't read as "filtered" to the user.
+    const row = mkSource({
+      id: "src-fed-cue-none",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    renderRow(row, "eng-cue-none");
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-filter-cue-${row.id}`,
+      ),
+    ).not.toBeInTheDocument();
+
+    // Explicit "all" written into storage — same outcome: no cue.
+    cleanup();
+    const row2 = mkSource({
+      id: "src-fed-cue-all",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    window.localStorage.setItem(
+      briefingSourceHistoryTierStorageKey("eng-cue-all"),
+      "all",
+    );
+    renderRow(row2, "eng-cue-all");
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-filter-cue-${row2.id}`,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("reveals the prior + current values for an FCC broadband tier rerun (Task #224)", () => {
     // FCC broadband rerun: provider count went from 1 → 2 and the
     // fastest tier crossed the gigabit boundary (100 Mbps → 1 Gbps).
@@ -2194,6 +2278,45 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
         .getByTestId(`briefing-source-history-toggle-${current.id}`)
         .textContent,
     ).toBe("View history");
+  });
+
+  it("clears the row's 'Filtered: …' cue when the open panel resets the tier filter to All (Task #205)", () => {
+    // Mount the row with a persisted non-default tier so the cue is
+    // present on first render. Then open the panel via the toggle and
+    // click the "All" filter button — the row's subscription to the
+    // shared change event must drop the cue without a remount.
+    const current = mkSource({
+      id: "src-cue-reset",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      createdAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current];
+    window.localStorage.setItem(
+      briefingSourceHistoryTierStorageKey("eng-cue-reset"),
+      "adapter",
+    );
+    renderRow(current, "eng-cue-reset");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-filter-cue-${current.id}`,
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByTestId(`briefing-source-history-toggle-${current.id}`),
+    );
+    fireEvent.click(
+      screen.getByTestId(
+        `briefing-source-history-filter-all-${current.id}`,
+      ),
+    );
+
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-filter-cue-${current.id}`,
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {

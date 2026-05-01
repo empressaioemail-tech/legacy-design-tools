@@ -1026,6 +1026,19 @@ export function BriefingSourceRow({
   const conversionStyle = conversionStatus
     ? CONVERSION_STATUS_STYLE[conversionStatus]
     : null;
+  // Surfaces the persisted "Generate Layers" / "Manual uploads"
+  // history filter as a "filtered view" pill next to the row's
+  // history toggle (Task #205). When the architect refreshes the
+  // page after picking a non-default tier, the localStorage value
+  // restores the filter on first render of the panel — but if they
+  // never open the panel they would have no idea rows are being
+  // hidden. The cue is inert (it's not a button), only renders when
+  // the persisted tier is non-default, and updates live when the
+  // user resets the filter from inside the open panel via the
+  // shared custom-event channel.
+  const persistedHistoryTier = useBriefingSourceHistoryTier(engagementId);
+  const persistedHistoryTierLabel =
+    BRIEFING_SOURCE_HISTORY_TIER_LABEL[persistedHistoryTier];
   return (
     <div
       className="sc-card"
@@ -1312,6 +1325,37 @@ export function BriefingSourceRow({
               {detailsExpanded ? "Hide layer details" : "View layer details"}
             </button>
           )}
+          {persistedHistoryTierLabel && (
+            <span
+              data-testid={`briefing-source-history-filter-cue-${source.id}`}
+              data-tier={persistedHistoryTier}
+              // Inert cue, not a button: clicking it would race the
+              // toggle next to it and the user already has the
+              // explicit filter pills inside the open panel for
+              // resetting. The pill mirrors the "Generate Layers" /
+              // "Manual uploads" badge styling used elsewhere on the
+              // row so it reads as related to the same source kinds.
+              title={`History filtered to ${persistedHistoryTierLabel}`}
+              style={{
+                fontSize: 10,
+                padding: "1px 6px",
+                borderRadius: 999,
+                background:
+                  persistedHistoryTier === "manual"
+                    ? "var(--info-dim)"
+                    : "var(--success-dim)",
+                color:
+                  persistedHistoryTier === "manual"
+                    ? "var(--info-text)"
+                    : "var(--success-text)",
+                textTransform: "uppercase",
+                letterSpacing: 0.3,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Filtered: {persistedHistoryTierLabel}
+            </span>
+          )}
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
@@ -1471,6 +1515,19 @@ export function briefingSourceHistoryTierStorageKey(engagementId: string) {
   return `${BRIEFING_SOURCE_HISTORY_TIER_STORAGE_PREFIX}${engagementId}`;
 }
 
+/**
+ * Same-tab notification channel for "the persisted tier filter for
+ * engagement X just changed". The native `storage` event only fires
+ * across tabs, but the collapsed `BriefingSourceRow` toggle and the
+ * open `BriefingSourceHistoryPanel` live in the same tab and need
+ * their cue / radio state to stay in sync. Dispatching a custom
+ * event keyed by the storage key lets the row's `useBriefingSourceHistoryTier`
+ * subscriber re-read the value without coupling the two components
+ * through props (the panel test mounts the panel in isolation).
+ */
+const BRIEFING_SOURCE_HISTORY_TIER_CHANGE_EVENT =
+  "briefing-source-history-tier:change";
+
 function readBriefingSourceHistoryTier(
   storageKey: string,
 ): "all" | "adapter" | "manual" {
@@ -1528,6 +1585,15 @@ function writeBriefingSourceHistoryTier(
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(storageKey, value);
+    // Same-tab notification — see comment above on the event constant.
+    // Best-effort: a CustomEvent dispatch can throw in degraded
+    // environments, in which case we silently fall back to "the cue
+    // updates on the next mount" rather than failing the write.
+    window.dispatchEvent(
+      new CustomEvent(BRIEFING_SOURCE_HISTORY_TIER_CHANGE_EVENT, {
+        detail: storageKey,
+      }),
+    );
   } catch {
     /* ignore — falling back to in-memory state is acceptable */
   }
@@ -1541,6 +1607,71 @@ function writeBriefingSourceHistoryTier(
     listener(value);
   }
 }
+
+/**
+ * Subscribe to the persisted tier filter for an engagement. Returns
+ * the live value (so the collapsed-row cue updates the moment the
+ * panel's filter is clicked) and is safe in SSR / disabled-storage
+ * environments — both readers swallow their failures and fall back
+ * to the default "all" tier.
+ */
+function useBriefingSourceHistoryTier(
+  engagementId: string,
+): "all" | "adapter" | "manual" {
+  const storageKey = briefingSourceHistoryTierStorageKey(engagementId);
+  const [tier, setTier] = useState<"all" | "adapter" | "manual">(() =>
+    readBriefingSourceHistoryTier(storageKey),
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Re-sync if the engagement (and therefore the storage key)
+    // changes between renders — the lazy initializer above only ran
+    // once.
+    setTier(readBriefingSourceHistoryTier(storageKey));
+    const handleCustom = (event: Event) => {
+      if (
+        event instanceof CustomEvent &&
+        typeof event.detail === "string" &&
+        event.detail === storageKey
+      ) {
+        setTier(readBriefingSourceHistoryTier(storageKey));
+      }
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === storageKey) {
+        setTier(readBriefingSourceHistoryTier(storageKey));
+      }
+    };
+    window.addEventListener(
+      BRIEFING_SOURCE_HISTORY_TIER_CHANGE_EVENT,
+      handleCustom,
+    );
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(
+        BRIEFING_SOURCE_HISTORY_TIER_CHANGE_EVENT,
+        handleCustom,
+      );
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [storageKey]);
+  return tier;
+}
+
+/**
+ * Reader-friendly label for each non-default tier filter, surfaced
+ * inside the collapsed history toggle's "filtered view" cue so the
+ * architect knows *which* tier is hiding rows before they click.
+ * "all" returns null because the cue is suppressed in that case.
+ */
+export const BRIEFING_SOURCE_HISTORY_TIER_LABEL = {
+  all: null,
+  adapter: "Generate Layers",
+  manual: "Manual uploads",
+} as const satisfies Record<
+  "all" | "adapter" | "manual",
+  string | null
+>;
 
 /**
  * Lazily-loaded per-layer history list rendered beneath a current
