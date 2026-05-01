@@ -987,6 +987,115 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
   });
 
+  // --- Task #402 — gesture legend so reviewers find pan/zoom/rotate ---
+
+  it("surfaces a gesture legend on the canvas so reviewers know they can pan, zoom, rotate, and reset", () => {
+    render(<BimModelViewport elements={elements} />);
+    const hint = screen.getByTestId("bim-model-viewport-gesture-hint");
+    expect(hint).toBeInTheDocument();
+    // The hint copy must read naturally to a reviewer who has never
+    // used a 3D viewer before — explicit verbs for every gesture
+    // the viewport responds to (Task #380), plus the Reset view
+    // affordance that lives next to it in the same canvas corner.
+    const text = hint.textContent ?? "";
+    expect(text.toLowerCase()).toContain("drag");
+    expect(text.toLowerCase()).toContain("pan");
+    expect(text.toLowerCase()).toContain("scroll");
+    expect(text.toLowerCase()).toContain("zoom");
+    expect(text.toLowerCase()).toContain("rotate");
+    expect(text.toLowerCase()).toContain("reset");
+  });
+
+  it("the gesture legend doesn't intercept mouse input — the canvas stays interactive underneath it", () => {
+    // Reviewers click-drag through the canvas to pan, so a hint
+    // that swallowed pointer events would silently break Task #380.
+    // pointerEvents:"none" keeps the hint visual-only.
+    render(<BimModelViewport elements={elements} />);
+    const hint = screen.getByTestId("bim-model-viewport-gesture-hint");
+    expect(hint.style.pointerEvents).toBe("none");
+  });
+
+  it("hides the gesture legend when WebGL is unavailable (the canvas isn't live, so there's nothing to hint about)", () => {
+    hoisted.webGlAvailable = false;
+    render(<BimModelViewport elements={elements} />);
+    // The webgl-fallback message already explains the situation —
+    // a "drag to pan" hint on top of "your browser doesn't support
+    // 3D viewing" would just confuse reviewers.
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-webgl-fallback"),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the gesture legend when there's no scene to interact with (empty renderable set)", () => {
+    // The empty-state hint already dominates the canvas with its
+    // own "no renderable geometry yet" message; layering a gesture
+    // legend on top would crowd it for no benefit (there's nothing
+    // to pan to).
+    render(<BimModelViewport elements={[]} />);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-empty"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the gesture legend visible alongside the GLB-loading overlay (they live in different canvas corners)", async () => {
+    // Loading overlay sits at the bottom of the canvas; the legend
+    // sits at the top-left. They must coexist so the reviewer sees
+    // the gesture hint even while the selected element's mesh is
+    // still streaming in.
+    let resolveFetch!: (value: unknown) => void;
+    hoisted.fetchMock.mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveFetch = res;
+        }),
+    );
+    render(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="el-terrain"
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("bim-model-viewport-glb-loading"),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    // Drain the dangling fetch so the test cleans up.
+    resolveFetch({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+    });
+  });
+
+  it("keeps the gesture legend visible alongside the no-geometry overlay", () => {
+    // The no-geometry overlay uses the bottom of the canvas; the
+    // gesture legend uses the top-left. They must coexist so a
+    // reviewer who jumped to an unrenderable element still learns
+    // the gesture model from the legend (they may pan/zoom over
+    // other elements while reading the warning).
+    render(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="wall:north-side-l2"
+      />,
+    );
+    expect(
+      screen.getByTestId("bim-model-viewport-no-geometry"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+  });
+
   it("does re-fit when the reviewer jumps to a different element via Show in 3D viewer", () => {
     const { rerender } = render(
       <BimModelViewport

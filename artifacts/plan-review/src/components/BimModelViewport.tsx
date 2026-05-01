@@ -1125,6 +1125,45 @@ export function BimModelViewport({
           aspectRatio: "16 / 9",
         }}
       >
+        {/*
+          Task #402 — gesture legend. Reviewers used to land on the
+          interactive 3D viewport (Task #380) with no on-canvas
+          affordance other than the Reset view button, so the
+          pan/zoom/rotate gestures were easy to miss. A small
+          persistent legend in the top-left corner surfaces those
+          gestures without dominating the canvas — top-right is
+          already the Reset view button, and bottom is reserved for
+          the GLB-loading / GLB-error / no-geometry overlays. We
+          only render the legend when there's actually a live scene
+          to interact with (WebGL available AND a frameable scene),
+          so it doesn't sit on top of the WebGL-fallback or
+          empty-state full-canvas overlays.
+        */}
+        {webGlOk && cameraFit && (
+          <div
+            data-testid="bim-model-viewport-gesture-hint"
+            aria-label="3D viewer controls: drag to pan, scroll to zoom, right-drag to rotate, Reset view to recenter"
+            style={{
+              position: "absolute",
+              top: 8,
+              left: 8,
+              background: "var(--bg-elevated)",
+              color: "var(--text-muted)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+              padding: "4px 8px",
+              fontSize: 11,
+              lineHeight: 1.35,
+              maxWidth: "60%",
+              opacity: 0.9,
+              pointerEvents: "none",
+              zIndex: 1,
+            }}
+          >
+            Drag to pan · Scroll to zoom · Right-drag to rotate ·
+            Reset view to recenter
+          </div>
+        )}
         {webGlOk && cameraFit && (
           <button
             type="button"
