@@ -332,3 +332,125 @@ test("Generate Layers: POST → outcome panel + cache-invalidation re-renders th
   // same final UI.
   expect(postCount).toBe(1);
 });
+
+/**
+ * Companion case for Task #177: the same Site Context tab, but the
+ * POST returns a structured 422 `no_applicable_adapters` envelope
+ * (the response shape the route emits for engagements outside the
+ * three pilot jurisdictions). We seed a Boulder CO engagement so the
+ * scenario reads naturally even though the route is fully stubbed,
+ * then assert that
+ *
+ *   - the generic `generate-layers-error` alert does NOT render —
+ *     surfacing the raw `no_applicable_adapters` slug as an upstream
+ *     failure was the bug the task was opened to fix;
+ *   - the new `generate-layers-no-adapters-banner` renders with the
+ *     server's human-readable `message` so an architect immediately
+ *     understands the cause is "this jurisdiction is not in the pilot
+ *     yet" rather than a transient outage;
+ *   - clicking the banner's CTA opens the existing
+ *     `BriefingSourceUploadModal` (asserted by the layer-kind select
+ *     control the modal owns). That proves the dead-end is actionable
+ *     instead of confusing.
+ */
+test("Generate Layers: 422 no_applicable_adapters renders the empty-pilot banner with a working upload CTA", async ({
+  page,
+}) => {
+  // Reuse the same engagement seeded in beforeAll — the FE wiring
+  // doesn't read jurisdiction from the seeded row to decide which
+  // banner to render (the server response is the single source of
+  // truth), so a Moab engagement is just as good as a Boulder one
+  // for stubbing the 422. Keeping a single seed also keeps the test
+  // file from doubling its DB churn.
+  let postCount = 0;
+
+  await page.route(
+    `**/api/engagements/${engagementId}/briefing`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      // Briefing stays empty throughout — the 422 path never persists
+      // any sources, so the briefing read after the failed POST is
+      // identical to the read before it. Asserting that the tier
+      // groups never appear is part of how we confirm the server's
+      // response was treated as an error, not a successful run with
+      // zero outcomes.
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ briefing: null }),
+      });
+    },
+  );
+
+  const serverMessage =
+    'No adapters configured for jurisdiction "CO" / "boulder".';
+
+  await page.route(
+    `**/api/engagements/${engagementId}/generate-layers`,
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      postCount += 1;
+      await route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "no_applicable_adapters",
+          message: serverMessage,
+        }),
+      });
+    },
+  );
+
+  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+
+  // Pre-condition: neither banner is up before the click.
+  await expect(
+    page.getByTestId("generate-layers-no-adapters-banner"),
+  ).toHaveCount(0);
+  await expect(page.getByTestId("generate-layers-error")).toHaveCount(0);
+
+  await page.getByTestId("generate-layers-button").click();
+
+  // The new empty-pilot banner is the only banner that should render.
+  // The generic `generate-layers-error` alert MUST stay absent — that
+  // was the bug: the architect on a non-pilot project saw the raw
+  // `no_applicable_adapters` slug there and could not tell the cause
+  // apart from a real upstream failure.
+  const banner = page.getByTestId("generate-layers-no-adapters-banner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText(
+    "No adapters configured for this jurisdiction yet",
+  );
+  await expect(
+    page.getByTestId("generate-layers-no-adapters-message"),
+  ).toContainText(serverMessage);
+  await expect(banner).toContainText(
+    "Upload a QGIS overlay below to seed the briefing manually.",
+  );
+  await expect(page.getByTestId("generate-layers-error")).toHaveCount(0);
+
+  // The briefing read still returns no sources, so neither tier
+  // group should have rendered as a side effect.
+  await expect(page.getByTestId("briefing-sources-tier-state")).toHaveCount(0);
+  await expect(page.getByTestId("briefing-sources-tier-local")).toHaveCount(0);
+  await expect(page.getByTestId("generate-layers-outcomes")).toHaveCount(0);
+
+  // Clicking the CTA opens the BriefingSourceUploadModal. The modal
+  // has no top-level testid; its `briefing-source-layer-kind` select
+  // is the cleanest proof of mounting because that id is unique to
+  // the modal subtree.
+  await expect(page.locator("#briefing-source-layer-kind")).toHaveCount(0);
+  await page.getByTestId("generate-layers-no-adapters-upload").click();
+  await expect(page.locator("#briefing-source-layer-kind")).toBeVisible();
+
+  // Sanity: only one POST fired. A regression that double-fires the
+  // mutation (e.g. by dropping `disabled={isPending}`) would still
+  // show the banner once but bump postCount above 1.
+  expect(postCount).toBe(1);
+});

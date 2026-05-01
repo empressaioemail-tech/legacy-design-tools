@@ -1966,21 +1966,47 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
       onSuccess: async (data) => {
         setLastOutcomes(data.outcomes);
         setLastGenerateError(null);
+        setLastGenerateErrorSlug(null);
         await queryClient.invalidateQueries({
           queryKey: getGetEngagementBriefingQueryKey(engagementId),
         });
       },
       onError: (err) => {
-        // The hook's error type is the OpenAPI `ErrorResponse`
-        // envelope — surface its `error` slug verbatim if present
-        // so the operator gets the same human-readable string the
-        // server logged.
+        // `customFetch` throws an `ApiError` whose `.data` is the
+        // parsed `ErrorResponse` body (`{ error, message }`). Pull
+        // the slug separately so the render branch can detect the
+        // `no_applicable_adapters` 422 envelope and show a
+        // jurisdiction-specific empty state with an upload CTA,
+        // instead of dumping the raw slug into the generic banner
+        // (Task #177). We additionally require `status === 422`
+        // before treating the slug as the empty-pilot signal — the
+        // route's contract pairs the slug with a 422 specifically,
+        // and matching both keys means a hypothetical future
+        // failure that happens to share the slug at a different
+        // status (e.g. a 500 wrapping the same string) cannot
+        // accidentally re-style as an actionable empty-pilot
+        // prompt. For every other failure we fall through to the
+        // message string the server returned (or the Error's own
+        // `.message` as a last resort) so an upstream timeout
+        // still reads naturally.
+        const apiErr = err as
+          | {
+              status?: number;
+              data?: { error?: string; message?: string } | null;
+            }
+          | undefined;
+        const data = apiErr?.data;
+        const slug = data?.error ?? null;
+        const isEmptyPilot =
+          apiErr?.status === 422 && slug === "no_applicable_adapters";
         const message =
-          (err as { error?: string; message?: string } | undefined)?.message ??
-          (err as { error?: string } | undefined)?.error ??
+          data?.message ??
+          (err as { message?: string } | undefined)?.message ??
+          slug ??
           "Failed to generate layers.";
         setLastOutcomes([]);
         setLastGenerateError(message);
+        setLastGenerateErrorSlug(isEmptyPilot ? slug : null);
       },
     },
   });
@@ -1988,6 +2014,13 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
   const [lastGenerateError, setLastGenerateError] = useState<string | null>(
     null,
   );
+  // Tracked alongside the human-readable message so the render
+  // branch can pick the empty-pilot-jurisdiction CTA banner when
+  // the server returns the `no_applicable_adapters` 422 envelope
+  // (Task #177).
+  const [lastGenerateErrorSlug, setLastGenerateErrorSlug] = useState<
+    string | null
+  >(null);
 
   const sources = briefingQuery.data?.briefing?.sources ?? [];
   const narrative = briefingQuery.data?.briefing?.narrative ?? null;
@@ -2113,20 +2146,71 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
         </div>
       </div>
 
-      {lastGenerateError && (
+      {lastGenerateErrorSlug === "no_applicable_adapters" ? (
+        // Distinct empty-pilot-jurisdiction banner (Task #177). The
+        // POST already returns a structured 422 with a human-readable
+        // `message` for engagements outside the three pilot
+        // jurisdictions (Bastrop TX, Moab UT, Salmon ID). Surfacing
+        // it through the generic `generate-layers-error` alert reads
+        // as an upstream failure; this branch instead frames it as
+        // an actionable dead-end and offers the manual-upload path
+        // the architect would otherwise have to discover on their
+        // own.
         <div
-          role="alert"
-          data-testid="generate-layers-error"
+          role="status"
+          data-testid="generate-layers-no-adapters-banner"
           style={{
             fontSize: 12,
-            color: "var(--danger-text)",
-            background: "var(--danger-dim)",
-            padding: 8,
+            color: "var(--info-text)",
+            background: "var(--info-dim)",
+            padding: 12,
             borderRadius: 4,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            justifyContent: "space-between",
           }}
         >
-          {lastGenerateError}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontWeight: 600 }}>
+              No adapters configured for this jurisdiction yet
+            </div>
+            <div
+              data-testid="generate-layers-no-adapters-message"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {lastGenerateError}
+            </div>
+            <div style={{ color: "var(--text-secondary)" }}>
+              Upload a QGIS overlay below to seed the briefing manually.
+            </div>
+          </div>
+          <button
+            type="button"
+            className="sc-btn sc-btn-primary"
+            data-testid="generate-layers-no-adapters-upload"
+            onClick={() => setUploadOpen(true)}
+            style={{ flexShrink: 0 }}
+          >
+            Upload site context source
+          </button>
         </div>
+      ) : (
+        lastGenerateError && (
+          <div
+            role="alert"
+            data-testid="generate-layers-error"
+            style={{
+              fontSize: 12,
+              color: "var(--danger-text)",
+              background: "var(--danger-dim)",
+              padding: 8,
+              borderRadius: 4,
+            }}
+          >
+            {lastGenerateError}
+          </div>
+        )
       )}
 
       {lastOutcomes.length > 0 && (
