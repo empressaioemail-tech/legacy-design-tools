@@ -44,8 +44,22 @@ function Router() {
           <Users />
         </RequirePermission>
       </Route>
-      <Route path="/reviewers" component={ComingSoon} />
-      <Route path="/settings" component={ComingSoon} />
+      {/* Reviewer Pool and Settings are still ComingSoon stubs, but the
+          sidebar already gates them on `reviewers:manage` / `settings:manage`,
+          so wrap the routes the same way Users & Roles is wrapped. That way
+          when the real admin pages drop in (Task #121), a non-admin pasting
+          either URL keeps landing on the access-denied screen instead of
+          briefly seeing whatever the new page renders. */}
+      <Route path="/reviewers">
+        <RequirePermission permission="reviewers:manage">
+          <ComingSoon />
+        </RequirePermission>
+      </Route>
+      <Route path="/settings">
+        <RequirePermission permission="settings:manage">
+          <ComingSoon />
+        </RequirePermission>
+      </Route>
 
       {/* Fallback to coming soon as requested ("No 404. Just a polite stub.") */}
       <Route component={ComingSoon} />

@@ -6,11 +6,15 @@ import { useSessionPermissions } from "../lib/session";
  *
  * Items without `requiresPermission` are visible to every session; items
  * that *do* declare one are filtered out by {@link useNavGroups} when the
- * server-side session does not list that claim. Today the only gated
- * entry is "Users & Roles" (gated on `users:manage`, matching the
- * server-side check in `routes/users.ts`); other admin entries can opt
- * in by adding their own `requiresPermission` later without touching the
- * call sites.
+ * server-side session does not list that claim. The ADMIN entries are
+ * all gated on a `<resource>:manage` claim mirroring the server-side
+ * check pattern in `routes/users.ts`: "Users & Roles" on
+ * `users:manage`, "Reviewer Pool" on `reviewers:manage`, and
+ * "Settings" on `settings:manage`. The latter two pages are still
+ * ComingSoon stubs today, but gating the nav and route now means the
+ * moment they grow real admin chrome a non-admin cannot land on them
+ * by URL — the route wrapper and the sidebar share the same claim, so
+ * they stay in sync.
  *
  * Whole groups whose every item filters out are dropped from the result
  * so the sidebar does not render an empty section header.
@@ -48,8 +52,8 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   ]},
   { label: "ADMIN", items: [
       { label: "Users & Roles", href: "/users", requiresPermission: "users:manage" },
-      { label: "Reviewer Pool", href: "/reviewers" },
-      { label: "Settings", href: "/settings" },
+      { label: "Reviewer Pool", href: "/reviewers", requiresPermission: "reviewers:manage" },
+      { label: "Settings", href: "/settings", requiresPermission: "settings:manage" },
   ]},
   { label: "DEV", items: [
       { label: "Style Probe", href: "/style-probe" },

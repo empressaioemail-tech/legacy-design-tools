@@ -1,26 +1,31 @@
 /**
- * Regression test for the route-level `RequirePermission` gate on the
- * admin "Users & Roles" page (Task #110).
+ * Regression tests for the route-level `RequirePermission` gates on the
+ * ADMIN sidebar pages — "Users & Roles" (Task #110), "Reviewer Pool"
+ * and "Settings" (Task #121).
  *
- * The new gate is what stops a non-admin from landing on `/users`
- * directly and seeing the admin form chrome before every action 403s
- * server-side. Three pieces have to stay wired up for it to keep
- * working:
+ * Each gate is what stops a non-admin from landing on the page
+ * directly and seeing chrome before every action 403s server-side.
+ * Three pieces have to stay wired up for each to keep working:
  *
- *   1. The `<Route path="/users">` in `App.tsx` wraps `<Users />` in
- *      `<RequirePermission permission="users:manage">`.
- *   2. `usePermissionStatus("users:manage")` (in `lib/session.ts`)
+ *   1. The matching `<Route>` in `App.tsx` wraps the page component in
+ *      `<RequirePermission permission="…">` (the admin pages all use a
+ *      `<resource>:manage` claim).
+ *   2. `usePermissionStatus("<resource>:manage")` (in `lib/session.ts`)
  *      returns `"denied"` when the session does not list the claim,
  *      and `"granted"` when it does.
  *   3. The denied branch renders the `AccessDenied` view (with the
- *      "Back to inbox" link), not the `Users` page.
+ *      "Back to inbox" link), not the gated page.
  *
- * If any of those changes silently — the route loses the wrapper, the
+ * If any of those changes silently — a route loses its wrapper, a
  * permission key is renamed, the session hook starts returning a
- * different shape, etc. — this test fails. It mirrors the dev
- * `x-permissions: users:manage` header used by the API-side test
- * (`artifacts/api-server/src/__tests__/users.test.ts`) by mocking
- * `useGetSession` to return the same claim shape the server would.
+ * different shape, etc. — these tests fail. The Users & Roles case
+ * mirrors the dev `x-permissions: users:manage` header used by the
+ * API-side test (`artifacts/api-server/src/__tests__/users.test.ts`)
+ * by mocking `useGetSession` to return the same claim shape the
+ * server would. Reviewer Pool / Settings still resolve to the
+ * `ComingSoon` stub today (no real admin pages yet), so the granted
+ * assertion just checks the stub renders and the access-denied
+ * fallback does not — the gate plumbing is what we're pinning down.
  *
  * Implementation pattern follows
  * `artifacts/design-tools/src/components/__tests__/SubmissionDetailModal.test.tsx`
@@ -128,6 +133,73 @@ describe("/users access gating", () => {
       expect(screen.getByText("User profiles")).toBeInTheDocument();
 
       // …and the access-denied fallback is NOT.
+      expect(screen.queryByTestId("access-denied")).toBeNull();
+    },
+  );
+});
+
+/**
+ * Reviewer Pool and Settings are still ComingSoon stubs, but the
+ * route-level gate has to be in place *before* a real admin page
+ * lands there — otherwise the first deploy that swaps in the real
+ * page exposes admin chrome to non-admins for as long as it takes
+ * to ship the gate. These tests cover the plumbing today (URL
+ * resolves to access-denied without the claim, ComingSoon stub
+ * with it) so the wrapper cannot be silently dropped during the
+ * upcoming "real admin page" PR.
+ *
+ * The granted-side check looks for the stub copy ("Coming soon —
+ * this view is in design.") rather than asserting the whole page —
+ * once the real admin page replaces the stub the assertion will
+ * need to be updated to the new chrome, which is exactly the
+ * moment the gate's grant path should be re-verified anyway.
+ */
+describe.each([
+  {
+    label: "Reviewer Pool",
+    path: "/reviewers",
+    permission: "reviewers:manage",
+  },
+  {
+    label: "Settings",
+    path: "/settings",
+    permission: "settings:manage",
+  },
+])("$path access gating", ({ path, permission }) => {
+  it(
+    `renders the access-denied screen when the session has no ${permission} claim`,
+    () => {
+      window.history.pushState({}, "", path);
+      hoisted.session = { data: { permissions: [] }, isLoading: false };
+
+      render(<App />);
+
+      const denied = screen.getByTestId("access-denied");
+      expect(denied).toBeInTheDocument();
+      expect(denied.textContent).toContain("Access denied");
+
+      // The ComingSoon stub copy must not be visible — the gate has
+      // to win over the page underneath, even when that page is just
+      // a placeholder.
+      expect(screen.queryByText(/Coming soon/i)).toBeNull();
+    },
+  );
+
+  it(
+    `renders the (currently stubbed) page when the session carries the ${permission} claim`,
+    () => {
+      window.history.pushState({}, "", path);
+      hoisted.session = {
+        data: { permissions: [permission] },
+        isLoading: false,
+      };
+
+      render(<App />);
+
+      // Stub copy is present and the access-denied fallback is not —
+      // confirms the gate's granted branch falls through to the
+      // routed component.
+      expect(screen.getByText(/Coming soon/i)).toBeInTheDocument();
       expect(screen.queryByTestId("access-denied")).toBeNull();
     },
   );
