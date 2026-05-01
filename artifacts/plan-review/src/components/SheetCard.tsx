@@ -13,6 +13,7 @@ import {
   TooltipTrigger,
 } from "./ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { relativeTime } from "../lib/relativeTime";
 import { Clock, FileText, History } from "lucide-react";
 
@@ -359,7 +360,17 @@ function TimelineRow({ event }: { event: AtomHistoryEvent }) {
               <strong>{event.eventType}</strong>
             </div>
             <div style={{ marginTop: 2 }}>{absolute}</div>
-            <div style={{ marginTop: 2 }}>by {actorLabel(event.actor)}</div>
+            <div
+              style={{
+                marginTop: 2,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <span>by</span>
+              <ActorBadge actor={event.actor} avatarSize={14} />
+            </div>
           </div>
         </TooltipContent>
       </Tooltip>
@@ -401,8 +412,17 @@ function ExpandedTimelineRow({ event }: { event: AtomHistoryEvent }) {
           {relativeTime(event.occurredAt)}
         </span>
       </div>
-      <div style={{ color: "var(--text-secondary)", fontSize: 10 }}>
-        by {actorLabel(event.actor)}
+      <div
+        style={{
+          color: "var(--text-secondary)",
+          fontSize: 10,
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <span>by</span>
+        <ActorBadge actor={event.actor} avatarSize={14} />
       </div>
     </div>
   );
@@ -423,6 +443,74 @@ function actorLabel(actor: AtomEventActor): string {
     return actor.displayName ?? "Unknown user";
   }
   return `${actor.kind}:${actor.id}`;
+}
+
+/**
+ * Compact 1-2 letter avatar fallback derived from a display name. Falls
+ * back to a generic `?` when no usable letters are available so the
+ * avatar slot doesn't collapse to an empty circle.
+ */
+function actorInitials(name: string): string {
+  const parts = name
+    .split(/\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.[0] ?? "";
+  const second = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
+  const initials = `${first}${second}`.toUpperCase();
+  return initials || "?";
+}
+
+/**
+ * Render an actor row used in timeline tooltips and the expanded
+ * popover. For `kind: "user"` actors we render a small circular avatar
+ * (image when `avatarUrl` is hydrated, initials fallback otherwise)
+ * next to the display name. Agent/system actors stay text-only because
+ * the data isn't person-shaped.
+ */
+function ActorBadge({
+  actor,
+  avatarSize,
+}: {
+  actor: AtomEventActor;
+  avatarSize: number;
+}) {
+  if (actor.kind !== "user") {
+    return <span>{actorLabel(actor)}</span>;
+  }
+  const name = actor.displayName ?? "Unknown user";
+  const sizeStyle = { height: avatarSize, width: avatarSize };
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        minWidth: 0,
+      }}
+    >
+      <Avatar
+        className="h-auto w-auto"
+        style={sizeStyle}
+        data-testid="timeline-actor-avatar"
+      >
+        {actor.avatarUrl ? (
+          <AvatarImage src={actor.avatarUrl} alt="" />
+        ) : null}
+        <AvatarFallback
+          className="bg-muted text-[var(--text-secondary)]"
+          style={{
+            fontSize: Math.max(8, Math.round(avatarSize * 0.5)),
+            lineHeight: 1,
+          }}
+        >
+          {actorInitials(name)}
+        </AvatarFallback>
+      </Avatar>
+      <span style={{ minWidth: 0 }}>{name}</span>
+    </span>
+  );
 }
 
 function prettyEventType(type: string): string {
