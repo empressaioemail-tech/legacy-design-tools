@@ -998,6 +998,46 @@ export function BriefingSourceRow({
 }
 
 /**
+ * `localStorage` key prefix for the per-engagement "show me only
+ * adapter runs / manual uploads / all" filter on the briefing-source
+ * history panel. Exported so tests can pin the persistence behavior
+ * without re-deriving the key from the implementation.
+ */
+export const BRIEFING_SOURCE_HISTORY_TIER_STORAGE_PREFIX =
+  "briefing-source-history-tier:";
+
+export function briefingSourceHistoryTierStorageKey(engagementId: string) {
+  return `${BRIEFING_SOURCE_HISTORY_TIER_STORAGE_PREFIX}${engagementId}`;
+}
+
+function readBriefingSourceHistoryTier(
+  storageKey: string,
+): "all" | "adapter" | "manual" {
+  if (typeof window === "undefined") return "all";
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (stored === "all" || stored === "adapter" || stored === "manual") {
+      return stored;
+    }
+  } catch {
+    /* localStorage may throw in private mode / disabled storage */
+  }
+  return "all";
+}
+
+function writeBriefingSourceHistoryTier(
+  storageKey: string,
+  value: "all" | "adapter" | "manual",
+) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(storageKey, value);
+  } catch {
+    /* ignore — falling back to in-memory state is acceptable */
+  }
+}
+
+/**
  * Lazily-loaded per-layer history list rendered beneath a current
  * source row. Fetches with `includeSuperseded=true` and filters the
  * current row out client-side so only prior versions show in the
@@ -1050,9 +1090,22 @@ export function BriefingSourceHistoryPanel({
   // Architects investigating "what did the adapter change" vs "when
   // did the manual override happen" can narrow the chronological
   // list to one tier at a time without changing the API contract.
-  const [tierFilter, setTierFilter] = useState<
+  //
+  // The choice is persisted to `localStorage` keyed by engagement so
+  // that collapsing the panel, switching layers within the same
+  // engagement, or refreshing the page all restore the same filter
+  // (audit-driven flows often want "show me only adapter runs across
+  // every layer"). The lazy `useState` initializer reads the stored
+  // value synchronously so the first render already reflects the
+  // restored choice — no flicker from "all" → restored value.
+  const tierStorageKey = briefingSourceHistoryTierStorageKey(engagementId);
+  const [tierFilter, setTierFilterState] = useState<
     "all" | "adapter" | "manual"
-  >("all");
+  >(() => readBriefingSourceHistoryTier(tierStorageKey));
+  const setTierFilter = (next: "all" | "adapter" | "manual") => {
+    setTierFilterState(next);
+    writeBriefingSourceHistoryTier(tierStorageKey, next);
+  };
 
   // Tracks which adapter prior rows have their "Changed: …" hint
   // expanded into the before → after reveal (Task #200). State lives

@@ -173,6 +173,8 @@ const {
   BriefingSourceRow,
   BriefingSourceHistoryPanel,
   BRIEFING_GENERATE_LAYERS_ACTOR_LABEL,
+  BRIEFING_SOURCE_HISTORY_TIER_STORAGE_PREFIX,
+  briefingSourceHistoryTierStorageKey,
 } = await import("../EngagementDetail");
 
 interface BriefingSourceFixture {
@@ -273,6 +275,19 @@ beforeEach(() => {
   hoisted.historySources = [];
   hoisted.historyState.isLoading = false;
   hoisted.historyState.isError = false;
+  // Each test starts with a clean persistence layer so a value
+  // written by one spec can't leak into the next via the shared
+  // happy-dom `localStorage`.
+  try {
+    for (let i = window.localStorage.length - 1; i >= 0; i -= 1) {
+      const key = window.localStorage.key(i);
+      if (key?.startsWith(BRIEFING_SOURCE_HISTORY_TIER_STORAGE_PREFIX)) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 });
 
 afterEach(() => {
@@ -927,6 +942,133 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
         `briefing-source-history-row-payload-changes-${prior.id}`,
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it("persists the active tier filter across remounts via localStorage so collapsing the panel or refreshing the page restores the choice (Task #196)", () => {
+    const engagementId = "eng-persist";
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const priorAdapter = mkSource({
+      id: "src-prior-adapter",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    const priorManual = mkSource({
+      id: "src-prior-manual",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, priorAdapter, priorManual];
+
+    // First mount: pick "Generate Layers" so only adapter rows show.
+    renderPanel({
+      engagementId,
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+    fireEvent.click(
+      screen.getByTestId(
+        `briefing-source-history-filter-adapter-${current.id}`,
+      ),
+    );
+
+    // The selection is mirrored to localStorage under the
+    // engagement-scoped key so the next mount can pick it up.
+    expect(
+      window.localStorage.getItem(
+        briefingSourceHistoryTierStorageKey(engagementId),
+      ),
+    ).toBe("adapter");
+
+    // Simulate a panel collapse / page reload: tear the tree down and
+    // re-render the panel from scratch. The first render must already
+    // reflect the restored filter — no flicker through the default
+    // "all" value, no waitFor needed.
+    cleanup();
+    renderPanel({
+      engagementId,
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-adapter-${current.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-all-${current.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+    // And the filter is actually applied on the restored render —
+    // adapter rows visible, manual rows hidden.
+    expect(
+      screen.getByTestId(`briefing-source-history-row-${priorAdapter.id}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(`briefing-source-history-row-${priorManual.id}`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("scopes the persisted tier filter per engagement so a different engagement starts at the default 'all' (Task #196)", () => {
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const priorAdapter = mkSource({
+      id: "src-prior-adapter",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    const priorManual = mkSource({
+      id: "src-prior-manual",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, priorAdapter, priorManual];
+
+    // Pre-seed a stored choice for engagement A only.
+    window.localStorage.setItem(
+      briefingSourceHistoryTierStorageKey("eng-A"),
+      "manual",
+    );
+
+    // Engagement B has no stored value — must fall back to "all".
+    renderPanel({
+      engagementId: "eng-B",
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-all-${current.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen.getByTestId(`briefing-source-history-row-${priorAdapter.id}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId(`briefing-source-history-row-${priorManual.id}`),
+    ).toBeInTheDocument();
   });
 
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {
