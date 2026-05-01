@@ -22,11 +22,35 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render as rtlRender,
+  screen,
+  within,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import type {
   EngagementBriefing,
   EngagementBriefingSource,
 } from "@workspace/api-client-react";
+
+/**
+ * BriefingSourceRow (lifted to portal-ui in Task #316) calls
+ * `useQueryClient` to invalidate caches on a retry-conversion mutation.
+ * Even though these tests never click that affordance, React invokes
+ * the hook during render, so the panel must mount inside a
+ * QueryClientProvider. Tests that mock the data hooks above never let
+ * the client actually fetch anything.
+ */
+function render(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return rtlRender(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+}
 
 const hoisted = vi.hoisted(() => ({
   briefing: {
@@ -422,7 +446,21 @@ describe("EngagementContextPanel", () => {
     expect(screen.queryByText(/Re-run stale/i)).toBeNull();
     expect(screen.queryByText(/Upload source/i)).toBeNull();
     expect(screen.queryByText(/Regenerate/i)).toBeNull();
-    expect(screen.queryByText(/Generate Layers/i)).toBeNull();
+    // Mutate affordances would surface as buttons; the read-only row
+    // may still render an informational "Last refreshed by Generate
+    // Layers" attribution line, which is text rather than an action.
+    expect(
+      screen.queryByRole("button", { name: /Re-run stale/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Upload source/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Regenerate/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Generate Briefing/i }),
+    ).toBeNull();
   });
 
   it("mounts the 3D site context viewer section in the populated path", () => {

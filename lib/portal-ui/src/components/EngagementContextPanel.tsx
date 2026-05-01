@@ -8,7 +8,7 @@ import {
   type EngagementBriefingSource,
   type EngagementBriefingNarrative,
 } from "@workspace/api-client-react";
-import { BriefingSourceDetails } from "./BriefingSourceDetails";
+import { BriefingSourceRow } from "./BriefingSourceRow";
 import { renderBriefingBody, scrollToBriefingSource } from "./briefingCitations";
 import { BriefingRecentRunsPanel } from "./BriefingRecentRunsPanel";
 import { SiteContextViewer } from "./SiteContextViewer";
@@ -59,6 +59,12 @@ import { SiteContextViewer } from "./SiteContextViewer";
  */
 
 export interface EngagementContextPanelProps {
+  /**
+   * Task #316 — id of the engagement whose briefing the panel
+   * renders. Threaded down to {@link BriefingSourceRow} so its
+   * "View history" disclosure can fetch the per-layer history list
+   * scoped to the right engagement.
+   */
   engagementId: string;
   /**
    * Optional — id of the briefing generation that produced the BIM
@@ -227,7 +233,10 @@ export function EngagementContextPanel({
       }}
     >
       <ParcelBriefingCard briefing={briefing} />
-      <BriefingSourcesSection sources={briefing.sources} />
+      <BriefingSourcesSection
+        engagementId={engagementId}
+        sources={briefing.sources}
+      />
       <NarrativeSection
         narrative={briefing.narrative}
         sourceIds={briefing.sources.map((s) => s.id)}
@@ -350,8 +359,10 @@ function ParcelBriefingCard({ briefing }: { briefing: EngagementBriefing }) {
  * can spot freshness regressions.
  */
 function BriefingSourcesSection({
+  engagementId,
   sources,
 }: {
+  engagementId: string;
   sources: EngagementBriefingSource[];
 }) {
   const grouped = useMemo(() => {
@@ -401,6 +412,7 @@ function BriefingSourcesSection({
           {populatedTiers.map((tier) => (
             <TierGroup
               key={tier}
+              engagementId={engagementId}
               tier={tier}
               sources={grouped[tier]}
             />
@@ -412,9 +424,11 @@ function BriefingSourcesSection({
 }
 
 function TierGroup({
+  engagementId,
   tier,
   sources,
 }: {
+  engagementId: string;
   tier: SourceTier;
   sources: EngagementBriefingSource[];
 }) {
@@ -448,107 +462,26 @@ function TierGroup({
         }}
       >
         {sources.map((source) => (
-          <BriefingSourceReadonlyRow key={source.id} source={source} />
+          <li key={source.id} style={{ listStyle: "none" }}>
+            {/*
+              Task #316 — render the same {@link BriefingSourceRow}
+              the architect sees on design-tools, with `readOnly`
+              suppressing the "Retry conversion" / "Refresh this
+              layer" / "Restore this version" mutate affordances.
+              Reviewers get the same per-source generation history,
+              divergence pills, and prior-run comparison disclosure
+              the architect uses without being able to mutate the
+              briefing.
+            */}
+            <BriefingSourceRow
+              engagementId={engagementId}
+              source={source}
+              readOnly
+            />
+          </li>
         ))}
       </ul>
     </div>
-  );
-}
-
-function BriefingSourceReadonlyRow({
-  source,
-}: {
-  source: EngagementBriefingSource;
-}) {
-  const [open, setOpen] = useState(false);
-  const canExpand = source.sourceKind !== "manual-upload";
-
-  const headerText = useMemo(() => {
-    const parts: string[] = [source.layerKind];
-    if (source.provider) parts.push(source.provider);
-    return parts.join(" · ");
-  }, [source.layerKind, source.provider]);
-
-  return (
-    <li
-      data-testid={`briefing-source-${source.id}`}
-      style={{
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-        padding: "8px 10px",
-        background: "var(--surface-1, transparent)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <div
-          style={{ display: "flex", flexDirection: "column", minWidth: 0 }}
-        >
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {headerText}
-          </span>
-          {source.snapshotDate && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--text-muted)",
-              }}
-            >
-              as of {new Date(source.snapshotDate).toLocaleDateString()}
-            </span>
-          )}
-        </div>
-        {canExpand && (
-          <button
-            type="button"
-            data-testid={`briefing-source-toggle-${source.id}`}
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            style={{
-              fontSize: 11,
-              padding: "2px 8px",
-              border: "1px solid var(--border-default, #444)",
-              borderRadius: 4,
-              background: "transparent",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-            }}
-          >
-            {open ? "Hide layer details" : "View layer details"}
-          </button>
-        )}
-      </div>
-      {source.note && (
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {source.note}
-        </div>
-      )}
-      {canExpand && open && <BriefingSourceDetails source={source} />}
-    </li>
   );
 }
 

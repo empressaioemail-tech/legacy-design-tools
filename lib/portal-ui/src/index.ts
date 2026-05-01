@@ -93,6 +93,40 @@ export {
 } from "./components/BriefingSourceDetails";
 export { BriefingRecentRunsPanel } from "./components/BriefingRecentRunsPanel";
 
+// Per-source briefing row + per-layer history disclosure + A–G
+// narrative panel — extracted from
+// `artifacts/design-tools/src/pages/EngagementDetail.tsx` (Task #316)
+// so plan-review reviewers see the same per-source generation
+// history, divergence pills, and prior-run comparison disclosure
+// as architects. Each component takes a `readOnly` prop that hides
+// the architect-only mutate affordances on the reviewer surface.
+export { BriefingSourceRow } from "./components/BriefingSourceRow";
+export type { BriefingSourceRowProps } from "./components/BriefingSourceRow";
+export { BriefingSourceHistoryPanel } from "./components/BriefingSourceHistoryPanel";
+export type { BriefingSourceHistoryPanelProps } from "./components/BriefingSourceHistoryPanel";
+export { BriefingNarrativePanel } from "./components/BriefingNarrativePanel";
+export type { BriefingNarrativePanelProps } from "./components/BriefingNarrativePanel";
+export {
+  BRIEFING_GENERATE_LAYERS_ACTOR_LABEL,
+  BRIEFING_SOURCE_HISTORY_TIER_STORAGE_PREFIX,
+  BRIEFING_SOURCE_HISTORY_TIER_LABEL,
+  BRIEFING_SOURCE_STALE_THRESHOLD_DAYS,
+  CONVERSION_STATUS_STYLE,
+  SOURCE_KIND_BADGE_LABEL,
+  briefingSourceHistoryTierStorageKey,
+  computeBriefingSourceRange,
+  diffBriefingSourceFields,
+  extractAdapterKeyFromProvider,
+  formatBriefingDiffValue,
+  formatBriefingSourceRangeShort,
+  formatBriefingSourceRangeTitle,
+  formatByteSize,
+  formatCacheAgeLabel,
+  isAdapterSourceKind,
+  isBriefingSourceRangeStale,
+  useBriefingSourceHistoryTier,
+} from "./lib/briefingSourceHelpers";
+
 // Composite read-only briefing surface used by the plan-review
 // submission detail modal's "Engagement Context" tab.
 export { EngagementContextPanel } from "./components/EngagementContextPanel";
