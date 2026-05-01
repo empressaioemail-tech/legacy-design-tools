@@ -214,31 +214,98 @@ describe("FindingsTab (AIR-2)", () => {
     expect(revision?.reviewerComment).toBe("Original conflated two issues.");
   });
 
-  it("shows the 3D viewer stub hint when bimViewerAvailable is false (the default)", async () => {
-    __seedFindingsForTests("sub-viewer", [
+  it("disables the 3D viewer button when no onShowInViewer host is wired (Task #343)", async () => {
+    __seedFindingsForTests("sub-viewer-stub", [
       fakeFinding({
-        id: "finding:sub-viewer:1",
-        submissionId: "sub-viewer",
+        id: "finding:sub-viewer-stub:1",
+        submissionId: "sub-viewer-stub",
         elementRef: "wall:demo-1",
       }),
     ]);
-    render(<ControlledTab submissionId="sub-viewer" />, { wrapper });
-    const row = await screen.findByTestId("finding-row-finding:sub-viewer:1");
-    fireEvent.click(row);
-    expect(
-      await screen.findByTestId("finding-drill-in-viewer-stub-hint"),
-    ).toBeTruthy();
-    // Clicking the button should fire the structured client-side log,
-    // not throw.
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    fireEvent.click(screen.getByTestId("finding-drill-in-viewer-jump"));
-    expect(infoSpy).toHaveBeenCalledWith(
-      "[air-2] show-in-viewer-stub",
-      expect.objectContaining({
-        findingId: "finding:sub-viewer:1",
-        elementRef: "wall:demo-1",
-      }),
+    // ControlledTab does not pass onShowInViewer — drill-in should
+    // render the button disabled with a "viewer not attached" hint
+    // rather than the legacy "(coming soon)" copy.
+    render(<ControlledTab submissionId="sub-viewer-stub" />, { wrapper });
+    const row = await screen.findByTestId(
+      "finding-row-finding:sub-viewer-stub:1",
     );
-    infoSpy.mockRestore();
+    fireEvent.click(row);
+    const btn = await screen.findByTestId("finding-drill-in-viewer-jump");
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(btn.getAttribute("data-viewer-attached")).toBe("false");
+    // The legacy stub hint span must not render anymore.
+    expect(
+      screen.queryByTestId("finding-drill-in-viewer-stub-hint"),
+    ).toBeNull();
+  });
+
+  it("invokes onShowInViewer with the finding's elementRef when wired (Task #343)", async () => {
+    __seedFindingsForTests("sub-viewer-jump", [
+      fakeFinding({
+        id: "finding:sub-viewer-jump:1",
+        submissionId: "sub-viewer-jump",
+        elementRef: "wall:north-side-l2",
+      }),
+    ]);
+    const onShow = vi.fn();
+    function HostedTab() {
+      const [selected, setSelected] = useState<string | null>(null);
+      return (
+        <FindingsTab
+          submissionId="sub-viewer-jump"
+          selectedFindingId={selected}
+          onSelectFinding={setSelected}
+          onShowInViewer={onShow}
+        />
+      );
+    }
+    render(<HostedTab />, { wrapper });
+    const row = await screen.findByTestId(
+      "finding-row-finding:sub-viewer-jump:1",
+    );
+    fireEvent.click(row);
+    const btn = await screen.findByTestId("finding-drill-in-viewer-jump");
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+    expect(btn.getAttribute("data-viewer-attached")).toBe("true");
+    expect(btn.getAttribute("aria-label")).toBe(
+      "Show wall:north-side-l2 in the BIM Model tab",
+    );
+    fireEvent.click(btn);
+    expect(onShow).toHaveBeenCalledWith("wall:north-side-l2");
+  });
+
+  it("activates the viewer-jump button via the keyboard (Enter key, Task #343)", async () => {
+    __seedFindingsForTests("sub-viewer-kbd", [
+      fakeFinding({
+        id: "finding:sub-viewer-kbd:1",
+        submissionId: "sub-viewer-kbd",
+        elementRef: "wall:k1",
+      }),
+    ]);
+    const onShow = vi.fn();
+    function HostedTab() {
+      const [selected, setSelected] = useState<string | null>(null);
+      return (
+        <FindingsTab
+          submissionId="sub-viewer-kbd"
+          selectedFindingId={selected}
+          onSelectFinding={setSelected}
+          onShowInViewer={onShow}
+        />
+      );
+    }
+    render(<HostedTab />, { wrapper });
+    fireEvent.click(
+      await screen.findByTestId("finding-row-finding:sub-viewer-kbd:1"),
+    );
+    const btn = await screen.findByTestId("finding-drill-in-viewer-jump");
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    // Native <button> activates on Enter; this also exercises the
+    // keyboard-accessibility requirement spelled out in the task.
+    fireEvent.keyDown(btn, { key: "Enter", code: "Enter" });
+    fireEvent.keyUp(btn, { key: "Enter", code: "Enter" });
+    fireEvent.click(btn);
+    expect(onShow).toHaveBeenCalledWith("wall:k1");
   });
 });

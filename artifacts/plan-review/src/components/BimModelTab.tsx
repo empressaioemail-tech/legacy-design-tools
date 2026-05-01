@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BriefingDivergenceRow,
   BriefingDivergenceDetailDialog,
@@ -54,10 +54,73 @@ const REFRESH_STATUS_COPY: Record<
  * elements yet — easy to mistake for an empty divergences panel
  * otherwise.
  */
+/**
+ * Resolve a finding's `elementRef` (a free-form pointer like
+ * `wall:north-side-l2` or a server-side element id) against the
+ * loaded materializable elements. We try a small ordered set of
+ * matchers so a finding emitted by the AI engine has a few
+ * fallbacks before we give up:
+ *
+ *   1. exact `id` match (the strongest match — the AI would have
+ *      to know the server-side element id);
+ *   2. exact `label` match;
+ *   3. case-insensitive `label` match;
+ *   4. case-insensitive trailing-segment match — e.g. an
+ *      `elementRef` of `wall:north-side-l2` matches a label of
+ *      `North side L2` or an id ending in `north-side-l2`.
+ *
+ * Returns `null` when nothing matches; the caller then announces
+ * the no-match case via the aria-live region rather than scrolling
+ * to or pulsing a row.
+ */
+function findElementByRef(
+  elements: MaterializableElement[],
+  ref: string,
+): MaterializableElement | null {
+  if (!ref) return null;
+  const exactId = elements.find((el) => el.id === ref);
+  if (exactId) return exactId;
+  const exactLabel = elements.find((el) => el.label === ref);
+  if (exactLabel) return exactLabel;
+  const lower = ref.toLowerCase();
+  const ciLabel = elements.find(
+    (el) => el.label != null && el.label.toLowerCase() === lower,
+  );
+  if (ciLabel) return ciLabel;
+  // Trailing-segment match: `wall:north-side-l2` → `north-side-l2`.
+  const tail = lower.includes(":") ? lower.split(":").pop() ?? lower : lower;
+  if (tail !== lower) {
+    const tailMatch = elements.find((el) => {
+      if (el.id.toLowerCase().endsWith(tail)) return true;
+      if (el.label != null && el.label.toLowerCase().includes(tail))
+        return true;
+      return false;
+    });
+    if (tailMatch) return tailMatch;
+  }
+  return null;
+}
+
 function MaterializableElementsList({
   elements,
+  highlightElementRef = null,
+  onHighlightConsumed,
 }: {
   elements: MaterializableElement[];
+  /**
+   * Task #343 — when a reviewer clicks "Show in 3D viewer" on a
+   * finding, the modal sets this to the finding's `elementRef`
+   * and we (a) resolve it to a row, (b) scroll the row into view,
+   * (c) apply a brief visual pulse, and (d) announce the jump in
+   * an aria-live region for screen readers.
+   */
+  highlightElementRef?: string | null;
+  /**
+   * Fired ~2.5s after the visual pulse starts so the modal can
+   * clear its `highlightedElementRef` state and a subsequent jump
+   * to the *same* element re-fires the pulse.
+   */
+  onHighlightConsumed?: () => void;
 }) {
   const grouped = useMemo(() => {
     const buckets = new Map<MaterializableElementKind, MaterializableElement[]>();
@@ -72,6 +135,59 @@ function MaterializableElementsList({
         (ELEMENT_KIND_DISPLAY[b]?.order ?? 99),
     );
   }, [elements]);
+
+  // Resolve the highlight ref to a concrete element on every change.
+  // `matched` is `null` when the reviewer clicked a finding whose
+  // elementRef does not appear in the current bim-model — we still
+  // announce the no-match case so they know the jump landed.
+  const matched = useMemo(
+    () =>
+      highlightElementRef
+        ? findElementByRef(elements, highlightElementRef)
+        : null,
+    [elements, highlightElementRef],
+  );
+
+  // Per-row refs let us scroll the matched row into view without
+  // querying the DOM. We only allocate refs lazily on render — a
+  // model with hundreds of elements doesn't need to keep stale
+  // refs around for rows it never highlighted.
+  const rowRefs = useRef(new Map<string, HTMLLIElement | null>());
+
+  // Pulse + scroll + announce side-effect. Fires on every change of
+  // `highlightElementRef` so two clicks on the same finding both
+  // animate (the modal clears the ref between clicks via the
+  // `onHighlightConsumed` callback).
+  useEffect(() => {
+    if (!highlightElementRef) return;
+    if (matched) {
+      const node = rowRefs.current.get(matched.id);
+      if (node) {
+        node.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+    // Auto-clear after the pulse animation has had time to play.
+    // Using a 2.5s window keeps the highlight long enough to be
+    // perceived but short enough that a reviewer who tab-switches
+    // away and back doesn't see a stuck pulse.
+    const tid = window.setTimeout(() => {
+      onHighlightConsumed?.();
+    }, 2500);
+    return () => {
+      window.clearTimeout(tid);
+    };
+  }, [highlightElementRef, matched, onHighlightConsumed]);
+
+  // Screen-reader announcement string. Empty when there's nothing to
+  // announce so the live region doesn't read out spurious "" updates.
+  const announcement = useMemo(() => {
+    if (!highlightElementRef) return "";
+    if (matched) {
+      const label = matched.label ?? matched.id;
+      return `Showing ${label} in the BIM model viewer.`;
+    }
+    return `Element ${highlightElementRef} from the finding is not present in the current BIM model.`;
+  }, [highlightElementRef, matched]);
 
   return (
     <div
@@ -89,6 +205,52 @@ function MaterializableElementsList({
       <div className="sc-medium" style={{ fontSize: 14 }}>
         Materializable elements
       </div>
+      {/*
+       * aria-live region for the cross-tab "Show in 3D viewer" jump
+       * (Task #343). Sighted users see the row pulse + scroll;
+       * screen-reader users hear an announcement of which element
+       * was focused (or that the elementRef has no match in the
+       * current model). `aria-atomic` ensures the full sentence is
+       * read on each update, not just the diff.
+       */}
+      <div
+        data-testid="bim-model-elements-announcer"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: "hidden",
+          clip: "rect(0,0,0,0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}
+      >
+        {announcement}
+      </div>
+      {highlightElementRef && !matched && (
+        <div
+          data-testid="bim-model-elements-no-match"
+          style={{
+            fontSize: 12,
+            color: "var(--warning-text)",
+            background: "var(--warning-dim)",
+            border: "1px solid var(--warning-text)",
+            borderRadius: 4,
+            padding: "6px 8px",
+          }}
+        >
+          The finding references{" "}
+          <code style={{ fontFamily: "ui-monospace, monospace" }}>
+            {highlightElementRef}
+          </code>
+          , which is not present in the current BIM model.
+        </div>
+      )}
       {elements.length === 0 ? (
         <div
           data-testid="bim-model-elements-list-empty"
@@ -143,43 +305,65 @@ function MaterializableElementsList({
                   gap: 2,
                 }}
               >
-                {items.map((el) => (
-                  <li
-                    key={el.id}
-                    data-testid="bim-model-elements-row"
-                    data-element-id={el.id}
-                    data-locked={el.locked ? "true" : "false"}
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                      fontSize: 12,
-                      color: "var(--text-default)",
-                    }}
-                  >
-                    <span style={{ flex: 1 }}>
-                      {el.label ?? <em style={{ color: "var(--text-muted)" }}>(unlabeled)</em>}
-                    </span>
-                    {el.locked && (
-                      <span
-                        data-testid="bim-model-elements-row-locked"
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                          letterSpacing: 0.4,
-                          padding: "1px 6px",
-                          borderRadius: 3,
-                          color: "var(--text-muted)",
-                          background: "var(--bg-muted)",
-                          border: "1px solid var(--border-default)",
-                        }}
-                      >
-                        Locked
+                {items.map((el) => {
+                  const isHighlighted = matched?.id === el.id;
+                  return (
+                    <li
+                      key={el.id}
+                      ref={(node) => {
+                        if (node) {
+                          rowRefs.current.set(el.id, node);
+                        } else {
+                          rowRefs.current.delete(el.id);
+                        }
+                      }}
+                      data-testid="bim-model-elements-row"
+                      data-element-id={el.id}
+                      data-locked={el.locked ? "true" : "false"}
+                      data-highlighted={isHighlighted ? "true" : "false"}
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        fontSize: 12,
+                        color: "var(--text-default)",
+                        padding: isHighlighted ? "4px 6px" : 0,
+                        borderRadius: 4,
+                        background: isHighlighted
+                          ? "var(--info-dim, var(--bg-input))"
+                          : "transparent",
+                        outline: isHighlighted
+                          ? "2px solid var(--info-text, var(--border-active))"
+                          : "none",
+                        outlineOffset: 1,
+                        transition:
+                          "background 200ms ease-out, outline-color 200ms ease-out",
+                      }}
+                    >
+                      <span style={{ flex: 1 }}>
+                        {el.label ?? <em style={{ color: "var(--text-muted)" }}>(unlabeled)</em>}
                       </span>
-                    )}
-                  </li>
-                ))}
+                      {el.locked && (
+                        <span
+                          data-testid="bim-model-elements-row-locked"
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.4,
+                            padding: "1px 6px",
+                            borderRadius: 3,
+                            color: "var(--text-muted)",
+                            background: "var(--bg-muted)",
+                            border: "1px solid var(--border-default)",
+                          }}
+                        >
+                          Locked
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ))}
@@ -291,6 +475,20 @@ function BimModelSummaryCard({ bimModel }: { bimModel: EngagementBimModel }) {
 
 export interface BimModelTabProps {
   engagementId: string;
+  /**
+   * Task #343 — when the reviewer clicks "Show in 3D viewer" on a
+   * finding, the SubmissionDetailModal switches to this tab and
+   * threads the finding's `elementRef` down so the
+   * materializable-elements list can scroll to + highlight the
+   * matching row. `null` means no jump is in flight.
+   */
+  highlightElementRef?: string | null;
+  /**
+   * Fired by the elements list ~2.5s after a pulse starts, letting
+   * the modal clear its highlight state so a subsequent click on
+   * the same finding re-triggers the animation.
+   */
+  onHighlightConsumed?: () => void;
 }
 
 /**
@@ -319,7 +517,11 @@ export interface BimModelTabProps {
  * supplies an empty-state explanation in that case so a reviewer
  * doesn't see a blank pane.
  */
-export function BimModelTab({ engagementId }: BimModelTabProps) {
+export function BimModelTab({
+  engagementId,
+  highlightElementRef = null,
+  onHighlightConsumed,
+}: BimModelTabProps) {
   const [activeDivergence, setActiveDivergence] =
     useState<BimModelDivergenceListEntry | null>(null);
   const bimModelQuery = useGetEngagementBimModel(engagementId);
@@ -369,7 +571,11 @@ export function BimModelTab({ engagementId }: BimModelTabProps) {
       {bimModel && <BimModelSummaryCard bimModel={bimModel} />}
 
       {bimModel && (
-        <MaterializableElementsList elements={bimModel.elements} />
+        <MaterializableElementsList
+          elements={bimModel.elements}
+          highlightElementRef={highlightElementRef}
+          onHighlightConsumed={onHighlightConsumed}
+        />
       )}
 
       {bimModel && (

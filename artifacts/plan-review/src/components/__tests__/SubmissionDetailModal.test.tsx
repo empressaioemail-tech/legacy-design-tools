@@ -28,7 +28,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   EngagementSubmissionSummary,
   EngagementDetail,
@@ -36,12 +36,51 @@ import type {
 } from "@workspace/api-client-react";
 
 vi.mock("../BimModelTab", () => ({
-  BimModelTab: ({ engagementId }: { engagementId: string }) => (
+  BimModelTab: ({
+    engagementId,
+    highlightElementRef,
+  }: {
+    engagementId: string;
+    highlightElementRef?: string | null;
+    onHighlightConsumed?: () => void;
+  }) => (
     <div
       data-testid="bim-model-tab-mock"
       data-engagement-id={engagementId}
+      data-highlight-element-ref={highlightElementRef ?? ""}
     >
       BIM Model tab
+    </div>
+  ),
+}));
+
+// FindingsTab is mocked to a thin marker that surfaces the
+// `onShowInViewer` host wire-up — the real Findings tab pulls in
+// the findingsMock store and is fully covered by FindingsTab.test.
+// Here we only need to verify the modal's cross-tab jump (Task
+// #343): clicking the marker calls `onShowInViewer(elementRef)`
+// and the modal switches tabs + threads the ref into BimModelTab.
+vi.mock("../findings/FindingsTab", () => ({
+  FindingsTab: ({
+    submissionId,
+    onShowInViewer,
+  }: {
+    submissionId: string;
+    selectedFindingId?: string | null;
+    onSelectFinding?: (id: string | null) => void;
+    onShowInViewer?: (elementRef: string) => void;
+  }) => (
+    <div
+      data-testid="findings-tab-mock"
+      data-submission-id={submissionId}
+    >
+      <button
+        type="button"
+        data-testid="findings-tab-mock-show-in-viewer"
+        onClick={() => onShowInViewer?.("wall:north-side-l2")}
+      >
+        Show in 3D viewer (mock)
+      </button>
     </div>
   ),
 }));
@@ -362,6 +401,91 @@ describe("SubmissionDetailModal — Plan Review (Task #306 / #319)", () => {
     );
     await user.click(link);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // Task #343 — clicking "Show in 3D viewer" on a Findings drill-in
+  // must (a) switch the modal to the BIM Model tab and (b) thread
+  // the finding's `elementRef` down into BimModelTab so the
+  // materializable-elements list can highlight + scroll. We cover
+  // both the uncontrolled (default) and controlled (parent-driven)
+  // tab modes.
+  it("uncontrolled mode: switches to BIM Model and threads elementRef when Findings fires onShowInViewer", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    // Switch to the Findings tab to expose the mocked drill-in.
+    await user.click(screen.getByTestId("submission-tab-findings"));
+    const trigger = await screen.findByTestId(
+      "findings-tab-mock-show-in-viewer",
+    );
+    await user.click(trigger);
+    // The BIM Model tab content is now active and the mock surfaces
+    // the highlight ref the modal forwarded.
+    const bimTab = await screen.findByTestId("bim-model-tab-mock");
+    expect(bimTab).toHaveAttribute(
+      "data-highlight-element-ref",
+      "wall:north-side-l2",
+    );
+  });
+
+  it("controlled mode: calls onTabChange('bim-model') and forwards highlight ref to BimModelTab", async () => {
+    const user = userEvent.setup();
+    const onTabChange = vi.fn();
+    // Controlled-mode harness: keep the active tab parent-managed
+    // so we can verify both the callback firing and the eventual
+    // re-render with `tab="bim-model"` populates the highlight.
+    function Harness() {
+      const [tab, setTab] = useState<
+        "bim-model" | "engagement-context" | "note" | "findings"
+      >("findings");
+      return (
+        <QueryClientProvider client={makeQueryClient()}>
+          <SubmissionDetailModal
+            submission={baseSubmission}
+            engagementId="eng-1"
+            onClose={() => {}}
+            tab={tab}
+            onTabChange={(next) => {
+              onTabChange(next);
+              setTab(next);
+            }}
+            selectedFindingId={null}
+            onSelectFinding={() => {}}
+          />
+        </QueryClientProvider>
+      );
+    }
+    render(<Harness />);
+    await user.click(
+      await screen.findByTestId("findings-tab-mock-show-in-viewer"),
+    );
+    expect(onTabChange).toHaveBeenCalledWith("bim-model");
+    const bimTab = await screen.findByTestId("bim-model-tab-mock");
+    expect(bimTab).toHaveAttribute(
+      "data-highlight-element-ref",
+      "wall:north-side-l2",
+    );
+  });
+
+  it("clears the highlight when the reviewer leaves the BIM Model tab", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    // Trigger the jump to seed a highlight.
+    await user.click(screen.getByTestId("submission-tab-findings"));
+    await user.click(
+      await screen.findByTestId("findings-tab-mock-show-in-viewer"),
+    );
+    expect(
+      await screen.findByTestId("bim-model-tab-mock"),
+    ).toHaveAttribute("data-highlight-element-ref", "wall:north-side-l2");
+    // Switch away to Engagement Context.
+    await user.click(
+      screen.getByTestId("submission-detail-modal-tab-engagement-context"),
+    );
+    // Switch back. The mock should now show an empty highlight ref.
+    await user.click(screen.getByTestId("submission-detail-modal-tab-bim-model"));
+    expect(
+      await screen.findByTestId("bim-model-tab-mock"),
+    ).toHaveAttribute("data-highlight-element-ref", "");
   });
 
   it("surfaces the jurisdiction + relative-time subtitle in the modal header", async () => {

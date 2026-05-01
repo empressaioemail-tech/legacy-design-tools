@@ -33,7 +33,7 @@
  *   - `?tab=findings|bim-model|engagement-context` switches tabs
  *   - `?finding=<atomId>` opens the Findings tab + drill-in panel
  */
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -96,6 +96,41 @@ export function SubmissionDetailModal({
     useState<SubmissionDetailTab>("bim-model");
   const isControlled = tab !== undefined;
   const activeTab = isControlled ? tab : internalTab;
+
+  // Task #343 — cross-tab "Show in 3D viewer" jump. The Findings
+  // drill-in fires `onShowInViewer(elementRef)`; we switch to the
+  // BIM Model tab and forward the elementRef so the
+  // materializable-elements list can scroll to + visually pulse the
+  // matching row. State is intentionally modal-local rather than
+  // URL-synced — the highlight is a transient navigation hint, not
+  // a deep-linkable selection.
+  const [highlightedElementRef, setHighlightedElementRef] = useState<
+    string | null
+  >(null);
+
+  // Clear the highlight whenever the reviewer leaves the BIM Model
+  // tab so a later return to that tab doesn't surface a stale pulse
+  // from a finding they've since closed.
+  useEffect(() => {
+    if (activeTab !== "bim-model" && highlightedElementRef !== null) {
+      setHighlightedElementRef(null);
+    }
+  }, [activeTab, highlightedElementRef]);
+
+  // Reset whenever the modal closes / opens against a different
+  // submission so a re-open lands on a clean BIM Model tab.
+  useEffect(() => {
+    if (!isOpen) setHighlightedElementRef(null);
+  }, [isOpen]);
+
+  const handleShowInViewer = (elementRef: string) => {
+    setHighlightedElementRef(elementRef);
+    if (isControlled) {
+      onTabChange?.("bim-model");
+    } else {
+      setInternalTab("bim-model");
+    }
+  };
 
   return (
     <Dialog
@@ -163,7 +198,11 @@ export function SubmissionDetailModal({
               value="bim-model"
               data-testid="submission-detail-modal-bim-model-content"
             >
-              <BimModelTab engagementId={engagementId} />
+              <BimModelTab
+                engagementId={engagementId}
+                highlightElementRef={highlightedElementRef}
+                onHighlightConsumed={() => setHighlightedElementRef(null)}
+              />
             </TabsContent>
             <TabsContent
               value="engagement-context"
@@ -206,6 +245,7 @@ export function SubmissionDetailModal({
                 submissionId={submission.id}
                 selectedFindingId={selectedFindingId}
                 onSelectFinding={onSelectFinding ?? (() => {})}
+                onShowInViewer={handleShowInViewer}
               />
             </TabsContent>
           </Tabs>

@@ -21,17 +21,26 @@ export interface FindingDrillInProps {
   finding: Finding;
   onClose: () => void;
   onAfterMutate?: (next: Finding) => void;
-  /** Pass `true` once parity-B wires the BIM Model tab + 3D viewer. */
-  bimViewerAvailable?: boolean;
-  /** Called when "Show in 3D viewer" is clicked and the viewer is wired. */
-  onShowInViewer?: (finding: Finding) => void;
+  /**
+   * Called when the reviewer clicks "Show in 3D viewer" on a
+   * finding that carries an `elementRef`. The host (the
+   * SubmissionDetailModal) is responsible for switching to the
+   * BIM Model tab and asking the materializable-elements list to
+   * highlight + scroll to the referenced element.
+   *
+   * Optional so tests that mount the drill-in in isolation
+   * (without the modal shell) don't have to stub this — when
+   * absent the button still renders for layout symmetry but is
+   * disabled with a "no viewer host attached" hint instead of
+   * throwing on click.
+   */
+  onShowInViewer?: (elementRef: string) => void;
 }
 
 export function FindingDrillIn({
   finding,
   onClose,
   onAfterMutate,
-  bimViewerAvailable = false,
   onShowInViewer,
 }: FindingDrillInProps) {
   const [overrideOpen, setOverrideOpen] = useState(false);
@@ -51,18 +60,16 @@ export function FindingDrillIn({
     onAfterMutate?.(next);
   };
 
+  // Task #343 — the modal owns the cross-tab jump; we just hand it
+  // the elementRef the finding points at. The button is gated on
+  // both `elementRef` and `onShowInViewer` so a hosted-without-
+  // wiring render still gives the user a clear "viewer not
+  // attached" affordance instead of a click that silently no-ops.
+  const viewerJumpEnabled =
+    finding.elementRef !== null && typeof onShowInViewer === "function";
   const handleViewerJump = () => {
-    if (bimViewerAvailable) {
-      onShowInViewer?.(finding);
-      return;
-    }
-    // eslint-disable-next-line no-console
-    console.info("[air-2] show-in-viewer-stub", {
-      findingId: finding.id,
-      submissionId: finding.submissionId,
-      elementRef: finding.elementRef,
-      reason: "parity-b-not-merged",
-    });
+    if (!viewerJumpEnabled || finding.elementRef === null) return;
+    onShowInViewer?.(finding.elementRef);
   };
 
   const originalAi = finding.revisionOf
@@ -298,11 +305,16 @@ export function FindingDrillIn({
                   type="button"
                   className="sc-btn-sm"
                   onClick={handleViewerJump}
+                  disabled={!viewerJumpEnabled}
                   data-testid="finding-drill-in-viewer-jump"
+                  data-viewer-attached={
+                    typeof onShowInViewer === "function" ? "true" : "false"
+                  }
+                  aria-label={`Show ${finding.elementRef} in the BIM Model tab`}
                   title={
-                    bimViewerAvailable
-                      ? "Open this element in the BIM Model tab"
-                      : "3D viewer not yet available — wired in a follow-up sprint"
+                    viewerJumpEnabled
+                      ? `Open ${finding.elementRef} in the BIM Model tab`
+                      : "3D viewer not attached to this drill-in"
                   }
                   style={{
                     display: "inline-flex",
@@ -315,15 +327,6 @@ export function FindingDrillIn({
                   <Box size={11} aria-hidden />
                   Show in 3D viewer
                 </button>
-                {!bimViewerAvailable && (
-                  <span
-                    className="sc-meta"
-                    data-testid="finding-drill-in-viewer-stub-hint"
-                    style={{ fontSize: 10, color: "var(--text-muted)" }}
-                  >
-                    not yet available
-                  </span>
-                )}
               </div>
             )}
             {finding.sourceRef && (

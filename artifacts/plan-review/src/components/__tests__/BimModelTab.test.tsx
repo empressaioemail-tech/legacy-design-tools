@@ -46,6 +46,7 @@ import {
   fireEvent,
   cleanup,
   within,
+  waitFor,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -155,11 +156,17 @@ function makeQueryClient() {
   });
 }
 
-function renderTab(engagementId = "eng-1") {
+function renderTab(
+  engagementId = "eng-1",
+  extraProps: {
+    highlightElementRef?: string | null;
+    onHighlightConsumed?: () => void;
+  } = {},
+) {
   const client = makeQueryClient();
   const node: ReactNode = (
     <QueryClientProvider client={client}>
-      <BimModelTab engagementId={engagementId} />
+      <BimModelTab engagementId={engagementId} {...extraProps} />
     </QueryClientProvider>
   );
   return render(node);
@@ -472,6 +479,178 @@ describe("BimModelTab — Plan Review (Task #306)", () => {
     expect(
       within(card).getByTestId("bim-model-summary-revit-document").textContent,
     ).toBe("C:/Projects/north-tower.rvt");
+  });
+
+  // Task #343 — when a reviewer clicks "Show in 3D viewer" on a
+  // finding, the SubmissionDetailModal switches to this tab and
+  // threads the finding's `elementRef` down. The materializable-
+  // elements list is responsible for resolving that ref to a row,
+  // scrolling it into view, applying a brief visual highlight,
+  // announcing the jump in an aria-live region, and signalling
+  // back via `onHighlightConsumed` so a re-click on the same
+  // finding re-fires the animation.
+  describe("Show-in-3D-viewer cross-tab jump (Task #343)", () => {
+    const baseModelWithElements = {
+      id: "bm-1",
+      engagementId: "eng-1",
+      activeBriefingId: "br-1",
+      briefingVersion: 1,
+      materializedAt: "2026-04-01T09:00:00.000Z",
+      revitDocumentPath: null,
+      refreshStatus: "current" as const,
+      elements: [
+        {
+          id: "el-terrain",
+          briefingId: "br-1",
+          elementKind: "terrain" as const,
+          briefingSourceId: null,
+          label: "Site terrain",
+          geometry: {},
+          glbObjectPath: null,
+          locked: true,
+          createdAt: "2026-04-01T09:00:00.000Z",
+          updatedAt: "2026-04-01T09:00:00.000Z",
+        },
+        {
+          // Server-side id intentionally ends with the hyphenated
+          // tail of the AI-emitted ref `wall:north-side-l2` so the
+          // trailing-segment matcher exercises the
+          // `id.endsWith(tail)` branch.
+          id: "el-wall-north-side-l2",
+          briefingId: "br-1",
+          elementKind: "setback-plane" as const,
+          briefingSourceId: null,
+          label: "North side L2",
+          geometry: {},
+          glbObjectPath: null,
+          locked: false,
+          createdAt: "2026-04-01T09:00:00.000Z",
+          updatedAt: "2026-04-01T09:00:00.000Z",
+        },
+      ] as never,
+      createdAt: "2026-04-01T09:00:00.000Z",
+      updatedAt: "2026-04-01T09:00:00.000Z",
+    };
+
+    let scrollSpy: ReturnType<typeof vi.fn>;
+    beforeEach(() => {
+      // JSDOM does not implement scrollIntoView; stub it so the
+      // pulse side-effect doesn't throw and we can assert the
+      // matched row was the one targeted. We DO NOT enable fake
+      // timers here because react-query schedules its own
+      // setTimeout-driven cache work and freezing the clock at
+      // mount time wedges the bim-model query in its loading
+      // state. The single test that needs a clock advance opts
+      // into fake timers locally, after the data has rendered.
+      scrollSpy = vi.fn();
+      Object.defineProperty(Element.prototype, "scrollIntoView", {
+        value: scrollSpy,
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    it("highlights the matched row, scrolls to it, and announces the jump for screen readers", async () => {
+      hoisted.bimModel = baseModelWithElements;
+      hoisted.divergences = [];
+      const { rerender } = renderTab("eng-1", { highlightElementRef: null });
+
+      // The list mounts; the announcer is empty until a jump fires.
+      const announcer = await screen.findByTestId(
+        "bim-model-elements-announcer",
+      );
+      expect(announcer.textContent).toBe("");
+      expect(announcer.getAttribute("aria-live")).toBe("polite");
+      expect(announcer.getAttribute("role")).toBe("status");
+
+      // Trigger the jump with the exact server-side element id.
+      rerender(
+        <QueryClientProvider client={makeQueryClient()}>
+          <BimModelTab
+            engagementId="eng-1"
+            highlightElementRef="el-wall-north-side-l2"
+          />
+        </QueryClientProvider>,
+      );
+
+      const rows = await screen.findAllByTestId("bim-model-elements-row");
+      const matched = rows.find(
+        (r) => r.getAttribute("data-element-id") === "el-wall-north-side-l2",
+      )!;
+      const other = rows.find(
+        (r) => r.getAttribute("data-element-id") === "el-terrain",
+      )!;
+      expect(matched.getAttribute("data-highlighted")).toBe("true");
+      expect(other.getAttribute("data-highlighted")).toBe("false");
+
+      // Scroll-into-view fired on the matched row only.
+      expect(scrollSpy).toHaveBeenCalledTimes(1);
+      expect(scrollSpy.mock.instances[0]).toBe(matched);
+
+      // Announcer renders a sentence naming the focused element.
+      expect(
+        screen.getByTestId("bim-model-elements-announcer").textContent,
+      ).toContain("North side L2");
+
+      // No "no-match" warning is shown when we resolved the ref.
+      expect(
+        screen.queryByTestId("bim-model-elements-no-match"),
+      ).toBeNull();
+    });
+
+    it("falls back to the trailing-segment matcher for AI-style refs like wall:north-side-l2", async () => {
+      hoisted.bimModel = baseModelWithElements;
+      hoisted.divergences = [];
+      renderTab("eng-1", { highlightElementRef: "wall:north-side-l2" });
+      const rows = await screen.findAllByTestId("bim-model-elements-row");
+      const matched = rows.find(
+        (r) => r.getAttribute("data-element-id") === "el-wall-north-side-l2",
+      )!;
+      expect(matched.getAttribute("data-highlighted")).toBe("true");
+      expect(
+        screen.queryByTestId("bim-model-elements-no-match"),
+      ).toBeNull();
+    });
+
+    it("renders a no-match warning + SR announcement when the elementRef does not resolve", async () => {
+      hoisted.bimModel = baseModelWithElements;
+      hoisted.divergences = [];
+      renderTab("eng-1", {
+        highlightElementRef: "window:bedroom-2-egress",
+      });
+      const warn = await screen.findByTestId("bim-model-elements-no-match");
+      expect(warn.textContent).toContain("window:bedroom-2-egress");
+      expect(
+        screen.getByTestId("bim-model-elements-announcer").textContent,
+      ).toContain("not present in the current BIM model");
+      // Nothing is highlighted in the no-match case.
+      const rows = screen.getAllByTestId("bim-model-elements-row");
+      for (const r of rows) {
+        expect(r.getAttribute("data-highlighted")).toBe("false");
+      }
+    });
+
+    it("invokes onHighlightConsumed ~2.5s after the pulse so a re-click re-fires", async () => {
+      hoisted.bimModel = baseModelWithElements;
+      hoisted.divergences = [];
+      const onConsumed = vi.fn();
+      renderTab("eng-1", {
+        highlightElementRef: "el-wall-north-side-l2",
+        onHighlightConsumed: onConsumed,
+      });
+      // Wait for the highlight effect to set its setTimeout (which
+      // happens once the row has rendered + the effect has run).
+      // We use a real-timer waitFor with a generous 3s ceiling
+      // rather than fake timers — react-query's internal scheduler
+      // also depends on setTimeout, and freezing the clock at mount
+      // wedges the bim-model query in its loading state.
+      await waitFor(
+        () => {
+          expect(onConsumed).toHaveBeenCalledTimes(1);
+        },
+        { timeout: 3500, interval: 100 },
+      );
+    });
   });
 
   it("closes the drill-in dialog when the Close button is clicked", async () => {

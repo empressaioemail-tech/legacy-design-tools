@@ -45,12 +45,20 @@ export interface FindingsTabProps {
   submissionId: string;
   selectedFindingId: string | null;
   onSelectFinding: (id: string | null) => void;
+  /**
+   * Task #343 — passed straight through to {@link FindingDrillIn}
+   * so the modal shell can switch to the BIM Model tab and
+   * highlight the referenced element when the reviewer clicks
+   * "Show in 3D viewer".
+   */
+  onShowInViewer?: (elementRef: string) => void;
 }
 
 export function FindingsTab({
   submissionId,
   selectedFindingId,
   onSelectFinding,
+  onShowInViewer,
 }: FindingsTabProps) {
   const findingsQuery = useListSubmissionFindings(submissionId);
   const findings = useMemo(
@@ -222,6 +230,7 @@ export function FindingsTab({
           onAfterMutate={(next) => {
             onSelectFinding(next.id);
           }}
+          onShowInViewer={onShowInViewer}
         />
       )}
     </div>
