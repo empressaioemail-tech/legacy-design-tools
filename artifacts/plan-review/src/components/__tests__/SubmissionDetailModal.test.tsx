@@ -46,16 +46,18 @@ import type {
 vi.mock("../BimModelTab", () => ({
   BimModelTab: ({
     engagementId,
-    highlightElementRef,
+    highlightToken,
   }: {
     engagementId: string;
-    highlightElementRef?: string | null;
-    onHighlightConsumed?: () => void;
+    highlightToken?: { ref: string; nonce: number } | null;
   }) => (
     <div
       data-testid="bim-model-tab-mock"
       data-engagement-id={engagementId}
-      data-highlight-element-ref={highlightElementRef ?? ""}
+      data-highlight-element-ref={highlightToken?.ref ?? ""}
+      data-highlight-nonce={
+        highlightToken ? String(highlightToken.nonce) : ""
+      }
     >
       BIM Model tab
     </div>
@@ -504,6 +506,40 @@ describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () =>
       "data-highlight-element-ref",
       "wall:north-side-l2",
     );
+  });
+
+  // Task #371 — clicking the *same* finding's "Show in 3D viewer"
+  // button twice in a row must re-fire the highlight effect downstream
+  // even though the elementRef hasn't changed. The modal does this by
+  // bumping a monotonically-increasing nonce inside the highlight
+  // token, so BimModelTab observes a fresh prop value on every click.
+  it("bumps the highlight token's nonce on every Show-in-3D-viewer click so re-clicks re-fire", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(screen.getByTestId("submission-tab-findings"));
+    const trigger = await screen.findByTestId(
+      "findings-tab-mock-show-in-viewer",
+    );
+    await user.click(trigger);
+    let bimTab = await screen.findByTestId("bim-model-tab-mock");
+    expect(bimTab).toHaveAttribute(
+      "data-highlight-element-ref",
+      "wall:north-side-l2",
+    );
+    expect(bimTab).toHaveAttribute("data-highlight-nonce", "1");
+
+    // Bounce back to Findings and click the same trigger again — the
+    // ref is identical but the nonce must have advanced.
+    await user.click(screen.getByTestId("submission-tab-findings"));
+    await user.click(
+      await screen.findByTestId("findings-tab-mock-show-in-viewer"),
+    );
+    bimTab = await screen.findByTestId("bim-model-tab-mock");
+    expect(bimTab).toHaveAttribute(
+      "data-highlight-element-ref",
+      "wall:north-side-l2",
+    );
+    expect(bimTab).toHaveAttribute("data-highlight-nonce", "2");
   });
 
   it("clears the highlight when the reviewer leaves the BIM Model tab", async () => {

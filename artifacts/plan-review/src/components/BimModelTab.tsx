@@ -103,24 +103,23 @@ function findElementByRef(
 
 function MaterializableElementsList({
   elements,
-  highlightElementRef = null,
-  onHighlightConsumed,
+  highlightToken = null,
 }: {
   elements: MaterializableElement[];
   /**
-   * Task #343 — when a reviewer clicks "Show in 3D viewer" on a
-   * finding, the modal sets this to the finding's `elementRef`
-   * and we (a) resolve it to a row, (b) scroll the row into view,
-   * (c) apply a brief visual pulse, and (d) announce the jump in
-   * an aria-live region for screen readers.
+   * Task #343 / #371 — when a reviewer clicks "Show in 3D viewer"
+   * on a finding, the modal sets this to a `{ ref, nonce }` token
+   * and we (a) resolve `ref` to a row, (b) scroll the row into
+   * view, (c) apply a visual highlight, and (d) announce the jump
+   * in an aria-live region for screen readers.
+   *
+   * The `nonce` is a monotonically-increasing counter the modal
+   * bumps on every click — including re-clicks of the SAME
+   * finding — so the highlight effect re-runs and re-scrolls even
+   * when `ref` has not changed. This replaces the brittle 2.5s
+   * `onHighlightConsumed` clear-and-refire dance from Task #343.
    */
-  highlightElementRef?: string | null;
-  /**
-   * Fired ~2.5s after the visual pulse starts so the modal can
-   * clear its `highlightedElementRef` state and a subsequent jump
-   * to the *same* element re-fires the pulse.
-   */
-  onHighlightConsumed?: () => void;
+  highlightToken?: { ref: string; nonce: number } | null;
 }) {
   const grouped = useMemo(() => {
     const buckets = new Map<MaterializableElementKind, MaterializableElement[]>();
@@ -140,12 +139,10 @@ function MaterializableElementsList({
   // `matched` is `null` when the reviewer clicked a finding whose
   // elementRef does not appear in the current bim-model — we still
   // announce the no-match case so they know the jump landed.
+  const ref = highlightToken?.ref ?? null;
   const matched = useMemo(
-    () =>
-      highlightElementRef
-        ? findElementByRef(elements, highlightElementRef)
-        : null,
-    [elements, highlightElementRef],
+    () => (ref ? findElementByRef(elements, ref) : null),
+    [elements, ref],
   );
 
   // Per-row refs let us scroll the matched row into view without
@@ -154,40 +151,33 @@ function MaterializableElementsList({
   // refs around for rows it never highlighted.
   const rowRefs = useRef(new Map<string, HTMLLIElement | null>());
 
-  // Pulse + scroll + announce side-effect. Fires on every change of
-  // `highlightElementRef` so two clicks on the same finding both
-  // animate (the modal clears the ref between clicks via the
-  // `onHighlightConsumed` callback).
+  // Scroll + announce side-effect. Re-runs on every new
+  // highlightToken — including same-ref / new-nonce re-clicks —
+  // because the modal hands us a fresh object each time. No
+  // wall-clock timer needed: the highlight outline simply stays
+  // applied until the modal clears the token (on tab leave or
+  // modal close), and the scroll fires on each click.
+  const nonce = highlightToken?.nonce ?? null;
   useEffect(() => {
-    if (!highlightElementRef) return;
+    if (!ref) return;
     if (matched) {
       const node = rowRefs.current.get(matched.id);
       if (node) {
         node.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
-    // Auto-clear after the pulse animation has had time to play.
-    // Using a 2.5s window keeps the highlight long enough to be
-    // perceived but short enough that a reviewer who tab-switches
-    // away and back doesn't see a stuck pulse.
-    const tid = window.setTimeout(() => {
-      onHighlightConsumed?.();
-    }, 2500);
-    return () => {
-      window.clearTimeout(tid);
-    };
-  }, [highlightElementRef, matched, onHighlightConsumed]);
+  }, [ref, nonce, matched]);
 
   // Screen-reader announcement string. Empty when there's nothing to
   // announce so the live region doesn't read out spurious "" updates.
   const announcement = useMemo(() => {
-    if (!highlightElementRef) return "";
+    if (!ref) return "";
     if (matched) {
       const label = matched.label ?? matched.id;
       return `Showing ${label} in the BIM model viewer.`;
     }
-    return `Element ${highlightElementRef} from the finding is not present in the current BIM model.`;
-  }, [highlightElementRef, matched]);
+    return `Element ${ref} from the finding is not present in the current BIM model.`;
+  }, [ref, matched]);
 
   return (
     <div
@@ -232,7 +222,7 @@ function MaterializableElementsList({
       >
         {announcement}
       </div>
-      {highlightElementRef && !matched && (
+      {ref && !matched && (
         <div
           data-testid="bim-model-elements-no-match"
           style={{
@@ -246,7 +236,7 @@ function MaterializableElementsList({
         >
           The finding references{" "}
           <code style={{ fontFamily: "ui-monospace, monospace" }}>
-            {highlightElementRef}
+            {ref}
           </code>
           , which is not present in the current BIM model.
         </div>
@@ -476,19 +466,16 @@ function BimModelSummaryCard({ bimModel }: { bimModel: EngagementBimModel }) {
 export interface BimModelTabProps {
   engagementId: string;
   /**
-   * Task #343 — when the reviewer clicks "Show in 3D viewer" on a
-   * finding, the SubmissionDetailModal switches to this tab and
-   * threads the finding's `elementRef` down so the
+   * Task #343 / #371 — when the reviewer clicks "Show in 3D
+   * viewer" on a finding, the SubmissionDetailModal switches to
+   * this tab and threads a `{ ref, nonce }` token down so the
    * materializable-elements list can scroll to + highlight the
-   * matching row. `null` means no jump is in flight.
+   * matching row. The `nonce` increments on every click so a
+   * re-click of the SAME finding still re-runs the highlight
+   * effect even though `ref` is unchanged. `null` means no jump
+   * is in flight.
    */
-  highlightElementRef?: string | null;
-  /**
-   * Fired by the elements list ~2.5s after a pulse starts, letting
-   * the modal clear its highlight state so a subsequent click on
-   * the same finding re-triggers the animation.
-   */
-  onHighlightConsumed?: () => void;
+  highlightToken?: { ref: string; nonce: number } | null;
 }
 
 /**
@@ -519,8 +506,7 @@ export interface BimModelTabProps {
  */
 export function BimModelTab({
   engagementId,
-  highlightElementRef = null,
-  onHighlightConsumed,
+  highlightToken = null,
 }: BimModelTabProps) {
   const [activeDivergence, setActiveDivergence] =
     useState<BimModelDivergenceListEntry | null>(null);
@@ -573,8 +559,7 @@ export function BimModelTab({
       {bimModel && (
         <MaterializableElementsList
           elements={bimModel.elements}
-          highlightElementRef={highlightElementRef}
-          onHighlightConsumed={onHighlightConsumed}
+          highlightToken={highlightToken}
         />
       )}
 

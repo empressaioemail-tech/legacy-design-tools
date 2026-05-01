@@ -48,7 +48,7 @@
  * default Dialog max-width so the divergences table doesn't wrap
  * awkwardly.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -130,32 +130,51 @@ export function SubmissionDetailModal({
 
   // Task #343 — cross-tab "Show in 3D viewer" jump. The Findings
   // drill-in fires `onShowInViewer(elementRef)`; we switch to the
-  // BIM Model tab and forward the elementRef so the
-  // materializable-elements list can scroll to + visually pulse the
+  // BIM Model tab and forward a `{ ref, nonce }` token so the
+  // materializable-elements list can scroll to + highlight the
   // matching row. State is intentionally modal-local rather than
   // URL-synced — the highlight is a transient navigation hint, not
   // a deep-linkable selection.
-  const [highlightedElementRef, setHighlightedElementRef] = useState<
-    string | null
-  >(null);
+  //
+  // Task #371 — using a monotonically-increasing `nonce` lets a
+  // re-click on the SAME finding re-trigger the highlight effect
+  // even though `ref` is unchanged. Previously we relied on a
+  // wall-clock 2.5s timer to clear the ref so the next click could
+  // re-fire; the token approach removes that brittle timing race.
+  //
+  // The nonce counter is held in a ref so it climbs monotonically
+  // across the modal's whole lifetime — even when the highlight is
+  // cleared (on tab leave or modal close) and later re-set, the
+  // next nonce is still strictly greater than the previous one.
+  // That guarantees BimModelTab observes a fresh value on every
+  // re-fire, regardless of intervening clears.
+  const [highlightToken, setHighlightToken] = useState<{
+    ref: string;
+    nonce: number;
+  } | null>(null);
+  const nextHighlightNonceRef = useRef(0);
 
   // Clear the highlight whenever the reviewer leaves the BIM Model
-  // tab so a later return to that tab doesn't surface a stale pulse
-  // from a finding they've since closed.
+  // tab so a later return to that tab doesn't surface a stale
+  // highlight from a finding they've since closed.
   useEffect(() => {
-    if (activeTab !== "bim-model" && highlightedElementRef !== null) {
-      setHighlightedElementRef(null);
+    if (activeTab !== "bim-model" && highlightToken !== null) {
+      setHighlightToken(null);
     }
-  }, [activeTab, highlightedElementRef]);
+  }, [activeTab, highlightToken]);
 
   // Reset whenever the modal closes / opens against a different
   // submission so a re-open lands on a clean BIM Model tab.
   useEffect(() => {
-    if (!isOpen) setHighlightedElementRef(null);
+    if (!isOpen) setHighlightToken(null);
   }, [isOpen]);
 
   const handleShowInViewer = (elementRef: string) => {
-    setHighlightedElementRef(elementRef);
+    nextHighlightNonceRef.current += 1;
+    setHighlightToken({
+      ref: elementRef,
+      nonce: nextHighlightNonceRef.current,
+    });
     if (isControlled) {
       onTabChange?.("bim-model");
     } else {
@@ -307,8 +326,7 @@ export function SubmissionDetailModal({
             >
               <BimModelTab
                 engagementId={engagementId}
-                highlightElementRef={highlightedElementRef}
-                onHighlightConsumed={() => setHighlightedElementRef(null)}
+                highlightToken={highlightToken}
               />
             </TabsContent>
           </Tabs>

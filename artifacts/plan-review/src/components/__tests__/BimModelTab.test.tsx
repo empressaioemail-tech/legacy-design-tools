@@ -159,8 +159,7 @@ function makeQueryClient() {
 function renderTab(
   engagementId = "eng-1",
   extraProps: {
-    highlightElementRef?: string | null;
-    onHighlightConsumed?: () => void;
+    highlightToken?: { ref: string; nonce: number } | null;
   } = {},
 ) {
   const client = makeQueryClient();
@@ -553,7 +552,7 @@ describe("BimModelTab — Plan Review (Task #306)", () => {
     it("highlights the matched row, scrolls to it, and announces the jump for screen readers", async () => {
       hoisted.bimModel = baseModelWithElements;
       hoisted.divergences = [];
-      const { rerender } = renderTab("eng-1", { highlightElementRef: null });
+      const { rerender } = renderTab("eng-1", { highlightToken: null });
 
       // The list mounts; the announcer is empty until a jump fires.
       const announcer = await screen.findByTestId(
@@ -568,7 +567,7 @@ describe("BimModelTab — Plan Review (Task #306)", () => {
         <QueryClientProvider client={makeQueryClient()}>
           <BimModelTab
             engagementId="eng-1"
-            highlightElementRef="el-wall-north-side-l2"
+            highlightToken={{ ref: "el-wall-north-side-l2", nonce: 1 }}
           />
         </QueryClientProvider>,
       );
@@ -601,7 +600,9 @@ describe("BimModelTab — Plan Review (Task #306)", () => {
     it("falls back to the trailing-segment matcher for AI-style refs like wall:north-side-l2", async () => {
       hoisted.bimModel = baseModelWithElements;
       hoisted.divergences = [];
-      renderTab("eng-1", { highlightElementRef: "wall:north-side-l2" });
+      renderTab("eng-1", {
+        highlightToken: { ref: "wall:north-side-l2", nonce: 1 },
+      });
       const rows = await screen.findAllByTestId("bim-model-elements-row");
       const matched = rows.find(
         (r) => r.getAttribute("data-element-id") === "el-wall-north-side-l2",
@@ -616,7 +617,7 @@ describe("BimModelTab — Plan Review (Task #306)", () => {
       hoisted.bimModel = baseModelWithElements;
       hoisted.divergences = [];
       renderTab("eng-1", {
-        highlightElementRef: "window:bedroom-2-egress",
+        highlightToken: { ref: "window:bedroom-2-egress", nonce: 1 },
       });
       const warn = await screen.findByTestId("bim-model-elements-no-match");
       expect(warn.textContent).toContain("window:bedroom-2-egress");
@@ -630,26 +631,49 @@ describe("BimModelTab — Plan Review (Task #306)", () => {
       }
     });
 
-    it("invokes onHighlightConsumed ~2.5s after the pulse so a re-click re-fires", async () => {
+    // Task #371 — a re-click of the SAME finding bumps the token's
+    // nonce while leaving the ref unchanged. The highlight effect
+    // must observe that and re-fire (re-scrolling the matched row
+    // into view) rather than treating the prop as unchanged. This
+    // replaces the previous `onHighlightConsumed` + 2.5s-timer
+    // dance: there is no clear-and-refire phase, the nonce alone
+    // re-triggers the effect deterministically.
+    it("re-runs the highlight effect when the nonce changes even if the ref is unchanged", async () => {
       hoisted.bimModel = baseModelWithElements;
       hoisted.divergences = [];
-      const onConsumed = vi.fn();
-      renderTab("eng-1", {
-        highlightElementRef: "el-wall-north-side-l2",
-        onHighlightConsumed: onConsumed,
+      const { rerender } = renderTab("eng-1", {
+        highlightToken: { ref: "el-wall-north-side-l2", nonce: 1 },
       });
-      // Wait for the highlight effect to set its setTimeout (which
-      // happens once the row has rendered + the effect has run).
-      // We use a real-timer waitFor with a generous 3s ceiling
-      // rather than fake timers — react-query's internal scheduler
-      // also depends on setTimeout, and freezing the clock at mount
-      // wedges the bim-model query in its loading state.
-      await waitFor(
-        () => {
-          expect(onConsumed).toHaveBeenCalledTimes(1);
-        },
-        { timeout: 3500, interval: 100 },
+
+      // First render: the matched row is highlighted and scrolled
+      // into view exactly once.
+      await screen.findAllByTestId("bim-model-elements-row");
+      expect(scrollSpy).toHaveBeenCalledTimes(1);
+
+      // Re-render with the SAME ref but a NEW nonce — the effect
+      // must observe the new token object and re-fire scrollIntoView
+      // (the equivalent of the reviewer clicking "Show in 3D viewer"
+      // on the same finding a second time).
+      rerender(
+        <QueryClientProvider client={makeQueryClient()}>
+          <BimModelTab
+            engagementId="eng-1"
+            highlightToken={{ ref: "el-wall-north-side-l2", nonce: 2 }}
+          />
+        </QueryClientProvider>,
       );
+      await waitFor(() => {
+        expect(scrollSpy).toHaveBeenCalledTimes(2);
+      });
+
+      // Row remains highlighted across the re-fire — the highlight
+      // outline isn't a wall-clock pulse, it stays applied as long
+      // as the modal holds the token.
+      const rows = await screen.findAllByTestId("bim-model-elements-row");
+      const matched = rows.find(
+        (r) => r.getAttribute("data-element-id") === "el-wall-north-side-l2",
+      )!;
+      expect(matched.getAttribute("data-highlighted")).toBe("true");
     });
   });
 
