@@ -26,6 +26,24 @@ import { engagements } from "./engagements";
  * read; `createdAt` defaults to the same value and is kept distinct
  * for forward-compat (a future producer might backfill historical
  * submissions where `submittedAt` differs from row creation time).
+ *
+ * Response columns (Task #76) — `status`, `reviewerComment`, and
+ * `respondedAt` capture the *jurisdiction's reply* against the
+ * submission. `status` is the canonical review-state enum (see
+ * {@link SUBMISSION_STATUS_VALUES}) — defaulted to `"pending"` at
+ * insert so every existing row, and every newly-created row, has a
+ * meaningful status without a separate backfill. `reviewerComment` is
+ * an optional free-text note from the reviewer (e.g. correction
+ * requests, approval conditions) and is null while the submission is
+ * still pending. `respondedAt` is null until the response is recorded;
+ * once non-null it is the canonical timestamp of the jurisdiction's
+ * reply (mirrors how `submittedAt` is the canonical send-off
+ * timestamp). Storing the response inline on the same row — rather
+ * than as a separate `submission_responses` table — keeps a
+ * submission's full back-and-forth retrievable in one read and
+ * matches the locked decision #5 (rows over events) for the response
+ * surface; the `submission.response-recorded` event remains the
+ * audit trail.
  */
 export const submissions = pgTable(
   "submissions",
@@ -42,6 +60,9 @@ export const submissions = pgTable(
     submittedAt: timestamp("submitted_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    status: text("status").notNull().default("pending"),
+    reviewerComment: text("reviewer_comment"),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -51,6 +72,41 @@ export const submissions = pgTable(
     submittedAtIdx: index("submissions_submitted_at_idx").on(t.submittedAt),
   }),
 );
+
+/**
+ * Canonical set of jurisdiction-response statuses a submission row's
+ * `status` column may hold. The `pending` value is the default at
+ * insert (no response yet); the other three are terminal-ish review
+ * outcomes the route handler may transition the row into when the
+ * jurisdiction's reply is recorded. Kept here (alongside the schema)
+ * so consumers — the response route, the OpenAPI body schema, the
+ * submission atom's keyMetric — all import the same source-of-truth
+ * tuple rather than open-coding string literals.
+ */
+export const SUBMISSION_STATUS_VALUES = [
+  "pending",
+  "approved",
+  "corrections_requested",
+  "rejected",
+] as const;
+
+export type SubmissionStatus = (typeof SUBMISSION_STATUS_VALUES)[number];
+
+/**
+ * The non-pending subset — the values the response route is allowed
+ * to transition a submission *into*. `pending` is the implicit
+ * starting state and not a valid response payload, so excluding it
+ * here lets the route validation reject `{"status":"pending"}` at the
+ * contract layer instead of silently no-op'ing the response.
+ */
+export const SUBMISSION_RESPONSE_STATUS_VALUES = [
+  "approved",
+  "corrections_requested",
+  "rejected",
+] as const;
+
+export type SubmissionResponseStatus =
+  (typeof SUBMISSION_RESPONSE_STATUS_VALUES)[number];
 
 export const submissionsRelations = relations(submissions, ({ one }) => ({
   engagement: one(engagements, {

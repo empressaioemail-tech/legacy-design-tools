@@ -152,6 +152,83 @@ export interface EngagementSubmissionSummary {
   note: string | null;
 }
 
+/**
+ * Canonical jurisdiction-response status for a submission.
+`pending` is the default at insert (no response recorded yet);
+the other three are review outcomes the response route may
+transition the row into.
+
+ */
+export type SubmissionStatus =
+  (typeof SubmissionStatus)[keyof typeof SubmissionStatus];
+
+export const SubmissionStatus = {
+  pending: "pending",
+  approved: "approved",
+  corrections_requested: "corrections_requested",
+  rejected: "rejected",
+} as const;
+
+/**
+ * Jurisdiction's review outcome for the submission.
+ */
+export type RecordSubmissionResponseBodyStatus =
+  (typeof RecordSubmissionResponseBodyStatus)[keyof typeof RecordSubmissionResponseBodyStatus];
+
+export const RecordSubmissionResponseBodyStatus = {
+  approved: "approved",
+  corrections_requested: "corrections_requested",
+  rejected: "rejected",
+} as const;
+
+/**
+ * Request body for `POST /engagements/{id}/submissions/{submissionId}/response`.
+`status` is the new review state the jurisdiction has assigned;
+`pending` is intentionally not a valid response value (it is the
+starting state, not an outcome). `reviewerComment` is an optional
+free-text note from the reviewer (e.g. correction requests,
+approval conditions); empty / whitespace-only strings are
+coerced to null. `respondedAt` is optional and defaults to the
+server's clock at the moment the response is recorded — callers
+only need to supply it when backfilling a historical reply.
+
+ */
+export interface RecordSubmissionResponseBody {
+  /** Jurisdiction's review outcome for the submission. */
+  status: RecordSubmissionResponseBodyStatus;
+  /**
+   * Optional free-text note from the reviewer. Capped at 4 KB
+so the event payload stays bounded. Empty / whitespace-only
+values are coerced to null on the stored row and event.
+
+   * @maxLength 4096
+   */
+  reviewerComment?: string;
+  /** Optional explicit response timestamp. Defaults to the
+server clock when omitted; supply when backfilling a
+historical jurisdiction reply.
+ */
+  respondedAt?: string;
+}
+
+/**
+ * Submission row reflecting the jurisdiction's recorded response.
+Returned by the response route so callers don't need a
+follow-up GET to see the new state. `respondedAt` is null
+only when the row is still pending (the response route always
+sets it, but the type allows null for the pre-response state
+in case a future GET shares this shape).
+
+ */
+export interface SubmissionResponse {
+  id: string;
+  engagementId: string;
+  status: SubmissionStatus;
+  reviewerComment: string | null;
+  respondedAt: string | null;
+  submittedAt: string;
+}
+
 export interface SnapshotPayloadExisting {
   engagementId: string;
   [key: string]: unknown;

@@ -39,6 +39,7 @@ import type {
   ListJurisdictionAtomsParams,
   MatchEngagementBody,
   MatchEngagementResponse,
+  RecordSubmissionResponseBody,
   RetrievalProbeBody,
   RetrievalProbeResponse,
   SheetSummary,
@@ -49,6 +50,7 @@ import type {
   SnapshotSheetHistoryResponse,
   SnapshotSummary,
   SubmissionReceipt,
+  SubmissionResponse,
   UpdateEngagementBody,
   UpdateUserBody,
   UploadSnapshotSheetsBody,
@@ -791,6 +793,135 @@ export const useCreateEngagementSubmission = <
   TContext
 > => {
   return useMutation(getCreateEngagementSubmissionMutationOptions(options));
+};
+
+/**
+ * Records the jurisdiction's reply against a previously-recorded
+plan-review submission. Updates the submission row's `status`,
+optional `reviewerComment`, and `respondedAt` columns, and
+emits a `submission.response-recorded` event scoped to the
+submission entity (so the back-and-forth shows up on the
+submission's own timeline rather than collapsing into the
+parent engagement's).
+
+The response body always reflects the submission row *after*
+the update — callers do not need a follow-up GET to see the
+new status. Calling this route a second time on the same
+submission is allowed and overwrites the prior response (the
+event chain on the submission preserves the full history).
+
+ * @summary Record the jurisdiction's response on a submission
+ */
+export const getRecordSubmissionResponseUrl = (
+  id: string,
+  submissionId: string,
+) => {
+  return `/api/engagements/${id}/submissions/${submissionId}/response`;
+};
+
+export const recordSubmissionResponse = async (
+  id: string,
+  submissionId: string,
+  recordSubmissionResponseBody: RecordSubmissionResponseBody,
+  options?: RequestInit,
+): Promise<SubmissionResponse> => {
+  return customFetch<SubmissionResponse>(
+    getRecordSubmissionResponseUrl(id, submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(recordSubmissionResponseBody),
+    },
+  );
+};
+
+export const getRecordSubmissionResponseMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordSubmissionResponse>>,
+    TError,
+    {
+      id: string;
+      submissionId: string;
+      data: BodyType<RecordSubmissionResponseBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordSubmissionResponse>>,
+  TError,
+  {
+    id: string;
+    submissionId: string;
+    data: BodyType<RecordSubmissionResponseBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["recordSubmissionResponse"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordSubmissionResponse>>,
+    {
+      id: string;
+      submissionId: string;
+      data: BodyType<RecordSubmissionResponseBody>;
+    }
+  > = (props) => {
+    const { id, submissionId, data } = props ?? {};
+
+    return recordSubmissionResponse(id, submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordSubmissionResponseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordSubmissionResponse>>
+>;
+export type RecordSubmissionResponseMutationBody =
+  BodyType<RecordSubmissionResponseBody>;
+export type RecordSubmissionResponseMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Record the jurisdiction's response on a submission
+ */
+export const useRecordSubmissionResponse = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordSubmissionResponse>>,
+    TError,
+    {
+      id: string;
+      submissionId: string;
+      data: BodyType<RecordSubmissionResponseBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recordSubmissionResponse>>,
+  TError,
+  {
+    id: string;
+    submissionId: string;
+    data: BodyType<RecordSubmissionResponseBody>;
+  },
+  TContext
+> => {
+  return useMutation(getRecordSubmissionResponseMutationOptions(options));
 };
 
 /**

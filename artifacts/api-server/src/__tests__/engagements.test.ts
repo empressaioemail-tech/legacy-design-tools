@@ -589,6 +589,153 @@ describe("GET /api/engagements/:id/submissions — list past submissions", () =>
   });
 });
 
+describe("POST /api/engagements/:id/submissions/:submissionId/response — submission.response-recorded", () => {
+  async function seedSubmissionFor(engagementId: string) {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const { submissions } = await import("@workspace/db");
+    const [sub] = await ctx.schema.db
+      .insert(submissions)
+      .values({
+        engagementId,
+        jurisdiction: "Moab, UT",
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        note: "Permit set v1.",
+      })
+      .returning();
+    return sub!;
+  }
+
+  async function readSubmissionEvents(submissionId: string) {
+    if (!ctx.schema) throw new Error("schema not ready");
+    return ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "submission"),
+          eq(atomEvents.entityId, submissionId),
+        ),
+      )
+      .orderBy(asc(atomEvents.recordedAt));
+  }
+
+  it("updates the submission row and emits a submission-scoped event", async () => {
+    const eng = await seedEngagement({
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+    });
+    const sub = await seedSubmissionFor(eng.id);
+
+    // Default state is pending / no comment / no respondedAt.
+    expect(sub.status).toBe("pending");
+    expect(sub.reviewerComment).toBeNull();
+    expect(sub.respondedAt).toBeNull();
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({
+        status: "corrections_requested",
+        reviewerComment: "Please clarify wall assemblies on A-101.",
+      });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: sub.id,
+      engagementId: eng.id,
+      status: "corrections_requested",
+      reviewerComment: "Please clarify wall assemblies on A-101.",
+    });
+    expect(typeof res.body.respondedAt).toBe("string");
+    expect(typeof res.body.submittedAt).toBe("string");
+
+    // Submission-scoped event row was appended (not on the engagement).
+    const submissionEvents = await readSubmissionEvents(sub.id);
+    expect(submissionEvents).toHaveLength(1);
+    expect(submissionEvents[0]!.eventType).toBe("submission.response-recorded");
+    expect(submissionEvents[0]!.actor).toEqual({
+      kind: "system",
+      id: "submission-response",
+    });
+    expect(submissionEvents[0]!.payload).toMatchObject({
+      engagementId: eng.id,
+      status: "corrections_requested",
+      reviewerComment: "Please clarify wall assemblies on A-101.",
+    });
+
+    // The engagement timeline should NOT carry the submission-scoped
+    // event — that's the whole point of scoping it to the submission.
+    const engagementEvents = await readEngagementEvents(eng.id);
+    expect(
+      engagementEvents.some(
+        (e) => e.eventType === "submission.response-recorded",
+      ),
+    ).toBe(false);
+  });
+
+  it("coerces empty reviewerComment to null and stamps respondedAt when omitted", async () => {
+    const eng = await seedEngagement();
+    const sub = await seedSubmissionFor(eng.id);
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({ status: "approved", reviewerComment: "   " });
+    expect(res.status).toBe(200);
+    expect(res.body.reviewerComment).toBeNull();
+    expect(res.body.respondedAt).toEqual(expect.any(String));
+  });
+
+  it("rejects pending as a status (not a valid response value)", async () => {
+    const eng = await seedEngagement();
+    const sub = await seedSubmissionFor(eng.id);
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({ status: "pending" });
+    expect(res.status).toBe(400);
+  });
+
+  it("404s when the submission id does not exist at all", async () => {
+    const eng = await seedEngagement();
+    const fakeId = "00000000-0000-0000-0000-000000000000";
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${fakeId}/response`)
+      .send({ status: "approved" });
+    expect(res.status).toBe(404);
+  });
+
+  it("400s when the submission belongs to a different engagement", async () => {
+    const engA = await seedEngagement({ name: "A" });
+    const engB = await seedEngagement({ name: "B" });
+    const sub = await seedSubmissionFor(engA.id);
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${engB.id}/submissions/${sub.id}/response`)
+      .send({ status: "approved" });
+    expect(res.status).toBe(400);
+  });
+
+  it("allows overwriting the response (each call appends a new event)", async () => {
+    const eng = await seedEngagement();
+    const sub = await seedSubmissionFor(eng.id);
+
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({ status: "corrections_requested", reviewerComment: "Round 1" });
+    const res2 = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({ status: "approved", reviewerComment: "Round 2" });
+    expect(res2.status).toBe(200);
+    expect(res2.body.status).toBe("approved");
+    expect(res2.body.reviewerComment).toBe("Round 2");
+
+    const events = await readSubmissionEvents(sub.id);
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => e.eventType)).toEqual([
+      "submission.response-recorded",
+      "submission.response-recorded",
+    ]);
+    expect(events[1]!.payload).toMatchObject({ status: "approved" });
+  });
+});
+
 describe("POST /api/snapshots create-new — fireGeocodeAndWarmup emits jurisdiction-resolved", () => {
   it("emits engagement.jurisdiction-resolved on the create-new branch when geocode resolves a city/state", async () => {
     mockedGeocodeAddress.mockResolvedValueOnce({

@@ -25,7 +25,10 @@
  */
 
 import { eq } from "drizzle-orm";
-import { submissions } from "@workspace/db";
+import {
+  submissions,
+  type SubmissionStatus,
+} from "@workspace/db";
 import type {
   AtomReference,
   AtomRegistration,
@@ -50,14 +53,39 @@ export type SubmissionSupportedModes = typeof SUBMISSION_SUPPORTED_MODES;
 
 /**
  * Event vocabulary the submission atom is allowed to emit. The
- * canonical lifecycle event today is `engagement.submitted`, which is
- * appended against the *parent* engagement (so the timeline lives on
- * the engagement) — that producer lives in `engagement.atom.ts`'s
- * vocabulary, not here. Submission-scoped events (e.g. status updates
- * once the jurisdiction responds) will land in this constant when
- * those producers are wired.
+ * canonical lifecycle event for the *outbound* package
+ * (`engagement.submitted`) is appended against the *parent* engagement
+ * — that producer lives in `engagement.atom.ts`'s vocabulary, not
+ * here.
+ *
+ * Submission-scoped events live on this list:
+ *   - `submission.response-recorded` — emitted by
+ *     `routes/engagements.ts`'s POST
+ *     `/engagements/:id/submissions/:submissionId/response` handler
+ *     when the jurisdiction's reply is recorded against a submission.
+ *     Scoped to the submission entity (not the parent engagement) so
+ *     the back-and-forth lives on the submission's own history chain.
  */
-export const SUBMISSION_EVENT_TYPES = [] as const;
+export const SUBMISSION_EVENT_TYPES = [
+  "submission.response-recorded",
+] as const;
+
+export type SubmissionEventType = (typeof SUBMISSION_EVENT_TYPES)[number];
+
+/**
+ * Human-readable label for each `SubmissionStatus`. Used by the
+ * `keyMetrics` "Status" entry and the `prose` response sentence so
+ * the chat layer / FE card never have to translate snake_case enum
+ * values themselves. Kept exhaustive (typed by `Record<...>`) so a
+ * new status added to {@link SUBMISSION_STATUS_VALUES} fails to
+ * compile here until a label is provided.
+ */
+export const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
+  corrections_requested: "Corrections requested",
+  rejected: "Rejected",
+};
 
 /**
  * Typed payload returned by `submission`'s `contextSummary.typed`.
@@ -65,6 +93,12 @@ export const SUBMISSION_EVENT_TYPES = [] as const;
  * the FE can distinguish "we have no jurisdiction snapshot for this
  * submission" from "the jurisdiction field is missing from the payload
  * shape entirely".
+ *
+ * Response fields (`status`, `reviewerComment`, `respondedAt`) follow
+ * the same convention — nullable values are emitted as `null` rather
+ * than omitted. `status` is always present (defaulted to `"pending"`
+ * by the row schema), so the FE can rely on it to drive the response
+ * UI without a presence check.
  */
 export interface SubmissionTypedPayload {
   id: string;
@@ -76,6 +110,9 @@ export interface SubmissionTypedPayload {
   jurisdictionFips?: string | null;
   note?: string | null;
   submittedAt?: string;
+  status?: SubmissionStatus;
+  reviewerComment?: string | null;
+  respondedAt?: string | null;
   createdAt?: string;
 }
 
@@ -117,6 +154,9 @@ export function makeSubmissionAtom(
           jurisdictionFips: submissions.jurisdictionFips,
           note: submissions.note,
           submittedAt: submissions.submittedAt,
+          status: submissions.status,
+          reviewerComment: submissions.reviewerComment,
+          respondedAt: submissions.respondedAt,
           createdAt: submissions.createdAt,
         })
         .from(submissions)
@@ -159,10 +199,35 @@ export function makeSubmissionAtom(
         composedJurisdiction ||
         "jurisdiction not recorded";
       const noteFragment = row.note ? ` Note: ${row.note}` : "";
+      // Narrow the row's text-typed status into the canonical enum.
+      // Falls back to `"pending"` for forward-compat with rows that
+      // somehow carry an unknown value (the schema constrains writes
+      // but DB-level migrations could in principle land arbitrary
+      // text), so the prose / keyMetric never crash on bad data.
+      const status: SubmissionStatus = (
+        SUBMISSION_STATUS_LABELS as Record<string, string>
+      )[row.status]
+        ? (row.status as SubmissionStatus)
+        : "pending";
+      const statusLabel = SUBMISSION_STATUS_LABELS[status];
+      // Response fragment — appended to prose so a single read gives
+      // the full back-and-forth (send-off + reviewer reply). Stays
+      // empty for pending submissions so the prose still reads
+      // cleanly when no response exists yet.
+      let responseFragment = "";
+      if (status !== "pending" && row.respondedAt) {
+        const reviewerCommentFragment = row.reviewerComment
+          ? ` Reviewer: ${row.reviewerComment}`
+          : "";
+        responseFragment =
+          ` Jurisdiction response: ${statusLabel} on ` +
+          `${row.respondedAt.toISOString()}.${reviewerCommentFragment}`;
+      }
       const proseRaw =
         `Plan-review submission to ${jurisdictionLabel}, ` +
         `submitted ${row.submittedAt.toISOString()}.` +
-        noteFragment;
+        noteFragment +
+        responseFragment;
       const prose =
         proseRaw.length > SUBMISSION_PROSE_MAX_CHARS
           ? proseRaw.slice(0, SUBMISSION_PROSE_MAX_CHARS - 1) + "…"
@@ -170,7 +235,14 @@ export function makeSubmissionAtom(
 
       const keyMetrics: KeyMetric[] = [
         { label: "Submitted at", value: row.submittedAt.toISOString() },
+        { label: "Status", value: statusLabel },
       ];
+      if (row.respondedAt) {
+        keyMetrics.push({
+          label: "Responded at",
+          value: row.respondedAt.toISOString(),
+        });
+      }
       if (row.jurisdictionCity && row.jurisdictionState) {
         keyMetrics.push({
           label: "Jurisdiction",
@@ -187,11 +259,13 @@ export function makeSubmissionAtom(
       };
 
       // History provenance: best-effort lookup against the atom_event
-      // chain — same fallback contract as sheet/snapshot. The current
-      // producer appends `engagement.submitted` against the parent
-      // engagement (not the submission entity), so until a
-      // submission-scoped event lands the lookup will normally return
-      // null and we fall back to `submittedAt`.
+      // chain — same fallback contract as sheet/snapshot. The engagement-
+      // scoped `engagement.submitted` event (appended against the parent
+      // engagement, not the submission entity) doesn't surface here;
+      // submission-scoped events like `submission.response-recorded`
+      // do, so once a response is recorded the latest-event lookup
+      // returns it. Falls back to `submittedAt` when no submission-
+      // scoped event exists yet.
       let latestEventId = "";
       let latestEventAt = row.submittedAt.toISOString();
       if (deps.history) {
@@ -220,6 +294,9 @@ export function makeSubmissionAtom(
         jurisdictionFips: row.jurisdictionFips,
         note: row.note,
         submittedAt: row.submittedAt.toISOString(),
+        status,
+        reviewerComment: row.reviewerComment,
+        respondedAt: row.respondedAt ? row.respondedAt.toISOString() : null,
         createdAt: row.createdAt.toISOString(),
       };
 

@@ -308,6 +308,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{id}/submissions/{submissionId}/response:
+    post:
+      operationId: recordSubmissionResponse
+      tags: [engagements]
+      summary: Record the jurisdiction's response on a submission
+      description: |
+        Records the jurisdiction's reply against a previously-recorded
+        plan-review submission. Updates the submission row's `status`,
+        optional `reviewerComment`, and `respondedAt` columns, and
+        emits a `submission.response-recorded` event scoped to the
+        submission entity (so the back-and-forth shows up on the
+        submission's own timeline rather than collapsing into the
+        parent engagement's).
+
+        The response body always reflects the submission row *after*
+        the update — callers do not need a follow-up GET to see the
+        new status. Calling this route a second time on the same
+        submission is allowed and overwrites the prior response (the
+        event chain on the submission preserves the full history).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Engagement id (must own the submission).
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordSubmissionResponseBody"
+      responses:
+        "200":
+          description: Response recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionResponse"
+        "400":
+          description: Invalid request body or submission/engagement mismatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement or submission not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /snapshots:
     get:
       operationId: listSnapshots
@@ -1436,6 +1493,90 @@ components:
         - submittedAt
         - jurisdiction
         - note
+
+    SubmissionStatus:
+      type: string
+      description: |
+        Canonical jurisdiction-response status for a submission.
+        `pending` is the default at insert (no response recorded yet);
+        the other three are review outcomes the response route may
+        transition the row into.
+      enum:
+        - pending
+        - approved
+        - corrections_requested
+        - rejected
+
+    RecordSubmissionResponseBody:
+      type: object
+      description: |
+        Request body for `POST /engagements/{id}/submissions/{submissionId}/response`.
+        `status` is the new review state the jurisdiction has assigned;
+        `pending` is intentionally not a valid response value (it is the
+        starting state, not an outcome). `reviewerComment` is an optional
+        free-text note from the reviewer (e.g. correction requests,
+        approval conditions); empty / whitespace-only strings are
+        coerced to null. `respondedAt` is optional and defaults to the
+        server's clock at the moment the response is recorded — callers
+        only need to supply it when backfilling a historical reply.
+      properties:
+        status:
+          type: string
+          enum:
+            - approved
+            - corrections_requested
+            - rejected
+          description: Jurisdiction's review outcome for the submission.
+        reviewerComment:
+          type: string
+          maxLength: 4096
+          description: |
+            Optional free-text note from the reviewer. Capped at 4 KB
+            so the event payload stays bounded. Empty / whitespace-only
+            values are coerced to null on the stored row and event.
+        respondedAt:
+          type: string
+          format: date-time
+          description: |
+            Optional explicit response timestamp. Defaults to the
+            server clock when omitted; supply when backfilling a
+            historical jurisdiction reply.
+      required:
+        - status
+
+    SubmissionResponse:
+      type: object
+      description: |
+        Submission row reflecting the jurisdiction's recorded response.
+        Returned by the response route so callers don't need a
+        follow-up GET to see the new state. `respondedAt` is null
+        only when the row is still pending (the response route always
+        sets it, but the type allows null for the pre-response state
+        in case a future GET shares this shape).
+      properties:
+        id:
+          type: string
+        engagementId:
+          type: string
+        status:
+          $ref: "#/components/schemas/SubmissionStatus"
+        reviewerComment:
+          type: string
+          nullable: true
+        respondedAt:
+          type: string
+          format: date-time
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - engagementId
+        - status
+        - reviewerComment
+        - respondedAt
+        - submittedAt
 
     SnapshotPayload:
       description: |

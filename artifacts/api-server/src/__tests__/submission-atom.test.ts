@@ -173,6 +173,97 @@ describe("submission atom (behavior)", () => {
     expect(summary.prose).toContain("Behavior note.");
   });
 
+  it("surfaces a recorded jurisdiction response in keyMetrics, prose, and typed", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    const [eng] = await db
+      .insert(engagements)
+      .values({
+        name: "Response Behavior",
+        nameLower: "response-behavior",
+        jurisdiction: "Moab, UT",
+        address: "1 Response Way",
+      })
+      .returning({ id: engagements.id });
+    const respondedAt = new Date("2026-04-15T10:00:00.000Z");
+    const [sub] = await db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "Moab, UT",
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        note: "Permit set v1.",
+        status: "corrections_requested",
+        reviewerComment: "Need updated egress diagrams.",
+        respondedAt,
+      })
+      .returning();
+
+    const atom = makeSubmissionAtom({ db: lazyDb });
+    const summary = await atom.contextSummary(sub!.id, defaultScope());
+
+    // Typed payload carries the response fields.
+    expect(summary.typed.status).toBe("corrections_requested");
+    expect(summary.typed.reviewerComment).toBe(
+      "Need updated egress diagrams.",
+    );
+    expect(summary.typed.respondedAt).toBe(respondedAt.toISOString());
+
+    // keyMetrics surfaces a labeled status (not the raw enum value)
+    // and a "Responded at" timestamp now that a reply exists.
+    const statusMetric = summary.keyMetrics.find(
+      (m) => m.label === "Status",
+    );
+    expect(statusMetric?.value).toBe("Corrections requested");
+    const respondedAtMetric = summary.keyMetrics.find(
+      (m) => m.label === "Responded at",
+    );
+    expect(respondedAtMetric?.value).toBe(respondedAt.toISOString());
+
+    // Prose includes the response sentence so a single read gives the
+    // full back-and-forth.
+    expect(summary.prose).toContain("Jurisdiction response: Corrections requested");
+    expect(summary.prose).toContain("Need updated egress diagrams.");
+  });
+
+  it("defaults to a Pending status keyMetric and omits 'Responded at' on a fresh submission", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    const [eng] = await db
+      .insert(engagements)
+      .values({
+        name: "Pending Default",
+        nameLower: "pending-default",
+        jurisdiction: "Moab, UT",
+        address: "1 Pending Way",
+      })
+      .returning({ id: engagements.id });
+    const [sub] = await db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "Moab, UT",
+      })
+      .returning();
+
+    const atom = makeSubmissionAtom({ db: lazyDb });
+    const summary = await atom.contextSummary(sub!.id, defaultScope());
+
+    expect(summary.typed.status).toBe("pending");
+    expect(summary.typed.respondedAt).toBeNull();
+    const statusMetric = summary.keyMetrics.find(
+      (m) => m.label === "Status",
+    );
+    expect(statusMetric?.value).toBe("Pending");
+    const respondedAtMetric = summary.keyMetrics.find(
+      (m) => m.label === "Responded at",
+    );
+    expect(respondedAtMetric).toBeUndefined();
+    // Prose does NOT include a "Jurisdiction response" sentence yet.
+    expect(summary.prose).not.toContain("Jurisdiction response");
+  });
+
   it("not-found returns the structural shape with typed.found=false", async () => {
     const atom = makeSubmissionAtom({ db: lazyDb });
     const summary = await atom.contextSummary(

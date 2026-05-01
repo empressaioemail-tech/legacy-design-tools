@@ -34,8 +34,10 @@
 
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import type { Logger } from "pino";
+import type { SubmissionStatus } from "@workspace/db";
 import { keyFromEngagement } from "@workspace/codes";
 import type { EngagementEventType } from "../atoms/engagement.atom";
+import type { SubmissionEventType } from "../atoms/submission.atom";
 
 const ENGAGEMENT_ADDRESS_UPDATED_EVENT_TYPE: EngagementEventType =
   "engagement.address-updated";
@@ -43,6 +45,8 @@ const ENGAGEMENT_JURISDICTION_RESOLVED_EVENT_TYPE: EngagementEventType =
   "engagement.jurisdiction-resolved";
 const ENGAGEMENT_SUBMITTED_EVENT_TYPE: EngagementEventType =
   "engagement.submitted";
+const SUBMISSION_RESPONSE_RECORDED_EVENT_TYPE: SubmissionEventType =
+  "submission.response-recorded";
 
 /**
  * Stable system actor for engagement lifecycle events emitted from the
@@ -71,6 +75,20 @@ export const ENGAGEMENT_EDIT_ACTOR = {
 export const SUBMISSION_INGEST_ACTOR = {
   kind: "system" as const,
   id: "submission-ingest",
+};
+
+/**
+ * Stable system actor for `submission.response-recorded` events
+ * emitted by the response-recording route. Distinct from
+ * `submission-ingest` (the send-off) so the submission timeline can
+ * attribute the *jurisdiction's reply* to its own producer instead of
+ * collapsing it under the same actor that recorded the original
+ * submission. Mirrors the per-producer actor convention used by the
+ * other engagement-domain emitters.
+ */
+export const SUBMISSION_RESPONSE_ACTOR = {
+  kind: "system" as const,
+  id: "submission-response",
 };
 
 export interface EngagementEventActor {
@@ -279,6 +297,77 @@ export async function emitEngagementSubmittedEvent(
         submissionId: params.submissionId,
       },
       "engagement.submitted event append failed — submission HTTP response kept",
+    );
+  }
+}
+
+/**
+ * Append a `submission.response-recorded` event scoped to a
+ * submission entity. Producer is the response-recording route in
+ * `routes/engagements.ts` — emitted after the submission row has
+ * been UPDATEd with the new status / reviewerComment / respondedAt
+ * so the event chain reflects committed state (no audit drift if
+ * the row update fails).
+ *
+ * Note this event is appended against `entityType: "submission"` (not
+ * the parent engagement) so the back-and-forth lives on the
+ * submission's own timeline. The `engagement.submitted` send-off
+ * event remains on the parent engagement; the two together describe
+ * the full lifecycle without either chain having to reach into the
+ * other.
+ *
+ * The payload is self-contained — it carries the new status, the
+ * optional reviewer comment, the respondedAt timestamp, and the
+ * parent `engagementId` — so consumers can render the timeline
+ * entry without joining back to the submissions row. Best-effort by
+ * the same contract as the sibling helpers: failures are caught and
+ * logged so a transient history outage cannot fail the response
+ * HTTP request.
+ */
+export async function emitSubmissionResponseRecordedEvent(
+  history: EventAnchoringService,
+  params: {
+    submissionId: string;
+    engagementId: string;
+    status: SubmissionStatus;
+    reviewerComment: string | null;
+    respondedAt: Date;
+    actor: EngagementEventActor;
+  },
+  reqLog: Logger,
+): Promise<void> {
+  try {
+    const event = await history.appendEvent({
+      entityType: "submission",
+      entityId: params.submissionId,
+      eventType: SUBMISSION_RESPONSE_RECORDED_EVENT_TYPE,
+      actor: params.actor,
+      payload: {
+        engagementId: params.engagementId,
+        status: params.status,
+        reviewerComment: params.reviewerComment,
+        respondedAt: params.respondedAt.toISOString(),
+      },
+    });
+    reqLog.info(
+      {
+        submissionId: params.submissionId,
+        engagementId: params.engagementId,
+        status: params.status,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "submission.response-recorded event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        submissionId: params.submissionId,
+        engagementId: params.engagementId,
+        status: params.status,
+      },
+      "submission.response-recorded event append failed — row update kept",
     );
   }
 }
