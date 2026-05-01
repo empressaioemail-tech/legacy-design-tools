@@ -2832,7 +2832,10 @@ function BriefingNarrativePanel({
         </div>
       )}
 
-      <BriefingRecentRunsPanel engagementId={engagementId} />
+      <BriefingRecentRunsPanel
+        engagementId={engagementId}
+        narrativeGeneratedAt={narrative?.generatedAt ?? null}
+      />
 
       {hasNarrative && (
         <div
@@ -3006,7 +3009,26 @@ function BriefingRunStateBadge({
  */
 type RecentRunsFilter = "all" | "failed" | "invalid";
 
-function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
+function BriefingRecentRunsPanel({
+  engagementId,
+  narrativeGeneratedAt,
+}: {
+  engagementId: string;
+  /**
+   * Task #263 — `generatedAt` of the narrative currently rendered in
+   * the parent `BriefingNarrativePanel`, or `null` when no narrative
+   * is on screen (the engine has never run for this engagement, or
+   * the very first generation is still pending). Used to pick the
+   * row that produced what the auditor is reading: of the retained
+   * runs, the most recent `completed` row is the one whose section
+   * columns currently live on `parcel_briefings` — `pending` rows
+   * haven't written anything yet and `failed` rows leave the
+   * previous narrative in place. When the narrative is `null` no
+   * row is marked, so a brand-new engagement (or one whose first
+   * attempt just failed) doesn't sport a misleading "Current" pill.
+   */
+  narrativeGeneratedAt: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   // Task #262 — auditors comparing the failed-then-rerun pattern on a
@@ -3059,6 +3081,43 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
     return true;
   });
   const visibleCount = visibleRuns.length;
+  // Resolve which row produced the narrative currently on screen
+  // (Task #263) by matching against `narrative.generatedAt`, not
+  // by picking "the latest completed row". Server-side, the
+  // engine stamps `result.generatedAt` between the job's
+  // `startedAt` and `completedAt` (`engine.ts` calls `now()` mid-
+  // run, then `finalizeJob` records `new Date()` after the
+  // briefing row update settles). That gives us a deterministic
+  // interval match: the producing run is the one whose
+  // [startedAt, completedAt] window contains the narrative's
+  // generatedAt — irrespective of how many newer completions
+  // landed afterwards or what other rows exist in the retained
+  // window. We match against the full `runs` list (not
+  // `visibleRuns`) so the Task #262 filter can't accidentally
+  // suppress the pill on the producing row when it would
+  // otherwise be hidden. We restrict the search to
+  // `state === "completed"` because the engine never stamps
+  // generatedAt on `pending` or `failed` rows. When no row's
+  // interval contains the timestamp — the narrative was produced
+  // by a run the sweep already pruned (or by a backfill that
+  // never inserted a job row at all) — we honestly mark nothing
+  // rather than mislabelling an unrelated row.
+  const currentGenerationId = useMemo<string | null>(() => {
+    if (narrativeGeneratedAt === null) return null;
+    const stampedMs = Date.parse(narrativeGeneratedAt);
+    if (Number.isNaN(stampedMs)) return null;
+    for (const run of runs as RecentRun[]) {
+      if (run.state !== "completed") continue;
+      if (run.completedAt === null) continue;
+      const startedMs = Date.parse(run.startedAt);
+      const completedMs = Date.parse(run.completedAt);
+      if (Number.isNaN(startedMs) || Number.isNaN(completedMs)) continue;
+      if (stampedMs >= startedMs && stampedMs <= completedMs) {
+        return run.generationId;
+      }
+    }
+    return null;
+  }, [narrativeGeneratedAt, runs]);
 
   return (
     <div
@@ -3226,6 +3285,7 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
             >
               {visibleRuns.map((run) => {
                 const isExpanded = expandedRunId === run.generationId;
+                const isCurrent = run.generationId === currentGenerationId;
                 const startedLabel = new Date(run.startedAt).toLocaleString();
                 const detailAvailable =
                   (run.state === "failed" && !!run.error) ||
@@ -3235,10 +3295,24 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
                   <li
                     key={run.generationId}
                     data-testid={`briefing-run-${run.generationId}`}
+                    aria-current={isCurrent ? "true" : undefined}
                     style={{
-                      border: "1px solid var(--border-subtle)",
+                      // Task #263 — subtly highlight the row whose
+                      // generation produced the narrative on screen
+                      // so the comparison story ("here's what's on
+                      // screen, and here's what was on screen
+                      // before it") reads end-to-end. Use the same
+                      // info accent the success badges already use
+                      // so the highlight is visible without
+                      // shouting; the explicit "Current" pill in
+                      // the row header carries the meaning.
+                      border: isCurrent
+                        ? "1px solid var(--info-text)"
+                        : "1px solid var(--border-subtle)",
                       borderRadius: 4,
-                      background: "transparent",
+                      background: isCurrent
+                        ? "var(--info-dim)"
+                        : "transparent",
                     }}
                   >
                     <button
@@ -3264,6 +3338,26 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
                       }}
                     >
                       <BriefingRunStateBadge state={run.state} />
+                      {isCurrent && (
+                        <span
+                          data-testid={`briefing-run-current-pill-${run.generationId}`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "1px 6px",
+                            borderRadius: 4,
+                            background: "var(--info-text)",
+                            color: "var(--bg-input, #fff)",
+                            fontSize: 10,
+                            fontWeight: 600,
+                            letterSpacing: 0.2,
+                            textTransform: "uppercase",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          Current
+                        </span>
+                      )}
                       <span style={{ flex: 1, color: "var(--text-default)" }}>
                         {startedLabel}
                       </span>
