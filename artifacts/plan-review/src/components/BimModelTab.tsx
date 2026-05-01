@@ -13,6 +13,7 @@ import {
   type MaterializableElementKind,
 } from "@workspace/api-client-react";
 import { BimModelViewport } from "./BimModelViewport";
+import { useSessionUserId } from "../lib/session";
 
 /**
  * Canonical ordering + display labels for the seven Spec 51a §2.4
@@ -513,6 +514,12 @@ export function BimModelTab({
     useState<BimModelDivergenceListEntry | null>(null);
   const bimModelQuery = useGetEngagementBimModel(engagementId);
   const bimModel = bimModelQuery.data?.bimModel ?? null;
+  // Task #409 — pass the session reviewer id down so the BIM
+  // viewport's "graduated" gesture-legend preference is scoped
+  // per-user. `null` (loading / anonymous / agent) is forwarded
+  // as `undefined` so the viewport falls back to its shared
+  // anonymous bucket without conflating loading and unauth.
+  const reviewerId = useSessionUserId();
 
   return (
     <div
@@ -561,6 +568,7 @@ export function BimModelTab({
         <BimModelViewport
           elements={bimModel.elements}
           selectedElementRef={highlightToken?.ref ?? null}
+          currentUserId={reviewerId ?? undefined}
         />
       )}
 

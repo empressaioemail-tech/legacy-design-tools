@@ -142,6 +142,18 @@ vi.mock("@workspace/api-client-react", async () => {
       isPending: false,
       isError: false,
     }),
+    // Task #409 — BimModelTab now resolves the session reviewer
+    // id via `useSessionUserId` to scope the BIM gesture-legend
+    // graduation flag per user. The tab's existing assertions
+    // don't care which user is in play, so we return an empty
+    // session (no requestor) → the viewport falls back to its
+    // shared anonymous bucket, matching the pre-#409 behaviour.
+    getGetSessionQueryKey: () => ["getSession"] as const,
+    useGetSession: (opts?: { query?: { queryKey?: readonly unknown[] } }) =>
+      useQuery({
+        queryKey: opts?.query?.queryKey ?? (["getSession"] as const),
+        queryFn: async () => ({ audience: "reviewer", permissions: [] }),
+      }),
   };
 });
 

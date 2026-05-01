@@ -31,6 +31,33 @@ export function useSessionPermissions(): {
   return { permissions: data?.permissions ?? [], isLoading };
 }
 
+/**
+ * Resolve the current session's reviewer id (`requestor.id`) for
+ * client-side state that needs to be scoped per-user — e.g. the
+ * Task #409 BIM gesture-legend "graduated" flag in localStorage.
+ *
+ * Returns `null` while the session request is in flight or when
+ * no `user`-kind requestor is attached (anonymous / agent
+ * sessions). Callers that need a stable storage key should
+ * substitute their own anonymous-bucket id in that case.
+ *
+ * Shares the same `Infinity` cache settings as
+ * `useSessionPermissions` so adding this hook on a route that
+ * already calls the permissions one doesn't double-fetch.
+ */
+export function useSessionUserId(): string | null {
+  const { data } = useGetSession({
+    query: {
+      queryKey: getGetSessionQueryKey(),
+      staleTime: Number.POSITIVE_INFINITY,
+      gcTime: Number.POSITIVE_INFINITY,
+    },
+  });
+  const requestor = data?.requestor;
+  if (!requestor || requestor.kind !== "user") return null;
+  return requestor.id;
+}
+
 export type PermissionStatus = "loading" | "granted" | "denied";
 
 /**

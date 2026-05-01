@@ -284,6 +284,15 @@ beforeEach(() => {
     max: { x: 0, y: 0, z: 0 },
   };
   hoisted.lastOrbitControls = null;
+  // Task #409 — the gesture legend's "graduated power user" state
+  // is persisted via localStorage. Clearing between tests so one
+  // spec's dismissals don't leak into the next spec's "fresh
+  // reviewer" expectations.
+  try {
+    window.localStorage.clear();
+  } catch {
+    /* ignore — happy-dom always implements localStorage */
+  }
   // happy-dom doesn't implement WebGL — stub getContext so the
   // viewport's detectWebGl() branches the test wants.
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
@@ -1418,12 +1427,183 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     ).toBeNull();
   });
 
-  it("seeds the dismissed state from localStorage on first paint (returning reviewer skips the legend without having to dismiss again)", () => {
-    // The reviewer dismissed the legend in a prior session — on
-    // their next page load, the viewer mounts with the "?"
-    // affordance already in place, no canvas pointerdown required.
+  // --- Task #409 — graduate the reviewer out of the per-engagement
+  // legend cycle once they've proven they know the gestures across
+  // multiple distinct engagements. Threshold = 3 (matches
+  // GRADUATE_THRESHOLD inside the component).
+
+  it("after the reviewer dismisses the legend on 3 consecutive engagements, a fresh engagement opens straight into the '?' affordance", () => {
+    // First three engagements still show the full legend on entry —
+    // the graduation isn't retroactive, it kicks in for the *next*
+    // engagement after the third dismissal lands.
+    const engagementsToDismiss = ["br-A", "br-B", "br-C"];
+    const { container, rerender, unmount } = render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-A" }))}
+      />,
+    );
+    for (const briefingId of engagementsToDismiss) {
+      // Re-render scoped to the current engagement (skip the very
+      // first iteration since we already rendered with br-A).
+      if (briefingId !== "br-A") {
+        rerender(
+          <BimModelViewport
+            elements={elements.map((el) => ({ ...el, briefingId }))}
+          />,
+        );
+      }
+      // Full legend visible on entry — graduation hasn't kicked in
+      // yet for this engagement.
+      expect(
+        screen.getByTestId("bim-model-viewport-gesture-hint"),
+      ).toBeInTheDocument();
+      fireEvent.pointerDown(container.querySelector("canvas")!);
+      expect(
+        screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+      ).toBeInTheDocument();
+    }
+    // Fully unmount + re-mount the viewport on a fourth engagement
+    // (simulating navigating to a fresh engagement page) — the
+    // graduated flag should now drive the initial paint to the "?"
+    // affordance, no full legend in between.
+    unmount();
+    render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-D-fresh" }))}
+      />,
+    );
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("the graduated reviewer can still re-summon the full legend on demand from the '?' affordance", () => {
+    // Re-summon path is the same Task #405 contract — graduating
+    // doesn't strip away the on-demand reveal, it just changes the
+    // default state on engagement entry.
+    const { container, rerender } = render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-A" }))}
+      />,
+    );
+    for (const briefingId of ["br-A", "br-B", "br-C"]) {
+      if (briefingId !== "br-A") {
+        rerender(
+          <BimModelViewport
+            elements={elements.map((el) => ({ ...el, briefingId }))}
+          />,
+        );
+      }
+      fireEvent.pointerDown(container.querySelector("canvas")!);
+    }
+    // Fourth engagement opens dismissed (graduated).
+    rerender(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-D-fresh" }))}
+      />,
+    );
+    const toggle = screen.getByTestId(
+      "bim-model-viewport-gesture-hint-toggle",
+    );
+    fireEvent.mouseEnter(toggle);
+    const legend = screen.getByTestId("bim-model-viewport-gesture-hint");
+    expect(legend).toBeInTheDocument();
+    // Same `data-hint-source="revealed"` contract from Task #405 —
+    // this is an on-demand reveal, not a fresh first-paint legend.
+    expect(legend.getAttribute("data-hint-source")).toBe("revealed");
+    fireEvent.mouseLeave(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+  });
+
+  it("re-dismissing the legend on the SAME engagement doesn't double-count toward the graduation streak", () => {
+    // The streak is "dismissed on 3 distinct engagements in a row",
+    // not "dismissed 3 times". A reviewer who keeps poking the same
+    // engagement shouldn't graduate after one engagement just
+    // because their session re-opened the canvas a few times.
+    const { container, rerender, unmount } = render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-only" }))}
+      />,
+    );
+    for (let i = 0; i < 5; i += 1) {
+      fireEvent.pointerDown(container.querySelector("canvas")!);
+      // Force a re-render of the same engagement to mimic a
+      // navigate-away-and-back flow without changing the briefingId.
+      rerender(
+        <BimModelViewport
+          elements={elements.map((el) => ({ ...el, briefingId: "br-only" }))}
+        />,
+      );
+    }
+    // Mount a fresh engagement — the legend should still appear
+    // because the same-engagement repeats only counted once.
+    unmount();
+    render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-next" }))}
+      />,
+    );
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeNull();
+  });
+
+  it("graduation persists across page reloads (the localStorage flag survives a full unmount + fresh mount)", () => {
+    // This is the core "remember across new engagements" guarantee
+    // the task asks for — exercised by simulating a page reload via
+    // a clean unmount + a fresh first-mount of the viewport on a
+    // brand-new engagement.
+    const { container, rerender, unmount } = render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-A" }))}
+      />,
+    );
+    for (const briefingId of ["br-A", "br-B", "br-C"]) {
+      if (briefingId !== "br-A") {
+        rerender(
+          <BimModelViewport
+            elements={elements.map((el) => ({ ...el, briefingId }))}
+          />,
+        );
+      }
+      fireEvent.pointerDown(container.querySelector("canvas")!);
+    }
+    unmount();
+    // The storage key is per-user; without a `currentUserId` prop
+    // the viewport falls back to the shared anonymous bucket.
+    expect(
+      window.localStorage.getItem("bim-gesture-legend:_anon:graduated"),
+    ).toBe("1");
+    // Fresh first-mount, brand-new engagement — graduated state from
+    // localStorage drives the initial paint directly into the "?".
+    render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-Z" }))}
+      />,
+    );
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("respects a pre-existing graduated flag on the very first paint (no full-legend flash before an effect collapses it)", () => {
+    // A reviewer who previously graduated and reloads the page
+    // should never see the full legend on first paint — the
+    // graduated state has to be picked up by the initial useState
+    // call, not a post-mount effect.
     window.localStorage.setItem(
-      "plan-review:bim-gesture-hint-dismissed",
+      "bim-gesture-legend:_anon:graduated",
       "1",
     );
     render(<BimModelViewport elements={elements} />);
@@ -1435,67 +1615,120 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     ).toBeInTheDocument();
   });
 
-  it("writes the dismissed preference to localStorage when the reviewer pans the canvas (so the next session remembers)", () => {
-    expect(
-      window.localStorage.getItem("plan-review:bim-gesture-hint-dismissed"),
-    ).toBeNull();
-    const { container } = render(<BimModelViewport elements={elements} />);
+  it("resets the consecutive-dismissal streak when the reviewer visits an intermediate engagement without dismissing the legend", () => {
+    // The task wording is "N consecutive engagements" — sparse
+    // dismissals (A → dismiss, B → walk away, C → dismiss, D →
+    // dismiss) must NOT graduate the reviewer at the third
+    // dismissal because B broke the streak. Only a clean run of
+    // GRADUATE_THRESHOLD back-to-back dismissals graduates.
+    const { container, rerender, unmount } = render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-A" }))}
+      />,
+    );
+    // Engagement A — dismiss.
     fireEvent.pointerDown(container.querySelector("canvas")!);
+    // Engagement B — visit but DON'T dismiss. This is the gap that
+    // must reset the streak.
+    rerender(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-B" }))}
+      />,
+    );
     expect(
-      window.localStorage.getItem("plan-review:bim-gesture-hint-dismissed"),
-    ).toBe("1");
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    // Engagement C — dismiss. This is the new "first" dismissal of
+    // a fresh streak (since B broke the old one), not the second.
+    rerender(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-C" }))}
+      />,
+    );
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    // Engagement D — dismiss. Streak is now [C, D] — still one
+    // short of graduation despite the reviewer having dismissed on
+    // three engagements (A, C, D).
+    rerender(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-D" }))}
+      />,
+    );
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    // Fresh fourth engagement — full legend should still appear,
+    // because the sparse pattern broke the consecutive streak.
+    unmount();
+    render(
+      <BimModelViewport
+        elements={elements.map((el) => ({ ...el, briefingId: "br-E" }))}
+      />,
+    );
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    expect(
+      window.localStorage.getItem("bim-gesture-legend:_anon:graduated"),
+    ).toBeNull();
   });
 
-  it("writes the dismissed preference when the reviewer scrolls to zoom (the second teaching gesture also counts)", () => {
-    const { container } = render(<BimModelViewport elements={elements} />);
-    fireEvent.wheel(container.querySelector("canvas")!, { deltaY: -100 });
+  it("scopes the graduated flag per user — reviewer A graduating doesn't graduate reviewer B on the same browser profile", () => {
+    // Two reviewers sharing a kiosk / shared QA laptop. Reviewer A
+    // graduates after their three dismissals; reviewer B logs in
+    // fresh and must still see the full legend on entry.
+    const { container, rerender, unmount } = render(
+      <BimModelViewport
+        currentUserId="user-A"
+        elements={elements.map((el) => ({ ...el, briefingId: "br-A" }))}
+      />,
+    );
+    for (const briefingId of ["br-A", "br-B", "br-C"]) {
+      if (briefingId !== "br-A") {
+        rerender(
+          <BimModelViewport
+            currentUserId="user-A"
+            elements={elements.map((el) => ({ ...el, briefingId }))}
+          />,
+        );
+      }
+      fireEvent.pointerDown(container.querySelector("canvas")!);
+    }
+    unmount();
+    // Reviewer A is now graduated under their per-user key.
     expect(
-      window.localStorage.getItem("plan-review:bim-gesture-hint-dismissed"),
+      window.localStorage.getItem("bim-gesture-legend:user-A:graduated"),
     ).toBe("1");
-  });
-
-  it("hover/focus/tap reveals on the persisted '?' affordance still work the same as the in-session dismiss path", () => {
-    // The persisted-preference seeding can't break the Task #405 /
-    // Task #408 tap-to-toggle, hover, and focus reveal contracts —
-    // a returning reviewer who wants to refresh their memory of
-    // the gestures still has the same three input models available.
-    window.localStorage.setItem(
-      "plan-review:bim-gesture-hint-dismissed",
-      "1",
+    // Reviewer B's per-user key is untouched.
+    expect(
+      window.localStorage.getItem("bim-gesture-legend:user-B:graduated"),
+    ).toBeNull();
+    // Reviewer A's next engagement opens straight into the "?".
+    const sessionA = render(
+      <BimModelViewport
+        currentUserId="user-A"
+        elements={elements.map((el) => ({ ...el, briefingId: "br-Z" }))}
+      />,
     );
-    render(<BimModelViewport elements={elements} />);
-    const toggle = screen.getByTestId(
-      "bim-model-viewport-gesture-hint-toggle",
+    expect(
+      sessionA.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      sessionA.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+    sessionA.unmount();
+    // Reviewer B logs in on the same browser profile — full legend
+    // returns because graduation is per-user, not per-browser.
+    const sessionB = render(
+      <BimModelViewport
+        currentUserId="user-B"
+        elements={elements.map((el) => ({ ...el, briefingId: "br-A" }))}
+      />,
     );
-    // Hover reveals → mouseLeave hides.
-    fireEvent.mouseEnter(toggle);
     expect(
-      screen.getByTestId("bim-model-viewport-gesture-hint"),
+      sessionB.getByTestId("bim-model-viewport-gesture-hint"),
     ).toBeInTheDocument();
-    fireEvent.mouseLeave(toggle);
     expect(
-      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+      sessionB.queryByTestId("bim-model-viewport-gesture-hint-toggle"),
     ).toBeNull();
-    // Focus reveals → blur hides.
-    fireEvent.focus(toggle);
-    expect(
-      screen.getByTestId("bim-model-viewport-gesture-hint"),
-    ).toBeInTheDocument();
-    fireEvent.blur(toggle);
-    expect(
-      screen.queryByTestId("bim-model-viewport-gesture-hint"),
-    ).toBeNull();
-    // Tap latches sticky-open, second tap closes it.
-    fireEvent.click(toggle);
-    expect(
-      screen.getByTestId("bim-model-viewport-gesture-hint"),
-    ).toBeInTheDocument();
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(toggle);
-    expect(
-      screen.queryByTestId("bim-model-viewport-gesture-hint"),
-    ).toBeNull();
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("does re-fit when the reviewer jumps to a different element via Show in 3D viewer", () => {

@@ -118,6 +118,21 @@ export interface BimModelViewportProps {
    * full scene.
    */
   selectedElementRef?: string | null;
+  /**
+   * Task #409 — the current reviewer's session user id, used to
+   * scope the localStorage-backed "graduated" gesture-legend
+   * preference per user. Two reviewers sharing one browser
+   * profile each keep their own graduation state; A's
+   * dismissals don't graduate B. The wrapping `BimModelTab`
+   * resolves this from the session endpoint; tests that exercise
+   * the per-user contract pass it directly.
+   *
+   * Defaults to a shared anonymous bucket so the unauth and
+   * undefined-prop paths still work, and so callers that don't
+   * care about the per-user dimension still benefit from the
+   * graduation behaviour.
+   */
+  currentUserId?: string;
 }
 
 interface Bounds2D {
@@ -451,47 +466,198 @@ function detectWebGl(): boolean {
 }
 
 /**
- * Task #410 — persist the "I already know the BIM gestures"
- * preference across sessions / engagements / page reloads. Tasks
- * #405 and #408 collapsed the legend down to a "?" affordance
- * once the reviewer demonstrates they know the gestures, but the
- * dismissed state was in-memory only and reset on every engagement
- * change. A power user who already knows pan/zoom/rotate would
- * still see the full legend on every reload, every revisit, and
- * every fresh BIM model — which is exactly the persistent visual
- * noise Task #405 was supposed to eliminate.
+ * Task #409 — "graduate" power users out of the per-engagement
+ * legend cycle.
  *
- * The preference is a single global flag, not keyed per
- * engagement: knowing the gesture model on one BIM model implies
- * knowing it on every other BIM model (the gestures are the same
- * everywhere). Once set, the engagement-change reset effect below
- * stops clearing `hintDismissed` back to false, so a returning
- * reviewer lands directly on the "?" affordance.
+ * Task #405 fades the legend down to a "?" affordance the moment
+ * the reviewer demonstrates the gestures (pan/wheel) on a given
+ * engagement, but each fresh engagement starts with the full
+ * legend again. That's the right default for a brand-new reviewer,
+ * but a high-volume reviewer who works through dozens of
+ * engagements per day proves they know the gesture model after
+ * the first few — surfacing the full banner on every new
+ * engagement after that becomes visual noise.
  *
- * Wrapped in try/catch so private-browsing / disabled-storage
- * doesn't crash the viewer — the worst case is the reviewer sees
- * the legend again, which is the same behaviour as before #410.
+ * This supersedes the simpler "persist on first dismissal"
+ * behaviour Task #410 briefly shipped: graduating only after
+ * `GRADUATE_THRESHOLD` distinct engagements gives a brand-new
+ * reviewer time to learn the gestures before we permanently
+ * collapse the legend on them, while still delivering the
+ * cross-session memory #410 was after.
+ *
+ * Per-user scoping: every storage key is suffixed with the
+ * reviewer's session user id (resolved from the same session
+ * endpoint `useSessionPermissions` consumes). Two reviewers
+ * sharing one browser profile (a kiosk machine, a shared QA
+ * laptop) keep independent graduation state — A's dismissals
+ * don't graduate B. The fallback id `"_anon"` is used when no
+ * session user is available (logged-out / unauth), giving a
+ * single shared default rather than collapsing every reviewer
+ * onto one global key.
+ *
+ * Streak semantics: graduation only triggers after the reviewer
+ * dismisses the legend on `GRADUATE_THRESHOLD` *consecutive*
+ * engagements. Visiting an engagement without dismissing the
+ * legend resets the streak — power-user discipline is the only
+ * signal the storage actually trusts. We track this via a
+ * `lastVisited` cursor: when the reviewer enters engagement E
+ * and the previously-tracked `lastVisited` engagement is NOT in
+ * the dismissed list (i.e. they walked away from a still-visible
+ * legend), we clear the streak.
+ *
+ * Storage contract (per-user):
+ *   - `bim-gesture-legend:<userId>:graduated` — `"1"` once the
+ *     reviewer has dismissed the legend on
+ *     `GRADUATE_THRESHOLD` consecutive engagements. Once set,
+ *     every future engagement opens straight into the "?"
+ *     affordance. Reviewers can still re-summon the full legend
+ *     on demand (the existing hover/focus toggle from #405).
+ *   - `bim-gesture-legend:<userId>:streak` — JSON
+ *     `{ lastVisited: string | null, dismissed: string[] }`
+ *     describing the current run. `dismissed` lists every
+ *     engagement key the reviewer has dismissed in the current
+ *     consecutive streak (set semantics — re-dismissing the same
+ *     engagement is a no-op). `lastVisited` is the most recent
+ *     engagement key the reviewer has visited; an entering
+ *     engagement that doesn't match `lastVisited` AND finds
+ *     `lastVisited` missing from `dismissed` resets the streak.
+ *     Cleared once the reviewer graduates (the individual keys
+ *     are no longer interesting once the flag is set).
+ *
+ * All helpers are defensive against environments without
+ * localStorage (SSR, private browsing with quota errors) — they
+ * silently treat the lookups as "not graduated, no history" so
+ * the default Task #405 behaviour applies.
  */
-const HINT_DISMISSED_STORAGE_KEY = "plan-review:bim-gesture-hint-dismissed";
+const GRADUATE_THRESHOLD = 3;
+const STORAGE_PREFIX = "bim-gesture-legend";
+const ANON_USER_ID = "_anon";
 
-export function readHintDismissedPreference(): boolean {
+function graduatedKey(userId: string): string {
+  return `${STORAGE_PREFIX}:${userId}:graduated`;
+}
+
+function streakKey(userId: string): string {
+  return `${STORAGE_PREFIX}:${userId}:streak`;
+}
+
+interface GestureHintStreak {
+  lastVisited: string | null;
+  dismissed: string[];
+}
+
+function emptyStreak(): GestureHintStreak {
+  return { lastVisited: null, dismissed: [] };
+}
+
+function readGestureHintGraduated(userId: string): boolean {
   try {
     if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(HINT_DISMISSED_STORAGE_KEY) === "1";
+    return window.localStorage.getItem(graduatedKey(userId)) === "1";
   } catch {
     return false;
   }
 }
 
-function writeHintDismissedPreference(): void {
+function readStreak(userId: string): GestureHintStreak {
+  try {
+    if (typeof window === "undefined") return emptyStreak();
+    const raw = window.localStorage.getItem(streakKey(userId));
+    if (!raw) return emptyStreak();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return emptyStreak();
+    const obj = parsed as { lastVisited?: unknown; dismissed?: unknown };
+    const lastVisited =
+      typeof obj.lastVisited === "string" ? obj.lastVisited : null;
+    const dismissed = Array.isArray(obj.dismissed)
+      ? obj.dismissed.filter((s): s is string => typeof s === "string")
+      : [];
+    return { lastVisited, dismissed };
+  } catch {
+    return emptyStreak();
+  }
+}
+
+function writeStreak(userId: string, next: GestureHintStreak): void {
   try {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(HINT_DISMISSED_STORAGE_KEY, "1");
+    window.localStorage.setItem(streakKey(userId), JSON.stringify(next));
   } catch {
-    // Storage quota / disabled — fall through silently. The
-    // in-memory dismissed flag still holds for the rest of this
-    // session, the reviewer just won't get the cross-session
-    // benefit. Better than crashing the viewer over a hint pref.
+    /* ignore quota errors — graduation just won't persist */
+  }
+}
+
+/**
+ * Record that the reviewer is now looking at `engagementKey`. If
+ * the previously-tracked engagement has NOT been dismissed (i.e.
+ * the reviewer walked away from a still-visible legend), reset
+ * the consecutive-dismissal streak — graduation requires
+ * back-to-back dismissals, not a sparse pattern.
+ *
+ * No-op once the reviewer is graduated (the streak is moot at
+ * that point) and no-op for a same-engagement re-visit (a
+ * rerender shouldn't trigger streak bookkeeping).
+ */
+function noteEngagementVisit(userId: string, engagementKey: string): void {
+  try {
+    if (typeof window === "undefined") return;
+    if (window.localStorage.getItem(graduatedKey(userId)) === "1") return;
+    const streak = readStreak(userId);
+    if (streak.lastVisited === engagementKey) return;
+    let nextDismissed = streak.dismissed;
+    if (
+      streak.lastVisited !== null &&
+      !streak.dismissed.includes(streak.lastVisited)
+    ) {
+      // Reviewer left the previous engagement without dismissing
+      // its legend → streak broken.
+      nextDismissed = [];
+    }
+    writeStreak(userId, {
+      lastVisited: engagementKey,
+      dismissed: nextDismissed,
+    });
+  } catch {
+    /* ignore — falling back to default behaviour */
+  }
+}
+
+/**
+ * Record that the reviewer dismissed the legend on `engagementKey`
+ * and report whether that dismissal pushed them over the
+ * graduation threshold. Idempotent for a given key — re-dismissing
+ * on the same engagement is a no-op so we don't trivially graduate
+ * a reviewer who keeps poking the same model.
+ *
+ * Returns `{ graduated }` so callers don't have to re-read storage
+ * just to detect the transition.
+ */
+function recordDismissedEngagement(
+  userId: string,
+  engagementKey: string,
+): { graduated: boolean } {
+  try {
+    if (typeof window === "undefined") return { graduated: false };
+    if (window.localStorage.getItem(graduatedKey(userId)) === "1") {
+      return { graduated: true };
+    }
+    const streak = readStreak(userId);
+    if (streak.dismissed.includes(engagementKey)) {
+      return { graduated: false };
+    }
+    const nextDismissed = [...streak.dismissed, engagementKey];
+    if (nextDismissed.length >= GRADUATE_THRESHOLD) {
+      window.localStorage.setItem(graduatedKey(userId), "1");
+      window.localStorage.removeItem(streakKey(userId));
+      return { graduated: true };
+    }
+    writeStreak(userId, {
+      lastVisited: engagementKey,
+      dismissed: nextDismissed,
+    });
+    return { graduated: false };
+  } catch {
+    return { graduated: false };
   }
 }
 
@@ -514,6 +680,7 @@ function disposeObject(obj: THREE.Object3D): void {
 export function BimModelViewport({
   elements,
   selectedElementRef = null,
+  currentUserId = ANON_USER_ID,
 }: BimModelViewportProps) {
   const renderable = useMemo(() => classifyElements(elements), [elements]);
 
@@ -553,17 +720,19 @@ export function BimModelViewport({
   // pan/rotate via pointerdown on the canvas, or first wheel
   // zoom), we collapse the legend down to a small "?" affordance
   // in the same corner. Hovering or focusing the "?" re-summons
-  // the full legend on demand.
-  //
-  // Task #410 — the dismissed state seeds from a persisted
-  // localStorage preference, so a returning reviewer who already
-  // dismissed the legend on any prior engagement lands directly
-  // on the "?" affordance instead of re-learning the gestures
-  // every reload / revisit / fresh BIM model. First-time reviewers
-  // (no stored preference) still see the full legend until they
-  // demonstrate the gesture, exactly like before #410.
+  // the full legend on demand. The dismissed state is per-engagement
+  // (keyed by `briefingId` — see the reset effect below) so a fresh
+  // BIM model still gets the full affordance even within the same
+  // session.
+  // Task #409 — graduated power users
+  // (`bim-gesture-legend:<userId>:graduated` in localStorage) skip
+  // the full legend on every new engagement and land directly in
+  // the "?" affordance state. Reading the flag lazily inside
+  // `useState` so the very first paint of the very first
+  // engagement still respects it (no full-legend flash before an
+  // effect collapses it down).
   const [hintDismissed, setHintDismissed] = useState<boolean>(
-    readHintDismissedPreference,
+    () => readGestureHintGraduated(currentUserId),
   );
   const [hintRevealed, setHintRevealed] = useState(false);
   // Task #408 — sticky tap/click reveal. Tablet reviewers have no
@@ -576,20 +745,70 @@ export function BimModelViewport({
   // half of the task contract).
   const [hintStickyOpen, setHintStickyOpen] = useState(false);
 
+  // Reset the dismissed state when the engagement changes — keyed
+  // by the briefing id since BimModelViewport is engagement-scoped
+  // (one BIM model per engagement, all elements share a briefingId).
+  // A reviewer who has dismissed the legend on engagement A still
+  // sees the full legend when they jump to engagement B's BIM model
+  // — UNLESS they've graduated (Task #409), in which case engagement
+  // B opens straight into the "?" state too.
+  //
+  // The transition also feeds into the consecutive-streak bookkeeping
+  // via `noteEngagementVisit` — moving away from an engagement
+  // without dismissing its legend resets the streak, so a reviewer
+  // who only dismisses sporadically never trivially graduates.
+  const engagementKey = elements[0]?.briefingId ?? null;
+  const lastEngagementKeyRef = useRef<string | null>(engagementKey);
+  // Register the very first engagement visit on mount. The reset
+  // effect below short-circuits on the initial render (because
+  // `lastEngagementKeyRef.current === engagementKey`), so without
+  // this we'd never record the opening engagement and the
+  // streak-reset logic would never see a `lastVisited` to compare
+  // against.
+  useEffect(() => {
+    if (engagementKey !== null) {
+      noteEngagementVisit(currentUserId, engagementKey);
+    }
+    // Mount-only: the engagement-change branch handles subsequent
+    // transitions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (lastEngagementKeyRef.current !== engagementKey) {
+      lastEngagementKeyRef.current = engagementKey;
+      if (engagementKey !== null) {
+        noteEngagementVisit(currentUserId, engagementKey);
+      }
+      setHintDismissed(readGestureHintGraduated(currentUserId));
+      setHintRevealed(false);
+      setHintStickyOpen(false);
+    }
+  }, [engagementKey, currentUserId]);
+
   // Stable callback ref so the scene-lifecycle effect (which only
   // re-runs on `webGlOk`) can dismiss the hint without taking
   // `setHintDismissed` as a dependency — bringing setState into
   // that effect would tear down and rebuild the entire Three.js
-  // scene on every state transition.
+  // scene on every state transition. The ref also persists the
+  // dismissal to localStorage (Task #409) so the graduation streak
+  // can be tracked across engagements; we read the latest
+  // engagementKey + userId off refs rather than closing over them
+  // directly so the ref stays valid even as those props change
+  // during a long session.
+  const engagementKeyRef = useRef<string | null>(engagementKey);
+  const currentUserIdRef = useRef<string>(currentUserId);
+  useEffect(() => {
+    engagementKeyRef.current = engagementKey;
+    currentUserIdRef.current = currentUserId;
+  });
   const dismissHintRef = useRef<() => void>(() => {});
   useEffect(() => {
     dismissHintRef.current = () => {
       setHintDismissed(true);
-      // Task #410 — persist "this reviewer knows the gestures" so
-      // future page loads / engagement jumps don't put the full
-      // legend back on top of the canvas. Safe to call even if
-      // the flag was already set; localStorage just no-ops.
-      writeHintDismissedPreference();
+      const key = engagementKeyRef.current;
+      if (key) {
+        recordDismissedEngagement(currentUserIdRef.current, key);
+      }
       // Task #408 — a canvas pan/zoom/rotate is the reviewer's
       // signal that they're done reading the legend, so clear the
       // sticky tap-open state too. Otherwise a reviewer who tapped
@@ -598,32 +817,6 @@ export function BimModelViewport({
       setHintStickyOpen(false);
     };
   });
-
-  // Reset the transient hint state when the engagement changes —
-  // keyed by the briefing id since BimModelViewport is engagement-
-  // scoped (one BIM model per engagement, all elements share a
-  // briefingId). The on-demand `hintRevealed` (hover/focus) and
-  // sticky `hintStickyOpen` (tap-toggle) reveals always reset so a
-  // newly-framed scene doesn't carry a stale legend over from the
-  // previous engagement.
-  //
-  // Task #410 — the dismissed state itself now respects the
-  // persisted preference: a reviewer who dismissed the legend on
-  // engagement A still skips the full legend on engagement B
-  // (they already know the gestures — the gesture model is the
-  // same on every BIM model). A first-time reviewer with no
-  // persisted preference still gets the legend on every fresh
-  // engagement until they demonstrate the gesture.
-  const engagementKey = elements[0]?.briefingId ?? null;
-  const lastEngagementKeyRef = useRef<string | null>(engagementKey);
-  useEffect(() => {
-    if (lastEngagementKeyRef.current !== engagementKey) {
-      lastEngagementKeyRef.current = engagementKey;
-      setHintDismissed(readHintDismissedPreference());
-      setHintRevealed(false);
-      setHintStickyOpen(false);
-    }
-  }, [engagementKey]);
 
   // Resolve the current selection. May resolve to an element
   // that has no scene representation — that's the fallback
