@@ -427,7 +427,7 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
     // see the multi-snapshot test for the plural variant.
     expect(systemPrompt).toContain("`<snapshot_focus>` block below");
     expect(systemPrompt).toContain(
-      `{{atom:snapshot:${SNAPSHOT_ID}:focus}}`,
+      `{{atom|snapshot|${SNAPSHOT_ID}|focus}}`,
     );
   });
 
@@ -461,8 +461,8 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
     // Plural-block phrasing + per-id citation hints joined by " or "
     // so the model sees each candidate target verbatim.
     expect(systemPrompt).toContain("`<snapshot_focus>` blocks below");
-    expect(systemPrompt).toContain(`{{atom:snapshot:${SNAP_A}:focus}}`);
-    expect(systemPrompt).toContain(`{{atom:snapshot:${SNAP_B}:focus}}`);
+    expect(systemPrompt).toContain(`{{atom|snapshot|${SNAP_A}|focus}}`);
+    expect(systemPrompt).toContain(`{{atom|snapshot|${SNAP_B}|focus}}`);
   });
 
   it("focus mode payload over the cap is shape-trimmed (not tail-cut) when shapeable, with a [truncated:] marker", () => {

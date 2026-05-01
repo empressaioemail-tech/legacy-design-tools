@@ -5,7 +5,7 @@
  * from a non-React-heavy entrypoint — specifically the chat round-trip
  * integration test in `artifacts/api-server/src/__tests__/chat-roundtrip.test.ts`,
  * which mounts the real api-server route + the design-tools store and
- * needs to assert that streamed `{{atom:snapshot:<id>:focus}}` markers
+ * needs to assert that streamed `{{atom|snapshot|<id>|focus}}` markers
  * land as snapshot citation chips without dragging in ReactMarkdown,
  * sidebar-state, or the chat composer's full UI tree.
  */
@@ -22,20 +22,21 @@ export const ATOM_TOKEN_RE = /\[\[CODE:([0-9a-fA-F-]{8,})\]\]/g;
 const CODE_LIBRARY_BASE = `${import.meta.env.BASE_URL}code-library`;
 const ENGAGEMENT_BASE = `${import.meta.env.BASE_URL}engagements`;
 
-// `{{atom:snapshot:<uuid>:focus}}` markers in assistant messages render as
+// `{{atom|snapshot|<uuid>|focus}}` markers in assistant messages render as
 // snapshot attribution chips (Task #48). The model is instructed by the
 // chat prompt's snapshot-focus citation rule (see
 // `lib/codes/src/promptFormatter.ts`) to cite each snapshot it draws from
-// with this exact form, so the regex is anchored to the `:focus` mode.
+// with this exact form, so the regex is anchored to the `focus` mode.
 // Hex-id length matches the CODE chip to keep stale or malformed ids from
-// rendering as chips.
+// rendering as chips. Delimiter is `|` (DA-PI-1F1) — see
+// `lib/empressa-atom/src/inline-reference.ts` for the canonical token shape.
 export const SNAPSHOT_FOCUS_TOKEN_RE =
-  /\{\{atom:snapshot:([0-9a-fA-F-]{8,}):focus\}\}/g;
+  /\{\{atom\|snapshot\|([0-9a-fA-F-]{8,})\|focus\}\}/g;
 
 /**
  * Per-assistant-message comparison context (Task #54). When a user turn was
  * sent with 2+ snapshots picked in the comparison picker, the assistant's
- * `{{atom:snapshot:<id>:focus}}` chips should deep-link to a compare view
+ * `{{atom|snapshot|<id>|focus}}` chips should deep-link to a compare view
  * for the cited snapshot vs. another snapshot in the picked set, rather
  * than to the snapshot's static detail page.
  *
@@ -113,7 +114,7 @@ function CodeAtomChip({ atomId }: { atomId: string }) {
 }
 
 /**
- * Inline chip rendered for `{{atom:snapshot:<id>:focus}}` markers Claude
+ * Inline chip rendered for `{{atom|snapshot|<id>|focus}}` markers Claude
  * embeds when answering comparison-style questions (Task #48). The chip's
  * tooltip carries the snapshot's "captured X ago" timestamp when the
  * caller can resolve the id through {@link snapshotLookup}; ids that
@@ -176,7 +177,7 @@ export function SnapshotFocusChip({
 
 /**
  * Walks the children produced by ReactMarkdown and rewrites text nodes that
- * contain `[[CODE:atomId]]` or `{{atom:snapshot:<id>:focus}}` markers into
+ * contain `[[CODE:atomId]]` or `{{atom|snapshot|<id>|focus}}` markers into
  * a mix of plain text and chip elements. Non-string children (e.g. nested
  * elements like <strong>, <code>) pass through untouched.
  *

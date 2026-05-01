@@ -175,21 +175,23 @@ M2-C without consumer changes.
 
 ## Inline reference syntax
 
-The chat layer embeds atoms in prose using `{{atom:type:id:label}}`:
+The chat layer embeds atoms in prose using `{{atom|type|id|label}}`:
 
 ```ts
-parseInlineReferences("see {{atom:task:t1:Pick HVAC}}");
+parseInlineReferences("see {{atom|task|t1|Pick HVAC}}");
 // → [
 //     { kind: "text", text: "see " },
-//     { kind: "atom", reference: { kind: "atom", entityType: "task", entityId: "t1", displayLabel: "Pick HVAC" }, raw: "{{atom:task:t1:Pick HVAC}}" }
+//     { kind: "atom", reference: { kind: "atom", entityType: "task", entityId: "t1", displayLabel: "Pick HVAC" }, raw: "{{atom|task|t1|Pick HVAC}}" }
 //   ]
 
 serializeInlineReference({ kind: "atom", entityType: "task", entityId: "t1", displayLabel: "Pick HVAC" });
-// → "{{atom:task:t1:Pick HVAC}}"
+// → "{{atom|task|t1|Pick HVAC}}"
 ```
 
-The regex (`INLINE_ATOM_REGEX`) is preserved verbatim from the Empressa
-Demo because the inline syntax is part of the public AI prompt contract.
+The delimiter is `|` (DA-PI-1F1). The previous shape used `:` and could
+not represent Spec 51 entityIds that themselves contain `:` (e.g.
+`parcel-briefing:{parcelId}:{intentHash}`). The old shape is no longer
+parsed — there is no dual-parse compatibility path.
 
 ## Testing utilities
 

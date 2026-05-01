@@ -19,7 +19,7 @@ const ENGAGEMENTS_BASE = `${import.meta.env.BASE_URL}engagements`;
 /**
  * Side-by-side diff view for two snapshots in the same engagement
  * (Task #54). Wired up from the assistant chat chips: when the user
- * compared 2+ snapshots in a turn, each `{{atom:snapshot:<id>:focus}}`
+ * compared 2+ snapshots in a turn, each `{{atom|snapshot|<id>|focus}}`
  * citation chip deep-links here with `?a=<chip-id>&b=<other-id>`.
  *
  * Why a dedicated page rather than a modal?

@@ -295,7 +295,7 @@ describe("ClaudeChat", () => {
         { role: "user", content: "compare" },
         {
           role: "assistant",
-          content: `First paragraph cites {{atom:snapshot:${SNAP_A}:focus}}.\n\nSecond paragraph cites {{atom:snapshot:${SNAP_B}:focus}} too.\n\nThird paragraph cites {{atom:snapshot:${SNAP_C}:focus}} as well.`,
+          content: `First paragraph cites {{atom|snapshot|${SNAP_A}|focus}}.\n\nSecond paragraph cites {{atom|snapshot|${SNAP_B}|focus}} too.\n\nThird paragraph cites {{atom|snapshot|${SNAP_C}|focus}} as well.`,
         },
       ] as Array<{ role: string; content: string }>,
     };
@@ -315,16 +315,16 @@ describe("ClaudeChat", () => {
     expect(screen.getByTestId(`snapshot-citation-${SNAP_A}`)).toBeInTheDocument();
     expect(screen.getByTestId(`snapshot-citation-${SNAP_B}`)).toBeInTheDocument();
     expect(screen.getByTestId(`snapshot-citation-${SNAP_C}`)).toBeInTheDocument();
-    expect(screen.queryByText(/\{\{atom:snapshot:/)).toBeNull();
+    expect(screen.queryByText(/\{\{atom\|snapshot\|/)).toBeNull();
   });
 
-  it("renders {{atom:snapshot:<id>:focus}} markers as snapshot citation chips", () => {
+  it("renders {{atom|snapshot|<id>|focus}} markers as snapshot citation chips", () => {
     stores.messagesByEngagement = {
       "eng-1": [
         { role: "user", content: "compare" },
         {
           role: "assistant",
-          content: `Per {{atom:snapshot:${SNAP_A}:focus}} the wall count rose from 12 to {{atom:snapshot:${SNAP_B}:focus}}.`,
+          content: `Per {{atom|snapshot|${SNAP_A}|focus}} the wall count rose from 12 to {{atom|snapshot|${SNAP_B}|focus}}.`,
         },
       ] as Array<{ role: string; content: string }>,
     };
@@ -340,7 +340,7 @@ describe("ClaudeChat", () => {
     expect(screen.getByTestId(`snapshot-citation-${SNAP_B}`)).toBeInTheDocument();
     // The raw token must not leak into the rendered DOM.
     expect(
-      screen.queryByText(/\{\{atom:snapshot:/),
+      screen.queryByText(/\{\{atom\|snapshot\|/),
     ).toBeNull();
   });
 
@@ -360,7 +360,7 @@ describe("ClaudeChat", () => {
         },
         {
           role: "assistant",
-          content: `Compared {{atom:snapshot:${SNAP_A}:focus}} vs {{atom:snapshot:${SNAP_B}:focus}}.`,
+          content: `Compared {{atom|snapshot|${SNAP_A}|focus}} vs {{atom|snapshot|${SNAP_B}|focus}}.`,
         },
       ] as Array<{ role: string; content: string; snapshotFocusIds?: string[] }>,
     };
@@ -398,7 +398,7 @@ describe("ClaudeChat", () => {
         },
         {
           role: "assistant",
-          content: `See {{atom:snapshot:${SNAP_A}:focus}}.`,
+          content: `See {{atom|snapshot|${SNAP_A}|focus}}.`,
         },
       ] as Array<{ role: string; content: string; snapshotFocusIds?: string[] }>,
     };

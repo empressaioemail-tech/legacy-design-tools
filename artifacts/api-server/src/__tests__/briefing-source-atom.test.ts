@@ -30,9 +30,11 @@ describe("briefing-source atom (contract)", () => {
   });
 
   runAtomContractTests(atom, {
-    // See parcel-briefing-atom.test.ts for why fixture ids must be
-    // colon-free today (inline-reference serializer limitation).
-    withFixture: { entityId: "briefing-source-fixture-id" },
+    // Real-shape Spec 51a §2.12 entityId:
+    // `briefing-source:{briefingId}:{overlayId}:{snapshotDate}`.
+    withFixture: {
+      entityId: "briefing-source:b-001:o-001:2026-04-28",
+    },
     alsoRegister: [makeIntentAtom(), makeParcelBriefingAtom()],
   });
 });

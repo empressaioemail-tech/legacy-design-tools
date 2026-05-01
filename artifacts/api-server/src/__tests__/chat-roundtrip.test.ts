@@ -23,7 +23,7 @@
  *     dropping into `<snapshot_focus snapshot_id="…">` blocks)
  *   - SSE framing changes that break the store's `data: {…}\n\n` parser
  *   - chip rendering regex drift on the client side
- *     (`{{atom:snapshot:<id>:focus}}` → `data-testid="snapshot-citation-<id>"`)
+ *     (`{{atom|snapshot|<id>|focus}}` → `data-testid="snapshot-citation-<id>"`)
  *
  * The single combined test mirrors what a Playwright run against the
  * live preview would do (open the picker, tick two snapshots, send,
@@ -217,7 +217,7 @@ function installFetchShim(): void {
 }
 
 describe("chat round-trip: picker → /api/chat → store → snapshot citation chips", () => {
-  it("two snapshots staged in the picker stream back as `{{atom:snapshot:<id>:focus}}` markers and render as citation chips", async () => {
+  it("two snapshots staged in the picker stream back as `{{atom|snapshot|<id>|focus}}` markers and render as citation chips", async () => {
     if (!ctx.schema) throw new Error("schema not ready");
 
     // Seed: one engagement + two snapshots, both inserts return real
@@ -267,14 +267,14 @@ describe("chat round-trip: picker → /api/chat → store → snapshot citation 
         type: "content_block_delta",
         delta: {
           type: "text_delta",
-          text: `Older push: {{atom:snapshot:${older.id}:focus}} `,
+          text: `Older push: {{atom|snapshot|${older.id}|focus}} `,
         },
       },
       {
         type: "content_block_delta",
         delta: {
           type: "text_delta",
-          text: `vs newer push: {{atom:snapshot:${newer.id}:focus}}.`,
+          text: `vs newer push: {{atom|snapshot|${newer.id}|focus}}.`,
         },
       },
     ];
@@ -342,10 +342,10 @@ describe("chat round-trip: picker → /api/chat → store → snapshot citation 
     const assistant = msgs.at(-1);
     expect(assistant?.role).toBe("assistant");
     expect(assistant?.content).toContain(
-      `{{atom:snapshot:${older.id}:focus}}`,
+      `{{atom|snapshot|${older.id}|focus}}`,
     );
     expect(assistant?.content).toContain(
-      `{{atom:snapshot:${newer.id}:focus}}`,
+      `{{atom|snapshot|${newer.id}|focus}}`,
     );
 
     // (5) `renderWithAtomChips` rewrites those markers into snapshot

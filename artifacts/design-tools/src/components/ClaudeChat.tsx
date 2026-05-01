@@ -49,7 +49,7 @@ interface ClaudeChatProps {
    * Recent snapshots for the active engagement, ordered most-recent
    * first by the parent (matches the engagement detail page's snapshot
    * list). Used to (1) populate the "Compare pushes" picker and (2)
-   * resolve `{{atom:snapshot:<id>:focus}}` citation tooltips with the
+   * resolve `{{atom|snapshot|<id>|focus}}` citation tooltips with the
    * snapshot's relative timestamp. Defaults to `[]` so the existing
    * non-comparison call sites don't have to thread the prop through.
    */

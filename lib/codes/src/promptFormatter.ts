@@ -78,7 +78,7 @@ export interface PromptEngagement {
  *
  * Task #39 reintroduced structured payload access via focus mode —
  * the chat route opts a turn in (an explicit `snapshotFocus: true`
- * request flag, an inline `{{atom:snapshot:<id>:focus}}` reference,
+ * request flag, an inline `{{atom|snapshot|<id>|focus}}` reference,
  * or — Task #44 — an explicit `snapshotFocusIds: string[]` body
  * field) and the formatter emits one `<snapshot_focus>` block per
  * snapshot the caller wanted to drill into. The dedicated block is
@@ -311,7 +311,7 @@ export interface BuildChatPromptInput {
   /**
    * Output of `registry.describeForPrompt()`. Drives the
    * `<atom_vocabulary>` enumeration so the LLM knows exactly which
-   * `{{atom:type:id:label}}` types it may emit. Empty/undefined → no
+   * `{{atom|type|id|label}}` types it may emit. Empty/undefined → no
    * vocabulary block (and no inline-reference instruction).
    */
   atomTypeDescriptions?: ReadonlyArray<PromptAtomTypeDescription>;
@@ -365,7 +365,7 @@ export function formatReferenceCodeAtoms(atoms: RetrievedAtom[]): string {
 
 /**
  * Assemble the `<atom_vocabulary>` block enumerating every registered
- * atom type the LLM may emit via `{{atom:type:id:label}}`. Returns `""`
+ * atom type the LLM may emit via `{{atom|type|id|label}}`. Returns `""`
  * when there are no descriptions so the prompt stays compact for the
  * common case (no atoms wired up yet).
  *
@@ -781,7 +781,7 @@ function shapeTrimMarker(result: ShapeSnapshotPayloadResult): string {
  * The block is a sibling of `<framework_atoms>` rather than a child —
  * the model treats them independently, but the `snapshot_id` attribute
  * matches the `entity_id` on the snapshot atom so any answer the model
- * attributes via inline `{{atom:snapshot:<id>:…}}` references stays
+ * attributes via inline `{{atom|snapshot|<id>|…}}` references stays
  * consistent across the two surfaces.
  *
  * When the JSON would exceed {@link MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS}
@@ -1142,7 +1142,7 @@ function formatLabelList(labels: string[]): string {
  * "added" means present in head but missing from base; "removed" means
  * present in base but missing from head. The `snapshot_id` attributes
  * line up with the corresponding `<snapshot_focus>` blocks so a model
- * citation like `{{atom:snapshot:<id>:focus}}` resolves to the same
+ * citation like `{{atom|snapshot|<id>|focus}}` resolves to the same
  * snapshot the diff describes.
  *
  * Pure: no DB, no network, no logger. Caller decides which pairs to
@@ -1338,7 +1338,7 @@ export function buildChatPrompt(
   // (Spec 20 §F / recon H6).
   const atomReferenceInstruction =
     atomTypeList.length > 0
-      ? `\n\nWhen you reference an entity from <framework_atoms> or one the user can plausibly drill into, embed an inline reference of the form \`{{atom:type:id:label}}\` where \`type\` is one of: ${atomTypeList
+      ? `\n\nWhen you reference an entity from <framework_atoms> or one the user can plausibly drill into, embed an inline reference of the form \`{{atom|type|id|label}}\` where \`type\` is one of: ${atomTypeList
           .map((d) => `\`${d.entityType}\``)
           .join(", ")}. Use only entity ids that appear in <framework_atoms> — never invent ids.`
       : "";
@@ -1346,7 +1346,7 @@ export function buildChatPrompt(
   // Snapshot focus mode (Task #39, expanded by Task #44). When the
   // chat route detects the caller has opted *this turn* into focus
   // mode — explicit `snapshotFocus: true` flag, an inline
-  // `{{atom:snapshot:<id>:focus}}` reference, or the explicit
+  // `{{atom|snapshot|<id>|focus}}` reference, or the explicit
   // `snapshotFocusIds: string[]` body field — it forwards the raw
   // `snapshots.payload` blob(s) through `latestSnapshot.focusPayloads`.
   // We then emit one dedicated `<snapshot_focus snapshot_id="…">`
@@ -1399,7 +1399,7 @@ export function buildChatPrompt(
           : `${focusPayloads.length} \`<snapshot_focus>\` blocks below carry the raw structured snapshot payloads for this turn — one per snapshot you may compare against. `) +
         "Use them to answer fine-grained questions about specific rooms, doors, schedules, or any item the snapshot atom's prose would have summarised away. Cite the snapshot you draw from with " +
         focusPayloads
-          .map((fp) => `\`{{atom:snapshot:${fp.snapshotId}:focus}}\``)
+          .map((fp) => `\`{{atom|snapshot|${fp.snapshotId}|focus}}\``)
           .join(" or ") +
         " so the answer stays attributable to the right snapshot." +
         (snapshotDiffBlocks.length > 0

@@ -31,9 +31,9 @@ describe("neighboring-context atom (contract)", () => {
   });
 
   runAtomContractTests(atom, {
-    // See parcel-briefing-atom.test.ts for why fixture ids must be
-    // colon-free today (inline-reference serializer limitation).
-    withFixture: { entityId: "neighboring-context-fixture-id" },
+    // Real-shape Spec 51a §2.13 entityId:
+    // `neighboring-context:{parcelId}:{radiusFt}`.
+    withFixture: { entityId: "neighboring-context:p-001:500" },
     alsoRegister: [
       makeIntentAtom(),
       makeParcelBriefingAtom(),

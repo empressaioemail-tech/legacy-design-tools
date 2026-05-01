@@ -2,23 +2,27 @@
  * Inline atom reference syntax.
  *
  * The chat layer embeds atom references in prose using the syntax
- * `{{atom:type:id:label}}`. This module ships a pure parser/serializer
+ * `{{atom|type|id|label}}`. This module ships a pure parser/serializer
  * pair that operates on strings only — no dependency on the registry.
  *
- * Recon F6/F7: regex preserved verbatim from the Empressa Demo because
- * the inline syntax is part of the public AI prompt contract; changing
- * it would require coordinated AI prompt + parser updates across every
- * downstream surface.
+ * Delimiter is `|` (DA-PI-1F1). The previous shape used `:` as the
+ * delimiter, which collided with Spec 51 entityId patterns that
+ * themselves contain `:` (e.g. `parcel-briefing:{parcelId}:{intentHash}`).
+ * `|` is collision-free against every registered entityType, every
+ * idResolver-produced id, and every displayLabel produced today.
+ * Backward compatibility with the old shape is intentionally NOT
+ * supported — see the "old-shape … no dual-parse contract" test in
+ * inline-reference.test.ts.
  */
 
 import type { AtomMode, AtomReference } from "./registration";
 
 /**
- * Source-of-truth regex. Captures: entityType (no `:`), entityId (no `:`),
- * displayLabel (no `}`). Greedy on the third group so labels with `:` are
- * accepted (e.g. "Decision: pick HVAC vendor").
+ * Source-of-truth regex. Captures: entityType (no `|`), entityId (no `|`),
+ * displayLabel (no `}`). Greedy on the third group so labels with `|` or
+ * `:` are accepted (e.g. "Decision: pick HVAC vendor").
  */
-export const INLINE_ATOM_REGEX: RegExp = /\{\{atom:([^:]+):([^:]+):([^}]+)\}\}/g;
+export const INLINE_ATOM_REGEX: RegExp = /\{\{atom\|([^|]+)\|([^|]+)\|([^}]+)\}\}/g;
 
 /** A single text run between (or surrounding) inline atom references. */
 export interface ParsedTextSegment {
@@ -75,7 +79,7 @@ export function parseInlineReferences(text: string): ParsedSegment[] {
 }
 
 /**
- * Serialize an {@link AtomReference} back to its `{{atom:type:id:label}}`
+ * Serialize an {@link AtomReference} back to its `{{atom|type|id|label}}`
  * form. Round-trips with {@link parseInlineReferences}.
  *
  * If `mode` is set, it is intentionally **not** serialized — the inline
@@ -85,7 +89,7 @@ export function parseInlineReferences(text: string): ParsedSegment[] {
  */
 export function serializeInlineReference(ref: AtomReference): string {
   const label = ref.displayLabel ?? ref.entityId;
-  return `{{atom:${ref.entityType}:${ref.entityId}:${label}}}`;
+  return `{{atom|${ref.entityType}|${ref.entityId}|${label}}}`;
 }
 
 /**

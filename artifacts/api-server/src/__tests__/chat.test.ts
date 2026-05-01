@@ -479,14 +479,14 @@ describe("POST /api/chat", () => {
     expect(system).toContain('"number": "204"');
     // The instruction line names the snapshot id in the citation form
     // so the model has an unambiguous attribution target.
-    expect(system).toContain(`{{atom:snapshot:${snap.id}:focus}}`);
+    expect(system).toContain(`{{atom|snapshot|${snap.id}|focus}}`);
   });
 
-  it("snapshot focus mode (Task #39): inline {{atom:snapshot:<id>:focus}} reference in the question text triggers payload injection", async () => {
+  it("snapshot focus mode (Task #39): inline {{atom|snapshot|<id>|focus}} reference in the question text triggers payload injection", async () => {
     // Equivalent to the explicit-flag path above, but exercising the
     // inline-reference channel. A power user (or the chat orchestrator
     // chaining off a snapshot atom card) embeds
-    // `{{atom:snapshot:<latestSnapshotId>:focus}}` in the question
+    // `{{atom|snapshot|<latestSnapshotId>|focus}}` in the question
     // and the route should reach the same focus-mode branch.
     if (!ctx.schema) throw new Error("schema not ready");
     const INLINE_MARKER = "FOCUS_MODE_INLINE_CANARY_c2a4d8";
@@ -521,7 +521,7 @@ describe("POST /api/chat", () => {
         engagementId: eng.id,
         // Note: NO `snapshotFocus: true` flag. The inline reference
         // alone has to flip focus on.
-        question: `list the door schedule {{atom:snapshot:${snap.id}:focus}} please`,
+        question: `list the door schedule {{atom|snapshot|${snap.id}|focus}} please`,
       });
     expect(res.status).toBe(200);
 
@@ -573,7 +573,7 @@ describe("POST /api/chat", () => {
         // engagement at all — the route's focus check matches against
         // the resolved latestSnapshotId, so this should fall through.
         question:
-          "what's in here? {{atom:snapshot:00000000-0000-0000-0000-deadbeef0000:focus}}",
+          "what's in here? {{atom|snapshot|00000000-0000-0000-0000-deadbeef0000|focus}}",
       });
     expect(res.status).toBe(200);
 
@@ -658,20 +658,20 @@ describe("POST /api/chat", () => {
     // Instruction line names *both* snapshot ids as candidate
     // citation targets so the model can attribute each piece of its
     // answer to the right snapshot.
-    expect(system).toContain(`{{atom:snapshot:${older.id}:focus}}`);
-    expect(system).toContain(`{{atom:snapshot:${newer.id}:focus}}`);
+    expect(system).toContain(`{{atom|snapshot|${older.id}|focus}}`);
+    expect(system).toContain(`{{atom|snapshot|${newer.id}|focus}}`);
     // Plural-block phrasing — single-block tests use the singular
     // form "A `<snapshot_focus>` block below", the multi-snapshot
     // path swaps in "N `<snapshot_focus>` blocks below".
     expect(system).toContain("`<snapshot_focus>` blocks below");
   });
 
-  it("snapshot focus mode (Task #44): inline {{atom:snapshot:<olderId>:focus}} reference now triggers focus on the older snapshot too", async () => {
+  it("snapshot focus mode (Task #44): inline {{atom|snapshot|<olderId>|focus}} reference now triggers focus on the older snapshot too", async () => {
     // Pre-Task-#44 the inline channel only matched the engagement's
     // *latest* snapshot id — pasting a reference to an older snapshot
     // (e.g. from a prior chat turn) was silently ignored and the
     // older payload could never reach the model. Task #44 lifts that
-    // restriction: any inline `{{atom:snapshot:<id>:focus}}` whose id
+    // restriction: any inline `{{atom|snapshot|<id>|focus}}` whose id
     // belongs to the engagement now opts that snapshot into focus
     // mode for this turn.
     if (!ctx.schema) throw new Error("schema not ready");
@@ -719,7 +719,7 @@ describe("POST /api/chat", () => {
       .post("/api/chat")
       .send({
         engagementId: eng.id,
-        question: `what was in {{atom:snapshot:${older.id}:focus}} originally?`,
+        question: `what was in {{atom|snapshot|${older.id}|focus}} originally?`,
       });
     expect(res.status).toBe(200);
 

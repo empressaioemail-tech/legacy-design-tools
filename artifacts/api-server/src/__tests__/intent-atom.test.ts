@@ -24,9 +24,8 @@ describe("intent atom (contract)", () => {
   // The only composition edge (`parcel`) is forwardRef, so
   // alsoRegister is empty — validate() skips the edge.
   runAtomContractTests(atom, {
-    // See parcel-briefing-atom.test.ts for why fixture ids must be
-    // colon-free today (inline-reference serializer limitation).
-    withFixture: { entityId: "intent-fixture-id" },
+    // Real-shape Spec 51a §2.11 entityId: `intent:{parcelId}:{ulid}`.
+    withFixture: { entityId: "intent:p-001:01HXYZABCDEFGHJKMNPQRSTVWX" },
     alsoRegister: [],
   });
 });

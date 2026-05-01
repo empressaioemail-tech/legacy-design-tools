@@ -30,7 +30,7 @@ export type AtomMode =
 /**
  * Stable reference to a single atom instance. The {@link displayLabel} is
  * populated by {@link parseInlineReferences} from the third token of
- * `{{atom:type:id:label}}`; downstream code should treat the label as
+ * `{{atom|type|id|label}}`; downstream code should treat the label as
  * presentation-only and never use it for identity.
  */
 export interface AtomReference {

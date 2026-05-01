@@ -43,15 +43,11 @@ describe("parcel-briefing atom (contract)", () => {
   // passes. The forward-ref edges (`parcel`, `code-section`) are
   // skipped by validate() — no stubs needed.
   runAtomContractTests(atom, {
-    // NOTE: real parcel-briefing ids per Spec 51 §5 are
-    // `parcel-briefing:{parcelId}:{intentHash}` and contain colons,
-    // but the inline-reference serializer (`{{atom:type:id:label}}`
-    // in @workspace/empressa-atom) splits on `:`, so a colon-bearing
-    // id round-trips lossily today. Using a colon-free fixture keeps
-    // the contract suite green; widening the serializer to handle
-    // colon-bearing ids is tracked as a follow-up for the sprint
-    // that wires real ids end-to-end (DA-PI-3).
-    withFixture: { entityId: "parcel-briefing-fixture-id" },
+    // Real-shape Spec 51 §5 entityId: `parcel-briefing:{parcelId}:{intentHash}`.
+    // The contract suite round-trips this through the inline-reference
+    // serializer; the `|` token delimiter (DA-PI-1F1) is what makes the
+    // colons inside the id survive that round-trip.
+    withFixture: { entityId: "parcel-briefing:p-001:hash-abc" },
     alsoRegister: [makeIntentAtom(), makeBriefingSourceAtom()],
   });
 });

@@ -33,7 +33,7 @@ import { SNAPSHOT_SUPPORTED_MODES } from "../atoms/snapshot.atom";
 const SNAPSHOT_FOCUS_MODE: (typeof SNAPSHOT_SUPPORTED_MODES)[number] = "focus";
 
 /**
- * Scan `question` for every inline `{{atom:snapshot:<id>:focus}}`
+ * Scan `question` for every inline `{{atom|snapshot|<id>|focus}}`
  * reference and return the set of snapshot ids the user named. The
  * third capture group of {@link INLINE_ATOM_REGEX} is the displayLabel
  * slot — chat repurposes it as the focus opt-in token, matching the
@@ -285,7 +285,7 @@ router.post("/chat", async (req: Request, res: Response) => {
   //      schedule change between yesterday's push and today's?").
   //      Foreign ids → 400; the route fails closed instead of silently
   //      dropping them so a programmatic caller learns about the bug.
-  //   3. Inline `{{atom:snapshot:<id>:focus}}` references embedded in
+  //   3. Inline `{{atom|snapshot|<id>|focus}}` references embedded in
   //      the question text (so a power user can opt in by chaining off
   //      a snapshot atom card). Stale/foreign ids here are silently
   //      filtered — copy-pasted references from older chats are an
@@ -641,7 +641,7 @@ router.post("/chat", async (req: Request, res: Response) => {
       // Focus mode (Task #39, expanded by Task #44): array of one
       // entry per snapshot the caller opted into for this turn (via
       // explicit flag, explicit `snapshotFocusIds`, and/or inline
-      // `{{atom:snapshot:<id>:focus}}` references). Each payload is
+      // `{{atom|snapshot|<id>|focus}}` references). Each payload is
       // forwarded as-is — the formatter owns the serialization +
       // per-block size cap. When a payload is null (the row exists
       // but `payload` happens to be JSON null) we still honor focus

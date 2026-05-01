@@ -27,7 +27,7 @@ snapshot atom summary. Use it for deep questions like
 "what's the area of room 204?" or "list every door schedule
 entry" — the cost stays bounded to the turns that need it.
 Equivalent to embedding a
-`{{atom:snapshot:<latestSnapshotId>:focus}}` inline
+`{{atom|snapshot|<latestSnapshotId>|focus}}` inline
 reference in the question text. For comparison questions
 that need to look at *older* snapshots too, see
 `snapshotFocusIds`.

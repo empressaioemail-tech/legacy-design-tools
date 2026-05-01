@@ -57,7 +57,7 @@ export type ValidateResult =
 /**
  * Per-atom prompt-builder description. The AI prompt builder is expected
  * to consume an array of these and turn them into a "you can render
- * <type> using {{atom:type:id:label}}" enumeration without hardcoding
+ * <type> using {{atom|type|id|label}}" enumeration without hardcoding
  * the type list (recon H6).
  */
 export interface AtomPromptDescription {

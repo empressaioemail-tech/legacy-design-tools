@@ -1185,7 +1185,7 @@ export const SendChatMessageBody = zod.object({
     .boolean()
     .optional()
     .describe(
-      'Opt this turn into \"snapshot focus mode\" against the\nengagement\'s \*latest\* snapshot. When true, the server loads\nthe full structured `snapshots.payload` blob for that\nsnapshot and injects it into the system prompt inside a\ndedicated `<snapshot_focus>` block, on top of the always-on\nsnapshot atom summary. Use it for deep questions like\n\"what\'s the area of room 204?\" or \"list every door schedule\nentry\" — the cost stays bounded to the turns that need it.\nEquivalent to embedding a\n`{{atom:snapshot:<latestSnapshotId>:focus}}` inline\nreference in the question text. For comparison questions\nthat need to look at \*older\* snapshots too, see\n`snapshotFocusIds`.\n',
+      'Opt this turn into \"snapshot focus mode\" against the\nengagement\'s \*latest\* snapshot. When true, the server loads\nthe full structured `snapshots.payload` blob for that\nsnapshot and injects it into the system prompt inside a\ndedicated `<snapshot_focus>` block, on top of the always-on\nsnapshot atom summary. Use it for deep questions like\n\"what\'s the area of room 204?\" or \"list every door schedule\nentry\" — the cost stays bounded to the turns that need it.\nEquivalent to embedding a\n`{{atom|snapshot|<latestSnapshotId>|focus}}` inline\nreference in the question text. For comparison questions\nthat need to look at \*older\* snapshots too, see\n`snapshotFocusIds`.\n',
     ),
   snapshotFocusIds: zod
     .array(zod.string())
