@@ -668,6 +668,26 @@ export function diffBriefingSourceFields(
   return BRIEFING_DIFF_FIELDS.filter((f) => prior[f] !== current[f]);
 }
 
+/**
+ * Format one of the {@link BRIEFING_DIFF_FIELDS} values for the
+ * inline before → after reveal under the "Changed: …" hint (Task
+ * #200). `snapshotDate` is sliced to its `YYYY-MM-DD` head so the
+ * reveal stays locale-independent and lines up with how the meta
+ * line above renders the same date; the other fields are scalar
+ * strings (provider/note are nullable, sourceKind is a literal
+ * union) so they pass through verbatim. `null` becomes `(none)`
+ * so a "field went from set → unset" rerun is visible at a glance
+ * instead of rendering as a blank cell.
+ */
+export function formatBriefingDiffValue(
+  field: (typeof BRIEFING_DIFF_FIELDS)[number],
+  value: string | null,
+): string {
+  if (value === null) return "(none)";
+  if (field === "snapshotDate") return value.slice(0, 10);
+  return value;
+}
+
 export function BriefingSourceRow({
   engagementId,
   source,
@@ -1024,6 +1044,24 @@ export function BriefingSourceHistoryPanel({
     "all" | "adapter" | "manual"
   >("all");
 
+  // Tracks which adapter prior rows have their "Changed: …" hint
+  // expanded into the before → after reveal (Task #200). State lives
+  // on the panel (rather than per-row) so it's purely local to this
+  // history surface — collapsing the panel via the row toggle drops
+  // the whole component and resets the reveal, matching the user's
+  // mental model of "open the history, peek at a diff, close".
+  const [expandedDiffs, setExpandedDiffs] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleDiffExpanded = (priorId: string) => {
+    setExpandedDiffs((prev) => {
+      const next = new Set(prev);
+      if (next.has(priorId)) next.delete(priorId);
+      else next.add(priorId);
+      return next;
+    });
+  };
+
   const allSources = historyQuery.data?.sources ?? [];
   const allPriorVersions = useMemo(
     () => allSources.filter((s) => s.id !== currentSourceId),
@@ -1268,12 +1306,79 @@ export function BriefingSourceHistoryPanel({
               </>
             )}
           </div>
-          {changedFields.length > 0 && (
-            <div
-              style={{ fontSize: 10, color: "var(--text-muted)" }}
-              data-testid={`briefing-source-history-row-changed-${prior.id}`}
-            >
-              Changed: {changedFields.join(", ")}
+          {changedFields.length > 0 && currentSource && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <button
+                type="button"
+                onClick={() => toggleDiffExpanded(prior.id)}
+                aria-expanded={expandedDiffs.has(prior.id)}
+                aria-controls={`briefing-source-history-row-changed-detail-${prior.id}`}
+                data-testid={`briefing-source-history-row-changed-${prior.id}`}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  margin: 0,
+                  textAlign: "left",
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  textDecoration: "underline dotted",
+                }}
+              >
+                {expandedDiffs.has(prior.id) ? "▾" : "▸"} Changed:{" "}
+                {changedFields.join(", ")}
+              </button>
+              {expandedDiffs.has(prior.id) && (
+                <table
+                  id={`briefing-source-history-row-changed-detail-${prior.id}`}
+                  data-testid={`briefing-source-history-row-changed-detail-${prior.id}`}
+                  style={{
+                    fontSize: 10,
+                    color: "var(--text-muted)",
+                    borderCollapse: "collapse",
+                    marginLeft: 12,
+                  }}
+                >
+                  <tbody>
+                    {changedFields.map((f) => (
+                      <tr key={f}>
+                        <th
+                          scope="row"
+                          style={{
+                            textAlign: "left",
+                            fontWeight: 500,
+                            padding: "1px 8px 1px 0",
+                            whiteSpace: "nowrap",
+                            verticalAlign: "top",
+                          }}
+                        >
+                          {f}
+                        </th>
+                        <td style={{ padding: "1px 0" }}>
+                          <span
+                            data-testid={`briefing-source-history-row-changed-before-${f}-${prior.id}`}
+                          >
+                            {formatBriefingDiffValue(
+                              f,
+                              (prior[f] as string | null) ?? null,
+                            )}
+                          </span>
+                          {" → "}
+                          <span
+                            data-testid={`briefing-source-history-row-changed-after-${f}-${prior.id}`}
+                          >
+                            {formatBriefingDiffValue(
+                              f,
+                              (currentSource[f] as string | null) ?? null,
+                            )}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>

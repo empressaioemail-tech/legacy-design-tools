@@ -551,12 +551,102 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     const hint = screen.getByTestId(
       `briefing-source-history-row-changed-${prior.id}`,
     );
-    expect(hint.textContent).toMatch(/^Changed:\s*snapshotDate$/);
+    // The hint button carries a chevron affordance (Task #200) so we
+    // anchor on the meaningful copy rather than the leading glyph.
+    expect(hint.textContent).toMatch(/Changed:\s*snapshotDate\s*$/);
     // Sanity: nothing else moved, so other field names must not leak
     // into the hint.
     expect(hint.textContent).not.toMatch(/provider/);
     expect(hint.textContent).not.toMatch(/note/);
     expect(hint.textContent).not.toMatch(/sourceKind/);
+  });
+
+  it("reveals the prior + current values for snapshotDate when the 'Changed: …' hint is clicked (Task #200)", () => {
+    // Same fixture shape as the snapshotDate diff test above — the
+    // rerun moved snapshotDate forward but kept everything else
+    // intact, so the reveal must surface the before → after pair
+    // for snapshotDate (and only snapshotDate).
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+    });
+    const prior = mkSource({
+      id: "src-prior-snap",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-01-01T00:00:00.000Z",
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    // Reveal is collapsed by default — the table is not in the DOM
+    // until the hint is clicked, so an architect with many prior
+    // rows isn't drowned in expanded diffs.
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-changed-detail-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    expect(hint).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(hint);
+
+    expect(hint).toHaveAttribute("aria-expanded", "true");
+
+    // The reveal lists the prior + current values for snapshotDate,
+    // sliced to YYYY-MM-DD so the assertion stays locale-stable.
+    const before = screen.getByTestId(
+      `briefing-source-history-row-changed-before-snapshotDate-${prior.id}`,
+    );
+    const after = screen.getByTestId(
+      `briefing-source-history-row-changed-after-snapshotDate-${prior.id}`,
+    );
+    expect(before.textContent).toBe("2026-01-01");
+    expect(after.textContent).toBe("2026-04-15");
+
+    // Only snapshotDate moved, so no other field rows should appear
+    // in the reveal.
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-changed-before-provider-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-changed-before-note-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-changed-before-sourceKind-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
+
+    // Clicking the hint again collapses the reveal — state is local
+    // to the panel so no extra fetch is made.
+    fireEvent.click(hint);
+    expect(hint).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-changed-detail-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("does NOT render the 'Changed: …' hint when an adapter prior row is byte-identical to the current row (Task #185)", () => {
