@@ -58,7 +58,7 @@ import * as path from "node:path";
  * the converter doesn't know about, or this script is failing to
  * smoke a kind users can upload — both are bugs.
  */
-const DXF_LAYER_KINDS = [
+export const DXF_LAYER_KINDS = [
   "terrain",
   "property-line",
   "setback-plane",
@@ -67,7 +67,7 @@ const DXF_LAYER_KINDS = [
   "wetland",
   "neighbor-mass",
 ] as const;
-type DxfLayerKind = (typeof DXF_LAYER_KINDS)[number];
+export type DxfLayerKind = (typeof DXF_LAYER_KINDS)[number];
 
 interface CliOptions {
   fixtureDir: string | null;
@@ -140,7 +140,7 @@ const FALLBACK_DXF = [
   "",
 ].join("\n");
 
-interface AttemptResult {
+export interface AttemptResult {
   layerKind: DxfLayerKind;
   ok: boolean;
   durationMs: number;
@@ -175,7 +175,7 @@ async function loadFixture(args: {
  * api-server stores these bytes — catching contract drift here
  * means the viewer never has to render a 404 in production.
  */
-function validateGlb(bytes: Buffer): { ok: true; length: number } | {
+export function validateGlb(bytes: Buffer): { ok: true; length: number } | {
   ok: false;
   reason: string;
 } {
@@ -220,7 +220,7 @@ function validateGlb(bytes: Buffer): { ok: true; length: number } | {
   return { ok: true, length };
 }
 
-async function smokeOne(args: {
+export async function smokeOne(args: {
   url: string;
   sharedSecret: string;
   layerKind: DxfLayerKind;
