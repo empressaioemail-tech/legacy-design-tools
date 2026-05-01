@@ -23,6 +23,7 @@ import { db } from "@workspace/db";
 import { makeSheetAtom } from "./sheet.atom";
 import { makeEngagementAtom } from "./engagement.atom";
 import { makeSnapshotAtom } from "./snapshot.atom";
+import { makeSubmissionAtom } from "./submission.atom";
 import { makeParcelBriefingAtom } from "./parcel-briefing.atom";
 import { makeIntentAtom } from "./intent.atom";
 import { makeBriefingSourceAtom } from "./briefing-source.atom";
@@ -76,14 +77,17 @@ export function getHistoryService(): EventAnchoringService {
  *
  * Catalog atoms registered today:
  *   - `sheet` (domain: `plan-review`)
- *   - `engagement` (domain: `plan-review`) — composes `snapshot` as a
- *     child plus a forward-ref edge to the future `submission` atom and
- *     a concrete edge to the (DA-PI-1) `parcel-briefing` atom; its
- *     registration receives the registry so `resolveComposition` can
- *     look up children at lookup time.
+ *   - `engagement` (domain: `plan-review`) — composes `snapshot` and
+ *     `submission` as concrete children plus a concrete edge to the
+ *     (DA-PI-1) `parcel-briefing` atom; its registration receives the
+ *     registry so `resolveComposition` can look every edge up at
+ *     lookup time.
  *   - `snapshot` (domain: `plan-review`) — composes `sheet` as a child;
  *     its registration receives the registry as a dep so the
  *     composition resolver can look up `sheet` at lookup time.
+ *   - `submission` (domain: `plan-review`) — leaf atom backed by the
+ *     `submissions` table populated by
+ *     `POST /api/engagements/:id/submissions` (sprint A4 / Task #63).
  *   - `parcel-briefing` (DA-PI-1, shape-only) — composes `intent`,
  *     `briefing-source`, and forward-ref edges to `parcel` (DA-PI-2/4)
  *     and `code-section` (Code Library catalog atom not yet shimmed).
@@ -109,6 +113,7 @@ export function getAtomRegistry(): AtomRegistry {
   registry.register(makeSheetAtom({ db, history }));
   registry.register(makeEngagementAtom({ db, history, registry }));
   registry.register(makeSnapshotAtom({ db, history, registry }));
+  registry.register(makeSubmissionAtom({ db, history }));
   // DA-PI-1 parcel-intelligence atoms — shape-only, no DB lookup yet.
   // Registered in child → parent reading order so that any future
   // operator surface tailing the boot log sees children before parents.

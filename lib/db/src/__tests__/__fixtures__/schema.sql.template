@@ -157,6 +157,21 @@ CREATE TABLE @@SCHEMA@@.snapshots (
 );
 
 
+-- Name: submissions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.submissions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    jurisdiction text,
+    jurisdiction_city text,
+    jurisdiction_state text,
+    jurisdiction_fips text,
+    note text,
+    submitted_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: users; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.users (
@@ -227,6 +242,12 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_pkey PRIMARY KEY (id);
+
+
+-- Name: submissions submissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.submissions
+    ADD CONSTRAINT submissions_pkey PRIMARY KEY (id);
 
 
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -330,6 +351,16 @@ CREATE INDEX snapshots_engagement_idx ON @@SCHEMA@@.snapshots USING btree (engag
 CREATE INDEX snapshots_received_at_idx ON @@SCHEMA@@.snapshots USING btree (received_at);
 
 
+-- Name: submissions_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX submissions_engagement_idx ON @@SCHEMA@@.submissions USING btree (engagement_id);
+
+
+-- Name: submissions_submitted_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX submissions_submitted_at_idx ON @@SCHEMA@@.submissions USING btree (submitted_at);
+
+
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_source_id_code_atom_sources_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
@@ -364,6 +395,12 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: submissions submissions_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.submissions
+    ADD CONSTRAINT submissions_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 

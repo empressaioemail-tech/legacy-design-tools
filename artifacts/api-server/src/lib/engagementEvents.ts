@@ -14,12 +14,12 @@
  *     post-create-new geocode pass.
  *   - `engagement.submitted`: emitted when a plan-review package is
  *     submitted to the jurisdiction. Producer is the POST
- *     /engagements/:id/submissions route. The submission entity itself
- *     is still a forward-ref child in `engagement.atom.ts`'s composition
- *     (no dedicated submissions table yet), so for now the timeline
- *     event IS the canonical submission record — when the catalog atom
- *     and table land, the producer here keeps the same event-type and
- *     payload shape so consumers don't have to re-wire.
+ *     /engagements/:id/submissions route. As of Task #63 the route
+ *     persists a row in the `submissions` table and uses that row's
+ *     id as the event payload's `submissionId` — the row is the
+ *     source of truth, this event is the audit-trail surface. The
+ *     payload shape is unchanged from the pre-table version so any
+ *     consumers wired against the original event keep working.
  *
  * All three follow the same "best-effort" contract used by
  * `emitSnapshotLifecycleEvents` and `emitEngagementCreatedEvent` in
@@ -222,13 +222,14 @@ export async function emitEngagementJurisdictionResolvedEvent(
  * out the engagement event vocabulary declared in
  * {@link import("../atoms/engagement.atom").ENGAGEMENT_EVENT_TYPES}.
  *
- * The payload mirrors the snapshot/jurisdiction emitters' "self-
- * contained" stance: enough fields to render the timeline entry and
- * audit-trail row without joining back to a submission row (there is
- * no submissions table yet — see file header). When the catalog atom
- * lands, the producer can grow `submissionId` from a generated id to
- * the persisted row's id without changing the event-type or any other
- * payload key, so consumers don't have to re-wire.
+ * The payload is intentionally self-contained — it carries the
+ * jurisdiction labels and submission note alongside the
+ * `submissionId` — so consumers (timeline UI, audit exports) can
+ * render the entry without joining back to the `submissions` row.
+ * The `submissionId` field points at the row created by the route
+ * handler in `routes/engagements.ts` (Task #63); the payload shape is
+ * identical to the pre-row version of this helper so consumers wired
+ * against the original event keep working.
  *
  * Best-effort by the same contract as the sibling helpers: failures
  * are caught and logged so a transient history outage cannot fail the

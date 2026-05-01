@@ -34,7 +34,7 @@
  */
 
 import { desc, eq } from "drizzle-orm";
-import { engagements, snapshots } from "@workspace/db";
+import { engagements, snapshots, submissions } from "@workspace/db";
 import {
   resolveComposition,
   type AnyAtomRegistration,
@@ -92,12 +92,12 @@ export type EngagementSupportedModes = typeof ENGAGEMENT_SUPPORTED_MODES;
  *     `lib/engagementEvents.ts` helper. Uses the `submission-ingest`
  *     system actor so the timeline can attribute submissions to the
  *     submission ingest path rather than the engagement-edit surface.
- *     The submissions table / catalog atom does not exist yet (the
- *     `submission` child edge is `forwardRef: true` in `composition`
- *     below), so for now the timeline event IS the canonical
- *     submission record; the producer keeps a stable payload shape so
- *     a future submissions-table backfill is a row insert in front of
- *     the existing emit, not a re-wire.
+ *     As of Task #63 the route also inserts a row into the
+ *     `submissions` table and the event's `submissionId` payload field
+ *     points at the inserted row's id — the row is the source of
+ *     truth, the event is the audit-trail surface, and both share the
+ *     same identity. The `submission` composition edge below is
+ *     correspondingly concrete now (no `forwardRef`).
  */
 export const ENGAGEMENT_EVENT_TYPES = [
   "engagement.created",
@@ -171,11 +171,12 @@ export function makeEngagementAtom(
   // Engagement's real children:
   //   - snapshot: registered alongside engagement in the api-server
   //     bootstrap, so this edge is concrete and validated at boot.
-  //   - submission: not yet implemented (sprint TBD); declared as a
-  //     forward ref so the framework's `validate()` step does not crash
-  //     on the missing child registration. The lookup-time resolver
-  //     silently produces zero children for `submissions` until the
-  //     submission catalog atom registers.
+  //   - submission: now backed by a real `submissions` table and a
+  //     registered catalog atom (sprint A4 / Task #63), so the edge
+  //     is concrete (no `forwardRef`) and submissions surface through
+  //     `resolveComposition` like snapshots do. The framework's
+  //     boot-time `validate()` step now requires the `submission`
+  //     atom to be registered.
   //   - parcel-briefing (DA-PI-1): the engagement's currently-active
   //     parcel briefing, per Spec 51a §2.10's "composed by:
   //     engagement.activeBriefing(1)" relation. Concrete (not forward-
@@ -184,8 +185,8 @@ export function makeEngagementAtom(
   //     `parentData["activeBriefing"]` ships in DA-PI-3 with the
   //     briefing engine; until then `parentData` does not carry that
   //     key, so `resolveComposition` naturally produces zero
-  //     parcel-briefing children — the same lazy pattern the
-  //     `submissions` edge uses today.
+  //     parcel-briefing children — the same lazy pattern submissions
+  //     used before they had a real table.
   const composition: ReadonlyArray<AtomComposition> = [
     {
       childEntityType: "snapshot",
@@ -196,7 +197,6 @@ export function makeEngagementAtom(
       childEntityType: "submission",
       childMode: "compact",
       dataKey: "submissions",
-      forwardRef: true,
     },
     {
       childEntityType: "parcel-briefing",
@@ -265,6 +265,20 @@ export function makeEngagementAtom(
         .where(eq(snapshots.engagementId, row.id))
         .orderBy(desc(snapshots.receivedAt));
 
+      // Load child submission rows once. Same id-candidate contract as
+      // snapshots — `resolveComposition` picks up `id` and synthesizes
+      // an `AtomReference` per row. `submittedAt` is loaded so future
+      // most-recent-activity logic can fold submissions into the same
+      // computation snapshots feed today.
+      const submissionRows = await deps.db
+        .select({
+          id: submissions.id,
+          submittedAt: submissions.submittedAt,
+        })
+        .from(submissions)
+        .where(eq(submissions.engagementId, row.id))
+        .orderBy(desc(submissions.submittedAt));
+
       // Composition resolution: hand the snapshot rows to the framework
       // so `relatedAtoms` is what `resolveComposition` produces, not a
       // hand-rolled list. Mirrors the pattern in `snapshot.atom.ts`.
@@ -272,10 +286,10 @@ export function makeEngagementAtom(
       // the resolver step is skipped and `relatedAtoms` is empty — the
       // framework's boot-time `validate()` is the canonical place that
       // surfaces a missing `snapshot` registration.
-      // The `submission` edge is declared `forwardRef: true`, and
-      // `parentData["submissions"]` is intentionally absent here, so
-      // the resolver naturally produces zero submission references
-      // until that catalog atom is wired up.
+      // The `submission` edge is now concrete (sprint A4 / Task #63):
+      // `parentData["submissions"]` is populated below so the resolver
+      // synthesizes one `AtomReference` per submission row alongside
+      // the snapshot references.
       const parentRef: AtomReference = {
         kind: "atom",
         entityType: "engagement",
@@ -286,7 +300,7 @@ export function makeEngagementAtom(
         const resolved = resolveComposition(
           registration as unknown as AnyAtomRegistration,
           parentRef,
-          { snapshots: snapshotRows },
+          { snapshots: snapshotRows, submissions: submissionRows },
           deps.registry,
         );
         if (resolved.ok) {

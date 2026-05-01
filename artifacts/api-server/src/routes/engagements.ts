@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, engagements, snapshots } from "@workspace/db";
+import { db, engagements, snapshots, submissions } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
 import {
   CreateEngagementSubmissionBody,
@@ -471,24 +470,29 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
  * POST /engagements/:id/submissions — record that a plan-review package
  * has been submitted to the jurisdiction.
  *
- * The submission flow is still a forward-ref child in
- * `engagement.atom.ts`'s composition (no dedicated submissions table or
- * catalog atom yet), so this route's only side effect today is appending
- * an `engagement.submitted` event to the history chain via the singleton
- * service. That makes the timeline event the canonical submission record
- * for now — when the catalog atom and table land, this handler grows a
- * row insert in front of the event emit (keeping the same payload shape
- * so consumers don't have to re-wire).
+ * Persistence (Task #63): the handler inserts a row into the
+ * `submissions` table — capturing the engagement's jurisdiction labels
+ * at the moment of submission so the row is self-contained for future
+ * timeline / audit rendering — and uses the inserted row's id as the
+ * `submissionId` field on the `engagement.submitted` event payload.
+ * The event-payload shape is unchanged from the pre-table version
+ * (`submissionId` is still a uuid string, just now backed by a real row
+ * rather than a one-off `randomUUID()`) so existing event consumers
+ * keep working.
  *
  * Best-effort emit by the same contract as the sibling lifecycle routes:
  * a transient history outage cannot fail the submission HTTP request —
- * the response 201s either way, the event-append failure is logged, and
- * the audit chain self-heals on the next successful append.
+ * the response 201s either way once the row is inserted, the event-
+ * append failure is logged, and the audit chain self-heals on the next
+ * successful append. Event being best-effort while the row is the
+ * source of truth follows locked decision #5 (rows over events).
  *
  * Body shape and the 2 KB note cap live in the OpenAPI contract
  * (`CreateEngagementSubmissionBody`); the generated zod schema rejects
  * over-cap notes with a 400 here so callers see a contract-level error
- * instead of a silently-truncated payload.
+ * instead of a silently-truncated payload. The parsed `note` is then
+ * trimmed and stored alongside the submission row so both the row and
+ * the event payload carry the same canonical value.
  */
 router.post(
   "/engagements/:id/submissions",
@@ -523,17 +527,33 @@ router.post(
           ? rawNote.trim()
           : null;
 
-      // Generate the submission id locally for now. When the
-      // submissions table lands this becomes the inserted row's id.
-      const submissionId = randomUUID();
-      const submittedAt = new Date().toISOString();
+      // Persist the submission row first. The row id (and its
+      // `submittedAt` default) become the canonical fields surfaced on
+      // both the HTTP response and the event payload — so the row, the
+      // response, and the event all agree on the submission identity.
+      const [inserted] = await db
+        .insert(submissions)
+        .values({
+          engagementId: existing.id,
+          jurisdiction: existing.jurisdiction,
+          jurisdictionCity: existing.jurisdictionCity,
+          jurisdictionState: existing.jurisdictionState,
+          jurisdictionFips: existing.jurisdictionFips,
+          note,
+        })
+        .returning();
+      if (!inserted) {
+        // .returning() should always yield a row when the insert
+        // succeeded; bail loudly if the driver violates that.
+        throw new Error("submission insert returned no row");
+      }
 
       const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
       await emitEngagementSubmittedEvent(
         getHistoryService(),
         {
           engagementId: existing.id,
-          submissionId,
+          submissionId: inserted.id,
           jurisdiction: existing.jurisdiction,
           jurisdictionCity: existing.jurisdictionCity,
           jurisdictionState: existing.jurisdictionState,
@@ -544,9 +564,9 @@ router.post(
       );
 
       res.status(201).json({
-        submissionId,
+        submissionId: inserted.id,
         engagementId: existing.id,
-        submittedAt,
+        submittedAt: inserted.submittedAt.toISOString(),
       });
     } catch (err) {
       logger.error(
