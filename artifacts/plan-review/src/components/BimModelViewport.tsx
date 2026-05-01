@@ -450,6 +450,51 @@ function detectWebGl(): boolean {
   }
 }
 
+/**
+ * Task #410 — persist the "I already know the BIM gestures"
+ * preference across sessions / engagements / page reloads. Tasks
+ * #405 and #408 collapsed the legend down to a "?" affordance
+ * once the reviewer demonstrates they know the gestures, but the
+ * dismissed state was in-memory only and reset on every engagement
+ * change. A power user who already knows pan/zoom/rotate would
+ * still see the full legend on every reload, every revisit, and
+ * every fresh BIM model — which is exactly the persistent visual
+ * noise Task #405 was supposed to eliminate.
+ *
+ * The preference is a single global flag, not keyed per
+ * engagement: knowing the gesture model on one BIM model implies
+ * knowing it on every other BIM model (the gestures are the same
+ * everywhere). Once set, the engagement-change reset effect below
+ * stops clearing `hintDismissed` back to false, so a returning
+ * reviewer lands directly on the "?" affordance.
+ *
+ * Wrapped in try/catch so private-browsing / disabled-storage
+ * doesn't crash the viewer — the worst case is the reviewer sees
+ * the legend again, which is the same behaviour as before #410.
+ */
+const HINT_DISMISSED_STORAGE_KEY = "plan-review:bim-gesture-hint-dismissed";
+
+export function readHintDismissedPreference(): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(HINT_DISMISSED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeHintDismissedPreference(): void {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(HINT_DISMISSED_STORAGE_KEY, "1");
+  } catch {
+    // Storage quota / disabled — fall through silently. The
+    // in-memory dismissed flag still holds for the rest of this
+    // session, the reviewer just won't get the cross-session
+    // benefit. Better than crashing the viewer over a hint pref.
+  }
+}
+
 function disposeObject(obj: THREE.Object3D): void {
   obj.traverse((child) => {
     const mesh = child as Partial<THREE.Mesh> & Partial<THREE.Line>;
@@ -508,11 +553,18 @@ export function BimModelViewport({
   // pan/rotate via pointerdown on the canvas, or first wheel
   // zoom), we collapse the legend down to a small "?" affordance
   // in the same corner. Hovering or focusing the "?" re-summons
-  // the full legend on demand. The dismissed state is per-engagement
-  // (keyed by `briefingId` — see the reset effect below) so a fresh
-  // BIM model still gets the full affordance even within the same
-  // session.
-  const [hintDismissed, setHintDismissed] = useState(false);
+  // the full legend on demand.
+  //
+  // Task #410 — the dismissed state seeds from a persisted
+  // localStorage preference, so a returning reviewer who already
+  // dismissed the legend on any prior engagement lands directly
+  // on the "?" affordance instead of re-learning the gestures
+  // every reload / revisit / fresh BIM model. First-time reviewers
+  // (no stored preference) still see the full legend until they
+  // demonstrate the gesture, exactly like before #410.
+  const [hintDismissed, setHintDismissed] = useState<boolean>(
+    readHintDismissedPreference,
+  );
   const [hintRevealed, setHintRevealed] = useState(false);
   // Task #408 — sticky tap/click reveal. Tablet reviewers have no
   // hover state and don't typically Tab through the review flow,
@@ -533,6 +585,11 @@ export function BimModelViewport({
   useEffect(() => {
     dismissHintRef.current = () => {
       setHintDismissed(true);
+      // Task #410 — persist "this reviewer knows the gestures" so
+      // future page loads / engagement jumps don't put the full
+      // legend back on top of the canvas. Safe to call even if
+      // the flag was already set; localStorage just no-ops.
+      writeHintDismissedPreference();
       // Task #408 — a canvas pan/zoom/rotate is the reviewer's
       // signal that they're done reading the legend, so clear the
       // sticky tap-open state too. Otherwise a reviewer who tapped
@@ -542,17 +599,27 @@ export function BimModelViewport({
     };
   });
 
-  // Reset the dismissed state when the engagement changes — keyed
-  // by the briefing id since BimModelViewport is engagement-scoped
-  // (one BIM model per engagement, all elements share a briefingId).
-  // A reviewer who has dismissed the legend on engagement A still
-  // sees the full legend when they jump to engagement B's BIM model.
+  // Reset the transient hint state when the engagement changes —
+  // keyed by the briefing id since BimModelViewport is engagement-
+  // scoped (one BIM model per engagement, all elements share a
+  // briefingId). The on-demand `hintRevealed` (hover/focus) and
+  // sticky `hintStickyOpen` (tap-toggle) reveals always reset so a
+  // newly-framed scene doesn't carry a stale legend over from the
+  // previous engagement.
+  //
+  // Task #410 — the dismissed state itself now respects the
+  // persisted preference: a reviewer who dismissed the legend on
+  // engagement A still skips the full legend on engagement B
+  // (they already know the gestures — the gesture model is the
+  // same on every BIM model). A first-time reviewer with no
+  // persisted preference still gets the legend on every fresh
+  // engagement until they demonstrate the gesture.
   const engagementKey = elements[0]?.briefingId ?? null;
   const lastEngagementKeyRef = useRef<string | null>(engagementKey);
   useEffect(() => {
     if (lastEngagementKeyRef.current !== engagementKey) {
       lastEngagementKeyRef.current = engagementKey;
-      setHintDismissed(false);
+      setHintDismissed(readHintDismissedPreference());
       setHintRevealed(false);
       setHintStickyOpen(false);
     }

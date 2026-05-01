@@ -260,6 +260,16 @@ function makeElement(
 }
 
 beforeEach(() => {
+  // Task #410 — the dismissed-hint preference now persists in
+  // localStorage. Clear it between tests so a "dismissed" test
+  // doesn't leak into the next test's first-time-reviewer setup.
+  try {
+    window.localStorage.clear();
+  } catch {
+    // happy-dom always provides localStorage; the try/catch just
+    // mirrors the production guard so a future jsdom switch won't
+    // break this hook.
+  }
   hoisted.webGlAvailable = true;
   hoisted.fetchMock.mockReset();
   // Default to a never-resolving promise so tests that don't
@@ -1353,10 +1363,18 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     ).toBeNull();
   });
 
-  it("brings the full legend back when the reviewer jumps to a different engagement (briefingId change)", () => {
-    // The dismissed state is per-engagement, not per-session, so a
-    // fresh BIM model still gets the affordance — even if the
-    // reviewer dismissed the legend earlier on a different one.
+  // --- Task #410 — persist the "knows the gestures" preference ---
+
+  it("keeps the '?' affordance on a fresh engagement once the reviewer has dismissed the legend in a prior session (persisted preference)", () => {
+    // Task #410 — the dismissed state used to be per-engagement
+    // and reset on every briefingId change. That meant a power
+    // user who already knew pan/zoom/rotate still got the full
+    // legend on every reload, every revisit, and every fresh BIM
+    // model — exactly the "persistent visual noise" Task #405 was
+    // supposed to eliminate. The dismissed state now seeds from a
+    // localStorage preference, so a returning reviewer who has
+    // ever dismissed the legend lands on the "?" affordance even
+    // when they jump to a brand-new engagement.
     const { container, rerender } = render(
       <BimModelViewport elements={elements} />,
     );
@@ -1370,11 +1388,114 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     }));
     rerender(<BimModelViewport elements={otherEngagementElements} />);
     expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("a first-time reviewer with no stored preference still sees the full legend on a fresh engagement", () => {
+    // Belt-and-braces — the persisted-preference path must not
+    // affect first-time reviewers. With no localStorage entry the
+    // engagement-change reset still surfaces the full legend, so a
+    // brand-new reviewer learns the gesture model the same way
+    // they did before #410.
+    const otherEngagementElements = elements.map((el) => ({
+      ...el,
+      briefingId: "br-2-different-engagement",
+    }));
+    const { rerender } = render(<BimModelViewport elements={elements} />);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    rerender(<BimModelViewport elements={otherEngagementElements} />);
+    expect(
       screen.getByTestId("bim-model-viewport-gesture-hint"),
     ).toBeInTheDocument();
     expect(
       screen.queryByTestId("bim-model-viewport-gesture-hint-toggle"),
     ).toBeNull();
+  });
+
+  it("seeds the dismissed state from localStorage on first paint (returning reviewer skips the legend without having to dismiss again)", () => {
+    // The reviewer dismissed the legend in a prior session — on
+    // their next page load, the viewer mounts with the "?"
+    // affordance already in place, no canvas pointerdown required.
+    window.localStorage.setItem(
+      "plan-review:bim-gesture-hint-dismissed",
+      "1",
+    );
+    render(<BimModelViewport elements={elements} />);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("writes the dismissed preference to localStorage when the reviewer pans the canvas (so the next session remembers)", () => {
+    expect(
+      window.localStorage.getItem("plan-review:bim-gesture-hint-dismissed"),
+    ).toBeNull();
+    const { container } = render(<BimModelViewport elements={elements} />);
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    expect(
+      window.localStorage.getItem("plan-review:bim-gesture-hint-dismissed"),
+    ).toBe("1");
+  });
+
+  it("writes the dismissed preference when the reviewer scrolls to zoom (the second teaching gesture also counts)", () => {
+    const { container } = render(<BimModelViewport elements={elements} />);
+    fireEvent.wheel(container.querySelector("canvas")!, { deltaY: -100 });
+    expect(
+      window.localStorage.getItem("plan-review:bim-gesture-hint-dismissed"),
+    ).toBe("1");
+  });
+
+  it("hover/focus/tap reveals on the persisted '?' affordance still work the same as the in-session dismiss path", () => {
+    // The persisted-preference seeding can't break the Task #405 /
+    // Task #408 tap-to-toggle, hover, and focus reveal contracts —
+    // a returning reviewer who wants to refresh their memory of
+    // the gestures still has the same three input models available.
+    window.localStorage.setItem(
+      "plan-review:bim-gesture-hint-dismissed",
+      "1",
+    );
+    render(<BimModelViewport elements={elements} />);
+    const toggle = screen.getByTestId(
+      "bim-model-viewport-gesture-hint-toggle",
+    );
+    // Hover reveals → mouseLeave hides.
+    fireEvent.mouseEnter(toggle);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    // Focus reveals → blur hides.
+    fireEvent.focus(toggle);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    fireEvent.blur(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    // Tap latches sticky-open, second tap closes it.
+    fireEvent.click(toggle);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("does re-fit when the reviewer jumps to a different element via Show in 3D viewer", () => {
