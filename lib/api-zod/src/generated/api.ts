@@ -1871,6 +1871,36 @@ export const GetBriefingSourceGlbHeader = zod.object({
 });
 
 /**
+ * DA-PI-5 — Streams the binary glTF (`model/gltf-binary`) for a
+materializable element whose `glbObjectPath` points at a glb in
+object storage. Mirrors `GET /briefing-sources/{id}/glb` (same
+ETag / cache-header contract, same `model/gltf-binary` body,
+same `If-None-Match` 304 short-circuit) but is keyed by the
+materializable-element row id rather than its briefing-source
+parent — needed for elements whose mesh exists in the bucket
+but that don't carry a `briefingSourceId` (e.g. an architect-
+supplied mesh that didn't go through the briefing-source
+converter pipeline). The Plan Review BIM viewport falls back
+to this endpoint when the element row has a `glbObjectPath`
+but no `briefingSourceId`, so the reviewer can frame the
+camera onto a terrain / setback / neighbor-mass element the
+same way they do an inline-ring property line.
+
+404 when the row does not exist or when its `glbObjectPath`
+is null. 404 with `glb_bytes_missing` when the row points at
+a path the bucket no longer holds.
+
+ * @summary Stream the converted glb for one materializable element
+ */
+export const GetMaterializableElementGlbParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetMaterializableElementGlbHeader = zod.object({
+  "If-None-Match": zod.string().optional(),
+});
+
+/**
  * DA-PI-5 — read-side surface for the C# Revit add-in. Returns the
 engagement's `bim_models` row (or `null` when no push has
 happened yet) along with the `materializable_elements` rows

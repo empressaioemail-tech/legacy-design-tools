@@ -2336,6 +2336,115 @@ export function useGetBriefingSourceGlb<
 }
 
 /**
+ * DA-PI-5 — Streams the binary glTF (`model/gltf-binary`) for a
+materializable element whose `glbObjectPath` points at a glb in
+object storage. Mirrors `GET /briefing-sources/{id}/glb` (same
+ETag / cache-header contract, same `model/gltf-binary` body,
+same `If-None-Match` 304 short-circuit) but is keyed by the
+materializable-element row id rather than its briefing-source
+parent — needed for elements whose mesh exists in the bucket
+but that don't carry a `briefingSourceId` (e.g. an architect-
+supplied mesh that didn't go through the briefing-source
+converter pipeline). The Plan Review BIM viewport falls back
+to this endpoint when the element row has a `glbObjectPath`
+but no `briefingSourceId`, so the reviewer can frame the
+camera onto a terrain / setback / neighbor-mass element the
+same way they do an inline-ring property line.
+
+404 when the row does not exist or when its `glbObjectPath`
+is null. 404 with `glb_bytes_missing` when the row points at
+a path the bucket no longer holds.
+
+ * @summary Stream the converted glb for one materializable element
+ */
+export const getGetMaterializableElementGlbUrl = (id: string) => {
+  return `/api/materializable-elements/${id}/glb`;
+};
+
+export const getMaterializableElementGlb = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetMaterializableElementGlbUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMaterializableElementGlbQueryKey = (id: string) => {
+  return [`/api/materializable-elements/${id}/glb`] as const;
+};
+
+export const getGetMaterializableElementGlbQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMaterializableElementGlb>>,
+  TError = ErrorType<void | ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMaterializableElementGlb>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetMaterializableElementGlbQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMaterializableElementGlb>>
+  > = ({ signal }) =>
+    getMaterializableElementGlb(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMaterializableElementGlb>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMaterializableElementGlbQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMaterializableElementGlb>>
+>;
+export type GetMaterializableElementGlbQueryError =
+  ErrorType<void | ErrorResponse>;
+
+/**
+ * @summary Stream the converted glb for one materializable element
+ */
+
+export function useGetMaterializableElementGlb<
+  TData = Awaited<ReturnType<typeof getMaterializableElementGlb>>,
+  TError = ErrorType<void | ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMaterializableElementGlb>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMaterializableElementGlbQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * DA-PI-5 — read-side surface for the C# Revit add-in. Returns the
 engagement's `bim_models` row (or `null` when no push has
 happened yet) along with the `materializable_elements` rows

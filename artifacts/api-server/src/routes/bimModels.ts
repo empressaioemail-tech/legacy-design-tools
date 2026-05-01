@@ -40,7 +40,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
   db,
   engagements,
@@ -59,11 +59,16 @@ import {
   PushEngagementBimModelParams,
   PushEngagementBimModelBody,
   GetBimModelRefreshParams,
+  GetMaterializableElementGlbParams,
   ListBimModelDivergencesParams,
   RecordBimModelDivergenceParams,
   RecordBimModelDivergenceBody,
   ResolveBimModelDivergenceParams,
 } from "@workspace/api-zod";
+import {
+  ObjectStorageService,
+  ObjectNotFoundError,
+} from "../lib/objectStorage";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import {
   BIM_MODEL_PUSH_ACTOR_ID,
@@ -796,8 +801,116 @@ async function emitBimModelDivergenceResolvedEvent(
 }
 
 // ---------------------------------------------------------------------------
+// Object storage — lazy singleton mirroring the briefingSources route. The
+// constructor reads env on first call and tests inject env via the harness
+// rather than at module load, so we can't construct it eagerly at import time.
+// ---------------------------------------------------------------------------
+
+let cachedObjectStorage: ObjectStorageService | null = null;
+function objectStorage(): ObjectStorageService {
+  if (!cachedObjectStorage) cachedObjectStorage = new ObjectStorageService();
+  return cachedObjectStorage;
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+
+/**
+ * GET /materializable-elements/:id/glb — Plan Review BIM viewport bytes
+ * endpoint (Task #379).
+ *
+ * Streams the `model/gltf-binary` bytes for one materializable element whose
+ * `glbObjectPath` points at a glb in object storage. Mirrors the
+ * `GET /briefing-sources/:id/glb` contract (same ETag / cache-header /
+ * If-None-Match short-circuit) but is keyed by the materializable-element row
+ * id rather than its briefing-source parent.
+ *
+ * Why this endpoint exists alongside the briefing-source one: an element row
+ * is allowed to advertise a `glbObjectPath` without a `briefingSourceId`
+ * (e.g. an architect-supplied mesh that didn't go through the briefing-source
+ * converter pipeline). Before this route, those "orphan" elements were
+ * counted as renderable in the viewport but the viewer had no way to fetch
+ * the bytes — a glb-orphan hint surfaced instead. With this route the
+ * viewport can pull the bytes by element id and render the mesh in scene,
+ * which is what the reviewer expects when they jump to a terrain / setback
+ * / neighbor-mass element from a finding.
+ *
+ * Auth posture: deliberately matches `/briefing-sources/:id/glb` — no
+ * audience gate. The bytes are content-addressed by the row id (a uuid) and
+ * carry geometry only (no Revit-binding metadata that would need the
+ * architect-audience guard the other bim-model routes apply). An applicant
+ * who knows a row id can fetch the bytes; we accept that since it matches
+ * the existing precedent and the row id is unguessable.
+ */
+router.get(
+  "/materializable-elements/:id/glb",
+  async (req: Request, res: Response) => {
+    const paramsParse = GetMaterializableElementGlbParams.safeParse(req.params);
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_materializable_element_id" });
+      return;
+    }
+    const { id } = paramsParse.data;
+    const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+
+    try {
+      const rows = await db
+        .select({
+          id: materializableElements.id,
+          glbObjectPath: materializableElements.glbObjectPath,
+        })
+        .from(materializableElements)
+        .where(eq(materializableElements.id, id))
+        .limit(1);
+      const row = rows[0];
+      if (!row) {
+        res.status(404).json({ error: "materializable_element_not_found" });
+        return;
+      }
+      // No glb attached — element is either inline-ring (geometry suffices
+      // on the C# side) or hasn't been backed by a converted mesh yet.
+      // Uniform 404 so the viewer renders a single fallback branch.
+      if (!row.glbObjectPath) {
+        res.status(404).json({ error: "glb_not_attached" });
+        return;
+      }
+
+      let bytes: Buffer;
+      try {
+        bytes = await objectStorage().getObjectEntityBytes(row.glbObjectPath);
+      } catch (err) {
+        if (err instanceof ObjectNotFoundError) {
+          // The row points at bytes the bucket no longer holds — same drift
+          // posture as the briefing-source route: surface as 404 so the
+          // viewer renders its "not available" hint and log loudly so an
+          // operator sees the row-vs-bucket mismatch.
+          reqLog.error(
+            { id, glbObjectPath: row.glbObjectPath },
+            "glb bytes missing for materializable element with glbObjectPath",
+          );
+          res.status(404).json({ error: "glb_bytes_missing" });
+          return;
+        }
+        throw err;
+      }
+
+      const etag = `"${createHash("sha1").update(bytes).digest("hex")}"`;
+      if (req.headers["if-none-match"] === etag) {
+        res.status(304).end();
+        return;
+      }
+      res.setHeader("Content-Type", "model/gltf-binary");
+      res.setHeader("Content-Length", String(bytes.length));
+      res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+      res.setHeader("ETag", etag);
+      res.end(bytes);
+    } catch (err) {
+      reqLog.error({ err, id }, "serve materializable element glb failed");
+      res.status(500).json({ error: "Failed to load materializable element glb" });
+    }
+  },
+);
 
 router.get(
   "/engagements/:id/bim-model",

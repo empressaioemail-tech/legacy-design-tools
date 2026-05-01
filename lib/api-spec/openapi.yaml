@@ -1045,6 +1045,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /materializable-elements/{id}/glb:
+    get:
+      operationId: getMaterializableElementGlb
+      tags: [engagements]
+      summary: Stream the converted glb for one materializable element
+      description: |
+        DA-PI-5 — Streams the binary glTF (`model/gltf-binary`) for a
+        materializable element whose `glbObjectPath` points at a glb in
+        object storage. Mirrors `GET /briefing-sources/{id}/glb` (same
+        ETag / cache-header contract, same `model/gltf-binary` body,
+        same `If-None-Match` 304 short-circuit) but is keyed by the
+        materializable-element row id rather than its briefing-source
+        parent — needed for elements whose mesh exists in the bucket
+        but that don't carry a `briefingSourceId` (e.g. an architect-
+        supplied mesh that didn't go through the briefing-source
+        converter pipeline). The Plan Review BIM viewport falls back
+        to this endpoint when the element row has a `glbObjectPath`
+        but no `briefingSourceId`, so the reviewer can frame the
+        camera onto a terrain / setback / neighbor-mass element the
+        same way they do an inline-ring property line.
+
+        404 when the row does not exist or when its `glbObjectPath`
+        is null. 404 with `glb_bytes_missing` when the row points at
+        a path the bucket no longer holds.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Glb bytes
+          content:
+            model/gltf-binary:
+              schema:
+                type: string
+                format: binary
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+        "304":
+          description: Cached copy still fresh
+        "404":
+          description: Materializable element not found, or no glb attached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /engagements/{id}/bim-model:
     get:
       operationId: getEngagementBimModel

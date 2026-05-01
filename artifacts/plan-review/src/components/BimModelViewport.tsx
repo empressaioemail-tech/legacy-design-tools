@@ -4,6 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
   getGetBriefingSourceGlbUrl,
+  getGetMaterializableElementGlbUrl,
   type MaterializableElement,
 } from "@workspace/api-client-react";
 
@@ -229,26 +230,38 @@ interface Renderable {
   /**
    * Which scene-representation path the element uses.
    *   - `"ring"` — inline polygon, extruded into a slab in-scene.
-   *   - `"glb"` — fetched from `GET /briefing-sources/:id/glb`
-   *     (only available when the element has a briefingSourceId).
-   *   - `"glb-orphan"` — element advertises a `glbObjectPath` but
-   *     no briefingSourceId, so the converted-DXF GLB exists in
-   *     object storage but the API doesn't expose a fetch path.
-   *     Counted as renderable (so it doesn't trip the
-   *     no-geometry overlay), but the viewport surfaces a
-   *     "mesh exists but can't be loaded yet" hint and frames
-   *     the scene-bounds fall-through.
+   *   - `"glb"` — fetched from one of two glb endpoints:
+   *       * `GET /briefing-sources/:id/glb` when the element has
+   *         a `briefingSourceId` (the typical converted-DXF case;
+   *         multiple elements may share one source so the load
+   *         effect dedups by `glbKey === briefingSourceId`).
+   *       * `GET /materializable-elements/:id/glb` when the
+   *         element has only a `glbObjectPath` (an architect-
+   *         supplied mesh that didn't go through the briefing-
+   *         source converter pipeline; Task #379 added this
+   *         fallback so the orphan case is no longer treated as
+   *         an unfetchable hint). The dedup key is the element id
+   *         itself — by definition unique.
    */
-  source: "ring" | "glb" | "glb-orphan";
+  source: "ring" | "glb";
   /** Inline 2D bounds — populated only when source === "ring". */
   inlineBounds: Bounds2D | null;
   /** Inline outer ring — populated only when source === "ring". */
   inlineRing: Array<[number, number]>;
   /**
-   * Source of the GLB to fetch — populated only when
-   * source === "glb". Same id as `element.briefingSourceId`.
+   * Stable key for dedup + per-source load-status reporting —
+   * populated only when source === "glb". `briefingSourceId` for
+   * elements backed by a briefing source (multiple elements may
+   * share); `element.id` for direct-element fetches (Task #379's
+   * `/materializable-elements/:id/glb` fallback).
    */
-  glbSourceId: string | null;
+  glbKey: string | null;
+  /**
+   * Pre-resolved fetch URL for the glb bytes — populated only when
+   * source === "glb". Lifting URL resolution here keeps the load
+   * effect agnostic to which endpoint backs the bytes.
+   */
+  glbUrl: string | null;
 }
 
 function classifyElements(elements: MaterializableElement[]): Renderable[] {
@@ -261,7 +274,8 @@ function classifyElements(elements: MaterializableElement[]): Renderable[] {
         source: "ring",
         inlineBounds: bounds,
         inlineRing: extractElementRing(el),
-        glbSourceId: null,
+        glbKey: null,
+        glbUrl: null,
       });
       continue;
     }
@@ -271,26 +285,27 @@ function classifyElements(elements: MaterializableElement[]): Renderable[] {
         source: "glb",
         inlineBounds: null,
         inlineRing: [],
-        glbSourceId: el.briefingSourceId,
+        glbKey: el.briefingSourceId,
+        glbUrl: getGetBriefingSourceGlbUrl(el.briefingSourceId),
       });
       continue;
     }
     if (el.glbObjectPath) {
-      // The schema permits an element to advertise a glbObjectPath
-      // without a briefingSourceId (e.g. an architect-supplied
-      // mesh that didn't go through the briefing-source converter
-      // pipeline). The element is *renderable* — geometry exists
-      // — but the viewer's only fetch endpoint is the per-source
-      // route, so we can't pull the bytes here. Mark it as
-      // glb-orphan: it counts toward the renderable total, but
-      // selection falls back to the scene-bounds frame + the
-      // glb-unfetchable hint instead of attempting an HTTP load.
+      // Task #379 — an element row may advertise a `glbObjectPath`
+      // without a `briefingSourceId` (e.g. an architect-supplied
+      // mesh that didn't pass through the briefing-source converter
+      // pipeline). Before #379 these were classed as "glb-orphan"
+      // and the viewer surfaced a "can't fetch" hint; now we route
+      // the load through `/materializable-elements/:id/glb` so the
+      // bytes load and the camera frames the mesh exactly like a
+      // briefing-source-backed element.
       out.push({
         element: el,
-        source: "glb-orphan",
+        source: "glb",
         inlineBounds: null,
         inlineRing: [],
-        glbSourceId: null,
+        glbKey: el.id,
+        glbUrl: getGetMaterializableElementGlbUrl(el.id),
       });
       continue;
     }
@@ -478,8 +493,8 @@ export function BimModelViewport({
           maxZ: RING_EXTRUDE_HEIGHT,
         };
         acc = acc ? unionBounds3(acc, b) : b;
-      } else if (r.source === "glb" && r.glbSourceId && glbBounds[r.glbSourceId]) {
-        acc = acc ? unionBounds3(acc, glbBounds[r.glbSourceId]) : glbBounds[r.glbSourceId];
+      } else if (r.source === "glb" && r.glbKey && glbBounds[r.glbKey]) {
+        acc = acc ? unionBounds3(acc, glbBounds[r.glbKey]) : glbBounds[r.glbKey];
       }
     }
     return acc;
@@ -500,10 +515,10 @@ export function BimModelViewport({
       }
       if (
         selectedRenderable.source === "glb" &&
-        selectedRenderable.glbSourceId &&
-        glbBounds[selectedRenderable.glbSourceId]
+        selectedRenderable.glbKey &&
+        glbBounds[selectedRenderable.glbKey]
       ) {
-        const b = glbBounds[selectedRenderable.glbSourceId];
+        const b = glbBounds[selectedRenderable.glbKey];
         // Manual 3D padding (the 2D padBounds doesn't know about
         // z). 25% of the longest axis is enough to keep a tall
         // mass like a neighbor-building visible inside the frame.
@@ -718,21 +733,30 @@ export function BimModelViewport({
     const scene = sceneRef.current;
     if (!scene) return;
 
-    // Dedupe by sourceId (multiple elements may share a source —
-    // e.g. one DXF source resolved into a single terrain element,
-    // but the schema permits N:1).
-    const wantedSources = new Map<string, string[]>();
+    // Dedupe by glbKey. For briefing-source-backed elements the key
+    // is the briefingSourceId so multiple elements sharing one
+    // source coalesce into a single fetch. For element-id-backed
+    // elements (Task #379's `/materializable-elements/:id/glb`
+    // fallback) the key is the element id itself — no coalescing
+    // possible since the URL is unique per element.
+    const wantedSources = new Map<
+      string,
+      { url: string; elementIds: string[] }
+    >();
     for (const r of renderable) {
-      if (r.source !== "glb" || !r.glbSourceId) continue;
-      const ids = wantedSources.get(r.glbSourceId) ?? [];
-      ids.push(r.element.id);
-      wantedSources.set(r.glbSourceId, ids);
+      if (r.source !== "glb" || !r.glbKey || !r.glbUrl) continue;
+      const entry = wantedSources.get(r.glbKey) ?? {
+        url: r.glbUrl,
+        elementIds: [],
+      };
+      entry.elementIds.push(r.element.id);
+      wantedSources.set(r.glbKey, entry);
     }
 
     const controller = new AbortController();
     const loader = new GLTFLoader();
 
-    for (const [sourceId, elementIds] of wantedSources.entries()) {
+    for (const [sourceId, { url, elementIds }] of wantedSources.entries()) {
       const currentStatus = glbStateRef.current[sourceId]?.status;
       // Skip sources that are already in any terminal / in-flight
       // state — only "no entry yet" should trigger a fresh fetch.
@@ -741,7 +765,6 @@ export function BimModelViewport({
       if (currentStatus === "error") continue;
 
       setGlbState((prev) => ({ ...prev, [sourceId]: { status: "loading" } }));
-      const url = getGetBriefingSourceGlbUrl(sourceId);
       void fetch(url, { signal: controller.signal })
         .then(async (res) => {
           if (!res.ok) {
@@ -994,8 +1017,8 @@ export function BimModelViewport({
           </div>
         )}
         {selectedRenderable?.source === "glb" &&
-          selectedRenderable.glbSourceId &&
-          glbState[selectedRenderable.glbSourceId]?.status === "loading" && (
+          selectedRenderable.glbKey &&
+          glbState[selectedRenderable.glbKey]?.status === "loading" && (
             <div
               data-testid="bim-model-viewport-glb-loading"
               style={{
@@ -1015,8 +1038,8 @@ export function BimModelViewport({
             </div>
           )}
         {selectedRenderable?.source === "glb" &&
-          selectedRenderable.glbSourceId &&
-          glbState[selectedRenderable.glbSourceId]?.status === "error" && (
+          selectedRenderable.glbKey &&
+          glbState[selectedRenderable.glbKey]?.status === "error" && (
             <div
               data-testid="bim-model-viewport-glb-error"
               style={{
@@ -1037,33 +1060,6 @@ export function BimModelViewport({
               . The element list still highlights its row below.
             </div>
           )}
-        {selectedRenderable?.source === "glb-orphan" && (
-          <div
-            data-testid="bim-model-viewport-glb-orphan"
-            style={{
-              position: "absolute",
-              left: 8,
-              bottom: 8,
-              right: 8,
-              background: "var(--warning-dim)",
-              color: "var(--warning-text)",
-              border: "1px solid var(--warning-text)",
-              borderRadius: 4,
-              padding: "6px 8px",
-              fontSize: 11,
-              lineHeight: 1.35,
-            }}
-          >
-            <strong style={{ fontWeight: 600 }}>
-              {selectedRenderable.element.label ??
-                selectedRenderable.element.id}
-            </strong>{" "}
-            advertises a 3D mesh ({selectedRenderable.element.glbObjectPath}
-            ) but isn&apos;t backed by a fetchable briefing source — the
-            viewer can&apos;t pull its bytes. The element list still
-            highlights its row below.
-          </div>
-        )}
       </div>
     </div>
   );

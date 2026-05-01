@@ -193,6 +193,8 @@ vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => ({
 vi.mock("@workspace/api-client-react", () => ({
   getGetBriefingSourceGlbUrl: (id: string) =>
     `/api/briefing-sources/${id}/glb`,
+  getGetMaterializableElementGlbUrl: (id: string) =>
+    `/api/materializable-elements/${id}/glb`,
 }));
 
 const {
@@ -738,15 +740,22 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     expect(viewport.getAttribute("data-camera-target")).toBe("");
   });
 
-  it("counts a glbObjectPath-only element as renderable and surfaces the orphan hint on selection", async () => {
-    // Code review (Task #370 round 2) flagged that
-    // glbObjectPath-only elements were being treated as
-    // no-geometry. Schema permits an element to have a
-    // glbObjectPath without a briefingSourceId — the mesh exists
-    // in object storage but the per-source fetch endpoint can't
-    // be addressed. The viewer must (a) count it toward the
-    // renderable total and (b) surface a glb-orphan overlay (NOT
-    // the no-geometry overlay) on selection.
+  it("fetches a glbObjectPath-only element via the materializable-element glb endpoint and frames its loaded bounds", async () => {
+    // Task #379 — the schema permits an element to advertise a
+    // glbObjectPath without a briefingSourceId (e.g. an architect-
+    // supplied mesh that didn't pass through the briefing-source
+    // converter pipeline). Before #379 these were classed as
+    // "glb-orphan" with a hint that the bytes couldn't be fetched;
+    // now the viewer routes the load through the per-element glb
+    // endpoint so the mesh loads + the camera frames it.
+    hoisted.fetchMock.mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+    });
+    hoisted.glbBoundsHook = {
+      min: { x: -10, y: 0, z: -10 },
+      max: { x: 10, y: 8, z: 10 },
+    };
     const orphanElements: MaterializableElement[] = [
       makeElement({
         id: "el-orphan-mesh",
@@ -764,26 +773,41 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
       />,
     );
     const viewport = screen.getByTestId("bim-model-viewport");
+    // Counts as renderable + selection resolves to the glb path
+    // (no longer "glb-orphan" — same source enum as the briefing-
+    // source-backed case, just keyed by element id).
     expect(viewport.getAttribute("data-renderable-element-count")).toBe("1");
     expect(viewport.getAttribute("data-selected-element-id")).toBe(
       "el-orphan-mesh",
     );
-    expect(viewport.getAttribute("data-selected-element-source")).toBe(
-      "glb-orphan",
-    );
-    // Empty-state hint should NOT render — geometry exists, just
-    // not fetchable.
+    expect(viewport.getAttribute("data-selected-element-source")).toBe("glb");
+    // Empty-state hint should NOT render — geometry exists.
     expect(
       screen.queryByTestId("bim-model-viewport-empty"),
     ).toBeNull();
-    // Glb-orphan overlay surfaces with the path so the reviewer
-    // can chase the issue back to the briefing source.
-    const overlay = screen.getByTestId("bim-model-viewport-glb-orphan");
-    expect(overlay.textContent).toContain("Architect-supplied mesh");
-    expect(overlay.textContent).toContain("/objects/architect-mesh-7");
-    // No fetch should be issued for glb-orphan elements (no
-    // briefingSourceId to address).
-    expect(hoisted.fetchMock).not.toHaveBeenCalled();
+    // The viewer fetches the bytes via the new per-element endpoint
+    // (Task #379) — never the briefing-source endpoint, since
+    // briefingSourceId is null here.
+    await waitFor(() =>
+      expect(hoisted.fetchMock).toHaveBeenCalledWith(
+        "/api/materializable-elements/el-orphan-mesh/glb",
+        expect.any(Object),
+      ),
+    );
+    // Once parsed, the per-key load status flips to "loaded" under
+    // the element id (the dedup key for direct-element fetches).
+    await waitFor(() =>
+      expect(
+        screen
+          .getByTestId("bim-model-viewport")
+          .getAttribute("data-source-load-el-orphan-mesh"),
+      ).toBe("loaded"),
+    );
+    // The legacy glb-orphan overlay must no longer surface for this
+    // case — bytes are fetchable, no warning needed.
+    expect(
+      screen.queryByTestId("bim-model-viewport-glb-orphan"),
+    ).toBeNull();
   });
 
   it("does not render the no-geometry overlay when the ref doesn't resolve at all", () => {
