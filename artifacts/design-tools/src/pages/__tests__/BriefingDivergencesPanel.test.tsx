@@ -195,6 +195,20 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
       if (hoisted.divergencesQueryState.isLoading) {
         return { ...q, isLoading: true, data: undefined };
       }
+      // Same pattern for isError: the panel pre-seeds the
+      // divergences cache via `client.setQueryData`, which keeps
+      // `queryFn` from ever running (and therefore from throwing).
+      // A synchronous override lets the test assert the error
+      // branch deterministically without racing a refetch.
+      if (hoisted.divergencesQueryState.isError) {
+        return {
+          ...q,
+          isError: true,
+          isLoading: false,
+          data: undefined,
+          error: new Error("simulated divergences error"),
+        };
+      }
       return q;
     },
     usePushEngagementBimModel: (
@@ -528,6 +542,159 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
     expect(
       within(otherRow).getByTestId("briefing-divergences-reason-badge"),
     ).toHaveTextContent("Other override");
+  });
+
+  it("renders the 'Element no longer in briefing' header when every row in a group has null kind/label", () => {
+    // The deleted-element scenario: the architect deleted a locked
+    // briefing element in Revit, so the row the C# add-in records
+    // has no `elementKind` / `elementLabel` to draw from. The group
+    // header must fall back to "Element no longer in briefing"
+    // rather than rendering an empty heading. This is the loudest
+    // signal the panel surfaces, so a regression that swapped the
+    // fallback string would silently strip the only context the
+    // operator gets for chasing a deleted element down.
+    hoisted.divergences = [
+      {
+        id: "div-deleted-1",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-gone",
+        briefingId: "brief-1",
+        reason: "deleted",
+        note: "Locked element removed in Revit",
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: null,
+        elementLabel: null,
+      },
+      {
+        id: "div-deleted-2",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-gone",
+        briefingId: "brief-1",
+        reason: "deleted",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-04T12:00:00.000Z",
+        elementKind: null,
+        elementLabel: null,
+      },
+    ];
+    renderPanel();
+
+    const groups = screen.getAllByTestId("briefing-divergences-group");
+    expect(groups).toHaveLength(1);
+    const group = groups[0];
+    expect(group.getAttribute("data-element-id")).toBe("elem-gone");
+    expect(group).toHaveTextContent("Element no longer in briefing");
+    // The element-label sub-line is keyed off `group.elementLabel`
+    // and must collapse to nothing when both rows lack one — there
+    // is no human-readable label to show.
+    expect(
+      within(group).queryByText("(lot 12)", { exact: false }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the populated kind/label header when only one row in a group carries them", () => {
+    // The fallback merge in `groupDivergencesByElement`: the first
+    // row the reducer sees for an element seeds the group's
+    // `elementKind` / `elementLabel`, and a later row whose own
+    // values are null must NOT blank them out. This guards the
+    // realistic mix where the C# add-in recorded a populated
+    // override first, then a deleted-fallback row landed in the
+    // same group on a later push. The header should still read the
+    // human-readable kind ("Buildable envelope") rather than
+    // collapsing to "Element no longer in briefing".
+    hoisted.divergences = [
+      {
+        id: "div-populated",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-mixed",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: "Pulled the envelope south by 2ft",
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+      },
+      {
+        id: "div-null",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-mixed",
+        briefingId: "brief-1",
+        reason: "deleted",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-04T12:00:00.000Z",
+        elementKind: null,
+        elementLabel: null,
+      },
+    ];
+    renderPanel();
+
+    const groups = screen.getAllByTestId("briefing-divergences-group");
+    expect(groups).toHaveLength(1);
+    const group = groups[0];
+    expect(group.getAttribute("data-element-id")).toBe("elem-mixed");
+    // The merged group keeps the populated kind ("buildable-envelope"
+    // → "Buildable envelope") and the populated label.
+    expect(group).toHaveTextContent("Buildable envelope");
+    expect(group).toHaveTextContent("Envelope (lot 12)");
+    // And it must NOT fall back to the deleted-element header just
+    // because one of the two rows has null kind/label.
+    expect(group).not.toHaveTextContent("Element no longer in briefing");
+    // Both rows still render under the merged header — the merge
+    // affects the group's metadata, not its row count.
+    const rows = within(group).getAllByTestId("briefing-divergences-row");
+    expect(rows.map((r) => r.getAttribute("data-divergence-id"))).toEqual([
+      "div-populated",
+      "div-null",
+    ]);
+  });
+
+  it("renders the loading-state copy while the divergences query is loading", () => {
+    // Force the divergences query into the loading branch via the
+    // hoisted state hook the mock honors synchronously. The
+    // bim-model query still resolves (so the panel mounts past its
+    // "no bim-model yet → render nothing" guard) and we land on
+    // the in-panel loading row.
+    hoisted.divergencesQueryState = { isLoading: true, isError: false };
+    renderPanel();
+
+    const loading = screen.getByTestId("briefing-divergences-loading");
+    expect(loading).toBeInTheDocument();
+    expect(loading).toHaveTextContent("Loading recent overrides…");
+    // The other two state branches must stay hidden — the loading
+    // copy is exclusive with both empty and error.
+    expect(
+      screen.queryByTestId("briefing-divergences-empty"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("briefing-divergences-error"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the error-state copy when the divergences query fails", () => {
+    // Same hoisted-state hook, error branch. The panel renders the
+    // error row in `role="alert"` so screen readers announce it,
+    // and the empty state must stay hidden so the operator
+    // doesn't read "no overrides recorded yet" when the panel
+    // actually couldn't load any.
+    hoisted.divergencesQueryState = { isLoading: false, isError: true };
+    renderPanel();
+
+    const error = screen.getByTestId("briefing-divergences-error");
+    expect(error).toBeInTheDocument();
+    expect(error).toHaveAttribute("role", "alert");
+    expect(error).toHaveTextContent(
+      "Couldn't load recent overrides. Try refreshing in a moment.",
+    );
+    expect(
+      screen.queryByTestId("briefing-divergences-empty"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("briefing-divergences-loading"),
+    ).not.toBeInTheDocument();
   });
 });
 
