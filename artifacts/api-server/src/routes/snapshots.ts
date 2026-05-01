@@ -272,8 +272,21 @@ function deriveCounts(body: Record<string, unknown>) {
   return { sheetCount, roomCount, levelCount, wallCount };
 }
 
-/** Pull a candidate address out of the Revit payload. */
+/**
+ * Pull a candidate address out of the Revit payload.
+ *
+ * Real production pushes from the Revit add-in ship the project address as a
+ * top-level scalar (`payload.address`) — confirmed by auditing the
+ * `snapshots.payload` rows in the dev DB. The earlier-spec
+ * `projectInformation.address` wrapper has never appeared in a real push but
+ * is preserved here as a defensive fallback in case a future add-in version
+ * nests it that way.
+ */
 function extractIncomingAddress(payload: Record<string, unknown>): string | null {
+  const topLevel = payload["address"];
+  if (typeof topLevel === "string" && topLevel.trim().length > 0) {
+    return topLevel.trim();
+  }
   const projectInfo = payload["projectInformation"];
   const rawAddress =
     projectInfo && typeof projectInfo === "object"

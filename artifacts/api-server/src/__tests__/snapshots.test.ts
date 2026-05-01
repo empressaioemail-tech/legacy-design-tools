@@ -30,8 +30,12 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
+const geocodeAddressMock = vi.hoisted(() =>
+  vi.fn(async (_address: string) => null as unknown),
+);
+
 vi.mock("@workspace/site-context/server", () => ({
-  geocodeAddress: vi.fn(async () => null),
+  geocodeAddress: geocodeAddressMock,
 }));
 
 vi.mock("@workspace/codes", async () => {
@@ -344,6 +348,122 @@ describe("POST /api/snapshots — A04.7", () => {
     expect(eng.revitDocumentPath).toBe("C:/projects/new.rvt");
     expect(eng.address).toBe("42 Wallaby Way");
     expect(eng.nameLower).toBe("brand new project");
+  });
+
+  it("createNewEngagement branch: extracts top-level payload.address (real Revit production shape) and fires geocode+warmup", async () => {
+    // Production audit (Task #61) showed every real Revit push ships the
+    // address as a top-level scalar — NO `projectInformation` wrapper.
+    // Regression guard: the create-new branch must capture that address on
+    // the new engagement row AND kick off the best-effort geocode+warmup.
+    geocodeAddressMock.mockClear();
+
+    const res = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Real Revit Push",
+        revitCentralGuid: "REAL-PUSH-GUID",
+        revitDocumentPath: "C:/projects/real.rvt",
+        // Production shape: top-level address scalar, NO projectInformation
+        // wrapper. This is the exact key the live add-in sends today.
+        address: "555 Production Ave, Moab, UT",
+        sheets: [],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      engagementName: "Real Revit Push",
+      autoCreated: true,
+    });
+
+    if (!ctx.schema) throw new Error("ctx");
+    const [eng] = await ctx.schema.db
+      .select()
+      .from(engagements)
+      .where(eq(engagements.id, res.body.engagementId));
+    expect(eng.address).toBe("555 Production Ave, Moab, UT");
+
+    // Geocode+warmup is fire-and-forget (`void (async () => …)()`), so the
+    // POST may return before the geocode call lands. Wait for it before
+    // asserting, but cap the wait so a regression that drops the kickoff
+    // fails fast instead of hanging the suite.
+    await vi.waitFor(
+      () => {
+        expect(geocodeAddressMock).toHaveBeenCalledWith(
+          "555 Production Ave, Moab, UT",
+        );
+      },
+      { timeout: 1000 },
+    );
+  });
+
+  it("createNewEngagement branch: falls back to projectInformation.address when no top-level address", async () => {
+    // Defensive fallback: if a future add-in version nests the address under
+    // `projectInformation`, we still pick it up. Today's real pushes don't
+    // use this shape, but the existing "persists GUID + path" test above
+    // covers the nested-only case for the address column; this test pins
+    // down that the geocode kickoff also fires for that shape.
+    geocodeAddressMock.mockClear();
+
+    const res = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Nested Address Project",
+        sheets: [],
+        projectInformation: { address: "77 Wrapper Lane" },
+      });
+
+    expect(res.status).toBe(201);
+    if (!ctx.schema) throw new Error("ctx");
+    const [eng] = await ctx.schema.db
+      .select()
+      .from(engagements)
+      .where(eq(engagements.id, res.body.engagementId));
+    expect(eng.address).toBe("77 Wrapper Lane");
+
+    await vi.waitFor(
+      () => {
+        expect(geocodeAddressMock).toHaveBeenCalledWith("77 Wrapper Lane");
+      },
+      { timeout: 1000 },
+    );
+  });
+
+  it("createNewEngagement branch: top-level payload.address wins over projectInformation.address", async () => {
+    // If the add-in ever sends both shapes (current real shape + future
+    // wrapper variant), the top-level scalar — the one production actually
+    // ships — must win. This guards against a future code change that
+    // accidentally re-prioritises the wrapper.
+    geocodeAddressMock.mockClear();
+
+    const res = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Both Shapes Project",
+        sheets: [],
+        address: "1 Top Level Way",
+        projectInformation: { address: "999 Wrapper Way" },
+      });
+
+    expect(res.status).toBe(201);
+    if (!ctx.schema) throw new Error("ctx");
+    const [eng] = await ctx.schema.db
+      .select()
+      .from(engagements)
+      .where(eq(engagements.id, res.body.engagementId));
+    expect(eng.address).toBe("1 Top Level Way");
+
+    await vi.waitFor(
+      () => {
+        expect(geocodeAddressMock).toHaveBeenCalledWith("1 Top Level Way");
+      },
+      { timeout: 1000 },
+    );
   });
 
   it("createNewEngagement branch: GUID + path null when not supplied", async () => {
