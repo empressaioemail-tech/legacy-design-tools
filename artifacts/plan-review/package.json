@@ -54,6 +54,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "@workspace/adapters": "workspace:*",
     "@workspace/api-client-react": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/object-storage-web": "workspace:*",

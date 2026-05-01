@@ -8,6 +8,12 @@ import {
   EngagementStatus,
   type EngagementSummary,
 } from "@workspace/api-client-react";
+import {
+  filterApplicableAdapters,
+  noApplicableAdaptersMessage,
+  resolveJurisdiction,
+  type AdapterContext,
+} from "@workspace/adapters";
 import { useNavGroups } from "../components/NavGroups";
 import { relativeTime } from "../lib/relativeTime";
 
@@ -44,6 +50,69 @@ function StatusPill({ status }: { status: EngagementSummary["status"] }) {
   );
 }
 
+/**
+ * "No adapters" pill — mirrors the design-tools EngagementList card pill
+ * (Task #235) so reviewers in the plan-review surface can triage out-of-
+ * pilot engagements without opening each detail page (Task #278). The
+ * tooltip is the same `noApplicableAdaptersMessage` copy the design-tools
+ * list and the EngagementDetail Site Context banner render, so the two
+ * surfaces' wording cannot drift.
+ */
+function NoAdaptersPill({ message }: { message: string }) {
+  return (
+    <span
+      className="sc-pill"
+      data-testid="engagement-row-no-adapters-pill"
+      title={message}
+      style={{
+        background: "var(--info-dim)",
+        color: "var(--info-text)",
+        textTransform: "uppercase",
+        fontSize: 11,
+        letterSpacing: "0.05em",
+        padding: "3px 8px",
+        borderRadius: 4,
+      }}
+    >
+      No adapters
+    </span>
+  );
+}
+
+/**
+ * Pre-flight pilot eligibility computed from a cached engagement-list
+ * row, matching `computeEligibility` in design-tools EngagementList
+ * (Task #235). Both surfaces feed the same `resolveJurisdiction` +
+ * `filterApplicableAdapters` pair from `@workspace/adapters/eligibility`,
+ * which is also the source of truth the server's `generateLayers` 422
+ * envelope reads from — so the plan-review pill, the design-tools
+ * pill, the EngagementDetail banner, and the server verdict cannot
+ * disagree.
+ */
+function computeEligibility(e: EngagementSummary): {
+  isInPilot: boolean;
+  message: string;
+} {
+  const geocode = e.site?.geocode ?? null;
+  const jurisdiction = resolveJurisdiction({
+    jurisdictionCity: geocode?.jurisdictionCity ?? null,
+    jurisdictionState: geocode?.jurisdictionState ?? null,
+    jurisdiction: e.jurisdiction ?? null,
+    address: e.address ?? null,
+  });
+  const lat = geocode?.latitude ?? NaN;
+  const lng = geocode?.longitude ?? NaN;
+  const ctx: AdapterContext = {
+    parcel: { latitude: lat, longitude: lng },
+    jurisdiction,
+  };
+  const applicable = filterApplicableAdapters(ctx);
+  return {
+    isInPilot: applicable.length > 0,
+    message: noApplicableAdaptersMessage(jurisdiction),
+  };
+}
+
 function EngagementRow({ engagement }: { engagement: EngagementSummary }) {
   const initials = engagement.name
     .split(/\s+/)
@@ -57,11 +126,17 @@ function EngagementRow({ engagement }: { engagement: EngagementSummary }) {
     (s): s is string => !!s,
   );
 
+  // Compute the per-row pilot verdict from the same shared helpers the
+  // design-tools list and the EngagementDetail banner use, so the three
+  // surfaces' "no adapters" copy can never drift (Task #278).
+  const eligibility = useMemo(() => computeEligibility(engagement), [engagement]);
+
   return (
     <Link
       href={`/engagements/${engagement.id}`}
       className="sc-card-row flex items-center gap-3 no-underline"
       data-testid={`engagement-row-${engagement.id}`}
+      data-in-pilot={eligibility.isInPilot ? "true" : "false"}
     >
       <div
         className="sc-avatar-mark shrink-0"
@@ -74,6 +149,9 @@ function EngagementRow({ engagement }: { engagement: EngagementSummary }) {
         <div className="flex items-center gap-2 min-w-0">
           <div className="sc-medium truncate">{engagement.name}</div>
           <StatusPill status={engagement.status} />
+          {!eligibility.isInPilot ? (
+            <NoAdaptersPill message={eligibility.message} />
+          ) : null}
         </div>
         <div className="flex items-center gap-2 mt-1 min-w-0">
           {subtitleParts.length > 0 ? (

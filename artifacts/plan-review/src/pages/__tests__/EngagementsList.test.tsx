@@ -20,20 +20,56 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import type { EngagementSummary } from "@workspace/api-client-react";
+import { noApplicableAdaptersMessage } from "@workspace/adapters";
 
 // One row per status so every tab has at least one item to render and so
 // each tab's count badge is non-zero, mirroring a realistic seeded list.
+//
+// The Active row carries a Moab, UT geocode so the per-row pilot
+// eligibility (Task #278) lands on the in-pilot branch — the empty-
+// pilot pill test below relies on this. The other two rows are left
+// without a geocode so the resolver lands on the unresolved branch
+// and the pill must render.
 const ENGAGEMENTS: EngagementSummary[] = [
-  mkEngagement({ id: "eng-active", name: "Active Project", status: "active" }),
+  mkEngagement({
+    id: "eng-active",
+    name: "Active Project",
+    status: "active",
+    site: {
+      address: "100 Main St, Moab, UT",
+      geocode: {
+        latitude: 38.573,
+        longitude: -109.5494,
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        jurisdictionFips: null,
+        source: "manual",
+        geocodedAt: "2026-04-01T00:00:00.000Z",
+      },
+      projectType: null,
+      zoningCode: null,
+      lotAreaSqft: null,
+    },
+  } as Partial<EngagementSummary> &
+    Pick<EngagementSummary, "id" | "name" | "status">),
+  // Out-of-pilot rows: explicit nulls on every resolver input so the
+  // jurisdiction collapses to the unresolved branch and the empty-
+  // pilot pill is exercised. The default `jurisdiction: "Moab, UT"`
+  // would otherwise be parsed by the freeform-text fallback in
+  // `resolveJurisdiction` and flip these rows back into pilot.
   mkEngagement({
     id: "eng-on-hold",
     name: "Paused Project",
     status: "on_hold",
+    jurisdiction: null,
+    address: null,
   }),
   mkEngagement({
     id: "eng-archived",
     name: "Old Project",
     status: "archived",
+    jurisdiction: null,
+    address: null,
   }),
 ];
 
@@ -64,12 +100,17 @@ function mkEngagement(
   over: Partial<EngagementSummary> &
     Pick<EngagementSummary, "id" | "name" | "status">,
 ): EngagementSummary {
+  // We intentionally use `in` rather than `??` for the nullable fields
+  // below so callers can pass explicit `null` to opt out of the
+  // default (e.g. the Task #278 pill test needs jurisdiction/address
+  // to actually be null so `resolveJurisdiction` lands on the
+  // unresolved branch).
   return {
     id: over.id,
     name: over.name,
     status: over.status,
-    jurisdiction: over.jurisdiction ?? "Moab, UT",
-    address: over.address ?? "100 Main St",
+    jurisdiction: "jurisdiction" in over ? over.jurisdiction : "Moab, UT",
+    address: "address" in over ? over.address : "100 Main St",
     createdAt: over.createdAt ?? "2026-04-01T00:00:00.000Z",
     updatedAt: over.updatedAt ?? "2026-04-15T00:00:00.000Z",
     snapshotCount: over.snapshotCount ?? 1,
@@ -164,5 +205,61 @@ describe("EngagementsList — `?status=` filter URL", () => {
   it("falls back to Active when `?status=` is an unknown value", () => {
     renderAt("/engagements?status=bogus");
     expect(selectedTabTestId()).toBe("engagements-filter-active");
+  });
+});
+
+/**
+ * Per-row "No adapters" pill — Task #278.
+ *
+ * Mirrors the design-tools EngagementList card-pill regression
+ * (Task #235) on the plan-review surface so reviewers can triage
+ * out-of-pilot projects without opening each detail page. Both
+ * surfaces feed the shared `resolveJurisdiction` +
+ * `filterApplicableAdapters` pair from
+ * `@workspace/adapters/eligibility` and surface the tooltip via the
+ * shared `noApplicableAdaptersMessage` helper, so the wording cannot
+ * drift between the two lists or the EngagementDetail banner.
+ *
+ * Reuses the top-of-file `ENGAGEMENTS` fixture (and its mock):
+ *   - eng-active → Moab, UT geocode → in pilot → no pill.
+ *   - eng-on-hold / eng-archived → no geocode → resolver lands on
+ *     the unresolved branch → pill must render. We assert the pill
+ *     using the All tab so every row is visible regardless of
+ *     status filtering.
+ */
+describe("EngagementsList — empty-pilot pill (Task #278)", () => {
+  it("renders the 'No adapters' pill on the in-pilot Active row's absence and the unresolved rows' presence, using the shared helper's tooltip", () => {
+    renderAt("/engagements?status=all");
+
+    const moabRow = screen.getByTestId("engagement-row-eng-active");
+    expect(moabRow.getAttribute("data-in-pilot")).toBe("true");
+    expect(
+      moabRow.querySelector(
+        "[data-testid='engagement-row-no-adapters-pill']",
+      ),
+    ).toBeNull();
+
+    const onHoldRow = screen.getByTestId("engagement-row-eng-on-hold");
+    expect(onHoldRow.getAttribute("data-in-pilot")).toBe("false");
+    const onHoldPill = onHoldRow.querySelector(
+      "[data-testid='engagement-row-no-adapters-pill']",
+    );
+    expect(onHoldPill).not.toBeNull();
+    // The on-hold and archived fixtures have no city/state geocode, so
+    // the resolver lands on the unresolved branch — the same input
+    // shape the EngagementDetail banner would compute from. We assert
+    // against the shared helper directly so a copy tweak on either
+    // side fails this test instead of silently drifting.
+    expect(onHoldPill?.getAttribute("title")).toBe(
+      noApplicableAdaptersMessage({ stateKey: null, localKey: null }),
+    );
+
+    const archivedRow = screen.getByTestId("engagement-row-eng-archived");
+    expect(archivedRow.getAttribute("data-in-pilot")).toBe("false");
+    expect(
+      archivedRow.querySelector(
+        "[data-testid='engagement-row-no-adapters-pill']",
+      ),
+    ).not.toBeNull();
   });
 });

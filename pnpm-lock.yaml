@@ -898,6 +898,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      '@workspace/adapters':
+        specifier: workspace:*
+        version: link:../../lib/adapters
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react

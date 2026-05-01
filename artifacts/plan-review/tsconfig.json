@@ -15,6 +15,7 @@
     }
   },
   "references": [
+    { "path": "../../lib/adapters" },
     { "path": "../../lib/api-client-react" },
     { "path": "../../lib/object-storage-web" },
     { "path": "../../lib/portal-ui" }
