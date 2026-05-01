@@ -32,7 +32,11 @@ import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionRe
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
-import { ReviewerComment, SubmitToJurisdictionDialog } from "@workspace/portal-ui";
+import {
+  ReviewerComment,
+  SubmissionRecordedBanner,
+  SubmitToJurisdictionDialog,
+} from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
@@ -75,75 +79,6 @@ function StatusPill({ status }: { status: string }) {
     >
       {status.replace("_", " ")}
     </span>
-  );
-}
-
-/**
- * Non-blocking confirmation banner shown above the engagement header
- * after a successful "Submit to jurisdiction" action. The dialog itself
- * already closes on success, so this banner is the visible receipt that
- * something was recorded — it pairs the human-friendly relative time
- * (e.g. "just now") with the absolute timestamp on hover so a teammate
- * can verify exactly when the submission landed.
- *
- * The jurisdiction string is captured at submit time (snapshotted into
- * `lastSubmission` by the parent) and surfaced verbatim here so the
- * banner copy mirrors the Plan Review side
- * (`artifacts/plan-review/src/pages/EngagementDetail.tsx`) — both
- * surfaces read "Submitted to <jurisdiction> · <relative time>" so a
- * designer who flips between the two artifacts sees the same wording.
- *
- * Auto-dismiss and the close button are wired up by the parent so the
- * banner stays presentational.
- */
-function SubmissionRecordedBanner({
-  submittedAt,
-  jurisdiction,
-  onDismiss,
-}: {
-  submittedAt: string;
-  jurisdiction: string | null;
-  onDismiss: () => void;
-}) {
-  const absolute = useMemo(() => {
-    const d = new Date(submittedAt);
-    return Number.isNaN(d.getTime()) ? submittedAt : d.toLocaleString();
-  }, [submittedAt]);
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      data-testid="submit-jurisdiction-success-banner"
-      className="sc-card flex items-center justify-between flex-shrink-0"
-      style={{
-        padding: "10px 14px",
-        background: "rgba(0,180,216,0.10)",
-        borderColor: "rgba(0,180,216,0.45)",
-        color: "var(--text-primary)",
-      }}
-    >
-      <div className="flex items-center gap-2" style={{ fontSize: 13 }}>
-        <span aria-hidden style={{ color: "var(--cyan)", fontWeight: 600 }}>
-          ✓
-        </span>
-        <span>
-          Submitted to <strong>{jurisdiction ?? "jurisdiction"}</strong> ·{" "}
-          <span title={absolute} style={{ color: "var(--text-secondary)" }}>
-            {relativeTime(submittedAt)}
-          </span>
-        </span>
-      </div>
-      <button
-        type="button"
-        className="sc-btn-ghost"
-        onClick={onDismiss}
-        aria-label="Dismiss submission confirmation"
-        data-testid="submit-jurisdiction-success-dismiss"
-        style={{ padding: "2px 8px", fontSize: 12 }}
-      >
-        Dismiss
-      </button>
-    </div>
   );
 }
 

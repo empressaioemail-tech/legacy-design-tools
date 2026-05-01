@@ -10,6 +10,8 @@ export { Header } from "./components/Header";
 export type { HeaderProps, HeaderSearch } from "./components/Header";
 export { SubmitToJurisdictionDialog } from "./components/SubmitToJurisdictionDialog";
 export type { SubmitToJurisdictionDialogProps } from "./components/SubmitToJurisdictionDialog";
+export { SubmissionRecordedBanner } from "./components/SubmissionRecordedBanner";
+export type { SubmissionRecordedBannerProps } from "./components/SubmissionRecordedBanner";
 export { ReviewerComment } from "./components/ReviewerComment";
 export type { ReviewerCommentProps } from "./components/ReviewerComment";
 

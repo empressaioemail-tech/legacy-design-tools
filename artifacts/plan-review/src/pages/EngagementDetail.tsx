@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "wouter";
-import { DashboardLayout, ReviewerComment } from "@workspace/portal-ui";
+import {
+  DashboardLayout,
+  ReviewerComment,
+  SubmissionRecordedBanner,
+  SubmitToJurisdictionDialog,
+} from "@workspace/portal-ui";
 import {
   useGetEngagement,
   useListEngagementSubmissions,
@@ -11,7 +16,6 @@ import {
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
-import { SubmitToJurisdictionDialog } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
 
 /**
@@ -79,73 +83,6 @@ function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
     >
       {label}
     </span>
-  );
-}
-
-/**
- * Non-blocking confirmation banner shown above the past-submissions
- * list after a successful "Submit to jurisdiction" action (Task #100).
- * Mirrors the design-tools banner so reviewers get the same visible
- * receipt — the dialog itself already closed on success, so this
- * banner is the only post-submit affordance reassuring them the
- * package was actually recorded. The relative-time label ("just now")
- * is paired with the absolute timestamp on hover so a teammate can
- * verify exactly when the submission landed.
- *
- * Auto-dismiss and the close button are wired up by the parent so the
- * banner stays presentational.
- */
-function SubmissionRecordedBanner({
-  submittedAt,
-  jurisdiction,
-  onDismiss,
-}: {
-  submittedAt: string | Date;
-  jurisdiction: string | null;
-  onDismiss: () => void;
-}) {
-  const absolute = useMemo(() => {
-    const d = submittedAt instanceof Date ? submittedAt : new Date(submittedAt);
-    return Number.isNaN(d.getTime())
-      ? String(submittedAt)
-      : d.toLocaleString();
-  }, [submittedAt]);
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      data-testid="submit-jurisdiction-success-banner"
-      className="sc-card flex items-center justify-between flex-shrink-0"
-      style={{
-        padding: "10px 14px",
-        background: "var(--info-dim)",
-        borderColor: "var(--info-text)",
-        color: "var(--text-primary)",
-      }}
-    >
-      <div className="flex items-center gap-2" style={{ fontSize: 13 }}>
-        <span aria-hidden style={{ color: "var(--info-text)", fontWeight: 600 }}>
-          ✓
-        </span>
-        <span>
-          Submitted to{" "}
-          <strong>{jurisdiction ?? "jurisdiction"}</strong> ·{" "}
-          <span title={absolute} style={{ color: "var(--text-secondary)" }}>
-            {relativeTime(submittedAt)}
-          </span>
-        </span>
-      </div>
-      <button
-        type="button"
-        className="sc-btn-ghost"
-        onClick={onDismiss}
-        aria-label="Dismiss submission confirmation"
-        data-testid="submit-jurisdiction-success-dismiss"
-        style={{ padding: "2px 8px", fontSize: 12 }}
-      >
-        Dismiss
-      </button>
-    </div>
   );
 }
 
