@@ -16,3 +16,5 @@ export type {
   MutationOptions,
   MutationCapture,
 } from "./mockApiClient";
+export { makeEngagementPageMockHooks } from "./engagementPageMocks";
+export type { EngagementPageMockHooksOptions } from "./engagementPageMocks";

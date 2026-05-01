@@ -46,12 +46,11 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
-  MockApiError,
   createMutationCapture,
   createQueryKeyStubs,
   makeCapturingMutationHook,
+  makeEngagementPageMockHooks,
   noopMutationHook,
-  noopQueryHook,
 } from "@workspace/portal-ui/test-utils";
 
 type RunState = "pending" | "completed" | "failed";
@@ -164,82 +163,29 @@ vi.mock("@workspace/site-context/client", () => ({
 vi.mock("@workspace/api-client-react", async () => {
   const { useQuery } = await import("@tanstack/react-query");
   return {
-    ApiError: MockApiError,
-    RecordSubmissionResponseBodyStatus: {
-      approved: "approved",
-      corrections_requested: "corrections_requested",
-      rejected: "rejected",
-    },
-    useRecordSubmissionResponse: noopMutationHook,
+    // Shared engagement-page hook bag (Task #398) — provides the
+    // dozen identical engagement / submissions / session / snapshot
+    // / atom hooks plus `RecordSubmissionResponseBodyStatus`,
+    // `ApiError`, and the standard query-key helpers every
+    // engagement-page test wires up identically. Submissions
+    // accessor omitted so the helper's empty-list default applies
+    // (this test never asserts against the submissions tab).
+    ...(await makeEngagementPageMockHooks({
+      engagement: () => hoisted.engagement,
+    })),
+    // File-specific query-key helpers the SiteContextTab subtree
+    // pulls in for briefing / divergences / generation-status caches
+    // — not part of the shared engagement-page bag because they're
+    // only relevant to tests that mount the Site Context tab.
+    // Task #230 added `getListEngagementBriefingGenerationRunsQueryKey`
+    // for the kickoff disclosure's invalidate target.
     ...createQueryKeyStubs([
-      "getGetEngagementQueryKey",
-      "getGetSnapshotQueryKey",
-      "getListEngagementsQueryKey",
-      "getListEngagementSubmissionsQueryKey",
       "getGetEngagementBriefingQueryKey",
       "getListEngagementBriefingSourcesQueryKey",
       "getListBimModelDivergencesQueryKey",
       "getGetEngagementBriefingGenerationStatusQueryKey",
-      // Task #230 — the new key the disclosure invalidates on
-      // kickoff and on the pending → terminal transition.
       "getListEngagementBriefingGenerationRunsQueryKey",
-      "getGetSessionQueryKey",
     ] as const),
-    // Custom-shape keys that prepend extra positional args — the
-    // standard `createQueryKeyStubs` algorithm does not produce
-    // `["getAtomHistory", scope, id, params ?? {}]`, so kept inline.
-    getGetAtomHistoryQueryKey: (
-      scope: string,
-      id: string,
-      params?: unknown,
-    ) => ["getAtomHistory", scope, id, params ?? {}],
-    getGetAtomSummaryQueryKey: (scope: string, id: string) => [
-      "getAtomSummary",
-      scope,
-      id,
-    ],
-    useGetSession: () =>
-      useQuery({
-        queryKey: ["getSession"],
-        queryFn: async () => ({ permissions: [] as string[] }),
-      }),
-    useListEngagements: (opts?: {
-      query?: { queryKey?: readonly unknown[] };
-    }) =>
-      useQuery({
-        queryKey: opts?.query?.queryKey ?? (["listEngagements"] as const),
-        queryFn: async () => [{ ...hoisted.engagement }],
-      }),
-    useGetEngagement: (
-      id: string,
-      opts?: { query?: { queryKey?: readonly unknown[] } },
-    ) =>
-      useQuery({
-        queryKey: opts?.query?.queryKey ?? (["getEngagement", id] as const),
-        queryFn: async () => ({ ...hoisted.engagement }),
-      }),
-    useGetSnapshot: (
-      id: string,
-      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
-    ) =>
-      useQuery({
-        queryKey: opts?.query?.queryKey ?? (["getSnapshot", id] as const),
-        queryFn: async () => null,
-        enabled: opts?.query?.enabled ?? false,
-      }),
-    useUpdateEngagement: noopMutationHook,
-    useGetAtomHistory: noopQueryHook,
-    useGetAtomSummary: noopQueryHook,
-    useListEngagementSubmissions: (
-      id: string,
-      opts?: { query?: { queryKey?: readonly unknown[] } },
-    ) =>
-      useQuery({
-        queryKey:
-          opts?.query?.queryKey ?? (["listEngagementSubmissions", id] as const),
-        queryFn: async () => [],
-      }),
-    useCreateEngagementSubmission: noopMutationHook,
     useGetEngagementBriefing: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },

@@ -48,12 +48,9 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
-  MockApiError,
   createMutationCapture,
-  createQueryKeyStubs,
   makeCapturingMutationHook,
-  noopMutationHook,
-  noopQueryHook,
+  makeEngagementPageMockHooks,
 } from "@workspace/portal-ui/test-utils";
 
 // ── Hoisted fixture state ───────────────────────────────────────────────
@@ -151,76 +148,24 @@ vi.mock("@workspace/site-context/client", () => ({
 // initial paint, so a no-op stub is enough to keep the page from
 // crashing while we exercise the banner.
 vi.mock("@workspace/api-client-react", async () => {
-  const { useQuery } = await import("@tanstack/react-query");
   return {
-    ApiError: MockApiError,
-    RecordSubmissionResponseBodyStatus: {
-      approved: "approved",
-      corrections_requested: "corrections_requested",
-      rejected: "rejected",
-    },
-    useRecordSubmissionResponse: noopMutationHook,
-    ...createQueryKeyStubs([
-      "getGetEngagementQueryKey",
-      "getGetSnapshotQueryKey",
-      "getListEngagementsQueryKey",
-      "getListEngagementSubmissionsQueryKey",
-      "getGetSessionQueryKey",
-    ] as const),
-    // Custom-shape keys that prepend extra positional args — the
-    // standard `createQueryKeyStubs` algorithm does not produce
-    // `["getAtomHistory", scope, id, params ?? {}]`, so kept inline.
-    getGetAtomHistoryQueryKey: (
-      scope: string,
-      id: string,
-      params?: unknown,
-    ) => ["getAtomHistory", scope, id, params ?? {}],
-    getGetAtomSummaryQueryKey: (scope: string, id: string) => [
-      "getAtomSummary",
-      scope,
-      id,
-    ],
-    useGetSession: () =>
-      useQuery({
-        queryKey: ["getSession"],
-        queryFn: async () => ({ permissions: [] as string[] }),
-      }),
-    useListEngagements: (opts?: {
-      query?: { queryKey?: readonly unknown[] };
-    }) =>
-      useQuery({
-        queryKey: opts?.query?.queryKey ?? (["listEngagements"] as const),
-        queryFn: async () => [{ ...hoisted.engagement }],
-      }),
-    useGetEngagement: (
-      id: string,
-      opts?: { query?: { queryKey?: readonly unknown[] } },
-    ) =>
-      useQuery({
-        queryKey: opts?.query?.queryKey ?? (["getEngagement", id] as const),
-        queryFn: async () => ({ ...hoisted.engagement }),
-      }),
-    useGetSnapshot: (
-      id: string,
-      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
-    ) =>
-      useQuery({
-        queryKey: opts?.query?.queryKey ?? (["getSnapshot", id] as const),
-        queryFn: async () => null,
-        enabled: opts?.query?.enabled ?? false,
-      }),
-    useUpdateEngagement: noopMutationHook,
-    useGetAtomHistory: noopQueryHook,
-    useGetAtomSummary: noopQueryHook,
-    useListEngagementSubmissions: (
-      id: string,
-      opts?: { query?: { queryKey?: readonly unknown[] } },
-    ) =>
-      useQuery({
-        queryKey:
-          opts?.query?.queryKey ?? (["listEngagementSubmissions", id] as const),
-        queryFn: async () => hoisted.submissions.map((s) => ({ ...s })),
-      }),
+    // Shared engagement-page hook bag (Task #398) — provides the
+    // dozen identical `useGetEngagement` / `useListEngagements` /
+    // `useGetSession` / `useGetSnapshot` / `useListEngagementSubmissions`
+    // / `useUpdateEngagement` / `useGetAtomHistory` / `useGetAtomSummary`
+    // / `useRecordSubmissionResponse` stubs plus the
+    // `RecordSubmissionResponseBodyStatus` enum, `ApiError` alias, and
+    // standard query-key helpers every engagement-page test wires up
+    // identically. Accessors close over the hoisted fixture so every
+    // refetch re-reads the latest values — same behavior the
+    // hand-rolled boilerplate had.
+    ...(await makeEngagementPageMockHooks({
+      engagement: () => hoisted.engagement,
+      submissions: () => hoisted.submissions,
+    })),
+    // File-specific override: capture the create-submission mutation
+    // options so the dialog's `onSubmitted` chain can be driven
+    // synchronously from each test.
     useCreateEngagementSubmission: makeCapturingMutationHook(submit),
   };
 });
