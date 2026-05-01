@@ -10,6 +10,7 @@
     "backfill:prior-generated-at": "tsx ./src/backfillPriorGeneratedAt.ts",
     "sweep:orphan-avatars": "tsx ./src/sweepOrphanAvatars.ts",
     "smoke:converter": "tsx ./src/smokeConverter.ts",
+    "check:cycles": "tsx ./src/checkWorkspaceCycles.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
