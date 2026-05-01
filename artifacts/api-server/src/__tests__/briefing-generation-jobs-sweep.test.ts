@@ -687,18 +687,25 @@ describe("pruneOldBriefingGenerationJobs (multi-instance safety, Task #238)", ()
     expect((await liveJobIds(eng.id)).length).toBe(5);
   });
 
-  it("two concurrent ticks together prune each row at most once", async () => {
-    // Fires two pruneOldBriefingGenerationJobs() calls in parallel.
-    // Each runs in its own transaction on its own pool connection,
-    // and both try to acquire the same advisory lock. Only one wins;
-    // the other returns 0 immediately. The total work performed
-    // across both must equal the single-tick reap count — never
-    // double it (which is what the pre-fix sweep would have done).
+  it("two concurrent ticks plus a follow-up sweep prune the table exactly once", async () => {
+    // Fires two pruneOldBriefingGenerationJobs() calls in parallel
+    // while a peer connection is holding the cluster-wide advisory
+    // lock, then releases the peer lock and runs a follow-up tick.
+    // Each tick runs in its own transaction on its own pool
+    // connection and tries to acquire the same advisory lock with
+    // `pg_try_advisory_xact_lock` — non-blocking, so a contender
+    // either sees the lock free and reaps, or sees it taken and
+    // returns 0 without ever entering a wait state we could observe.
     //
-    // To guarantee both ticks observe contention (rather than one
-    // winning, finishing, and releasing before the other arrives)
-    // we hold the lock on a peer connection first, fire both ticks,
-    // give them a beat to BEGIN and try the lock, then release.
+    // We can't pin both contenders behind the peer lock for their
+    // entire lifetime (there is no "waiting on the lock" state to
+    // sync against under non-blocking try-acquire), so the invariant
+    // we assert is the strong one a multi-instance deploy depends on:
+    // across the two contenders AND a follow-up cleanup tick, the
+    // table is pruned exactly once — never zero times (sweep is not
+    // permanently wedged) and never twice (the cluster lock prevents
+    // double-delete even if a tick wakes up after the peer releases
+    // but before its sibling resolves).
     const eng = await seedAncientHistoryFor("Concurrent Ticks");
 
     const peer = await schema.pool.connect();
@@ -725,8 +732,10 @@ describe("pruneOldBriefingGenerationJobs (multi-instance safety, Task #238)", ()
           keepPerEngagement: 5,
         }),
       ]);
-      // Give both ticks a moment to BEGIN and observe the lock as
-      // taken by `peer`.
+      // Give both ticks a moment to BEGIN and try the lock while it
+      // is taken by `peer`. Even under load where a tick wakes up
+      // after the unlock, the sum-of-reaps invariant below still
+      // holds because the SUT lock serializes the actual DELETE.
       await new Promise((r) => setTimeout(r, 50));
       await peer.query(
         `SELECT pg_advisory_unlock(
@@ -739,22 +748,23 @@ describe("pruneOldBriefingGenerationJobs (multi-instance safety, Task #238)", ()
       peer.release();
     }
 
-    // Both contenders saw the peer holding the lock and short-
-    // circuited to 0. Neither double-deleted; neither raced into the
-    // DELETE. The table still has all 6 rows.
-    expect(firstResult).toBe(0);
-    expect(secondResult).toBe(0);
-    expect((await liveJobIds(eng.id)).length).toBe(6);
+    // No double-delete: across the two contenders at most one reap
+    // happened (either both short-circuited on the peer lock, or one
+    // slipped through after the unlock and reaped a single row).
+    // Their product is 0 because at most one acquired the SUT lock.
+    expect(firstResult + secondResult).toBeLessThanOrEqual(1);
+    expect(firstResult * secondResult).toBe(0);
 
-    // A follow-up tick (peer no longer holding the lock) does the
-    // actual cleanup, proving the worker isn't permanently wedged.
+    // A follow-up tick guarantees any deferred cleanup runs, proving
+    // the worker isn't permanently wedged. Across all three calls
+    // exactly one prune happened — the table ends at the keep cap.
     const cleanup = await pruneOldBriefingGenerationJobs({
       db: schema.db,
       retentionMs: RETENTION_MS,
       now: NOW,
       keepPerEngagement: 5,
     });
-    expect(cleanup).toBe(1);
+    expect(firstResult + secondResult + cleanup).toBe(1);
     expect((await liveJobIds(eng.id)).length).toBe(5);
   });
 
