@@ -909,6 +909,7 @@ export function BriefingSourceRow({
   onRefreshLayer = null,
   isRefreshing = false,
   rerunStaleAdapterError = null,
+  rerunStaleAdapterSuccessAt = null,
 }: {
   engagementId: string;
   source: EngagementBriefingSource;
@@ -968,6 +969,18 @@ export function BriefingSourceRow({
    * paired Re-run button just failed. `null` while idle / on success.
    */
   rerunStaleAdapterError?: string | null;
+  /**
+   * Task #271 — wall-clock millis at which the most recent rerun
+   * targeting THIS row's adapter key resolved successfully (parent
+   * gates on `success.adapterKey === thisRowKey`). Forwarded into
+   * `BriefingSourceDetails` → `ProvenanceFooter` so the footer can
+   * render a transient "Refreshed just now" pill confirming the
+   * one-click re-run took effect. The parent owns the auto-clear
+   * timer (~4s) so the pill fades back to nothing without the row
+   * needing its own timer. `null` while idle / before the first
+   * success / after the timer clears.
+   */
+  rerunStaleAdapterSuccessAt?: number | null;
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const isAdapter = isAdapterSourceKind(source.sourceKind);
@@ -1423,6 +1436,7 @@ export function BriefingSourceRow({
           onRerunStaleAdapter={onRefreshLayer}
           isRerunningStaleAdapter={isRefreshing}
           rerunStaleAdapterError={rerunStaleAdapterError}
+          rerunStaleAdapterSuccessAt={rerunStaleAdapterSuccessAt}
         />
       )}
       {isAdapter && (
@@ -3602,6 +3616,33 @@ function SiteContextTab({
     adapterKey: string;
     message: string;
   } | null>(null);
+  // Task #271 — sibling of `lastRerunError`: tracks the most recent
+  // per-adapter rerun *success* so the targeted row's
+  // `ProvenanceFooter` can render a transient "Refreshed just now"
+  // pill confirming the click took effect. We store both the key and
+  // the resolution timestamp so (a) the row can pin the affordance
+  // to the specific adapterKey it owns (no flashing on bystander
+  // rows) and (b) `BriefingSourceDetails` can re-key its CSS-animated
+  // node off `at` to restart the fade if a second rerun lands within
+  // the same window. The auto-clear effect below resets this back to
+  // `null` after ~4s so the pill fades out gracefully.
+  const [lastRerunSuccessAt, setLastRerunSuccessAt] = useState<{
+    adapterKey: string;
+    at: number;
+  } | null>(null);
+  // Task #271 — auto-clear the success pill after the affordance
+  // window. We pin the cleared state to the same `at` we set so a
+  // second rerun arriving inside the window (and stamping a fresh
+  // `at`) doesn't get clobbered by the prior timer's fire — the
+  // updater bails when `curr.at` no longer matches.
+  useEffect(() => {
+    if (lastRerunSuccessAt === null) return;
+    const stamped = lastRerunSuccessAt.at;
+    const handle = setTimeout(() => {
+      setLastRerunSuccessAt((curr) => (curr?.at === stamped ? null : curr));
+    }, 4000);
+    return () => clearTimeout(handle);
+  }, [lastRerunSuccessAt]);
   const handleRefreshLayer = useCallback(
     (adapterKey: string) => {
       // Don't fire a second single-layer mutation while one is in
@@ -3613,6 +3654,11 @@ function SiteContextTab({
       // Clear any prior per-adapter error so the spinner isn't
       // stacked on top of a stale failure message.
       setLastRerunError(null);
+      // Task #271 — clear any prior success pill at click time too,
+      // so a second click on the same (or sibling) row doesn't
+      // visually advertise the *previous* run's success while the
+      // new one is still in flight.
+      setLastRerunSuccessAt(null);
       generateMutation.mutate(
         {
           id: engagementId,
@@ -3637,6 +3683,13 @@ function SiteContextTab({
                 `/api/engagements/${engagementId}/briefing/sources`,
               ],
             });
+            // Task #271 — stamp a per-adapter success record after
+            // the invalidation kicks off so the targeted row's
+            // `ProvenanceFooter` can render the "Refreshed just now"
+            // pill. Keyed by adapterKey so a re-mount of the new
+            // (superseded) row picks the same affordance up — the
+            // new `source.id` differs but the adapterKey is stable.
+            setLastRerunSuccessAt({ adapterKey, at: Date.now() });
           },
           onError: (err) => {
             const apiErr = err as
@@ -4345,6 +4398,16 @@ function SiteContextTab({
                     lastRerunError.adapterKey === adapterKey
                       ? lastRerunError.message
                       : null;
+                  // Task #271 — same per-adapter scoping for the
+                  // success pill: only the row whose adapterKey was
+                  // actually targeted gets the "Refreshed just now"
+                  // affordance. Bystander rows never see the pill.
+                  const rerunSuccessAt =
+                    lastRerunSuccessAt !== null &&
+                    adapterKey !== null &&
+                    lastRerunSuccessAt.adapterKey === adapterKey
+                      ? lastRerunSuccessAt.at
+                      : null;
                   return (
                     <BriefingSourceRow
                       key={source.id}
@@ -4358,6 +4421,7 @@ function SiteContextTab({
                         adapterKey === refreshingAdapterKey
                       }
                       rerunStaleAdapterError={rerunError}
+                      rerunStaleAdapterSuccessAt={rerunSuccessAt}
                     />
                   );
                 })}

@@ -1150,6 +1150,61 @@ describe("BriefingSourceDetails federal snapshot stale-badge Re-run pairing (Tas
     ).toBeNull();
   });
 
+  it("renders a transient 'Refreshed just now' pill when rerunStaleAdapterSuccessAt is set (Task #271)", () => {
+    // The pill is rendered unconditionally on the prop — by the time
+    // the parent stamps a success the briefing query has refetched
+    // and the new fresh row's snapshotDate has already retired the
+    // stale badge. So we drive it on a *fresh* federal source (no
+    // stale badge) to pin that the success pill stands on its own.
+    const fresh = mkSource({
+      id: "src-fema-success",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:nfhl-flood-zone (FEMA NFHL)",
+      // Inside the 12-month FEMA window so the stale badge does NOT
+      // render — the pill is the only visual confirmation.
+      snapshotDate: "2026-04-01T00:00:00.000Z",
+      payload: {
+        kind: "flood-zone",
+        inSpecialFloodHazardArea: true,
+        floodZone: "AE",
+        features: [{ attributes: { FLD_ZONE: "AE" } }],
+      },
+    });
+    render(
+      <BriefingSourceDetails
+        source={fresh}
+        onRerunStaleAdapter={vi.fn()}
+        rerunStaleAdapterSuccessAt={NOW.getTime()}
+      />,
+    );
+    // Stale badge is gone now that the snapshot is fresh.
+    expect(
+      screen.queryByTestId(
+        "briefing-source-federal-stale-src-fema-success",
+      ),
+    ).toBeNull();
+    // Success pill confirms the click took effect.
+    const pill = screen.getByTestId(
+      "briefing-source-rerun-success-src-fema-success",
+    );
+    expect(pill).toBeInTheDocument();
+    expect(pill.textContent).toBe("Refreshed just now");
+    // Announced politely so a screen reader picks up the
+    // confirmation without interrupting the user's current focus.
+    expect(pill).toHaveAttribute("role", "status");
+    expect(pill).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("does NOT render the success pill when rerunStaleAdapterSuccessAt is null (Task #271)", () => {
+    render(<BriefingSourceDetails source={staleFemaSource()} />);
+    expect(
+      screen.queryByTestId(
+        "briefing-source-rerun-success-src-fema-stale-rerun",
+      ),
+    ).toBeNull();
+  });
+
   it("does NOT render the Re-run button when the provider doesn't follow the packed `<key> (<label>)` convention", () => {
     // Free-text provider (no `<key> (<label>)` shape) means we can't
     // safely round-trip an adapterKey — the backend would 422 on

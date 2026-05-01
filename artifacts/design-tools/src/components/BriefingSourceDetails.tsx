@@ -51,6 +51,7 @@ export function BriefingSourceDetails({
   onRerunStaleAdapter = null,
   isRerunningStaleAdapter = false,
   rerunStaleAdapterError = null,
+  rerunStaleAdapterSuccessAt = null,
 }: {
   source: EngagementBriefingSource;
   /**
@@ -80,6 +81,18 @@ export function BriefingSourceDetails({
    * after a successful rerun.
    */
   rerunStaleAdapterError?: string | null;
+  /**
+   * Task #271 — wall-clock millis at which the most recent rerun
+   * targeting THIS row's adapter key resolved successfully. The
+   * parent (`EngagementDetail`) gates this on
+   * `lastRerunSuccessAt.adapterKey === thisRowKey` so a successful
+   * rerun on a sibling adapter can never flash a "Refreshed just now"
+   * confirmation on this row. The footer renders a transient pill
+   * when set; the parent owns the timer that clears the value back to
+   * `null` after the affordance window (~4s) so the pill auto-fades
+   * without the row needing its own timer.
+   */
+  rerunStaleAdapterSuccessAt?: number | null;
 }) {
   const payload = (source.payload ?? {}) as Record<string, unknown>;
   const kind =
@@ -152,6 +165,7 @@ export function BriefingSourceDetails({
           onRerunStaleAdapter={onRerunStaleAdapter}
           isRerunningStaleAdapter={isRerunningStaleAdapter}
           rerunStaleAdapterError={rerunStaleAdapterError}
+          rerunStaleAdapterSuccessAt={rerunStaleAdapterSuccessAt}
         />
       )}
 
@@ -428,11 +442,13 @@ function ProvenanceFooter({
   onRerunStaleAdapter = null,
   isRerunningStaleAdapter = false,
   rerunStaleAdapterError = null,
+  rerunStaleAdapterSuccessAt = null,
 }: {
   source: EngagementBriefingSource;
   onRerunStaleAdapter?: ((adapterKey: string) => void) | null;
   isRerunningStaleAdapter?: boolean;
   rerunStaleAdapterError?: string | null;
+  rerunStaleAdapterSuccessAt?: number | null;
 }) {
   // Reuse the same `formatSnapshotDate` helper the federal-summary
   // markdown digest uses (Task #210) so the YYYY-MM-DD value the
@@ -537,6 +553,59 @@ function ProvenanceFooter({
             Couldn't re-run this layer: {rerunStaleAdapterError}
           </span>
         )}
+      {/*
+        Task #271 — transient "Refreshed just now" pill rendered when
+        the most recent rerun targeting THIS row's adapterKey resolved
+        successfully. The parent (`EngagementDetail`) owns both the
+        per-adapter scoping (so a sibling rerun can't flash success
+        here) AND the auto-clear timer (so the pill fades back to
+        nothing after ~4s). We render unconditionally on the prop —
+        no freshness gate — because by the time success lands the
+        briefing query has refetched and `freshness.verdict.isStale`
+        already flipped to false on the new row, so the stale badge
+        is naturally gone. The pill closes the loop visually so the
+        architect doesn't double-click thinking nothing happened.
+      */}
+      {rerunStaleAdapterSuccessAt !== null && (
+        <span
+          role="status"
+          aria-live="polite"
+          data-testid={`briefing-source-rerun-success-${source.id}`}
+          // Keyed on the success timestamp so React re-mounts the node
+          // when the parent stamps a fresh success — that resets the
+          // CSS transition / opacity from scratch instead of trying
+          // to crossfade back from a half-faded state.
+          key={rerunStaleAdapterSuccessAt}
+          style={{
+            alignSelf: "flex-start",
+            fontSize: 11,
+            padding: "1px 8px",
+            borderRadius: 999,
+            background: "var(--success-dim, #e6f7ec)",
+            color: "var(--success-text, #1a6b3a)",
+            border: "1px solid var(--success-border, #b8e6c9)",
+            lineHeight: 1.4,
+            // Fade-in then fade-out within the parent's ~4s success
+            // window so the pill announces itself, holds, and then
+            // gracefully disappears just before the parent clears
+            // the prop back to null.
+            animation: "sc-rerun-success-fade 4s ease-in-out forwards",
+          }}
+        >
+          Refreshed just now
+        </span>
+      )}
+      {rerunStaleAdapterSuccessAt !== null && (
+        // Inline keyframes scoped via a unique animation name so the
+        // pill doesn't depend on a global CSS file (mirrors the
+        // pattern `SnapshotStaleBadge` already uses for its spinner).
+        <style>{`@keyframes sc-rerun-success-fade {
+          0% { opacity: 0; transform: translateY(-2px); }
+          12% { opacity: 1; transform: translateY(0); }
+          85% { opacity: 1; transform: translateY(0); }
+          100% { opacity: 0; transform: translateY(-1px); }
+        }`}</style>
+      )}
     </div>
   );
 }
