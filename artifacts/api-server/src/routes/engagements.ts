@@ -4,6 +4,12 @@ import { desc, eq, sql } from "drizzle-orm";
 import { GetEngagementParams, UpdateEngagementBody } from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
 import { logger } from "../lib/logger";
+import { getHistoryService } from "../atoms/registry";
+import {
+  ENGAGEMENT_EDIT_ACTOR,
+  emitEngagementAddressUpdatedEvent,
+  emitEngagementJurisdictionResolvedEvent,
+} from "../lib/engagementEvents";
 
 const router: IRouter = Router();
 
@@ -221,10 +227,33 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
 
     const warnings: string[] = [];
 
+    // Track whether the address payload represents a real change (not
+    // just a no-op PATCH that sent the same value). The history emit
+    // below uses this so a same-value PATCH does not pollute the
+    // engagement timeline with redundant `engagement.address-updated`
+    // events.
+    let addressChanged = false;
+    let priorAddress: string | null = null;
+    let nextAddress: string | null = null;
+
+    // Track whether the geocode resolved a (potentially new) jurisdiction
+    // city/state pair. The helper itself guards against re-emitting on
+    // identical pairs, but we only call it when we actually ran a geocode.
+    let geocodeProducedJurisdiction = false;
+    let resolvedJurisdictionCity: string | null = null;
+    let resolvedJurisdictionState: string | null = null;
+    let resolvedJurisdictionFips: string | null = null;
+
     if (body.address !== undefined) {
       update["address"] = body.address;
       const trimmed = body.address.trim();
-      if (trimmed && trimmed !== (existing.address ?? "").trim()) {
+      const existingTrimmed = (existing.address ?? "").trim();
+      if (trimmed !== existingTrimmed) {
+        addressChanged = true;
+        priorAddress = existingTrimmed.length > 0 ? existingTrimmed : null;
+        nextAddress = trimmed.length > 0 ? trimmed : null;
+      }
+      if (trimmed && trimmed !== existingTrimmed) {
         try {
           const geo = await geocodeAddress(trimmed);
           if (geo) {
@@ -236,6 +265,12 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
             update["jurisdictionState"] = geo.jurisdictionState;
             update["jurisdictionFips"] = geo.jurisdictionFips;
             update["siteContextRaw"] = geo.raw ?? null;
+            if (geo.jurisdictionCity && geo.jurisdictionState) {
+              geocodeProducedJurisdiction = true;
+              resolvedJurisdictionCity = geo.jurisdictionCity;
+              resolvedJurisdictionState = geo.jurisdictionState;
+              resolvedJurisdictionFips = geo.jurisdictionFips;
+            }
           } else {
             warnings.push(
               "Geocoding didn't find this address — map view will be unavailable until corrected.",
@@ -254,6 +289,41 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
       .update(engagements)
       .set(update)
       .where(eq(engagements.id, existing.id));
+
+    // Best-effort lifecycle events. Per-request logger (carries
+    // pino-http's request id when wired) so emit log lines correlate
+    // with the originating request; falls back to the singleton when
+    // the route is reached outside an HTTP request lifecycle (tests,
+    // synthetic calls). Mirrors the pattern in `routes/snapshots.ts`.
+    const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+    if (addressChanged) {
+      const history = getHistoryService();
+      await emitEngagementAddressUpdatedEvent(
+        history,
+        {
+          engagementId: existing.id,
+          fromAddress: priorAddress,
+          toAddress: nextAddress,
+          actor: ENGAGEMENT_EDIT_ACTOR,
+        },
+        reqLog,
+      );
+      if (geocodeProducedJurisdiction) {
+        await emitEngagementJurisdictionResolvedEvent(
+          history,
+          {
+            engagementId: existing.id,
+            jurisdictionCity: resolvedJurisdictionCity,
+            jurisdictionState: resolvedJurisdictionState,
+            jurisdictionFips: resolvedJurisdictionFips,
+            previousJurisdictionCity: existing.jurisdictionCity,
+            previousJurisdictionState: existing.jurisdictionState,
+            actor: ENGAGEMENT_EDIT_ACTOR,
+          },
+          reqLog,
+        );
+      }
+    }
 
     const out = await fetchEngagementDetail(existing.id);
     if (!out) {
@@ -295,23 +365,30 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
     }
 
     const warnings: string[] = [];
+    let resolvedGeo: Awaited<ReturnType<typeof geocodeAddress>> = null;
+    // Only emit the timeline event after the row UPDATE has actually
+    // committed. If the geocode succeeds but the row update throws, we
+    // would otherwise create audit drift (timeline says "jurisdiction
+    // resolved to X" while the row still says the prior jurisdiction).
+    let updateSucceeded = false;
     try {
-      const geo = await geocodeAddress(address);
-      if (geo) {
+      resolvedGeo = await geocodeAddress(address);
+      if (resolvedGeo) {
         await db
           .update(engagements)
           .set({
-            latitude: String(geo.latitude),
-            longitude: String(geo.longitude),
-            geocodedAt: new Date(geo.geocodedAt),
-            geocodeSource: geo.source,
-            jurisdictionCity: geo.jurisdictionCity,
-            jurisdictionState: geo.jurisdictionState,
-            jurisdictionFips: geo.jurisdictionFips,
-            siteContextRaw: geo.raw ?? null,
+            latitude: String(resolvedGeo.latitude),
+            longitude: String(resolvedGeo.longitude),
+            geocodedAt: new Date(resolvedGeo.geocodedAt),
+            geocodeSource: resolvedGeo.source,
+            jurisdictionCity: resolvedGeo.jurisdictionCity,
+            jurisdictionState: resolvedGeo.jurisdictionState,
+            jurisdictionFips: resolvedGeo.jurisdictionFips,
+            siteContextRaw: resolvedGeo.raw ?? null,
             updatedAt: new Date(),
           })
           .where(eq(engagements.id, existing.id));
+        updateSucceeded = true;
       } else {
         warnings.push(
           "Geocoding didn't find this address — map view will be unavailable until corrected.",
@@ -320,6 +397,30 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
     } catch (err) {
       logger.warn({ err, address }, "regeocode failed");
       warnings.push("Geocoding service unavailable — try again in a moment.");
+    }
+
+    // Best-effort `engagement.jurisdiction-resolved` event. The helper
+    // is a no-op when the geocode produced no city/state pair OR when
+    // the resolved pair matches the engagement's prior pair, so manual
+    // re-geocodes that don't move the needle don't pollute the
+    // engagement timeline. Gated on `updateSucceeded` so a row-update
+    // failure doesn't leave a misleading "resolved" event in the audit
+    // log pointing at a jurisdiction the row never actually adopted.
+    if (resolvedGeo && updateSucceeded) {
+      const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+      await emitEngagementJurisdictionResolvedEvent(
+        getHistoryService(),
+        {
+          engagementId: existing.id,
+          jurisdictionCity: resolvedGeo.jurisdictionCity,
+          jurisdictionState: resolvedGeo.jurisdictionState,
+          jurisdictionFips: resolvedGeo.jurisdictionFips,
+          previousJurisdictionCity: existing.jurisdictionCity,
+          previousJurisdictionState: existing.jurisdictionState,
+          actor: ENGAGEMENT_EDIT_ACTOR,
+        },
+        reqLog,
+      );
     }
 
     const out = await fetchEngagementDetail(existing.id);

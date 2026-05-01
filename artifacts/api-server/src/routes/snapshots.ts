@@ -31,6 +31,7 @@ import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { getHistoryService } from "../atoms/registry";
 import type { EngagementEventType } from "../atoms/engagement.atom";
+import { emitEngagementJurisdictionResolvedEvent } from "../lib/engagementEvents";
 
 /**
  * Engagement event-type literals used by the producers in this file.
@@ -375,6 +376,28 @@ function fireGeocodeAndWarmup(
           siteContextRaw: geo.raw ?? null,
         })
         .where(eq(engagements.id, engagementId));
+
+      // Best-effort `engagement.jurisdiction-resolved` emit. The
+      // create-new branch always passes through here with a freshly-
+      // inserted engagement that has no prior jurisdiction columns set,
+      // so the helper's "no-op when unchanged" guard naturally lets the
+      // first resolution through. The actor is `snapshot-ingest` (not
+      // `engagement-edit`) so the audit trail can attribute the
+      // resolution to the implicit warmup pass rather than a user
+      // re-geocode.
+      await emitEngagementJurisdictionResolvedEvent(
+        getHistoryService(),
+        {
+          engagementId,
+          jurisdictionCity: geo.jurisdictionCity,
+          jurisdictionState: geo.jurisdictionState,
+          jurisdictionFips: geo.jurisdictionFips,
+          previousJurisdictionCity: null,
+          previousJurisdictionState: null,
+          actor: SNAPSHOT_INGEST_ACTOR,
+        },
+        logger,
+      );
 
       const jKey = keyFromEngagement({
         jurisdictionCity: geo.jurisdictionCity,

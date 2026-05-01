@@ -75,10 +75,20 @@ export type EngagementSupportedModes = typeof ENGAGEMENT_SUPPORTED_MODES;
  * Producers wired so far:
  *   - `engagement.created` — emitted by `routes/snapshots.ts` on the
  *     create-new-engagement branch of the snapshot ingest.
- *   - `engagement.address-updated`, `engagement.jurisdiction-resolved`,
- *     `engagement.snapshot-received`, `engagement.submitted` — declared
- *     here but not yet emitted (TBD as the relevant routes adopt the
- *     history service).
+ *   - `engagement.snapshot-received` — emitted by `routes/snapshots.ts`
+ *     on every snapshot ingest, against the parent engagement.
+ *   - `engagement.address-updated` — emitted by `routes/engagements.ts`
+ *     PATCH when a request actually changes the address, via the
+ *     `lib/engagementEvents.ts` helper.
+ *   - `engagement.jurisdiction-resolved` — emitted by
+ *     `routes/engagements.ts` (PATCH + POST `/:id/geocode`) and by
+ *     `routes/snapshots.ts`'s `fireGeocodeAndWarmup` on the
+ *     create-new-engagement branch, via the same helper. The PATCH/
+ *     regeocode emissions use the `engagement-edit` system actor; the
+ *     snapshot-ingest emission uses the `snapshot-ingest` actor so the
+ *     timeline can attribute resolutions to the right producer.
+ *   - `engagement.submitted` — declared here but not yet emitted; the
+ *     submission route does not exist yet (tracked as a follow-up).
  */
 export const ENGAGEMENT_EVENT_TYPES = [
   "engagement.created",
