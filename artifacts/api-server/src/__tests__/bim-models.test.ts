@@ -19,6 +19,10 @@
  *     HMAC headers (400/401), accepts a correctly-signed body,
  *     inserts the row, and emits both `briefing-divergence.recorded`
  *     and `bim-model.diverged`.
+ *   - POST /bim-models/:id/divergences/:divergenceId/resolve emits a
+ *     `briefing-divergence.resolved` atom event on the *first*
+ *     resolve (and only the first — an idempotent re-resolve does
+ *     not double-emit).
  *   - 404 paths for unknown bim-model id, unknown element, and
  *     element belonging to a non-active briefing.
  */
@@ -735,6 +739,75 @@ describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
     expect(res.status).toBe(200);
     expect(res.body.divergence.resolvedAt).not.toBeNull();
     expect(res.body.divergence.resolvedByRequestor).toBeNull();
+  });
+
+  it("emits briefing-divergence.resolved exactly once across an idempotent re-resolve", async () => {
+    // Closes Task #213: the first resolve must append a
+    // `briefing-divergence.resolved` atom event (so the engagement
+    // timeline can show "operator X acknowledged the override at
+    // 3pm"); a re-resolve must NOT double-emit (the first
+    // acknowledger keeps the audit-trail attribution and the
+    // timeline keeps a single resolve marker).
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    // Baseline event count for this divergence — the seed insert
+    // does NOT pass through the recorded-emit path (it goes
+    // straight to drizzle), so the timeline starts empty.
+    const baseline = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityId, divergenceId));
+    expect(baseline).toHaveLength(0);
+
+    const first = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:operator-1");
+    expect(first.status).toBe(200);
+
+    const afterFirst = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityId, divergenceId));
+    const resolvedEventsAfterFirst = afterFirst.filter(
+      (e) =>
+        e.entityType === "briefing-divergence" &&
+        e.eventType === "briefing-divergence.resolved",
+    );
+    expect(resolvedEventsAfterFirst).toHaveLength(1);
+    // Attribution rides through: the timeline event records *who*
+    // resolved the row, mirroring the row-side
+    // `resolvedByRequestor` columns.
+    const evt = resolvedEventsAfterFirst[0];
+    expect(evt.actor).toMatchObject({ kind: "user", id: "operator-1" });
+    expect(evt.payload).toMatchObject({
+      bimModelId,
+      resolvedByRequestor: { kind: "user", id: "operator-1" },
+    });
+
+    // Re-resolve: the row update is a no-op (idempotent) and so is
+    // the emit — exactly one resolved event should still exist.
+    const second = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:second-operator");
+    expect(second.status).toBe(200);
+
+    const afterSecond = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityId, divergenceId));
+    const resolvedEventsAfterSecond = afterSecond.filter(
+      (e) =>
+        e.entityType === "briefing-divergence" &&
+        e.eventType === "briefing-divergence.resolved",
+    );
+    expect(resolvedEventsAfterSecond).toHaveLength(1);
+    // And the surviving event keeps the original acknowledger.
+    expect(resolvedEventsAfterSecond[0].id).toBe(evt.id);
   });
 });
 

@@ -27,6 +27,11 @@
  *
  * Event types per Spec 51a §2.2:
  *   - `briefing-divergence.recorded` — emitted on each insert.
+ *   - `briefing-divergence.resolved` — emitted exactly once when an
+ *     operator first acknowledges the override via the resolve
+ *     route. Idempotent re-resolves do not re-emit (the first
+ *     acknowledger keeps the attribution and the timeline keeps a
+ *     single resolve marker).
  *
  * VDA wrapping (`wrapForStorage`) intentionally not invoked.
  */
@@ -64,6 +69,7 @@ export type BriefingDivergenceSupportedModes =
  */
 export const BRIEFING_DIVERGENCE_EVENT_TYPES = [
   "briefing-divergence.recorded",
+  "briefing-divergence.resolved",
 ] as const;
 
 export type BriefingDivergenceEventType =

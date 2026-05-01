@@ -53,7 +53,7 @@ import {
   type MaterializableElement,
   type BriefingDivergence,
 } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, isNull } from "drizzle-orm";
 import {
   GetEngagementBimModelParams,
   PushEngagementBimModelParams,
@@ -94,6 +94,8 @@ const BIM_MODEL_DIVERGED_EVENT_TYPE: BimModelEventType =
 
 const BRIEFING_DIVERGENCE_RECORDED_EVENT_TYPE: BriefingDivergenceEventType =
   BRIEFING_DIVERGENCE_EVENT_TYPES[0];
+const BRIEFING_DIVERGENCE_RESOLVED_EVENT_TYPE: BriefingDivergenceEventType =
+  BRIEFING_DIVERGENCE_EVENT_TYPES[1];
 
 /** Stable system actor for design-tools-driven bim-model writes. */
 const BIM_MODEL_PUSH_ACTOR = {
@@ -111,6 +113,19 @@ const BIM_MODEL_REFRESH_ACTOR = {
 const BIM_MODEL_DIVERGENCE_ACTOR = {
   kind: "system" as const,
   id: "bim-model-divergence",
+};
+
+/**
+ * Fallback actor for the operator-resolve path when the request did
+ * not carry a session-bound requestor. Mirrors how
+ * `actorFromRequest` in `engagements.ts` falls back to a system
+ * actor — the timeline still gets a "this was acknowledged" marker
+ * even when attribution was unavailable, instead of dropping the
+ * event entirely.
+ */
+const BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR = {
+  kind: "system" as const,
+  id: "bim-model-divergence-resolve",
 };
 
 // ---------------------------------------------------------------------------
@@ -599,6 +614,66 @@ async function emitDivergenceRecordedEvent(
   }
 }
 
+/**
+ * Emit `briefing-divergence.resolved` for the engagement timeline.
+ *
+ * Called only after a *fresh* resolve transaction (the row's
+ * `resolvedAt` was null going in) so idempotent re-resolves do not
+ * double-emit. `actor` is the session-bound requestor when the
+ * resolve was attributed; otherwise we fall back to a stable system
+ * actor so the timeline still gets a marker for the acknowledgement.
+ */
+async function emitDivergenceResolvedEvent(
+  history: EventAnchoringService,
+  divergence: BriefingDivergence,
+  reqLog: typeof logger,
+): Promise<void> {
+  const requestorKind = divergence.resolvedByRequestorKind;
+  const requestorId = divergence.resolvedByRequestorId;
+  const attributedActor:
+    | { kind: "user" | "agent"; id: string }
+    | null =
+    (requestorKind === "user" || requestorKind === "agent") && requestorId
+      ? { kind: requestorKind, id: requestorId }
+      : null;
+  const actor = attributedActor ?? BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR;
+  try {
+    const event = await history.appendEvent({
+      entityType: "briefing-divergence",
+      entityId: divergence.id,
+      eventType: BRIEFING_DIVERGENCE_RESOLVED_EVENT_TYPE,
+      actor,
+      payload: {
+        bimModelId: divergence.bimModelId,
+        materializableElementId: divergence.materializableElementId,
+        briefingId: divergence.briefingId,
+        resolvedAt: divergence.resolvedAt
+          ? divergence.resolvedAt.toISOString()
+          : null,
+        resolvedByRequestor: attributedActor,
+      },
+    });
+    reqLog.info(
+      {
+        divergenceId: divergence.id,
+        bimModelId: divergence.bimModelId,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "briefing-divergence.resolved event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        divergenceId: divergence.id,
+        bimModelId: divergence.bimModelId,
+      },
+      "briefing-divergence.resolved event append failed — row update kept",
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -948,6 +1023,15 @@ router.get(
  * follow-up `POST /bim-models/:id/divergence` for the same element
  * lands as a fresh row.
  *
+ * Timeline emit (Task #213): the *first* successful resolve appends
+ * a `briefing-divergence.resolved` atom event so the engagement
+ * timeline can show "operator X acknowledged the override at 3pm"
+ * — closing the loop on the existing
+ * `briefing-divergence.recorded` + `bim-model.diverged` pair the
+ * record path emits. The emit is gated on a freshly-resolved flag
+ * the transaction returns so an idempotent re-resolve never
+ * double-emits.
+ *
  * Engagement-scoped: gated by the same architect-audience guard
  * the rest of the bim-model browser surface uses. The resolve is
  * attributed to `req.session.requestor` when present so the
@@ -983,6 +1067,12 @@ router.post(
       divergence: BriefingDivergence;
       elementKind: string | null;
       elementLabel: string | null;
+      /**
+       * True only when this transaction flipped the row from Open
+       * to Resolved. The post-transaction timeline emit gates on
+       * this flag so an idempotent re-resolve never double-emits.
+       */
+      freshlyResolved: boolean;
     };
     try {
       resolved = await db.transaction(async (tx) => {
@@ -1011,20 +1101,50 @@ router.post(
         }
 
         let row = existing;
+        let freshlyResolved = false;
         // Idempotent re-resolve: leave the original timestamp +
         // requestor in place. The first acknowledger keeps the
         // attribution.
+        //
+        // Conditional UPDATE (`WHERE resolvedAt IS NULL`) — combined
+        // with deriving `freshlyResolved` from the affected row
+        // count — guarantees emit-once even under concurrent
+        // resolves. Two simultaneous first-resolve requests would
+        // both observe `existing.resolvedAt === null` on read, but
+        // Postgres serializes the two UPDATEs through the row lock;
+        // the second one re-checks the predicate against the
+        // committed value and matches zero rows, so its `updated`
+        // array comes back empty and the post-tx emit is skipped.
         if (!existing.resolvedAt) {
-          const [updated] = await tx
+          const updated = await tx
             .update(briefingDivergences)
             .set({
               resolvedAt: new Date(),
               resolvedByRequestorKind: resolvedByKind,
               resolvedByRequestorId: resolvedById,
             })
-            .where(eq(briefingDivergences.id, divergenceId))
+            .where(
+              and(
+                eq(briefingDivergences.id, divergenceId),
+                isNull(briefingDivergences.resolvedAt),
+              ),
+            )
             .returning();
-          row = updated;
+          if (updated.length === 1) {
+            row = updated[0];
+            freshlyResolved = true;
+          } else {
+            // A concurrent resolve beat us to it. Re-read the row
+            // so the response carries the *winning* attribution
+            // (preserves "first acknowledger keeps the audit
+            // trail") instead of the now-stale snapshot.
+            const reReadRows = await tx
+              .select()
+              .from(briefingDivergences)
+              .where(eq(briefingDivergences.id, divergenceId))
+              .limit(1);
+            row = reReadRows[0] ?? existing;
+          }
         }
 
         // Pull element kind+label so the FE can splice the response
@@ -1043,6 +1163,7 @@ router.post(
           divergence: row,
           elementKind: elem?.elementKind ?? null,
           elementLabel: elem?.elementLabel ?? null,
+          freshlyResolved,
         };
       });
     } catch (err) {
@@ -1060,6 +1181,17 @@ router.post(
       );
       res.status(500).json({ error: "Failed to resolve divergence" });
       return;
+    }
+
+    // Only the *first* resolve emits the timeline event — an
+    // idempotent re-resolve must not double-emit (a single
+    // acknowledgement marker is the audit-trail intent).
+    if (resolved.freshlyResolved) {
+      await emitDivergenceResolvedEvent(
+        getHistoryService(),
+        resolved.divergence,
+        reqLog,
+      );
     }
 
     // Hydrate the resolver's display name so the splice the FE
