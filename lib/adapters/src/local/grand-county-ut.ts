@@ -33,6 +33,34 @@ const GRAND_COUNTY_ENDPOINTS = {
 
 const OSM_OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
+/**
+ * Freshness windows for the Grand County, UT (Moab) adapters, in
+ * whole months. Surfaced via {@link evaluateLocalSnapshotFreshness}
+ * so the Site Context tab renders the same amber stale badge on
+ * local-tier rows that Task #222 added on the federal tier.
+ *
+ * Local-tier windows are intentionally tighter than federal/state
+ * because (per the Task #254 brief) ordinance-driven local zoning
+ * data can flip a setback overnight on a single council vote — a
+ * stale read here has the highest reviewer-impact of any tier.
+ *
+ *   - `parcels` (6mo): the county updates parcels on roughly a
+ *     monthly cadence as recordings clear; 6 months keeps the badge
+ *     responsive without firing on a routine quarterly read.
+ *   - `zoning` (6mo): the council can adopt an ordinance amending a
+ *     district at any meeting. 6 months matches typical "annual
+ *     review of the code" frequency a reviewer would expect — a
+ *     half-year-old read is the boundary at which "you should
+ *     re-pull this" is the right reviewer instinct.
+ *   - `roads` (12mo): roads change much more slowly than zoning, and
+ *     the OSM Overpass fallback gives us a mostly-current secondary
+ *     when the county GIS lags. 12 months matches the cadence at
+ *     which county road inventories typically refresh.
+ */
+export const GRAND_COUNTY_PARCELS_FRESHNESS_THRESHOLD_MONTHS = 6;
+export const GRAND_COUNTY_ZONING_FRESHNESS_THRESHOLD_MONTHS = 6;
+export const GRAND_COUNTY_ROADS_FRESHNESS_THRESHOLD_MONTHS = 12;
+
 function grandCountyApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.localKey === "grand-county-ut";
 }

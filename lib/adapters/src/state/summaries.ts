@@ -24,6 +24,7 @@ import {
   ADDRESS_NUMBER_KEYS,
   ADDRESS_STREET_KEYS,
   diffPayloadByFields,
+  evaluateSnapshotFreshness,
   formatAcres,
   isRecord,
   PARCEL_ACRES_KEYS,
@@ -34,7 +35,18 @@ import {
   pickNumber,
   type PayloadDiffField,
   type PayloadFieldChange,
+  type SnapshotFreshness,
 } from "../_payloadSummaryHelpers";
+import {
+  INSIDE_IDAHO_DEM_FRESHNESS_THRESHOLD_MONTHS,
+  INSIDE_IDAHO_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+} from "./idaho";
+import { TCEQ_EDWARDS_AQUIFER_FRESHNESS_THRESHOLD_MONTHS } from "./texas";
+import {
+  UGRC_ADDRESS_POINTS_FRESHNESS_THRESHOLD_MONTHS,
+  UGRC_DEM_FRESHNESS_THRESHOLD_MONTHS,
+  UGRC_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+} from "./utah";
 
 /** Layer kinds emitted by the state-tier adapters. */
 export type StateLayerKind =
@@ -44,6 +56,60 @@ export type StateLayerKind =
   | "inside-idaho-dem"
   | "inside-idaho-parcels"
   | "tceq-edwards-aquifer";
+
+/**
+ * Per-dataset "snapshot is still trustworthy" windows for the
+ * state-tier adapters, in whole months. Mirrors the federal-tier
+ * registry pattern (see `../federal/summaries.ts`): the actual
+ * numbers live with the adapters they belong to so a future tweak
+ * to e.g. UGRC's parcel-refresh cadence travels with the UGRC
+ * adapter, but the `layerKind → threshold` lookup is centralized
+ * here so the FE doesn't have to import every state adapter file
+ * just to render the stale badge on the provenance footer.
+ */
+const STATE_FRESHNESS_THRESHOLD_MONTHS: Record<StateLayerKind, number> = {
+  "ugrc-dem": UGRC_DEM_FRESHNESS_THRESHOLD_MONTHS,
+  "ugrc-parcels": UGRC_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+  "ugrc-address-points": UGRC_ADDRESS_POINTS_FRESHNESS_THRESHOLD_MONTHS,
+  "inside-idaho-dem": INSIDE_IDAHO_DEM_FRESHNESS_THRESHOLD_MONTHS,
+  "inside-idaho-parcels": INSIDE_IDAHO_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+  "tceq-edwards-aquifer": TCEQ_EDWARDS_AQUIFER_FRESHNESS_THRESHOLD_MONTHS,
+};
+
+function isStateLayerKindStr(kind: string): kind is StateLayerKind {
+  return Object.prototype.hasOwnProperty.call(
+    STATE_FRESHNESS_THRESHOLD_MONTHS,
+    kind,
+  );
+}
+
+/**
+ * Evaluate a state-tier briefing source's snapshot date against its
+ * adapter-declared freshness window. Parallel to
+ * `evaluateFederalSnapshotFreshness` — same {@link SnapshotFreshness}
+ * shape so the FE renders a single badge component regardless of
+ * which tier produced the row. Returns `null` when:
+ *
+ *   - `layerKind` is not a state-tier layer (callers should fall
+ *     through to `evaluateLocalSnapshotFreshness`);
+ *   - `snapshotDate` is missing, malformed, or parses to `NaN`;
+ *   - the snapshot date is in the *future* relative to `now`.
+ *
+ * `now` is injectable so unit tests can pin a stable "today" without
+ * faking the system clock.
+ */
+export function evaluateStateSnapshotFreshness(
+  layerKind: string,
+  snapshotDate: string | Date | null | undefined,
+  now: Date = new Date(),
+): SnapshotFreshness | null {
+  if (!isStateLayerKindStr(layerKind)) return null;
+  return evaluateSnapshotFreshness(
+    STATE_FRESHNESS_THRESHOLD_MONTHS[layerKind],
+    snapshotDate,
+    now,
+  );
+}
 
 /**
  * UGRC / INSIDE Idaho elevation-contour layer summary.

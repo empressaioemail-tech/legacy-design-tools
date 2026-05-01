@@ -5,10 +5,16 @@ import {
   type EngagementBriefingSource,
   type LocalSetbackDistrict,
 } from "@workspace/api-client-react";
-import {
-  evaluateFederalSnapshotFreshness,
-  type FederalSnapshotFreshness,
-} from "@workspace/adapters/federal/summaries";
+import { evaluateFederalSnapshotFreshness } from "@workspace/adapters/federal/summaries";
+import { evaluateLocalSnapshotFreshness } from "@workspace/adapters/local/summaries";
+import { evaluateStateSnapshotFreshness } from "@workspace/adapters/state/summaries";
+
+type ProvenanceTier = "federal" | "state" | "local";
+type SnapshotFreshnessVerdict = {
+  ageMonths: number;
+  thresholdMonths: number;
+  isStale: boolean;
+};
 
 /**
  * "View layer details" panel for one adapter-driven briefing source row.
@@ -398,18 +404,28 @@ function ProvenanceFooter({
       ? source.provider.trim()
       : null;
   // Compare the snapshot to "now" using the per-dataset freshness
-  // window declared with each federal adapter (Task #222). Returns
-  // `null` for non-federal layer kinds, missing/malformed dates, or
-  // future-dated snapshots — in any of those cases we fall through
-  // to the original "as of … · source: …" footer with no badge.
-  const freshness = useMemo<FederalSnapshotFreshness | null>(
-    () =>
-      evaluateFederalSnapshotFreshness(
-        source.layerKind,
-        source.snapshotDate as unknown as string | null | undefined,
-      ),
-    [source.layerKind, source.snapshotDate],
-  );
+  // window declared with each adapter — federal (Task #222) plus
+  // state/local (Task #254). Each evaluator returns `null` when the
+  // layer kind isn't in its tier so we can probe each in turn and
+  // tag the verdict with whichever tier owned it; the FE only needs
+  // the tier to pick the testid suffix the e2e tests assert on.
+  // For non-adapter layer kinds, missing/malformed dates, or
+  // future-dated snapshots, all three return `null` and we fall
+  // through to the original "as of … · source: …" footer with no
+  // badge.
+  const freshness = useMemo<{
+    tier: ProvenanceTier;
+    verdict: SnapshotFreshnessVerdict;
+  } | null>(() => {
+    const snap = source.snapshotDate as unknown as string | null | undefined;
+    const fed = evaluateFederalSnapshotFreshness(source.layerKind, snap);
+    if (fed) return { tier: "federal", verdict: fed };
+    const st = evaluateStateSnapshotFreshness(source.layerKind, snap);
+    if (st) return { tier: "state", verdict: st };
+    const loc = evaluateLocalSnapshotFreshness(source.layerKind, snap);
+    if (loc) return { tier: "local", verdict: loc };
+    return null;
+  }, [source.layerKind, source.snapshotDate]);
   if (!snapshot && !provider) return null;
   return (
     <div
@@ -427,10 +443,11 @@ function ProvenanceFooter({
       {snapshot && <span>as of {snapshot}</span>}
       {snapshot && provider && <span aria-hidden="true">·</span>}
       {provider && <span>source: {provider}</span>}
-      {freshness?.isStale && (
-        <FederalSnapshotStaleBadge
+      {freshness?.verdict.isStale && (
+        <SnapshotStaleBadge
           sourceId={source.id}
-          freshness={freshness}
+          tier={freshness.tier}
+          freshness={freshness.verdict}
         />
       )}
     </div>
@@ -439,22 +456,29 @@ function ProvenanceFooter({
 
 /**
  * Small inline "snapshot is N months old" badge rendered next to the
- * provenance footer when the federal-tier snapshot is older than the
- * adapter-declared freshness window.
+ * provenance footer when the snapshot is older than the per-dataset
+ * adapter-declared freshness window. Used uniformly for federal
+ * (Task #222), state, and local (Task #254) tiers — the tier only
+ * influences the testid suffix the e2e tests assert on; the visible
+ * label and aria-label are tier-agnostic so a screen-reader user
+ * gets the same warning regardless of which dataset triggered it.
  *
  * Accessibility: the staleness signal is *not* color-only — the dot
  * is paired with a literal "snapshot is N months old" label and an
- * `aria-label` that names the dataset's threshold ("FEMA snapshot is
- * 14 months old; window is 12 months"), so a screen reader picks up
- * the warning even when the amber dot is invisible. The dot itself
- * is `aria-hidden` since the text already conveys the same meaning.
+ * `aria-label` that names the dataset's threshold ("snapshot is 14
+ * months old; freshness window is 12 months"), so a screen reader
+ * picks up the warning even when the amber dot is invisible. The
+ * dot itself is `aria-hidden` since the text already conveys the
+ * same meaning.
  */
-function FederalSnapshotStaleBadge({
+function SnapshotStaleBadge({
   sourceId,
+  tier,
   freshness,
 }: {
   sourceId: string;
-  freshness: FederalSnapshotFreshness;
+  tier: ProvenanceTier;
+  freshness: SnapshotFreshnessVerdict;
 }) {
   const { ageMonths, thresholdMonths } = freshness;
   // Round small / huge ages into a reader-friendly label. Snapshots
@@ -468,7 +492,7 @@ function FederalSnapshotStaleBadge({
   return (
     <span
       role="status"
-      data-testid={`briefing-source-federal-stale-${sourceId}`}
+      data-testid={`briefing-source-${tier}-stale-${sourceId}`}
       aria-label={ariaLabel}
       title={ariaLabel}
       style={{

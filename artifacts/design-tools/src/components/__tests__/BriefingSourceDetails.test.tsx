@@ -836,9 +836,179 @@ describe("BriefingSourceDetails federal snapshot staleness badge", () => {
     // Provenance footer still rendered so the "as of …" line stays
     // visible — only the stale-tag piece is suppressed.
     expect(
-      screen.getByTestId(
-        "briefing-source-federal-provenance-src-fema-fresh",
-      ),
+      screen.getByTestId("briefing-source-provenance-src-fema-fresh"),
     ).toHaveTextContent("as of 2026-02-01");
+  });
+});
+
+describe("BriefingSourceDetails state snapshot staleness badge", () => {
+  // Pin a deterministic "now" so the badge math doesn't depend on
+  // the wall clock — the per-dataset thresholds for state adapters
+  // (UGRC parcels: 12mo, UGRC DEM: 24mo, INSIDE Idaho parcels:
+  // 12mo, TCEQ Edwards Aquifer: 18mo) live with the adapters in
+  // lib/adapters/src/state/*.ts and are the source of truth.
+  const NOW = new Date("2026-05-01T00:00:00.000Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders the stale badge when a UGRC parcels snapshot is older than 12 months", () => {
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-ugrc-stale",
+          layerKind: "ugrc-parcels",
+          sourceKind: "state-adapter",
+          provider: "UGRC Statewide Parcels",
+          // 14 calendar months before NOW — past the UGRC parcels
+          // 12-month window declared in lib/adapters/src/state/utah.ts.
+          snapshotDate: "2025-03-01T12:00:00.000Z",
+          payload: {
+            kind: "parcel",
+            parcel: { attributes: { PARCEL_ID: "01-001-0001" } },
+          },
+        })}
+      />,
+    );
+    const badge = screen.getByTestId(
+      "briefing-source-state-stale-src-ugrc-stale",
+    );
+    // Same visible label format as the federal tier — Task #254 wants
+    // a uniform reviewer experience across tiers.
+    expect(badge).toHaveTextContent("snapshot is 14 months old");
+    // Same a11y combo: aria-label names the dataset's window so the
+    // warning isn't conveyed by color alone.
+    expect(badge).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("freshness window is 12 months"),
+    );
+    expect(badge).toHaveAttribute("role", "status");
+  });
+
+  it("does not render the stale badge when the UGRC parcels snapshot is fresh", () => {
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-ugrc-fresh",
+          layerKind: "ugrc-parcels",
+          sourceKind: "state-adapter",
+          provider: "UGRC Statewide Parcels",
+          // 3 calendar months before NOW — well inside the 12-month
+          // UGRC parcels window.
+          snapshotDate: "2026-02-01T12:00:00.000Z",
+          payload: {
+            kind: "parcel",
+            parcel: { attributes: { PARCEL_ID: "01-001-0001" } },
+          },
+        })}
+      />,
+    );
+    expect(
+      screen.queryByTestId("briefing-source-state-stale-src-ugrc-fresh"),
+    ).toBeNull();
+    // The federal-tier testid must NOT collide with the state row —
+    // probing each tier in turn (Task #254) means a state row picks
+    // the state suffix, never the federal one.
+    expect(
+      screen.queryByTestId("briefing-source-federal-stale-src-ugrc-fresh"),
+    ).toBeNull();
+  });
+});
+
+describe("BriefingSourceDetails local snapshot staleness badge", () => {
+  // Per-dataset thresholds for local adapters live in
+  // lib/adapters/src/local/*.ts. Grand County zoning is the
+  // tightest 6-month window because a council vote can flip a
+  // setback overnight; we pin one stale + one fresh case here as
+  // the regression-anchor for the whole local tier.
+  const NOW = new Date("2026-05-01T00:00:00.000Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders the stale badge when a Grand County zoning snapshot is older than 6 months", () => {
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-grand-stale",
+          layerKind: "grand-county-ut-zoning",
+          sourceKind: "local-adapter",
+          provider: "grand-county-ut:zoning (Grand County, UT GIS)",
+          // 8 calendar months before NOW — past the 6-month window
+          // declared in lib/adapters/src/local/grand-county-ut.ts.
+          snapshotDate: "2025-09-01T12:00:00.000Z",
+          payload: {
+            kind: "zoning",
+            zoning: {
+              attributes: {
+                ZONE_DIST: "R-1",
+                ZONE_DESC: "Single-Family Residential",
+              },
+            },
+          },
+        })}
+      />,
+    );
+    const badge = screen.getByTestId(
+      "briefing-source-local-stale-src-grand-stale",
+    );
+    expect(badge).toHaveTextContent("snapshot is 8 months old");
+    expect(badge).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("freshness window is 6 months"),
+    );
+    expect(badge).toHaveAttribute("role", "status");
+  });
+
+  it("does not render the stale badge when the Grand County zoning snapshot is fresh", () => {
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-grand-fresh",
+          layerKind: "grand-county-ut-zoning",
+          sourceKind: "local-adapter",
+          provider: "grand-county-ut:zoning (Grand County, UT GIS)",
+          // 2 calendar months before NOW — well inside the 6-month
+          // Grand County zoning window.
+          snapshotDate: "2026-03-01T12:00:00.000Z",
+          payload: {
+            kind: "zoning",
+            zoning: {
+              attributes: {
+                ZONE_DIST: "R-1",
+                ZONE_DESC: "Single-Family Residential",
+              },
+            },
+          },
+        })}
+      />,
+    );
+    expect(
+      screen.queryByTestId("briefing-source-local-stale-src-grand-fresh"),
+    ).toBeNull();
   });
 });

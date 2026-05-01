@@ -35,6 +35,31 @@ const UGRC_ENDPOINTS = {
     "https://services1.arcgis.com/99lidPhWCzftIe9K/arcgis/rest/services/UtahAddressPoints/FeatureServer/0",
 } as const;
 
+/**
+ * Freshness windows for the UGRC (Utah) adapters, in whole months.
+ * Surfaced via {@link evaluateStateSnapshotFreshness} so the Site
+ * Context tab can render the same "snapshot is N months old" amber
+ * badge on stale state-tier rows that Task #222 added on the federal
+ * tier.
+ *
+ *   - `dem` (24mo): Utah's statewide 5m DEM is rebuilt as new lidar
+ *     collections complete; absolute elevation at a point is stable,
+ *     so the snapshot is only stale once the *raster product* has
+ *     been replaced. 24 months matches the cadence UGRC publishes
+ *     new DEM tiles. Mirrors the USGS NED window for the same reason.
+ *   - `parcels` (12mo): the statewide Unified Parcel layer aggregates
+ *     county pushes on a roughly quarterly cadence; 12 months keeps
+ *     the badge tight enough that a year-old read prompts a re-run
+ *     without firing on the routine quarterly republish.
+ *   - `addressPoints` (12mo): same cadence as parcels (UGRC pulls
+ *     address points from the same county feeds). A stale read here
+ *     is lower-stakes for a building review, but auditors expect the
+ *     same window across the UGRC bundle.
+ */
+export const UGRC_DEM_FRESHNESS_THRESHOLD_MONTHS = 24;
+export const UGRC_PARCELS_FRESHNESS_THRESHOLD_MONTHS = 12;
+export const UGRC_ADDRESS_POINTS_FRESHNESS_THRESHOLD_MONTHS = 12;
+
 function utahApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.stateKey === "utah";
 }

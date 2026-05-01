@@ -29,6 +29,24 @@ const TCEQ_ENDPOINTS = {
     "https://gisweb.tceq.texas.gov/arcgis/rest/services/EdwardsAquifer/ContributingZone/MapServer/0",
 } as const;
 
+/**
+ * Freshness window for the TCEQ Edwards Aquifer adapter snapshot,
+ * in whole months. Surfaced via {@link evaluateStateSnapshotFreshness}
+ * so the Site Context tab renders the same amber stale badge on
+ * state-tier rows that Task #222 added on the federal tier.
+ *
+ * Edwards Aquifer recharge + contributing zone polygons are
+ * regulatory boundaries (TCEQ rule 30 TAC §213) that change rarely
+ * — usually only on a rule revision or a survey-driven boundary
+ * adjustment. But when they *do* change, an architect citing a stale
+ * read might be quoting a parcel as outside the recharge zone after
+ * a republish brought it inside, which is a real audit risk. 18
+ * months keeps the window long enough that a routine annual
+ * re-publish doesn't fire the badge while still flagging snapshots
+ * predating any rule-revision cadence.
+ */
+export const TCEQ_EDWARDS_AQUIFER_FRESHNESS_THRESHOLD_MONTHS = 18;
+
 function texasApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.stateKey === "texas";
 }

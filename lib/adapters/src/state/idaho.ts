@@ -26,6 +26,27 @@ const INSIDE_IDAHO_ENDPOINTS = {
     "https://gis.idaho.gov/server/rest/services/Cadastral/Idaho_Statewide_Parcels/MapServer/0",
 } as const;
 
+/**
+ * Freshness windows for the INSIDE Idaho adapters, in whole months.
+ * Surfaced via {@link evaluateStateSnapshotFreshness} so the Site
+ * Context tab renders the same amber stale badge on state-tier rows
+ * that Task #222 added on the federal tier.
+ *
+ *   - `dem` (24mo): the Idaho statewide elevation contour layer is
+ *     republished as new lidar collections complete; terrain at a
+ *     point is geologically stable, so the snapshot is stale only
+ *     when the underlying raster product has been replaced. 24 months
+ *     mirrors the USGS NED window for the same reason.
+ *   - `parcels` (12mo): the statewide parcels layer is a county
+ *     roll-up with uneven update cadence (per the DA-PI-4 brief: some
+ *     counties refresh quarterly, others annually). 12 months keeps
+ *     the badge useful — a year-old read should prompt a re-run —
+ *     while staying loose enough that a slow-cadence county doesn't
+ *     trip the tag every other read.
+ */
+export const INSIDE_IDAHO_DEM_FRESHNESS_THRESHOLD_MONTHS = 24;
+export const INSIDE_IDAHO_PARCELS_FRESHNESS_THRESHOLD_MONTHS = 12;
+
 function idahoApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.stateKey === "idaho";
 }

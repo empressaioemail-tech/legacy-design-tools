@@ -36,6 +36,29 @@ const BASTROP_ENDPOINTS = {
     "https://gis.bastropcountytx.gov/arcgis/rest/services/Hazards/Floodplain/MapServer/0",
 } as const;
 
+/**
+ * Freshness windows for the Bastrop County, TX adapters, in whole
+ * months. Surfaced via {@link evaluateLocalSnapshotFreshness} so the
+ * Site Context tab renders the same amber stale badge on local-tier
+ * rows that Task #222 added on the federal tier.
+ *
+ * Same rationale as the other counties: parcels and zoning stay on a
+ * tight 6-month window because a council-driven amendment can change
+ * the answer overnight. Floodplain is a county republish of FEMA
+ * NFHL inputs and follows the FEMA cadence more closely, so it
+ * matches the FEMA NFHL window (12 months).
+ *
+ *   - `parcels` (6mo): appraisal-district updates as recordings clear.
+ *   - `zoning` (6mo): commissioners court can amend a district at any
+ *     meeting; 6 months keeps the badge responsive.
+ *   - `floodplain` (12mo): county republish derives from FEMA NFHL,
+ *     which follows a multi-year LOMR cycle. 12 months mirrors the
+ *     federal FEMA NFHL window.
+ */
+export const BASTROP_PARCELS_FRESHNESS_THRESHOLD_MONTHS = 6;
+export const BASTROP_ZONING_FRESHNESS_THRESHOLD_MONTHS = 6;
+export const BASTROP_FLOODPLAIN_FRESHNESS_THRESHOLD_MONTHS = 12;
+
 function bastropApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.localKey === "bastrop-tx";
 }

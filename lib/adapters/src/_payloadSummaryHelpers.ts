@@ -231,3 +231,85 @@ export function diffPayloadByFields(
   }
   return changes;
 }
+
+/**
+ * Verdict for a single briefing source's snapshot date relative to
+ * its adapter-declared freshness window. Tier-specific evaluators
+ * (federal / state / local) all return this shape so the FE renders
+ * a single badge component regardless of which adapter produced the
+ * row.
+ *
+ *   - `ageMonths` is the integer number of whole months between the
+ *     snapshot date and `now` (a snapshot 11 months and 29 days old
+ *     reads as `11`, not `12`); rounding *down* keeps the "snapshot
+ *     is N months old" label honest.
+ *   - `thresholdMonths` is the per-dataset window pulled from the
+ *     adapter file — surfaced so a tooltip / aria-label can include
+ *     it without the caller re-doing the lookup.
+ *   - `isStale` is true iff `ageMonths >= thresholdMonths`. Equality
+ *     counts as stale so a snapshot taken exactly N months ago tags
+ *     on its anniversary (matches what a reviewer intuitively expects
+ *     when the threshold reads "12 months").
+ */
+export interface SnapshotFreshness {
+  ageMonths: number;
+  thresholdMonths: number;
+  isStale: boolean;
+}
+
+/**
+ * Whole-months difference between two `Date`s, rounded *down*. We
+ * compute on the calendar (year * 12 + month) and then back off by
+ * one if the snapshot's day-of-month + time-of-day haven't yet been
+ * reached in the current month — that way "Jan 1 → Dec 31 same year"
+ * reads as 11 months, not 12, and stays under a 12-month threshold
+ * until the literal anniversary.
+ */
+export function wholeMonthsBetween(snapshot: Date, now: Date): number {
+  let months =
+    (now.getUTCFullYear() - snapshot.getUTCFullYear()) * 12 +
+    (now.getUTCMonth() - snapshot.getUTCMonth());
+  if (now.getUTCDate() < snapshot.getUTCDate()) {
+    months -= 1;
+  }
+  return months;
+}
+
+/**
+ * Generic snapshot-freshness evaluator shared by the federal-, state-,
+ * and local-tier evaluators. Caller is responsible for the
+ * `layerKind → thresholdMonths` lookup; this helper just does the
+ * calendar math and the null-guarding shared by every tier.
+ *
+ * Returns `null` when:
+ *   - `thresholdMonths` is `undefined` (caller's `layerKind` was not
+ *     in the registry — caller short-circuits and lets another tier
+ *     try);
+ *   - `snapshotDate` is missing, malformed, or parses to `NaN` (the
+ *     row simply has no provenance to evaluate, so the FE should
+ *     suppress the badge entirely rather than guessing);
+ *   - the snapshot date is in the *future* relative to `now` (a
+ *     producer clock skew or a fixture typo — we don't want to claim
+ *     "-3 months old" or to flip the badge into a meaningless state).
+ *
+ * `now` is injectable so unit tests can pin a stable "today" without
+ * faking the system clock.
+ */
+export function evaluateSnapshotFreshness(
+  thresholdMonths: number | undefined,
+  snapshotDate: string | Date | null | undefined,
+  now: Date,
+): SnapshotFreshness | null {
+  if (thresholdMonths === undefined) return null;
+  if (snapshotDate === null || snapshotDate === undefined) return null;
+  const snap =
+    snapshotDate instanceof Date ? snapshotDate : new Date(snapshotDate);
+  if (Number.isNaN(snap.getTime())) return null;
+  if (snap.getTime() > now.getTime()) return null;
+  const ageMonths = Math.max(0, wholeMonthsBetween(snap, now));
+  return {
+    ageMonths,
+    thresholdMonths,
+    isStale: ageMonths >= thresholdMonths,
+  };
+}

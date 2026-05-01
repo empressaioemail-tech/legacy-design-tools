@@ -21,6 +21,7 @@
 
 import {
   diffPayloadByFields,
+  evaluateSnapshotFreshness,
   FLOOD_ZONE_KEYS,
   isRecord,
   PAYLOAD_DIFF_NONE,
@@ -31,7 +32,23 @@ import {
   ZONING_DESC_KEYS,
   type PayloadDiffField,
   type PayloadFieldChange,
+  type SnapshotFreshness,
 } from "../_payloadSummaryHelpers";
+import {
+  BASTROP_FLOODPLAIN_FRESHNESS_THRESHOLD_MONTHS,
+  BASTROP_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+  BASTROP_ZONING_FRESHNESS_THRESHOLD_MONTHS,
+} from "./bastrop-tx";
+import {
+  GRAND_COUNTY_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+  GRAND_COUNTY_ROADS_FRESHNESS_THRESHOLD_MONTHS,
+  GRAND_COUNTY_ZONING_FRESHNESS_THRESHOLD_MONTHS,
+} from "./grand-county-ut";
+import {
+  LEMHI_COUNTY_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+  LEMHI_COUNTY_ROADS_FRESHNESS_THRESHOLD_MONTHS,
+  LEMHI_COUNTY_ZONING_FRESHNESS_THRESHOLD_MONTHS,
+} from "./lemhi-county-id";
 import {
   PARCEL_PAYLOAD_FIELDS,
   summarizeParcelPayload,
@@ -48,6 +65,61 @@ export type LocalLayerKind =
   | "bastrop-tx-parcels"
   | "bastrop-tx-zoning"
   | "bastrop-tx-floodplain";
+
+/**
+ * Per-dataset "snapshot is still trustworthy" windows for the
+ * local-tier adapters, in whole months. Mirrors the federal- and
+ * state-tier registry pattern: numbers live with the adapters they
+ * belong to, and the `layerKind → threshold` lookup is centralized
+ * here so the FE doesn't import every county adapter file just to
+ * render the stale badge on the provenance footer.
+ */
+const LOCAL_FRESHNESS_THRESHOLD_MONTHS: Record<LocalLayerKind, number> = {
+  "grand-county-ut-parcels": GRAND_COUNTY_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+  "grand-county-ut-zoning": GRAND_COUNTY_ZONING_FRESHNESS_THRESHOLD_MONTHS,
+  "grand-county-ut-roads": GRAND_COUNTY_ROADS_FRESHNESS_THRESHOLD_MONTHS,
+  "lemhi-county-id-parcels": LEMHI_COUNTY_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+  "lemhi-county-id-zoning": LEMHI_COUNTY_ZONING_FRESHNESS_THRESHOLD_MONTHS,
+  "lemhi-county-id-roads": LEMHI_COUNTY_ROADS_FRESHNESS_THRESHOLD_MONTHS,
+  "bastrop-tx-parcels": BASTROP_PARCELS_FRESHNESS_THRESHOLD_MONTHS,
+  "bastrop-tx-zoning": BASTROP_ZONING_FRESHNESS_THRESHOLD_MONTHS,
+  "bastrop-tx-floodplain": BASTROP_FLOODPLAIN_FRESHNESS_THRESHOLD_MONTHS,
+};
+
+function isLocalLayerKindStr(kind: string): kind is LocalLayerKind {
+  return Object.prototype.hasOwnProperty.call(
+    LOCAL_FRESHNESS_THRESHOLD_MONTHS,
+    kind,
+  );
+}
+
+/**
+ * Evaluate a local-tier briefing source's snapshot date against its
+ * adapter-declared freshness window. Parallel to
+ * `evaluateFederalSnapshotFreshness` and
+ * `evaluateStateSnapshotFreshness` — same {@link SnapshotFreshness}
+ * shape so the FE renders a single badge component regardless of
+ * which tier produced the row. Returns `null` when:
+ *
+ *   - `layerKind` is not a local-tier layer;
+ *   - `snapshotDate` is missing, malformed, or parses to `NaN`;
+ *   - the snapshot date is in the *future* relative to `now`.
+ *
+ * `now` is injectable so unit tests can pin a stable "today" without
+ * faking the system clock.
+ */
+export function evaluateLocalSnapshotFreshness(
+  layerKind: string,
+  snapshotDate: string | Date | null | undefined,
+  now: Date = new Date(),
+): SnapshotFreshness | null {
+  if (!isLocalLayerKindStr(layerKind)) return null;
+  return evaluateSnapshotFreshness(
+    LOCAL_FRESHNESS_THRESHOLD_MONTHS[layerKind],
+    snapshotDate,
+    now,
+  );
+}
 
 /**
  * Zoning summary used by every county zoning adapter.

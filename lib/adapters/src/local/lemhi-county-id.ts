@@ -31,6 +31,27 @@ const LEMHI_ENDPOINTS = {
 
 const OSM_OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
+/**
+ * Freshness windows for the Lemhi County, ID (Salmon) adapters, in
+ * whole months. Surfaced via {@link evaluateLocalSnapshotFreshness}
+ * so the Site Context tab renders the same amber stale badge on
+ * local-tier rows that Task #222 added on the federal tier.
+ *
+ * Same rationale as the Grand County windows: ordinance-driven local
+ * data is the highest-impact tier for staleness, so the windows are
+ * tight (6 months) for parcels + zoning. Roads stay at the looser
+ * 12-month window because a stale roads read is a much smaller
+ * audit risk and the OSM fallback covers gaps.
+ *
+ *   - `parcels` (6mo): assessor updates parcels as recordings clear.
+ *   - `zoning` (6mo): board of commissioners can amend a district at
+ *     any meeting; 6 months keeps the badge responsive.
+ *   - `roads` (12mo): county road inventory changes slowly.
+ */
+export const LEMHI_COUNTY_PARCELS_FRESHNESS_THRESHOLD_MONTHS = 6;
+export const LEMHI_COUNTY_ZONING_FRESHNESS_THRESHOLD_MONTHS = 6;
+export const LEMHI_COUNTY_ROADS_FRESHNESS_THRESHOLD_MONTHS = 12;
+
 function lemhiApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.localKey === "lemhi-county-id";
 }
