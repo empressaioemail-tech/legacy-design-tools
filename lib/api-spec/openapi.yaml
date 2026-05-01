@@ -4893,12 +4893,27 @@ components:
         to anything, deliberately, so a swap of identity providers
         cannot retroactively break the audit trail (see
         `lib/db/src/schema/users.ts` for the rationale).
+
+        `displayName` is an optional, best-effort hydration of the
+        underlying `users.displayName` for `kind === "user"` actors
+        (Task #212). It is populated for surfaces that join through
+        the `users` table when the identity is known; consumers must
+        fall back to the raw `id` when the field is absent so a
+        missing or transiently-unavailable profile does not blank
+        the audit trail.
       properties:
         kind:
           type: string
           enum: [user, agent]
         id:
           type: string
+        displayName:
+          type: string
+          description: |
+            Friendly label for the actor when one is known. Optional
+            on the wire — surfaces that do not hydrate identities
+            (e.g. service-to-service callbacks) omit it, and
+            consumers must fall back to `id`.
       required:
         - kind
         - id

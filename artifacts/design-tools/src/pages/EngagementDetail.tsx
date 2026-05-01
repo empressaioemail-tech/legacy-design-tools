@@ -4370,6 +4370,32 @@ function formatRelativeMaterializedAt(iso: string): string {
 }
 
 /**
+ * Build the inline "Resolved {time} by {who}" attribution string
+ * shown on each Resolved divergence row (Task #212). Mirrors the
+ * server-side `resolvedByRequestor` posture: a `null` requestor —
+ * meaning the resolve was recorded without a session-bound caller —
+ * renders as "by system"; an attributed user falls back from
+ * `displayName` to the raw `id` when the API hasn't (or couldn't)
+ * hydrate the profile.
+ *
+ * `resolvedAt` should always be non-null for a Resolved row, but we
+ * tolerate `null` defensively so a partial-shape row never crashes
+ * the panel — the badge above already carries the visual cue.
+ */
+function formatResolvedAttribution(
+  resolvedAt: string | null | undefined,
+  resolvedByRequestor: { kind: string; id: string; displayName?: string } | null,
+): string {
+  const when = resolvedAt
+    ? formatRelativeMaterializedAt(resolvedAt)
+    : null;
+  const who = resolvedByRequestor
+    ? resolvedByRequestor.displayName?.trim() || resolvedByRequestor.id
+    : "system";
+  return when ? `${when} by ${who}` : `by ${who}`;
+}
+
+/**
  * Human-readable label for each {@link MaterializableElementKind}
  * the C# Revit add-in can materialize. Mirrors the kinds defined in
  * the OpenAPI spec at `MaterializableElementKind`.
@@ -4855,29 +4881,45 @@ function BriefingDivergenceRow({
         </span>
         <div style={{ flex: 1 }} />
         {isResolved ? (
-          <span
-            data-testid="briefing-divergences-resolved-badge"
-            title={
-              row.resolvedAt
-                ? `Resolved ${new Date(row.resolvedAt).toISOString()}`
-                : undefined
-            }
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "2px 8px",
-              borderRadius: 999,
-              background: "var(--success-dim)",
-              color: "var(--success-text)",
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: 0.2,
-              textTransform: "uppercase",
-              lineHeight: 1.4,
-            }}
-          >
-            Resolved
-          </span>
+          <>
+            <span
+              data-testid="briefing-divergences-resolved-badge"
+              title={
+                row.resolvedAt
+                  ? `Resolved ${new Date(row.resolvedAt).toISOString()}`
+                  : undefined
+              }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "var(--success-dim)",
+                color: "var(--success-text)",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                textTransform: "uppercase",
+                lineHeight: 1.4,
+              }}
+            >
+              Resolved
+            </span>
+            <span
+              data-testid="briefing-divergences-resolved-attribution"
+              title={
+                row.resolvedAt
+                  ? new Date(row.resolvedAt).toISOString()
+                  : undefined
+              }
+              style={{ fontSize: 11, color: "var(--text-muted)" }}
+            >
+              {formatResolvedAttribution(
+                row.resolvedAt,
+                row.resolvedByRequestor,
+              )}
+            </span>
+          </>
         ) : (
           <button
             type="button"

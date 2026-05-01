@@ -76,6 +76,13 @@ const hoisted = vi.hoisted(() => {
       createdAt: string;
       elementKind: string | null;
       elementLabel: string | null;
+      // Resolved-row fields (Task #191 / #212). Default omitted so
+      // existing fixtures stay untouched; the inline attribution
+      // test populates them explicitly.
+      resolvedAt?: string | null;
+      resolvedByRequestor?:
+        | { kind: "user" | "agent"; id: string; displayName?: string }
+        | null;
     }>,
     divergencesQueryState: {
       isLoading: false,
@@ -701,6 +708,108 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
       "div-populated",
       "div-null",
     ]);
+  });
+
+  it("renders the inline 'Resolved {time} by {who}' attribution on each Resolved row (Task #212)", () => {
+    // Three Resolved rows so we exercise the three attribution
+    // shapes the FE has to render side-by-side:
+    //   - hydrated user → friendly displayName
+    //   - un-hydrated user → falls back to the raw id
+    //   - null requestor → renders "by system"
+    // All three must show their relative time inline (not just on
+    // hover) so the operator can scan attribution without mousing
+    // over each badge.
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    hoisted.divergences = [
+      {
+        id: "div-friendly",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: {
+          kind: "user",
+          id: "user-7",
+          displayName: "Alex Architect",
+        },
+      },
+      {
+        id: "div-raw-id",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-B",
+        briefingId: "brief-1",
+        reason: "unpinned",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T11:00:00.000Z",
+        elementKind: "property-line",
+        elementLabel: "South property line",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: { kind: "user", id: "user-22" },
+      },
+      {
+        id: "div-system",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-C",
+        briefingId: "brief-1",
+        reason: "deleted",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T10:00:00.000Z",
+        elementKind: "terrain",
+        elementLabel: "Site terrain",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: null,
+      },
+    ];
+    renderPanel();
+
+    // The Resolved section is collapsed by default — toggle it open
+    // so the attribution rows are in the document tree.
+    fireEvent.click(
+      screen.getByTestId("briefing-divergences-resolved-toggle"),
+    );
+
+    const friendlyRow = screen
+      .getAllByTestId("briefing-divergences-row")
+      .find((r) => r.getAttribute("data-divergence-id") === "div-friendly");
+    expect(friendlyRow).toBeDefined();
+    const friendlyAttr = within(friendlyRow!).getByTestId(
+      "briefing-divergences-resolved-attribution",
+    );
+    // Inline copy carries both the relative time and the friendly
+    // display name — no need to hover the badge to learn either.
+    expect(friendlyAttr).toHaveTextContent("1 h ago by Alex Architect");
+
+    const rawRow = screen
+      .getAllByTestId("briefing-divergences-row")
+      .find((r) => r.getAttribute("data-divergence-id") === "div-raw-id");
+    expect(rawRow).toBeDefined();
+    expect(
+      within(rawRow!).getByTestId("briefing-divergences-resolved-attribution"),
+    ).toHaveTextContent("1 h ago by user-22");
+
+    const systemRow = screen
+      .getAllByTestId("briefing-divergences-row")
+      .find((r) => r.getAttribute("data-divergence-id") === "div-system");
+    expect(systemRow).toBeDefined();
+    expect(
+      within(systemRow!).getByTestId(
+        "briefing-divergences-resolved-attribution",
+      ),
+    ).toHaveTextContent("1 h ago by system");
+
+    // The absolute ISO timestamp is still tucked into the title
+    // attribute so an operator can hover for second-precision when
+    // they need it. The relative copy in the body covers the at-a-
+    // glance need; the title covers the audit-precision need.
+    expect(friendlyAttr).toHaveAttribute("title", oneHourAgo);
   });
 
   it("renders the loading-state copy while the divergences query is loading", () => {

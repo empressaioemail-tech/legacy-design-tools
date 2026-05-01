@@ -56,6 +56,7 @@ const {
   materializableElements,
   briefingDivergences,
   atomEvents,
+  users,
 } = await import("@workspace/db");
 const { eq, desc } = await import("drizzle-orm");
 
@@ -502,7 +503,12 @@ describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
     expect(wire.id).toBe(divergenceId);
     expect(wire.resolvedAt).not.toBeNull();
     expect(new Date(wire.resolvedAt).getTime()).toBeGreaterThanOrEqual(before);
-    expect(wire.resolvedByRequestor).toEqual({
+    // `kind` / `id` are the contract guaranteed by the resolve
+    // route. The optional `displayName` (Task #212) is exercised by
+    // the dedicated hydration test below — here we deliberately
+    // tolerate its presence/absence because the session middleware's
+    // profile backfill is fire-and-forget and racy in tests.
+    expect(wire.resolvedByRequestor).toMatchObject({
       kind: "user",
       id: "operator-1",
     });
@@ -542,7 +548,7 @@ describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
     ).set("x-requestor", "user:second-operator");
     expect(second.status).toBe(200);
     expect(second.body.divergence.resolvedAt).toBe(firstResolvedAt);
-    expect(second.body.divergence.resolvedByRequestor).toEqual({
+    expect(second.body.divergence.resolvedByRequestor).toMatchObject({
       kind: "user",
       id: "first-operator",
     });
@@ -593,7 +599,7 @@ describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
     expect(listRes.status).toBe(200);
     expect(listRes.body.divergences).toHaveLength(1);
     expect(listRes.body.divergences[0].resolvedAt).not.toBeNull();
-    expect(listRes.body.divergences[0].resolvedByRequestor).toEqual({
+    expect(listRes.body.divergences[0].resolvedByRequestor).toMatchObject({
       kind: "user",
       id: "operator-1",
     });
@@ -669,6 +675,51 @@ describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
     );
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("divergence_not_found");
+  });
+
+  it("hydrates the resolver's friendly displayName onto the resolve + list response (Task #212)", async () => {
+    // The `users.displayName` column carries the friendly label
+    // surfaced by the design-tools "Resolved by …" badge. The
+    // session middleware backfills a default row keyed off the raw
+    // id, but an admin can later edit the row to a real name —
+    // here we pre-seed the `users` row so the displayName is
+    // distinct from the id and the hydration path is unmistakable.
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    await ctx.schema.db
+      .insert(users)
+      .values({
+        id: "operator-7",
+        displayName: "Alex Architect",
+        email: null,
+        avatarUrl: null,
+      })
+      .onConflictDoNothing({ target: users.id });
+
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+    const resolveRes = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:operator-7");
+    expect(resolveRes.status).toBe(200);
+    expect(resolveRes.body.divergence.resolvedByRequestor).toEqual({
+      kind: "user",
+      id: "operator-7",
+      displayName: "Alex Architect",
+    });
+
+    // The list endpoint must hydrate the same field — it's the
+    // surface the design-tools panel re-fetches on cache invalidation,
+    // so the display name has to ride along on every read.
+    const listRes = await asArchitect(
+      request(getApp()).get(`/api/bim-models/${bimModelId}/divergences`),
+    );
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.divergences[0].resolvedByRequestor).toEqual({
+      kind: "user",
+      id: "operator-7",
+      displayName: "Alex Architect",
+    });
   });
 
   it("resolves successfully without a session requestor (resolvedByRequestor null)", async () => {
