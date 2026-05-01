@@ -58,6 +58,7 @@
     "@types/three": "~0.128.0",
     "@vitejs/plugin-react": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "@workspace/adapters": "workspace:*",
     "@workspace/api-client-react": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",

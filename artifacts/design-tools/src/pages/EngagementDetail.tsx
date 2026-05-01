@@ -38,6 +38,7 @@ import {
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
+import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
 import type { SheetSummary } from "@workspace/api-client-react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { AppShell } from "../components/AppShell";
@@ -650,6 +651,18 @@ export function BriefingSourceRow({
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const isAdapter = isAdapterSourceKind(source.sourceKind);
+  // Federal-tier rows (FEMA, USGS, EJScreen, FCC) carry small
+  // structured payloads with one or two reader-friendly readings
+  // each. We pull a one-line summary for inline display so reviewers
+  // see the actual value (e.g. "Flood Zone AE · BFE 425.5 ft")
+  // without having to expand "View layer details". The summarizer
+  // returns null for state/local rows and for malformed payloads —
+  // we just skip the chip in that case rather than rendering a
+  // misleading "—".
+  const federalSummary =
+    source.sourceKind === "federal-adapter"
+      ? summarizeFederalPayload(source.layerKind, source.payload)
+      : null;
   const [expanded, setExpanded] = useState(false);
   // Layer-details panel is independent of the history panel; the
   // architect should be able to keep "what does this layer say about
@@ -750,6 +763,23 @@ export function BriefingSourceRow({
           </span>
         </div>
       </div>
+      {federalSummary && (
+        <div
+          data-testid={`briefing-source-summary-${source.id}`}
+          style={{
+            fontSize: 12,
+            fontWeight: 500,
+            color: "var(--text-primary)",
+            background: "var(--surface-muted)",
+            borderRadius: 4,
+            padding: "4px 8px",
+            marginTop: 2,
+            alignSelf: "flex-start",
+          }}
+        >
+          {federalSummary}
+        </div>
+      )}
       {conversionStatus === "failed" && (
         <div
           style={{

@@ -12,6 +12,7 @@
     "./federal/usgs-ned": "./src/federal/usgs-ned.ts",
     "./federal/epa-ejscreen": "./src/federal/epa-ejscreen.ts",
     "./federal/fcc-broadband": "./src/federal/fcc-broadband.ts",
+    "./federal/summaries": "./src/federal/summaries.ts",
     "./state/utah": "./src/state/utah.ts",
     "./state/idaho": "./src/state/idaho.ts",
     "./state/texas": "./src/state/texas.ts",
