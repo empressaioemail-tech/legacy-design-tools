@@ -1653,10 +1653,16 @@ export const RequestUploadUrlBody = zod
       .number()
       .min(requestUploadUrlBodySizeMin)
       .max(requestUploadUrlBodySizeMax),
-    contentType: zod.string().min(1),
+    contentType: zod.enum([
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+      "image/svg+xml",
+    ]),
   })
   .describe(
-    "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n\n`size` is capped at 2 MiB. The only consumer today is avatar\nuploads, and the Plan Review web UI client-side-resizes those to\n~20 KB before requesting a URL. The server-side cap exists so a\nnon-browser client (mobile app, curl, integration) can't ask for\na URL for an arbitrarily large object and bloat storage. Requests\nthat exceed the cap get a clear `413` from the route handler\nbefore the schema validation runs.\n",
+    "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n\n`size` is capped at 2 MiB. The only consumer today is avatar\nuploads, and the Plan Review web UI client-side-resizes those to\n~20 KB before requesting a URL. The server-side cap exists so a\nnon-browser client (mobile app, curl, integration) can't ask for\na URL for an arbitrarily large object and bloat storage. Requests\nthat exceed the cap get a clear `413` from the route handler\nbefore the schema validation runs.\n\n`contentType` is restricted to image MIME types for the same\nreason: the only consumer today is the avatar uploader, so a\nnon-browser client can't smuggle a non-image blob (e.g. a JSON\ndump) past the size cap. Requests with a disallowed content type\nget a clear `415` from the route handler before the schema\nvalidation runs.\n",
   );
 
 export const requestUploadUrlResponseMetadataSizeMin = 0;
@@ -1678,9 +1684,15 @@ export const RequestUploadUrlResponse = zod.object({
         .number()
         .min(requestUploadUrlResponseMetadataSizeMin)
         .max(requestUploadUrlResponseMetadataSizeMax),
-      contentType: zod.string().min(1),
+      contentType: zod.enum([
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+        "image/svg+xml",
+      ]),
     })
     .describe(
-      "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n\n`size` is capped at 2 MiB. The only consumer today is avatar\nuploads, and the Plan Review web UI client-side-resizes those to\n~20 KB before requesting a URL. The server-side cap exists so a\nnon-browser client (mobile app, curl, integration) can't ask for\na URL for an arbitrarily large object and bloat storage. Requests\nthat exceed the cap get a clear `413` from the route handler\nbefore the schema validation runs.\n",
+      "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n\n`size` is capped at 2 MiB. The only consumer today is avatar\nuploads, and the Plan Review web UI client-side-resizes those to\n~20 KB before requesting a URL. The server-side cap exists so a\nnon-browser client (mobile app, curl, integration) can't ask for\na URL for an arbitrarily large object and bloat storage. Requests\nthat exceed the cap get a clear `413` from the route handler\nbefore the schema validation runs.\n\n`contentType` is restricted to image MIME types for the same\nreason: the only consumer today is the avatar uploader, so a\nnon-browser client can't smuggle a non-image blob (e.g. a JSON\ndump) past the size cap. Requests with a disallowed content type\nget a clear `415` from the route handler before the schema\nvalidation runs.\n",
     ),
 });

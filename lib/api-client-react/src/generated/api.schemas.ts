@@ -633,6 +633,17 @@ export interface UpdateUserBody {
   avatarUrl?: string | null;
 }
 
+export type RequestUploadUrlBodyContentType =
+  (typeof RequestUploadUrlBodyContentType)[keyof typeof RequestUploadUrlBodyContentType];
+
+export const RequestUploadUrlBodyContentType = {
+  "image/jpeg": "image/jpeg",
+  "image/png": "image/png",
+  "image/webp": "image/webp",
+  "image/gif": "image/gif",
+  "image/svg+xml": "image/svg+xml",
+} as const;
+
 /**
  * File metadata sent to obtain a presigned PUT URL. The file bytes
 themselves are NOT sent to this endpoint — they are PUT directly
@@ -646,6 +657,13 @@ a URL for an arbitrarily large object and bloat storage. Requests
 that exceed the cap get a clear `413` from the route handler
 before the schema validation runs.
 
+`contentType` is restricted to image MIME types for the same
+reason: the only consumer today is the avatar uploader, so a
+non-browser client can't smuggle a non-image blob (e.g. a JSON
+dump) past the size cap. Requests with a disallowed content type
+get a clear `415` from the route handler before the schema
+validation runs.
+
  */
 export interface RequestUploadUrlBody {
   /** @minLength 1 */
@@ -655,8 +673,7 @@ export interface RequestUploadUrlBody {
    * @maximum 2097152
    */
   size: number;
-  /** @minLength 1 */
-  contentType: string;
+  contentType: RequestUploadUrlBodyContentType;
 }
 
 export interface RequestUploadUrlResponse {

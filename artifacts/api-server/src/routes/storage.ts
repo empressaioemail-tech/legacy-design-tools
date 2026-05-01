@@ -12,6 +12,13 @@ const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 
 /**
+ * Allowed `contentType` values, sourced from the generated zod enum so the
+ * route handler and the OpenAPI spec can't drift apart. `.options` is the
+ * runtime-readable list zod exposes for `z.enum([...])`.
+ */
+const allowedContentTypes = RequestUploadUrlBody.shape.contentType.options;
+
+/**
  * POST /storage/uploads/request-url
  *
  * Request a presigned URL for file upload.
@@ -27,12 +34,30 @@ const objectStorageService = new ObjectStorageService();
  * storage.  We do the size check explicitly before the schema parse so the
  * caller gets a clear `413` ("Asset too large") instead of being lumped in
  * with generic `400` schema errors.
+ *
+ * For the same reason we also pre-check `contentType` against the image
+ * MIME allow-list and return a clear `415` ("Unsupported Media Type") when
+ * a non-image type slips through. Today the only consumer is the avatar
+ * uploader, whose client-side resize always emits `image/jpeg`, so a
+ * non-image request can only come from a non-browser caller trying to park
+ * an arbitrary blob in object storage under the upload code path.
  */
 router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
   const rawSize = req.body?.size;
   if (typeof rawSize === "number" && rawSize > requestUploadUrlBodySizeMax) {
     res.status(413).json({
       error: `Upload too large: ${rawSize} bytes exceeds the ${requestUploadUrlBodySizeMax}-byte cap for this endpoint.`,
+    });
+    return;
+  }
+
+  const rawContentType = req.body?.contentType;
+  if (
+    typeof rawContentType === "string" &&
+    !allowedContentTypes.includes(rawContentType as (typeof allowedContentTypes)[number])
+  ) {
+    res.status(415).json({
+      error: `Unsupported contentType "${rawContentType}". Allowed types: ${allowedContentTypes.join(", ")}.`,
     });
     return;
   }

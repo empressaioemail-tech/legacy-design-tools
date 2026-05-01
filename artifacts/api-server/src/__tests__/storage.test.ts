@@ -21,7 +21,10 @@
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
-import { requestUploadUrlBodySizeMax } from "@workspace/api-zod";
+import {
+  RequestUploadUrlBody,
+  requestUploadUrlBodySizeMax,
+} from "@workspace/api-zod";
 import { ctx } from "./test-context";
 
 vi.mock("@workspace/db", async () => {
@@ -96,6 +99,77 @@ describe("POST /api/storage/uploads/request-url", () => {
         name: "weird.jpg",
         size: "not-a-number",
         contentType: "image/jpeg",
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects non-image contentType with a 415 naming the allowed types", async () => {
+    // The avatar uploader is the only consumer today and always sends
+    // `image/jpeg`, so a non-image type can only come from a non-browser
+    // caller trying to park an arbitrary blob (e.g. a JSON dump that
+    // sneaks under the 2 MiB cap) in object storage. The route must
+    // refuse those with a clear `415` *before* any presigned URL is
+    // handed out.
+    const res = await request(getApp())
+      .post("/api/storage/uploads/request-url")
+      .send({
+        name: "payload.json",
+        size: 1024,
+        contentType: "application/json",
+      });
+
+    expect(res.status).toBe(415);
+    expect(res.body.error).toContain("application/json");
+    // Must enumerate the allow-list so the caller can fix without
+    // having to read docs — same shape as the size-cap error.
+    for (const allowed of RequestUploadUrlBody.shape.contentType.options) {
+      expect(res.body.error).toContain(allowed);
+    }
+  });
+
+  it("accepts every image MIME type in the allow-list (boundary)", async () => {
+    // Pin the allow-list itself: if a future spec change drops a type,
+    // this test fails so we notice. We can't assert 200 (the success
+    // branch needs real GCS — see the file header) but we can assert
+    // the request makes it past *both* validation gates, i.e. it is
+    // neither a 413 nor a 415 nor a 400.
+    for (const contentType of RequestUploadUrlBody.shape.contentType.options) {
+      const res = await request(getApp())
+        .post("/api/storage/uploads/request-url")
+        .send({ name: `ok.${contentType.split("/")[1]}`, size: 1024, contentType });
+
+      expect([413, 415, 400]).not.toContain(res.status);
+    }
+  });
+
+  it("returns 415 (not 400) when contentType is a string but disallowed", async () => {
+    // The 415 short-circuit is gated on `typeof contentType === "string"`;
+    // a string that isn't in the allow-list must surface as 415 rather
+    // than being lumped in with generic schema errors. This mirrors the
+    // 413-vs-400 distinction for `size`.
+    const res = await request(getApp())
+      .post("/api/storage/uploads/request-url")
+      .send({
+        name: "doc.pdf",
+        size: 1024,
+        contentType: "application/pdf",
+      });
+
+    expect(res.status).toBe(415);
+  });
+
+  it("returns 400 (not 415) when contentType is the wrong type entirely", async () => {
+    // The 415 short-circuit only fires for string content types; a
+    // missing or non-string contentType has to flow through the schema
+    // parse so the caller gets a generic validation error, not a
+    // misleading "unsupported media type" message.
+    const res = await request(getApp())
+      .post("/api/storage/uploads/request-url")
+      .send({
+        name: "weird.jpg",
+        size: 1024,
+        contentType: 42,
       });
 
     expect(res.status).toBe(400);

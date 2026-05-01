@@ -1431,6 +1431,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: |
+            Requested `contentType` is not in the allow-list (see
+            `RequestUploadUrlBody.contentType`). The avatar flow is the
+            only consumer today; it always uploads `image/jpeg`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
 components:
   schemas:
@@ -2478,6 +2487,13 @@ components:
         a URL for an arbitrarily large object and bloat storage. Requests
         that exceed the cap get a clear `413` from the route handler
         before the schema validation runs.
+
+        `contentType` is restricted to image MIME types for the same
+        reason: the only consumer today is the avatar uploader, so a
+        non-browser client can't smuggle a non-image blob (e.g. a JSON
+        dump) past the size cap. Requests with a disallowed content type
+        get a clear `415` from the route handler before the schema
+        validation runs.
       properties:
         name:
           type: string
@@ -2488,7 +2504,12 @@ components:
           maximum: 2097152
         contentType:
           type: string
-          minLength: 1
+          enum:
+            - image/jpeg
+            - image/png
+            - image/webp
+            - image/gif
+            - image/svg+xml
       required:
         - name
         - size
