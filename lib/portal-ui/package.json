@@ -8,6 +8,10 @@
     "./styles": "./src/styles/index.css",
     "./styles/plan-review-disciplines.css": "./src/styles/plan-review-disciplines.css"
   },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "dependencies": {
     "@tanstack/react-query": "catalog:",
     "@workspace/api-client-react": "workspace:*",
@@ -22,9 +26,14 @@
     "react-dom": ">=18"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "happy-dom": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "vitest": "catalog:"
   }
 }
