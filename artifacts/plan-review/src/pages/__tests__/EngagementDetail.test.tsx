@@ -142,6 +142,34 @@ vi.mock("@workspace/api-client-react", async () => {
       id,
     ],
     getGetSessionQueryKey: () => ["getSession"],
+    // Task #261 — the engagement page now embeds BriefingRecentRunsPanel,
+    // which calls these two named exports. The panel fetches lazily
+    // (only when its disclosure is opened), so the runs hook is wired
+    // through `useQuery` with `enabled` honored — no fetch fires for
+    // these submission-banner tests since nothing toggles the
+    // disclosure.
+    getListEngagementBriefingGenerationRunsQueryKey: (id: string) => [
+      "listEngagementBriefingGenerationRuns",
+      id,
+    ],
+    useListEngagementBriefingGenerationRuns: (
+      id: string,
+      opts?: {
+        query?: {
+          queryKey?: readonly unknown[];
+          enabled?: boolean;
+          refetchOnWindowFocus?: boolean;
+        };
+      },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          (["listEngagementBriefingGenerationRuns", id] as const),
+        queryFn: async () => ({ runs: [] }),
+        enabled: opts?.query?.enabled ?? true,
+        refetchOnWindowFocus: opts?.query?.refetchOnWindowFocus ?? true,
+      }),
     useGetSession: () =>
       useQuery({
         queryKey: ["getSession"],

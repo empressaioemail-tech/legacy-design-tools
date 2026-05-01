@@ -16,6 +16,7 @@ import {
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
+import { BriefingRecentRunsPanel } from "../components/BriefingRecentRunsPanel";
 import { relativeTime } from "../lib/relativeTime";
 
 /**
@@ -219,6 +220,18 @@ export default function EngagementDetail() {
           canSubmit={canSubmit}
           searchQuery={searchQuery}
         />
+
+        {/*
+          Task #261 — auditor-side mirror of the Design Tools "Recent
+          runs" disclosure (Task #230). External reviewers who land in
+          Plan Review can now spot a suspicious briefing-generation
+          attempt (failed run, completed run with stripped citations)
+          without bouncing across to Design Tools to investigate. The
+          panel only fetches `/engagements/:id/briefing/runs` once the
+          disclosure is actually opened, so a page load that never
+          touches it costs zero extra round trips.
+        */}
+        {id && <BriefingRecentRunsPanel engagementId={id} />}
       </div>
 
       {engagement && (
