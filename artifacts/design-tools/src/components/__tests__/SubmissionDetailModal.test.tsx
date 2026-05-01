@@ -504,6 +504,76 @@ describe("SubmissionDetailModal", () => {
   );
 
   it(
+    "STATUS HISTORY shows the loading placeholder when the summary " +
+      "is refetching and no entries are cached yet (Task #143)",
+    () => {
+      // The populated and empty branches of `StatusHistoryBlock` are
+      // covered above (Task #93 + the empty-state spec). This test
+      // pins the third branch — `loading && entries.length === 0` —
+      // so a future refactor that always falls through to the
+      // empty-state copy (or leaves the placeholder up forever)
+      // fails here before reviewers ever see a stuck "Loading status
+      // history…" message in the modal.
+      //
+      // Realistic shape: React Query is mid-refetch (`isLoading: true`)
+      // but already has a cached `data` payload whose typed body
+      // exists with `found: true` and no `statusHistory` yet — for
+      // example, the cache was hydrated from an older atom server
+      // version that didn't yet return the field, and we're refetching
+      // for the new shape. Setting both `isLoading` and `data` is
+      // also the only way to get the modal to render the
+      // `StatusHistoryBlock` at all (the surrounding panel is gated
+      // on `summary && typed.found !== false`), so this combination
+      // is what actually exercises the loading branch.
+      setSummary({
+        isLoading: true,
+        data: {
+          prose: "x",
+          typed: {
+            id: "sub-1",
+            found: true,
+            submittedAt: "2026-04-30T12:00:00.000Z",
+            // No statusHistory yet — the placeholder branch only
+            // fires when the entries array is empty.
+          },
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: {
+            latestEventId: "",
+            latestEventAt: "2026-04-30T12:00:00.000Z",
+          },
+          scopeFiltered: false,
+        },
+      });
+      setHistory({ data: { events: [] } });
+
+      renderModal(
+        <SubmissionDetailModal
+          submissionId="sub-1"
+          engagementId="eng-1"
+          onClose={() => {}}
+        />,
+      );
+
+      // The loading placeholder is rendered with the expected copy.
+      const placeholder = screen.getByTestId(
+        "submission-status-history-loading",
+      );
+      expect(placeholder.textContent).toContain("Loading status history");
+
+      // Crucially, neither the empty-state hint nor the populated
+      // timeline rendered — the loading branch is exclusive. Without
+      // these guards a regression that always returns the empty-state
+      // copy (or always renders an empty timeline container) would
+      // still pass the placeholder assertion above.
+      expect(
+        screen.queryByTestId("submission-status-history-empty"),
+      ).toBeNull();
+      expect(screen.queryByTestId("submission-status-history")).toBeNull();
+    },
+  );
+
+  it(
     "STATUS HISTORY appends a new row each time a response is recorded " +
       "(Task #131)",
     () => {
