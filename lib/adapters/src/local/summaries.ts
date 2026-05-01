@@ -20,14 +20,22 @@
  */
 
 import {
+  diffPayloadByFields,
+  FLOOD_ZONE_KEYS,
   isRecord,
+  PAYLOAD_DIFF_NONE,
   pickFirstString,
   pickNumber,
   pickString,
   ZONING_CODE_KEYS,
   ZONING_DESC_KEYS,
+  type PayloadDiffField,
+  type PayloadFieldChange,
 } from "../_payloadSummaryHelpers";
-import { summarizeParcelPayload } from "../state/summaries";
+import {
+  PARCEL_PAYLOAD_FIELDS,
+  summarizeParcelPayload,
+} from "../state/summaries";
 
 /** Layer kinds emitted by the local-tier adapters. */
 export type LocalLayerKind =
@@ -173,4 +181,149 @@ export function summarizeLocalPayload(
     default:
       return null;
   }
+}
+
+/**
+ * Per-layer payload-diff field configs for the local-tier adapters.
+ * Each formatter mirrors the wording / units of the inline summary
+ * chip so an architect comparing reruns sees the same vocabulary in
+ * the reveal that they're already familiar with from the row chip.
+ *
+ * Parcel rows reuse {@link PARCEL_PAYLOAD_FIELDS} from the state-tier
+ * config — UGRC, INSIDE Idaho, and the three county parcel adapters
+ * all emit the same `{ kind: "parcel", parcel }` shape, so we point
+ * at the same array rather than duplicating it.
+ */
+const ZONING_PAYLOAD_FIELDS: ReadonlyArray<PayloadDiffField> = [
+  {
+    key: "zoningCode",
+    label: "Zoning code",
+    format: (p) => {
+      const zoning = p["zoning"];
+      if (!isRecord(zoning)) return PAYLOAD_DIFF_NONE;
+      const attrs = isRecord(zoning["attributes"]) ? zoning["attributes"] : {};
+      return pickFirstString(attrs, ZONING_CODE_KEYS) ?? PAYLOAD_DIFF_NONE;
+    },
+  },
+  {
+    key: "zoningDescription",
+    label: "District",
+    format: (p) => {
+      const zoning = p["zoning"];
+      if (!isRecord(zoning)) return PAYLOAD_DIFF_NONE;
+      const attrs = isRecord(zoning["attributes"]) ? zoning["attributes"] : {};
+      return pickFirstString(attrs, ZONING_DESC_KEYS) ?? PAYLOAD_DIFF_NONE;
+    },
+  },
+];
+
+/**
+ * Roads adapters emit one of two shapes depending on whether the
+ * county GIS endpoint was reachable; the diff treats both alike,
+ * counting whichever array is present and surfacing a normalized
+ * source label so a fallback flip from "county-gis" → "osm" reads
+ * as a real change rather than a no-op.
+ */
+function roadsCount(p: Record<string, unknown>): number | null {
+  const features = p["features"];
+  if (Array.isArray(features)) return features.length;
+  const elements = p["elements"];
+  if (Array.isArray(elements)) return elements.length;
+  return null;
+}
+
+function roadsSourceLabel(p: Record<string, unknown>): string {
+  const src = pickString(p["source"]);
+  if (src === "osm") return "OpenStreetMap";
+  if (src === "county-gis") return "County GIS";
+  return src ?? PAYLOAD_DIFF_NONE;
+}
+
+const ROADS_PAYLOAD_FIELDS: ReadonlyArray<PayloadDiffField> = [
+  {
+    key: "roadCount",
+    label: "Road segments",
+    format: (p) => {
+      const count = roadsCount(p);
+      return count === null ? PAYLOAD_DIFF_NONE : String(count);
+    },
+  },
+  {
+    key: "source",
+    label: "Source",
+    format: roadsSourceLabel,
+  },
+];
+
+const FLOODPLAIN_PAYLOAD_FIELDS: ReadonlyArray<PayloadDiffField> = [
+  {
+    key: "inMappedFloodplain",
+    label: "In floodplain",
+    format: (p) => {
+      const v = p["inMappedFloodplain"];
+      if (v === true) return "Yes";
+      if (v === false) return "No";
+      return PAYLOAD_DIFF_NONE;
+    },
+  },
+  {
+    key: "floodZone",
+    label: "Flood zone",
+    format: (p) => {
+      const features = p["features"];
+      if (!Array.isArray(features) || features.length === 0) {
+        return PAYLOAD_DIFF_NONE;
+      }
+      const first = features[0];
+      if (!isRecord(first)) return PAYLOAD_DIFF_NONE;
+      const attrs = isRecord(first["attributes"]) ? first["attributes"] : {};
+      return pickFirstString(attrs, FLOOD_ZONE_KEYS) ?? PAYLOAD_DIFF_NONE;
+    },
+  },
+];
+
+const LOCAL_PAYLOAD_FIELDS: Record<
+  LocalLayerKind,
+  ReadonlyArray<PayloadDiffField>
+> = {
+  "grand-county-ut-parcels": PARCEL_PAYLOAD_FIELDS,
+  "lemhi-county-id-parcels": PARCEL_PAYLOAD_FIELDS,
+  "bastrop-tx-parcels": PARCEL_PAYLOAD_FIELDS,
+  "grand-county-ut-zoning": ZONING_PAYLOAD_FIELDS,
+  "lemhi-county-id-zoning": ZONING_PAYLOAD_FIELDS,
+  "bastrop-tx-zoning": ZONING_PAYLOAD_FIELDS,
+  "grand-county-ut-roads": ROADS_PAYLOAD_FIELDS,
+  "lemhi-county-id-roads": ROADS_PAYLOAD_FIELDS,
+  "bastrop-tx-floodplain": FLOODPLAIN_PAYLOAD_FIELDS,
+};
+
+function isLocalLayerKind(kind: string): kind is LocalLayerKind {
+  return Object.prototype.hasOwnProperty.call(LOCAL_PAYLOAD_FIELDS, kind);
+}
+
+/**
+ * Diff a prior local-adapter payload against the current row's
+ * payload. See `diffStatePayload` / `diffFederalPayload` for the
+ * shared contract — same `null` semantics for non-local layer kinds,
+ * non-record payloads, mismatched payload `kind`s; returns an empty
+ * array when the kinds match and every key formats identically.
+ */
+export function diffLocalPayload(
+  layerKind: string,
+  priorPayload: unknown,
+  currentPayload: unknown,
+): PayloadFieldChange[] | null {
+  if (!isLocalLayerKind(layerKind)) return null;
+  if (!isRecord(priorPayload) || !isRecord(currentPayload)) return null;
+  const priorKind = priorPayload["kind"];
+  const currentKind = currentPayload["kind"];
+  if (typeof priorKind !== "string" || typeof currentKind !== "string") {
+    return null;
+  }
+  if (priorKind !== currentKind) return null;
+  return diffPayloadByFields(
+    LOCAL_PAYLOAD_FIELDS[layerKind],
+    priorPayload,
+    currentPayload,
+  );
 }

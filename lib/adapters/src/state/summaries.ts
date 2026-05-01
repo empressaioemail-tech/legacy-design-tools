@@ -20,13 +20,20 @@
  */
 
 import {
+  ADDRESS_FULL_KEYS,
+  ADDRESS_NUMBER_KEYS,
+  ADDRESS_STREET_KEYS,
+  diffPayloadByFields,
   formatAcres,
   isRecord,
+  PARCEL_ACRES_KEYS,
+  PARCEL_ID_KEYS,
+  PAYLOAD_DIFF_NONE,
   pickFirstNumber,
   pickFirstString,
   pickNumber,
-  PARCEL_ACRES_KEYS,
-  PARCEL_ID_KEYS,
+  type PayloadDiffField,
+  type PayloadFieldChange,
 } from "../_payloadSummaryHelpers";
 
 /** Layer kinds emitted by the state-tier adapters. */
@@ -112,6 +119,25 @@ export function summarizeParcelPayload(payload: unknown): string | null {
  *   - only number+street:              "Address: 100 Main St" (reconstructed)
  *   - neither:                         "Address point present"
  */
+/**
+ * Pull the best-available address string out of an address-point
+ * feature's attributes, applying the same ranked-key fallbacks used
+ * by the inline summary chip. Returns `null` when none of the
+ * candidate columns produce a usable string.
+ */
+function extractAddressString(
+  feature: Record<string, unknown>,
+): string | null {
+  const attrs = isRecord(feature["attributes"]) ? feature["attributes"] : {};
+  const fullAddress = pickFirstString(attrs, ADDRESS_FULL_KEYS);
+  if (fullAddress) return fullAddress;
+  const number = pickFirstString(attrs, ADDRESS_NUMBER_KEYS);
+  const street = pickFirstString(attrs, ADDRESS_STREET_KEYS);
+  if (number && street) return `${number} ${street}`;
+  if (street) return street;
+  return null;
+}
+
 export function summarizeAddressPointPayload(
   payload: unknown,
 ): string | null {
@@ -119,33 +145,8 @@ export function summarizeAddressPointPayload(
   if (payload["kind"] !== "address-point") return null;
   const feature = payload["feature"];
   if (!isRecord(feature)) return "Address point present";
-  const attrs = isRecord(feature["attributes"]) ? feature["attributes"] : {};
-  const fullAddress = pickFirstString(attrs, [
-    "FullAdd",
-    "FullAddress",
-    "FULL_ADDR",
-    "FULLADDR",
-    "ADDRESS",
-    "Address",
-    "SiteAddress",
-    "SITEADDR",
-  ]);
-  if (fullAddress) return `Address: ${fullAddress}`;
-  const number = pickFirstString(attrs, [
-    "AddNum",
-    "ADD_NUM",
-    "STREET_NUMBER",
-    "HouseNumber",
-    "HOUSE_NO",
-  ]);
-  const street = pickFirstString(attrs, [
-    "StreetName",
-    "STREET",
-    "STR_NAME",
-    "STNAME",
-  ]);
-  if (number && street) return `Address: ${number} ${street}`;
-  if (street) return `Address: ${street}`;
+  const address = extractAddressString(feature);
+  if (address) return `Address: ${address}`;
   return "Address point present";
 }
 
@@ -202,5 +203,159 @@ export function summarizeStatePayload(
     default:
       return null;
   }
+}
+
+/**
+ * Field config for the shared parcel payload (UGRC, INSIDE Idaho, and
+ * every county parcel adapter all emit `{ kind: "parcel", parcel }`).
+ *
+ * Exported so the local-tier diff can reuse exactly the same field
+ * order/labels — duplicating the config here would risk drift between
+ * the state row reveal and the local row reveal for what is, from the
+ * payload's perspective, the same shape.
+ */
+export const PARCEL_PAYLOAD_FIELDS: ReadonlyArray<PayloadDiffField> = [
+  {
+    key: "parcelPresent",
+    label: "Parcel polygon",
+    format: (p) => {
+      const parcel = p["parcel"];
+      // The producers explicitly persist `null` for points that fall
+      // on public land (no parcel polygon). Treat `undefined` the same
+      // way so a malformed payload doesn't show a confusing "Yes" row.
+      if (parcel === null || parcel === undefined) return "None (public land)";
+      if (!isRecord(parcel)) return PAYLOAD_DIFF_NONE;
+      return "Present";
+    },
+  },
+  {
+    key: "parcelId",
+    label: "Parcel ID",
+    format: (p) => {
+      const parcel = p["parcel"];
+      if (!isRecord(parcel)) return PAYLOAD_DIFF_NONE;
+      const attrs = isRecord(parcel["attributes"]) ? parcel["attributes"] : {};
+      return pickFirstString(attrs, PARCEL_ID_KEYS) ?? PAYLOAD_DIFF_NONE;
+    },
+  },
+  {
+    key: "parcelAcres",
+    label: "Acres",
+    format: (p) => {
+      const parcel = p["parcel"];
+      if (!isRecord(parcel)) return PAYLOAD_DIFF_NONE;
+      const attrs = isRecord(parcel["attributes"]) ? parcel["attributes"] : {};
+      const acres = pickFirstNumber(attrs, PARCEL_ACRES_KEYS);
+      return acres === null ? PAYLOAD_DIFF_NONE : formatAcres(acres);
+    },
+  },
+];
+
+/**
+ * Per-layer field readers keyed by `StateLayerKind`. The list defines
+ * the order of rows in the "Payload changes" reveal and each formatter
+ * mirrors the corresponding inline summary chip's wording / units so
+ * the rerun delta reads consistently with the row's existing chip.
+ */
+const ELEVATION_CONTOURS_FIELDS: ReadonlyArray<PayloadDiffField> = [
+  {
+    key: "featureCount",
+    label: "Contours nearby",
+    format: (p) => {
+      // Same fallback chain as the chip — prefer the explicit count,
+      // fall back to the array length so a payload missing the
+      // count still produces a useful diff value.
+      const count =
+        pickNumber(p["featureCount"]) ??
+        (Array.isArray(p["features"]) ? p["features"].length : null);
+      return count === null ? PAYLOAD_DIFF_NONE : String(Math.round(count));
+    },
+  },
+];
+
+const STATE_PAYLOAD_FIELDS: Record<
+  StateLayerKind,
+  ReadonlyArray<PayloadDiffField>
+> = {
+  "ugrc-dem": ELEVATION_CONTOURS_FIELDS,
+  "inside-idaho-dem": ELEVATION_CONTOURS_FIELDS,
+  "ugrc-parcels": PARCEL_PAYLOAD_FIELDS,
+  "inside-idaho-parcels": PARCEL_PAYLOAD_FIELDS,
+  "ugrc-address-points": [
+    {
+      key: "address",
+      label: "Address",
+      format: (p) => {
+        const feature = p["feature"];
+        if (!isRecord(feature)) return PAYLOAD_DIFF_NONE;
+        return extractAddressString(feature) ?? PAYLOAD_DIFF_NONE;
+      },
+    },
+  ],
+  "tceq-edwards-aquifer": [
+    {
+      key: "inRecharge",
+      label: "Recharge zone",
+      format: (p) => {
+        const v = p["inRecharge"];
+        if (v === true) return "Yes";
+        if (v === false) return "No";
+        return PAYLOAD_DIFF_NONE;
+      },
+    },
+    {
+      key: "inContributing",
+      label: "Contributing zone",
+      format: (p) => {
+        const v = p["inContributing"];
+        if (v === true) return "Yes";
+        if (v === false) return "No";
+        return PAYLOAD_DIFF_NONE;
+      },
+    },
+  ],
+};
+
+function isStateLayerKind(kind: string): kind is StateLayerKind {
+  return Object.prototype.hasOwnProperty.call(STATE_PAYLOAD_FIELDS, kind);
+}
+
+/**
+ * Diff a prior state-adapter payload against the current row's
+ * payload, returning one {@link PayloadFieldChange} per payload key
+ * whose formatted value moved between the two reruns.
+ *
+ * Mirrors `diffFederalPayload`'s contract:
+ *
+ *   - returns `null` when `layerKind` is not a state-tier adapter
+ *     (callers should fall through to `diffLocalPayload`);
+ *   - returns `null` when either side's payload is not an object;
+ *   - returns `null` when the two payload `kind` discriminants
+ *     differ (a `parcel` ↔ `elevation-contours` comparison would
+ *     just emit a wall of garbage rows; the architect should look
+ *     at "View layer details" on both sides instead);
+ *   - returns an empty array when the kinds match and every key
+ *     formats to the same string — the caller suppresses the
+ *     subsection so we don't show an empty "Payload changes" heading
+ *     on a true byte-identical rerun.
+ */
+export function diffStatePayload(
+  layerKind: string,
+  priorPayload: unknown,
+  currentPayload: unknown,
+): PayloadFieldChange[] | null {
+  if (!isStateLayerKind(layerKind)) return null;
+  if (!isRecord(priorPayload) || !isRecord(currentPayload)) return null;
+  const priorKind = priorPayload["kind"];
+  const currentKind = currentPayload["kind"];
+  if (typeof priorKind !== "string" || typeof currentKind !== "string") {
+    return null;
+  }
+  if (priorKind !== currentKind) return null;
+  return diffPayloadByFields(
+    STATE_PAYLOAD_FIELDS[layerKind],
+    priorPayload,
+    currentPayload,
+  );
 }
 

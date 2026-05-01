@@ -124,3 +124,110 @@ export const ZONING_DESC_KEYS = [
   "ZONE_NAME",
   "ZONE_LABEL",
 ] as const;
+
+/** Common full-street-address column names used by address-point layers. */
+export const ADDRESS_FULL_KEYS = [
+  "FullAdd",
+  "FullAddress",
+  "FULL_ADDR",
+  "FULLADDR",
+  "ADDRESS",
+  "Address",
+  "SiteAddress",
+  "SITEADDR",
+] as const;
+
+/** Common house-number column names used when reconstructing an address. */
+export const ADDRESS_NUMBER_KEYS = [
+  "AddNum",
+  "ADD_NUM",
+  "STREET_NUMBER",
+  "HouseNumber",
+  "HOUSE_NO",
+] as const;
+
+/** Common street-name column names used when reconstructing an address. */
+export const ADDRESS_STREET_KEYS = [
+  "StreetName",
+  "STREET",
+  "STR_NAME",
+  "STNAME",
+] as const;
+
+/** Common FEMA-derived flood-zone column names on county floodplain layers. */
+export const FLOOD_ZONE_KEYS = [
+  "FLD_ZONE",
+  "ZONE",
+  "FloodZone",
+  "FLOOD_ZONE",
+] as const;
+
+/**
+ * "(none)" mirrors the wording the engagement-detail metadata diff
+ * already uses for missing fields, so a per-key payload reveal reads
+ * consistently with the metadata table directly above it. State and
+ * local payload diffs share this constant with the federal diff.
+ */
+export const PAYLOAD_DIFF_NONE = "(none)";
+
+/**
+ * One per-key payload delta surfaced by a tier-specific `diff*Payload`
+ * helper. `key` is the underlying payload property name (stable, used
+ * as a test-id and React key); `label` is the reader-friendly heading
+ * the UI shows next to the before/after pair.
+ *
+ * The federal diff exposes its own structurally-identical
+ * `FederalPayloadFieldChange` for backwards compatibility — both
+ * shapes are intentionally interchangeable from the UI's perspective.
+ */
+export interface PayloadFieldChange {
+  key: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
+/**
+ * One field config consumed by {@link diffPayloadByFields}. `key` is
+ * the property name on the payload (stable, used as a test-id);
+ * `label` is the heading shown in the reveal; `format` reads the
+ * (validated-as-record) payload and returns a string identical in
+ * shape/units to the inline summary chip.
+ */
+export interface PayloadDiffField {
+  key: string;
+  label: string;
+  format: (payload: Record<string, unknown>) => string;
+}
+
+/**
+ * Diff a prior-payload against the current-payload by walking a
+ * declared field list. Returns one {@link PayloadFieldChange} per
+ * field whose formatted value moved. The caller is responsible for:
+ *
+ *   - validating that both payloads are records (state/local payload
+ *     `kind`s vary; the per-tier dispatcher handles `kind`-mismatch
+ *     and non-record short-circuits before delegating here);
+ *   - deciding what to do with an empty array (the engagement-detail
+ *     UI suppresses the "Payload changes" subsection when nothing
+ *     moved so an architect isn't shown an empty heading).
+ *
+ * Iteration order is the field list's order — this is what the UI
+ * uses to lay out rows top-down, so list fields in the same order
+ * the inline summary chip composes its parts.
+ */
+export function diffPayloadByFields(
+  fields: ReadonlyArray<PayloadDiffField>,
+  priorPayload: Record<string, unknown>,
+  currentPayload: Record<string, unknown>,
+): PayloadFieldChange[] {
+  const changes: PayloadFieldChange[] = [];
+  for (const f of fields) {
+    const before = f.format(priorPayload);
+    const after = f.format(currentPayload);
+    if (before !== after) {
+      changes.push({ key: f.key, label: f.label, before, after });
+    }
+  }
+  return changes;
+}

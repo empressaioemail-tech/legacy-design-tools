@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  diffStatePayload,
   summarizeAddressPointPayload,
   summarizeEdwardsAquiferPayload,
   summarizeElevationContoursPayload,
@@ -283,6 +284,197 @@ describe("summarizeStatePayload (registry)", () => {
       summarizeStatePayload("grand-county-ut-zoning", {
         kind: "zoning",
       }),
+    ).toBeNull();
+  });
+});
+
+describe("diffStatePayload", () => {
+  it("returns one entry per moved key for an elevation-contours rerun", () => {
+    const changes = diffStatePayload(
+      "ugrc-dem",
+      { kind: "elevation-contours", featureCount: 3, features: [] },
+      { kind: "elevation-contours", featureCount: 5, features: [] },
+    );
+    expect(changes).toEqual([
+      {
+        key: "featureCount",
+        label: "Contours nearby",
+        before: "3",
+        after: "5",
+      },
+    ]);
+  });
+
+  it("falls back to the array length when featureCount is missing (mirrors the chip)", () => {
+    const changes = diffStatePayload(
+      "inside-idaho-dem",
+      { kind: "elevation-contours", features: [{}, {}] },
+      { kind: "elevation-contours", features: [{}, {}, {}, {}] },
+    );
+    expect(changes).toEqual([
+      {
+        key: "featureCount",
+        label: "Contours nearby",
+        before: "2",
+        after: "4",
+      },
+    ]);
+  });
+
+  it("surfaces parcelPresent flipping to public-land + drops Parcel ID/Acres rows", () => {
+    // A rerun that lost the parcel polygon (e.g. UGRC dropped the
+    // sliver between two adjoining lots) should call out the
+    // presence move plus the now-missing id/acres rather than
+    // silently emitting "(none)" without context.
+    const changes = diffStatePayload(
+      "ugrc-parcels",
+      {
+        kind: "parcel",
+        parcel: { attributes: { PARCEL_ID: "01-12345", ACRES: 0.42 } },
+      },
+      { kind: "parcel", parcel: null, note: "no-parcel-at-point" },
+    );
+    expect(changes).toEqual([
+      {
+        key: "parcelPresent",
+        label: "Parcel polygon",
+        before: "Present",
+        after: "None (public land)",
+      },
+      {
+        key: "parcelId",
+        label: "Parcel ID",
+        before: "01-12345",
+        after: "(none)",
+      },
+      {
+        key: "parcelAcres",
+        label: "Acres",
+        before: "0.42 ac",
+        after: "(none)",
+      },
+    ]);
+  });
+
+  it("formats the acres delta with the same units as the inline summary chip", () => {
+    const changes = diffStatePayload(
+      "inside-idaho-parcels",
+      { kind: "parcel", parcel: { attributes: { APN: "I-1", ACRES: 0.42 } } },
+      { kind: "parcel", parcel: { attributes: { APN: "I-1", ACRES: 1.5 } } },
+    );
+    expect(changes).toEqual([
+      {
+        key: "parcelAcres",
+        label: "Acres",
+        before: "0.42 ac",
+        after: "1.5 ac",
+      },
+    ]);
+  });
+
+  it("surfaces an address change for a UGRC address-point rerun", () => {
+    const changes = diffStatePayload(
+      "ugrc-address-points",
+      {
+        kind: "address-point",
+        feature: { attributes: { FullAdd: "100 Main St" } },
+      },
+      {
+        kind: "address-point",
+        feature: { attributes: { FullAdd: "102 Main St" } },
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "address",
+        label: "Address",
+        before: "100 Main St",
+        after: "102 Main St",
+      },
+    ]);
+  });
+
+  it("emits Yes/No deltas for the Edwards Aquifer recharge + contributing flags", () => {
+    const changes = diffStatePayload(
+      "tceq-edwards-aquifer",
+      {
+        kind: "edwards-aquifer",
+        inRecharge: true,
+        inContributing: false,
+      },
+      {
+        kind: "edwards-aquifer",
+        inRecharge: false,
+        inContributing: true,
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "inRecharge",
+        label: "Recharge zone",
+        before: "Yes",
+        after: "No",
+      },
+      {
+        key: "inContributing",
+        label: "Contributing zone",
+        before: "No",
+        after: "Yes",
+      },
+    ]);
+  });
+
+  it("returns an empty array when every key formats identically (true no-op rerun)", () => {
+    const payload = {
+      kind: "parcel",
+      parcel: { attributes: { PARCEL_ID: "01-12345", ACRES: 0.42 } },
+    };
+    expect(
+      diffStatePayload("ugrc-parcels", payload, { ...payload }),
+    ).toEqual([]);
+  });
+
+  it("returns null when the payload kinds differ between reruns", () => {
+    expect(
+      diffStatePayload(
+        "ugrc-parcels",
+        { kind: "parcel", parcel: null },
+        { kind: "elevation-contours", featureCount: 1, features: [{}] },
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when either payload is malformed", () => {
+    expect(
+      diffStatePayload(
+        "ugrc-parcels",
+        null,
+        { kind: "parcel", parcel: null },
+      ),
+    ).toBeNull();
+    expect(
+      diffStatePayload(
+        "ugrc-parcels",
+        { parcel: null },
+        { kind: "parcel", parcel: null },
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for non-state layer kinds (federal/local rows are skipped)", () => {
+    expect(
+      diffStatePayload(
+        "fema-nfhl-flood-zone",
+        { kind: "flood-zone", floodZone: "AE" },
+        { kind: "flood-zone", floodZone: "X" },
+      ),
+    ).toBeNull();
+    expect(
+      diffStatePayload(
+        "grand-county-ut-zoning",
+        { kind: "zoning", zoning: { attributes: { ZONE_CODE: "R-1" } } },
+        { kind: "zoning", zoning: { attributes: { ZONE_CODE: "R-2" } } },
+      ),
     ).toBeNull();
   });
 });

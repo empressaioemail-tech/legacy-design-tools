@@ -967,6 +967,162 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     ).toBe("2026-01-01");
   });
 
+  it("reveals a 'Payload changes' subsection for a state-adapter (UGRC parcels) rerun (Task #223)", () => {
+    // UGRC parcel rerun: the parcel polygon was redrawn so PARCEL_ID
+    // stayed put but ACRES moved (county re-survey). Both rows are
+    // tagged `state-adapter` so the diff routes through
+    // `diffStatePayload` rather than the federal helper.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "ugrc-parcels",
+      sourceKind: "state-adapter",
+      provider: "Utah Geospatial Resource Center (UGRC)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload: {
+        kind: "parcel",
+        parcel: { attributes: { PARCEL_ID: "01-12345", ACRES: 0.5 } },
+      },
+    });
+    const prior = mkSource({
+      id: "src-prior-ugrc",
+      layerKind: "ugrc-parcels",
+      sourceKind: "state-adapter",
+      provider: "Utah Geospatial Resource Center (UGRC)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-01-01T00:00:00.000Z",
+      payload: {
+        kind: "parcel",
+        parcel: { attributes: { PARCEL_ID: "01-12345", ACRES: 0.42 } },
+      },
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    // Hint pulls in the snapshotDate metadata move + the Acres
+    // payload label so a payload-only rerun (snapshotDate unchanged
+    // but the polygon shifted) would still surface in the chip.
+    expect(hint.textContent).toContain("snapshotDate");
+    expect(hint.textContent).toContain("Acres");
+    // PARCEL_ID didn't move so its label shouldn't leak in.
+    expect(hint.textContent).not.toContain("Parcel ID");
+
+    fireEvent.click(hint);
+
+    const subsection = screen.getByTestId(
+      `briefing-source-history-row-payload-changes-${prior.id}`,
+    );
+    expect(within(subsection).getByText(/Payload changes/i)).toBeInTheDocument();
+
+    // Acres moved with the same chip-formatting (formatAcres) as the
+    // inline summary chip — 0.42 stays "0.42 ac", 0.5 collapses to
+    // "0.5 ac".
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-parcelAcres-${prior.id}`,
+      ).textContent,
+    ).toBe("0.42 ac");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-parcelAcres-${prior.id}`,
+      ).textContent,
+    ).toBe("0.5 ac");
+
+    // PARCEL_ID stayed identical — its row must not be in the reveal
+    // (otherwise an architect would have to re-read the same value
+    // on both sides for no benefit).
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-payload-before-parcelId-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reveals a 'Payload changes' subsection for a local-adapter (Bastrop floodplain) rerun (Task #223)", () => {
+    // Bastrop floodplain rerun: the parcel was redesignated into a
+    // mapped FEMA floodplain (Zone AE) between runs. Both rows are
+    // tagged `local-adapter` so the diff routes through
+    // `diffLocalPayload`. snapshotDate stays put — this is a
+    // payload-only move, exercising the case where the metadata
+    // diff alone wouldn't open the reveal.
+    const sharedSnapshot = "2026-04-15T00:00:00.000Z";
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "bastrop-tx-floodplain",
+      sourceKind: "local-adapter",
+      provider: "Bastrop County, TX GIS (FEMA-derived floodplain)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: sharedSnapshot,
+      payload: {
+        kind: "floodplain",
+        inMappedFloodplain: true,
+        features: [{ attributes: { FLD_ZONE: "AE" } }],
+      },
+    });
+    const prior = mkSource({
+      id: "src-prior-bastrop",
+      layerKind: "bastrop-tx-floodplain",
+      sourceKind: "local-adapter",
+      provider: "Bastrop County, TX GIS (FEMA-derived floodplain)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: sharedSnapshot,
+      payload: {
+        kind: "floodplain",
+        inMappedFloodplain: false,
+        features: [],
+      },
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    // Metadata didn't move — the hint must still appear because the
+    // payload diff surfaced two real changes.
+    expect(hint.textContent).not.toContain("snapshotDate");
+    expect(hint.textContent).toContain("In floodplain");
+    expect(hint.textContent).toContain("Flood zone");
+
+    fireEvent.click(hint);
+
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-inMappedFloodplain-${prior.id}`,
+      ).textContent,
+    ).toBe("No");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-inMappedFloodplain-${prior.id}`,
+      ).textContent,
+    ).toBe("Yes");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-floodZone-${prior.id}`,
+      ).textContent,
+    ).toBe("(none)");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-floodZone-${prior.id}`,
+      ).textContent,
+    ).toBe("AE");
+  });
+
   it("does NOT render the 'Payload changes' subsection when the federal payload is identical between reruns (Task #211)", () => {
     // snapshotDate moved (so the reveal still opens via the existing
     // metadata diff) but every payload key formats identically — the

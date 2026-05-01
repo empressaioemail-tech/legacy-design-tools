@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  diffLocalPayload,
   summarizeFloodplainPayload,
   summarizeLocalPayload,
   summarizeRoadsPayload,
@@ -219,6 +220,173 @@ describe("summarizeLocalPayload (registry)", () => {
         kind: "parcel",
         parcel: null,
       }),
+    ).toBeNull();
+  });
+});
+
+describe("diffLocalPayload", () => {
+  it("emits zoning code + district deltas for a county zoning rerun", () => {
+    const changes = diffLocalPayload(
+      "grand-county-ut-zoning",
+      {
+        kind: "zoning",
+        zoning: {
+          attributes: { ZONE_CODE: "R-1", ZONE_DESC: "Single-Family Residential" },
+        },
+      },
+      {
+        kind: "zoning",
+        zoning: {
+          attributes: { ZONE_CODE: "R-2", ZONE_DESC: "Two-Family Residential" },
+        },
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "zoningCode",
+        label: "Zoning code",
+        before: "R-1",
+        after: "R-2",
+      },
+      {
+        key: "zoningDescription",
+        label: "District",
+        before: "Single-Family Residential",
+        after: "Two-Family Residential",
+      },
+    ]);
+  });
+
+  it("calls out a roads source flip from county GIS to OSM with a normalized label", () => {
+    const changes = diffLocalPayload(
+      "grand-county-ut-roads",
+      { kind: "roads", source: "county-gis", features: [{}, {}, {}] },
+      {
+        kind: "roads",
+        source: "osm",
+        radiusMeters: 100,
+        elements: [{}, {}],
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "roadCount",
+        label: "Road segments",
+        before: "3",
+        after: "2",
+      },
+      {
+        key: "source",
+        label: "Source",
+        before: "County GIS",
+        after: "OpenStreetMap",
+      },
+    ]);
+  });
+
+  it("reuses the shared parcel field config for the county parcel layers", () => {
+    const changes = diffLocalPayload(
+      "bastrop-tx-parcels",
+      {
+        kind: "parcel",
+        parcel: { attributes: { PARCEL_ID: "B-1", ACRES: 5 } },
+      },
+      {
+        kind: "parcel",
+        parcel: { attributes: { PARCEL_ID: "B-1", ACRES: 7.5 } },
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "parcelAcres",
+        label: "Acres",
+        before: "5 ac",
+        after: "7.5 ac",
+      },
+    ]);
+  });
+
+  it("surfaces a Bastrop floodplain rerun moving into a mapped FEMA zone", () => {
+    const changes = diffLocalPayload(
+      "bastrop-tx-floodplain",
+      {
+        kind: "floodplain",
+        inMappedFloodplain: false,
+        features: [],
+      },
+      {
+        kind: "floodplain",
+        inMappedFloodplain: true,
+        features: [{ attributes: { FLD_ZONE: "AE" } }],
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "inMappedFloodplain",
+        label: "In floodplain",
+        before: "No",
+        after: "Yes",
+      },
+      {
+        key: "floodZone",
+        label: "Flood zone",
+        before: "(none)",
+        after: "AE",
+      },
+    ]);
+  });
+
+  it("returns an empty array when every key formats identically (true no-op rerun)", () => {
+    const payload = {
+      kind: "zoning",
+      zoning: { attributes: { ZONE_CODE: "R-1", ZONE_DESC: "Residential" } },
+    };
+    expect(
+      diffLocalPayload("grand-county-ut-zoning", payload, { ...payload }),
+    ).toEqual([]);
+  });
+
+  it("returns null when the payload kinds differ between reruns", () => {
+    expect(
+      diffLocalPayload(
+        "bastrop-tx-floodplain",
+        { kind: "floodplain", inMappedFloodplain: false, features: [] },
+        { kind: "zoning", zoning: { attributes: {} } },
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when either payload is malformed", () => {
+    expect(
+      diffLocalPayload(
+        "grand-county-ut-zoning",
+        null,
+        { kind: "zoning", zoning: { attributes: {} } },
+      ),
+    ).toBeNull();
+    expect(
+      diffLocalPayload(
+        "grand-county-ut-zoning",
+        { zoning: null },
+        { kind: "zoning", zoning: null },
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for non-local layer kinds (federal/state rows are skipped)", () => {
+    expect(
+      diffLocalPayload(
+        "fema-nfhl-flood-zone",
+        { kind: "flood-zone", floodZone: "AE" },
+        { kind: "flood-zone", floodZone: "X" },
+      ),
+    ).toBeNull();
+    expect(
+      diffLocalPayload(
+        "ugrc-parcels",
+        { kind: "parcel", parcel: null },
+        { kind: "parcel", parcel: { attributes: {} } },
+      ),
     ).toBeNull();
   });
 });

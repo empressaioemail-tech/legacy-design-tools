@@ -42,8 +42,14 @@ import {
   diffFederalPayload,
   summarizeFederalPayload,
 } from "@workspace/adapters/federal/summaries";
-import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
-import { summarizeLocalPayload } from "@workspace/adapters/local/summaries";
+import {
+  diffStatePayload,
+  summarizeStatePayload,
+} from "@workspace/adapters/state/summaries";
+import {
+  diffLocalPayload,
+  summarizeLocalPayload,
+} from "@workspace/adapters/local/summaries";
 import { PILOT_JURISDICTIONS } from "@workspace/adapters";
 import type { SheetSummary } from "@workspace/api-client-react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
@@ -1628,28 +1634,46 @@ export function BriefingSourceHistoryPanel({
           priorIsAdapter && currentSource
             ? diffBriefingSourceFields(prior, currentSource)
             : [];
-        // Federal-tier rows carry a structured `payload` blob whose
-        // per-key contents (FEMA flood zone, USGS elevation, …) drive
-        // the design downstream. The metadata-only diff above misses
-        // those moves, so for federal prior rows whose payload `kind`
-        // matches the current row we also surface a "Payload changes"
-        // subsection inside the reveal (Task #211). State/local rows
-        // are skipped — `diffFederalPayload` returns null for any
-        // non-federal `layerKind`, so the subsection silently turns
-        // off for them. An empty array (kinds match, every value is
-        // identical) also suppresses the subsection so we don't show
-        // an empty "Payload changes" heading on a true no-op rerun.
-        const payloadChanges =
+        // Adapter rows carry a structured `payload` blob whose per-key
+        // contents (FEMA flood zone, UGRC parcel ID, county zoning
+        // code, …) drive the design downstream. The metadata-only
+        // diff above misses those moves, so for adapter prior rows
+        // whose tier matches the current row we also surface a
+        // "Payload changes" subsection inside the reveal. The
+        // federal/state/local diff helpers each return null for any
+        // layer kind outside their tier, so we walk the matching tier
+        // first and fall through if the layer kind isn't recognized
+        // (manual-upload prior rows skip the whole computation —
+        // their payload is `{}` so no comparison is meaningful).
+        // An empty array (kinds match, every value is identical) also
+        // suppresses the subsection so we don't show an empty
+        // "Payload changes" heading on a true no-op rerun.
+        let payloadChanges: ReturnType<typeof diffFederalPayload> = null;
+        if (
           priorIsAdapter &&
           currentSource &&
-          prior.sourceKind === "federal-adapter" &&
-          currentSource.sourceKind === "federal-adapter"
-            ? diffFederalPayload(
-                prior.layerKind,
-                prior.payload,
-                currentSource.payload,
-              )
-            : null;
+          prior.sourceKind === currentSource.sourceKind
+        ) {
+          if (prior.sourceKind === "federal-adapter") {
+            payloadChanges = diffFederalPayload(
+              prior.layerKind,
+              prior.payload,
+              currentSource.payload,
+            );
+          } else if (prior.sourceKind === "state-adapter") {
+            payloadChanges = diffStatePayload(
+              prior.layerKind,
+              prior.payload,
+              currentSource.payload,
+            );
+          } else if (prior.sourceKind === "local-adapter") {
+            payloadChanges = diffLocalPayload(
+              prior.layerKind,
+              prior.payload,
+              currentSource.payload,
+            );
+          }
+        }
         const hasPayloadChanges =
           payloadChanges !== null && payloadChanges.length > 0;
         // Hint label combines the metadata field names with the
