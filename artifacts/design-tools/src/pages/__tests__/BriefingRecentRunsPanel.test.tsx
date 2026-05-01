@@ -788,6 +788,130 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     ).toHaveLength(4);
   });
 
+  // Task #276 — surface a per-bucket tally next to each chip so an
+  // auditor can decide whether narrowing to that bucket is worth the
+  // click. The test pins two things:
+  //
+  //   1. Each chip renders a numeric count alongside its label, and
+  //      each count matches the number of rows that would be visible
+  //      if that filter were active. Asserted by reading the count
+  //      directly off the chip and then activating the filter and
+  //      counting the resulting list rows.
+  //   2. Counts update live when the runs list changes — pushing a
+  //      new failed row and re-fetching causes the Failed chip's
+  //      count to step from 1 → 2 without a re-mount of the panel.
+  it("renders a per-bucket count on each filter chip and keeps the counts in sync with the visible rows", async () => {
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-pending",
+        state: "pending",
+        startedAt: "2026-04-04T10:00:00.000Z",
+        completedAt: null,
+      }),
+      makeRun({
+        generationId: "gen-completed-clean",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+      makeRun({
+        generationId: "gen-completed-invalid-a",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:05.000Z",
+        invalidCitationCount: 2,
+      }),
+      makeRun({
+        generationId: "gen-completed-invalid-b",
+        state: "completed",
+        startedAt: "2026-04-02T09:00:00.000Z",
+        completedAt: "2026-04-02T09:00:05.000Z",
+        invalidCitationCount: 1,
+      }),
+      makeRun({
+        generationId: "gen-failed",
+        state: "failed",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        completedAt: "2026-04-01T10:00:03.000Z",
+        error: "OpenAI 503 — upstream unavailable",
+      }),
+    ];
+
+    const { client } = renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    await screen.findByTestId("briefing-recent-runs-list");
+
+    // The chip counts should reflect the seeded fixture: 5 total,
+    // 1 failed, 2 with invalid citations.
+    expect(
+      screen.getByTestId("briefing-recent-runs-filter-all-count"),
+    ).toHaveTextContent("(5)");
+    expect(
+      screen.getByTestId("briefing-recent-runs-filter-failed-count"),
+    ).toHaveTextContent("(1)");
+    expect(
+      screen.getByTestId("briefing-recent-runs-filter-invalid-count"),
+    ).toHaveTextContent("(2)");
+
+    // Each chip's count must equal the number of rows the
+    // corresponding filter actually shows when active. Walk every
+    // chip → activate → assert row count → return to All.
+    for (const bucket of ["all", "failed", "invalid"] as const) {
+      const expected = Number(
+        (
+          screen
+            .getByTestId(`briefing-recent-runs-filter-${bucket}-count`)
+            .textContent ?? ""
+        ).replace(/[()]/g, ""),
+      );
+      fireEvent.click(
+        screen.getByTestId(`briefing-recent-runs-filter-${bucket}`),
+      );
+      const list = screen.queryByTestId("briefing-recent-runs-list");
+      const actual = list ? within(list).getAllByRole("listitem").length : 0;
+      expect(actual).toBe(expected);
+    }
+    // Land back on All so the next assertion sees the full list.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-all"));
+
+    // Push a brand-new failed row and force the runs query to
+    // refetch — the Failed chip's count must step from 1 → 2 live,
+    // without remounting the panel. We use the same query
+    // invalidation path the kickoff `onSuccess` exercises so this
+    // test pins the live-update behavior end to end.
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-failed-2",
+        state: "failed",
+        startedAt: "2026-04-05T10:00:00.000Z",
+        completedAt: "2026-04-05T10:00:03.000Z",
+        error: "OpenAI 503 — upstream unavailable",
+      }),
+      ...hoisted.runs,
+    ];
+    await act(async () => {
+      await client.invalidateQueries({
+        queryKey: [
+          "listEngagementBriefingGenerationRuns",
+          hoisted.engagement.id,
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("briefing-recent-runs-filter-all-count"),
+      ).toHaveTextContent("(6)");
+      expect(
+        screen.getByTestId("briefing-recent-runs-filter-failed-count"),
+      ).toHaveTextContent("(2)");
+      expect(
+        screen.getByTestId("briefing-recent-runs-filter-invalid-count"),
+      ).toHaveTextContent("(2)");
+    });
+  });
+
   it("switches the empty-state copy to 'No runs match this filter' when the active filter narrows the list to zero", async () => {
     // A single completed-with-no-invalid-citations row — neither the
     // Failed nor the Has-invalid-citations filter will match it, so

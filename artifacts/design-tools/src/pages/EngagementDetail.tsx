@@ -3031,6 +3031,24 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
   const runs = runsQuery.data?.runs ?? [];
   const count = runs.length;
   type RecentRun = (typeof runs)[number];
+  // Task #276 — pre-compute the per-bucket tallies so each filter chip
+  // can render a count alongside its label. Surfacing the count means
+  // an auditor can see at a glance whether the comparison-of-attempts
+  // story is even worth opening, instead of clicking each chip just
+  // to discover the empty-state copy. The buckets stay in sync with
+  // the predicate below by using the same conditions.
+  const failedCount = runs.filter(
+    (run: RecentRun) => run.state === "failed",
+  ).length;
+  const invalidCount = runs.filter(
+    (run: RecentRun) =>
+      run.state === "completed" && (run.invalidCitationCount ?? 0) > 0,
+  ).length;
+  const filterCounts: Record<RecentRunsFilter, number> = {
+    all: count,
+    failed: failedCount,
+    invalid: invalidCount,
+  };
   const visibleRuns = runs.filter((run: RecentRun) => {
     if (filter === "failed") return run.state === "failed";
     if (filter === "invalid") {
@@ -3136,6 +3154,7 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
                 ] as const
               ).map((opt) => {
                 const active = filter === opt.key;
+                const bucketCount = filterCounts[opt.key];
                 return (
                   <button
                     key={opt.key}
@@ -3163,7 +3182,23 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
                       cursor: "pointer",
                     }}
                   >
-                    {opt.label}
+                    {opt.label}{" "}
+                    {/*
+                      Task #276 — render the matching-run count next to
+                      each chip's label so an auditor can see at a glance
+                      whether narrowing to that bucket would surface
+                      anything (e.g. "Failed (0)" warns the auditor not
+                      to bother clicking through to the empty-state).
+                      The count tracks the same predicate the active
+                      filter applies, so the displayed number always
+                      matches the row count the auditor would see.
+                    */}
+                    <span
+                      data-testid={`briefing-recent-runs-filter-${opt.key}-count`}
+                      style={{ opacity: 0.7 }}
+                    >
+                      ({bucketCount})
+                    </span>
                   </button>
                 );
               })}
