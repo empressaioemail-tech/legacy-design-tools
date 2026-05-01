@@ -4,6 +4,7 @@ import {
   useCreateEngagementSubmission,
   getGetEngagementQueryKey,
   getGetAtomHistoryQueryKey,
+  getListEngagementSubmissionsQueryKey,
   type SubmissionReceipt,
 } from "@workspace/api-client-react";
 import { createEngagementSubmissionBodyNoteMax } from "@workspace/api-zod";
@@ -54,6 +55,12 @@ export function SubmitToJurisdictionDialog({
           }),
           qc.invalidateQueries({
             queryKey: getGetAtomHistoryQueryKey("engagement", engagementId),
+          }),
+          // Refresh the past-submissions list (Task #75) so the new
+          // package shows up immediately on the engagement detail
+          // page's Submissions tab without a manual reload.
+          qc.invalidateQueries({
+            queryKey: getListEngagementSubmissionsQueryKey(engagementId),
           }),
         ]);
         onSubmitted?.(receipt);

@@ -494,6 +494,73 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
  * trimmed and stored alongside the submission row so both the row and
  * the event payload carry the same canonical value.
  */
+/**
+ * GET /engagements/:id/submissions — list prior plan-review
+ * submissions for an engagement, newest-first.
+ *
+ * Reads straight from the `submissions` table (indexed by
+ * `engagement_id`, see `lib/db/src/schema/submissions.ts`). The
+ * returned shape matches the `EngagementSubmissionSummary` OpenAPI
+ * schema and intentionally omits the captured city/state/FIPS columns
+ * — the denormalized `jurisdiction` label is what consumers render in
+ * the past-submissions list today; the structured columns are still
+ * available via the per-submission atom (`submission.atom.ts`) when
+ * a future surface needs them.
+ *
+ * Returns 404 when the parent engagement does not exist (rather than
+ * an empty array) so the front-end can distinguish "no submissions
+ * yet" from "stale engagement id"; this mirrors the contract of
+ * `GET /engagements/:id`.
+ */
+router.get(
+  "/engagements/:id/submissions",
+  async (req: Request, res: Response) => {
+    const params = GetEngagementParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    try {
+      const existingRows = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.id, params.data.id))
+        .limit(1);
+      if (!existingRows[0]) {
+        res.status(404).json({ error: "Engagement not found" });
+        return;
+      }
+
+      const rows = await db
+        .select({
+          id: submissions.id,
+          submittedAt: submissions.submittedAt,
+          jurisdiction: submissions.jurisdiction,
+          note: submissions.note,
+        })
+        .from(submissions)
+        .where(eq(submissions.engagementId, params.data.id))
+        .orderBy(desc(submissions.submittedAt));
+
+      res.json(
+        rows.map((r) => ({
+          id: r.id,
+          submittedAt: r.submittedAt.toISOString(),
+          jurisdiction: r.jurisdiction,
+          note: r.note,
+        })),
+      );
+    } catch (err) {
+      logger.error(
+        { err, id: params.data.id },
+        "list submissions failed",
+      );
+      res.status(500).json({ error: "Failed to list submissions" });
+    }
+  },
+);
+
 router.post(
   "/engagements/:id/submissions",
   async (req: Request, res: Response) => {

@@ -385,6 +385,39 @@ export const RegeocodeEngagementResponse = zod.object({
 });
 
 /**
+ * Returns the engagement's recorded plan-review submissions,
+newest-first. Each entry mirrors the row inserted by `POST
+/engagements/{id}/submissions` (id, submittedAt, jurisdiction
+labels captured at the moment of submission, optional note).
+
+The list is read-straight from the `submissions` table — there
+is no pagination today (engagements typically accumulate a
+handful of packages over their lifetime); when that assumption
+breaks, callers can adopt a `limit` / `cursor` extension
+without breaking existing consumers since the response is a
+bare array.
+
+ * @summary List prior plan-review submissions for an engagement
+ */
+export const ListEngagementSubmissionsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ListEngagementSubmissionsResponseItem = zod
+  .object({
+    id: zod.string(),
+    submittedAt: zod.coerce.date(),
+    jurisdiction: zod.string().nullable(),
+    note: zod.string().nullable(),
+  })
+  .describe(
+    "One past plan-review submission for an engagement, as returned\nby `GET \/engagements\/{id}\/submissions`. The `jurisdiction`\nlabel is the denormalized snapshot captured at submission time\n(so a later jurisdiction change on the parent engagement does\nnot retroactively rewrite the audit trail). `note` is the\noptional free-text note from the submission body, surfaced\nverbatim (capped to 2 KB by the create route's contract).\n",
+  );
+export const ListEngagementSubmissionsResponse = zod.array(
+  ListEngagementSubmissionsResponseItem,
+);
+
+/**
  * Records that a plan-review package has been submitted to the
 jurisdiction for this engagement. The submission flow is still a
 forward-ref child in the engagement atom's composition (no

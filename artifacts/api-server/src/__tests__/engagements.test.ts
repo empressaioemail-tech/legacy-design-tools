@@ -53,7 +53,7 @@ vi.mock("@workspace/codes", async () => {
 });
 
 const { setupRouteTests } = await import("./setup");
-const { engagements, atomEvents } = await import("@workspace/db");
+const { engagements, atomEvents, submissions } = await import("@workspace/db");
 const { eq, and, asc } = await import("drizzle-orm");
 const { geocodeAddress } = await import("@workspace/site-context/server");
 const registryModule = await import("../atoms/registry");
@@ -479,6 +479,113 @@ describe("POST /api/engagements/:id/submissions — engagement.submitted", () =>
       jurisdictionCity: null,
       jurisdictionState: null,
     });
+  });
+});
+
+describe("GET /api/engagements/:id/submissions — list past submissions", () => {
+  it("returns the engagement's submissions newest-first with id / submittedAt / jurisdiction / note", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const eng = await seedEngagement({
+      address: "789 Past Submissions Way",
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+      jurisdictionFips: "4950150",
+    });
+
+    // Insert two submissions directly so we can pin distinct
+    // submittedAt timestamps and assert on ordering — driving them
+    // through the POST handler would also work but would couple this
+    // test to the create route's clock and event-emit behavior, which
+    // is not what we're verifying here.
+    const earlier = new Date("2025-01-01T10:00:00Z");
+    const later = new Date("2025-02-01T10:00:00Z");
+    const [first] = await ctx.schema.db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "Moab, UT",
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        jurisdictionFips: "4950150",
+        note: "First package",
+        submittedAt: earlier,
+      })
+      .returning();
+    const [second] = await ctx.schema.db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "Moab, UT",
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        jurisdictionFips: "4950150",
+        note: null,
+        submittedAt: later,
+      })
+      .returning();
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/submissions`,
+    );
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body).toHaveLength(2);
+
+    // Newest-first: the later submission should be at index 0.
+    expect(res.body[0]).toEqual({
+      id: second!.id,
+      submittedAt: later.toISOString(),
+      jurisdiction: "Moab, UT",
+      note: null,
+    });
+    expect(res.body[1]).toEqual({
+      id: first!.id,
+      submittedAt: earlier.toISOString(),
+      jurisdiction: "Moab, UT",
+      note: "First package",
+    });
+  });
+
+  it("returns an empty array when the engagement has no submissions yet", async () => {
+    const eng = await seedEngagement({ address: "1 Empty Lane" });
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/submissions`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it("404s when the engagement does not exist", async () => {
+    const fakeId = "00000000-0000-0000-0000-000000000000";
+    const res = await request(getApp()).get(
+      `/api/engagements/${fakeId}/submissions`,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("scopes the list to the requested engagement (does not leak siblings)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const a = await seedEngagement({ name: "Engagement A" });
+    const b = await seedEngagement({ name: "Engagement B" });
+
+    await ctx.schema.db.insert(submissions).values({
+      engagementId: a.id,
+      jurisdiction: null,
+      note: "for A",
+    });
+    await ctx.schema.db.insert(submissions).values({
+      engagementId: b.id,
+      jurisdiction: null,
+      note: "for B",
+    });
+
+    const resA = await request(getApp()).get(
+      `/api/engagements/${a.id}/submissions`,
+    );
+    expect(resA.status).toBe(200);
+    expect(resA.body).toHaveLength(1);
+    expect(resA.body[0].note).toBe("for A");
   });
 });
 

@@ -219,6 +219,43 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   /engagements/{id}/submissions:
+    get:
+      operationId: listEngagementSubmissions
+      tags: [engagements]
+      summary: List prior plan-review submissions for an engagement
+      description: |
+        Returns the engagement's recorded plan-review submissions,
+        newest-first. Each entry mirrors the row inserted by `POST
+        /engagements/{id}/submissions` (id, submittedAt, jurisdiction
+        labels captured at the moment of submission, optional note).
+
+        The list is read-straight from the `submissions` table — there
+        is no pagination today (engagements typically accumulate a
+        handful of packages over their lifetime); when that assumption
+        breaks, callers can adopt a `limit` / `cursor` extension
+        without breaking existing consumers since the response is a
+        bare array.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of submission summaries (newest-first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EngagementSubmissionSummary"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
       operationId: createEngagementSubmission
       tags: [engagements]
@@ -1371,6 +1408,34 @@ components:
         - submissionId
         - engagementId
         - submittedAt
+
+    EngagementSubmissionSummary:
+      type: object
+      description: |
+        One past plan-review submission for an engagement, as returned
+        by `GET /engagements/{id}/submissions`. The `jurisdiction`
+        label is the denormalized snapshot captured at submission time
+        (so a later jurisdiction change on the parent engagement does
+        not retroactively rewrite the audit trail). `note` is the
+        optional free-text note from the submission body, surfaced
+        verbatim (capped to 2 KB by the create route's contract).
+      properties:
+        id:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+        jurisdiction:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+      required:
+        - id
+        - submittedAt
+        - jurisdiction
+        - note
 
     SnapshotPayload:
       description: |

@@ -27,6 +27,7 @@ import type {
   CreateEngagementSubmissionBody,
   CreateUserBody,
   EngagementDetail,
+  EngagementSubmissionSummary,
   EngagementSummary,
   ErrorResponse,
   GetAtomHistoryParams,
@@ -583,6 +584,110 @@ export const useRegeocodeEngagement = <
 > => {
   return useMutation(getRegeocodeEngagementMutationOptions(options));
 };
+
+/**
+ * Returns the engagement's recorded plan-review submissions,
+newest-first. Each entry mirrors the row inserted by `POST
+/engagements/{id}/submissions` (id, submittedAt, jurisdiction
+labels captured at the moment of submission, optional note).
+
+The list is read-straight from the `submissions` table — there
+is no pagination today (engagements typically accumulate a
+handful of packages over their lifetime); when that assumption
+breaks, callers can adopt a `limit` / `cursor` extension
+without breaking existing consumers since the response is a
+bare array.
+
+ * @summary List prior plan-review submissions for an engagement
+ */
+export const getListEngagementSubmissionsUrl = (id: string) => {
+  return `/api/engagements/${id}/submissions`;
+};
+
+export const listEngagementSubmissions = async (
+  id: string,
+  options?: RequestInit,
+): Promise<EngagementSubmissionSummary[]> => {
+  return customFetch<EngagementSubmissionSummary[]>(
+    getListEngagementSubmissionsUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementSubmissionsQueryKey = (id: string) => {
+  return [`/api/engagements/${id}/submissions`] as const;
+};
+
+export const getListEngagementSubmissionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementSubmissions>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementSubmissions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListEngagementSubmissionsQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementSubmissions>>
+  > = ({ signal }) =>
+    listEngagementSubmissions(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementSubmissions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementSubmissionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementSubmissions>>
+>;
+export type ListEngagementSubmissionsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List prior plan-review submissions for an engagement
+ */
+
+export function useListEngagementSubmissions<
+  TData = Awaited<ReturnType<typeof listEngagementSubmissions>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementSubmissions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementSubmissionsQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Records that a plan-review package has been submitted to the

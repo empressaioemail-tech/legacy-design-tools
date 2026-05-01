@@ -135,6 +135,23 @@ export interface SubmissionReceipt {
   submittedAt: string;
 }
 
+/**
+ * One past plan-review submission for an engagement, as returned
+by `GET /engagements/{id}/submissions`. The `jurisdiction`
+label is the denormalized snapshot captured at submission time
+(so a later jurisdiction change on the parent engagement does
+not retroactively rewrite the audit trail). `note` is the
+optional free-text note from the submission body, surfaced
+verbatim (capped to 2 KB by the create route's contract).
+
+ */
+export interface EngagementSubmissionSummary {
+  id: string;
+  submittedAt: string;
+  jurisdiction: string | null;
+  note: string | null;
+}
+
 export interface SnapshotPayloadExisting {
   engagementId: string;
   [key: string]: unknown;

@@ -28,6 +28,7 @@ export * from "./createUserBody";
 export * from "./engagementCandidate";
 export * from "./engagementDetail";
 export * from "./engagementStatus";
+export * from "./engagementSubmissionSummary";
 export * from "./engagementSummary";
 export * from "./errorResponse";
 export * from "./geocode";

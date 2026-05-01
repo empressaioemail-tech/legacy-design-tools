@@ -4,11 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetEngagement,
   useGetSnapshot,
+  useListEngagementSubmissions,
   useUpdateEngagement,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
   getListEngagementsQueryKey,
+  getListEngagementSubmissionsQueryKey,
   type EngagementDetail as EngagementDetailType,
+  type EngagementSubmissionSummary,
   type SubmissionReceipt,
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
@@ -139,6 +142,7 @@ type TabId =
   | "sheets"
   | "site"
   | "site-context"
+  | "submissions"
   | "settings";
 
 /**
@@ -161,6 +165,7 @@ function readTabFromUrl(): TabId {
     raw === "sheets" ||
     raw === "site" ||
     raw === "site-context" ||
+    raw === "submissions" ||
     raw === "settings"
   ) {
     return raw;
@@ -203,6 +208,7 @@ function TabBar({
     { id: "sheets", label: "Sheets" },
     { id: "site", label: "Site" },
     { id: "site-context", label: "Site context" },
+    { id: "submissions", label: "Submissions" },
     { id: "settings", label: "Settings" },
   ];
   return (
@@ -523,6 +529,113 @@ function SiteContextTab() {
           shapes are registered so deep links (<code>?tab=site-context</code>)
           and the chat inline-reference resolver already recognize this view.
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Submissions tab — surfaces the engagement's prior plan-review
+ * submissions (Task #75). Reads from
+ * `GET /api/engagements/:id/submissions` (newest-first), and renders
+ * each row with the captured jurisdiction label, the submitted-at
+ * relative timestamp, and the optional free-text note.
+ *
+ * The list is intentionally minimal today — the create flow already
+ * lives in `SubmitToJurisdictionDialog`, and the per-submission
+ * detail surface (status updates, attached docs) is a follow-up
+ * sprint. Pagination is also a follow-up: engagements typically
+ * accumulate a handful of packages, so a bare array is fine for now
+ * and matches the route contract.
+ */
+function SubmissionsTab({ engagementId }: { engagementId: string }) {
+  const { data: submissions, isLoading } = useListEngagementSubmissions(
+    engagementId,
+    {
+      query: {
+        enabled: !!engagementId,
+        queryKey: getListEngagementSubmissionsQueryKey(engagementId),
+      },
+    },
+  );
+
+  if (isLoading) {
+    return (
+      <div
+        className="sc-card p-6 text-center"
+        data-testid="submissions-loading"
+      >
+        <div className="sc-body opacity-60">Loading submissions…</div>
+      </div>
+    );
+  }
+
+  if (!submissions || submissions.length === 0) {
+    return (
+      <div
+        className="sc-card p-6 text-center"
+        data-testid="submissions-empty"
+      >
+        <div className="sc-prose opacity-70" style={{ maxWidth: 480 }}>
+          No submissions yet. Once you click <strong>Submit to
+          jurisdiction</strong> above, the package will appear here.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sc-card flex flex-col" data-testid="submissions-list">
+      <div className="sc-card-header sc-row-sb">
+        <span className="sc-label">PAST SUBMISSIONS</span>
+        <span className="sc-meta">{submissions.length} total</span>
+      </div>
+      <div className="flex flex-col">
+        {submissions.map((s: EngagementSubmissionSummary) => (
+          <div
+            key={s.id}
+            className="sc-card-row"
+            data-testid={`submission-row-${s.id}`}
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid var(--border-default)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <div
+              className="sc-row-sb"
+              style={{ display: "flex", alignItems: "baseline", gap: 12 }}
+            >
+              <span
+                className="sc-medium"
+                style={{ color: "var(--text-primary)", fontSize: 13 }}
+              >
+                {s.jurisdiction ?? "Jurisdiction not recorded"}
+              </span>
+              <span
+                className="sc-meta"
+                title={new Date(s.submittedAt).toLocaleString()}
+                style={{ color: "var(--text-secondary)", fontSize: 11 }}
+              >
+                {relativeTime(s.submittedAt)}
+              </span>
+            </div>
+            {s.note && (
+              <div
+                className="sc-body"
+                style={{
+                  color: "var(--text-secondary)",
+                  fontSize: 12,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {s.note}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -867,6 +980,10 @@ export function EngagementDetail() {
         )}
 
         {tab === "site-context" && <SiteContextTab />}
+
+        {tab === "submissions" && (
+          <SubmissionsTab engagementId={engagement.id} />
+        )}
 
         {tab === "settings" && (
           <SettingsTab engagement={engagement} onEdit={openEdit} />
