@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   getGetLocalSetbackTableQueryKey,
   useGetLocalSetbackTable,
@@ -97,7 +97,7 @@ export function BriefingSourceDetails({
         </span>
       </div>
 
-      <KindBody payload={payload} kind={kind} />
+      <KindBody source={source} />
 
       {source.sourceKind === "local-adapter" &&
         kind === "zoning" &&
@@ -112,13 +112,12 @@ export function BriefingSourceDetails({
   );
 }
 
-function KindBody({
-  payload,
-  kind,
-}: {
-  payload: Record<string, unknown>;
-  kind: string;
-}) {
+function KindBody({ source }: { source: EngagementBriefingSource }) {
+  const payload = (source.payload ?? {}) as Record<string, unknown>;
+  const kind =
+    typeof payload["kind"] === "string"
+      ? (payload["kind"] as string)
+      : "unknown";
   switch (kind) {
     case "parcel": {
       const parcel = payload["parcel"];
@@ -263,16 +262,104 @@ function KindBody({
       );
     }
     case "flood-zone":
-      return <FemaFloodZoneSummary payload={payload} />;
+      return (
+        <FederalSummaryGroup source={source}>
+          <FemaFloodZoneSummary payload={payload} />
+        </FederalSummaryGroup>
+      );
     case "elevation-point":
-      return <UsgsElevationSummary payload={payload} />;
+      return (
+        <FederalSummaryGroup source={source}>
+          <UsgsElevationSummary payload={payload} />
+        </FederalSummaryGroup>
+      );
     case "ejscreen-blockgroup":
-      return <EpaEjscreenSummary payload={payload} />;
+      return (
+        <FederalSummaryGroup source={source}>
+          <EpaEjscreenSummary payload={payload} />
+        </FederalSummaryGroup>
+      );
     case "broadband-availability":
-      return <FccBroadbandSummary payload={payload} />;
+      return (
+        <FederalSummaryGroup source={source}>
+          <FccBroadbandSummary payload={payload} />
+        </FederalSummaryGroup>
+      );
     default:
       return <RawPayload payload={payload} />;
   }
+}
+
+/**
+ * Wraps a federal-adapter summary so the architect can copy a one-line
+ * markdown digest of it ("Zone AE, in SFHA, BFE 432 ft") into the
+ * engagement chat or an external review note. The wrapper renders the
+ * summary body and a "Copy summary" button; if the formatter cannot
+ * build a meaningful one-liner for this payload, the button is
+ * suppressed so we never copy an empty string.
+ */
+function FederalSummaryGroup({
+  source,
+  children,
+}: {
+  source: EngagementBriefingSource;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {children}
+      <CopySummaryButton source={source} />
+    </div>
+  );
+}
+
+function CopySummaryButton({ source }: { source: EngagementBriefingSource }) {
+  const markdown = useMemo(
+    () => formatFederalSummaryMarkdown(source),
+    [source],
+  );
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  if (!markdown) return null;
+
+  async function copy(): Promise<void> {
+    if (!markdown) return;
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setState("copied");
+      setTimeout(() => setState("idle"), 1500);
+    } catch {
+      setState("failed");
+      setTimeout(() => setState("idle"), 1500);
+    }
+  }
+
+  const label =
+    state === "copied"
+      ? "Copied!"
+      : state === "failed"
+        ? "Copy failed"
+        : "Copy summary";
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      data-testid={`briefing-source-copy-summary-${source.id}`}
+      title={markdown}
+      style={{
+        alignSelf: "flex-start",
+        fontSize: 11,
+        padding: "4px 8px",
+        borderRadius: 4,
+        border: "1px solid var(--border-subtle)",
+        background: "var(--surface-muted)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
 }
 
 /**
@@ -459,6 +546,136 @@ function FccBroadbandSummary({
       />
     </div>
   );
+}
+
+/**
+ * Build the single-line markdown digest the "Copy summary" button
+ * writes to the clipboard for a federal-adapter briefing source.
+ *
+ * Shape: `**<label>** — <body> — snapshot YYYY-MM-DD`
+ *   e.g. `**FEMA NFHL** — Zone AE, in SFHA, BFE 432 ft — snapshot 2026-01-01`
+ *
+ * Returns `null` when:
+ *   - `payload.kind` is not one of the four federal kinds we support
+ *   - the kind is supported but the payload has nothing meaningful to
+ *     summarize (so the button stays hidden rather than copying an
+ *     empty digest).
+ *
+ * Exported so the format is unit-testable without rendering the
+ * component (see `__tests__/BriefingSourceDetails.test.tsx`).
+ */
+export function formatFederalSummaryMarkdown(
+  source: EngagementBriefingSource,
+): string | null {
+  const payload = (source.payload ?? {}) as Record<string, unknown>;
+  const kind =
+    typeof payload["kind"] === "string" ? (payload["kind"] as string) : null;
+  let label: string;
+  let body: string;
+  switch (kind) {
+    case "flood-zone":
+      label = "FEMA NFHL";
+      body = formatFloodZoneSummaryBody(payload);
+      break;
+    case "elevation-point":
+      label = "USGS NED";
+      body = formatElevationSummaryBody(payload);
+      break;
+    case "ejscreen-blockgroup":
+      label = "EPA EJScreen";
+      body = formatEjscreenSummaryBody(payload);
+      break;
+    case "broadband-availability":
+      label = "FCC";
+      body = formatBroadbandSummaryBody(payload);
+      break;
+    default:
+      return null;
+  }
+  if (!body) return null;
+  const snapshot = formatSnapshotDate(source.snapshotDate);
+  const tail = snapshot ? ` — snapshot ${snapshot}` : "";
+  return `**${label}** — ${body}${tail}`;
+}
+
+/** ISO-timestamp prefix (YYYY-MM-DD) — adapters always persist a UTC
+ * `snapshotDate`, so a string slice keeps this dependency-free and
+ * timezone-stable. Returns `null` for absent / malformed inputs so
+ * the caller can drop the trailing "snapshot …" segment. */
+function formatSnapshotDate(s: string | null | undefined): string | null {
+  if (typeof s !== "string") return null;
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return m ? m[1] : null;
+}
+
+function formatFloodZoneSummaryBody(payload: Record<string, unknown>): string {
+  const floodZone = payload["floodZone"];
+  const features = payload["features"];
+  const noFeatures = Array.isArray(features) && features.length === 0;
+  if ((floodZone === null || floodZone === undefined) && noFeatures) {
+    return "no mapped flood zone (treat as Zone X)";
+  }
+  const inSfha = payload["inSpecialFloodHazardArea"];
+  const zoneSubtype = payload["zoneSubtype"];
+  const bfe = payload["baseFloodElevation"];
+  const parts: string[] = [];
+  if (typeof floodZone === "string" && floodZone.length > 0) {
+    parts.push(`Zone ${floodZone}`);
+  }
+  if (typeof inSfha === "boolean") {
+    parts.push(inSfha ? "in SFHA" : "not in SFHA");
+  }
+  if (typeof zoneSubtype === "string" && zoneSubtype.length > 0) {
+    parts.push(zoneSubtype);
+  }
+  if (typeof bfe === "number") parts.push(`BFE ${bfe} ft`);
+  return parts.join(", ");
+}
+
+function formatElevationSummaryBody(payload: Record<string, unknown>): string {
+  const elevation = payload["elevationFeet"];
+  if (elevation === null || elevation === undefined) {
+    return "no elevation value (off-raster)";
+  }
+  if (typeof elevation !== "number") return "";
+  const units = payload["units"];
+  const unitsLabel =
+    typeof units === "string" && units.length > 0 ? units : "Feet";
+  return `Elevation ${elevation} ${unitsLabel}`;
+}
+
+function formatEjscreenSummaryBody(payload: Record<string, unknown>): string {
+  const population = payload["population"];
+  const ranked = EJSCREEN_PERCENTILE_FIELDS.map((f) => ({
+    label: f.label,
+    value: payload[f.key],
+  }))
+    .filter(
+      (f): f is { label: string; value: number } => typeof f.value === "number",
+    )
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 3);
+  if (ranked.length === 0 && typeof population !== "number") return "";
+  const parts: string[] = [];
+  if (typeof population === "number") parts.push(`pop ${population}`);
+  for (const r of ranked) parts.push(`${r.label} p${r.value}`);
+  return parts.join(", ");
+}
+
+function formatBroadbandSummaryBody(
+  payload: Record<string, unknown>,
+): string {
+  const providerCount = payload["providerCount"];
+  if (providerCount === 0) return "no fixed-broadband deployment";
+  const down = payload["fastestDownstreamMbps"];
+  const up = payload["fastestUpstreamMbps"];
+  const parts: string[] = [];
+  if (typeof providerCount === "number") {
+    parts.push(`${providerCount} providers`);
+  }
+  if (typeof down === "number") parts.push(`${down} Mbps down`);
+  if (typeof up === "number") parts.push(`${up} Mbps up`);
+  return parts.join(", ");
 }
 
 /**

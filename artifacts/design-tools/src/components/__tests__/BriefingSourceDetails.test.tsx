@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { EngagementBriefingSource } from "@workspace/api-client-react";
 
 const setbackHook = vi.hoisted(() => ({
@@ -43,7 +43,9 @@ vi.mock("@workspace/api-client-react", async () => {
   };
 });
 
-const { BriefingSourceDetails } = await import("../BriefingSourceDetails");
+const { BriefingSourceDetails, formatFederalSummaryMarkdown } = await import(
+  "../BriefingSourceDetails"
+);
 
 function mkSource(
   over: Partial<EngagementBriefingSource> &
@@ -354,5 +356,161 @@ describe("BriefingSourceDetails", () => {
     // Highlighted attribute still rendered.
     expect(screen.getByText("ZONING")).toBeInTheDocument();
     expect(screen.getByText("C-1")).toBeInTheDocument();
+  });
+});
+
+describe("formatFederalSummaryMarkdown", () => {
+  it("formats a FEMA NFHL flood-zone payload as a one-line markdown digest", () => {
+    const md = formatFederalSummaryMarkdown(
+      mkSource({
+        id: "src-fema",
+        sourceKind: "federal-adapter",
+        snapshotDate: "2026-01-01T00:00:00.000Z",
+        payload: {
+          kind: "flood-zone",
+          inSpecialFloodHazardArea: true,
+          floodZone: "AE",
+          zoneSubtype: null,
+          baseFloodElevation: 432,
+          features: [{ attributes: { FLD_ZONE: "AE" } }],
+        },
+      }),
+    );
+    expect(md).toBe(
+      "**FEMA NFHL** — Zone AE, in SFHA, BFE 432 ft — snapshot 2026-01-01",
+    );
+  });
+
+  it("formats the FEMA NFHL 'no mapped flood zone' branch", () => {
+    const md = formatFederalSummaryMarkdown(
+      mkSource({
+        id: "src-fema-empty",
+        sourceKind: "federal-adapter",
+        snapshotDate: "2026-02-15T12:00:00.000Z",
+        payload: {
+          kind: "flood-zone",
+          inSpecialFloodHazardArea: false,
+          floodZone: null,
+          features: [],
+        },
+      }),
+    );
+    expect(md).toBe(
+      "**FEMA NFHL** — no mapped flood zone (treat as Zone X) — snapshot 2026-02-15",
+    );
+  });
+
+  it("formats an FCC broadband-availability payload", () => {
+    const md = formatFederalSummaryMarkdown(
+      mkSource({
+        id: "src-fcc",
+        sourceKind: "federal-adapter",
+        snapshotDate: "2026-03-20T00:00:00.000Z",
+        payload: {
+          kind: "broadband-availability",
+          providerCount: 3,
+          fastestDownstreamMbps: 1000,
+          fastestUpstreamMbps: 35,
+        },
+      }),
+    );
+    expect(md).toBe(
+      "**FCC** — 3 providers, 1000 Mbps down, 35 Mbps up — snapshot 2026-03-20",
+    );
+  });
+
+  it("returns null for a non-federal kind so the copy button stays hidden", () => {
+    const md = formatFederalSummaryMarkdown(
+      mkSource({
+        id: "src-zoning",
+        sourceKind: "local-adapter",
+        payload: {
+          kind: "zoning",
+          zoning: { attributes: { ZONING: "C-1" } },
+        },
+      }),
+    );
+    expect(md).toBeNull();
+  });
+});
+
+describe("BriefingSourceDetails federal copy-summary button", () => {
+  it("writes the markdown digest to the clipboard when clicked", async () => {
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+    // Re-stub navigator.clipboard fresh so a previous test's mock can't
+    // leak in (mirrors DevAtomsProbe.test.tsx's pattern).
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: { writeText: writeTextMock },
+      configurable: true,
+      writable: true,
+    });
+
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-fema-copy",
+          layerKind: "fema-nfhl-flood-zone",
+          sourceKind: "federal-adapter",
+          provider: "FEMA National Flood Hazard Layer (NFHL)",
+          snapshotDate: "2026-01-01T00:00:00.000Z",
+          payload: {
+            kind: "flood-zone",
+            inSpecialFloodHazardArea: true,
+            floodZone: "AE",
+            zoneSubtype: null,
+            baseFloodElevation: 432,
+            features: [{ attributes: { FLD_ZONE: "AE" } }],
+          },
+        })}
+      />,
+    );
+
+    const button = screen.getByTestId(
+      "briefing-source-copy-summary-src-fema-copy",
+    );
+    expect(button).toHaveTextContent("Copy summary");
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(writeTextMock).toHaveBeenCalledWith(
+        "**FEMA NFHL** — Zone AE, in SFHA, BFE 432 ft — snapshot 2026-01-01",
+      );
+    });
+    await waitFor(() => {
+      expect(button).toHaveTextContent("Copied!");
+    });
+  });
+
+  it("does not render a copy-summary button for non-federal payloads", () => {
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-parcel-nocopy",
+          layerKind: "parcels",
+          sourceKind: "federal-adapter",
+          provider: "us-tiger:parcels (TIGER)",
+          payload: {
+            kind: "parcel",
+            parcel: { attributes: { PARCEL_ID: "R0123456" } },
+          },
+        })}
+      />,
+    );
+    expect(
+      screen.queryByTestId(
+        "briefing-source-copy-summary-src-parcel-nocopy",
+      ),
+    ).toBeNull();
   });
 });
