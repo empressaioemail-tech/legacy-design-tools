@@ -1450,16 +1450,34 @@ components:
         snapshotFocus:
           type: boolean
           description: |
-            Opt this turn into "snapshot focus mode". When true, the
-            server loads the full structured `snapshots.payload` blob
-            for the engagement's latest snapshot and injects it into the
-            system prompt inside a dedicated `<snapshot_focus>` block,
-            on top of the always-on snapshot atom summary. Use it for
-            deep questions like "what's the area of room 204?" or
-            "list every door schedule entry" — the cost stays bounded
-            to the turns that need it. Equivalent to embedding a
+            Opt this turn into "snapshot focus mode" against the
+            engagement's *latest* snapshot. When true, the server loads
+            the full structured `snapshots.payload` blob for that
+            snapshot and injects it into the system prompt inside a
+            dedicated `<snapshot_focus>` block, on top of the always-on
+            snapshot atom summary. Use it for deep questions like
+            "what's the area of room 204?" or "list every door schedule
+            entry" — the cost stays bounded to the turns that need it.
+            Equivalent to embedding a
             `{{atom:snapshot:<latestSnapshotId>:focus}}` inline
-            reference in the question text.
+            reference in the question text. For comparison questions
+            that need to look at *older* snapshots too, see
+            `snapshotFocusIds`.
+        snapshotFocusIds:
+          type: array
+          description: |
+            Explicit list of snapshot ids to enter focus mode against
+            for this turn (Task #44). Each id must belong to the same
+            engagement; foreign ids cause a 400. The server emits one
+            `<snapshot_focus snapshot_id="…">` block per id so the
+            model can answer comparison-style questions that need to
+            mine more than just the latest snapshot's payload (e.g.
+            "how did the room schedule change between yesterday's push
+            and today's?"). May be combined with `snapshotFocus: true`
+            (the latest id is added if not already present). Capped
+            server-side; ids are de-duplicated.
+          items:
+            type: string
       required:
         - engagementId
         - question

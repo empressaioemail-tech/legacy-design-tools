@@ -1110,6 +1110,12 @@ export const SendChatMessageBody = zod.object({
     .boolean()
     .optional()
     .describe(
-      'Opt this turn into \"snapshot focus mode\". When true, the\nserver loads the full structured `snapshots.payload` blob\nfor the engagement\'s latest snapshot and injects it into the\nsystem prompt inside a dedicated `<snapshot_focus>` block,\non top of the always-on snapshot atom summary. Use it for\ndeep questions like \"what\'s the area of room 204?\" or\n\"list every door schedule entry\" — the cost stays bounded\nto the turns that need it. Equivalent to embedding a\n`{{atom:snapshot:<latestSnapshotId>:focus}}` inline\nreference in the question text.\n',
+      'Opt this turn into \"snapshot focus mode\" against the\nengagement\'s \*latest\* snapshot. When true, the server loads\nthe full structured `snapshots.payload` blob for that\nsnapshot and injects it into the system prompt inside a\ndedicated `<snapshot_focus>` block, on top of the always-on\nsnapshot atom summary. Use it for deep questions like\n\"what\'s the area of room 204?\" or \"list every door schedule\nentry\" — the cost stays bounded to the turns that need it.\nEquivalent to embedding a\n`{{atom:snapshot:<latestSnapshotId>:focus}}` inline\nreference in the question text. For comparison questions\nthat need to look at \*older\* snapshots too, see\n`snapshotFocusIds`.\n',
+    ),
+  snapshotFocusIds: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      'Explicit list of snapshot ids to enter focus mode against\nfor this turn (Task #44). Each id must belong to the same\nengagement; foreign ids cause a 400. The server emits one\n`<snapshot_focus snapshot_id=\"…\">` block per id so the\nmodel can answer comparison-style questions that need to\nmine more than just the latest snapshot\'s payload (e.g.\n\"how did the room schedule change between yesterday\'s push\nand today\'s?\"). May be combined with `snapshotFocus: true`\n(the latest id is added if not already present). Capped\nserver-side; ids are de-duplicated.\n',
     ),
 });

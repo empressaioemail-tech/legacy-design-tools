@@ -32,38 +32,41 @@ import { SNAPSHOT_SUPPORTED_MODES } from "../atoms/snapshot.atom";
 const SNAPSHOT_FOCUS_MODE: (typeof SNAPSHOT_SUPPORTED_MODES)[number] = "focus";
 
 /**
- * Scan `question` for any inline `{{atom:snapshot:<latestSnapshotId>:focus}}`
- * reference. The third capture group of {@link INLINE_ATOM_REGEX} is
- * the displayLabel slot — chat repurposes it as the focus opt-in
- * token, matching the documented opt-in path on the OpenAPI spec
- * (`ChatRequest.snapshotFocus`).
+ * Scan `question` for every inline `{{atom:snapshot:<id>:focus}}`
+ * reference and return the set of snapshot ids the user named. The
+ * third capture group of {@link INLINE_ATOM_REGEX} is the displayLabel
+ * slot — chat repurposes it as the focus opt-in token, matching the
+ * documented opt-in path on the OpenAPI spec
+ * (`ChatRequest.snapshotFocus` / `ChatRequest.snapshotFocusIds`).
  *
- * Only references that target the **current** latest snapshot id flip
- * focus on. A stale id (e.g. the user pasted a reference from a chat
- * a week ago, before the engagement got a fresher snapshot) is
- * intentionally ignored — focus mode is always about the snapshot
- * the rest of the prompt is already framed around.
+ * Validation against the engagement's snapshot history happens at the
+ * call site — this function purely *parses*. The caller intersects
+ * the returned set with the engagement's known snapshot ids before
+ * loading any payloads, so a stale id (e.g. the user pasted a
+ * reference from a chat a week ago, before the engagement got a
+ * fresher snapshot) and a foreign-tenant id are both rejected at the
+ * same boundary.
+ *
+ * Pre-Task-#44 this returned a `boolean` keyed off the engagement's
+ * *latest* snapshot id only — comparison questions ("how did the room
+ * schedule change between yesterday's push and today's?") were
+ * impossible because older ids were intentionally ignored. The set
+ * shape unblocks that flow.
  */
-function questionRequestsSnapshotFocus(
-  question: string,
-  latestSnapshotId: string,
-): boolean {
+function parseInlineSnapshotFocusIds(question: string): Set<string> {
+  const ids = new Set<string>();
   // Defensive copy: regex is module-scoped + `g`-flagged so we reset
   // lastIndex (parseInlineReferences upstream relies on the same dance).
   INLINE_ATOM_REGEX.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = INLINE_ATOM_REGEX.exec(question)) !== null) {
     const [, entityType, entityId, label] = match;
-    if (
-      entityType === "snapshot" &&
-      entityId === latestSnapshotId &&
-      label === SNAPSHOT_FOCUS_MODE
-    ) {
-      INLINE_ATOM_REGEX.lastIndex = 0;
-      return true;
+    if (entityType === "snapshot" && label === SNAPSHOT_FOCUS_MODE) {
+      ids.add(entityId);
     }
   }
-  return false;
+  INLINE_ATOM_REGEX.lastIndex = 0;
+  return ids;
 }
 
 /**
@@ -94,6 +97,17 @@ const router: IRouter = Router();
 const MAX_REFERENCED_SHEETS = 4;
 const MAX_REFERENCED_ATOMS = 6;
 const MAX_RETRIEVED_ATOMS = 8;
+/**
+ * Hard cap on the number of snapshots a single chat turn may enter
+ * focus mode against (Task #44). Comparison-style questions usually
+ * span 2–3 snapshots; allowing more would risk pushing the prompt
+ * past Claude's context budget once each per-block payload is
+ * serialized (see `MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS` in the
+ * promptFormatter — worst case ~60 KB per block). Applies to the
+ * resolved set across all opt-in channels (explicit body list +
+ * inline references + latest-id fallback).
+ */
+const MAX_FOCUS_SNAPSHOTS = 4;
 
 /**
  * Build the request-scoped {@link Scope} for chat from the authenticated
@@ -137,6 +151,7 @@ router.post("/chat", async (req: Request, res: Response) => {
     referencedSheetIds,
     referencedAtomIds,
     snapshotFocus: explicitSnapshotFocus,
+    snapshotFocusIds: explicitSnapshotFocusIds,
   } = parse.data;
 
   // Resolve the engagement through the framework registry instead of a
@@ -217,6 +232,20 @@ router.post("/chat", async (req: Request, res: Response) => {
   }
   const latestSnapshotId = latestSnapshotRef.entityId;
 
+  // Build the engagement's full snapshot id set (sorted most-recent
+  // first) once, off the same `relatedAtoms` view the latest-id lookup
+  // above uses. This is the single source of truth for "is snapshot
+  // <id> known to belong to this engagement?" — every focus-mode
+  // validation below intersects with this set, so a foreign-tenant id
+  // (cross-tenant exfil attempt) and a stale-but-deleted id are both
+  // rejected at the same boundary.
+  const validSnapshotIds = new Set<string>();
+  for (const ref of engagementSummary.relatedAtoms) {
+    if (ref.entityType === "snapshot") {
+      validSnapshotIds.add(ref.entityId);
+    }
+  }
+
   // Snapshot framework atom — pushed into `<framework_atoms>` so the
   // model receives the same provenance-stamped narrative the FE atom
   // card sees, instead of inferring everything from the raw payload
@@ -244,57 +273,130 @@ router.post("/chat", async (req: Request, res: Response) => {
     );
   }
 
-  // Snapshot focus mode (Task #39). Two opt-in channels feed the same
-  // boolean: an explicit `snapshotFocus: true` flag on the request body
-  // (programmatic callers / a future "deep dive" UI button), and an
-  // inline `{{atom:snapshot:<latestSnapshotId>:focus}}` reference
-  // embedded in the question text (so a power user can opt in by
-  // chaining off the snapshot atom card). Either path triggers the
-  // raw `snapshots.payload` blob to be loaded and threaded through to
-  // the prompt formatter inside a dedicated `<snapshot_focus>` block;
-  // the default path stays JSON-free per Task #34.
-  const snapshotFocusOn =
-    explicitSnapshotFocus === true ||
-    questionRequestsSnapshotFocus(question, latestSnapshotId);
+  // Snapshot focus mode (Task #39, expanded by Task #44). Three opt-in
+  // channels feed the same resolved id list, all intersected with the
+  // engagement's known snapshot ids before any payload is loaded:
+  //   1. `snapshotFocus: true` on the request body — backwards-compat
+  //      shorthand for "focus on the latest snapshot" (programmatic
+  //      callers + the existing "deep dive" UI button).
+  //   2. `snapshotFocusIds: string[]` on the request body — explicit
+  //      list for comparison-style questions ("how did the room
+  //      schedule change between yesterday's push and today's?").
+  //      Foreign ids → 400; the route fails closed instead of silently
+  //      dropping them so a programmatic caller learns about the bug.
+  //   3. Inline `{{atom:snapshot:<id>:focus}}` references embedded in
+  //      the question text (so a power user can opt in by chaining off
+  //      a snapshot atom card). Stale/foreign ids here are silently
+  //      filtered — copy-pasted references from older chats are an
+  //      expected ergonomic, not a programming error worth a 400.
+  // Whichever channels fire, the resolved set drives a single batched
+  // `payload` read and one `<snapshot_focus>` block per id in the
+  // prompt. The default chat path stays JSON-free per Task #34.
+  const requestedFocusIds: string[] = [];
+  const requestedFocusSeen = new Set<string>();
+  const addFocusId = (id: string): void => {
+    if (!requestedFocusSeen.has(id)) {
+      requestedFocusSeen.add(id);
+      requestedFocusIds.push(id);
+    }
+  };
+
+  // (2) explicit body list — validated up-front so the caller gets a
+  // clean 400 instead of a silently-empty focus block.
+  if (explicitSnapshotFocusIds && explicitSnapshotFocusIds.length > 0) {
+    const foreign = explicitSnapshotFocusIds.filter(
+      (id) => !validSnapshotIds.has(id),
+    );
+    if (foreign.length > 0) {
+      logger.warn(
+        {
+          engagementId,
+          foreignIds: foreign,
+          audience: scope.audience,
+        },
+        "chat: snapshotFocusIds contained ids not on this engagement — refusing",
+      );
+      res.status(400).json({
+        error: "snapshot_not_in_engagement",
+        message:
+          "One or more snapshotFocusIds do not belong to this engagement.",
+      });
+      return;
+    }
+    for (const id of explicitSnapshotFocusIds.slice(0, MAX_FOCUS_SNAPSHOTS)) {
+      addFocusId(id);
+    }
+  }
+
+  // (3) inline references — silently filtered to ids the engagement
+  // actually owns. The cap is shared with the explicit channel: the
+  // worst case (cap=4 inline + cap=4 explicit) still stays well under
+  // the prompt budget thanks to formatSnapshotFocus's per-block
+  // truncation, but capping the *resolved* set keeps comparison
+  // questions deterministic.
+  const inlineFocusIds = parseInlineSnapshotFocusIds(question);
+  for (const id of inlineFocusIds) {
+    if (validSnapshotIds.has(id) && requestedFocusIds.length < MAX_FOCUS_SNAPSHOTS) {
+      addFocusId(id);
+    }
+  }
+
+  // (1) latest-id fallback for the legacy `snapshotFocus: true` flag —
+  // appended last so an explicit `snapshotFocusIds` list takes
+  // precedence over the implicit "and also the latest" interpretation.
+  // Skipped entirely if the latest id is already in the set.
+  if (
+    explicitSnapshotFocus === true &&
+    requestedFocusIds.length < MAX_FOCUS_SNAPSHOTS
+  ) {
+    addFocusId(latestSnapshotId);
+  }
+
+  const snapshotFocusOn = requestedFocusIds.length > 0;
 
   let snapshotReceivedAt: Date | undefined;
-  let snapshotFocusPayload: unknown = undefined;
+  const focusPayloadById = new Map<string, unknown>();
   try {
-    // `receivedAt` is always needed (it drives the "captured
-    // <relative-time> ago" framing sentence). `payload` is only loaded
-    // when focus mode is on for this turn — by default the snapshot
-    // framework atom's prose carries everything the model needs and we
-    // skip paying the tens-of-KB tax (Task #34 contract). When focus
-    // mode IS on, the same single-row primary-key lookup pulls both
-    // columns so we don't issue a second round-trip.
-    const sRows = snapshotFocusOn
-      ? await db
-          .select({
-            receivedAt: snapshots.receivedAt,
-            payload: snapshots.payload,
-          })
-          .from(snapshots)
-          .where(eq(snapshots.id, latestSnapshotId))
-          .limit(1)
-      : await db
-          .select({ receivedAt: snapshots.receivedAt })
-          .from(snapshots)
-          .where(eq(snapshots.id, latestSnapshotId))
-          .limit(1);
-    snapshotReceivedAt = sRows[0]?.receivedAt;
+    // `receivedAt` for the *latest* snapshot is always needed (it
+    // drives the "captured <relative-time> ago" framing sentence).
+    // When focus mode is on for this turn we batch the latest-id
+    // lookup with the focus-id payload reads via a single `inArray`
+    // query, so the worst case is still one round-trip. Default path
+    // stays a single-row primary-key lookup.
     if (snapshotFocusOn) {
-      // The narrowed `select` shape above means `payload` is only
-      // populated on the focus branch; the cast lets us read it without
-      // re-narrowing every consumer. `payload` is intentionally typed
-      // as `unknown` downstream — buildChatPrompt JSON-stringifies it
-      // verbatim, no schema assumed.
-      snapshotFocusPayload = (
-        sRows[0] as { payload?: unknown } | undefined
-      )?.payload;
+      // Always include latestSnapshotId so we can populate
+      // `snapshotReceivedAt`, even if the caller is only focusing on
+      // older snapshots. The set lookup below is keyed off the row's
+      // own id so the merge stays unambiguous.
+      const ids = new Set<string>(requestedFocusIds);
+      ids.add(latestSnapshotId);
+      const sRows = await db
+        .select({
+          id: snapshots.id,
+          receivedAt: snapshots.receivedAt,
+          payload: snapshots.payload,
+        })
+        .from(snapshots)
+        .where(inArray(snapshots.id, Array.from(ids)));
+      for (const row of sRows) {
+        if (row.id === latestSnapshotId) {
+          snapshotReceivedAt = row.receivedAt;
+        }
+        if (requestedFocusSeen.has(row.id)) {
+          focusPayloadById.set(row.id, row.payload as unknown);
+        }
+      }
+    } else {
+      const sRows = await db
+        .select({ receivedAt: snapshots.receivedAt })
+        .from(snapshots)
+        .where(eq(snapshots.id, latestSnapshotId))
+        .limit(1);
+      snapshotReceivedAt = sRows[0]?.receivedAt;
     }
   } catch (err) {
     logger.error(
-      { err, engagementId, snapshotId: latestSnapshotId },
+      { err, engagementId, snapshotIds: requestedFocusIds },
       "chat snapshot lookup failed",
     );
     res.status(500).json({ error: "Failed to load engagement" });
@@ -311,6 +413,27 @@ router.post("/chat", async (req: Request, res: Response) => {
         "No snapshots yet for this engagement. Send one from Revit first.",
     });
     return;
+  }
+
+  // Materialize `focusPayloads` in the same order the route resolved
+  // the requested ids (body-explicit → inline → latest-fallback). A
+  // requested id whose row vanished between the engagement-atom read
+  // and the focus payload read is skipped with a logger.warn — the
+  // rest of the focus-mode prompt still ships, but the missing block
+  // is observable.
+  const focusPayloads: Array<{ snapshotId: string; payload: unknown }> = [];
+  for (const id of requestedFocusIds) {
+    if (focusPayloadById.has(id)) {
+      focusPayloads.push({
+        snapshotId: id,
+        payload: focusPayloadById.get(id),
+      });
+    } else {
+      logger.warn(
+        { engagementId, snapshotId: id },
+        "chat: snapshot focus payload row missing — skipping focus block for this id",
+      );
+    }
   }
 
   // Engagement is the first framework atom in the prompt (always
@@ -514,21 +637,18 @@ router.post("/chat", async (req: Request, res: Response) => {
     },
     latestSnapshot: {
       receivedAt: snapshotReceivedAt,
-      // Focus mode (Task #39): only set when the caller opted in via
-      // explicit flag or inline `{{atom:snapshot:<id>:focus}}` reference.
-      // The payload is forwarded as-is — the formatter owns the
-      // serialization + size-cap. When `snapshotFocusPayload` is null
-      // (the row exists but `payload` happens to be JSON null) we still
-      // honor focus mode and the formatter emits `null` in the block,
-      // making it obvious the snapshot has no structured detail to mine.
-      ...(snapshotFocusOn
-        ? {
-            focusPayload: {
-              snapshotId: latestSnapshotId,
-              payload: snapshotFocusPayload,
-            },
-          }
-        : {}),
+      // Focus mode (Task #39, expanded by Task #44): array of one
+      // entry per snapshot the caller opted into for this turn (via
+      // explicit flag, explicit `snapshotFocusIds`, and/or inline
+      // `{{atom:snapshot:<id>:focus}}` references). Each payload is
+      // forwarded as-is — the formatter owns the serialization +
+      // per-block size cap. When a payload is null (the row exists
+      // but `payload` happens to be JSON null) we still honor focus
+      // mode for that id and the formatter emits `null` in the
+      // block, making it obvious the snapshot has no structured
+      // detail to mine. Empty array → formatter omits both the
+      // `<snapshot_focus>` blocks and the instruction line.
+      ...(focusPayloads.length > 0 ? { focusPayloads } : {}),
     },
     allAtoms,
     attachedSheets,
@@ -565,19 +685,26 @@ router.post("/chat", async (req: Request, res: Response) => {
   }
   if (snapshotFocusOn) {
     // One-line audit so prod observability can answer "how often is
-    // focus mode actually used?" without having to parse the prompt.
-    // The payload itself isn't logged — it's tenant data and may run
-    // tens of KB. `triggeredBy` distinguishes the explicit body flag
-    // from the inline-reference path so a regression that breaks
-    // either channel surfaces here.
-    const triggeredBy: "flag" | "inline_reference" =
-      explicitSnapshotFocus === true ? "flag" : "inline_reference";
+    // focus mode actually used?" and "how often does a turn drill
+    // into more than one snapshot?" without having to parse the
+    // prompt. The payloads themselves aren't logged — they're tenant
+    // data and may run tens of KB each. `triggeredBy` records every
+    // channel that fired this turn so a regression that breaks any
+    // single channel surfaces here.
+    const triggeredBy: Array<"flag" | "explicit_ids" | "inline_reference"> = [];
+    if (explicitSnapshotFocus === true) triggeredBy.push("flag");
+    if (explicitSnapshotFocusIds && explicitSnapshotFocusIds.length > 0) {
+      triggeredBy.push("explicit_ids");
+    }
+    if (inlineFocusIds.size > 0) triggeredBy.push("inline_reference");
     logger.info(
       {
         engagementId,
-        snapshotId: latestSnapshotId,
+        snapshotIds: focusPayloads.map((fp) => fp.snapshotId),
+        focusCount: focusPayloads.length,
         triggeredBy,
-        payloadIsNull: snapshotFocusPayload === null,
+        nullPayloadCount: focusPayloads.filter((fp) => fp.payload === null)
+          .length,
       },
       "chat with snapshot focus payload",
     );

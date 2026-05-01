@@ -76,30 +76,43 @@ export interface PromptEngagement {
  * every turn. That block dominated the token budget for real Revit
  * pushes, so it was dropped in favor of the atom-driven summary.
  *
- * Task #39 reintroduces structured payload access via the optional
- * {@link focusPayload} field — populated only when the chat route
- * detects the caller has opted *this turn* into "snapshot focus mode"
- * (an explicit `snapshotFocus: true` request flag, or an inline
- * `{{atom:snapshot:<id>:focus}}` reference embedded in the question).
- * When set, {@link buildChatPrompt} emits a dedicated
- * `<snapshot_focus>` block separate from `<framework_atoms>` so the
- * model can mine the raw payload for questions like "what's the area
- * of room 204?". The default chat path stays JSON-free.
+ * Task #39 reintroduced structured payload access via focus mode —
+ * the chat route opts a turn in (an explicit `snapshotFocus: true`
+ * request flag, an inline `{{atom:snapshot:<id>:focus}}` reference,
+ * or — Task #44 — an explicit `snapshotFocusIds: string[]` body
+ * field) and the formatter emits one `<snapshot_focus>` block per
+ * snapshot the caller wanted to drill into. The dedicated block is
+ * separate from `<framework_atoms>` so the model can mine the raw
+ * payload for questions like "what's the area of room 204?" or
+ * comparison questions like "how did the room schedule change
+ * between yesterday's push and today's?". The default chat path
+ * leaves {@link focusPayloads} empty/undefined and stays JSON-free.
  */
 export interface PromptSnapshot {
   receivedAt: Date;
   /**
-   * When set, the prompt enters focus mode for this turn: the raw
-   * `snapshots.payload` blob is JSON-stringified into a
-   * `<snapshot_focus>` block alongside an instruction directing the
-   * model to use it for structured lookups. `snapshotId` is included
-   * so the LLM can attribute its answer back to the same atom id the
-   * `<framework_atoms>` snapshot entry advertises.
+   * When non-empty, the prompt enters focus mode for this turn: each
+   * entry's raw `snapshots.payload` blob is JSON-stringified into its
+   * own `<snapshot_focus snapshot_id="…">` block, and a single
+   * instruction line is added directing the model to use whichever
+   * block the answer draws from for structured lookups. The
+   * `snapshotId` on each entry must match the corresponding atom id
+   * the engagement's `<framework_atoms>` snapshot entries advertise
+   * so cross-block attribution stays consistent.
+   *
+   * Pre-Task-#44 this field was a single optional object; promoting
+   * it to an array unblocks comparison questions that need to focus
+   * on more than just the engagement's latest snapshot. Order matches
+   * the order the chat route resolved the ids (request body first,
+   * then inline references, then the latest-id fallback) — the model
+   * sees the blocks in declaration order, but the per-id
+   * `snapshot_id` attribute is the actual attribution target so
+   * order is informational.
    */
-  focusPayload?: {
+  focusPayloads?: ReadonlyArray<{
     snapshotId: string;
     payload: unknown;
-  };
+  }>;
 }
 
 /**
@@ -249,7 +262,7 @@ export function formatFrameworkAtoms(atoms: PromptFrameworkAtom[]): string {
  * Assemble the `<snapshot_focus>` block carrying the raw structured
  * `snapshots.payload` JSON for the engagement's latest snapshot. Only
  * emitted when chat is in focus mode for this turn (see
- * {@link PromptSnapshot.focusPayload}); the default chat path does NOT
+ * {@link PromptSnapshot.focusPayloads}); the default chat path does NOT
  * call this helper, preserving the Task #34 contract that the
  * always-on prompt is JSON-free.
  *
@@ -374,26 +387,39 @@ export function buildChatPrompt(
           .join(", ")}. Use only entity ids that appear in <framework_atoms> — never invent ids.`
       : "";
 
-  // Snapshot focus mode (Task #39). When the chat route detects the
-  // caller has opted *this turn* into focus mode — explicit
-  // `snapshotFocus: true` flag or an inline
-  // `{{atom:snapshot:<id>:focus}}` reference — it forwards the raw
-  // `snapshots.payload` blob through `latestSnapshot.focusPayload`.
-  // We then emit a dedicated `<snapshot_focus>` block (sibling of
-  // `<framework_atoms>`) plus an instruction line telling the model
-  // it may use the JSON for structured lookups. Default chat path
-  // leaves `focusPayload` undefined, both blocks stay empty, and the
-  // Task #34 JSON-free contract is preserved.
-  const focusPayload = latestSnapshot.focusPayload;
-  const snapshotFocusBlock = focusPayload
-    ? "\n\n" +
-      formatSnapshotFocus(focusPayload.snapshotId, focusPayload.payload)
-    : "";
-  const snapshotFocusInstruction = focusPayload
-    ? "\n\nA `<snapshot_focus>` block below carries the raw structured snapshot payload for this turn. Use it to answer fine-grained questions about specific rooms, doors, schedules, or any item the snapshot atom's prose would have summarised away. Cite the snapshot you draw from with `{{atom:snapshot:" +
-      focusPayload.snapshotId +
-      ":focus}}` so the answer stays attributable."
-    : "";
+  // Snapshot focus mode (Task #39, expanded by Task #44). When the
+  // chat route detects the caller has opted *this turn* into focus
+  // mode — explicit `snapshotFocus: true` flag, an inline
+  // `{{atom:snapshot:<id>:focus}}` reference, or the explicit
+  // `snapshotFocusIds: string[]` body field — it forwards the raw
+  // `snapshots.payload` blob(s) through `latestSnapshot.focusPayloads`.
+  // We then emit one dedicated `<snapshot_focus snapshot_id="…">`
+  // block per id (siblings of `<framework_atoms>`) plus a single
+  // instruction line telling the model it may use the JSON for
+  // structured lookups and naming each candidate id as a citation
+  // target. Default chat path leaves `focusPayloads` empty, both
+  // surfaces stay empty, and the Task #34 JSON-free contract is
+  // preserved.
+  const focusPayloads = latestSnapshot.focusPayloads ?? [];
+  const snapshotFocusBlock =
+    focusPayloads.length > 0
+      ? "\n\n" +
+        focusPayloads
+          .map((fp) => formatSnapshotFocus(fp.snapshotId, fp.payload))
+          .join("\n\n")
+      : "";
+  const snapshotFocusInstruction =
+    focusPayloads.length > 0
+      ? "\n\n" +
+        (focusPayloads.length === 1
+          ? "A `<snapshot_focus>` block below carries the raw structured snapshot payload for this turn. "
+          : `${focusPayloads.length} \`<snapshot_focus>\` blocks below carry the raw structured snapshot payloads for this turn — one per snapshot you may compare against. `) +
+        "Use them to answer fine-grained questions about specific rooms, doors, schedules, or any item the snapshot atom's prose would have summarised away. Cite the snapshot you draw from with " +
+        focusPayloads
+          .map((fp) => `\`{{atom:snapshot:${fp.snapshotId}:focus}}\``)
+          .join(" or ") +
+        " so the answer stays attributable to the right snapshot."
+      : "";
 
   // The legacy *always-on* `<snapshot received_at='…'>{full JSON}</snapshot>`
   // block from before Task #34 stays retired — focus mode is opt-in

@@ -373,10 +373,10 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
   const MARKER = "FOCUS_PAYLOAD_MARKER_a91b3c";
   const SNAPSHOT_ID = "snap-focus-aaaa-bbbb";
 
-  it("default chat (no focusPayload) does NOT emit a <snapshot_focus> block or instruction", () => {
+  it("default chat (no focusPayloads) does NOT emit a <snapshot_focus> block or instruction", () => {
     // Regression guard for the Task #34 contract: opting OUT of focus
     // mode (the default) keeps the prompt JSON-free. If a future
-    // refactor accidentally always-passes focusPayload through, this
+    // refactor accidentally always-passes focusPayloads through, this
     // assertion catches it before it lands in production.
     const { systemPrompt } = buildChatPrompt(
       baseInput({
@@ -385,7 +385,7 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
     );
     expect(systemPrompt).not.toContain("<snapshot_focus");
     expect(systemPrompt).not.toContain("</snapshot_focus>");
-    expect(systemPrompt).not.toMatch(/snapshot focus.*block below/i);
+    expect(systemPrompt).not.toMatch(/snapshot focus.*block[s]? below/i);
   });
 
   it("focus mode emits a <snapshot_focus> block with the JSON payload AND an instruction line", () => {
@@ -402,7 +402,7 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
       baseInput({
         latestSnapshot: {
           receivedAt: new Date("2026-04-01T12:00:00Z"),
-          focusPayload: { snapshotId: SNAPSHOT_ID, payload },
+          focusPayloads: [{ snapshotId: SNAPSHOT_ID, payload }],
         },
       }),
     );
@@ -416,11 +416,47 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
     expect(systemPrompt).toContain(MARKER);
     expect(systemPrompt).toContain('"number": "204"');
     expect(systemPrompt).toContain('"areaSqft": 312');
-    // Instruction line: presence + snapshot-id citation hint.
+    // Instruction line: presence + snapshot-id citation hint. The
+    // single-block phrasing is "A `<snapshot_focus>` block below";
+    // see the multi-snapshot test for the plural variant.
     expect(systemPrompt).toContain("`<snapshot_focus>` block below");
     expect(systemPrompt).toContain(
       `{{atom:snapshot:${SNAPSHOT_ID}:focus}}`,
     );
+  });
+
+  it("focus mode (Task #44) emits one <snapshot_focus> block per id with all snapshot ids cited in the instruction", () => {
+    // Comparison-style questions ("how did the room schedule change
+    // between yesterday's push and today's?") need the model to mine
+    // more than just the latest snapshot's payload. The formatter
+    // emits one block per requested id and the instruction line lists
+    // every snapshot id as a candidate citation target so the model
+    // can attribute each piece of its answer to the correct snapshot.
+    const SNAP_A = "snap-aaaa-1111";
+    const SNAP_B = "snap-bbbb-2222";
+    const MARK_A = "MULTI_FOCUS_PAYLOAD_A_d4f2";
+    const MARK_B = "MULTI_FOCUS_PAYLOAD_B_e9a3";
+    const { systemPrompt } = buildChatPrompt(
+      baseInput({
+        latestSnapshot: {
+          receivedAt: new Date("2026-04-01T12:00:00Z"),
+          focusPayloads: [
+            { snapshotId: SNAP_A, payload: { canary: MARK_A } },
+            { snapshotId: SNAP_B, payload: { canary: MARK_B } },
+          ],
+        },
+      }),
+    );
+
+    expect(systemPrompt).toContain(`<snapshot_focus snapshot_id="${SNAP_A}">`);
+    expect(systemPrompt).toContain(`<snapshot_focus snapshot_id="${SNAP_B}">`);
+    expect(systemPrompt).toContain(MARK_A);
+    expect(systemPrompt).toContain(MARK_B);
+    // Plural-block phrasing + per-id citation hints joined by " or "
+    // so the model sees each candidate target verbatim.
+    expect(systemPrompt).toContain("`<snapshot_focus>` blocks below");
+    expect(systemPrompt).toContain(`{{atom:snapshot:${SNAP_A}:focus}}`);
+    expect(systemPrompt).toContain(`{{atom:snapshot:${SNAP_B}:focus}}`);
   });
 
   it("focus mode payload is hard-truncated when JSON exceeds the cap, with a [truncated] marker", () => {

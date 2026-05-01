@@ -581,6 +581,298 @@ describe("POST /api/chat", () => {
     expect(system).not.toContain(STALE_MARKER);
   });
 
+  it("snapshot focus mode (Task #44): explicit `snapshotFocusIds` lets a turn drill into multiple snapshots, emitting one block per id", async () => {
+    // Comparison-style questions ("how did the room schedule change
+    // between yesterday's push and today's?") need the model to mine
+    // more than just the latest snapshot's payload. We seed two
+    // snapshots with distinct marker strings, request both via the new
+    // `snapshotFocusIds` body field, and assert both payloads land in
+    // the system prompt inside their own `<snapshot_focus>` blocks.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const OLDER_MARKER = "FOCUS_OLDER_SNAPSHOT_CANARY_a1b2";
+    const NEWER_MARKER = "FOCUS_NEWER_SNAPSHOT_CANARY_c3d4";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Multi-Focus Engagement",
+        nameLower: `multi-focus-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    const [older] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Older Project",
+        payload: {
+          markerField: OLDER_MARKER,
+          rooms: [{ number: "204", areaSqft: 300 }],
+        },
+        sheetCount: 0,
+        roomCount: 1,
+        levelCount: 0,
+        wallCount: 0,
+        receivedAt: new Date("2026-04-01T00:00:00.000Z"),
+      })
+      .returning({ id: snapshots.id });
+    const [newer] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Newer Project",
+        payload: {
+          markerField: NEWER_MARKER,
+          rooms: [{ number: "204", areaSqft: 312 }],
+        },
+        sheetCount: 0,
+        roomCount: 1,
+        levelCount: 0,
+        wallCount: 0,
+        receivedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .returning({ id: snapshots.id });
+
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({
+        engagementId: eng.id,
+        question: "how did the room schedule change between these two pushes?",
+        snapshotFocusIds: [older.id, newer.id],
+      });
+    expect(res.status).toBe(200);
+
+    const system = String(anthropicMocks.lastArgs.system);
+    // Both blocks present, tagged with their own snapshot ids.
+    expect(system).toContain(`<snapshot_focus snapshot_id="${older.id}">`);
+    expect(system).toContain(`<snapshot_focus snapshot_id="${newer.id}">`);
+    // Both payloads' marker strings are in the prompt — proving the
+    // route loaded each row's `payload` column independently and the
+    // formatter didn't collapse them into one block.
+    expect(system).toContain(OLDER_MARKER);
+    expect(system).toContain(NEWER_MARKER);
+    // Instruction line names *both* snapshot ids as candidate
+    // citation targets so the model can attribute each piece of its
+    // answer to the right snapshot.
+    expect(system).toContain(`{{atom:snapshot:${older.id}:focus}}`);
+    expect(system).toContain(`{{atom:snapshot:${newer.id}:focus}}`);
+    // Plural-block phrasing — single-block tests use the singular
+    // form "A `<snapshot_focus>` block below", the multi-snapshot
+    // path swaps in "N `<snapshot_focus>` blocks below".
+    expect(system).toContain("`<snapshot_focus>` blocks below");
+  });
+
+  it("snapshot focus mode (Task #44): inline {{atom:snapshot:<olderId>:focus}} reference now triggers focus on the older snapshot too", async () => {
+    // Pre-Task-#44 the inline channel only matched the engagement's
+    // *latest* snapshot id — pasting a reference to an older snapshot
+    // (e.g. from a prior chat turn) was silently ignored and the
+    // older payload could never reach the model. Task #44 lifts that
+    // restriction: any inline `{{atom:snapshot:<id>:focus}}` whose id
+    // belongs to the engagement now opts that snapshot into focus
+    // mode for this turn.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const OLDER_MARKER = "INLINE_OLDER_FOCUS_CANARY_e5f6";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Inline Older Focus",
+        nameLower: `inline-older-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    const [older] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Older Inline Project",
+        payload: { markerField: OLDER_MARKER },
+        sheetCount: 0,
+        roomCount: 0,
+        levelCount: 0,
+        wallCount: 0,
+        receivedAt: new Date("2026-04-01T00:00:00.000Z"),
+      })
+      .returning({ id: snapshots.id });
+    // Newer snapshot — engagement atom resolves this as "latest" so
+    // the framing sentence + framework atom both key off it. The
+    // inline reference below targets the OLDER id specifically.
+    await ctx.schema.db.insert(snapshots).values({
+      engagementId: eng.id,
+      projectName: "Newer Inline Project",
+      payload: { rooms: [] },
+      sheetCount: 0,
+      roomCount: 0,
+      levelCount: 0,
+      wallCount: 0,
+      receivedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({
+        engagementId: eng.id,
+        question: `what was in {{atom:snapshot:${older.id}:focus}} originally?`,
+      });
+    expect(res.status).toBe(200);
+
+    const system = String(anthropicMocks.lastArgs.system);
+    // Older snapshot's focus block + its marker land in the prompt.
+    expect(system).toContain(`<snapshot_focus snapshot_id="${older.id}">`);
+    expect(system).toContain(OLDER_MARKER);
+  });
+
+  it("snapshot focus mode (Task #44): foreign `snapshotFocusIds` (cross-engagement leak attempt) returns 400 and never loads the payload", async () => {
+    // Access-control denial: a programmatic caller passing a snapshot
+    // id from a *different* engagement must be rejected before any
+    // payload row is loaded — the engagement atom's `relatedAtoms` is
+    // the single source of truth for what counts as "this
+    // engagement's snapshots", so an id outside that set can never
+    // reach `<snapshot_focus>`. We verify the error response shape
+    // AND that the foreign payload's marker never appears in any
+    // prompt sent to the SDK (which it can't, because the SDK is
+    // never invoked on the 400 branch).
+    if (!ctx.schema) throw new Error("schema not ready");
+    const FOREIGN_MARKER = "CROSS_ENGAGEMENT_SHOULD_NOT_LEAK_g7h8";
+    // Engagement A: the chat target. Has its own snapshot.
+    const [engA] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Engagement A",
+        nameLower: `engagement-a-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    await ctx.schema.db.insert(snapshots).values({
+      engagementId: engA.id,
+      projectName: "A's Project",
+      payload: { ownMarker: "A_OWN" },
+      sheetCount: 0,
+      roomCount: 0,
+      levelCount: 0,
+      wallCount: 0,
+    });
+    // Engagement B: belongs to a different project, holds the
+    // payload the attacker wants to exfiltrate.
+    const [engB] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Engagement B",
+        nameLower: `engagement-b-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Other City, UT",
+        address: "999 Other St",
+      })
+      .returning({ id: engagements.id });
+    const [foreign] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: engB.id,
+        projectName: "B's Secret Project",
+        payload: { markerField: FOREIGN_MARKER },
+        sheetCount: 0,
+        roomCount: 0,
+        levelCount: 0,
+        wallCount: 0,
+      })
+      .returning({ id: snapshots.id });
+
+    // Reset the mock so we can prove the SDK was NOT invoked on the
+    // denial path (would-be events stay buffered, .lastArgs stays
+    // null after this point).
+    anthropicMocks.lastArgs = null;
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({
+        engagementId: engA.id,
+        // The attacker chats against Engagement A but tries to focus
+        // Engagement B's snapshot id. Server must refuse.
+        question: "what's in here?",
+        snapshotFocusIds: [foreign.id],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("snapshot_not_in_engagement");
+    // The SDK was never called — confirms the route fails *closed*
+    // before any payload load + prompt assembly.
+    expect(anthropicMocks.lastArgs).toBeNull();
+  });
+
+  it("snapshot focus mode (Task #44): `snapshotFocus: true` + explicit `snapshotFocusIds` ship one block per id with the latest auto-included", async () => {
+    // Combining the legacy boolean flag with the new explicit list
+    // should be additive — the latest snapshot id gets folded in
+    // once, de-duplicated against the explicit list. This pins the
+    // backwards-compat contract: the existing UI button (which sends
+    // `snapshotFocus: true` alone) keeps working, and a future
+    // "compare with snapshot X" UI that sends both fields gets the
+    // expected superset without surprising re-orderings.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const OLDER_MARKER = "COMBINED_OLDER_MARKER_i9j0";
+    const NEWER_MARKER = "COMBINED_NEWER_MARKER_k1l2";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Combined Focus",
+        nameLower: `combined-focus-${Math.random().toString(36).slice(2)}`,
+        jurisdiction: "Moab, UT",
+        address: "123 Main St",
+      })
+      .returning({ id: engagements.id });
+    const [older] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Combined Older",
+        payload: { markerField: OLDER_MARKER },
+        sheetCount: 0,
+        roomCount: 0,
+        levelCount: 0,
+        wallCount: 0,
+        receivedAt: new Date("2026-04-01T00:00:00.000Z"),
+      })
+      .returning({ id: snapshots.id });
+    const [newer] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId: eng.id,
+        projectName: "Combined Newer",
+        payload: { markerField: NEWER_MARKER },
+        sheetCount: 0,
+        roomCount: 0,
+        levelCount: 0,
+        wallCount: 0,
+        receivedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .returning({ id: snapshots.id });
+
+    anthropicMocks.events = [
+      { type: "content_block_delta", delta: { type: "text_delta", text: "ok" } },
+    ];
+    const res = await request(getApp())
+      .post("/api/chat")
+      .send({
+        engagementId: eng.id,
+        question: "compare these",
+        snapshotFocus: true,
+        snapshotFocusIds: [older.id],
+      });
+    expect(res.status).toBe(200);
+    const system = String(anthropicMocks.lastArgs.system);
+    // Both markers + both block headers present.
+    expect(system).toContain(`<snapshot_focus snapshot_id="${older.id}">`);
+    expect(system).toContain(`<snapshot_focus snapshot_id="${newer.id}">`);
+    expect(system).toContain(OLDER_MARKER);
+    expect(system).toContain(NEWER_MARKER);
+  });
+
   it("does NOT inline the raw snapshot JSON payload in the system prompt (Task #34)", async () => {
     // Pre-Task-#34 the chat route loaded the entire snapshots.payload
     // blob and pasted it into a `<snapshot received_at='…'>{full
