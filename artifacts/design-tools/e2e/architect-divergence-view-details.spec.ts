@@ -735,3 +735,230 @@ test.describe("empty-detail branch", () => {
     ).toBeVisible();
   });
 });
+
+/**
+ * Combined diff + flat-attributes branch — pins the third visual
+ * state of {@link BriefingDivergenceDetailDialog}. When a divergence's
+ * `detail` carries *both* a `before`/`after` envelope **and** extra
+ * top-level keys (e.g. a `revitElementId` reference), the dialog
+ * renders the 3-column diff table *and* the flat attributes table
+ * side-by-side. `extractDetailViews` deliberately skips the `before`
+ * and `after` keys when populating the flat-attributes table (they're
+ * already represented in the diff above), so the attributes table
+ * surfaces only the *extra* top-level keys.
+ *
+ * The geometry-edited test at the top of this file seeds exactly
+ * this shape but only pins the diff table — a regression that:
+ *
+ *   - re-included the `before`/`after` envelope as opaque JSON in
+ *     the attributes table (i.e. removed the skip-on-`before`/`after`
+ *     guard in `extractDetailViews`), or
+ *   - hid the attributes table whenever a diff was present (i.e.
+ *     wrapped the `rows.length > 0` section in an `else` branch
+ *     against `beforeAfter.length > 0`),
+ *
+ * would slip past every test in this file. This case explicitly
+ * pins the coexistence: diff table present with the envelope's
+ * fields, attributes table present with *only* the extra top-level
+ * key (no `before` or `after` row), and the empty placeholder
+ * absent.
+ */
+test.describe("combined diff + flat-attributes branch", () => {
+  let combinedEngagementId = "";
+  let combinedDivergenceId = "";
+
+  test.beforeAll(async () => {
+    const caseTag = `${RUN_TAG}-combined`;
+    const projectName = `e2e Architect Divergence Drill-In ${caseTag}`;
+
+    const [eng] = await db
+      .insert(engagements)
+      .values({
+        name: projectName,
+        nameLower: projectName.toLowerCase(),
+        jurisdiction: "Moab, UT",
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        jurisdictionFips: "49019",
+        address: "456 Drill-In Ave, Moab, UT 84532",
+        status: "active",
+      })
+      .returning();
+    if (!eng) throw new Error("seed: engagement insert returned no row");
+    combinedEngagementId = eng.id;
+
+    const [briefing] = await db
+      .insert(parcelBriefings)
+      .values({ engagementId: combinedEngagementId })
+      .returning();
+    if (!briefing) throw new Error("seed: briefing insert returned no row");
+
+    const [element] = await db
+      .insert(materializableElements)
+      .values({
+        briefingId: briefing.id,
+        elementKind: "buildable-envelope",
+        label: `e2e Buildable Envelope ${caseTag}`,
+        geometry: {
+          polygon: [
+            [0, 0, 0],
+            [10, 0, 0],
+            [10, 10, 0],
+            [0, 10, 0],
+          ],
+        },
+        locked: true,
+      })
+      .returning();
+    if (!element)
+      throw new Error("seed: materializable element insert returned no row");
+
+    const [model] = await db
+      .insert(bimModels)
+      .values({
+        engagementId: combinedEngagementId,
+        activeBriefingId: briefing.id,
+        briefingVersion: 1,
+        revitDocumentPath: `e2e:${caseTag}.rvt`,
+        materializedAt: new Date(),
+      })
+      .returning();
+    if (!model) throw new Error("seed: bim-model insert returned no row");
+
+    // Combined-shape divergence — `geometry-edited` with a paired
+    // `before`/`after` envelope **plus** a top-level
+    // `revitElementId`. The envelope drives the diff table; the
+    // `revitElementId` is the extra top-level key that should land
+    // in the flat-attributes table on its own (with no `before` or
+    // `after` row alongside it).
+    const [div] = await db
+      .insert(briefingDivergences)
+      .values({
+        bimModelId: model.id,
+        materializableElementId: element.id,
+        briefingId: briefing.id,
+        reason: "geometry-edited",
+        note: `e2e combined diff+attributes ${caseTag}`,
+        detail: {
+          revitElementId: 5151,
+          before: { height: 30, footprintArea: 100 },
+          after: { height: 35, footprintArea: 105 },
+        },
+      })
+      .returning();
+    if (!div) throw new Error("seed: divergence insert returned no row");
+    combinedDivergenceId = div.id;
+  });
+
+  test.afterAll(async () => {
+    if (combinedEngagementId) {
+      await db
+        .delete(engagements)
+        .where(eq(engagements.id, combinedEngagementId));
+    }
+  });
+
+  test("View details renders both the diff table and the flat attributes table when detail carries an envelope plus extra top-level keys", async ({
+    page,
+  }) => {
+    const proxyOrigin = new URL(
+      process.env["E2E_BASE_URL"] ?? "http://localhost:80",
+    );
+    await page.context().addCookies([
+      {
+        name: "pr_session",
+        value: encodeURIComponent(JSON.stringify({ audience: "internal" })),
+        domain: proxyOrigin.hostname,
+        path: "/",
+        httpOnly: false,
+        secure: false,
+      },
+    ]);
+
+    await page.goto(`/engagements/${combinedEngagementId}?tab=site-context`);
+
+    const row = page.locator(
+      `[data-testid="briefing-divergences-row"][data-divergence-id="${combinedDivergenceId}"]`,
+    );
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute(
+      "data-divergence-reason",
+      "geometry-edited",
+    );
+
+    const viewDetailsButton = page.locator(
+      `[data-testid="briefing-divergences-view-details-button"][data-divergence-id="${combinedDivergenceId}"]`,
+    );
+    await expect(viewDetailsButton).toBeVisible();
+    await viewDetailsButton.click();
+
+    const dialog = page.getByTestId("briefing-divergence-detail-dialog");
+    await expect(dialog).toBeVisible();
+
+    // Diff table must be present — the seeded `detail` carries a
+    // matching `before`/`after` object pair, so the dialog renders
+    // the 3-column diff section. We pin the row count (one per
+    // distinguishable field in the envelope) and the per-field
+    // rows by `data-field` so a regression that collapsed the
+    // table or mis-merged the field set would fail loudly.
+    const diffTable = dialog.getByTestId(
+      "briefing-divergence-detail-diff-table",
+    );
+    await expect(diffTable).toBeVisible();
+    const diffRows = dialog.getByTestId("briefing-divergence-detail-diff-row");
+    await expect(diffRows).toHaveCount(2);
+    await expect(
+      dialog.locator(
+        `[data-testid="briefing-divergence-detail-diff-row"][data-field="height"]`,
+      ),
+    ).toHaveCount(1);
+    await expect(
+      dialog.locator(
+        `[data-testid="briefing-divergence-detail-diff-row"][data-field="footprintArea"]`,
+      ),
+    ).toHaveCount(1);
+
+    // Flat attributes table must *also* be present — this is the
+    // coexistence the task exists to pin. The envelope is already
+    // surfaced in the diff table above, so `extractDetailViews`
+    // skips its `before`/`after` keys when building the
+    // attributes rows, leaving exactly one row for the extra
+    // top-level `revitElementId` reference.
+    const attrTable = dialog.getByTestId(
+      "briefing-divergence-detail-attributes-table",
+    );
+    await expect(attrTable).toBeVisible();
+    const attrRows = dialog.getByTestId(
+      "briefing-divergence-detail-attribute-row",
+    );
+    await expect(attrRows).toHaveCount(1);
+    const revitElementIdRow = dialog.locator(
+      `[data-testid="briefing-divergence-detail-attribute-row"][data-field="revitElementId"]`,
+    );
+    await expect(revitElementIdRow).toHaveCount(1);
+    await expect(revitElementIdRow).toContainText("5151");
+
+    // The envelope must NOT bleed into the flat-attributes table
+    // as opaque JSON — `extractDetailViews`'s skip-on-`before`/
+    // `after` rule is exactly the guard against that regression.
+    // Asserting both keys are absent (rather than just the count)
+    // gives the failure mode a clear name in the report.
+    await expect(
+      dialog.locator(
+        `[data-testid="briefing-divergence-detail-attribute-row"][data-field="before"]`,
+      ),
+    ).toHaveCount(0);
+    await expect(
+      dialog.locator(
+        `[data-testid="briefing-divergence-detail-attribute-row"][data-field="after"]`,
+      ),
+    ).toHaveCount(0);
+
+    // The empty placeholder must not render — both branches above
+    // produced rows, so the `rows.length === 0 && beforeAfter.length === 0`
+    // guard should be false.
+    await expect(
+      dialog.getByTestId("briefing-divergence-detail-empty"),
+    ).toHaveCount(0);
+  });
+});
