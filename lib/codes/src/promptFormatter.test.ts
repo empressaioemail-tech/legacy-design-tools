@@ -1073,4 +1073,234 @@ describe("shapeSnapshotPayloadForBudget: smart trim (Task #52)", () => {
     expect(blocks[2]).toContain('"r3"');
     expect(blocks[3]).toContain('"r4"');
   });
+
+  // --------------------------------------------------------------
+  // Task #61: fixture-driven test against a realistic Revit-shaped
+  // payload. The fixture mirrors the top-level keys observed in real
+  // production `snapshots.payload` rows (rooms/sheets/levels arrays,
+  // doors/windows/walls count+family objects, project-identity
+  // scalars like address/projectName/projectNumber, plus the noise
+  // keys: activeViewName/activeViewType, units, and the snapshot
+  // ingest request envelope fields engagementId/createNewEngagement
+  // /revitCentralGuid/revitDocumentPath that the route stores
+  // verbatim because `payload = req.body`).
+  //
+  // Audit provenance — the validated key list was enumerated by
+  // running this against the production replica (15 rows across 4
+  // engagements: Snowdon Towers, 3514 E ARENA ROJA, Jones Garage_B,
+  // Balsley):
+  //
+  //   SELECT DISTINCT top_key
+  //   FROM (
+  //     SELECT jsonb_object_keys(payload::jsonb) AS top_key
+  //     FROM snapshots
+  //     WHERE jsonb_typeof(payload::jsonb) = 'object'
+  //   ) keys
+  //   ORDER BY top_key;
+  //
+  // The 20 distinct keys observed (capturedAt + documentPath are
+  // medium-priority — small scalars carrying low chat signal but
+  // enough provenance value to stay unranked):
+  //   activeViewName, activeViewType, address, capturedAt,
+  //   clientName, createNewEngagement, documentPath, documentTitle,
+  //   doors, engagementId, levels, projectName, projectNumber,
+  //   revitCentralGuid, revitDocumentPath, rooms, sheets, units,
+  //   walls, windows.
+  //
+  // No occurrences of the existing low-priority Revit-metadata names
+  // (families/materials/parameters/warnings/...) or the high-priority
+  // schedules/spaces/areas/projectInformation defensive entries; those
+  // are kept because they match Revit conventions and we want the
+  // priority order locked before the first push that includes them
+  // hits production.
+  //
+  // The fixture is deliberately inflated past the per-block cap by
+  // bloating a medium-priority `customBloat` branch so the helper has
+  // to make actual prioritisation decisions — not just trim a single
+  // pathological key. The assertions guard the intent of the priority
+  // sets: validated low-priority + envelope keys go FIRST, unknown
+  // medium keys go BEFORE the high-priority set, and the project-
+  // identity scalars that the chat answer needs survive.
+  // --------------------------------------------------------------
+  it("realistic Revit-shaped over-cap payload preserves project-identity + structural-element keys and sheds capture-time / envelope noise first", () => {
+    // Mirror the real production shape (Snowdon Towers et al.).
+    // Numbers/strings are illustrative; what matters is that every
+    // key on the priority sets is present so the helper has to
+    // actually choose between them.
+    const fixture: Record<string, unknown> = {
+      // High-priority structural collections.
+      rooms: Array.from({ length: 200 }, (_, i) => ({
+        name: `Room ${i + 1}`,
+        level: `L1 - Block ${i % 10}`,
+        number: String(101 + i),
+        areaSqFt: 100 + i,
+      })),
+      sheets: Array.from({ length: 80 }, (_, i) => ({
+        name: `Sheet ${i + 1}`,
+        number: `A${100 + i}`,
+        viewCount: 1,
+      })),
+      levels: Array.from({ length: 18 }, (_, i) => ({
+        name: `Level ${i + 1}`,
+        elevationFeet: -16.9 + i * 10,
+      })),
+      doors: { count: 142, doorFamilies: ["Door-Single-Flush", "Door-Double"] },
+      windows: { count: 106, windowFamilies: ["Window-Fixed", "Window-Sliding"] },
+      walls: {
+        count: 1152,
+        wallTypes: ["Block 37 Pilaster", "Core - Concrete 12\""],
+        totalLengthFeet: 12750.2,
+      },
+      // High-priority project-identity scalars (small, but they
+      // must survive even an aggressive squeeze so chat can answer
+      // "what's the address?" / "what's the project number?").
+      address: "1 Main St, Moab, UT 84532",
+      projectName: "Snowdon Towers",
+      projectNumber: "2024-001",
+      documentTitle: "Snowdon Towers - Architecture",
+      clientName: "Block 37 LLC",
+      // Capture-time view metadata (low-priority — should be shed
+      // first even though it's tiny).
+      activeViewName: "Cover",
+      activeViewType: "DrawingSheet",
+      // Units-system marker (low-priority).
+      units: "feetFractionalInches-1.0.0",
+      // Snapshot ingest request envelope (low-priority — request
+      // metadata, not Revit content).
+      engagementId: "00000000-0000-0000-0000-000000000001",
+      createNewEngagement: false,
+      revitCentralGuid: "abc-revit-guid",
+      revitDocumentPath: "C:/Projects/SnowdonTowers.rvt",
+      // Medium-priority unknown keys: a chunky one (the squeeze
+      // target) and a small one (the survivor probe). `customMeta`
+      // is small enough to survive after the bloated key is shed.
+      customBloat: {
+        notes: bigString(40_000),
+      },
+      customMeta: { reviewer: "alice", lastReview: "2026-04-30" },
+    };
+
+    // Confirm the fixture actually exceeds the per-block cap before
+    // we ask the helper to shape it — otherwise the assertions
+    // below would silently exercise the no-trim happy path.
+    const fullSize = JSON.stringify(fixture, null, 2).length;
+    expect(fullSize).toBeGreaterThan(MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS);
+
+    const result = shapeSnapshotPayloadForBudget(
+      fixture,
+      MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS,
+    );
+
+    expect(result.fitsBudget).toBe(true);
+    expect(result.trimmed).toBe(true);
+    expect(result.json.length).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS,
+    );
+    expect(() => JSON.parse(result.json)).not.toThrow();
+
+    const parsed = JSON.parse(result.json) as Record<string, unknown>;
+
+    // The validated low-priority keys must all be among the first
+    // dropped — no high-priority key may be dropped before any of
+    // them. (The fixture is sized so the squeeze stops well before
+    // Phase 4 has to drop any high-priority key, but we still want
+    // the *order* invariant locked.)
+    const lowPriorityValidated = [
+      "activeViewName",
+      "activeViewType",
+      "units",
+      "engagementId",
+      "createNewEngagement",
+      "revitCentralGuid",
+      "revitDocumentPath",
+    ];
+    for (const lowKey of lowPriorityValidated) {
+      const lowIdx = result.droppedKeys.indexOf(lowKey);
+      // It is OK for a low-priority key to NOT be dropped (the
+      // squeeze may have completed before reaching it). What's not
+      // OK is for it to be shed AFTER any high-priority key.
+      if (lowIdx < 0) continue;
+      for (const highKey of HIGH_PRIORITY_VALIDATED_KEYS) {
+        const highIdx = result.droppedKeys.indexOf(highKey);
+        if (highIdx >= 0) {
+          expect(lowIdx).toBeLessThan(highIdx);
+        }
+      }
+    }
+
+    // The bloated medium-priority key is the squeeze target — it
+    // must be dropped, and it must be dropped AFTER the validated
+    // low-priority keys present in the dropped set.
+    expect(result.droppedKeys).toContain("customBloat");
+    for (const lowKey of lowPriorityValidated) {
+      const lowIdx = result.droppedKeys.indexOf(lowKey);
+      const bloatIdx = result.droppedKeys.indexOf("customBloat");
+      if (lowIdx >= 0) {
+        expect(lowIdx).toBeLessThan(bloatIdx);
+      }
+    }
+
+    // The small medium-priority survivor probe (`customMeta`) is
+    // expected to survive — the helper stops the squeeze as soon as
+    // it fits, and dropping the bloated key alone clears the budget.
+    expect(parsed.customMeta).toEqual({
+      reviewer: "alice",
+      lastReview: "2026-04-30",
+    });
+
+    // Project-identity scalars and structural-element collections —
+    // the validated high-priority keys — must all survive. This is
+    // the core contract chat answers depend on.
+    expect(parsed.address).toBe("1 Main St, Moab, UT 84532");
+    expect(parsed.projectName).toBe("Snowdon Towers");
+    expect(parsed.projectNumber).toBe("2024-001");
+    expect(parsed.documentTitle).toBe("Snowdon Towers - Architecture");
+    expect(parsed.clientName).toBe("Block 37 LLC");
+    expect(parsed.doors).toEqual({
+      count: 142,
+      doorFamilies: ["Door-Single-Flush", "Door-Double"],
+    });
+    expect(parsed.windows).toEqual({
+      count: 106,
+      windowFamilies: ["Window-Fixed", "Window-Sliding"],
+    });
+    expect(parsed.walls).toEqual({
+      count: 1152,
+      wallTypes: ["Block 37 Pilaster", "Core - Concrete 12\""],
+      totalLengthFeet: 12750.2,
+    });
+    // The structural arrays may be shrunk by Phase 3 (or survive
+    // intact if the Phase 1/2 drops alone freed enough budget); in
+    // either case a non-empty leading slice must remain so chat can
+    // still answer about the project's rooms / sheets / levels.
+    expect(Array.isArray(parsed.rooms)).toBe(true);
+    expect((parsed.rooms as unknown[]).length).toBeGreaterThan(0);
+    expect(Array.isArray(parsed.sheets)).toBe(true);
+    expect((parsed.sheets as unknown[]).length).toBeGreaterThan(0);
+    expect(Array.isArray(parsed.levels)).toBe(true);
+    expect((parsed.levels as unknown[]).length).toBeGreaterThan(0);
+  });
 });
+
+/**
+ * Validated high-priority top-level keys — the ones actually observed
+ * in production `snapshots.payload` rows. Used by the fixture-driven
+ * test above to assert no high-priority key is shed before any
+ * validated low-priority key. Kept as a local constant (rather than
+ * exporting it from the formatter) because it's a test-only invariant
+ * — the formatter's HIGH_PRIORITY set intentionally includes
+ * defensive entries that production hasn't exercised yet.
+ */
+const HIGH_PRIORITY_VALIDATED_KEYS = [
+  "rooms",
+  "sheets",
+  "levels",
+  "doors",
+  "windows",
+  "walls",
+  "address",
+  "projectName",
+  "projectNumber",
+  "documentTitle",
+  "clientName",
+] as const;

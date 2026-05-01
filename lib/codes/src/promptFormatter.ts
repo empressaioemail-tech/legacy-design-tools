@@ -147,54 +147,109 @@ export const MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS = 60_000;
  * Bias: keep this set small and conservative. Any unknown key falls
  * into the medium tier and gets shed before the high-value set, but
  * adding a key here makes it survive at the expense of unknown keys —
- * that should be a deliberate prioritisation choice. The keys here
- * mirror what `deriveCounts` reads in the snapshot ingest route
- * (sheets/rooms/levels/walls) plus the obvious Revit collections
- * (doors/windows/spaces/areas/schedules) and the address-bearing
- * `projectInformation` block. Snapshot payload schemas vary across
- * Revit versions — if your push uses a different naming convention,
- * add the corresponding key here.
+ * that should be a deliberate prioritisation choice.
+ *
+ * Audit (Task #61): the keys marked `// validated` were enumerated by
+ * surveying every distinct top-level key across all production
+ * `snapshots.payload` rows from real Revit add-in pushes. The keys
+ * marked `// defensive` were not observed in production but match
+ * Revit naming conventions and are kept so a future add-in version (or
+ * a different jurisdiction's push) that includes them still has its
+ * high-value branches preferred over unknown bloat. If your push uses
+ * a different naming convention, add the corresponding key here.
+ *
+ * Note on the structural-element keys: in production the field-tested
+ * `doors`, `windows`, and `walls` blocks ship as objects (e.g.
+ * `{ count: 142, doorFamilies: [...] }`) rather than arrays, so
+ * Phase 3's array-shrink step does not reach them — they survive
+ * intact until Phase 4's last-resort drop, which is the desired
+ * behaviour because the count + family/type listing is exactly the
+ * structured fact chat answers about door/window/wall populations.
  */
 export const HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS: ReadonlySet<string> =
   new Set([
-    "rooms",
-    "doors",
-    "windows",
-    "sheets",
-    "schedules",
-    "levels",
-    "walls",
-    "spaces",
-    "areas",
-    "projectInformation",
+    // Structural-element collections (validated in production pushes).
+    "rooms", // validated — array of room records (name/level/number/areaSqFt)
+    "sheets", // validated — array of sheet records (name/number/viewCount)
+    "levels", // validated — array of level records (name/elevationFeet)
+    "doors", // validated — object {count, doorFamilies[]}
+    "windows", // validated — object {count, windowFamilies[]}
+    "walls", // validated — object {count, wallTypes[], totalLengthFeet}
+    // Project-identity scalars (validated in production pushes). These
+    // are tiny strings, but listing them here guarantees they survive
+    // even an aggressive Phase-4 squeeze so chat answers about the
+    // project itself ("what's the address?", "what's the project
+    // number?") still have ground truth.
+    "address", // validated — top-level address string
+    "projectName", // validated — project display name
+    "projectNumber", // validated — Revit project number
+    "documentTitle", // validated — Revit document title
+    "clientName", // validated — Revit project client field
+    // Defensive: not observed in production today, but match Revit
+    // conventions (Schedules, Spaces, Areas are first-class Revit
+    // categories; ProjectInformation is the Revit element wrapper that
+    // carries address/client/etc. when an add-in serialises it as a
+    // sub-object instead of top-level scalars).
+    "schedules", // defensive
+    "spaces", // defensive
+    "areas", // defensive
+    "projectInformation", // defensive — wrapper variant of address/client/etc.
   ]);
 
 /**
  * Top-level snapshot-payload keys that are typically verbose, low-
  * signal Revit metadata — the BIM family library, applied parameters,
  * warnings about deprecated families, materials/categories/line styles
- * /fill patterns/view templates and so on.
+ * /fill patterns/view templates and so on, plus capture-time view
+ * metadata and the snapshot ingest request envelope.
  * {@link shapeSnapshotPayloadForBudget} drops these first so the
  * high-value collections (see {@link HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS})
  * survive a budget-forced trim. As with the high-priority set, any
  * unknown key sits at medium priority — it's only the keys explicitly
  * listed here that get sacrificed first.
+ *
+ * Audit (Task #61): the keys marked `// validated` were enumerated by
+ * surveying every distinct top-level key across all production
+ * `snapshots.payload` rows. The remaining entries are `// defensive`
+ * — not observed in production, but matching Revit naming
+ * conventions for verbose metadata branches we want to shed first if
+ * a future push includes them.
  */
 export const LOW_PRIORITY_SNAPSHOT_PAYLOAD_KEYS: ReadonlySet<string> =
   new Set([
-    "families",
-    "materials",
-    "parameters",
-    "warnings",
-    "metadata",
-    "revitMetadata",
-    "categories",
-    "lineStyles",
-    "fillPatterns",
-    "viewTemplates",
-    "linkedFiles",
-    "phases",
-    "appliedDisciplines",
+    // Capture-time view metadata (validated). The active view
+    // recorded at push time has no value for chat answers about the
+    // project itself — drop it first.
+    "activeViewName", // validated — string, name of view active at capture
+    "activeViewType", // validated — string, kind of view active at capture
+    // Units-system marker (validated). In production this is a
+    // scalar like "feetFractionalInches-1.0.0" — small, but if a
+    // future push expands it into a verbose units block (per-
+    // discipline rounding, formatting, etc.) we want it shed first.
+    "units", // validated — units-system identifier
+    // Snapshot ingest request envelope (validated). Because the route
+    // stores `req.body` verbatim as the payload, the envelope fields
+    // it discriminates on (engagementId vs. createNewEngagement, plus
+    // the GUID/path identifiers) end up inside the payload. They are
+    // request metadata, not Revit content — chat never needs them.
+    "engagementId", // validated — request envelope (existing-engagement branch)
+    "createNewEngagement", // validated — request envelope (create-new branch flag)
+    "revitCentralGuid", // validated — request envelope identifier
+    "revitDocumentPath", // validated — request envelope identifier
+    // Defensive: classic verbose Revit metadata branches.
+    "families", // defensive — BIM family library
+    "materials", // defensive — material definitions
+    "parameters", // defensive — applied parameter values
+    "warnings", // defensive — model-check warnings
+    "metadata", // defensive — generic metadata blob
+    "revitMetadata", // defensive — Revit-specific metadata blob
+    "categories", // defensive — category definitions
+    "lineStyles", // defensive — line style library
+    "fillPatterns", // defensive — fill pattern library
+    "viewTemplates", // defensive — view template definitions
+    "linkedFiles", // defensive — linked-file references
+    "phases", // defensive — project phase definitions
+    "appliedDisciplines", // defensive — discipline-applied settings
   ]);
 
 /**
