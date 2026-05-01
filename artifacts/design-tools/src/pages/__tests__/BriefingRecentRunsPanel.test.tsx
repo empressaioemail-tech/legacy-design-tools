@@ -1833,6 +1833,19 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
  *     section is byte-identical we render an "(unchanged)" pill
  *     so the auditor isn't asked to scan for diffs that aren't
  *     there.
+ *
+ * Task #397 — the B.5 diff-internals assertions (every A–G row,
+ * removed/added/unchanged testids, empty-section placeholder, and
+ * the null/undefined current-body fall-through) are now pinned at
+ * the lib boundary by
+ * `lib/briefing-prior-snapshot/src/BriefingPriorNarrativeDiff.test.tsx`
+ * (Task #389). This surface suite intentionally keeps only a single
+ * smoke check that the diff component is *mounted* in the right
+ * disclosure slot — a regression that drops the component entirely
+ * still surfaces here, without re-exercising rendering details that
+ * the lib-level guard now owns. Removing the inline-diff and
+ * unchanged-pill internals here closes the cross-firing pattern
+ * Task #374's lift was meant to retire.
  */
 describe("BriefingRecentRunsPanel — prior-narrative polish (Task #303 B.3/B.4/B.5)", () => {
   function seedPriorRow(opts: {
@@ -2245,7 +2258,17 @@ describe("BriefingRecentRunsPanel — prior-narrative polish (Task #303 B.3/B.4/
     }
   });
 
-  it("B.5 — renders an inline word diff when prior and current sections differ", async () => {
+  // Task #397 — smoke check that `<BriefingPriorNarrativeDiff />`
+  // is mounted in the prior-snapshot disclosure slot. The lib-level
+  // suite at
+  // `lib/briefing-prior-snapshot/src/BriefingPriorNarrativeDiff.test.tsx`
+  // (Task #389) exhaustively pins the component's rendering — every
+  // A–G row, removed/added/unchanged token testids, empty-section
+  // placeholder, and the null/undefined current-body fall-through.
+  // We only need to assert the component shows up in the right slot
+  // here so a regression that drops it entirely from the surface
+  // still surfaces against this suite.
+  it("B.5 — mounts the prior-narrative diff in the disclosure slot (lib pins the rendering details)", async () => {
     seedPriorRow({
       priorSectionA: "The buildable area is 4500 square feet.",
       currentSectionA: "The buildable area is 5200 square feet.",
@@ -2255,54 +2278,12 @@ describe("BriefingRecentRunsPanel — prior-narrative polish (Task #303 B.3/B.4/
     fireEvent.click(
       await screen.findByTestId("briefing-run-toggle-gen-prior"),
     );
-    const diff = await screen.findByTestId(
-      "briefing-run-prior-section-diff-a-gen-prior",
-    );
-    // The dropped "4500" token survives in the prior body wrapped
-    // in a strike-through span; the inserted "5200" token shows
-    // up in the same diff span. Together they tell the auditor
-    // exactly what the regeneration changed.
-    expect(diff).toHaveTextContent(/4500/);
-    expect(diff).toHaveTextContent(/5200/);
+    // The section A row's testid is the diff component's outermost
+    // anchor inside the disclosure — its presence proves the
+    // component is wired through the surface's render-prop slot.
     expect(
-      within(diff).getByTestId(
-        "briefing-run-prior-section-diff-removed-a-gen-prior",
-      ),
-    ).toHaveTextContent("4500");
-  });
-
-  it("B.5 — surfaces an (unchanged) pill when a section is byte-identical", async () => {
-    seedPriorRow({
-      priorSectionA: "Identical body.",
-      currentSectionA: "Identical body.",
-      priorSectionG: "Different prior G.",
-      currentSectionG: "Different current G.",
-    });
-    renderPage();
-    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
-    fireEvent.click(
-      await screen.findByTestId("briefing-run-toggle-gen-prior"),
-    );
-    // Section A has the unchanged pill (and no diff span)…
-    expect(
-      await screen.findByTestId(
-        "briefing-run-prior-section-unchanged-a-gen-prior",
-      ),
-    ).toHaveTextContent(/unchanged/i);
-    expect(
-      screen.queryByTestId("briefing-run-prior-section-diff-a-gen-prior"),
-    ).not.toBeInTheDocument();
-    // …while section G keeps the diff span (and no unchanged pill).
-    // Proves the unchanged-detection is per-section, not a global
-    // flag.
-    expect(
-      screen.getByTestId("briefing-run-prior-section-diff-g-gen-prior"),
+      await screen.findByTestId("briefing-run-prior-section-a-gen-prior"),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId(
-        "briefing-run-prior-section-unchanged-g-gen-prior",
-      ),
-    ).not.toBeInTheDocument();
   });
 });
 
