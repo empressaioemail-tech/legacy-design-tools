@@ -2099,6 +2099,89 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /me/profile:
+    patch:
+      operationId: updateMyProfile
+      tags: [users]
+      summary: Update the current architect's own display name / email / avatar
+      description: |
+        Lets the session's current `user`-kind requestor edit their
+        own `displayName`, `email`, and `avatarUrl` columns. The
+        Settings page wires this up so an architect can fix the
+        opaque user id that gets backfilled on first sign-in without
+        having to ask an admin to PATCH `/users/{id}` (which requires
+        the `users:manage` claim — architects do not have it).
+
+        Self-edit only — there is no `users:manage` admin gate, but
+        the request must carry a `user`-kind requestor (anonymous /
+        agent sessions get a 401). The row id always comes from
+        `req.session.requestor.id`, so a malicious payload that
+        smuggles another user's id cannot reach `users.id = <other>`.
+
+        Partial update: omit a field to leave it unchanged. `email`
+        and `avatarUrl` accept `null` to clear the column;
+        `displayName` is non-nullable, and an empty / whitespace-only
+        value is a 400 (the architect's own name should never be
+        silently demoted to "" or back to the opaque id). `email`
+        is trimmed and an empty / whitespace-only string clears the
+        column so the FE form can ship a single Save button.
+
+        `avatarUrl` runs through the same per-asset size cap and
+        image-bytes sniff as the admin `PATCH /users/{id}` route, and
+        the freshly-uploaded blob is rolled back if the row never
+        ends up pointing at it. The user's profile row is upserted on
+        the way in so a freshly-seen architect editing their profile
+        on their first visit doesn't 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMyProfileBody"
+      responses:
+        "200":
+          description: Updated user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: |
+            Invalid request body, empty patch, empty `displayName`,
+            or `avatarUrl` points at an object missing from storage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: |
+            No `user`-kind requestor on the session — anonymous and
+            agent callers cannot self-edit a profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: |
+            Avatar object exceeds the per-asset size cap (the bytes
+            were PUT directly to GCS via the presigned URL, then this
+            route inspected the actual stored size before persisting
+            `avatar_url`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: |
+            Avatar bytes do not match a recognized image format (the
+            declared `contentType` is checked at presigned-URL time,
+            but a non-browser client can lie about it; this route
+            sniffs the actual bytes before persisting `avatar_url`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /session:
     get:
       operationId: getSession
@@ -4296,6 +4379,28 @@ components:
           nullable: true
       required:
         - architectPdfHeader
+
+    UpdateMyProfileBody:
+      type: object
+      description: |
+        Body for `PATCH /me/profile`. Partial update: omit a field to
+        leave it unchanged. `email` and `avatarUrl` accept `null` to
+        clear the column; `displayName` is non-nullable, and an
+        empty / whitespace-only value is a 400 server-side (we never
+        silently demote an architect's name to "" or back to the
+        opaque user id). `email` is trimmed; an empty / whitespace-
+        only string normalises to `null` so the FE form can clear the
+        column with a blank input.
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
 
     RequestUploadUrlBody:
       type: object

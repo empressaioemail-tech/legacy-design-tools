@@ -1,31 +1,20 @@
 /**
- * Settings — coverage for the architect-PDF-header self-edit surface
- * (DA-PI-6 / Task #322).
+ * Settings — coverage for the architect's two self-edit forms:
  *
- * The page wires three generated hooks together:
+ *   - Profile (displayName / email) — Task #366.
+ *   - Stakeholder briefing PDF header (DA-PI-6 / Task #322), plus its
+ *     live mini-preview (Task #365).
  *
- *   - `useGetSession`    — gates on a `user`-kind requestor.
- *   - `useGetUser(id)`   — seeds the input with the persisted value.
- *   - `useUpdateMyArchitectPdfHeader` — PATCH self-edit.
+ * Each form mounts its own mutation hook from `@workspace/api-client-react`;
+ * the test mocks both alongside the shared `useGetSession` /
+ * `useGetUser` queries so the page renders end-to-end without an HTTP
+ * round trip. The forbidden path (anonymous / agent caller) is pinned
+ * once at the top — neither form should render an input in that state.
  *
- * Tests pin the behaviors the spec calls out:
- *
- *   1. Anonymous / agent sessions are turned away with a "sign in"
- *      prompt — no input renders, no PATCH fires.
- *   2. The input is seeded from the server value once it loads.
- *   3. Submitting forwards the raw draft to the mutation, then the
- *      server's persisted value is reflected back into the input on
- *      success (the FE never invents the trimmed/cleared value
- *      itself).
- *   4. Empty / whitespace-only input clears the override — the Save
- *      button relabels to "Clear override" so the architect knows
- *      what they're about to do.
- *   5. The Save button is disabled when the trimmed draft equals the
- *      currently-persisted value (idle / no-op state).
- *   6. The live PDF-header preview (Task #365) renders the seeded
- *      value, updates as the architect types, and falls back to the
- *      platform default — in a muted/italic style — when the input
- *      is empty or whitespace-only.
+ * The PDF-header section also pins the live-preview contract from
+ * Task #365: the preview renders the seeded value, updates as the
+ * architect types, and falls back to the platform default (in a
+ * muted/italic style) when the input is empty / whitespace-only.
  */
 import {
   describe,
@@ -77,14 +66,18 @@ const hoisted = vi.hoisted(() => {
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     } as FakeUser | null,
-    capturedMutationOptions: null as null | {
-      mutation?: {
-        onSuccess?: (data: FakeUser) => void;
-      };
+    pdfHeaderCapturedOptions: null as null | {
+      mutation?: { onSuccess?: (data: FakeUser) => void };
     },
-    mutateSpy: vi.fn(),
-    mutationPending: false,
-    mutationError: null as null | Error,
+    pdfHeaderMutateSpy: vi.fn(),
+    pdfHeaderPending: false,
+    pdfHeaderError: null as null | Error,
+    profileCapturedOptions: null as null | {
+      mutation?: { onSuccess?: (data: FakeUser) => void };
+    },
+    profileMutateSpy: vi.fn(),
+    profilePending: false,
+    profileError: null as null | Error,
   };
 });
 
@@ -118,14 +111,25 @@ vi.mock("@workspace/api-client-react", async () => {
         enabled: opts?.query?.enabled ?? true,
       }),
     useUpdateMyArchitectPdfHeader: (
-      options: typeof hoisted.capturedMutationOptions,
+      options: typeof hoisted.pdfHeaderCapturedOptions,
     ) => {
-      hoisted.capturedMutationOptions = options;
+      hoisted.pdfHeaderCapturedOptions = options;
       return {
-        mutate: hoisted.mutateSpy,
-        isPending: hoisted.mutationPending,
-        isError: !!hoisted.mutationError,
-        error: hoisted.mutationError,
+        mutate: hoisted.pdfHeaderMutateSpy,
+        isPending: hoisted.pdfHeaderPending,
+        isError: !!hoisted.pdfHeaderError,
+        error: hoisted.pdfHeaderError,
+      };
+    },
+    useUpdateMyProfile: (
+      options: typeof hoisted.profileCapturedOptions,
+    ) => {
+      hoisted.profileCapturedOptions = options;
+      return {
+        mutate: hoisted.profileMutateSpy,
+        isPending: hoisted.profilePending,
+        isError: !!hoisted.profileError,
+        error: hoisted.profileError,
       };
     },
   };
@@ -168,10 +172,14 @@ beforeEach(() => {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
-  hoisted.capturedMutationOptions = null;
-  hoisted.mutateSpy.mockReset();
-  hoisted.mutationPending = false;
-  hoisted.mutationError = null;
+  hoisted.pdfHeaderCapturedOptions = null;
+  hoisted.pdfHeaderMutateSpy.mockReset();
+  hoisted.pdfHeaderPending = false;
+  hoisted.pdfHeaderError = null;
+  hoisted.profileCapturedOptions = null;
+  hoisted.profileMutateSpy.mockReset();
+  hoisted.profilePending = false;
+  hoisted.profileError = null;
 });
 
 afterEach(() => {
@@ -190,7 +198,10 @@ describe("Settings — auth gate", () => {
     expect(
       screen.queryByTestId("settings-architect-pdf-header-save"),
     ).toBeNull();
-    expect(hoisted.mutateSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("settings-display-name-input")).toBeNull();
+    expect(screen.queryByTestId("settings-email-input")).toBeNull();
+    expect(hoisted.pdfHeaderMutateSpy).not.toHaveBeenCalled();
+    expect(hoisted.profileMutateSpy).not.toHaveBeenCalled();
   });
 
   it("renders a sign-in prompt for agent-kind requestors", async () => {
@@ -207,10 +218,11 @@ describe("Settings — auth gate", () => {
     expect(
       screen.queryByTestId("settings-architect-pdf-header-input"),
     ).toBeNull();
+    expect(screen.queryByTestId("settings-display-name-input")).toBeNull();
   });
 });
 
-describe("Settings — happy paths", () => {
+describe("Settings — PDF header form", () => {
   it("seeds the input with the persisted value and disables Save when clean", async () => {
     hoisted.user = {
       ...hoisted.user!,
@@ -251,8 +263,8 @@ describe("Settings — happy paths", () => {
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
 
-    expect(hoisted.mutateSpy).toHaveBeenCalledTimes(1);
-    expect(hoisted.mutateSpy).toHaveBeenCalledWith({
+    expect(hoisted.pdfHeaderMutateSpy).toHaveBeenCalledTimes(1);
+    expect(hoisted.pdfHeaderMutateSpy).toHaveBeenCalledWith({
       data: { architectPdfHeader: "  Studio Bar — Briefing  " },
     });
 
@@ -260,7 +272,7 @@ describe("Settings — happy paths", () => {
     // should reflect what the server actually persisted, not the
     // raw draft.
     act(() => {
-      hoisted.capturedMutationOptions?.mutation?.onSuccess?.({
+      hoisted.pdfHeaderCapturedOptions?.mutation?.onSuccess?.({
         ...hoisted.user!,
         architectPdfHeader: "Studio Bar — Briefing",
       });
@@ -291,14 +303,14 @@ describe("Settings — happy paths", () => {
     expect(save.disabled).toBe(false);
 
     fireEvent.click(save);
-    expect(hoisted.mutateSpy).toHaveBeenCalledWith({
+    expect(hoisted.pdfHeaderMutateSpy).toHaveBeenCalledWith({
       data: { architectPdfHeader: "" },
     });
 
     // Server returns null — the status banner should call out the
     // "now using the default" outcome.
     act(() => {
-      hoisted.capturedMutationOptions?.mutation?.onSuccess?.({
+      hoisted.pdfHeaderCapturedOptions?.mutation?.onSuccess?.({
         ...hoisted.user!,
         architectPdfHeader: null,
       });
@@ -459,5 +471,208 @@ describe("Settings — live PDF header preview (Task #365)", () => {
       ),
     );
     expect(preview.getAttribute("data-preview-fallback")).toBe("true");
+  });
+});
+
+describe("Settings — profile form (displayName + email)", () => {
+  it("seeds both inputs with the persisted values and disables Save when clean", async () => {
+    hoisted.user = {
+      ...hoisted.user!,
+      displayName: "Alex Architect",
+      email: "alex@example.com",
+    };
+    renderPage();
+
+    const name = (await screen.findByTestId(
+      "settings-display-name-input",
+    )) as HTMLInputElement;
+    const email = screen.getByTestId(
+      "settings-email-input",
+    ) as HTMLInputElement;
+    await waitFor(() => expect(name.value).toBe("Alex Architect"));
+    expect(email.value).toBe("alex@example.com");
+
+    const save = screen.getByTestId(
+      "settings-profile-save",
+    ) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+  });
+
+  it("treats null email from the server as an empty input", async () => {
+    // The User shape has `email: string | null`; coercing the null
+    // to "" lets the controlled input render without warnings and
+    // matches the "blank means clear" semantics the server enforces.
+    renderPage();
+    const email = (await screen.findByTestId(
+      "settings-email-input",
+    )) as HTMLInputElement;
+    await waitFor(() => expect(email.value).toBe(""));
+  });
+
+  it("forwards only the changed fields to the mutation (partial update)", async () => {
+    hoisted.user = {
+      ...hoisted.user!,
+      displayName: "Old Name",
+      email: "old@example.com",
+    };
+    renderPage();
+
+    const name = (await screen.findByTestId(
+      "settings-display-name-input",
+    )) as HTMLInputElement;
+    const email = screen.getByTestId(
+      "settings-email-input",
+    ) as HTMLInputElement;
+    await waitFor(() => expect(name.value).toBe("Old Name"));
+
+    // Only edit displayName — email should not appear in the payload
+    // (matches the server's "omit a field to leave it unchanged"
+    // contract and avoids ticking updatedAt on untouched columns).
+    fireEvent.change(name, { target: { value: "New Name" } });
+    expect(email.value).toBe("old@example.com");
+
+    const save = screen.getByTestId(
+      "settings-profile-save",
+    ) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(hoisted.profileMutateSpy).toHaveBeenCalledTimes(1);
+    expect(hoisted.profileMutateSpy).toHaveBeenCalledWith({
+      data: { displayName: "New Name" },
+    });
+  });
+
+  it("forwards both fields when both have changed", async () => {
+    renderPage();
+    const name = (await screen.findByTestId(
+      "settings-display-name-input",
+    )) as HTMLInputElement;
+    const email = screen.getByTestId(
+      "settings-email-input",
+    ) as HTMLInputElement;
+    await waitFor(() => expect(name.value).toBe("Arch"));
+
+    fireEvent.change(name, { target: { value: "Architect Renamed" } });
+    fireEvent.change(email, { target: { value: "arch@example.com" } });
+
+    fireEvent.click(
+      screen.getByTestId("settings-profile-save") as HTMLButtonElement,
+    );
+    expect(hoisted.profileMutateSpy).toHaveBeenCalledWith({
+      data: {
+        displayName: "Architect Renamed",
+        email: "arch@example.com",
+      },
+    });
+  });
+
+  it("reflects the server's persisted (trimmed) values back on success", async () => {
+    renderPage();
+    const name = (await screen.findByTestId(
+      "settings-display-name-input",
+    )) as HTMLInputElement;
+    const email = screen.getByTestId(
+      "settings-email-input",
+    ) as HTMLInputElement;
+    await waitFor(() => expect(name.value).toBe("Arch"));
+
+    fireEvent.change(name, { target: { value: "  Padded Name  " } });
+    fireEvent.change(email, { target: { value: "  padded@example.com  " } });
+    fireEvent.click(
+      screen.getByTestId("settings-profile-save") as HTMLButtonElement,
+    );
+
+    act(() => {
+      hoisted.profileCapturedOptions?.mutation?.onSuccess?.({
+        ...hoisted.user!,
+        displayName: "Padded Name",
+        email: "padded@example.com",
+      });
+    });
+    await waitFor(() => expect(name.value).toBe("Padded Name"));
+    expect(email.value).toBe("padded@example.com");
+    expect(
+      screen.getByTestId("settings-profile-status").textContent,
+    ).toMatch(/Saved/i);
+  });
+
+  it("disables Save and surfaces an inline error when displayName is blanked out", async () => {
+    // The server rejects an empty displayName with 400 — the form
+    // mirrors that locally so the architect doesn't have to round-
+    // trip through the server to learn their input is invalid.
+    hoisted.user = { ...hoisted.user!, displayName: "Original" };
+    renderPage();
+
+    const name = (await screen.findByTestId(
+      "settings-display-name-input",
+    )) as HTMLInputElement;
+    await waitFor(() => expect(name.value).toBe("Original"));
+
+    fireEvent.change(name, { target: { value: "   " } });
+    const save = screen.getByTestId(
+      "settings-profile-save",
+    ) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(true));
+    expect(
+      screen.getByTestId("settings-display-name-error").textContent,
+    ).toMatch(/can't be blank/i);
+    expect(hoisted.profileMutateSpy).not.toHaveBeenCalled();
+  });
+
+  it("treats whitespace-only edits as no-ops (matches server's trim)", async () => {
+    // Padding "Arch" with surrounding whitespace produces the same
+    // trimmed value as the persisted "Arch", so Save must stay
+    // disabled — otherwise we'd fire a write that ticks updatedAt
+    // for no actual change.
+    renderPage();
+    const name = (await screen.findByTestId(
+      "settings-display-name-input",
+    )) as HTMLInputElement;
+    await waitFor(() => expect(name.value).toBe("Arch"));
+
+    fireEvent.change(name, { target: { value: "  Arch  " } });
+    const save = screen.getByTestId(
+      "settings-profile-save",
+    ) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+  });
+
+  it("clears the email column when the input is blanked out", async () => {
+    hoisted.user = {
+      ...hoisted.user!,
+      email: "old@example.com",
+    };
+    renderPage();
+    const email = (await screen.findByTestId(
+      "settings-email-input",
+    )) as HTMLInputElement;
+    await waitFor(() => expect(email.value).toBe("old@example.com"));
+
+    fireEvent.change(email, { target: { value: "" } });
+    fireEvent.click(
+      screen.getByTestId("settings-profile-save") as HTMLButtonElement,
+    );
+    expect(hoisted.profileMutateSpy).toHaveBeenCalledWith({
+      data: { email: "" },
+    });
+
+    // Server returns null — the input should reflect that.
+    act(() => {
+      hoisted.profileCapturedOptions?.mutation?.onSuccess?.({
+        ...hoisted.user!,
+        email: null,
+      });
+    });
+    await waitFor(() => expect(email.value).toBe(""));
+  });
+
+  it("surfaces a save error when the mutation fails", async () => {
+    hoisted.profileError = new Error("Network down");
+    renderPage();
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("settings-profile-error").textContent,
+      ).toMatch(/Couldn't save/i),
+    );
   });
 });

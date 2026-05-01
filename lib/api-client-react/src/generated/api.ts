@@ -81,6 +81,7 @@ import type {
   SubmissionResponse,
   UpdateEngagementBody,
   UpdateMyArchitectPdfHeaderBody,
+  UpdateMyProfileBody,
   UpdateReviewerAnnotationBody,
   UpdateUserBody,
   UploadSnapshotSheetsBody,
@@ -4844,6 +4845,120 @@ export const useUpdateMyArchitectPdfHeader = <
   TContext
 > => {
   return useMutation(getUpdateMyArchitectPdfHeaderMutationOptions(options));
+};
+
+/**
+ * Lets the session's current `user`-kind requestor edit their
+own `displayName`, `email`, and `avatarUrl` columns. The
+Settings page wires this up so an architect can fix the
+opaque user id that gets backfilled on first sign-in without
+having to ask an admin to PATCH `/users/{id}` (which requires
+the `users:manage` claim — architects do not have it).
+
+Self-edit only — there is no `users:manage` admin gate, but
+the request must carry a `user`-kind requestor (anonymous /
+agent sessions get a 401). The row id always comes from
+`req.session.requestor.id`, so a malicious payload that
+smuggles another user's id cannot reach `users.id = <other>`.
+
+Partial update: omit a field to leave it unchanged. `email`
+and `avatarUrl` accept `null` to clear the column;
+`displayName` is non-nullable, and an empty / whitespace-only
+value is a 400 (the architect's own name should never be
+silently demoted to "" or back to the opaque id). `email`
+is trimmed and an empty / whitespace-only string clears the
+column so the FE form can ship a single Save button.
+
+`avatarUrl` runs through the same per-asset size cap and
+image-bytes sniff as the admin `PATCH /users/{id}` route, and
+the freshly-uploaded blob is rolled back if the row never
+ends up pointing at it. The user's profile row is upserted on
+the way in so a freshly-seen architect editing their profile
+on their first visit doesn't 404.
+
+ * @summary Update the current architect's own display name / email / avatar
+ */
+export const getUpdateMyProfileUrl = () => {
+  return `/api/me/profile`;
+};
+
+export const updateMyProfile = async (
+  updateMyProfileBody: UpdateMyProfileBody,
+  options?: RequestInit,
+): Promise<User> => {
+  return customFetch<User>(getUpdateMyProfileUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateMyProfileBody),
+  });
+};
+
+export const getUpdateMyProfileMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyProfile>>,
+    TError,
+    { data: BodyType<UpdateMyProfileBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyProfile>>,
+  TError,
+  { data: BodyType<UpdateMyProfileBody> },
+  TContext
+> => {
+  const mutationKey = ["updateMyProfile"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyProfile>>,
+    { data: BodyType<UpdateMyProfileBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateMyProfile(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyProfileMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyProfile>>
+>;
+export type UpdateMyProfileMutationBody = BodyType<UpdateMyProfileBody>;
+export type UpdateMyProfileMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update the current architect's own display name / email / avatar
+ */
+export const useUpdateMyProfile = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyProfile>>,
+    TError,
+    { data: BodyType<UpdateMyProfileBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyProfile>>,
+  TError,
+  { data: BodyType<UpdateMyProfileBody> },
+  TContext
+> => {
+  return useMutation(getUpdateMyProfileMutationOptions(options));
 };
 
 /**

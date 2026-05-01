@@ -3213,6 +3213,67 @@ export const UpdateMyArchitectPdfHeaderResponse = zod
   );
 
 /**
+ * Lets the session's current `user`-kind requestor edit their
+own `displayName`, `email`, and `avatarUrl` columns. The
+Settings page wires this up so an architect can fix the
+opaque user id that gets backfilled on first sign-in without
+having to ask an admin to PATCH `/users/{id}` (which requires
+the `users:manage` claim — architects do not have it).
+
+Self-edit only — there is no `users:manage` admin gate, but
+the request must carry a `user`-kind requestor (anonymous /
+agent sessions get a 401). The row id always comes from
+`req.session.requestor.id`, so a malicious payload that
+smuggles another user's id cannot reach `users.id = <other>`.
+
+Partial update: omit a field to leave it unchanged. `email`
+and `avatarUrl` accept `null` to clear the column;
+`displayName` is non-nullable, and an empty / whitespace-only
+value is a 400 (the architect's own name should never be
+silently demoted to "" or back to the opaque id). `email`
+is trimmed and an empty / whitespace-only string clears the
+column so the FE form can ship a single Save button.
+
+`avatarUrl` runs through the same per-asset size cap and
+image-bytes sniff as the admin `PATCH /users/{id}` route, and
+the freshly-uploaded blob is rolled back if the row never
+ends up pointing at it. The user's profile row is upserted on
+the way in so a freshly-seen architect editing their profile
+on their first visit doesn't 404.
+
+ * @summary Update the current architect's own display name / email / avatar
+ */
+
+export const UpdateMyProfileBody = zod
+  .object({
+    displayName: zod.string().min(1).optional(),
+    email: zod.string().nullish(),
+    avatarUrl: zod.string().nullish(),
+  })
+  .describe(
+    'Body for `PATCH \/me\/profile`. Partial update: omit a field to\nleave it unchanged. `email` and `avatarUrl` accept `null` to\nclear the column; `displayName` is non-nullable, and an\nempty \/ whitespace-only value is a 400 server-side (we never\nsilently demote an architect\'s name to \"\" or back to the\nopaque user id). `email` is trimmed; an empty \/ whitespace-\nonly string normalises to `null` so the FE form can clear the\ncolumn with a blank input.\n',
+  );
+
+export const UpdateMyProfileResponse = zod
+  .object({
+    id: zod.string(),
+    displayName: zod.string(),
+    email: zod.string().nullable(),
+    avatarUrl: zod.string().nullable(),
+    architectPdfHeader: zod
+      .string()
+      .nullable()
+      .describe(
+        "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .describe(
+    'A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK\'d from `atom_events.actor.id`.\n\n`architectPdfHeader` is the per-architect override for the header\ntext printed on the stakeholder-briefing PDF export. Null falls\nback to the default (\"SmartCity Design Tools — Pre-Design\nBriefing\"). Architects edit their own value via\n`PATCH \/me\/architect-pdf-header`; the admin `PATCH \/users\/{id}`\nroute does not write the column today (the field is read-only on\nthe admin \"Users & Roles\" surface).\n',
+  );
+
+/**
  * Returns whatever `req.session` the server has attached for the
 caller. Today this is derived from the dev `pr_session` cookie
 / `x-requestor` / `x-permissions` header overrides outside

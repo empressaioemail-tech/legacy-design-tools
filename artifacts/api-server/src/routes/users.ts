@@ -64,6 +64,13 @@
  * the orphan blob is best-effort cleaned up. The DB row never gets
  * to reference a non-image, even if the bytes briefly land in the
  * bucket.
+ *
+ * Avatar-write helpers
+ * --------------------
+ * The size / image-sniff / rollback helpers live in
+ * `../lib/avatarWrites` so the architect-self-edit surface
+ * (`PATCH /api/me/profile`) can apply the same gates without copy-
+ * pasting the logic. Adjust the helpers there, not here.
  */
 
 import {
@@ -84,146 +91,16 @@ import {
   DeleteUserParams,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
-import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
 import {
-  IMAGE_SIGNATURE_HEAD_BYTES,
-  looksLikeImage,
-} from "../lib/imageSignature";
-import { requestUploadUrlBodySizeMax } from "@workspace/api-zod";
+  enforceAvatarIsImage,
+  enforceAvatarSizeCap,
+  objectStorage,
+  readCandidateAvatarUrl,
+  requestUploadUrlBodySizeMax,
+  rollbackOrphanedAvatar,
+} from "../lib/avatarWrites";
 
 const router: IRouter = Router();
-// One instance is enough — the service is stateless beyond the env-var
-// reads it does on demand, and `objectStorageClient` is already a module
-// singleton. Constructed lazily-by-import so test files that mock
-// `../lib/objectStorage` get their stub here too.
-const objectStorage = new ObjectStorageService();
-
-/**
- * Outcome of {@link enforceAvatarSizeCap}. The handler maps these onto
- * HTTP responses; the helper itself stays response-agnostic so it can be
- * reused unchanged from POST and PATCH (and any future write surface).
- */
-type AvatarSizeCheck =
-  | { kind: "ok" }
-  | { kind: "external" } // Caller supplied a URL we don't host (skip).
-  | { kind: "missing" } // Path looks like ours but the object isn't in the bucket.
-  | { kind: "too_large"; actualSize: number };
-
-/**
- * Enforce the per-asset byte cap on a client-supplied avatar URL by
- * inspecting the *actual* stored object size.
- *
- * The presigned-URL handler caps `RequestUploadUrlBody.size` (client-
- * declared metadata), but a malicious or buggy non-browser client can
- * lie about that number and still PUT a much larger file. Validating
- * the real size here, before `users.avatar_url` is allowed to point at
- * the object, closes that loop: the row never references an oversized
- * blob, even if the bytes briefly landed in the bucket.
- *
- * On `too_large` we also best-effort delete the offending object so the
- * rejected upload doesn't leave an orphan in storage. The cleanup is
- * inside its own try/catch — a delete failure must not mask the real
- * 413 we owe the caller. (The orphan-sweep follow-up will mop up
- * anything we still miss here.)
- */
-async function enforceAvatarSizeCap(
-  rawAvatarUrl: string,
-): Promise<AvatarSizeCheck> {
-  let actualSize: number | null;
-  try {
-    actualSize = await objectStorage.getObjectEntitySize(rawAvatarUrl);
-  } catch (err) {
-    if (err instanceof ObjectNotFoundError) {
-      return { kind: "missing" };
-    }
-    throw err;
-  }
-  if (actualSize === null) {
-    // Not one of ours — pasted external URL, public-objects path, etc.
-    // The cap only applies to objects we host.
-    return { kind: "external" };
-  }
-  if (actualSize > requestUploadUrlBodySizeMax) {
-    try {
-      await objectStorage.deleteObjectIfStored(rawAvatarUrl);
-    } catch (cleanupErr) {
-      logger.warn(
-        { err: cleanupErr, avatarUrl: rawAvatarUrl, actualSize },
-        "failed to delete oversized avatar after rejection",
-      );
-    }
-    return { kind: "too_large", actualSize };
-  }
-  return { kind: "ok" };
-}
-
-/**
- * Outcome of {@link enforceAvatarIsImage}. Mirrors the shape of
- * {@link AvatarSizeCheck} so the route handlers can map outcomes onto
- * HTTP responses uniformly. The helper itself stays response-agnostic
- * so it can be reused unchanged from POST and PATCH.
- */
-type AvatarImageCheck =
-  | { kind: "ok" }
-  | { kind: "external" } // Caller supplied a URL we don't host (skip).
-  | { kind: "missing" } // Path looks like ours but the object isn't in the bucket.
-  | { kind: "not_image" };
-
-/**
- * Confirm that the bytes stored under `rawAvatarUrl` actually decode
- * to one of the image formats we accept on the avatar upload path.
- *
- * The presigned-URL endpoint pre-checks the *declared* `contentType`
- * against the image MIME allow-list, but the bytes themselves are
- * PUT directly to GCS via the signed URL — so a non-browser caller
- * can declare `image/jpeg` and upload arbitrary bytes (a JSON dump,
- * an executable, an HTML page, …). Without a second check, that
- * arbitrary blob ends up referenced from `users.avatar_url` and gets
- * served to other admins under an `<img>` tag.
- *
- * This helper closes that loop: we read the head of the stored object
- * and run it through {@link looksLikeImage}. If the signature doesn't
- * match, the row is never allowed to point at the object and the
- * orphan is best-effort deleted on the way out (same posture as the
- * `too_large` branch in {@link enforceAvatarSizeCap}). The cleanup is
- * inside its own try/catch so a delete failure doesn't mask the real
- * 415 we owe the caller — the orphan-sweep follow-up will mop up
- * anything we still miss here.
- */
-async function enforceAvatarIsImage(
-  rawAvatarUrl: string,
-): Promise<AvatarImageCheck> {
-  let head: Buffer | null;
-  try {
-    head = await objectStorage.getObjectEntityHead(
-      rawAvatarUrl,
-      IMAGE_SIGNATURE_HEAD_BYTES,
-    );
-  } catch (err) {
-    if (err instanceof ObjectNotFoundError) {
-      return { kind: "missing" };
-    }
-    throw err;
-  }
-  if (head === null) {
-    // Not one of ours — pasted external URL, public-objects path,
-    // etc. We can't sniff bytes we don't host, and the legacy "paste
-    // a URL" path needs to keep working, so treat it as a skip.
-    return { kind: "external" };
-  }
-  if (!looksLikeImage(head)) {
-    try {
-      await objectStorage.deleteObjectIfStored(rawAvatarUrl);
-    } catch (cleanupErr) {
-      logger.warn(
-        { err: cleanupErr, avatarUrl: rawAvatarUrl },
-        "failed to delete non-image avatar after rejection",
-      );
-    }
-    return { kind: "not_image" };
-  }
-  return { kind: "ok" };
-}
 
 /**
  * Permission name required by every write to the `users` profile
@@ -256,43 +133,6 @@ const requireUsersManage: RequestHandler = (
   }
   res.status(403).json({ error: "Requires users:manage permission" });
 };
-
-/**
- * Pull a string `avatarUrl` candidate out of the raw request body
- * BEFORE zod validation runs. We need this so that even a 400 (body
- * shape rejected by `UpdateUserBody` / `CreateUserBody`) can still
- * roll back the freshly-uploaded GCS object the FE pushed up just
- * ahead of the PATCH/POST. `deleteObjectIfStored` is internally
- * defensive (no-ops for empty / external / non-`/objects/...`
- * inputs), so we don't need to filter on shape here.
- */
-function readCandidateAvatarUrl(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
-  const value = (body as Record<string, unknown>)["avatarUrl"];
-  return typeof value === "string" ? value : null;
-}
-
-/**
- * Best-effort rollback for an `avatarUrl` the request advertised but
- * that no row ever ended up pointing at. Mirrors the posture of the
- * existing OLD-avatar cleanup branches — log and continue on failure
- * so a transient GCS blip during rollback never turns into a 500 on
- * top of whatever the user was already trying to recover from.
- */
-async function rollbackOrphanedAvatar(
-  candidate: string | null,
-  userId: string | null,
-): Promise<void> {
-  if (!candidate) return;
-  try {
-    await objectStorage.deleteObjectIfStored(candidate);
-  } catch (cleanupErr) {
-    logger.warn(
-      { err: cleanupErr, id: userId, orphanedAvatarUrl: candidate },
-      "failed to delete orphaned avatar object after failed user write",
-    );
-  }
-}
 
 type UserRow = typeof users.$inferSelect;
 

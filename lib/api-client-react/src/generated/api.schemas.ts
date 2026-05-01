@@ -1224,6 +1224,24 @@ export interface UpdateMyArchitectPdfHeaderBody {
   architectPdfHeader: string | null;
 }
 
+/**
+ * Body for `PATCH /me/profile`. Partial update: omit a field to
+leave it unchanged. `email` and `avatarUrl` accept `null` to
+clear the column; `displayName` is non-nullable, and an
+empty / whitespace-only value is a 400 server-side (we never
+silently demote an architect's name to "" or back to the
+opaque user id). `email` is trimmed; an empty / whitespace-
+only string normalises to `null` so the FE form can clear the
+column with a blank input.
+
+ */
+export interface UpdateMyProfileBody {
+  /** @minLength 1 */
+  displayName?: string;
+  email?: string | null;
+  avatarUrl?: string | null;
+}
+
 export type RequestUploadUrlBodyContentType =
   (typeof RequestUploadUrlBodyContentType)[keyof typeof RequestUploadUrlBodyContentType];
 
