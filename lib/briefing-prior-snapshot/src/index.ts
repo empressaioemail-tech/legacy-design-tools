@@ -25,6 +25,7 @@ export {
   BriefingPriorSnapshotHeader,
   SECTION_ORDER,
   pickSection,
+  buildPriorSnapshotClipboardText,
   type BriefingSectionKey,
   type PriorNarrativeSnapshot,
   type FormatGeneratedAt,

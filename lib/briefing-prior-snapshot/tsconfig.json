@@ -11,7 +11,7 @@
     "types": ["node"]
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test-setup.ts"],
   "references": [
     { "path": "../briefing-diff" },
     { "path": "../portal-ui" }
