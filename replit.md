@@ -56,6 +56,13 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
 - `MUNICODE_MIN_GAP_MS` / `MUNICODE_JITTER_MAX_MS` — optional rate-limit overrides for the municode HTTP client (used in tests to avoid sleeping). Defaults preserve production behavior.
 - AI integration credentials provided by Replit AI Integrations.
 
+## End-to-End Tests
+
+- `artifacts/design-tools` ships a Playwright suite under `e2e/` (config: `playwright.config.ts`). Run with `pnpm --filter @workspace/design-tools run test:e2e`. The suite is excluded from Vitest (`vitest.config` only matches `src/**/*.test.{ts,tsx}`).
+- `e2e/submission-detail.spec.ts` pins the submission-detail modal flow: seeds an isolated engagement via `@workspace/db`, ingests a submission via `POST /api/engagements/:id/submissions` (which fires `engagement.submitted`), navigates to `/engagements/<id>?tab=submissions`, opens the row, asserts the modal note, the "Submitted to <jurisdiction>" header, and the `engagement.submitted` event panel; closes and re-opens to verify idempotency. The engagement is deleted in `afterAll` (FK cascades to submissions).
+- The config auto-discovers `mesa-libgbm-*` in `/nix/store` and prepends its `lib/` dir to `LD_LIBRARY_PATH` so the bundled `chrome-headless-shell` can resolve `libgbm.so.1` on Replit's NixOS image without per-developer setup. Other store paths that ship the same soname are deliberately ignored (some bundle older `libstdc++.so.6` and would shadow the system one and break Node).
+- The suite assumes the `API Server` and `web` workflows are running (it talks to `localhost:80`). Override with `E2E_BASE_URL` to point at a different environment.
+
 ## Testing (Sprint H01 Part 1)
 
 - Per-package Vitest with v8 coverage in `lib/db`, `lib/codes`, `lib/codes-sources`. Root: `pnpm test` runs all three.
