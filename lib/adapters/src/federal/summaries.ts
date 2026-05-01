@@ -32,12 +32,121 @@
  * picks it up.
  */
 import { isRecord, pickNumber, pickString } from "../_payloadSummaryHelpers";
+import { FEMA_NFHL_FRESHNESS_THRESHOLD_MONTHS } from "./fema-nfhl";
+import { USGS_NED_FRESHNESS_THRESHOLD_MONTHS } from "./usgs-ned";
+import { EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS } from "./epa-ejscreen";
+import { FCC_BROADBAND_FRESHNESS_THRESHOLD_MONTHS } from "./fcc-broadband";
 
 export type FederalLayerKind =
   | "fema-nfhl-flood-zone"
   | "usgs-ned-elevation"
   | "epa-ejscreen-blockgroup"
   | "fcc-broadband-availability";
+
+/**
+ * Per-dataset "snapshot is still trustworthy" windows, in whole months.
+ * The actual numbers live with the adapters they belong to (so a future
+ * tweak to e.g. the FCC BDC publishing cadence travels with the FCC
+ * adapter), but we centralize the `layerKind → threshold` lookup here
+ * so the FE doesn't have to import every adapter file just to render
+ * the stale badge on the provenance footer.
+ */
+const FEDERAL_FRESHNESS_THRESHOLD_MONTHS: Record<FederalLayerKind, number> = {
+  "fema-nfhl-flood-zone": FEMA_NFHL_FRESHNESS_THRESHOLD_MONTHS,
+  "usgs-ned-elevation": USGS_NED_FRESHNESS_THRESHOLD_MONTHS,
+  "epa-ejscreen-blockgroup": EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS,
+  "fcc-broadband-availability": FCC_BROADBAND_FRESHNESS_THRESHOLD_MONTHS,
+};
+
+/**
+ * Verdict for a single federal-tier briefing source's snapshot date.
+ *
+ *  - `ageMonths` is the integer number of whole months between the
+ *    snapshot date and `now` (a snapshot 11 months and 29 days old
+ *    reads as `11`, not `12`); rounding *down* keeps the "snapshot is
+ *    N months old" label honest.
+ *  - `thresholdMonths` is the per-dataset window pulled from the
+ *    adapter file — surfaced so a tooltip/aria-label can include it
+ *    without the caller re-doing the lookup.
+ *  - `isStale` is true iff `ageMonths >= thresholdMonths`. Equality
+ *    counts as stale so a snapshot taken exactly 12 months ago tags on
+ *    its anniversary (matches what an architect intuitively expects
+ *    when the threshold reads "12 months").
+ */
+export interface FederalSnapshotFreshness {
+  ageMonths: number;
+  thresholdMonths: number;
+  isStale: boolean;
+}
+
+function isFederalLayerKindStr(kind: string): kind is FederalLayerKind {
+  return Object.prototype.hasOwnProperty.call(
+    FEDERAL_FRESHNESS_THRESHOLD_MONTHS,
+    kind,
+  );
+}
+
+/**
+ * Whole-months difference between two `Date`s, rounded *down*. We
+ * compute on the calendar (year * 12 + month) and then back off by one
+ * if the snapshot's day-of-month + time-of-day haven't yet been
+ * reached in the current month — that way "Jan 1 → Dec 31 same year"
+ * reads as 11 months, not 12, and stays under a 12-month threshold
+ * until the literal anniversary.
+ */
+function wholeMonthsBetween(snapshot: Date, now: Date): number {
+  let months =
+    (now.getUTCFullYear() - snapshot.getUTCFullYear()) * 12 +
+    (now.getUTCMonth() - snapshot.getUTCMonth());
+  // If we haven't yet crossed the snapshot's day-of-month in the
+  // current month, the trailing month hasn't fully elapsed.
+  if (now.getUTCDate() < snapshot.getUTCDate()) {
+    months -= 1;
+  }
+  return months;
+}
+
+/**
+ * Evaluate a federal-tier briefing source's snapshot date against its
+ * adapter-declared freshness window. Returns `null` when:
+ *
+ *   - `layerKind` is not a federal-tier layer (state/local rows have
+ *     their own provenance surfacing, and the threshold lookup would
+ *     be undefined here);
+ *   - `snapshotDate` is missing, malformed, or parses to `NaN` (the
+ *     row simply has no provenance to evaluate, so the FE should
+ *     suppress the badge entirely rather than guessing);
+ *   - the snapshot date is in the *future* relative to `now` (a
+ *     producer clock skew or a fixture typo — we don't want to claim
+ *     "-3 months old" or to flip the badge into a meaningless state).
+ *
+ * Otherwise returns a {@link FederalSnapshotFreshness} verdict the FE
+ * can render: `isStale` drives the badge, `ageMonths` /
+ * `thresholdMonths` populate the visible label and the screen-reader
+ * announcement.
+ *
+ * `now` is injectable so unit tests can pin a stable "today" without
+ * faking the system clock.
+ */
+export function evaluateFederalSnapshotFreshness(
+  layerKind: string,
+  snapshotDate: string | Date | null | undefined,
+  now: Date = new Date(),
+): FederalSnapshotFreshness | null {
+  if (!isFederalLayerKindStr(layerKind)) return null;
+  if (snapshotDate === null || snapshotDate === undefined) return null;
+  const snap =
+    snapshotDate instanceof Date ? snapshotDate : new Date(snapshotDate);
+  if (Number.isNaN(snap.getTime())) return null;
+  if (snap.getTime() > now.getTime()) return null;
+  const thresholdMonths = FEDERAL_FRESHNESS_THRESHOLD_MONTHS[layerKind];
+  const ageMonths = Math.max(0, wholeMonthsBetween(snap, now));
+  return {
+    ageMonths,
+    thresholdMonths,
+    isStale: ageMonths >= thresholdMonths,
+  };
+}
 
 /**
  * Format a number as an ordinal percentile (e.g. 1 → "1st", 22 → "22nd",

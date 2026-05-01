@@ -5,6 +5,10 @@ import {
   type EngagementBriefingSource,
   type LocalSetbackDistrict,
 } from "@workspace/api-client-react";
+import {
+  evaluateFederalSnapshotFreshness,
+  type FederalSnapshotFreshness,
+} from "@workspace/adapters/federal/summaries";
 
 /**
  * "View layer details" panel for one adapter-driven briefing source row.
@@ -393,6 +397,19 @@ function ProvenanceFooter({
     typeof source.provider === "string" && source.provider.trim().length > 0
       ? source.provider.trim()
       : null;
+  // Compare the snapshot to "now" using the per-dataset freshness
+  // window declared with each federal adapter (Task #222). Returns
+  // `null` for non-federal layer kinds, missing/malformed dates, or
+  // future-dated snapshots — in any of those cases we fall through
+  // to the original "as of … · source: …" footer with no badge.
+  const freshness = useMemo<FederalSnapshotFreshness | null>(
+    () =>
+      evaluateFederalSnapshotFreshness(
+        source.layerKind,
+        source.snapshotDate as unknown as string | null | undefined,
+      ),
+    [source.layerKind, source.snapshotDate],
+  );
   if (!snapshot && !provider) return null;
   return (
     <div
@@ -401,6 +418,7 @@ function ProvenanceFooter({
         display: "flex",
         gap: 8,
         flexWrap: "wrap",
+        alignItems: "center",
         fontSize: 11,
         color: "var(--text-muted)",
         marginTop: 2,
@@ -409,7 +427,79 @@ function ProvenanceFooter({
       {snapshot && <span>as of {snapshot}</span>}
       {snapshot && provider && <span aria-hidden="true">·</span>}
       {provider && <span>source: {provider}</span>}
+      {freshness?.isStale && (
+        <FederalSnapshotStaleBadge
+          sourceId={source.id}
+          freshness={freshness}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Small inline "snapshot is N months old" badge rendered next to the
+ * provenance footer when the federal-tier snapshot is older than the
+ * adapter-declared freshness window.
+ *
+ * Accessibility: the staleness signal is *not* color-only — the dot
+ * is paired with a literal "snapshot is N months old" label and an
+ * `aria-label` that names the dataset's threshold ("FEMA snapshot is
+ * 14 months old; window is 12 months"), so a screen reader picks up
+ * the warning even when the amber dot is invisible. The dot itself
+ * is `aria-hidden` since the text already conveys the same meaning.
+ */
+function FederalSnapshotStaleBadge({
+  sourceId,
+  freshness,
+}: {
+  sourceId: string;
+  freshness: FederalSnapshotFreshness;
+}) {
+  const { ageMonths, thresholdMonths } = freshness;
+  // Round small / huge ages into a reader-friendly label. Snapshots
+  // older than 24 months drop down to "~Ny" because "snapshot is 47
+  // months old" is harder to scan than "snapshot is ~4y old".
+  const ageLabel =
+    ageMonths >= 24
+      ? `~${Math.floor(ageMonths / 12)}y`
+      : `${ageMonths} month${ageMonths === 1 ? "" : "s"}`;
+  const ariaLabel = `Snapshot is ${ageLabel} old; freshness window is ${thresholdMonths} months. Re-run the adapter to refresh.`;
+  return (
+    <span
+      role="status"
+      data-testid={`briefing-source-federal-stale-${sourceId}`}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "1px 6px",
+        borderRadius: 999,
+        // Warning palette borrowed from the existing var(--warn-*)
+        // tokens used elsewhere on the engagement page; falls back
+        // to amber-ish defaults for surfaces that haven't defined
+        // them yet so the badge degrades gracefully.
+        background: "var(--warn-dim, #fff4e5)",
+        color: "var(--warn-text, #8a4b00)",
+        border: "1px solid var(--warn-border, #f5c98c)",
+        fontSize: 11,
+        lineHeight: 1.4,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: "var(--warn-text, #b86e00)",
+          display: "inline-block",
+        }}
+      />
+      <span>snapshot is {ageLabel} old</span>
+    </span>
   );
 }
 

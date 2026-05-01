@@ -23,6 +23,18 @@ import {
 const EPA_EJSCREEN_BROKER =
   "https://ejscreen.epa.gov/mapper/ejscreenRESTbroker.aspx";
 
+/**
+ * Freshness window for the EPA EJScreen snapshot.
+ *
+ * EJScreen is rebuilt roughly annually, after the Census/ACS five-year
+ * sample it draws demographics from is republished and the EPA's
+ * pollution model layers (PM2.5, ozone, NATA) are refreshed. 18 months
+ * gives the architect a buffer past the typical annual cycle so a row
+ * isn't tagged stale during the brief overlap when EJScreen has
+ * announced an update but the adapter cache hasn't rerun yet.
+ */
+export const EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS = 18;
+
 function federalApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.stateKey !== null;
 }

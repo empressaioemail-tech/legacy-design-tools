@@ -26,6 +26,18 @@ import {
 const FCC_BROADBAND_LAYER =
   "https://broadbandmap.fcc.gov/nbm/map/api/published/v1/location/area/feature/0";
 
+/**
+ * Freshness window for the FCC National Broadband Map snapshot.
+ *
+ * The Broadband DATA Collection (BDC, post-Form 477) publishes new
+ * fabric versions every six months (June + December filing windows),
+ * and ISP deployment churn between filings can move a parcel from
+ * "no fixed broadband" to gigabit fiber. 6 months keeps the warning
+ * aligned with the publishing cadence — anything older than one BDC
+ * cycle is the auditable sweet spot for "you should re-run this".
+ */
+export const FCC_BROADBAND_FRESHNESS_THRESHOLD_MONTHS = 6;
+
 function federalApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.stateKey !== null;
 }

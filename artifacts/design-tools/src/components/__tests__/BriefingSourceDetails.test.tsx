@@ -12,7 +12,14 @@
  * focused on render logic.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  it,
+  expect,
+  vi,
+} from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { EngagementBriefingSource } from "@workspace/api-client-react";
 
@@ -742,5 +749,96 @@ describe("BriefingSourceDetails setback copy-summary button", () => {
         "briefing-source-copy-setback-src-zoning-nomatch-nocopy",
       ),
     ).toBeNull();
+  });
+});
+
+describe("BriefingSourceDetails federal snapshot staleness badge", () => {
+  // Pin a deterministic "now" so the badge math doesn't depend on the
+  // wall clock — the per-dataset thresholds (FEMA: 12mo, FCC: 6mo,
+  // USGS: 24mo, EJScreen: 18mo) live with the adapters in
+  // lib/adapters/src/federal/*.ts and are the source of truth.
+  const NOW = new Date("2026-05-01T00:00:00.000Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders the stale badge when a FEMA NFHL snapshot is older than 12 months", () => {
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-fema-stale",
+          layerKind: "fema-nfhl-flood-zone",
+          sourceKind: "federal-adapter",
+          provider: "FEMA National Flood Hazard Layer (NFHL)",
+          // 14 calendar months before NOW — past the FEMA 12-month
+          // window declared in lib/adapters/src/federal/fema-nfhl.ts.
+          snapshotDate: "2025-03-01T12:00:00.000Z",
+          payload: {
+            kind: "flood-zone",
+            inSpecialFloodHazardArea: true,
+            floodZone: "AE",
+            features: [{ attributes: { FLD_ZONE: "AE" } }],
+          },
+        })}
+      />,
+    );
+    const badge = screen.getByTestId(
+      "briefing-source-federal-stale-src-fema-stale",
+    );
+    // Visible label includes the elapsed-months reading…
+    expect(badge).toHaveTextContent("snapshot is 14 months old");
+    // …and the screen-reader label names the dataset's window so the
+    // warning isn't conveyed by color alone (Task #222 a11y note).
+    expect(badge).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("freshness window is 12 months"),
+    );
+    // role="status" so an SR pings the staleness when the panel
+    // expands without taking focus.
+    expect(badge).toHaveAttribute("role", "status");
+  });
+
+  it("does not render the stale badge when the FEMA NFHL snapshot is fresh", () => {
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-fema-fresh",
+          layerKind: "fema-nfhl-flood-zone",
+          sourceKind: "federal-adapter",
+          provider: "FEMA National Flood Hazard Layer (NFHL)",
+          // 3 calendar months before NOW — well inside the 12-month
+          // FEMA window.
+          snapshotDate: "2026-02-01T12:00:00.000Z",
+          payload: {
+            kind: "flood-zone",
+            inSpecialFloodHazardArea: false,
+            floodZone: "X",
+            features: [{ attributes: { FLD_ZONE: "X" } }],
+          },
+        })}
+      />,
+    );
+    expect(
+      screen.queryByTestId("briefing-source-federal-stale-src-fema-fresh"),
+    ).toBeNull();
+    // Provenance footer still rendered so the "as of …" line stays
+    // visible — only the stale-tag piece is suppressed.
+    expect(
+      screen.getByTestId(
+        "briefing-source-federal-provenance-src-fema-fresh",
+      ),
+    ).toHaveTextContent("as of 2026-02-01");
   });
 });

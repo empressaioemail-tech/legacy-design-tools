@@ -28,6 +28,19 @@ const USGS_EPQS_ENDPOINT = "https://epqs.nationalmap.gov/v1/json";
 /** EPQS sentinel for "raster has no value at this point". */
 const EPQS_NODATA_SENTINEL = -1_000_000;
 
+/**
+ * Freshness window for the USGS NED elevation snapshot.
+ *
+ * The 3DEP/NED raster is reprocessed in multi-year blocks per region;
+ * absolute elevation at a point is geologically stable, so a snapshot
+ * is only "stale" when the *raster product* has been replaced (e.g. a
+ * new lidar collection at a finer DEM resolution). 24 months matches
+ * the cadence USGS publishes new 1m / 1/3 arc-second tiles in the
+ * pilot states; older than that and an architect should re-run the
+ * adapter to pick up any new lidar-derived terrain.
+ */
+export const USGS_NED_FRESHNESS_THRESHOLD_MONTHS = 24;
+
 function federalApplies(ctx: AdapterContext): boolean {
   return ctx.jurisdiction.stateKey !== null;
 }

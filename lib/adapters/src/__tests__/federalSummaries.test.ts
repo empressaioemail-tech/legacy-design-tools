@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   diffFederalPayload,
+  evaluateFederalSnapshotFreshness,
   summarizeFederalPayload,
   summarizeFemaNfhlPayload,
   summarizeUsgsNedPayload,
@@ -443,6 +444,140 @@ describe("diffFederalPayload", () => {
         "grand-county-ut:zoning",
         { kind: "zoning", zoning: "RR-1" },
         { kind: "zoning", zoning: "RR-2" },
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("evaluateFederalSnapshotFreshness", () => {
+  // Pin a deterministic "now" so the verdict doesn't shift with the
+  // wall clock — Task #222's per-dataset thresholds (FEMA: 12mo,
+  // FCC: 6mo, USGS: 24mo, EJScreen: 18mo) are calendar-month math,
+  // and we want the test to keep producing the same age regardless
+  // of when CI runs it.
+  const NOW = new Date("2026-05-01T00:00:00.000Z");
+
+  it("flags a 14-month-old FEMA NFHL snapshot as stale (window is 12 months)", () => {
+    // Snapshot taken 14 calendar months before NOW (March 2025).
+    const verdict = evaluateFederalSnapshotFreshness(
+      "fema-nfhl-flood-zone",
+      "2025-03-01T00:00:00.000Z",
+      NOW,
+    );
+    expect(verdict).toEqual({
+      ageMonths: 14,
+      thresholdMonths: 12,
+      isStale: true,
+    });
+  });
+
+  it("does not flag a fresh (3-month-old) FEMA NFHL snapshot", () => {
+    // Snapshot taken 3 calendar months before NOW (Feb 2026).
+    const verdict = evaluateFederalSnapshotFreshness(
+      "fema-nfhl-flood-zone",
+      "2026-02-01T00:00:00.000Z",
+      NOW,
+    );
+    expect(verdict).toEqual({
+      ageMonths: 3,
+      thresholdMonths: 12,
+      isStale: false,
+    });
+  });
+
+  it("flags an FCC broadband snapshot older than the 6-month BDC cycle", () => {
+    // 8 months prior — past one BDC publishing window.
+    const verdict = evaluateFederalSnapshotFreshness(
+      "fcc-broadband-availability",
+      "2025-09-01T00:00:00.000Z",
+      NOW,
+    );
+    expect(verdict?.isStale).toBe(true);
+    expect(verdict?.ageMonths).toBe(8);
+    expect(verdict?.thresholdMonths).toBe(6);
+  });
+
+  it("uses the longer 24-month window for USGS NED elevation", () => {
+    // 18 months old — stale for FCC/EJScreen, but still fresh for
+    // USGS because terrain rasters change on a longer cadence.
+    const verdict = evaluateFederalSnapshotFreshness(
+      "usgs-ned-elevation",
+      "2024-11-01T00:00:00.000Z",
+      NOW,
+    );
+    expect(verdict).toEqual({
+      ageMonths: 18,
+      thresholdMonths: 24,
+      isStale: false,
+    });
+  });
+
+  it("treats a snapshot that exactly hits the threshold as stale (anniversary day)", () => {
+    // Exactly 12 months old → equality counts as stale so the badge
+    // appears on the anniversary, matching the literal "12 months"
+    // wording of the threshold.
+    const verdict = evaluateFederalSnapshotFreshness(
+      "fema-nfhl-flood-zone",
+      "2025-05-01T00:00:00.000Z",
+      NOW,
+    );
+    expect(verdict).toEqual({
+      ageMonths: 12,
+      thresholdMonths: 12,
+      isStale: true,
+    });
+  });
+
+  it("rounds whole months down so an 11-month-and-29-day-old snapshot is still fresh", () => {
+    // One day shy of 12 months — must read as 11 months / fresh.
+    const verdict = evaluateFederalSnapshotFreshness(
+      "fema-nfhl-flood-zone",
+      "2025-05-02T00:00:00.000Z",
+      NOW,
+    );
+    expect(verdict).toEqual({
+      ageMonths: 11,
+      thresholdMonths: 12,
+      isStale: false,
+    });
+  });
+
+  it("returns null for non-federal layer kinds (state/local rows are skipped)", () => {
+    expect(
+      evaluateFederalSnapshotFreshness(
+        "grand-county-ut:zoning",
+        "2020-01-01T00:00:00.000Z",
+        NOW,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for missing or malformed snapshot dates", () => {
+    expect(
+      evaluateFederalSnapshotFreshness("fema-nfhl-flood-zone", null, NOW),
+    ).toBeNull();
+    expect(
+      evaluateFederalSnapshotFreshness(
+        "fema-nfhl-flood-zone",
+        undefined,
+        NOW,
+      ),
+    ).toBeNull();
+    expect(
+      evaluateFederalSnapshotFreshness(
+        "fema-nfhl-flood-zone",
+        "not-a-date",
+        NOW,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for a future-dated snapshot (clock skew / fixture typo)", () => {
+    expect(
+      evaluateFederalSnapshotFreshness(
+        "fema-nfhl-flood-zone",
+        "2027-01-01T00:00:00.000Z",
+        NOW,
       ),
     ).toBeNull();
   });

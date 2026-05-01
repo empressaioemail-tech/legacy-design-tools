@@ -24,6 +24,21 @@ import {
 const FEMA_NFHL_FLOOD_ZONES =
   "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28";
 
+/**
+ * Freshness window for the FEMA NFHL adapter snapshot.
+ *
+ * FEMA republishes NFHL effective panels on a rolling basis as Letters
+ * of Map Revision (LOMRs) clear and new community-wide map products
+ * adopt. Most communities' effective FIRMs change on a multi-year
+ * cadence, but a stale NFHL snapshot is a real audit risk: an
+ * architect citing a 5-year-old FEMA reading might be quoting a zone
+ * that has since been redrawn by a LOMR. 12 months keeps the window
+ * tight enough that any architect-facing reading is at most one
+ * publishing cycle old, while staying loose enough that we don't tag
+ * every read as stale on day 366.
+ */
+export const FEMA_NFHL_FRESHNESS_THRESHOLD_MONTHS = 12;
+
 function federalApplies(ctx: AdapterContext): boolean {
   // Federal adapters cover the entire US. We still gate on a resolved
   // pilot state so an out-of-pilot engagement 422s consistently with
