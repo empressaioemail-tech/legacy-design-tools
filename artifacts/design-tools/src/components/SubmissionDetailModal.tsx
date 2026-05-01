@@ -11,6 +11,7 @@ import {
 } from "@workspace/api-client-react";
 import { relativeTime } from "../lib/relativeTime";
 import { backfillAnnotation } from "../lib/submissionBackfill";
+import { friendlyAgentLabel } from "../lib/actorLabel";
 
 /**
  * Status the submission's atom-event chain may surface in
@@ -563,15 +564,28 @@ function RelatedEventBlock({
 }
 
 /**
- * Display label for an event actor. Mirrors the "user shows display
- * name, agents/system show stable kind:id" convention `SheetCard`
- * already uses on the sheet timeline so the two surfaces read the
- * same way.
+ * Display label for an event actor.
+ *
+ * `user` actors show the hydrated display name (falling back to a
+ * generic "Unknown user" string when the API hasn't / couldn't
+ * hydrate the profile — distinct from the divergence-resolver
+ * surface, which prefers the raw id over a generic label so an
+ * audit row never collapses to anonymous copy).
+ *
+ * `agent` / `system` actors look up a friendly label in
+ * {@link FRIENDLY_AGENT_LABELS} so e.g. `snapshot-ingest` reads as
+ * "Site-context automation" instead of leaking the raw code-side
+ * id. Unknown ids degrade to the historical `kind:id` convention
+ * `SheetCard` already uses on the sheet timeline so the two
+ * surfaces still read the same way for any producer that hasn't
+ * been added to the friendly-label map yet.
  */
 function actorLabel(actor: AtomEventActor): string {
   if (actor.kind === "user") {
     return actor.displayName ?? "Unknown user";
   }
+  const friendly = friendlyAgentLabel(actor.id);
+  if (friendly) return friendly;
   return `${actor.kind}:${actor.id}`;
 }
 

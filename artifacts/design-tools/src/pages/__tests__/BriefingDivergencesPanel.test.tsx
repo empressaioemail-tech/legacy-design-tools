@@ -767,6 +767,43 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
         resolvedAt: oneHourAgo,
         resolvedByRequestor: null,
       },
+      {
+        // Task #270: a `kind === "agent"` resolver whose id is in
+        // the friendly-label map should render the polished label
+        // ("Site-context automation") rather than leaking the raw
+        // `snapshot-ingest` id into the audit row.
+        id: "div-agent-known",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-D",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T09:30:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 13)",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: { kind: "agent", id: "snapshot-ingest" },
+      },
+      {
+        // Task #270 fallback case: an agent id we don't have a
+        // friendly label for must still attribute itself with the
+        // raw id rather than collapse to an anonymous string, so a
+        // newly-introduced producer keeps showing up in the audit
+        // trail.
+        id: "div-agent-unknown",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-E",
+        briefingId: "brief-1",
+        reason: "unpinned",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T09:00:00.000Z",
+        elementKind: "property-line",
+        elementLabel: "North property line",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: { kind: "agent", id: "future-agent" },
+      },
     ];
     renderPanel();
 
@@ -804,6 +841,40 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
         "briefing-divergences-resolved-attribution",
       ),
     ).toHaveTextContent("1 h ago by system");
+
+    // Task #270: a known agent id renders the friendly label
+    // sourced from the shared FRIENDLY_AGENT_LABELS map rather
+    // than the raw `snapshot-ingest` identifier.
+    const agentKnownRow = screen
+      .getAllByTestId("briefing-divergences-row")
+      .find(
+        (r) => r.getAttribute("data-divergence-id") === "div-agent-known",
+      );
+    expect(agentKnownRow).toBeDefined();
+    const agentKnownAttr = within(agentKnownRow!).getByTestId(
+      "briefing-divergences-resolved-attribution",
+    );
+    expect(agentKnownAttr).toHaveTextContent(
+      "1 h ago by Site-context automation",
+    );
+    // Defensive: the raw id must NOT leak into the audit row when
+    // the friendly label is available.
+    expect(agentKnownAttr).not.toHaveTextContent("snapshot-ingest");
+
+    // Task #270 fallback: an agent id we don't have a friendly
+    // label for still attributes itself with the raw id rather
+    // than collapsing to an anonymous string.
+    const agentUnknownRow = screen
+      .getAllByTestId("briefing-divergences-row")
+      .find(
+        (r) => r.getAttribute("data-divergence-id") === "div-agent-unknown",
+      );
+    expect(agentUnknownRow).toBeDefined();
+    expect(
+      within(agentUnknownRow!).getByTestId(
+        "briefing-divergences-resolved-attribution",
+      ),
+    ).toHaveTextContent("1 h ago by future-agent");
 
     // The absolute ISO timestamp is still tucked into the title
     // attribute so an operator can hover for second-precision when

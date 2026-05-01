@@ -83,6 +83,7 @@ import {
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
+import { formatActorLabel } from "../lib/actorLabel";
 import {
   BACKFILL_FILTER_QUERY_PARAM,
   backfillAnnotation,
@@ -4535,6 +4536,13 @@ function formatRelativeMaterializedAt(iso: string): string {
  * `displayName` to the raw `id` when the API hasn't (or couldn't)
  * hydrate the profile.
  *
+ * For `kind === "agent"` resolvers we delegate to
+ * {@link formatActorLabel} so a stable code-side id like
+ * `snapshot-ingest` renders as a human-friendly label (e.g.
+ * "Site-context automation") instead of leaking the raw identifier
+ * into the audit trail. Unknown agent ids still fall back to the
+ * raw id so a newly-introduced producer keeps attributing itself.
+ *
  * `resolvedAt` should always be non-null for a Resolved row, but we
  * tolerate `null` defensively so a partial-shape row never crashes
  * the panel — the badge above already carries the visual cue.
@@ -4547,7 +4555,7 @@ function formatResolvedAttribution(
     ? formatRelativeMaterializedAt(resolvedAt)
     : null;
   const who = resolvedByRequestor
-    ? resolvedByRequestor.displayName?.trim() || resolvedByRequestor.id
+    ? formatActorLabel(resolvedByRequestor)
     : "system";
   return when ? `${when} by ${who}` : `by ${who}`;
 }

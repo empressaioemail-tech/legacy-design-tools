@@ -787,11 +787,17 @@ describe("SubmissionDetailModal", () => {
       expect(
         screen.getByTestId("submission-status-history-status-2").textContent,
       ).toBe("Approved");
-      // The system actor uses the "kind:id" convention from
-      // `actorLabel`, mirroring SheetCard.
+      // Task #270: known system / agent actor ids resolve to a
+      // friendly label via the shared `friendlyAgentLabel` helper
+      // instead of leaking the raw `system:submission-response`
+      // identifier into the audit row. Unknown ids still fall back
+      // to the historical "kind:id" convention from SheetCard.
       expect(
         screen.getByTestId("submission-status-history-actor-2").textContent,
-      ).toContain("system:submission-response");
+      ).toContain("Submission response");
+      expect(
+        screen.getByTestId("submission-status-history-actor-2").textContent,
+      ).not.toContain("system:submission-response");
       // The new row has no note, so the optional note row must
       // be absent. The previous row's note must still be present.
       expect(
