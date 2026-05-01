@@ -1096,6 +1096,161 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     ).toBeInTheDocument();
   });
 
+  // --- Task #405 — fade the gesture legend after the reviewer interacts ---
+
+  it("collapses the legend to a '?' affordance once the reviewer pans (pointerdown on the canvas)", () => {
+    // Power users get the gestures right away; the legend should
+    // fade out the first time they actually pan/rotate so it
+    // stops being persistent visual noise.
+    const { container } = render(<BimModelViewport elements={elements} />);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeNull();
+    const canvas = container.querySelector("canvas");
+    expect(canvas).not.toBeNull();
+    fireEvent.pointerDown(canvas!);
+    // Legend gone, "?" affordance in its place.
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("collapses the legend to a '?' affordance once the reviewer scrolls to zoom (wheel on the canvas)", () => {
+    // Wheel zoom is the second gesture the legend teaches; using
+    // it should also count as "the reviewer knows the gesture
+    // model" and fade the legend.
+    const { container } = render(<BimModelViewport elements={elements} />);
+    const canvas = container.querySelector("canvas");
+    expect(canvas).not.toBeNull();
+    fireEvent.wheel(canvas!, { deltaY: -100 });
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("re-summons the full legend on demand when the reviewer hovers the '?' affordance", () => {
+    // The legend has to remain reachable — a reviewer who forgets
+    // the right-drag rotate gesture should be able to pull it
+    // back up without needing to refresh the engagement.
+    const { container } = render(<BimModelViewport elements={elements} />);
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    const toggle = screen.getByTestId(
+      "bim-model-viewport-gesture-hint-toggle",
+    );
+    fireEvent.mouseEnter(toggle);
+    const legend = screen.getByTestId("bim-model-viewport-gesture-hint");
+    expect(legend).toBeInTheDocument();
+    // The data-hint-source attribute distinguishes the on-demand
+    // reveal from the initial first-paint render — useful for
+    // analytics / future styling without changing the test contract
+    // for the initial-render visibility tests.
+    expect(legend.getAttribute("data-hint-source")).toBe("revealed");
+    // And the legend stays pointer-transparent so re-summoning it
+    // doesn't suddenly start eating canvas pan/zoom gestures.
+    expect(legend.style.pointerEvents).toBe("none");
+    // Cursor leaves → hide again.
+    fireEvent.mouseLeave(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+  });
+
+  it("re-summons the full legend when the '?' affordance receives keyboard focus", () => {
+    // Keyboard reviewers (Tab through the page) need the same
+    // affordance — focusing the "?" should reveal the legend the
+    // same way hover does, and blur should hide it again.
+    const { container } = render(<BimModelViewport elements={elements} />);
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    const toggle = screen.getByTestId(
+      "bim-model-viewport-gesture-hint-toggle",
+    );
+    fireEvent.focus(toggle);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    fireEvent.blur(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+  });
+
+  it("the '?' affordance is a real button with an accessible label so screen readers find it", () => {
+    const { container } = render(<BimModelViewport elements={elements} />);
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    const toggle = screen.getByTestId(
+      "bim-model-viewport-gesture-hint-toggle",
+    );
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.getAttribute("aria-label")).toBe(
+      "Show 3D viewer controls",
+    );
+  });
+
+  it("keeps the dismissed state for the rest of the same engagement (an unrelated rerender doesn't bring the legend back)", () => {
+    const { container, rerender } = render(
+      <BimModelViewport elements={elements} />,
+    );
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+    // Rerender with same elements (same engagement / briefingId) —
+    // dismissed state should persist; the reviewer just demonstrated
+    // they know the gestures, we shouldn't second-guess that on the
+    // very next paint.
+    rerender(<BimModelViewport elements={elements} />);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+    // Even a selection change (Show in 3D viewer jump) shouldn't
+    // un-dismiss the hint.
+    rerender(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="el-envelope"
+      />,
+    );
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+  });
+
+  it("brings the full legend back when the reviewer jumps to a different engagement (briefingId change)", () => {
+    // The dismissed state is per-engagement, not per-session, so a
+    // fresh BIM model still gets the affordance — even if the
+    // reviewer dismissed the legend earlier on a different one.
+    const { container, rerender } = render(
+      <BimModelViewport elements={elements} />,
+    );
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+    const otherEngagementElements = elements.map((el) => ({
+      ...el,
+      briefingId: "br-2-different-engagement",
+    }));
+    rerender(<BimModelViewport elements={otherEngagementElements} />);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeNull();
+  });
+
   it("does re-fit when the reviewer jumps to a different element via Show in 3D viewer", () => {
     const { rerender } = render(
       <BimModelViewport

@@ -501,6 +501,45 @@ export function BimModelViewport({
   >({});
   const [glbBounds, setGlbBounds] = useState<Record<string, Bounds3D>>({});
 
+  // Task #405 — gesture legend fade. The Task #402 legend reads
+  // naturally on a fresh canvas but turns into visual noise for
+  // power users who already know the gesture model. Once the
+  // reviewer demonstrates they know the gestures (first
+  // pan/rotate via pointerdown on the canvas, or first wheel
+  // zoom), we collapse the legend down to a small "?" affordance
+  // in the same corner. Hovering or focusing the "?" re-summons
+  // the full legend on demand. The dismissed state is per-engagement
+  // (keyed by `briefingId` — see the reset effect below) so a fresh
+  // BIM model still gets the full affordance even within the same
+  // session.
+  const [hintDismissed, setHintDismissed] = useState(false);
+  const [hintRevealed, setHintRevealed] = useState(false);
+
+  // Stable callback ref so the scene-lifecycle effect (which only
+  // re-runs on `webGlOk`) can dismiss the hint without taking
+  // `setHintDismissed` as a dependency — bringing setState into
+  // that effect would tear down and rebuild the entire Three.js
+  // scene on every state transition.
+  const dismissHintRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    dismissHintRef.current = () => setHintDismissed(true);
+  });
+
+  // Reset the dismissed state when the engagement changes — keyed
+  // by the briefing id since BimModelViewport is engagement-scoped
+  // (one BIM model per engagement, all elements share a briefingId).
+  // A reviewer who has dismissed the legend on engagement A still
+  // sees the full legend when they jump to engagement B's BIM model.
+  const engagementKey = elements[0]?.briefingId ?? null;
+  const lastEngagementKeyRef = useRef<string | null>(engagementKey);
+  useEffect(() => {
+    if (lastEngagementKeyRef.current !== engagementKey) {
+      lastEngagementKeyRef.current = engagementKey;
+      setHintDismissed(false);
+      setHintRevealed(false);
+    }
+  }, [engagementKey]);
+
   // Resolve the current selection. May resolve to an element
   // that has no scene representation — that's the fallback
   // overlay path.
@@ -708,6 +747,14 @@ export function BimModelViewport({
       const cam = cameraRef.current;
       const ctrls = controlsRef.current;
       if (!cam || !ctrls) return;
+      // Task #405 — wheel zoom is one of the gestures the legend
+      // teaches; the moment the reviewer uses it we collapse the
+      // legend to the "?" affordance. Done before the rect-zero
+      // early return so we still credit the gesture in headless /
+      // unmeasured layouts (the legend is purely informational —
+      // its dismiss state shouldn't depend on the zoom math
+      // succeeding).
+      dismissHintRef.current();
       event.preventDefault();
       event.stopImmediatePropagation();
       const rect = renderer.domElement.getBoundingClientRect();
@@ -744,6 +791,19 @@ export function BimModelViewport({
     renderer.domElement.addEventListener("wheel", handleWheelZoom, {
       capture: true,
       passive: false,
+    });
+
+    // Task #405 — pointerdown on the canvas catches the other two
+    // gestures the legend teaches: left-drag pan and right-drag
+    // rotate. We listen passively (no preventDefault) so OrbitControls'
+    // own pointerdown handler still receives the event and starts
+    // the drag normally — we only piggyback to mark the legend as
+    // dismissed.
+    const handlePointerDown = () => {
+      dismissHintRef.current();
+    };
+    renderer.domElement.addEventListener("pointerdown", handlePointerDown, {
+      passive: true,
     });
 
     const animate = () => {
@@ -802,6 +862,10 @@ export function BimModelViewport({
         "wheel",
         handleWheelZoom,
         { capture: true } as EventListenerOptions,
+      );
+      renderer.domElement.removeEventListener(
+        "pointerdown",
+        handlePointerDown,
       );
       controls.dispose();
       controlsRef.current = null;
@@ -1185,9 +1249,10 @@ export function BimModelViewport({
           so it doesn't sit on top of the WebGL-fallback or
           empty-state full-canvas overlays.
         */}
-        {webGlOk && cameraFit && (
+        {webGlOk && cameraFit && (!hintDismissed || hintRevealed) && (
           <div
             data-testid="bim-model-viewport-gesture-hint"
+            data-hint-source={hintDismissed ? "revealed" : "initial"}
             aria-label="3D viewer controls: drag to pan, scroll to zoom, right-drag to rotate, Reset view to recenter"
             style={{
               position: "absolute",
@@ -1203,12 +1268,52 @@ export function BimModelViewport({
               maxWidth: "60%",
               opacity: 0.9,
               pointerEvents: "none",
-              zIndex: 1,
+              zIndex: 2,
             }}
           >
             Drag to pan · Scroll to zoom · Right-drag to rotate ·
             Reset view to recenter
           </div>
+        )}
+        {webGlOk && cameraFit && hintDismissed && (
+          // Task #405 — collapsed "?" affordance the reviewer can
+          // hover or focus to re-summon the full legend. Sits in
+          // the same top-left corner the legend used so the
+          // reviewer's eye doesn't have to hunt for it. The "?"
+          // owns the hover/focus handlers; the legend itself stays
+          // pointerEvents:none so it never absorbs canvas gestures
+          // (Task #380 contract). zIndex 1 keeps it under the
+          // re-summoned legend (zIndex 2) so the legend visually
+          // covers and replaces the "?" while it's revealed.
+          <button
+            type="button"
+            data-testid="bim-model-viewport-gesture-hint-toggle"
+            aria-label="Show 3D viewer controls"
+            title="Show 3D viewer controls"
+            onMouseEnter={() => setHintRevealed(true)}
+            onMouseLeave={() => setHintRevealed(false)}
+            onFocus={() => setHintRevealed(true)}
+            onBlur={() => setHintRevealed(false)}
+            style={{
+              position: "absolute",
+              top: 8,
+              left: 8,
+              width: 20,
+              height: 20,
+              padding: 0,
+              background: "var(--bg-elevated)",
+              color: "var(--text-muted)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 10,
+              fontSize: 12,
+              lineHeight: 1,
+              cursor: "help",
+              opacity: 0.7,
+              zIndex: 1,
+            }}
+          >
+            ?
+          </button>
         )}
         {webGlOk && cameraFit && (
           <button
