@@ -37,6 +37,7 @@ import type {
   KeyMetric,
 } from "@workspace/empressa-atom";
 import type { db as ProdDb } from "@workspace/db";
+import { hydrateActors as defaultHydrateActors } from "../lib/userLookup";
 
 /** Hard cap on the prose summary length so we don't blow up token budget. */
 export const SUBMISSION_PROSE_MAX_CHARS = 600;
@@ -133,7 +134,23 @@ export const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
 export interface SubmissionStatusHistoryEntry {
   status: SubmissionStatus;
   occurredAt: string;
-  actor: { kind: "user" | "agent" | "system"; id: string };
+  /**
+   * Recorded actor of the transition. The optional `displayName` /
+   * `email` / `avatarUrl` fields are populated by the same
+   * `hydrateActors` lookup the `/atoms/:slug/:id/history` endpoint
+   * uses, so user-kind actors carry profile metadata pulled from the
+   * `users` table when one exists. Absent for `agent` / `system`
+   * actors (those have no profile row by design) and for user actors
+   * whose id has no matching profile (deleted account, ad-hoc dev id,
+   * etc.) — UIs fall back to "Unknown user" in that case.
+   */
+  actor: {
+    kind: "user" | "agent" | "system";
+    id: string;
+    displayName?: string;
+    email?: string;
+    avatarUrl?: string;
+  };
   note: string | null;
   eventId: string | null;
 }
@@ -181,10 +198,18 @@ export interface SubmissionTypedPayload {
 /**
  * Dependencies of {@link makeSubmissionAtom}. `db` and `history`
  * mirror the {@link import("./sheet.atom").SheetAtomDeps} contract.
+ *
+ * `hydrateActors` is injectable purely for testability — production
+ * callers should rely on the default, which delegates to the same
+ * `users`-table lookup the `/atoms/:slug/:id/history` endpoint uses.
+ * Tests that exercise the in-memory event service can swap in a stub
+ * (or pass through unchanged) so they don't need a `users` row to
+ * cover the non-hydration code path.
  */
 export interface SubmissionAtomDeps {
   db: typeof ProdDb;
   history?: EventAnchoringService;
+  hydrateActors?: typeof defaultHydrateActors;
 }
 
 /**
@@ -496,6 +521,36 @@ export function makeSubmissionAtom(
             // Seed actor stays as the ingest fallback.
           }
         }
+      }
+
+      // Hydrate user-kind actors with profile metadata from the
+      // `users` table (Task #130) so the FE timeline can render
+      // "Jane Doe approved this submission" instead of
+      // "user:u_abc123 …". Mirrors the hydration the
+      // `/atoms/:slug/:id/history` endpoint applies to atom-event
+      // actors. Best-effort: a transient lookup failure leaves the
+      // raw actors in place — the UI's "Unknown user" fallback is
+      // less informative than a real name but still correct, and we
+      // never want a profile-table hiccup to 500 a summary read.
+      // Agent / system actors are passed through unchanged by
+      // `hydrateActors` itself, so the seed entry's
+      // `submission-ingest` system fallback (or the promoted user
+      // attribution copied off `engagement.submitted`) participates
+      // in the same single batched lookup as the
+      // `submission.status-changed` entries.
+      const hydrate = deps.hydrateActors ?? defaultHydrateActors;
+      try {
+        const rawActors = statusHistory.map((entry) => entry.actor);
+        const hydrated = await hydrate(rawActors);
+        for (let i = 0; i < statusHistory.length; i++) {
+          const entry = statusHistory[i];
+          const next = hydrated[i];
+          if (entry && next) {
+            entry.actor = next;
+          }
+        }
+      } catch {
+        // Best-effort — raw actors already populated above.
       }
 
       const typed: SubmissionTypedPayload = {

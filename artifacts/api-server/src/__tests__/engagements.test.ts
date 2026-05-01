@@ -753,6 +753,44 @@ describe("POST /api/engagements/:id/submissions/:submissionId/response — submi
     ).toBe(false);
   });
 
+  it("attributes both submission events to the session user when one is attached (Task #130)", async () => {
+    // The response route used to hard-code the system actor
+    // `submission-response` because no session-bound user identity
+    // was wired through. Now that `sessionMiddleware` runs for every
+    // request, the route should pull `req.session.requestor` and
+    // attribute BOTH the `submission.response-recorded` and the
+    // companion `submission.status-changed` event to that user — so
+    // the SubmissionDetailModal's status timeline can render the
+    // reviewer's display name (hydrated server-side from the `users`
+    // table) instead of a generic `system:submission-response` label.
+    // The system fallback is still exercised by the test above for
+    // the no-session path. The `x-requestor` dev override is the
+    // same opt-in the engagement-edit attribution test uses.
+    const eng = await seedEngagement();
+    const sub = await seedSubmissionFor(eng.id);
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .set("x-requestor", "user:reviewer-9")
+      .send({
+        status: "approved",
+        reviewerComment: "Looks good — proceed.",
+      });
+    expect(res.status).toBe(200);
+
+    const submissionEvents = await readSubmissionEvents(sub.id);
+    expect(submissionEvents).toHaveLength(2);
+    // Both events carry the user-kind actor — not the system fallback.
+    expect(submissionEvents[0]!.actor).toEqual({
+      kind: "user",
+      id: "reviewer-9",
+    });
+    expect(submissionEvents[1]!.actor).toEqual({
+      kind: "user",
+      id: "reviewer-9",
+    });
+  });
+
   it("coerces empty reviewerComment to null and stamps respondedAt when omitted", async () => {
     const eng = await seedEngagement();
     const sub = await seedSubmissionFor(eng.id);

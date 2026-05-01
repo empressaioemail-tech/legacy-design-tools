@@ -510,6 +510,260 @@ describe("submission atom (behavior)", () => {
     },
   );
 
+  it(
+    "statusHistory hydrates user-kind actors with displayName / email / avatarUrl " +
+      "from the users table (Task #130) so the timeline shows reviewer profiles",
+    async () => {
+      if (!ctx.schema) throw new Error("ctx.schema not set");
+      const db = ctx.schema.db;
+      const { users } = await import("@workspace/db");
+      // Seed two reviewer profiles. Mirrors the production wire — the
+      // `users` table id is the same opaque string the session
+      // middleware writes into `atom_events.actor.id` for `kind: user`
+      // actors.
+      await db.insert(users).values([
+        {
+          id: "u_jane",
+          displayName: "Jane Reviewer",
+          email: "jane@example.com",
+          avatarUrl: "https://cdn.example.com/jane.png",
+        },
+        {
+          id: "u_carl",
+          displayName: "Carl Submitter",
+          email: null,
+          avatarUrl: null,
+        },
+      ]);
+      const [eng] = await db
+        .insert(engagements)
+        .values({
+          name: "Hydration",
+          nameLower: "hydration",
+          jurisdiction: "Moab, UT",
+          address: "1 Hydration Way",
+        })
+        .returning({ id: engagements.id });
+      const [sub] = await db
+        .insert(submissions)
+        .values({
+          engagementId: eng.id,
+          jurisdiction: "Moab, UT",
+          note: null,
+        })
+        .returning();
+
+      const history = createInMemoryEventService();
+      // The seed entry's actor is promoted off the engagement.submitted
+      // event — make that a real user actor too so we cover both
+      // hydration paths in one read.
+      await history.appendEvent({
+        entityType: "engagement",
+        entityId: eng.id,
+        eventType: "engagement.submitted",
+        actor: { kind: "user", id: "u_carl" },
+        payload: { submissionId: sub!.id, jurisdiction: "Moab, UT" },
+      });
+      await history.appendEvent({
+        entityType: "submission",
+        entityId: sub!.id,
+        eventType: "submission.status-changed",
+        actor: { kind: "user", id: "u_jane" },
+        payload: {
+          engagementId: eng.id,
+          fromStatus: "pending",
+          toStatus: "approved",
+          note: "Looks good.",
+        },
+      });
+      // A status-changed event from a user we have no profile row for
+      // — hydration should pass it through unchanged so the FE's
+      // "Unknown user" fallback can render rather than crashing on a
+      // missing field.
+      await history.appendEvent({
+        entityType: "submission",
+        entityId: sub!.id,
+        eventType: "submission.status-changed",
+        actor: { kind: "user", id: "u_ghost" },
+        payload: {
+          engagementId: eng.id,
+          fromStatus: "approved",
+          toStatus: "corrections_requested",
+          note: null,
+        },
+      });
+
+      const atom = makeSubmissionAtom({ db: lazyDb, history });
+      const summary = await atom.contextSummary(sub!.id, defaultScope());
+      const statusHistory = (
+        summary.typed as {
+          statusHistory?: Array<{
+            actor: {
+              kind: string;
+              id: string;
+              displayName?: string;
+              email?: string;
+              avatarUrl?: string;
+            };
+          }>;
+        }
+      ).statusHistory!;
+      expect(statusHistory).toHaveLength(3);
+      // Seed entry: promoted to u_carl, hydrated with displayName.
+      expect(statusHistory[0]!.actor).toMatchObject({
+        kind: "user",
+        id: "u_carl",
+        displayName: "Carl Submitter",
+      });
+      // First transition: u_jane is hydrated with the full profile.
+      expect(statusHistory[1]!.actor).toMatchObject({
+        kind: "user",
+        id: "u_jane",
+        displayName: "Jane Reviewer",
+        email: "jane@example.com",
+        avatarUrl: "https://cdn.example.com/jane.png",
+      });
+      // Second transition: u_ghost has no profile row — actor is
+      // returned unchanged (no displayName), so the FE's
+      // "Unknown user" fallback can take over.
+      expect(statusHistory[2]!.actor).toEqual({
+        kind: "user",
+        id: "u_ghost",
+      });
+    },
+  );
+
+  it(
+    "statusHistory passes system / agent actors through hydration unchanged " +
+      "(no profile row by design)",
+    async () => {
+      if (!ctx.schema) throw new Error("ctx.schema not set");
+      const db = ctx.schema.db;
+      const [eng] = await db
+        .insert(engagements)
+        .values({
+          name: "System Actor Pass-through",
+          nameLower: "system-actor-pass-through",
+          jurisdiction: "Moab, UT",
+          address: "1 Passthrough Way",
+        })
+        .returning({ id: engagements.id });
+      const [sub] = await db
+        .insert(submissions)
+        .values({
+          engagementId: eng.id,
+          jurisdiction: "Moab, UT",
+          note: null,
+        })
+        .returning();
+
+      const history = createInMemoryEventService();
+      await history.appendEvent({
+        entityType: "submission",
+        entityId: sub!.id,
+        eventType: "submission.status-changed",
+        actor: { kind: "system", id: "submission-response" },
+        payload: {
+          engagementId: eng.id,
+          fromStatus: "pending",
+          toStatus: "approved",
+          note: null,
+        },
+      });
+
+      const atom = makeSubmissionAtom({ db: lazyDb, history });
+      const summary = await atom.contextSummary(sub!.id, defaultScope());
+      const statusHistory = (
+        summary.typed as {
+          statusHistory?: Array<{
+            actor: { kind: string; id: string; displayName?: string };
+          }>;
+        }
+      ).statusHistory!;
+      // Two entries: the synthetic seed + the one status-changed event.
+      expect(statusHistory).toHaveLength(2);
+      // Seed entry — submission-ingest system actor, no displayName.
+      expect(statusHistory[0]!.actor).toEqual({
+        kind: "system",
+        id: "submission-ingest",
+      });
+      // Transition entry — submission-response system actor, no
+      // displayName. The hydration helper passes through non-user
+      // kinds untouched.
+      expect(statusHistory[1]!.actor).toEqual({
+        kind: "system",
+        id: "submission-response",
+      });
+    },
+  );
+
+  it(
+    "statusHistory degrades gracefully when the actor-hydration helper throws " +
+      "(raw actors are surfaced rather than 500-ing the summary read)",
+    async () => {
+      if (!ctx.schema) throw new Error("ctx.schema not set");
+      const db = ctx.schema.db;
+      const [eng] = await db
+        .insert(engagements)
+        .values({
+          name: "Hydration Failure",
+          nameLower: "hydration-failure",
+          jurisdiction: "Moab, UT",
+          address: "1 Failure Way",
+        })
+        .returning({ id: engagements.id });
+      const [sub] = await db
+        .insert(submissions)
+        .values({
+          engagementId: eng.id,
+          jurisdiction: "Moab, UT",
+          note: null,
+        })
+        .returning();
+
+      const history = createInMemoryEventService();
+      await history.appendEvent({
+        entityType: "submission",
+        entityId: sub!.id,
+        eventType: "submission.status-changed",
+        actor: { kind: "user", id: "u_unhydrated" },
+        payload: {
+          engagementId: eng.id,
+          fromStatus: "pending",
+          toStatus: "approved",
+          note: null,
+        },
+      });
+
+      const atom = makeSubmissionAtom({
+        db: lazyDb,
+        history,
+        hydrateActors: async () => {
+          throw new Error("simulated lookup failure");
+        },
+      });
+      const summary = await atom.contextSummary(sub!.id, defaultScope());
+      const statusHistory = (
+        summary.typed as {
+          statusHistory?: Array<{
+            actor: { kind: string; id: string; displayName?: string };
+          }>;
+        }
+      ).statusHistory!;
+      // Both entries fall back to the raw event actors — the lookup
+      // failure does NOT swallow the timeline.
+      expect(statusHistory).toHaveLength(2);
+      expect(statusHistory[0]!.actor).toEqual({
+        kind: "system",
+        id: "submission-ingest",
+      });
+      expect(statusHistory[1]!.actor).toEqual({
+        kind: "user",
+        id: "u_unhydrated",
+      });
+    },
+  );
+
   it("not-found returns the structural shape with typed.found=false", async () => {
     const atom = makeSubmissionAtom({ db: lazyDb });
     const summary = await atom.contextSummary(
