@@ -47,6 +47,7 @@ import {
   render,
   screen,
   cleanup,
+  fireEvent,
   waitFor,
   within,
 } from "@testing-library/react";
@@ -57,6 +58,11 @@ const hoisted = vi.hoisted(() => ({
   fetchMock: vi.fn(),
   parseMock: vi.fn(),
   glbBoundsHook: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+  // Most-recently constructed OrbitControls instance — tests
+  // use this to assert the pan/zoom configuration applied
+  // (Task #380) and to count how many times the camera-fit
+  // logic actually wrote a new target into the live controls.
+  lastOrbitControls: null as Record<string, unknown> | null,
 }));
 
 // Three.js module stub — only the surface BimModelViewport touches.
@@ -164,16 +170,48 @@ vi.mock("three", () => {
     ExtrudeGeometry,
     Box3,
     DoubleSide: 2,
+    // OrbitControls reads the requested mouse-button / touch
+    // bindings off these enums (Task #380 — pan-on-left,
+    // dolly-on-middle, rotate-on-right). Values mirror the real
+    // three.js exports so the test can assert the binding
+    // BimModelViewport applied is the one a reviewer actually
+    // sees in the browser.
+    MOUSE: { LEFT: 0, MIDDLE: 1, RIGHT: 2, ROTATE: 0, DOLLY: 1, PAN: 2 },
+    TOUCH: { ROTATE: 0, PAN: 1, DOLLY_PAN: 2, DOLLY_ROTATE: 3 },
   };
 });
 
 vi.mock("three/examples/jsm/controls/OrbitControls.js", () => ({
   OrbitControls: class {
-    target = { set: () => {} };
+    // Captures every (x, y, z) the camera-fit logic writes to the
+    // controls target — tests assert the length of this array to
+    // tell "the camera was reframed once / twice / not at all"
+    // apart from "the React-derived data-camera-target attribute
+    // changed reactively but the camera was left alone".
+    targetCalls: Array<[number, number, number]> = [];
+    target = {
+      set: (x: number, y: number, z: number) => {
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const self = this as unknown as {
+          targetCalls: Array<[number, number, number]>;
+        };
+        self.targetCalls.push([x, y, z]);
+      },
+    };
     enableDamping = false;
     dampingFactor = 0;
+    enablePan?: boolean;
+    enableZoom?: boolean;
+    enableRotate?: boolean;
+    screenSpacePanning?: boolean;
+    zoomToCursor?: boolean;
+    mouseButtons?: { LEFT?: number; MIDDLE?: number; RIGHT?: number };
+    touches?: { ONE?: number; TWO?: number };
     update() {}
     dispose() {}
+    constructor() {
+      hoisted.lastOrbitControls = this as unknown as Record<string, unknown>;
+    }
   },
 }));
 
@@ -235,6 +273,7 @@ beforeEach(() => {
     min: { x: 0, y: 0, z: 0 },
     max: { x: 0, y: 0, z: 0 },
   };
+  hoisted.lastOrbitControls = null;
   // happy-dom doesn't implement WebGL — stub getContext so the
   // viewport's detectWebGl() branches the test wants.
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
@@ -826,5 +865,186 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
         .getByTestId("bim-model-viewport")
         .getAttribute("data-camera-target"),
     ).toBe("10.00,6.00,0.25");
+  });
+
+  // --- Task #380 — reviewer pan / zoom / reset-view -----------------
+
+  it("configures OrbitControls for left-mouse pan, screen-space panning, and right-mouse rotate", () => {
+    render(<BimModelViewport elements={elements} />);
+    const controls = hoisted.lastOrbitControls as
+      | (Record<string, unknown> & {
+          mouseButtons?: { LEFT?: number; MIDDLE?: number; RIGHT?: number };
+          touches?: { ONE?: number; TWO?: number };
+        })
+      | null;
+    expect(controls).not.toBeNull();
+    expect(controls?.enablePan).toBe(true);
+    expect(controls?.enableZoom).toBe(true);
+    expect(controls?.screenSpacePanning).toBe(true);
+    // PAN = 2 in the MOUSE enum we expose from the three mock.
+    expect(controls?.mouseButtons?.LEFT).toBe(2);
+    expect(controls?.mouseButtons?.MIDDLE).toBe(1);
+    expect(controls?.mouseButtons?.RIGHT).toBe(0);
+    // Touch: single-finger pan, two-finger dolly+rotate (so a
+    // pinch zooms in / out the way reviewers expect on a laptop
+    // trackpad).
+    expect(controls?.touches?.ONE).toBe(1);
+    expect(controls?.touches?.TWO).toBe(3);
+  });
+
+  it("renders the Reset view button when WebGL is available and there's a frame to restore", () => {
+    render(<BimModelViewport elements={elements} />);
+    const button = screen.getByTestId("bim-model-viewport-reset-view");
+    expect(button).toBeInTheDocument();
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.getAttribute("title")).toContain("full scene");
+  });
+
+  it("hides the Reset view button when there's no scene to frame (empty renderable set)", () => {
+    render(<BimModelViewport elements={[]} />);
+    expect(
+      screen.queryByTestId("bim-model-viewport-reset-view"),
+    ).toBeNull();
+  });
+
+  it("hides the Reset view button when WebGL is unavailable (the canvas isn't live, so reset has nothing to act on)", () => {
+    hoisted.webGlAvailable = false;
+    render(<BimModelViewport elements={elements} />);
+    expect(
+      screen.queryByTestId("bim-model-viewport-reset-view"),
+    ).toBeNull();
+  });
+
+  it("re-applies the auto-frame to the live OrbitControls when the reviewer clicks Reset view", () => {
+    render(<BimModelViewport elements={elements} selectedElementRef="el-envelope" />);
+    const viewport = screen.getByTestId("bim-model-viewport");
+    // Initial selection-driven frame ran once.
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
+    fireEvent.click(screen.getByTestId("bim-model-viewport-reset-view"));
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("2");
+    const controls = hoisted.lastOrbitControls as
+      | { targetCalls: Array<[number, number, number]> }
+      | null;
+    // The reset-driven write targets the same envelope-fit center
+    // the initial frame did. Initial call (0,0,0 from the
+    // controls constructor) + selection frame + reset frame = 3.
+    expect(controls?.targetCalls.length).toBe(3);
+    expect(controls?.targetCalls[0]).toEqual([0, 0, 0]);
+    expect(controls?.targetCalls[1]).toEqual([10, 6, 0.25]);
+    expect(controls?.targetCalls[2]).toEqual([10, 6, 0.25]);
+  });
+
+  it("Reset view button label / title reflects the current selection so reviewers know what they're snapping back to", () => {
+    const { rerender } = render(
+      <BimModelViewport elements={elements} />,
+    );
+    expect(
+      screen.getByTestId("bim-model-viewport-reset-view").getAttribute("title"),
+    ).toContain("full scene");
+    rerender(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="el-envelope"
+      />,
+    );
+    expect(
+      screen.getByTestId("bim-model-viewport-reset-view").getAttribute("title"),
+    ).toContain("selected element");
+  });
+
+  it("does not yank the camera back when an unrelated GLB load completes mid-pan", async () => {
+    // Reviewer is inspecting a ring element (envelope) and is
+    // free-form panning. Meanwhile the terrain GLB finishes
+    // loading in the background — the scene bounds would expand,
+    // but the auto-frame must NOT re-fire because the reviewer
+    // didn't pick a new element.
+    hoisted.fetchMock.mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+    });
+    hoisted.glbBoundsHook = {
+      min: { x: -50, y: 0, z: -50 },
+      max: { x: 50, y: 4, z: 50 },
+    };
+    render(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="el-envelope"
+      />,
+    );
+    const viewport = screen.getByTestId("bim-model-viewport");
+    // Initial selection frame.
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
+    // Wait for the terrain GLB load to settle.
+    await waitFor(() =>
+      expect(
+        viewport.getAttribute("data-source-load-src-terrain-1"),
+      ).toBe("loaded"),
+    );
+    // Critical: the applied-count is still 1 — the unrelated GLB
+    // load did not re-fit the camera (which would have ripped the
+    // reviewer's pan/zoom away from them).
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
+  });
+
+  it("does re-fit when the reviewer jumps to a different element via Show in 3D viewer", () => {
+    const { rerender } = render(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="el-envelope"
+      />,
+    );
+    const viewport = screen.getByTestId("bim-model-viewport");
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
+    // Same prop value — should NOT re-fit (nothing changed).
+    rerender(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="el-envelope"
+      />,
+    );
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
+    // New selection — the camera-fit should fire again so the
+    // reviewer's "Show in 3D viewer" jump always re-frames.
+    rerender(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="el-property-line"
+      />,
+    );
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("2");
+  });
+
+  it("re-fits onto the GLB-derived bounds once the selected element's GLB resolves", async () => {
+    hoisted.fetchMock.mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+    });
+    hoisted.glbBoundsHook = {
+      min: { x: -50, y: 0, z: -50 },
+      max: { x: 50, y: 4, z: 50 },
+    };
+    render(
+      <BimModelViewport
+        elements={elements}
+        selectedElementRef="el-terrain"
+      />,
+    );
+    const viewport = screen.getByTestId("bim-model-viewport");
+    // Initial frame (scene-bounds fallback while the GLB loads).
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
+    await waitFor(() =>
+      expect(
+        viewport.getAttribute("data-source-load-src-terrain-1"),
+      ).toBe("loaded"),
+    );
+    // GLB bounds now resolved → second fit lands on the
+    // GLB-derived frame.
+    await waitFor(() =>
+      expect(
+        viewport.getAttribute("data-camera-fit-applied-count"),
+      ).toBe("2"),
+    );
+    expect(viewport.getAttribute("data-camera-target")).toBe("0.00,2.00,0.00");
   });
 });

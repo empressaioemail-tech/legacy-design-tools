@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -62,6 +62,27 @@ import {
  *   - `data-webgl-available` — `"true"` | `"false"` so tests
  *     don't have to introspect the fallback child to know
  *     whether the canvas is live.
+ *   - `data-camera-fit-applied-count` — number of times the
+ *     auto-framing has actually been applied to the live
+ *     OrbitControls camera. Increments on (a) the first
+ *     selection-driven jump, (b) each subsequent change of the
+ *     `selectedElementRef` prop, (c) the moment the selected
+ *     element's GLB bounds resolve, and (d) every "Reset view"
+ *     button click. It does NOT increment for unrelated
+ *     re-renders (e.g. a non-selected GLB finishing loading) so
+ *     reviewers' manual pan/zoom isn't undone out from under
+ *     them — see Task #380.
+ *
+ * Reviewer interaction model (Task #380):
+ *   - Wheel scroll zooms around the cursor (`zoomToCursor`).
+ *   - Click-and-drag (left mouse button) pans the camera in
+ *     screen space.
+ *   - Right mouse button still rotates the orbit, in case a
+ *     reviewer wants to look at a wall from a different angle —
+ *     not requested by the task but cheap to keep enabled.
+ *   - The "Reset view" button restores the auto-framed bounds
+ *     for the current selection (or the full scene when there's
+ *     no selection in flight).
  *
  * The viewport intentionally does *not* own the aria-live
  * announcement — that lives in {@link MaterializableElementsList}
@@ -621,7 +642,90 @@ export function BimModelViewport({
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.target.set(0, 0, 0);
+    // Task #380 — reviewer pan/zoom interaction model:
+    //   - Left mouse drags pan the camera (the most common gesture
+    //     reviewers reach for when verifying a finding's neighbour
+    //     context). Screen-space panning so the gesture moves the
+    //     scene 1:1 with the cursor regardless of camera tilt.
+    //   - Wheel zooms toward the cursor (handled by the custom
+    //     `wheel` capture-phase listener below — three@0.128
+    //     predates OrbitControls' built-in `zoomToCursor`, and
+    //     bumping the dependency for one UX nicety would regress
+    //     too many other consumers).
+    //   - Right mouse still rotates the orbit so reviewers can
+    //     pivot to read a setback-plane from a different angle.
+    //     The task didn't ask for this but the alternative is to
+    //     disable rotation entirely, which would regress today's
+    //     OrbitControls default for no good reason.
+    controls.enablePan = true;
+    controls.enableZoom = true;
+    controls.enableRotate = true;
+    controls.screenSpacePanning = true;
+    if (THREE.MOUSE) {
+      controls.mouseButtons = {
+        LEFT: THREE.MOUSE.PAN,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE,
+      };
+    }
+    if (THREE.TOUCH) {
+      controls.touches = {
+        ONE: THREE.TOUCH.PAN,
+        TWO: THREE.TOUCH.DOLLY_ROTATE,
+      };
+    }
     controlsRef.current = controls;
+
+    // Custom wheel-zoom that anchors on the cursor instead of the
+    // orbit target. We compute the world position under the cursor
+    // by intersecting the camera ray with a plane through the
+    // current orbit target (perpendicular to the camera->target
+    // axis), then uniformly scale both the camera position and
+    // the orbit target around that anchor. The OrbitControls
+    // built-in dolly is suppressed via stopImmediatePropagation —
+    // we register in capture phase so we run before the bubble-
+    // phase listener OrbitControls attaches.
+    const handleWheelZoom = (event: WheelEvent) => {
+      const cam = cameraRef.current;
+      const ctrls = controlsRef.current;
+      if (!cam || !ctrls) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const ndcX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+      const planeNormal = new THREE.Vector3()
+        .subVectors(cam.position, ctrls.target)
+        .normalize();
+      // If the camera and target coincide (degenerate), bail —
+      // there's no well-defined plane to zoom around.
+      if (planeNormal.lengthSq() === 0) return;
+      const plane = new THREE.Plane();
+      plane.setFromNormalAndCoplanarPoint(planeNormal, ctrls.target);
+      const anchor = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(plane, anchor)) return;
+      // Per-tick scale factor: positive deltaY (scroll down) zooms
+      // out, negative zooms in. Clamped so a stray high-resolution
+      // trackpad event can't crash the camera through the geometry.
+      const rawScale = Math.pow(0.95, -event.deltaY * 0.01);
+      const scale = Math.max(0.5, Math.min(2.0, rawScale));
+      const camOffset = new THREE.Vector3()
+        .subVectors(cam.position, anchor)
+        .multiplyScalar(scale);
+      const targetOffset = new THREE.Vector3()
+        .subVectors(ctrls.target, anchor)
+        .multiplyScalar(scale);
+      cam.position.copy(anchor).add(camOffset);
+      ctrls.target.copy(anchor).add(targetOffset);
+      if (typeof ctrls.update === "function") ctrls.update();
+    };
+    renderer.domElement.addEventListener("wheel", handleWheelZoom, {
+      capture: true,
+      passive: false,
+    });
 
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
@@ -649,6 +753,11 @@ export function BimModelViewport({
         animationFrameRef.current = null;
       }
       observer?.disconnect();
+      renderer.domElement.removeEventListener(
+        "wheel",
+        handleWheelZoom,
+        { capture: true } as EventListenerOptions,
+      );
       controls.dispose();
       controlsRef.current = null;
       elementMeshesRef.current.forEach(disposeObject);
@@ -866,11 +975,28 @@ export function BimModelViewport({
   }, [selectedElementId, webGlOk, renderable]);
 
   // ---------- Camera fit: update OrbitControls target + camera position ----------
-  useEffect(() => {
-    if (!webGlOk) return;
+  // The reviewer is allowed to pan / zoom freely (Task #380), so we
+  // can't re-apply the auto-frame on every cameraFit recompute —
+  // that would yank their viewport back whenever an unrelated GLB
+  // finishes loading or a new element is appended. Instead we
+  // re-frame only on selection-driven events:
+  //   1. The very first cameraFit becomes available (initial
+  //      scene framing on mount).
+  //   2. The `selectedElementRef` prop changes — this is the
+  //      "Show in 3D viewer" jump from MaterializableElementsList.
+  //   3. The selected element's GLB bounds resolve from
+  //      "pending" → "ready" (so a glb-source jump still snaps to
+  //      the GLB-derived frame once the bytes land, even though
+  //      the prop never changed).
+  //   4. The reviewer explicitly clicks "Reset view" — handled
+  //      via `handleResetView` below, not this effect.
+  const [cameraFitAppliedCount, setCameraFitAppliedCount] = useState(0);
+
+  const applyCameraFit = useCallback((): boolean => {
+    if (!webGlOk) return false;
     const camera = cameraRef.current;
     const controls = controlsRef.current;
-    if (!camera || !controls || !cameraFit) return;
+    if (!camera || !controls || !cameraFit) return false;
     const [tx, ty, tz] = cameraFit.target;
     controls.target.set(tx, ty, tz);
     // Z-up iso camera vector: south-west-above of target, so the
@@ -884,7 +1010,52 @@ export function BimModelViewport({
     );
     camera.lookAt(tx, ty, tz);
     if (typeof controls.update === "function") controls.update();
+    return true;
   }, [cameraFit, webGlOk]);
+
+  // Stable identity for "what we last fit". Includes the selected
+  // ref AND a flag for whether the selection's GLB bounds have
+  // resolved, so the GLB-load promotion (case #3 above) still
+  // triggers a reframe even when the prop didn't change. For
+  // ring/glb-orphan/no-selection cases the GLB-resolved flag is
+  // a no-op constant, so unrelated GLB loads don't churn the
+  // signature.
+  const fitSignature = useMemo(() => {
+    const ref = selectedElementRef ?? "<scene>";
+    if (
+      selectedRenderable?.source === "glb" &&
+      selectedRenderable.glbKey
+    ) {
+      const ready = glbBounds[selectedRenderable.glbKey] ? "ready" : "pending";
+      return `${ref}|glb:${ready}`;
+    }
+    return `${ref}|static`;
+  }, [selectedElementRef, selectedRenderable, glbBounds]);
+
+  const lastFitSignatureRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!webGlOk) return;
+    if (!cameraFit) return;
+    if (lastFitSignatureRef.current === fitSignature) return;
+    if (applyCameraFit()) {
+      lastFitSignatureRef.current = fitSignature;
+      setCameraFitAppliedCount((n) => n + 1);
+    }
+  }, [cameraFit, fitSignature, applyCameraFit, webGlOk]);
+
+  const handleResetView = useCallback(() => {
+    if (applyCameraFit()) {
+      // Re-syncs the signature so the next selection-change /
+      // GLB-load is still detected as "different from what's on
+      // screen" — without this, a reviewer who pans away after a
+      // reset wouldn't be re-framed if they later jumped to the
+      // *same* element they reset onto. The increment is the
+      // observable "yes, the reset clicked through to the camera".
+      lastFitSignatureRef.current = fitSignature;
+      setCameraFitAppliedCount((n) => n + 1);
+    }
+  }, [applyCameraFit, fitSignature]);
 
   const cameraTargetAttr = cameraFit
     ? `${cameraFit.target[0].toFixed(2)},${cameraFit.target[1].toFixed(2)},${cameraFit.target[2].toFixed(2)}`
@@ -908,6 +1079,7 @@ export function BimModelViewport({
       data-selected-element-source={selectedSourceAttr}
       data-camera-target={cameraTargetAttr}
       data-camera-distance={cameraDistanceAttr}
+      data-camera-fit-applied-count={cameraFitAppliedCount}
       data-webgl-available={webGlOk ? "true" : "false"}
       {...sourceLoadAttrs}
       style={{
@@ -953,6 +1125,34 @@ export function BimModelViewport({
           aspectRatio: "16 / 9",
         }}
       >
+        {webGlOk && cameraFit && (
+          <button
+            type="button"
+            data-testid="bim-model-viewport-reset-view"
+            onClick={handleResetView}
+            title={
+              selectedRenderable
+                ? "Reset view to the selected element"
+                : "Reset view to the full scene"
+            }
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              background: "var(--bg-elevated)",
+              color: "var(--text-default)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+              padding: "4px 8px",
+              fontSize: 11,
+              cursor: "pointer",
+              lineHeight: 1.2,
+              zIndex: 1,
+            }}
+          >
+            Reset view
+          </button>
+        )}
         {!webGlOk && (
           <div
             data-testid="bim-model-viewport-webgl-fallback"
