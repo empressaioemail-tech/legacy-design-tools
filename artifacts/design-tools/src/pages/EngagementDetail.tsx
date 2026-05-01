@@ -634,6 +634,40 @@ function isAdapterSourceKind(
   );
 }
 
+/**
+ * Field names compared between an adapter-driven prior row and the
+ * current row to drive the "Changed: …" hint in the history panel.
+ * Kept narrow (snapshotDate / provider / note / sourceKind) so the
+ * diff is meaningful at a glance for a non-destructive rerun — fields
+ * that are bookkeeping (createdAt, supersededAt, supersededById, the
+ * row's own id, conversion blob fields, upload byte fields) would
+ * always differ and would drown out the signal.
+ */
+const BRIEFING_DIFF_FIELDS = [
+  "snapshotDate",
+  "provider",
+  "note",
+  "sourceKind",
+] as const satisfies readonly (keyof EngagementBriefingSource)[];
+
+/**
+ * Diff a prior briefing-source row against the current row, returning
+ * the names of {@link BRIEFING_DIFF_FIELDS} whose value differs. Used
+ * by the history panel to surface a compact "Changed: provider,
+ * snapshotDate" hint on adapter-driven prior rows so an architect can
+ * see what an adapter rerun actually moved without opening the JSON.
+ *
+ * Comparison is a strict `!==` over scalar values — the four diffed
+ * fields are all `string | null`, so reference identity is sufficient
+ * and we avoid a JSON.stringify roundtrip on every render.
+ */
+export function diffBriefingSourceFields(
+  prior: EngagementBriefingSource,
+  current: EngagementBriefingSource,
+): readonly (typeof BRIEFING_DIFF_FIELDS)[number][] {
+  return BRIEFING_DIFF_FIELDS.filter((f) => prior[f] !== current[f]);
+}
+
 export function BriefingSourceRow({
   engagementId,
   source,
@@ -990,12 +1024,19 @@ export function BriefingSourceHistoryPanel({
     "all" | "adapter" | "manual"
   >("all");
 
+  const allSources = historyQuery.data?.sources ?? [];
   const allPriorVersions = useMemo(
-    () =>
-      (historyQuery.data?.sources ?? []).filter(
-        (s) => s.id !== currentSourceId,
-      ),
-    [historyQuery.data, currentSourceId],
+    () => allSources.filter((s) => s.id !== currentSourceId),
+    [allSources, currentSourceId],
+  );
+  // The "Changed: …" hint compares each adapter-driven prior row to
+  // the current row (the one whose id matches `currentSourceId`).
+  // Looking up the current row from the same `includeSuperseded=true`
+  // payload keeps the diff purely client-side over data the panel has
+  // already fetched — no extra request.
+  const currentSource = useMemo(
+    () => allSources.find((s) => s.id === currentSourceId) ?? null,
+    [allSources, currentSourceId],
   );
 
   const priorVersions = useMemo(() => {
@@ -1109,6 +1150,16 @@ export function BriefingSourceHistoryPanel({
         // Show the per-layer key + provider as the headline and stamp
         // the actor line so an architect can see at a glance whether
         // a prior version came from an adapter run or a manual upload.
+        // For adapter-driven prior rows, compute which of the diffed
+        // fields moved between this rerun and the current row so we
+        // can render a compact "Changed: …" hint below the meta line.
+        // Manual-upload prior rows skip the hint — the typical reason
+        // to look at one is to compare uploaded files, not adapter
+        // rerun deltas.
+        const changedFields =
+          priorIsAdapter && currentSource
+            ? diffBriefingSourceFields(prior, currentSource)
+            : [];
         return (
         <div
           key={prior.id}
@@ -1194,6 +1245,14 @@ export function BriefingSourceHistoryPanel({
               </>
             )}
           </div>
+          {changedFields.length > 0 && (
+            <div
+              style={{ fontSize: 10, color: "var(--text-muted)" }}
+              data-testid={`briefing-source-history-row-changed-${prior.id}`}
+            >
+              Changed: {changedFields.join(", ")}
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button
               type="button"

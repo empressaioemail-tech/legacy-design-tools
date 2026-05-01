@@ -519,6 +519,86 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     ).not.toBeInTheDocument();
   });
 
+  it("renders a 'Changed: …' hint on an adapter prior row whose snapshotDate differs from the current row (Task #185)", () => {
+    // Two adapter rows of the same layer, different snapshot dates —
+    // the rerun moved the snapshot forward but kept provider/note/
+    // sourceKind. The hint should call out exactly which field moved.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+    });
+    const prior = mkSource({
+      id: "src-prior-snap",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-01-01T00:00:00.000Z",
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    expect(hint.textContent).toMatch(/^Changed:\s*snapshotDate$/);
+    // Sanity: nothing else moved, so other field names must not leak
+    // into the hint.
+    expect(hint.textContent).not.toMatch(/provider/);
+    expect(hint.textContent).not.toMatch(/note/);
+    expect(hint.textContent).not.toMatch(/sourceKind/);
+  });
+
+  it("does NOT render the 'Changed: …' hint when an adapter prior row is byte-identical to the current row (Task #185)", () => {
+    // Same provider, snapshotDate, note, sourceKind — only the row
+    // id and createdAt differ (which the diff intentionally ignores).
+    // The hint must not render so the architect isn't told something
+    // moved when nothing meaningful did.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+    });
+    const prior = mkSource({
+      id: "src-prior-identical",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    // Sanity: the prior row is rendered (so the assertion below isn't
+    // vacuously true because the panel skipped this row entirely).
+    expect(
+      screen.getByTestId(`briefing-source-history-row-${prior.id}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(`briefing-source-history-row-changed-${prior.id}`),
+    ).not.toBeInTheDocument();
+  });
+
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {
     const current = mkSource({
       id: "src-only",
