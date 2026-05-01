@@ -106,6 +106,7 @@ export function BriefingSourceDetails({
             sourceId={source.id}
             jurisdictionKey={jurisdictionKey}
             reportedDistrict={reportedDistrict}
+            snapshotDate={source.snapshotDate}
           />
         )}
     </div>
@@ -326,11 +327,33 @@ function CopySummaryButton({ source }: { source: EngagementBriefingSource }) {
     () => formatFederalSummaryMarkdown(source),
     [source],
   );
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   if (!markdown) return null;
+  return (
+    <CopyMarkdownButton
+      markdown={markdown}
+      testId={`briefing-source-copy-summary-${source.id}`}
+    />
+  );
+}
+
+/**
+ * Generic "Copy summary" button that writes a pre-built markdown
+ * digest to the clipboard. Shared by the federal-adapter row summary
+ * and the local-tier setback panel — both surface the same one-line
+ * affordance ("Copied!" / "Copy failed" feedback that resets after
+ * 1.5s) so reviewers can drop the digest into chat or a code-review
+ * note without retyping the values.
+ */
+function CopyMarkdownButton({
+  markdown,
+  testId,
+}: {
+  markdown: string;
+  testId: string;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
 
   async function copy(): Promise<void> {
-    if (!markdown) return;
     try {
       await navigator.clipboard.writeText(markdown);
       setState("copied");
@@ -352,7 +375,7 @@ function CopySummaryButton({ source }: { source: EngagementBriefingSource }) {
     <button
       type="button"
       onClick={copy}
-      data-testid={`briefing-source-copy-summary-${source.id}`}
+      data-testid={testId}
       title={markdown}
       style={{
         alignSelf: "flex-start",
@@ -918,10 +941,12 @@ function SetbackPanel({
   sourceId,
   jurisdictionKey,
   reportedDistrict,
+  snapshotDate,
 }: {
   sourceId: string;
   jurisdictionKey: string;
   reportedDistrict: string | null;
+  snapshotDate: string | null;
 }) {
   const tableQuery = useGetLocalSetbackTable(jurisdictionKey, {
     query: {
@@ -1018,7 +1043,18 @@ function SetbackPanel({
         )}
       </div>
       {matched ? (
-        <SetbacksGrid district={matched} />
+        <>
+          <SetbacksGrid district={matched} />
+          <CopyMarkdownButton
+            markdown={formatSetbackSummaryMarkdown({
+              jurisdictionDisplayName:
+                tableQuery.data.jurisdictionDisplayName,
+              district: matched,
+              snapshotDate,
+            })}
+            testId={`briefing-source-copy-setback-${sourceId}`}
+          />
+        </>
       ) : (
         <EmptyHint>
           {reportedDistrict
@@ -1028,6 +1064,39 @@ function SetbackPanel({
       )}
     </div>
   );
+}
+
+/**
+ * Build the single-line markdown digest the local-tier setback panel's
+ * "Copy summary" button writes to the clipboard when a matched row is
+ * present.
+ *
+ * Shape: `**<jurisdiction>** — <district> — front X ft, rear X ft, side X ft, height X ft, max coverage X% — snapshot YYYY-MM-DD`
+ *   e.g. `**Grand County, UT (Moab area)** — RR-1 Rural Residential — front 30 ft, rear 25 ft, side 15 ft, height 32 ft, max coverage 30% — snapshot 2026-01-01`
+ *
+ * The snapshot suffix is dropped when `snapshotDate` is missing or
+ * malformed (mirrors `formatFederalSummaryMarkdown`). Exported so the
+ * format is unit-testable without rendering the component.
+ */
+export function formatSetbackSummaryMarkdown({
+  jurisdictionDisplayName,
+  district,
+  snapshotDate,
+}: {
+  jurisdictionDisplayName: string;
+  district: LocalSetbackDistrict;
+  snapshotDate: string | null | undefined;
+}): string {
+  const body = [
+    `front ${district.front_ft} ft`,
+    `rear ${district.rear_ft} ft`,
+    `side ${district.side_ft} ft`,
+    `height ${district.max_height_ft} ft`,
+    `max coverage ${district.max_lot_coverage_pct}%`,
+  ].join(", ");
+  const snapshot = formatSnapshotDate(snapshotDate);
+  const tail = snapshot ? ` — snapshot ${snapshot}` : "";
+  return `**${jurisdictionDisplayName}** — ${district.district_name} — ${body}${tail}`;
 }
 
 function SetbacksGrid({ district }: { district: LocalSetbackDistrict }) {

@@ -43,9 +43,11 @@ vi.mock("@workspace/api-client-react", async () => {
   };
 });
 
-const { BriefingSourceDetails, formatFederalSummaryMarkdown } = await import(
-  "../BriefingSourceDetails"
-);
+const {
+  BriefingSourceDetails,
+  formatFederalSummaryMarkdown,
+  formatSetbackSummaryMarkdown,
+} = await import("../BriefingSourceDetails");
 
 function mkSource(
   over: Partial<EngagementBriefingSource> &
@@ -549,6 +551,161 @@ describe("BriefingSourceDetails federal copy-summary button", () => {
     expect(
       screen.queryByTestId(
         "briefing-source-copy-summary-src-parcel-nocopy",
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("formatSetbackSummaryMarkdown", () => {
+  it("formats a Grand County, UT (Moab area) RR-1 row as a one-line markdown digest", () => {
+    const md = formatSetbackSummaryMarkdown({
+      jurisdictionDisplayName: "Grand County, UT (Moab area)",
+      district: {
+        district_name: "RR-1 Rural Residential",
+        front_ft: 30,
+        rear_ft: 25,
+        side_ft: 15,
+        side_corner_ft: 25,
+        max_height_ft: 32,
+        max_lot_coverage_pct: 30,
+        max_impervious_pct: 40,
+        citation_url: "https://example.test/code",
+      },
+      snapshotDate: "2026-01-01T00:00:00.000Z",
+    });
+    expect(md).toBe(
+      "**Grand County, UT (Moab area)** — RR-1 Rural Residential — front 30 ft, rear 25 ft, side 15 ft, height 32 ft, max coverage 30% — snapshot 2026-01-01",
+    );
+  });
+
+  it("drops the snapshot suffix when snapshotDate is missing", () => {
+    const md = formatSetbackSummaryMarkdown({
+      jurisdictionDisplayName: "Bastrop County, TX",
+      district: {
+        district_name: "C-1 Commercial",
+        front_ft: 25,
+        rear_ft: 10,
+        side_ft: 10,
+        side_corner_ft: 15,
+        max_height_ft: 35,
+        max_lot_coverage_pct: 50,
+        max_impervious_pct: 65,
+        citation_url: "",
+      },
+      snapshotDate: null,
+    });
+    expect(md).toBe(
+      "**Bastrop County, TX** — C-1 Commercial — front 25 ft, rear 10 ft, side 10 ft, height 35 ft, max coverage 50%",
+    );
+  });
+});
+
+describe("BriefingSourceDetails setback copy-summary button", () => {
+  it("writes the setback markdown digest to the clipboard when clicked", async () => {
+    setbackHook.state = {
+      data: {
+        jurisdictionKey: "grand-county-ut",
+        jurisdictionDisplayName: "Grand County, UT (Moab area)",
+        districts: [
+          {
+            district_name: "RR-1 Rural Residential",
+            front_ft: 30,
+            rear_ft: 25,
+            side_ft: 15,
+            side_corner_ft: 25,
+            max_height_ft: 32,
+            max_lot_coverage_pct: 30,
+            max_impervious_pct: 40,
+            citation_url: "https://example.test/code",
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      value: { writeText: writeTextMock },
+      configurable: true,
+      writable: true,
+    });
+
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-zoning-copy",
+          layerKind: "zoning",
+          sourceKind: "local-adapter",
+          provider: "grand-county-ut:zoning (Grand County, UT GIS)",
+          snapshotDate: "2026-01-01T00:00:00.000Z",
+          payload: {
+            kind: "zoning",
+            zoning: {
+              attributes: { ZONE_DIST: "RR-1 Rural Residential" },
+            },
+          },
+        })}
+      />,
+    );
+
+    const button = screen.getByTestId(
+      "briefing-source-copy-setback-src-zoning-copy",
+    );
+    expect(button).toHaveTextContent("Copy summary");
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(writeTextMock).toHaveBeenCalledWith(
+        "**Grand County, UT (Moab area)** — RR-1 Rural Residential — front 30 ft, rear 25 ft, side 15 ft, height 32 ft, max coverage 30% — snapshot 2026-01-01",
+      );
+    });
+    await waitFor(() => {
+      expect(button).toHaveTextContent("Copied!");
+    });
+  });
+
+  it("does not render a copy-summary button when no setback row matched", () => {
+    setbackHook.state = {
+      data: {
+        jurisdictionKey: "grand-county-ut",
+        jurisdictionDisplayName: "Grand County, UT (Moab area)",
+        districts: [
+          {
+            district_name: "RR-1 Rural Residential",
+            front_ft: 30,
+            rear_ft: 25,
+            side_ft: 15,
+            side_corner_ft: 25,
+            max_height_ft: 32,
+            max_lot_coverage_pct: 30,
+            max_impervious_pct: 40,
+            citation_url: "https://example.test/code",
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-zoning-nomatch-nocopy",
+          layerKind: "zoning",
+          sourceKind: "local-adapter",
+          provider: "grand-county-ut:zoning (Grand County, UT GIS)",
+          payload: {
+            kind: "zoning",
+            zoning: {
+              attributes: { ZONE_DIST: "Some Unmapped District" },
+            },
+          },
+        })}
+      />,
+    );
+    expect(
+      screen.queryByTestId(
+        "briefing-source-copy-setback-src-zoning-nomatch-nocopy",
       ),
     ).toBeNull();
   });
