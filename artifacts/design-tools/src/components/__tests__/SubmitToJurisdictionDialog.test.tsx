@@ -107,9 +107,7 @@ vi.mock("@workspace/api-zod", () => ({
   createEngagementSubmissionBodyNoteMax: 2048,
 }));
 
-const { SubmitToJurisdictionDialog } = await import(
-  "../SubmitToJurisdictionDialog"
-);
+const { SubmitToJurisdictionDialog } = await import("@workspace/portal-ui");
 
 // ── Render helpers ──────────────────────────────────────────────────────
 

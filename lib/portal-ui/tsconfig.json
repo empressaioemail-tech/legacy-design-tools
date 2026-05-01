@@ -10,5 +10,9 @@
     "lib": ["es2022", "dom", "dom.iterable"],
     "types": []
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    { "path": "../api-client-react" },
+    { "path": "../api-zod" }
+  ]
 }

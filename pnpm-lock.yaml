@@ -1117,6 +1117,15 @@ importers:
 
   lib/portal-ui:
     dependencies:
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.90.21(react@19.1.0)
+      '@workspace/api-client-react':
+        specifier: workspace:*
+        version: link:../api-client-react
+      '@workspace/api-zod':
+        specifier: workspace:*
+        version: link:../api-zod
       lucide-react:
         specifier: 'catalog:'
         version: 0.545.0(react@19.1.0)
@@ -1133,6 +1142,12 @@ importers:
       '@types/react-dom':
         specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.14)
+      react:
+        specifier: 'catalog:'
+        version: 19.1.0
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.1.0(react@19.1.0)
 
   lib/site-context:
     dependencies:

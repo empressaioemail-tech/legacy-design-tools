@@ -8,6 +8,8 @@ export type {
 } from "./components/Sidebar";
 export { Header } from "./components/Header";
 export type { HeaderProps } from "./components/Header";
+export { SubmitToJurisdictionDialog } from "./components/SubmitToJurisdictionDialog";
+export type { SubmitToJurisdictionDialogProps } from "./components/SubmitToJurisdictionDialog";
 
 export {
   initTheme,

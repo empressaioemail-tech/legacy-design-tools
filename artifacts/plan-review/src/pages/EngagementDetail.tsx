@@ -10,7 +10,7 @@ import {
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
-import { SubmitToJurisdictionDialog } from "../components/SubmitToJurisdictionDialog";
+import { SubmitToJurisdictionDialog } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
 
 /**
