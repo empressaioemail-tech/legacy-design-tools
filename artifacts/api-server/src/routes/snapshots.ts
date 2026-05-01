@@ -41,6 +41,8 @@ import type { EngagementEventType } from "../atoms/engagement.atom";
  * stale name.
  */
 const ENGAGEMENT_CREATED_EVENT_TYPE: EngagementEventType = "engagement.created";
+const ENGAGEMENT_SNAPSHOT_RECEIVED_EVENT_TYPE: EngagementEventType =
+  "engagement.snapshot-received";
 
 const snapshotSecret = getSnapshotSecret();
 
@@ -120,6 +122,53 @@ async function emitEngagementCreatedEvent(
         snapshotId: outcome.result.id,
       },
       "engagement.created event append failed — row insert kept",
+    );
+  }
+}
+
+/**
+ * Best-effort emission of `engagement.snapshot-received` against the
+ * parent engagement on every accepted snapshot ingest. Fires on both
+ * branches (existing-engagement bind and create-new), and on the
+ * GUID-race rebind path — the engagement just received a snapshot in
+ * each of those cases. Failures are swallowed and logged so a history
+ * outage cannot roll back the snapshot insert; the event chain is
+ * observability, not the source of truth (mirrors the contract used by
+ * {@link emitSnapshotLifecycleEvents} and {@link emitEngagementCreatedEvent}).
+ */
+async function emitEngagementSnapshotReceivedEvent(
+  history: EventAnchoringService,
+  outcome: SnapshotAttachOutcome,
+  reqLog: typeof logger,
+): Promise<void> {
+  try {
+    const event = await history.appendEvent({
+      entityType: "engagement",
+      entityId: outcome.result.engagementId,
+      eventType: ENGAGEMENT_SNAPSHOT_RECEIVED_EVENT_TYPE,
+      actor: SNAPSHOT_INGEST_ACTOR,
+      payload: {
+        snapshotId: outcome.result.id,
+        projectName: outcome.result.engagementName,
+      },
+    });
+    reqLog.info(
+      {
+        engagementId: outcome.result.engagementId,
+        snapshotId: outcome.result.id,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "engagement.snapshot-received event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        engagementId: outcome.result.engagementId,
+        snapshotId: outcome.result.id,
+      },
+      "engagement.snapshot-received event append failed — row insert kept",
     );
   }
 }
@@ -442,6 +491,10 @@ router.post("/snapshots", async (req: Request, res: Response) => {
       // latest snapshot when one exists, `snapshot.created` for the new
       // row). Awaited but never throw — see emitSnapshotLifecycleEvents.
       await emitSnapshotLifecycleEvents(history, outcome, reqLog);
+      // Mirror the snapshot lifecycle on the parent engagement so its
+      // history endpoint reflects every snapshot landing without
+      // consumers cross-joining snapshot history with engagement id.
+      await emitEngagementSnapshotReceivedEvent(history, outcome, reqLog);
       res.status(201).json(outcome.result);
     } catch (err) {
       logger.error({ err, engagementId }, "attach snapshot failed");
@@ -538,6 +591,11 @@ router.post("/snapshots", async (req: Request, res: Response) => {
     // bound to an existing engagement and must NOT re-emit it.
     await emitSnapshotLifecycleEvents(history, outcome, reqLog);
     await emitEngagementCreatedEvent(history, outcome, reqLog);
+    // Always emit `engagement.snapshot-received` against the parent —
+    // applies equally to a freshly-inserted engagement (its first
+    // snapshot is still a snapshot landing) and to the GUID-race
+    // rebind path (engagement existed, just received a new snapshot).
+    await emitEngagementSnapshotReceivedEvent(history, outcome, reqLog);
 
     res.status(201).json(outcome.result);
   } catch (err) {

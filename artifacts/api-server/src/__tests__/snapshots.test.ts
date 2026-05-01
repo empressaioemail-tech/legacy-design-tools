@@ -200,6 +200,122 @@ describe("POST /api/snapshots — A04.7", () => {
     });
   });
 
+  it("existing branch: engagement.snapshot-received appears on engagement history", async () => {
+    const eng = await seedEngagement({ name: "History Engagement" });
+
+    const post = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        engagementId: eng.id,
+        sheets: [{ id: 1 }],
+      });
+    expect(post.status).toBe(201);
+
+    const history = await request(getApp()).get(
+      `/api/atoms/engagement/${eng.id}/history`,
+    );
+    expect(history.status).toBe(200);
+    const events: Array<{ eventType: string }> = history.body.events;
+    const received = events.filter(
+      (e) => e.eventType === "engagement.snapshot-received",
+    );
+    expect(received.length).toBeGreaterThan(0);
+
+    // Cross-check the persisted row carries the snapshot id + project name
+    // payload the spec requires.
+    if (!ctx.schema) throw new Error("ctx");
+    const evRows = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "engagement"),
+          eq(atomEvents.entityId, eng.id),
+          eq(atomEvents.eventType, "engagement.snapshot-received"),
+        ),
+      );
+    expect(evRows).toHaveLength(1);
+    expect(evRows[0]!.actor).toEqual({
+      kind: "system",
+      id: "snapshot-ingest",
+    });
+    expect(evRows[0]!.payload).toMatchObject({
+      snapshotId: post.body.id,
+      projectName: "History Engagement",
+    });
+  });
+
+  it("create-new branch: engagement.snapshot-received fires for the freshly-created engagement", async () => {
+    const res = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Fresh Project",
+        sheets: [],
+      });
+    expect(res.status).toBe(201);
+
+    if (!ctx.schema) throw new Error("ctx");
+    const evRows = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "engagement"),
+          eq(atomEvents.entityId, res.body.engagementId),
+          eq(atomEvents.eventType, "engagement.snapshot-received"),
+        ),
+      );
+    expect(evRows).toHaveLength(1);
+    expect(evRows[0]!.payload).toMatchObject({
+      snapshotId: res.body.id,
+      projectName: "Fresh Project",
+    });
+  });
+
+  it("GUID-race rebind: engagement.snapshot-received fires once per accepted snapshot", async () => {
+    const r1 = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Race Project",
+        revitCentralGuid: "RACE-RECEIVED-GUID",
+        sheets: [{ id: 1 }],
+      });
+    expect(r1.status).toBe(201);
+
+    const r2 = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Race Project (renamed)",
+        revitCentralGuid: "RACE-RECEIVED-GUID",
+        sheets: [{ id: 2 }],
+      });
+    expect(r2.status).toBe(201);
+    expect(r2.body.engagementId).toBe(r1.body.engagementId);
+
+    if (!ctx.schema) throw new Error("ctx");
+    const evRows = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "engagement"),
+          eq(atomEvents.entityId, r1.body.engagementId),
+          eq(atomEvents.eventType, "engagement.snapshot-received"),
+        ),
+      )
+      .orderBy(asc(atomEvents.recordedAt));
+    expect(evRows).toHaveLength(2);
+    expect(evRows[0]!.payload).toMatchObject({ snapshotId: r1.body.id });
+    expect(evRows[1]!.payload).toMatchObject({ snapshotId: r2.body.id });
+  });
+
   it("createNewEngagement branch: persists GUID + path on the new engagement", async () => {
     const res = await request(getApp())
       .post("/api/snapshots")
