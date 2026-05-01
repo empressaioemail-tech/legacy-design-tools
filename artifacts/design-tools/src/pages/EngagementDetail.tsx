@@ -539,54 +539,62 @@ function SiteContextTab() {
 }
 
 /**
- * Visual accent for a recorded submission status. Mirrors the
- * `STATUS_ACCENT` palette used for the engagement-level pill so the
- * row-level status badge stays visually consistent with the rest of
- * the page.
+ * Human-readable label for each {@link SubmissionStatus}. Kept in
+ * lock-step with the matching map in
+ * `artifacts/plan-review/src/pages/EngagementDetail.tsx` so the two
+ * surfaces render identical badge text.
  */
-const SUBMISSION_STATUS_ACCENT: Record<
-  SubmissionStatus,
-  { bg: string; color: string; label: string }
-> = {
-  pending: {
-    bg: "var(--bg-input)",
-    color: "var(--text-muted)",
-    label: "Pending",
-  },
-  approved: {
-    bg: "rgba(34,197,94,0.18)",
-    color: "#22c55e",
-    label: "Approved",
-  },
-  corrections_requested: {
-    bg: "rgba(245,158,11,0.18)",
-    color: "#f59e0b",
-    label: "Corrections requested",
-  },
-  rejected: {
-    bg: "rgba(239,68,68,0.18)",
-    color: "#ef4444",
-    label: "Rejected",
-  },
+const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
+  corrections_requested: "Corrections requested",
+  rejected: "Rejected",
 };
 
-function SubmissionStatusPill({ status }: { status: SubmissionStatus }) {
-  const accent =
-    SUBMISSION_STATUS_ACCENT[status] ?? SUBMISSION_STATUS_ACCENT.pending;
+/**
+ * Per-status badge palette, keyed off the shared SmartCity theme
+ * tokens (see `lib/portal-ui/src/styles/smartcity-themes.css`) so the
+ * pill picks up the correct dark/light contrast automatically and
+ * mirrors the plan-review engagement page's reviewer badge.
+ */
+const SUBMISSION_STATUS_COLORS: Record<
+  SubmissionStatus,
+  { bg: string; fg: string }
+> = {
+  pending: { bg: "var(--info-dim)", fg: "var(--info-text)" },
+  approved: { bg: "var(--success-dim)", fg: "var(--success-text)" },
+  corrections_requested: {
+    bg: "var(--warning-dim)",
+    fg: "var(--warning-text)",
+  },
+  rejected: { bg: "var(--danger-dim)", fg: "var(--danger-text)" },
+};
+
+function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
+  // Defensive narrowing: a forward-compat status value the FE has not
+  // shipped a label for yet falls back to the raw enum string so the
+  // UI degrades gracefully instead of rendering an empty pill.
+  const label = SUBMISSION_STATUS_LABELS[status] ?? status;
+  const palette =
+    SUBMISSION_STATUS_COLORS[status] ?? SUBMISSION_STATUS_COLORS.pending;
   return (
     <span
-      className="sc-pill"
+      data-testid={`submission-status-badge-${status}`}
       style={{
-        background: accent.bg,
-        color: accent.color,
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "2px 8px",
+        borderRadius: 999,
+        background: palette.bg,
+        color: palette.fg,
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: 0.2,
         textTransform: "uppercase",
-        fontSize: 10.5,
-        letterSpacing: "0.05em",
-        padding: "2px 7px",
-        borderRadius: 4,
+        lineHeight: 1.4,
       }}
     >
-      {accent.label}
+      {label}
     </span>
   );
 }
@@ -598,20 +606,20 @@ function SubmissionStatusPill({ status }: { status: SubmissionStatus }) {
  *
  * Reads from `GET /api/engagements/:id/submissions` (newest-first)
  * and renders each row with the captured jurisdiction label, the
- * submitted-at relative timestamp, and the optional free-text note.
- * Each row carries a "Record response" action that opens
- * `RecordSubmissionResponseDialog`.
+ * submitted-at relative timestamp, the response status badge, the
+ * optional reviewer comment + responded-at timestamp, and the
+ * original outbound note. The visual layout mirrors `SubmissionRow`
+ * in `artifacts/plan-review/src/pages/EngagementDetail.tsx` so the
+ * two surfaces stay consistent. Each row carries a "Record response"
+ * action that opens `RecordSubmissionResponseDialog`.
  *
- * The current `EngagementSubmissionSummary` shape does not include
- * `status` / `reviewerComment` (the sister task "Show jurisdiction
- * response status and comment on the engagement page" surfaces them
- * in the listing). To meet the acceptance criterion that the row
- * reflects the response *immediately after submitting*, this tab
- * keeps a local map of just-recorded responses keyed by submission
- * id. When the listing eventually carries those columns, the
- * resolver below prefers the listing payload over the local mirror,
- * so the local-state path collapses to dead weight (and can be
- * removed) without any change to the dialog or the row shape.
+ * `EngagementSubmissionSummary` now carries `status`,
+ * `reviewerComment`, and `respondedAt` directly (Task #102's sister
+ * task on the API side already shipped). We still keep a local map
+ * of just-recorded responses keyed by submission id so the row
+ * reflects a freshly-saved reply *before* the listing query
+ * refetches; the resolver below prefers the local mirror when
+ * present and falls through to the row payload otherwise.
  *
  * Pagination is still a follow-up: engagements typically accumulate
  * a handful of packages, so a bare array is fine for now.
@@ -662,6 +670,36 @@ function SubmissionsTab({
     setResponseDialogFor(null);
   }, [engagementId]);
 
+  // Reconcile the local mirror against the listing query: once the
+  // server-side row reflects the recorded response (status + comment
+  // + respondedAt all agree), drop the local entry so an out-of-band
+  // edit on another tab doesn't get permanently shadowed by a stale
+  // optimistic value. Done in a layout-style effect so the prune
+  // happens before paint and avoids a no-op re-render.
+  useEffect(() => {
+    if (!submissions) return;
+    setRecordedResponses((prev) => {
+      const ids = Object.keys(prev);
+      if (ids.length === 0) return prev;
+      let changed = false;
+      const next = { ...prev };
+      for (const id of ids) {
+        const local = prev[id];
+        const row = submissions.find((s) => s.id === id);
+        if (
+          row &&
+          row.status === local.status &&
+          row.reviewerComment === local.reviewerComment &&
+          row.respondedAt === local.respondedAt
+        ) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [submissions]);
+
   const dialogTarget =
     responseDialogFor && submissions
       ? (submissions.find((s) => s.id === responseDialogFor) ?? null)
@@ -701,25 +739,19 @@ function SubmissionsTab({
         </div>
         <div className="flex flex-col">
           {submissions.map((s: EngagementSubmissionSummary) => {
-            // Prefer a row-carried status (sister task) when present;
-            // fall back to the locally-recorded response so the row
-            // updates immediately after the user records a reply.
-            const rowStatus =
-              (s as EngagementSubmissionSummary & {
-                status?: SubmissionStatus | null;
-                reviewerComment?: string | null;
-              }).status ?? null;
-            const rowComment =
-              (s as EngagementSubmissionSummary & {
-                reviewerComment?: string | null;
-              }).reviewerComment ?? null;
+            // The OpenAPI contract guarantees `status` is always
+            // present on the row; reviewer comment and respondedAt
+            // remain optional. We still consult the local mirror so a
+            // just-recorded reply renders immediately, before the
+            // listing query refetches.
             const localResponse = recordedResponses[s.id] ?? null;
             const status: SubmissionStatus =
-              rowStatus ?? localResponse?.status ?? "pending";
-            const comment: string | null =
-              rowComment ?? localResponse?.reviewerComment ?? null;
+              localResponse?.status ?? s.status;
+            const reviewerComment: string | null =
+              localResponse?.reviewerComment ?? s.reviewerComment;
             const respondedAt: string | null =
-              localResponse?.respondedAt ?? null;
+              localResponse?.respondedAt ?? s.respondedAt;
+            const hasResponse = status !== "pending" && respondedAt != null;
             return (
               // Row container is a `<div role="button">` rather than a
               // `<button>` because the row hosts an inner "Record
@@ -783,7 +815,7 @@ function SubmissionsTab({
                       data-testid={`submission-status-${s.id}`}
                       style={{ display: "inline-flex" }}
                     >
-                      <SubmissionStatusPill status={status} />
+                      <SubmissionStatusBadge status={status} />
                     </span>
                     <span
                       className="sc-meta"
@@ -813,9 +845,47 @@ function SubmissionsTab({
                       : "Update response"}
                   </button>
                 </div>
+                {hasResponse && (
+                  <div
+                    data-testid={`submission-response-${s.id}`}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                    }}
+                  >
+                    {reviewerComment && (
+                      <div
+                        className="sc-body"
+                        data-testid={`submission-reviewer-comment-${s.id}`}
+                        style={{
+                          color: "var(--text-primary)",
+                          fontSize: 12,
+                          whiteSpace: "pre-wrap",
+                          borderLeft: "2px solid var(--border-active)",
+                          paddingLeft: 8,
+                        }}
+                      >
+                        {reviewerComment}
+                      </div>
+                    )}
+                    <span
+                      className="sc-meta"
+                      data-testid={`submission-responded-at-${s.id}`}
+                      title={new Date(respondedAt!).toLocaleString()}
+                      style={{
+                        color: "var(--text-secondary)",
+                        fontSize: 11,
+                      }}
+                    >
+                      Responded {relativeTime(respondedAt)}
+                    </span>
+                  </div>
+                )}
                 {s.note && (
                   <div
                     className="sc-body"
+                    data-testid={`submission-note-${s.id}`}
                     style={{
                       color: "var(--text-secondary)",
                       fontSize: 12,
@@ -830,34 +900,6 @@ function SubmissionsTab({
                     }}
                   >
                     {s.note}
-                  </div>
-                )}
-                {comment && (
-                  <div
-                    data-testid={`submission-comment-${s.id}`}
-                    className="sc-body"
-                    style={{
-                      borderLeft: "2px solid var(--border-default)",
-                      paddingLeft: 8,
-                      color: "var(--text-primary)",
-                      fontSize: 12,
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    <span
-                      className="sc-label"
-                      style={{
-                        color: "var(--text-secondary)",
-                        marginRight: 6,
-                      }}
-                    >
-                      REVIEWER
-                      {respondedAt
-                        ? ` · ${relativeTime(respondedAt)}`
-                        : ""}
-                      :
-                    </span>
-                    {comment}
                   </div>
                 )}
               </div>
