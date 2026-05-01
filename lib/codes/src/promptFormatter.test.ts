@@ -515,7 +515,7 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
     // Smoke test for the fits-fine path: one focus payload, comfortably
     // under both caps. The combined-cap downgrade markers must not
     // appear — they're reserved for the cumulative-cap path.
-    const blocks = formatSnapshotFocusBlocks([
+    const { blocks, stats } = formatSnapshotFocusBlocks([
       { snapshotId: "snap-only-1", payload: payloadOfRoughSize(1_000) },
     ]);
     expect(blocks).toHaveLength(1);
@@ -527,6 +527,13 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
     expect(blocks[0].length).toBeLessThan(
       MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
     );
+    // Stats: every count is zero except `intactCount` and `totalCount`.
+    expect(stats).toEqual({
+      totalCount: 1,
+      intactCount: 1,
+      combinedCapTruncatedCount: 0,
+      combinedCapOmittedCount: 0,
+    });
   });
 
   it("multiple blocks whose combined size fits under the cumulative cap are all intact", () => {
@@ -535,7 +542,7 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
     // should appear once per block (proving raw payloads were
     // preserved end-to-end).
     const each = 5_000;
-    const blocks = formatSnapshotFocusBlocks([
+    const { blocks, stats } = formatSnapshotFocusBlocks([
       { snapshotId: "snap-a", payload: payloadOfRoughSize(each) },
       { snapshotId: "snap-b", payload: payloadOfRoughSize(each) },
       { snapshotId: "snap-c", payload: payloadOfRoughSize(each) },
@@ -548,6 +555,13 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
     }
     const combined = blocks.reduce((sum, b) => sum + b.length, 0);
     expect(combined).toBeLessThan(MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS);
+    // Stats: nothing was downgraded by the cumulative cap.
+    expect(stats).toEqual({
+      totalCount: 4,
+      intactCount: 4,
+      combinedCapTruncatedCount: 0,
+      combinedCapOmittedCount: 0,
+    });
   });
 
   it("combined cap fires: first block stays intact, later blocks are progressively trimmed with the cumulative-cap marker", () => {
@@ -556,7 +570,7 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
     // per-block truncation. With 4 of them, the worst-case combined
     // size would be ~240 KB — well above the 120 KB cumulative cap.
     const oversized = MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 5_000;
-    const blocks = formatSnapshotFocusBlocks([
+    const { blocks, stats } = formatSnapshotFocusBlocks([
       { snapshotId: "snap-1st", payload: payloadOfRoughSize(oversized) },
       { snapshotId: "snap-2nd", payload: payloadOfRoughSize(oversized) },
       { snapshotId: "snap-3rd", payload: payloadOfRoughSize(oversized) },
@@ -609,6 +623,49 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
     expect(combined).toBeLessThanOrEqual(
       MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS + 500,
     );
+
+    // Stats (Task #51): one block was kept intact (the first), and
+    // the remaining three were downgraded by the cumulative cap. The
+    // counts must add up to totalCount and at least one downgrade
+    // category must be non-zero so the chat route's warn fires.
+    expect(stats.totalCount).toBe(4);
+    expect(stats.intactCount).toBe(1);
+    expect(
+      stats.combinedCapTruncatedCount + stats.combinedCapOmittedCount,
+    ).toBe(3);
+    expect(stats.combinedCapTruncatedCount).toBeGreaterThan(0);
+  });
+
+  it("stats reports omitted blocks when the cumulative budget is fully spent before later entries fit", () => {
+    // Four oversized payloads — the first block lands at the per-block
+    // cap (~60 KB), the second downgrades to a partial body that uses
+    // up most of the remaining budget, and the third/fourth end up
+    // with zero or near-zero room. We assert the omitted-count
+    // category is exercised so chat.ts's warn payload distinguishes
+    // partial trims from full omissions (operators tuning the cap
+    // care about that distinction).
+    const oversized = MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 5_000;
+    const { blocks, stats } = formatSnapshotFocusBlocks([
+      { snapshotId: "snap-1st", payload: payloadOfRoughSize(oversized) },
+      { snapshotId: "snap-2nd", payload: payloadOfRoughSize(oversized) },
+      { snapshotId: "snap-3rd", payload: payloadOfRoughSize(oversized) },
+      { snapshotId: "snap-4th", payload: payloadOfRoughSize(oversized) },
+    ]);
+    expect(blocks).toHaveLength(4);
+    expect(stats.totalCount).toBe(4);
+    // The category sums must agree with the block count.
+    expect(
+      stats.intactCount +
+        stats.combinedCapTruncatedCount +
+        stats.combinedCapOmittedCount,
+    ).toBe(4);
+    // For the 4×oversized worst case at least one block is omitted
+    // (cumulative budget = ~120 KB; first block alone consumes ~60 KB,
+    // second block's truncated form chews most of the remaining
+    // budget). If this ever stops being true we want the omitted
+    // category to be exercised by another test instead — silently
+    // skipping it would leave the chat route's stat untested.
+    expect(stats.combinedCapOmittedCount).toBeGreaterThan(0);
   });
 
   it("buildChatPrompt wires the cumulative cap through so the system prompt stays bounded", () => {
@@ -619,7 +676,7 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
     // 4 oversized snapshots; we assert the actual cumulative size of
     // the snapshot focus blocks inside the system prompt is bounded.
     const oversized = MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 5_000;
-    const { systemPrompt } = buildChatPrompt({
+    const { systemPrompt, snapshotFocusStats } = buildChatPrompt({
       engagement: {
         name: "Cap Test",
         address: null,
@@ -654,5 +711,42 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
     expect(systemPrompt).toContain(
       "combined snapshot focus payloads exceeded the cumulative size cap",
     );
+    // Task #51: buildChatPrompt's output must surface the per-turn
+    // downgrade stats so chat.ts can log + warn on them without
+    // re-parsing the prompt for marker strings.
+    expect(snapshotFocusStats.totalCount).toBe(4);
+    expect(snapshotFocusStats.intactCount).toBe(1);
+    expect(
+      snapshotFocusStats.combinedCapTruncatedCount +
+        snapshotFocusStats.combinedCapOmittedCount,
+    ).toBe(3);
+  });
+
+  it("buildChatPrompt returns zeroed snapshotFocusStats when focus mode is off (Task #51)", () => {
+    // Default chat path leaves focusPayloads empty — the stats field
+    // must still be present (so the chat route can log a stable
+    // shape) but every count is zero. Without this contract chat.ts
+    // would have to special-case the no-focus turn, which defeats the
+    // point of returning the stats unconditionally.
+    const { snapshotFocusStats } = buildChatPrompt({
+      engagement: {
+        name: "No Focus",
+        address: null,
+        jurisdiction: null,
+      },
+      latestSnapshot: {
+        receivedAt: new Date("2026-04-01T12:00:00Z"),
+      },
+      allAtoms: [],
+      attachedSheets: [],
+      question: "any question",
+      now: () => new Date("2026-04-01T12:00:30Z"),
+    });
+    expect(snapshotFocusStats).toEqual({
+      totalCount: 0,
+      intactCount: 0,
+      combinedCapTruncatedCount: 0,
+      combinedCapOmittedCount: 0,
+    });
   });
 });

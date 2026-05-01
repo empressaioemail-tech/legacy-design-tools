@@ -200,6 +200,15 @@ export interface BuildChatPromptInput {
 export interface BuildChatPromptOutput {
   systemPrompt: string;
   messages: PromptOutputMessage[];
+  /**
+   * Per-turn accounting of how the cumulative `<snapshot_focus>` cap
+   * shaped the emitted blocks for this prompt — see
+   * {@link SnapshotFocusBlocksStats}. Always present (even when focus
+   * mode was off, in which case every count is `0`) so callers can log
+   * a stable shape; the chat route reads this to fire a warn-level log
+   * when any block was downgraded by the cumulative cap (Task #51).
+   */
+  snapshotFocusStats: SnapshotFocusBlocksStats;
 }
 
 /**
@@ -328,6 +337,43 @@ const COMBINED_CAP_OMITTED_MARKER =
   "[truncated: combined snapshot focus payloads exceeded the cumulative size cap; full payload omitted]";
 
 /**
+ * Per-turn accounting for how the cumulative cap shaped the emitted
+ * `<snapshot_focus>` blocks. The chat route (and any other caller that
+ * cares about observability) reads this off
+ * {@link formatSnapshotFocusBlocks} so it can log when the cumulative
+ * cap actually fired in production — Task #51 wired this into a
+ * `req.log.warn` so operators can tell whether 120 KB is the right
+ * budget without having to grep the prompt itself.
+ *
+ * Counts are mutually exclusive per block:
+ *  - `intactCount` — block emitted verbatim by {@link formatSnapshotFocus}
+ *    (subject to the per-block cap, which this metadata does NOT track —
+ *    that's a different failure mode and is already visible to the
+ *    model via its own `[truncated: payload exceeded …]` marker).
+ *  - `combinedCapTruncatedCount` — block carried a partial payload plus
+ *    {@link COMBINED_CAP_TRUNC_MARKER} because the cumulative budget
+ *    forced it to be clipped.
+ *  - `combinedCapOmittedCount` — block carried only
+ *    {@link COMBINED_CAP_OMITTED_MARKER} (no payload bytes) because the
+ *    cumulative budget was already spent before this block could fit
+ *    anything meaningful.
+ *
+ * `totalCount` is always `intactCount + combinedCapTruncatedCount +
+ * combinedCapOmittedCount`.
+ */
+export interface SnapshotFocusBlocksStats {
+  totalCount: number;
+  intactCount: number;
+  combinedCapTruncatedCount: number;
+  combinedCapOmittedCount: number;
+}
+
+export interface SnapshotFocusBlocksResult {
+  blocks: string[];
+  stats: SnapshotFocusBlocksStats;
+}
+
+/**
  * Format every `<snapshot_focus>` block for a turn, enforcing both the
  * per-block cap (via {@link formatSnapshotFocus}) and the cumulative
  * cap {@link MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS} across the set.
@@ -356,12 +402,21 @@ const COMBINED_CAP_OMITTED_MARKER =
  * keep the strict total bounded, or have callers drop trailing shells
  * when no room remains.
  *
- * Returns one string per input entry, in input order.
+ * Returns one string per input entry, in input order, plus
+ * per-turn downgrade {@link SnapshotFocusBlocksStats} so callers can
+ * observe whether the cumulative cap fired without having to re-parse
+ * the emitted blocks for marker strings.
  */
 export function formatSnapshotFocusBlocks(
   focusPayloads: ReadonlyArray<{ snapshotId: string; payload: unknown }>,
-): string[] {
+): SnapshotFocusBlocksResult {
   const blocks: string[] = [];
+  const stats: SnapshotFocusBlocksStats = {
+    totalCount: focusPayloads.length,
+    intactCount: 0,
+    combinedCapTruncatedCount: 0,
+    combinedCapOmittedCount: 0,
+  };
   let cumulative = 0;
   for (let i = 0; i < focusPayloads.length; i++) {
     const fp = focusPayloads[i];
@@ -374,6 +429,7 @@ export function formatSnapshotFocusBlocks(
     if (i === 0) {
       blocks.push(fullBlock);
       cumulative += fullBlock.length;
+      stats.intactCount += 1;
       continue;
     }
 
@@ -381,6 +437,7 @@ export function formatSnapshotFocusBlocks(
     if (fullBlock.length <= remaining) {
       blocks.push(fullBlock);
       cumulative += fullBlock.length;
+      stats.intactCount += 1;
       continue;
     }
 
@@ -404,6 +461,7 @@ export function formatSnapshotFocusBlocks(
       const block = header + body + footer;
       blocks.push(block);
       cumulative += block.length;
+      stats.combinedCapTruncatedCount += 1;
       continue;
     }
 
@@ -412,8 +470,9 @@ export function formatSnapshotFocusBlocks(
     const placeholder = header + COMBINED_CAP_OMITTED_MARKER + footer;
     blocks.push(placeholder);
     cumulative += placeholder.length;
+    stats.combinedCapOmittedCount += 1;
   }
-  return blocks;
+  return { blocks, stats };
 }
 
 /**
@@ -528,9 +587,21 @@ export function buildChatPrompt(
   // surfaces stay empty, and the Task #34 JSON-free contract is
   // preserved.
   const focusPayloads = latestSnapshot.focusPayloads ?? [];
-  const snapshotFocusBlock =
+  const focusFormatted =
     focusPayloads.length > 0
-      ? "\n\n" + formatSnapshotFocusBlocks(focusPayloads).join("\n\n")
+      ? formatSnapshotFocusBlocks(focusPayloads)
+      : {
+          blocks: [] as string[],
+          stats: {
+            totalCount: 0,
+            intactCount: 0,
+            combinedCapTruncatedCount: 0,
+            combinedCapOmittedCount: 0,
+          } satisfies SnapshotFocusBlocksStats,
+        };
+  const snapshotFocusBlock =
+    focusFormatted.blocks.length > 0
+      ? "\n\n" + focusFormatted.blocks.join("\n\n")
       : "";
   const snapshotFocusInstruction =
     focusPayloads.length > 0
@@ -598,5 +669,9 @@ export function buildChatPrompt(
     },
   ];
 
-  return { systemPrompt, messages };
+  return {
+    systemPrompt,
+    messages,
+    snapshotFocusStats: focusFormatted.stats,
+  };
 }

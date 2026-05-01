@@ -8,6 +8,7 @@ import {
   retrieveAtomsForQuestion,
   getAtomsByIds,
   buildChatPrompt,
+  MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
   type RetrievedAtom,
   type PromptAttachedSheet,
   type PromptFrameworkAtom,
@@ -624,7 +625,7 @@ router.post("/chat", async (req: Request, res: Response) => {
   // automatically (Spec 20 §F / recon H6).
   const atomTypeDescriptions = getAtomRegistry().describeForPrompt();
 
-  const { systemPrompt, messages } = buildChatPrompt({
+  const { systemPrompt, messages, snapshotFocusStats } = buildChatPrompt({
     engagement: {
       // `engagementTyped.name` is required when `found: true`, but the
       // typed shape marks it optional (the not-found variant carries
@@ -697,17 +698,49 @@ router.post("/chat", async (req: Request, res: Response) => {
       triggeredBy.push("explicit_ids");
     }
     if (inlineFocusIds.size > 0) triggeredBy.push("inline_reference");
-    logger.info(
-      {
-        engagementId,
-        snapshotIds: focusPayloads.map((fp) => fp.snapshotId),
-        focusCount: focusPayloads.length,
-        triggeredBy,
-        nullPayloadCount: focusPayloads.filter((fp) => fp.payload === null)
-          .length,
-      },
-      "chat with snapshot focus payload",
-    );
+    // Task #51: surface the cumulative-cap downgrade counts on the
+    // existing focus log + fire a sibling warn when any block was
+    // downgraded so operators can alert on it. The stats are derived
+    // by `formatSnapshotFocusBlocks` and threaded through
+    // `buildChatPrompt`'s output — see SnapshotFocusBlocksStats.
+    const downgradedCount =
+      snapshotFocusStats.combinedCapTruncatedCount +
+      snapshotFocusStats.combinedCapOmittedCount;
+    const focusLogPayload = {
+      engagementId,
+      snapshotIds: focusPayloads.map((fp) => fp.snapshotId),
+      focusCount: focusPayloads.length,
+      triggeredBy,
+      nullPayloadCount: focusPayloads.filter((fp) => fp.payload === null)
+        .length,
+      combinedCapTruncatedCount:
+        snapshotFocusStats.combinedCapTruncatedCount,
+      combinedCapOmittedCount: snapshotFocusStats.combinedCapOmittedCount,
+    };
+    logger.info(focusLogPayload, "chat with snapshot focus payload");
+    if (downgradedCount > 0) {
+      // Prefer the per-request logger (carries the pino-http request
+      // id when wired) so the warn correlates with the originating
+      // chat request; fall back to the singleton for callers that
+      // bypass pino-http (notably the in-process test harness).
+      const reqLog =
+        (req as unknown as { log?: typeof logger }).log ?? logger;
+      reqLog.warn(
+        {
+          ...focusLogPayload,
+          downgradedCount,
+          // Field is sourced from `MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS`,
+          // which is a character count (the JSON-stringified payload's
+          // `.length` is char-counted, not byte-counted). Naming the
+          // log field "Chars" — instead of the misleading "Bytes" —
+          // keeps operators tuning the cap from confusing the unit
+          // (UTF-8 multi-byte characters would inflate a true byte
+          // count vs. what the prompt cap actually measures).
+          cumulativeCapChars: MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
+        },
+        "snapshot focus payloads downgraded by cumulative cap",
+      );
+    }
   }
 
   try {
