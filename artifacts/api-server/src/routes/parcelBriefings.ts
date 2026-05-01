@@ -32,8 +32,10 @@ import {
   engagements,
   parcelBriefings,
   briefingSources,
+  briefingGenerationJobs,
   type ParcelBriefing,
   type BriefingSource,
+  type BriefingGenerationJob,
 } from "@workspace/db";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import {
@@ -49,7 +51,6 @@ import {
   RetryBriefingSourceConversionParams,
 } from "@workspace/api-zod";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
-import { randomUUID } from "node:crypto";
 import {
   generateBriefing,
   type BriefingSourceInput,
@@ -1179,31 +1180,38 @@ class NoCurrentRowError extends Error {
  *       columns inside the same transaction).
  *
  *   - GET /engagements/:id/briefing/status
- *       Returns the in-process job state for that engagement so the
- *       UI can poll until the run settles. Job state is process-local
- *       and best-effort — the persisted briefing on `GET /briefing`
- *       is the source of truth.
- *
- * The job map is in-memory (mirrors the federal-layers polling
- * pattern). It is NOT durable across restarts — the persisted row's
- * `generated_at` column is what the UI ultimately reads to know a
- * narrative is on file.
+ *       Returns the most recent generation's outcome for that
+ *       engagement so the UI can poll until the run settles. Job
+ *       state is persisted in `briefing_generation_jobs` (one row per
+ *       kickoff), so it survives api-server restarts and stays
+ *       coherent across multiple instances. The persisted briefing on
+ *       `GET /briefing` remains the source of truth for the
+ *       narrative; this endpoint is the mechanism the UI uses to know
+ *       when the narrative has landed.
  */
 
-interface BriefingGenerationJob {
-  generationId: string;
-  state: "pending" | "completed" | "failed";
-  startedAt: Date;
-  completedAt: Date | null;
-  error: string | null;
-  invalidCitationCount: number | null;
-}
+/**
+ * Closed wire union for the job's `state` column. The DB column is
+ * `text` so writers must narrow into this union — anything else would
+ * be a schema-violation we want to surface, not silently round-trip.
+ */
+type BriefingGenerationJobState = "pending" | "completed" | "failed";
 
-const briefingGenerationJobs = new Map<string, BriefingGenerationJob>();
+/** PG unique-violation SQLSTATE — see the snapshots route's identical helper. */
+const PG_UNIQUE_VIOLATION = "23505";
 
-/** Test-only: clear the job map between vitest cases. */
-export function __clearBriefingGenerationJobsForTests(): void {
-  briefingGenerationJobs.clear();
+/**
+ * Drizzle wraps pg errors in `DrizzleQueryError` with the underlying
+ * pg error on `.cause`, so we check both the top level and `.cause`
+ * (mirrors `routes/snapshots.ts`). Used to map the partial unique
+ * index conflict on `(engagement_id) WHERE state = 'pending'` into
+ * the route's 409 response.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const direct = (err as { code?: string }).code;
+  const cause = (err as { cause?: { code?: string } }).cause?.code;
+  return direct === PG_UNIQUE_VIOLATION || cause === PG_UNIQUE_VIOLATION;
 }
 
 /** Pinned event-type constants — break compilation on a rename. */
@@ -1397,10 +1405,54 @@ async function emitParcelBriefingGeneratedEvent(
 }
 
 /**
- * Body of the async generation kickoff. Updates the in-memory job
- * map at every state transition. Never throws — terminal failures
- * land in the job map's `state="failed"` slot and the route's status
- * endpoint surfaces the reason to the UI.
+ * Update a job row to a terminal state (`completed` / `failed`).
+ * Always stamps `completed_at`. Best-effort with respect to row
+ * existence — the kickoff route inserted the row before launching
+ * this background task, so the only way the row is gone is a
+ * concurrent engagement deletion (cascade). In that case we log
+ * and move on; there's nothing for the status endpoint to surface.
+ */
+async function finalizeJob(
+  generationId: string,
+  patch: {
+    state: Extract<BriefingGenerationJobState, "completed" | "failed">;
+    error: string | null;
+    invalidCitationCount: number | null;
+  },
+  reqLog: typeof logger,
+): Promise<void> {
+  try {
+    const updated = await db
+      .update(briefingGenerationJobs)
+      .set({
+        state: patch.state,
+        error: patch.error,
+        invalidCitationCount: patch.invalidCitationCount,
+        completedAt: new Date(),
+      })
+      .where(eq(briefingGenerationJobs.id, generationId))
+      .returning({ id: briefingGenerationJobs.id });
+    if (updated.length === 0) {
+      reqLog.warn(
+        { generationId, state: patch.state },
+        "briefing generation: job row missing on terminal update (engagement likely deleted)",
+      );
+    }
+  } catch (err) {
+    reqLog.error(
+      { err, generationId, state: patch.state },
+      "briefing generation: terminal job-row update failed",
+    );
+  }
+}
+
+/**
+ * Body of the async generation kickoff. Persists every state
+ * transition to the `briefing_generation_jobs` row inserted by the
+ * kickoff route, so the status endpoint surfaces the run's true
+ * outcome even if this api-server process restarts mid-flight or
+ * another instance handles the poll. Never throws — terminal
+ * failures land in the row's `state="failed"` column.
  */
 async function runBriefingGeneration(args: {
   engagementId: string;
@@ -1452,15 +1504,15 @@ async function runBriefingGeneration(args: {
         "briefing generation: engine emitted unresolved citation tokens (stripped)",
       );
     }
-    briefingGenerationJobs.set(engagementId, {
+    await finalizeJob(
       generationId,
-      state: "completed",
-      startedAt:
-        briefingGenerationJobs.get(engagementId)?.startedAt ?? new Date(),
-      completedAt: new Date(),
-      error: null,
-      invalidCitationCount: result.invalidCitations.length,
-    });
+      {
+        state: "completed",
+        error: null,
+        invalidCitationCount: result.invalidCitations.length,
+      },
+      reqLog,
+    );
     reqLog.info(
       {
         engagementId,
@@ -1473,15 +1525,11 @@ async function runBriefingGeneration(args: {
     );
   } catch (err) {
     const message = (err as Error).message ?? "unknown engine failure";
-    briefingGenerationJobs.set(engagementId, {
+    await finalizeJob(
       generationId,
-      state: "failed",
-      startedAt:
-        briefingGenerationJobs.get(engagementId)?.startedAt ?? new Date(),
-      completedAt: new Date(),
-      error: message,
-      invalidCitationCount: null,
-    });
+      { state: "failed", error: message, invalidCitationCount: null },
+      reqLog,
+    );
     reqLog.error(
       { err, engagementId, briefingId, generationId },
       "briefing generation: failed",
@@ -1545,28 +1593,49 @@ router.post(
       // Single-flight guard: a generation already in flight for this
       // engagement is a 409, not a "queue another one" because the
       // engine call is non-trivial and the result would race the
-      // first run's persist. Once the first run settles, the second
-      // call can succeed.
-      const existing = briefingGenerationJobs.get(engagementId);
-      if (existing && existing.state === "pending") {
-        res.status(409).json({
-          error: "briefing_generation_already_in_flight",
-          generationId: existing.generationId,
-        });
-        return;
+      // first run's persist. Enforced by the partial unique index on
+      // `briefing_generation_jobs (engagement_id) WHERE state =
+      // 'pending'` — a concurrent kickoff that races past our
+      // pre-check still trips the constraint, and the catch below
+      // maps that into the same 409 a caller would see for a stale
+      // poll.
+      let kickoffRow: BriefingGenerationJob;
+      try {
+        const inserted = await db
+          .insert(briefingGenerationJobs)
+          .values({
+            engagementId,
+            briefingId: briefing.id,
+            state: "pending",
+          })
+          .returning();
+        kickoffRow = inserted[0]!;
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          // Another kickoff won the race. Surface its id so the
+          // caller can poll the same job's outcome rather than
+          // retrying with a fresh generationId. We pull the most
+          // recent row (typically still `pending`, but the engine
+          // could have settled in the brief window between the
+          // failed insert and this select — either way, this is the
+          // job the caller should poll).
+          const [existing] = await db
+            .select({ id: briefingGenerationJobs.id })
+            .from(briefingGenerationJobs)
+            .where(eq(briefingGenerationJobs.engagementId, engagementId))
+            .orderBy(desc(briefingGenerationJobs.startedAt))
+            .limit(1);
+          res.status(409).json({
+            error: "briefing_generation_already_in_flight",
+            generationId: existing?.id ?? null,
+          });
+          return;
+        }
+        throw err;
       }
+      const generationId = kickoffRow.id;
 
-      const generationId = randomUUID();
-      briefingGenerationJobs.set(engagementId, {
-        generationId,
-        state: "pending",
-        startedAt: new Date(),
-        completedAt: null,
-        error: null,
-        invalidCitationCount: null,
-      });
-
-      // Fire-and-forget. The job map carries the state the status
+      // Fire-and-forget. The job row's state is what the status
       // endpoint reads. We do not await — the 202 returns immediately.
       void runBriefingGeneration({
         engagementId,
@@ -1617,7 +1686,16 @@ router.get(
         res.status(404).json({ error: "engagement_not_found" });
         return;
       }
-      const job = briefingGenerationJobs.get(engagementId);
+      // Read the most recent job for this engagement. Single-row
+      // result (or zero, when no kickoff has ever run) — the partial
+      // unique index keeps at most one `pending`, but completed/failed
+      // rows accumulate over time, so order by `started_at DESC`.
+      const [job] = await db
+        .select()
+        .from(briefingGenerationJobs)
+        .where(eq(briefingGenerationJobs.engagementId, engagementId))
+        .orderBy(desc(briefingGenerationJobs.startedAt))
+        .limit(1);
       if (!job) {
         res.json({
           generationId: null,
@@ -1630,8 +1708,11 @@ router.get(
         return;
       }
       res.json({
-        generationId: job.generationId,
-        state: job.state,
+        generationId: job.id,
+        // The DB column is `text`; the writers in this file all narrow
+        // into `BriefingGenerationJobState`, so a value outside that
+        // union here would be a schema-violation we want to surface.
+        state: job.state as BriefingGenerationJobState,
         startedAt: job.startedAt.toISOString(),
         completedAt: job.completedAt ? job.completedAt.toISOString() : null,
         error: job.error,

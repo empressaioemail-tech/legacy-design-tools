@@ -52,6 +52,20 @@ CREATE TABLE @@SCHEMA@@.briefing_divergences (
 );
 
 
+-- Name: briefing_generation_jobs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.briefing_generation_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    briefing_id uuid,
+    state text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    error text,
+    invalid_citation_count integer
+);
+
+
 -- Name: briefing_sources; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.briefing_sources (
@@ -309,6 +323,12 @@ ALTER TABLE ONLY @@SCHEMA@@.briefing_divergences
     ADD CONSTRAINT briefing_divergences_pkey PRIMARY KEY (id);
 
 
+-- Name: briefing_generation_jobs briefing_generation_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_generation_jobs
+    ADD CONSTRAINT briefing_generation_jobs_pkey PRIMARY KEY (id);
+
+
 -- Name: briefing_sources briefing_sources_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
@@ -432,6 +452,16 @@ CREATE INDEX briefing_divergences_briefing_idx ON @@SCHEMA@@.briefing_divergence
 -- Name: briefing_divergences_element_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX briefing_divergences_element_idx ON @@SCHEMA@@.briefing_divergences USING btree (materializable_element_id);
+
+
+-- Name: briefing_generation_jobs_engagement_started_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX briefing_generation_jobs_engagement_started_idx ON @@SCHEMA@@.briefing_generation_jobs USING btree (engagement_id, started_at);
+
+
+-- Name: briefing_generation_jobs_pending_per_engagement_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX briefing_generation_jobs_pending_per_engagement_uniq ON @@SCHEMA@@.briefing_generation_jobs USING btree (engagement_id) WHERE (state = 'pending'::text);
 
 
 -- Name: briefing_sources_briefing_idx; Type: INDEX; Schema: public; Owner: -
@@ -582,6 +612,18 @@ ALTER TABLE ONLY @@SCHEMA@@.briefing_divergences
 
 ALTER TABLE ONLY @@SCHEMA@@.briefing_divergences
     ADD CONSTRAINT briefing_divergences_materializable_element_id_materializable_e FOREIGN KEY (materializable_element_id) REFERENCES @@SCHEMA@@.materializable_elements(id) ON DELETE CASCADE;
+
+
+-- Name: briefing_generation_jobs briefing_generation_jobs_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_generation_jobs
+    ADD CONSTRAINT briefing_generation_jobs_briefing_id_parcel_briefings_id_fk FOREIGN KEY (briefing_id) REFERENCES @@SCHEMA@@.parcel_briefings(id) ON DELETE SET NULL;
+
+
+-- Name: briefing_generation_jobs briefing_generation_jobs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_generation_jobs
+    ADD CONSTRAINT briefing_generation_jobs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: briefing_sources briefing_sources_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

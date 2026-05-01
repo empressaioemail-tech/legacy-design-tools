@@ -69,6 +69,7 @@ describe("lib/db schema integration", () => {
         // forms the divergences reference.
         "bim_models",
         "briefing_divergences",
+        "briefing_generation_jobs",
         "briefing_sources",
         "code_atom_fetch_queue",
         "code_atom_sources",

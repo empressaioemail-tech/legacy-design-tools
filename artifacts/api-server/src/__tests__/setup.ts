@@ -52,6 +52,11 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "bim_models",
   "materializable_elements",
   "briefing_divergences",
+  // DA-PI-3 generation jobs. Cascades off `engagements`, but listed
+  // explicitly per the "if a route writes to it, it's in this list"
+  // invariant — and also so suites that seed jobs without going
+  // through the engagement table still get a clean slate.
+  "briefing_generation_jobs",
   "code_atom_fetch_queue",
   "code_atoms",
   "code_atom_sources",

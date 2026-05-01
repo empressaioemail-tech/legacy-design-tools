@@ -21,14 +21,7 @@
  * the deterministic `mockGenerator` writes the seven sections.
  */
 
-import {
-  describe,
-  it,
-  expect,
-  vi,
-  beforeEach,
-  afterAll,
-} from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -51,23 +44,14 @@ const {
   engagements,
   parcelBriefings,
   briefingSources,
+  briefingGenerationJobs,
   atomEvents,
 } = await import("@workspace/db");
-const { eq, and } = await import("drizzle-orm");
-const { __clearBriefingGenerationJobsForTests } = await import(
-  "../routes/parcelBriefings"
-);
+const { eq, and, desc } = await import("drizzle-orm");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;
-});
-
-beforeEach(() => {
-  __clearBriefingGenerationJobsForTests();
-});
-afterAll(() => {
-  __clearBriefingGenerationJobsForTests();
 });
 
 async function seedEngagement(name = "Briefing Generate Engagement") {
@@ -277,10 +261,12 @@ describe("POST /api/engagements/:id/briefing/generate (mock mode)", () => {
     const firstSectionA = afterFirst.sectionA;
     const firstGeneratedAt = afterFirst.generatedAt;
 
-    // Reset the in-process job map between generations so the second
-    // POST is allowed (route blocks while a `pending` job exists).
-    __clearBriefingGenerationJobsForTests();
-
+    // The first run's job row is now `completed`, so the partial
+    // unique index on `(engagement_id) WHERE state = 'pending'`
+    // permits a second `pending` insert without any reset hook —
+    // the route's single-flight guard only fires on a still-pending
+    // row.
+    //
     // Second generation — explicit regenerate flag (informational
     // today; the route auto-detects).
     const second = await request(getApp())
@@ -322,7 +308,7 @@ describe("POST /api/engagements/:id/briefing/generate (mock mode)", () => {
 });
 
 describe("GET /api/engagements/:id/briefing/status idle path", () => {
-  it("returns idle when no generation has run on this process", async () => {
+  it("returns idle when no generation has ever been kicked off for this engagement", async () => {
     const eng = await seedEngagement();
     const res = await request(getApp()).get(
       `/api/engagements/${eng.id}/briefing/status`,
@@ -343,5 +329,109 @@ describe("GET /api/engagements/:id/briefing/status idle path", () => {
       `/api/engagements/00000000-0000-0000-0000-000000000000/briefing/status`,
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("briefing_generation_jobs persistence (DA-PI-3 durability)", () => {
+  it("status endpoint reflects a row inserted directly into the DB (survives restart)", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+
+    // Simulate "another api-server instance ran the kickoff and then
+    // this process restarted" by inserting a terminal job row
+    // directly into the DB without ever calling the route. If the
+    // status endpoint were still backed by an in-process Map, this
+    // row would be invisible to the GET below — that was the bug
+    // the briefing_generation_jobs table fixes.
+    const completedAt = new Date("2026-04-01T12:00:00Z");
+    const startedAt = new Date("2026-04-01T11:59:30Z");
+    const [persisted] = await ctx.schema.db
+      .insert(briefingGenerationJobs)
+      .values({
+        engagementId: eng.id,
+        state: "completed",
+        startedAt,
+        completedAt,
+        error: null,
+        invalidCitationCount: 0,
+      })
+      .returning();
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing/status`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      generationId: persisted.id,
+      state: "completed",
+      startedAt: startedAt.toISOString(),
+      completedAt: completedAt.toISOString(),
+      error: null,
+      invalidCitationCount: 0,
+    });
+  });
+
+  it("status endpoint returns the most recent job when multiple exist", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+
+    // Older completed run.
+    await ctx.schema.db.insert(briefingGenerationJobs).values({
+      engagementId: eng.id,
+      state: "completed",
+      startedAt: new Date("2026-04-01T10:00:00Z"),
+      completedAt: new Date("2026-04-01T10:00:30Z"),
+      invalidCitationCount: 0,
+    });
+    // Newer failed run — this is what the status endpoint should
+    // surface, because the UI polls "what happened most recently?"
+    const [recent] = await ctx.schema.db
+      .insert(briefingGenerationJobs)
+      .values({
+        engagementId: eng.id,
+        state: "failed",
+        startedAt: new Date("2026-04-01T11:00:00Z"),
+        completedAt: new Date("2026-04-01T11:00:05Z"),
+        error: "engine timeout",
+        invalidCitationCount: null,
+      })
+      .returning();
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing/status`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      generationId: recent.id,
+      state: "failed",
+      error: "engine timeout",
+    });
+  });
+
+  it("kickoff persists the new pending job row to the DB", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+    await seedBriefingWithSource(eng.id);
+
+    const kickoff = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({});
+    expect(kickoff.status).toBe(202);
+    const generationId = kickoff.body.generationId as string;
+
+    // Wait for completion so the assertion below is deterministic
+    // (the row will have transitioned to `completed` by then).
+    await waitForStatus(eng.id, "completed");
+
+    const rows = await ctx.schema.db
+      .select()
+      .from(briefingGenerationJobs)
+      .where(eq(briefingGenerationJobs.engagementId, eng.id))
+      .orderBy(desc(briefingGenerationJobs.startedAt));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(generationId);
+    expect(rows[0]!.state).toBe("completed");
+    expect(rows[0]!.completedAt).toBeTruthy();
+    expect(rows[0]!.invalidCitationCount).toBe(0);
   });
 });
