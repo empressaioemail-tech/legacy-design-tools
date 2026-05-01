@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { BriefingGenerationRun } from "./briefingGenerationRun";
+import type { EngagementBriefingNarrative } from "./engagementBriefingNarrative";
 
 /**
  * Wire envelope for `GET /engagements/{id}/briefing/runs`.
@@ -13,7 +14,34 @@ import type { BriefingGenerationRun } from "./briefingGenerationRun";
 the sweep's per-engagement keep value so what the API
 surfaces and what the sweep keeps cannot drift.
 
+`priorNarrative` is the section_a..g + generatedAt/generatedBy
+snapshot the briefing held *before* its current narrative was
+written — i.e. the contents of the `prior_section_*` /
+`prior_generated_at` backup columns on `parcel_briefings`,
+which the regeneration transaction populates atomically with
+the new narrative. The auditor uses this to read the prior
+body inline (in the Recent runs disclosure) so the side-by-
+side comparison with what is currently on screen does not
+require remembering or screenshotting the previous wording.
+Null when the briefing has never been regenerated (the first
+generation has no prior) or when no briefing row exists yet
+for the engagement. There is at most one prior narrative on
+the wire because only one set of backup columns is retained
+— the row whose [startedAt, completedAt] interval contains
+`priorNarrative.generatedAt` is the run that produced it;
+all other (older) rows' backups have already been overwritten
+and so cannot be surfaced from this envelope.
+
  */
 export interface BriefingGenerationRunsResponse {
   runs: BriefingGenerationRun[];
+  /** Snapshot of the section_a..g body held by the briefing
+before its current narrative was written. Reuses the
+`EngagementBriefingNarrative` shape since the prior_*
+columns mirror the current ones one-for-one; the
+`generatedAt` field carries the *prior* generation's
+timestamp so the FE can match it against the run that
+produced it.
+ */
+  priorNarrative: EngagementBriefingNarrative | null;
 }

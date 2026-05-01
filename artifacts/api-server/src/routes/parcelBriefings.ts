@@ -1860,12 +1860,56 @@ router.get(
       // additional sort. Bounded by the sweep's keep cap so the
       // wire shape cannot accidentally grow unbounded if a future
       // change loosens the prune retention.
-      const rows = await db
-        .select()
-        .from(briefingGenerationJobs)
-        .where(eq(briefingGenerationJobs.engagementId, engagementId))
-        .orderBy(desc(briefingGenerationJobs.startedAt))
-        .limit(limit);
+      //
+      // Task #280 — fetch the briefing row in parallel with the
+      // jobs query so we can also surface the `prior_section_*`
+      // backup columns alongside the runs. The prior narrative is
+      // the snapshot the briefing held *before* its current
+      // narrative was written; the regeneration transaction
+      // stamps `prior_generated_at` atomically with the new
+      // generation, so the FE can match that timestamp against
+      // a job's [startedAt, completedAt] interval to figure out
+      // which row in the disclosure produced it. There's at most
+      // one prior on the wire because the briefing row only
+      // retains one snapshot — older runs' bodies have already
+      // been overwritten by newer regenerations.
+      const [rows, briefingRows] = await Promise.all([
+        db
+          .select()
+          .from(briefingGenerationJobs)
+          .where(eq(briefingGenerationJobs.engagementId, engagementId))
+          .orderBy(desc(briefingGenerationJobs.startedAt))
+          .limit(limit),
+        db
+          .select()
+          .from(parcelBriefings)
+          .where(eq(parcelBriefings.engagementId, engagementId))
+          .limit(1),
+      ]);
+      const briefing = briefingRows[0];
+      // `prior_generated_at` is the load-bearing sentinel: the
+      // regeneration transaction stamps it together with the
+      // section_* backups, and `persistGenerationResult` clears
+      // both back to null on a first-run-no-prior write. So
+      // `priorGeneratedAt !== null` is the precise condition for
+      // "the backup columns are populated and represent a real
+      // prior narrative". When the briefing has never been
+      // regenerated (or doesn't exist yet), surface `null` so
+      // the FE doesn't try to match an empty interval.
+      const priorNarrative =
+        briefing && briefing.priorGeneratedAt
+          ? {
+              sectionA: briefing.priorSectionA,
+              sectionB: briefing.priorSectionB,
+              sectionC: briefing.priorSectionC,
+              sectionD: briefing.priorSectionD,
+              sectionE: briefing.priorSectionE,
+              sectionF: briefing.priorSectionF,
+              sectionG: briefing.priorSectionG,
+              generatedAt: briefing.priorGeneratedAt.toISOString(),
+              generatedBy: briefing.priorGeneratedBy,
+            }
+          : null;
       res.json({
         runs: rows.map((job) => ({
           generationId: job.id,
@@ -1881,6 +1925,7 @@ router.get(
           error: job.error,
           invalidCitationCount: job.invalidCitationCount,
         })),
+        priorNarrative,
       });
     } catch (err) {
       logger.error(

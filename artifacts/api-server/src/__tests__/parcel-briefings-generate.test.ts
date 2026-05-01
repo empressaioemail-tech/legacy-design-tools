@@ -556,7 +556,12 @@ describe("GET /api/engagements/:id/briefing/runs", () => {
       `/api/engagements/${eng.id}/briefing/runs`,
     );
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ runs: [] });
+    // Task #280 — the envelope also carries `priorNarrative` so the
+    // FE disclosure can render the prior body inline. With no
+    // briefing row at all, `priorNarrative` resolves to `null`
+    // (there is nothing to back up from), keeping the FE's "Prior"
+    // pill suppressed.
+    expect(res.body).toEqual({ runs: [], priorNarrative: null });
   });
 
   it("returns recent runs newest-first with the auditor-facing field shape", async () => {
@@ -676,6 +681,56 @@ describe("GET /api/engagements/:id/briefing/runs", () => {
         delete process.env["BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT"];
       else process.env["BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT"] = prev;
     }
+  });
+
+  it("surfaces the briefing's prior_section_* backup as priorNarrative after a regeneration (Task #280)", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+    await seedBriefingWithSource(eng.id);
+
+    // First generation populates section_* + generated_at; the
+    // regenerate flips that into prior_section_* + prior_generated_at
+    // so the runs envelope can carry it back to the FE for the
+    // "Prior" disclosure block.
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({});
+    await waitForStatus(eng.id, "completed");
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({ regenerate: true });
+    await waitForStatus(eng.id, "completed");
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing/runs`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.priorNarrative).toBeTruthy();
+    expect(typeof res.body.priorNarrative.sectionA).toBe("string");
+    expect(res.body.priorNarrative.sectionA.length).toBeGreaterThan(0);
+    expect(typeof res.body.priorNarrative.generatedAt).toBe("string");
+    expect(res.body.priorNarrative.generatedBy).toBe(
+      "system:briefing-engine",
+    );
+  });
+
+  it("returns priorNarrative=null when the briefing exists but has never been regenerated (Task #280)", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+    await seedBriefingWithSource(eng.id);
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({});
+    await waitForStatus(eng.id, "completed");
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing/runs`,
+    );
+    expect(res.status).toBe(200);
+    // First-generation-only state — prior_generated_at is still
+    // null on the briefing row, so the wire field collapses to
+    // null and the FE never lights up the Prior pill.
+    expect(res.body.priorNarrative).toBeNull();
   });
 
   it("scopes results to the requested engagement", async () => {

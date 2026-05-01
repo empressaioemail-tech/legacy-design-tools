@@ -3149,6 +3149,16 @@ function BriefingRecentRunsPanel({
     },
   });
   const runs = runsQuery.data?.runs ?? [];
+  // Task #280 — the wire envelope also carries the section_a..g
+  // backup the briefing held *before* its current narrative was
+  // written. There's at most one (the briefing row only retains
+  // one snapshot — older runs have already been overwritten by
+  // newer regenerations) so we resolve the producing row by
+  // matching its [startedAt, completedAt] interval against the
+  // backup's `generatedAt` timestamp, mirroring the Current-pill
+  // logic below. Older rows whose backups were already overwritten
+  // simply don't match and fall through to the existing details.
+  const priorNarrative = runsQuery.data?.priorNarrative ?? null;
   const count = runs.length;
   type RecentRun = (typeof runs)[number];
   // Task #276 — pre-compute the per-bucket tallies so each filter chip
@@ -3216,6 +3226,39 @@ function BriefingRecentRunsPanel({
     }
     return null;
   }, [narrativeGeneratedAt, runs]);
+
+  // Task #280 — same interval-match shape as Current, but against
+  // the prior narrative's `generatedAt`. Resolves to the
+  // generationId of the row that produced the body now living in
+  // `prior_section_*` (i.e. the run *before* the one whose output
+  // is currently on screen). Older rows in the list whose backups
+  // have already been overwritten will not match — the briefing
+  // row only retains one snapshot — so they fall through to the
+  // existing details branch with no prior body to render. A
+  // missing or unparseable timestamp resolves to null so we
+  // never pick an arbitrary row.
+  const priorGenerationId = useMemo<string | null>(() => {
+    if (!priorNarrative || priorNarrative.generatedAt === null) return null;
+    // The orval/zod codegen coerces `generatedAt` to `Date`, but
+    // tests + the runtime queryFn pass through ISO strings, so
+    // normalize via `new Date(...)` which accepts both shapes
+    // and yields `NaN` on garbage.
+    const stampedMs = new Date(
+      priorNarrative.generatedAt as Date | string,
+    ).getTime();
+    if (Number.isNaN(stampedMs)) return null;
+    for (const run of runs as RecentRun[]) {
+      if (run.state !== "completed") continue;
+      if (run.completedAt === null) continue;
+      const startedMs = Date.parse(String(run.startedAt));
+      const completedMs = Date.parse(String(run.completedAt));
+      if (Number.isNaN(startedMs) || Number.isNaN(completedMs)) continue;
+      if (stampedMs >= startedMs && stampedMs <= completedMs) {
+        return run.generationId;
+      }
+    }
+    return null;
+  }, [priorNarrative, runs]);
 
   return (
     <div
@@ -3384,6 +3427,17 @@ function BriefingRecentRunsPanel({
               {visibleRuns.map((run) => {
                 const isExpanded = expandedRunId === run.generationId;
                 const isCurrent = run.generationId === currentGenerationId;
+                // Task #280 — only the row whose interval contains
+                // the prior backup's `generatedAt` gets the inline
+                // prior body. Older rows (whose backups have already
+                // been overwritten by newer regenerations) fall
+                // through to the existing details branch with no
+                // prior section block — the briefing row only
+                // retains one snapshot, so we can't honestly surface
+                // anything for them.
+                const isPriorRow =
+                  priorGenerationId !== null &&
+                  run.generationId === priorGenerationId;
                 const startedLabel = new Date(run.startedAt).toLocaleString();
                 const detailAvailable =
                   (run.state === "failed" && !!run.error) ||
@@ -3456,6 +3510,33 @@ function BriefingRecentRunsPanel({
                           Current
                         </span>
                       )}
+                      {isPriorRow && (
+                        // Task #280 — flag the row that produced
+                        // what was on screen *before* the Current
+                        // narrative so the side-by-side comparison
+                        // story reads end-to-end. Same shape as
+                        // the Current pill but in a muted accent
+                        // so it never competes visually with
+                        // "what is on screen right now".
+                        <span
+                          data-testid={`briefing-run-prior-pill-${run.generationId}`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "1px 6px",
+                            borderRadius: 4,
+                            background: "var(--surface-2, var(--border-subtle))",
+                            color: "var(--text-muted)",
+                            fontSize: 10,
+                            fontWeight: 600,
+                            letterSpacing: 0.2,
+                            textTransform: "uppercase",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          Prior
+                        </span>
+                      )}
                       <span style={{ flex: 1, color: "var(--text-default)" }}>
                         {startedLabel}
                       </span>
@@ -3518,6 +3599,78 @@ function BriefingRecentRunsPanel({
                         )}
                         {!detailAvailable && run.state === "pending" && (
                           <div>Generation in progress…</div>
+                        )}
+                        {isPriorRow && priorNarrative && (
+                          // Task #280 — render the seven A–G section
+                          // bodies the briefing held *before* its
+                          // current narrative was written. Only
+                          // mounted on the Prior row (the one whose
+                          // [startedAt, completedAt] interval
+                          // contains the backup's `generatedAt`),
+                          // so older rows whose backups have already
+                          // been overwritten don't get a misleading
+                          // "this is the prior body" block. The
+                          // Current row never reaches this branch
+                          // either — its narrative is already
+                          // rendered above the disclosure, so
+                          // duplicating it here would be noise.
+                          <div
+                            data-testid={`briefing-run-prior-narrative-${run.generationId}`}
+                            style={{
+                              marginTop: 6,
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 4,
+                              borderTop: "1px solid var(--border-subtle)",
+                              paddingTop: 6,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: "var(--text-default)",
+                                textTransform: "uppercase",
+                                letterSpacing: 0.3,
+                              }}
+                            >
+                              Narrative on screen before this run was
+                              overwritten
+                            </div>
+                            {SECTION_ORDER.map(({ key, label }) => {
+                              const body = pickSection(priorNarrative, key);
+                              const isEmpty = !body || body.trim().length === 0;
+                              return (
+                                <div
+                                  key={key}
+                                  data-testid={`briefing-run-prior-section-${key}-${run.generationId}`}
+                                  style={{
+                                    fontSize: 12,
+                                    color: isEmpty
+                                      ? "var(--text-muted)"
+                                      : "var(--text-default)",
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      fontWeight: 600,
+                                      marginRight: 6,
+                                    }}
+                                  >
+                                    {label}
+                                  </span>
+                                  <span
+                                    style={{
+                                      whiteSpace: "pre-wrap",
+                                      lineHeight: 1.5,
+                                    }}
+                                  >
+                                    {isEmpty ? "—" : body}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
                     )}

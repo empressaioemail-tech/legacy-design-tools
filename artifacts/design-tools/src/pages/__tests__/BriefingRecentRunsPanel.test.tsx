@@ -92,6 +92,22 @@ const hoisted = vi.hoisted(() => {
       revitDocumentPath: null as string | null,
     },
     runs: initialRuns,
+    // Task #280 — the runs envelope also carries the `prior_section_*`
+    // backup snapshot keyed by `generatedAt`. Tests that exercise the
+    // "Prior" pill + inline prior-narrative rendering replace this
+    // with a non-null payload; the default keeps the wire shape
+    // honest without forcing every existing test to mention it.
+    priorNarrative: null as null | {
+      sectionA: string | null;
+      sectionB: string | null;
+      sectionC: string | null;
+      sectionD: string | null;
+      sectionE: string | null;
+      sectionF: string | null;
+      sectionG: string | null;
+      generatedAt: string | null;
+      generatedBy: string | null;
+    },
     runsHookCalls: 0,
     runsFetchCalls: 0,
     capturedGenerateBriefingOptions: null as null | {
@@ -312,7 +328,17 @@ vi.mock("@workspace/api-client-react", async () => {
           // The route returns `runs` newest-first; the hoisted
           // array is treated as already in newest-first order so
           // each test can shift new pending rows onto the front.
-          return { runs: hoisted.runs.map((r) => ({ ...r })) };
+          // Task #280 — the same envelope also carries the
+          // `prior_section_*` backup snapshot the briefing held
+          // before its current narrative was written. Cloned so a
+          // test that mutates it post-render doesn't accidentally
+          // mutate the cached payload.
+          return {
+            runs: hoisted.runs.map((r) => ({ ...r })),
+            priorNarrative: hoisted.priorNarrative
+              ? { ...hoisted.priorNarrative }
+              : null,
+          };
         },
         enabled: opts?.query?.enabled ?? true,
         refetchOnWindowFocus: opts?.query?.refetchOnWindowFocus ?? true,
@@ -467,6 +493,10 @@ beforeEach(() => {
   // keep their existing semantics; the Current-pill tests below
   // override this with a non-null narrative payload.
   hoisted.briefing = null;
+  // Task #280 — default to "no prior backup" so existing tests
+  // keep rendering as they did before; the prior-narrative tests
+  // below override this with a populated payload.
+  hoisted.priorNarrative = null;
 });
 
 afterEach(() => {
@@ -1156,6 +1186,221 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     expect(row).not.toHaveAttribute("aria-current");
     expect(
       screen.queryByTestId("briefing-run-current-pill-gen-recent"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the prior briefing narrative inline on the row whose interval contains prior_generated_at (Task #280)", async () => {
+    // Two completed runs: the most recent one produced what's
+    // currently on screen (Current pill), and the older one
+    // produced what was on screen *before* that — its
+    // [startedAt, completedAt] window contains
+    // priorNarrative.generatedAt, so its expanded details
+    // should surface the seven A–G section bodies the briefing
+    // held before the regeneration overwrote them. The Current
+    // row's expanded details should *not* duplicate the
+    // narrative (it's already rendered above the disclosure).
+    hoisted.briefing = {
+      narrative: { generatedAt: "2026-04-03T10:00:02.000Z" },
+    };
+    hoisted.priorNarrative = {
+      sectionA: "Prior Section A — buildable thesis as of run 1.",
+      sectionB: "Prior Section B — threshold issues as of run 1.",
+      sectionC: "Prior Section C — regulatory gates as of run 1.",
+      sectionD: "Prior Section D — site infrastructure as of run 1.",
+      sectionE: "Prior Section E — buildable envelope as of run 1.",
+      sectionF: "Prior Section F — neighboring context as of run 1.",
+      sectionG: "Prior Section G — next-step checklist as of run 1.",
+      generatedAt: "2026-04-02T10:00:02.000Z",
+      generatedBy: "system:briefing-engine",
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-current",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:05.000Z",
+        invalidCitationCount: 0,
+      }),
+      makeRun({
+        generationId: "gen-prior",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+
+    // The matching row carries the "Prior" pill alongside its
+    // existing state badge so the comparison story reads
+    // end-to-end ("Current" + "Prior") at a glance.
+    const priorRow = within(list).getByTestId("briefing-run-gen-prior");
+    expect(
+      within(priorRow).getByTestId("briefing-run-prior-pill-gen-prior"),
+    ).toHaveTextContent(/Prior/i);
+    // The Current row does NOT also get the Prior pill — it's
+    // the producer of what's on screen now, not what was on
+    // screen before.
+    expect(
+      screen.queryByTestId("briefing-run-prior-pill-gen-current"),
+    ).not.toBeInTheDocument();
+
+    // Expanding the prior row surfaces the seven section bodies
+    // inline — same A–G ordering as the on-screen briefing
+    // panel so the auditor can read them top-to-bottom.
+    fireEvent.click(screen.getByTestId("briefing-run-toggle-gen-prior"));
+    const priorNarrativeBlock = await screen.findByTestId(
+      "briefing-run-prior-narrative-gen-prior",
+    );
+    expect(
+      within(priorNarrativeBlock).getByTestId(
+        "briefing-run-prior-section-a-gen-prior",
+      ),
+    ).toHaveTextContent("Prior Section A — buildable thesis as of run 1.");
+    expect(
+      within(priorNarrativeBlock).getByTestId(
+        "briefing-run-prior-section-g-gen-prior",
+      ),
+    ).toHaveTextContent("Prior Section G — next-step checklist as of run 1.");
+
+    // The Current row's expanded details stay unchanged — no
+    // prior-narrative block, since duplicating the on-screen
+    // narrative there would be noise.
+    fireEvent.click(screen.getByTestId("briefing-run-toggle-gen-current"));
+    await screen.findByTestId("briefing-run-details-gen-current");
+    expect(
+      screen.queryByTestId("briefing-run-prior-narrative-gen-current"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the prior narrative on older rows whose backups have already been overwritten (Task #280)", async () => {
+    // Three completed runs: the newest produced what's on screen
+    // (Current), the middle produced what was on screen before
+    // that (Prior — its interval contains priorNarrative.generatedAt),
+    // and an older one whose body has *already been overwritten*
+    // by the middle run's regeneration. The briefing row only
+    // retains one `prior_section_*` snapshot, so the older row
+    // has no body to honestly surface — its expanded details
+    // must NOT render a prior-narrative block.
+    hoisted.briefing = {
+      narrative: { generatedAt: "2026-04-03T10:00:02.000Z" },
+    };
+    hoisted.priorNarrative = {
+      sectionA: "Prior Section A from run 2.",
+      sectionB: null,
+      sectionC: null,
+      sectionD: null,
+      sectionE: null,
+      sectionF: null,
+      sectionG: "Prior Section G from run 2.",
+      generatedAt: "2026-04-02T10:00:02.000Z",
+      generatedBy: "system:briefing-engine",
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-current",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:05.000Z",
+      }),
+      makeRun({
+        generationId: "gen-prior",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:04.000Z",
+      }),
+      makeRun({
+        generationId: "gen-overwritten",
+        state: "completed",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        completedAt: "2026-04-01T10:00:03.000Z",
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+
+    // Only the matching row carries the Prior pill — the older
+    // row does NOT, since its narrative was overwritten by the
+    // middle row's regeneration and is no longer recoverable
+    // from the briefing's backup columns.
+    expect(
+      within(list).getByTestId("briefing-run-prior-pill-gen-prior"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("briefing-run-prior-pill-gen-overwritten"),
+    ).not.toBeInTheDocument();
+
+    // Expanding the older row shows its existing details (the
+    // Started/Completed/Invalid citations lines) but no prior
+    // narrative block — the disclosure stays honest about what
+    // it can recover from the wire envelope.
+    fireEvent.click(screen.getByTestId("briefing-run-toggle-gen-overwritten"));
+    await screen.findByTestId("briefing-run-details-gen-overwritten");
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-gen-overwritten",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-section-a-gen-overwritten",
+      ),
+    ).not.toBeInTheDocument();
+
+    // And expanding the matching row still surfaces the prior
+    // body as expected — proving the "hidden on older rows"
+    // behavior is row-specific, not a global suppression.
+    fireEvent.click(screen.getByTestId("briefing-run-toggle-gen-prior"));
+    const priorNarrativeBlock = await screen.findByTestId(
+      "briefing-run-prior-narrative-gen-prior",
+    );
+    expect(
+      within(priorNarrativeBlock).getByTestId(
+        "briefing-run-prior-section-a-gen-prior",
+      ),
+    ).toHaveTextContent("Prior Section A from run 2.");
+  });
+
+  it("renders no Prior pill anywhere when the briefing has never been regenerated (Task #280)", async () => {
+    // First-generation-only state: the briefing row exists with
+    // a current narrative on screen, but `prior_section_*` are
+    // null because no overwrite has happened yet. The runs list
+    // has only the producing run; the disclosure marks it
+    // Current and renders no Prior pill — the auditor isn't
+    // told a prior body is recoverable when it isn't.
+    hoisted.briefing = {
+      narrative: { generatedAt: "2026-04-03T10:00:02.000Z" },
+    };
+    hoisted.priorNarrative = null;
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-only",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:05.000Z",
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+
+    expect(
+      within(list).getByTestId("briefing-run-current-pill-gen-only"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("briefing-run-prior-pill-gen-only"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("briefing-run-toggle-gen-only"));
+    await screen.findByTestId("briefing-run-details-gen-only");
+    expect(
+      screen.queryByTestId("briefing-run-prior-narrative-gen-only"),
     ).not.toBeInTheDocument();
   });
 
