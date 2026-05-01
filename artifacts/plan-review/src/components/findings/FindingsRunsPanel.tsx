@@ -4,7 +4,7 @@ import {
   useListSubmissionFindingsGenerationRuns,
   useFindingsGenerationPolling,
   type FindingRun,
-} from "../../lib/findingsMock";
+} from "../../lib/findingsApi";
 
 const RUN_STATE_LABELS: Record<FindingRun["state"], string> = {
   pending: "Generating",

@@ -1,12 +1,27 @@
 /**
- * AIR-2 Findings — CLIENT-SIDE MOCK MODULE.
+ * AIR-2 Findings — CLIENT-SIDE MOCK MODULE (legacy).
  *
- * SWAP POINT: every import of `../lib/findingsMock` in
- * `artifacts/plan-review/src/` should be flipped to
- * `@workspace/api-client-react` once AIR-1 lands the real
- * `finding` atom + endpoints. The hook names + type shapes here
- * mirror the AIR-1 recon, so the swap is mechanical. See follow-up
- * task #341 for the wiring step.
+ * Production code MUST NOT import from this module directly — it
+ * imports from `./findingsApi` instead. That barrel is the single
+ * swap point for the AIR-1 backend wiring (see `./findingsApi.ts`
+ * top-of-file comment for the full procedure and Task #341 for
+ * context).
+ *
+ * What still lives here:
+ *   - The mock hook implementations (re-exported through
+ *     `findingsApi`).
+ *   - The deterministic 3-finding fixture used by the mock
+ *     `useGenerateSubmissionFindings` mutation.
+ *   - Test-only seed / reset / peek helpers
+ *     (`__seedFindingsForTests`, `__resetFindingsMockForTests`,
+ *     `__peekFindingsForTests`) — these are imported by
+ *     `FindingsTab.test.tsx` and DO NOT survive the AIR-1 swap.
+ *
+ * What moved out:
+ *   - Pure URL atom-id allow-list helpers
+ *     (`isWellFormedFindingId`, `submissionIdFromFindingId`) now live
+ *     in `./findingUrl.ts` because they have no backend coupling and
+ *     must outlive this module.
  *
  * `generateSubmissionFindings()` always yields the same three-
  * finding fixture (1 blocker / 1 concern / 1 advisory) so component
@@ -202,36 +217,6 @@ function buildFixtureFindings(submissionId: string): Finding[] {
       revisionOf: null,
     },
   ];
-}
-
-// ─── Deep-link allow-list ─────────────────────────────────────────
-
-/**
- * Validate a `?finding=<atomId>` URL parameter. The atom id grammar
- * (per AIR-1 recon) is `finding:{submissionId}:{ulid}`. We use a
- * permissive ASCII allow-list rather than a strict ULID regex so
- * test/dev fixtures with non-ULID ids still round-trip; the goal is
- * to keep junk and obvious XSS out of the URL, not to validate the
- * atom shape itself (the server / atom-graph does that).
- */
-export function isWellFormedFindingId(raw: string): boolean {
-  if (!raw) return false;
-  if (!raw.startsWith("finding:")) return false;
-  if (raw.length > 200) return false;
-  return /^finding:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(raw);
-}
-
-/**
- * Extract the submission id from a well-formed finding atom id.
- * Returns `null` for malformed ids. Used by the URL deep-link to
- * decide which submission's modal to open when only `?finding=…`
- * is present in the URL.
- */
-export function submissionIdFromFindingId(raw: string): string | null {
-  if (!isWellFormedFindingId(raw)) return null;
-  const parts = raw.split(":");
-  if (parts.length < 3) return null;
-  return parts[1] ?? null;
 }
 
 // ─── Query keys ───────────────────────────────────────────────────

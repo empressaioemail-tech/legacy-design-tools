@@ -2,13 +2,13 @@ import { Fragment, useState } from "react";
 import { Box } from "lucide-react";
 import {
   useAcceptFinding,
+  useListSubmissionFindings,
   useRejectFinding,
-  __peekFindingsForTests,
   type Finding,
   FINDING_CATEGORY_LABELS,
   FINDING_SEVERITY_LABELS,
   FINDING_STATUS_LABELS,
-} from "../../lib/findingsMock";
+} from "../../lib/findingsApi";
 import {
   CodeAtomPill,
   SourceCitationPill,
@@ -72,8 +72,14 @@ export function FindingDrillIn({
     onShowInViewer?.(finding.elementRef);
   };
 
+  // Look up the superseded original AI finding via the same React
+  // Query cache the parent FindingsTab already mounted — pulling it
+  // out of the cached query means we don't need any test-only peek
+  // helper here, and the same code path will work against the
+  // generated AIR-1 hooks once the swap lands.
+  const submissionFindings = useListSubmissionFindings(finding.submissionId);
   const originalAi = finding.revisionOf
-    ? __peekFindingsForTests(finding.submissionId).find(
+    ? (submissionFindings.data ?? []).find(
         (f) => f.id === finding.revisionOf,
       ) ?? null
     : null;

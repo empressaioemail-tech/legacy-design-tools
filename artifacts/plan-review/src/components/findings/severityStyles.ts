@@ -15,7 +15,7 @@
 import type {
   FindingSeverity,
   FindingStatus,
-} from "../../lib/findingsMock";
+} from "../../lib/findingsApi";
 
 export const SEVERITY_PALETTE: Record<
   FindingSeverity,

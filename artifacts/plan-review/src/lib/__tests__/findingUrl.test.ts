@@ -13,17 +13,15 @@ import {
   FINDING_QUERY_PARAM,
   SUBMISSION_QUERY_PARAM,
   SUBMISSION_TAB_QUERY_PARAM,
+  isWellFormedFindingId,
   readFindingFromUrl,
   readSubmissionFromUrl,
   readSubmissionTabFromUrl,
+  submissionIdFromFindingId,
   writeFindingToUrl,
   writeSubmissionTabToUrl,
   writeSubmissionToUrl,
 } from "../findingUrl";
-import {
-  isWellFormedFindingId,
-  submissionIdFromFindingId,
-} from "../findingsMock";
 
 // happy-dom rejects cross-origin replaceState (it must match the
 // document origin), so we use the same origin happy-dom uses for
@@ -33,7 +31,7 @@ function setUrl(search: string): void {
   window.history.replaceState(null, "", next);
 }
 
-describe("findingsMock allow-list", () => {
+describe("finding atom-id allow-list", () => {
   it("accepts well-formed finding ids", () => {
     expect(isWellFormedFindingId("finding:sub-1:01H8FOOBAR")).toBe(true);
     expect(isWellFormedFindingId("finding:sub-1:abc.def-123")).toBe(true);

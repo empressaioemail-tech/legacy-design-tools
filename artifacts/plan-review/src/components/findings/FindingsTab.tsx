@@ -14,7 +14,7 @@ import {
   type FindingCategory,
   type FindingSeverity,
   type FindingStatus,
-} from "../../lib/findingsMock";
+} from "../../lib/findingsApi";
 import { FindingsRunsPanel } from "./FindingsRunsPanel";
 import { FindingDrillIn } from "./FindingDrillIn";
 import { CodeAtomPill, renderFindingBody } from "./CodeAtomPill";

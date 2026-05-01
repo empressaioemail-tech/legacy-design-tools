@@ -6,7 +6,7 @@ import {
   type FindingSeverity,
   FINDING_CATEGORY_LABELS,
   FINDING_SEVERITY_LABELS,
-} from "../../lib/findingsMock";
+} from "../../lib/findingsApi";
 
 const SEVERITY_OPTIONS: FindingSeverity[] = ["blocker", "concern", "advisory"];
 const CATEGORY_OPTIONS: FindingCategory[] = [

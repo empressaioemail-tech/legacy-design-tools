@@ -26,7 +26,39 @@
  * design-tools uses for tab and filter state.
  */
 
-import { isWellFormedFindingId, submissionIdFromFindingId } from "./findingsMock";
+// ─── Finding atom-id allow-list ───────────────────────────────────
+//
+// These two helpers used to live in `./findingsMock.ts` but they are
+// pure ID-shape utilities with no backend coupling, so they stay here
+// to survive the AIR-1 swap that deletes the mock module. Atom id
+// grammar (per AIR-1 recon): `finding:{submissionId}:{ulid}`.
+
+/**
+ * Validate a `?finding=<atomId>` URL parameter. We use a permissive
+ * ASCII allow-list rather than a strict ULID regex so test/dev
+ * fixtures with non-ULID ids still round-trip; the goal is to keep
+ * junk and obvious XSS out of the URL, not to validate the atom shape
+ * itself (the server / atom-graph does that).
+ */
+export function isWellFormedFindingId(raw: string): boolean {
+  if (!raw) return false;
+  if (!raw.startsWith("finding:")) return false;
+  if (raw.length > 200) return false;
+  return /^finding:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(raw);
+}
+
+/**
+ * Extract the submission id from a well-formed finding atom id.
+ * Returns `null` for malformed ids. Used by the URL deep-link to
+ * decide which submission's modal to open when only `?finding=…`
+ * is present in the URL.
+ */
+export function submissionIdFromFindingId(raw: string): string | null {
+  if (!isWellFormedFindingId(raw)) return null;
+  const parts = raw.split(":");
+  if (parts.length < 3) return null;
+  return parts[1] ?? null;
+}
 
 export const FINDING_QUERY_PARAM = "finding";
 export const SUBMISSION_QUERY_PARAM = "submission";
