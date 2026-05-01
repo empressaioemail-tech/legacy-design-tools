@@ -12,6 +12,7 @@ import {
   type MaterializableElement,
   type MaterializableElementKind,
 } from "@workspace/api-client-react";
+import { BimModelViewport } from "./BimModelViewport";
 
 /**
  * Canonical ordering + display labels for the seven Spec 51a §2.4
@@ -555,6 +556,13 @@ export function BimModelTab({
       )}
 
       {bimModel && <BimModelSummaryCard bimModel={bimModel} />}
+
+      {bimModel && (
+        <BimModelViewport
+          elements={bimModel.elements}
+          selectedElementRef={highlightToken?.ref ?? null}
+        />
+      )}
 
       {bimModel && (
         <MaterializableElementsList

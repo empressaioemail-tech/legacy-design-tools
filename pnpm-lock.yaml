@@ -919,6 +919,9 @@ importers:
       '@types/react-dom':
         specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.14)
+      '@types/three':
+        specifier: ~0.128.0
+        version: 0.128.0
       '@vitejs/plugin-react':
         specifier: 'catalog:'
         version: 5.1.4(vite@7.3.2(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
@@ -1012,6 +1015,9 @@ importers:
       tailwindcss:
         specifier: 'catalog:'
         version: 4.2.1
+      three:
+        specifier: ^0.128.0
+        version: 0.128.0
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0

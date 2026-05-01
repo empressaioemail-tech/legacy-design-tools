@@ -49,6 +49,8 @@
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/react-query": "catalog:",
+    "@types/three": "~0.128.0",
+    "three": "^0.128.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
