@@ -949,14 +949,17 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
     ).toHaveTextContent("Copy plain text");
   });
 
-  // Task #338 — explicit no-false-positive coverage. When the
-  // Clipboard API isn't available (older browsers, locked-down
-  // contexts, or test environments that don't polyfill it) the
-  // button must NOT show the "Copied!" indicator, because the
-  // copy didn't actually happen. The production code guards this
-  // by only flipping the label inside the `writeText().then(...)`
-  // success branch.
-  it("does not show the 'Copied!' confirmation when navigator.clipboard is unavailable", async () => {
+  // Task #338 / #345 — explicit no-false-positive coverage on the
+  // failure path. When the Clipboard API isn't available (older
+  // browsers, locked-down contexts, or test environments that
+  // don't polyfill it) the button must NOT show the "Copied!"
+  // indicator, because the copy didn't actually happen. Task #345
+  // closes the symmetric loop — the same branch must surface a
+  // short-lived "Couldn't copy" pill under the mirrored
+  // `*-copy-error-*` testid so the auditor knows to retry or
+  // hand-select the seven sections instead of silently believing
+  // the copy landed.
+  it("surfaces a 'Couldn't copy' indicator (not 'Copied!') when navigator.clipboard is unavailable", async () => {
     seedPriorRow({
       priorSectionA: "Prior A body.",
       currentSectionA: "Current A body.",
@@ -984,15 +987,36 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
         "briefing-run-prior-narrative-copy-gen-prior",
       );
       fireEvent.click(button);
-      await act(async () => {
-        await Promise.resolve();
-      });
+      // The error pill mounts synchronously off the
+      // early-return branch (no promise to await), so it's in
+      // the tree on the next microtask flush.
+      const errorPill = await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-error-gen-prior",
+      );
+      expect(errorPill).toHaveTextContent(/couldn.?t copy/i);
+      // The success pill must NEVER appear on the failure path —
+      // the auditor's whole signal is that the copy did NOT
+      // land, so a stray "Copied!" would be a false positive.
       expect(
         screen.queryByTestId(
           "briefing-run-prior-narrative-copy-confirm-gen-prior",
         ),
       ).not.toBeInTheDocument();
-      expect(button).toHaveTextContent("Copy plain text");
+      // After ~2s the indicator reverts so the disclosure
+      // doesn't stay frozen on a stale "Couldn't copy" pill.
+      await waitFor(
+        () => {
+          expect(
+            screen.queryByTestId(
+              "briefing-run-prior-narrative-copy-error-gen-prior",
+            ),
+          ).not.toBeInTheDocument();
+        },
+        { timeout: 2500 },
+      );
+      expect(
+        screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
+      ).toHaveTextContent("Copy plain text");
     } finally {
       if (originalClipboardDescriptor) {
         Object.defineProperty(
@@ -1002,6 +1026,91 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
         );
       } else {
         // The property didn't exist before — best-effort delete.
+        delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+      }
+    }
+  });
+
+  // Task #345 — rejected-promise branch. Even when the Clipboard
+  // API is present, `writeText` can still reject (focus loss, an
+  // OS-level permission denial, a sandbox refusal). Without the
+  // mirrored "Couldn't copy" indicator the auditor would click,
+  // see the label flicker back to "Copy plain text", and have no
+  // way to tell the copy actually failed. The mirroring
+  // design-tools test pins the same testid + timing so a future
+  // shared-lib lift stays a no-op.
+  it("surfaces the 'Couldn't copy' indicator when navigator.clipboard.writeText rejects", async () => {
+    seedPriorRow({
+      priorSectionA: "Prior A body.",
+      currentSectionA: "Current A body.",
+    });
+    // Reject with a real Error so the production `.catch(() =>
+    // ...)` branch runs exactly as it would in a browser that
+    // refused the write (focus loss, sandbox denial, etc.).
+    const writeText = vi
+      .fn()
+      .mockRejectedValue(new Error("clipboard write refused"));
+    // Restore the descriptor in `finally` so the override doesn't
+    // leak into sibling tests — a leaked rejecting clipboard
+    // would silently flip any later test that exercises the
+    // copy button into the failure branch.
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      renderPage();
+      fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+      fireEvent.click(
+        await screen.findByTestId("briefing-run-toggle-gen-prior"),
+      );
+      const button = await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-gen-prior",
+      );
+      fireEvent.click(button);
+      expect(writeText).toHaveBeenCalledTimes(1);
+      // The error pill mounts once the rejection settles —
+      // `findByTestId` polls until React flushes the resulting
+      // state update from the `.catch(...)` branch.
+      expect(
+        await screen.findByTestId(
+          "briefing-run-prior-narrative-copy-error-gen-prior",
+        ),
+      ).toHaveTextContent(/couldn.?t copy/i);
+      // Mutually-exclusive invariant — only one of {success,
+      // error} can be in the tree at a time. A stray "Copied!"
+      // pill on a rejected write would tell the auditor the
+      // copy succeeded when it did not.
+      expect(
+        screen.queryByTestId(
+          "briefing-run-prior-narrative-copy-confirm-gen-prior",
+        ),
+      ).not.toBeInTheDocument();
+      await waitFor(
+        () => {
+          expect(
+            screen.queryByTestId(
+              "briefing-run-prior-narrative-copy-error-gen-prior",
+            ),
+          ).not.toBeInTheDocument();
+        },
+        { timeout: 2500 },
+      );
+      expect(
+        screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
+      ).toHaveTextContent("Copy plain text");
+    } finally {
+      if (originalClipboardDescriptor) {
+        Object.defineProperty(
+          navigator,
+          "clipboard",
+          originalClipboardDescriptor,
+        );
+      } else {
         delete (navigator as unknown as { clipboard?: unknown }).clipboard;
       }
     }

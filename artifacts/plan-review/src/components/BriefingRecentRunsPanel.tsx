@@ -291,17 +291,46 @@ export function BriefingRecentRunsPanel({
   // search for `briefing-run-prior-narrative-copy-confirm-`) so a
   // future shared-lib lift is a no-op and so an auditor moving
   // between the two surfaces sees the same confirmation timing.
-  const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
-  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  //
+  // Task #345 closes the symmetric failure path: when
+  // `navigator.clipboard` is unavailable (older browsers,
+  // locked-down contexts, no HTTPS) or `writeText` rejects, the
+  // button surfaces a "Couldn't copy" indicator with the same ~2s
+  // timing under a sibling `*-copy-error-*` testid. The success
+  // and error states are stored as a single discriminated value so
+  // only one of the two pills can ever be in the tree at a time —
+  // a back-to-back retry that flips error → success replaces the
+  // pill in place rather than briefly stacking both.
+  const [copyResult, setCopyResult] = useState<{
+    id: string;
+    kind: "success" | "error";
+  } | null>(null);
+  const copyResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const COPY_FEEDBACK_MS = 2000;
+  const flashCopyResult = (
+    generationId: string,
+    kind: "success" | "error",
+  ): void => {
+    if (copyResultTimerRef.current !== null) {
+      clearTimeout(copyResultTimerRef.current);
+    }
+    setCopyResult({ id: generationId, kind });
+    copyResultTimerRef.current = setTimeout(() => {
+      setCopyResult(null);
+      copyResultTimerRef.current = null;
+    }, COPY_FEEDBACK_MS);
+  };
   // Clear the pending revert on unmount so a click that races the
   // disclosure being collapsed (or the page being navigated away
   // from) doesn't leak a setTimeout that fires against an
   // already-unmounted tree.
   useEffect(() => {
     return () => {
-      if (copiedTimerRef.current !== null) {
-        clearTimeout(copiedTimerRef.current);
-        copiedTimerRef.current = null;
+      if (copyResultTimerRef.current !== null) {
+        clearTimeout(copyResultTimerRef.current);
+        copyResultTimerRef.current = null;
       }
     };
   }, []);
@@ -825,9 +854,12 @@ export function BriefingRecentRunsPanel({
                                   two surfaces sees the same
                                   confirmation timing. */}
                               {(() => {
-                                const COPIED_CONFIRMATION_MS = 2000;
                                 const isCopied =
-                                  copiedRunId === run.generationId;
+                                  copyResult?.id === run.generationId &&
+                                  copyResult.kind === "success";
+                                const hasCopyError =
+                                  copyResult?.id === run.generationId &&
+                                  copyResult.kind === "error";
                                 return (
                                   <button
                                     type="button"
@@ -841,45 +873,51 @@ export function BriefingRecentRunsPanel({
                                           return `${label}\n\n${body.trim() || "—"}`;
                                         },
                                       ).join("\n\n");
+                                      // Capture the id at click time
+                                      // so a fast row-swap doesn't
+                                      // confirm or error the wrong
+                                      // row.
+                                      const generationId = run.generationId;
                                       if (
                                         typeof navigator === "undefined" ||
                                         !navigator.clipboard ||
                                         typeof navigator.clipboard
                                           .writeText !== "function"
                                       ) {
+                                        // Task #345 — symmetric failure
+                                        // path: when the Clipboard API
+                                        // isn't available the button
+                                        // surfaces the same ~2s
+                                        // "Couldn't copy" pill it would
+                                        // surface for a rejected
+                                        // promise, so the auditor
+                                        // always gets feedback.
+                                        flashCopyResult(
+                                          generationId,
+                                          "error",
+                                        );
                                         return;
                                       }
-                                      // Capture the id at click time
-                                      // so a fast row-swap doesn't
-                                      // confirm the wrong row.
-                                      const generationId = run.generationId;
                                       navigator.clipboard
                                         .writeText(text)
                                         .then(() => {
-                                          if (
-                                            copiedTimerRef.current !== null
-                                          ) {
-                                            clearTimeout(
-                                              copiedTimerRef.current,
-                                            );
-                                          }
-                                          setCopiedRunId(generationId);
-                                          copiedTimerRef.current = setTimeout(
-                                            () => {
-                                              setCopiedRunId(null);
-                                              copiedTimerRef.current = null;
-                                            },
-                                            COPIED_CONFIRMATION_MS,
+                                          flashCopyResult(
+                                            generationId,
+                                            "success",
                                           );
                                         })
                                         .catch(() => {
-                                          // Swallow — falls back
-                                          // silently when the
-                                          // Clipboard API is
-                                          // unavailable or rejects,
-                                          // so the auditor never
-                                          // sees a false-positive
-                                          // confirmation.
+                                          // Task #345 — surface the
+                                          // rejection symmetrically so
+                                          // the auditor knows to retry
+                                          // or hand-select the seven
+                                          // sections instead of
+                                          // silently believing the
+                                          // copy landed.
+                                          flashCopyResult(
+                                            generationId,
+                                            "error",
+                                          );
                                         });
                                     }}
                                     style={{
@@ -899,6 +937,13 @@ export function BriefingRecentRunsPanel({
                                         aria-live="polite"
                                       >
                                         Copied!
+                                      </span>
+                                    ) : hasCopyError ? (
+                                      <span
+                                        data-testid={`briefing-run-prior-narrative-copy-error-${run.generationId}`}
+                                        aria-live="polite"
+                                      >
+                                        Couldn&apos;t copy
                                       </span>
                                     ) : (
                                       "Copy plain text"
