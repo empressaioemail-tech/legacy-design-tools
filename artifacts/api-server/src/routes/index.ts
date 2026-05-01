@@ -19,6 +19,7 @@ import bimModelsRouter from "./bimModels";
 import generateLayersRouter from "./generateLayers";
 import localSetbacksRouter from "./localSetbacks";
 import adapterCacheRouter from "./adapterCache";
+import reviewerAnnotationsRouter from "./reviewerAnnotations";
 
 const router: IRouter = Router();
 
@@ -65,5 +66,9 @@ router.use(sessionRouter);
 // adapterCacheRouter mounts under `/admin/adapter-cache` — distinct
 // path subtree from everything else so ordering is indifferent.
 router.use(adapterCacheRouter);
+// Wave 2 Sprint C / Spec 307 — reviewer-annotation surface.
+// Mounts under /submissions/:submissionId/reviewer-annotations; no
+// path overlap with any existing router so ordering is indifferent.
+router.use(reviewerAnnotationsRouter);
 
 export default router;

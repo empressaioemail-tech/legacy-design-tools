@@ -6,6 +6,8 @@ import {
   BRIEFING_ENGINE_ACTOR_ID,
   BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
   ENGAGEMENT_EDIT_ACTOR_ID,
+  REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID,
+  REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,
   SNAPSHOT_INGEST_ACTOR_ID,
   SUBMISSION_INGEST_ACTOR_ID,
   SUBMISSION_RESPONSE_ACTOR_ID,
@@ -53,6 +55,14 @@ export const FRIENDLY_AGENT_LABELS: Readonly<Record<string, string>> = {
   // briefing-source lifecycle (routes/parcelBriefings.ts)
   [BRIEFING_MANUAL_UPLOAD_ACTOR_ID]: "Manual briefing upload",
   [BRIEFING_ENGINE_ACTOR_ID]: "Briefing engine",
+  // reviewer-annotation lifecycle (routes/reviewerAnnotations.ts) —
+  // Wave 2 Sprint C / Spec 307. Stamped on the rare path where the
+  // session does not carry a requestor id (the route gates on a
+  // session-bound requestor today, but the actor exists so a future
+  // service-to-service call has a stable label rather than rendering
+  // the raw `reviewer-annotation-author` slug in the audit trail).
+  [REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID]: "Reviewer annotation author",
+  [REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID]: "Reviewer annotation promotion",
 };
 
 /**

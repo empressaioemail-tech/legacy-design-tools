@@ -30,6 +30,7 @@ import type {
   CodeAtomSummary,
   CreateBriefingSourceBody,
   CreateEngagementSubmissionBody,
+  CreateReviewerAnnotationBody,
   CreateUserBody,
   EngagementBimModelResponse,
   EngagementBriefingResponse,
@@ -51,9 +52,13 @@ import type {
   ListCodeAtomsParams,
   ListEngagementBriefingSourcesParams,
   ListJurisdictionAtomsParams,
+  ListReviewerAnnotationsParams,
+  ListReviewerAnnotationsResponse,
   LocalSetbackTable,
   MatchEngagementBody,
   MatchEngagementResponse,
+  PromoteReviewerAnnotationsBody,
+  PromoteReviewerAnnotationsResponse,
   PushBimModelBody,
   RecordBimModelDivergenceBody,
   RecordSubmissionResponseBody,
@@ -62,6 +67,7 @@ import type {
   ResolveBimModelDivergenceResponse,
   RetrievalProbeBody,
   RetrievalProbeResponse,
+  ReviewerAnnotationResponse,
   Session,
   SheetSummary,
   SheetUploadResponse,
@@ -73,6 +79,7 @@ import type {
   SubmissionReceipt,
   SubmissionResponse,
   UpdateEngagementBody,
+  UpdateReviewerAnnotationBody,
   UpdateUserBody,
   UploadSnapshotSheetsBody,
   User,
@@ -5209,4 +5216,481 @@ export const useRequestUploadUrl = <
   TContext
 > => {
   return useMutation(getRequestUploadUrlMutationOptions(options));
+};
+
+/**
+ * Returns every reviewer-annotation row anchored to the
+submission, in newest-first order. Reviewer-only — the
+endpoint requires the `internal` audience and 403s any
+non-reviewer caller. Architects must wait until annotations
+are *promoted* (via `POST .../{annotationId}/promote`) before
+they can see them in the architect-side jurisdiction-response
+inbox.
+
+Annotations are submission-scoped and never leak across
+submissions of the same engagement. Threading is preserved on
+the wire (each entry carries `parentAnnotationId`) so the
+side-panel can render a flat list as a thread tree without a
+follow-up query.
+
+ * @summary List reviewer annotations on a submission
+ */
+export const getListReviewerAnnotationsUrl = (
+  submissionId: string,
+  params?: ListReviewerAnnotationsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/submissions/${submissionId}/reviewer-annotations?${stringifiedParams}`
+    : `/api/submissions/${submissionId}/reviewer-annotations`;
+};
+
+export const listReviewerAnnotations = async (
+  submissionId: string,
+  params?: ListReviewerAnnotationsParams,
+  options?: RequestInit,
+): Promise<ListReviewerAnnotationsResponse> => {
+  return customFetch<ListReviewerAnnotationsResponse>(
+    getListReviewerAnnotationsUrl(submissionId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListReviewerAnnotationsQueryKey = (
+  submissionId: string,
+  params?: ListReviewerAnnotationsParams,
+) => {
+  return [
+    `/api/submissions/${submissionId}/reviewer-annotations`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListReviewerAnnotationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listReviewerAnnotations>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  params?: ListReviewerAnnotationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listReviewerAnnotations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListReviewerAnnotationsQueryKey(submissionId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listReviewerAnnotations>>
+  > = ({ signal }) =>
+    listReviewerAnnotations(submissionId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listReviewerAnnotations>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListReviewerAnnotationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listReviewerAnnotations>>
+>;
+export type ListReviewerAnnotationsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List reviewer annotations on a submission
+ */
+
+export function useListReviewerAnnotations<
+  TData = Awaited<ReturnType<typeof listReviewerAnnotations>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  params?: ListReviewerAnnotationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listReviewerAnnotations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListReviewerAnnotationsQueryOptions(
+    submissionId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Creates a top-level annotation, or a reply if
+`parentAnnotationId` is supplied. The route validates that the
+parent annotation (when present) belongs to the same submission
+and is itself a top-level annotation — single-level threading
+is the v1 contract.
+
+Emits `reviewer-annotation.created` for top-level annotations
+and `reviewer-annotation.replied` for replies, both anchored
+to the new annotation row's id.
+
+Reviewer-only — the endpoint requires the `internal` audience
+and 403s any non-reviewer caller.
+
+ * @summary Create a reviewer annotation on a submission
+ */
+export const getCreateReviewerAnnotationUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/reviewer-annotations`;
+};
+
+export const createReviewerAnnotation = async (
+  submissionId: string,
+  createReviewerAnnotationBody: CreateReviewerAnnotationBody,
+  options?: RequestInit,
+): Promise<ReviewerAnnotationResponse> => {
+  return customFetch<ReviewerAnnotationResponse>(
+    getCreateReviewerAnnotationUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createReviewerAnnotationBody),
+    },
+  );
+};
+
+export const getCreateReviewerAnnotationMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createReviewerAnnotation>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateReviewerAnnotationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createReviewerAnnotation>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateReviewerAnnotationBody> },
+  TContext
+> => {
+  const mutationKey = ["createReviewerAnnotation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createReviewerAnnotation>>,
+    { submissionId: string; data: BodyType<CreateReviewerAnnotationBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return createReviewerAnnotation(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateReviewerAnnotationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createReviewerAnnotation>>
+>;
+export type CreateReviewerAnnotationMutationBody =
+  BodyType<CreateReviewerAnnotationBody>;
+export type CreateReviewerAnnotationMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a reviewer annotation on a submission
+ */
+export const useCreateReviewerAnnotation = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createReviewerAnnotation>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateReviewerAnnotationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createReviewerAnnotation>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateReviewerAnnotationBody> },
+  TContext
+> => {
+  return useMutation(getCreateReviewerAnnotationMutationOptions(options));
+};
+
+/**
+ * Edit the body and/or category of a non-promoted reviewer
+annotation. Promoted annotations (those with a non-null
+`promotedAt`) are immutable — a PATCH against one returns 409.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+Today every reviewer in the same submission may edit any
+annotation; per-author lockdown is a follow-up for when the
+identity layer carries roles beyond `internal`.
+
+ * @summary Edit a reviewer annotation
+ */
+export const getUpdateReviewerAnnotationUrl = (
+  submissionId: string,
+  annotationId: string,
+) => {
+  return `/api/submissions/${submissionId}/reviewer-annotations/${annotationId}`;
+};
+
+export const updateReviewerAnnotation = async (
+  submissionId: string,
+  annotationId: string,
+  updateReviewerAnnotationBody: UpdateReviewerAnnotationBody,
+  options?: RequestInit,
+): Promise<ReviewerAnnotationResponse> => {
+  return customFetch<ReviewerAnnotationResponse>(
+    getUpdateReviewerAnnotationUrl(submissionId, annotationId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateReviewerAnnotationBody),
+    },
+  );
+};
+
+export const getUpdateReviewerAnnotationMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateReviewerAnnotation>>,
+    TError,
+    {
+      submissionId: string;
+      annotationId: string;
+      data: BodyType<UpdateReviewerAnnotationBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateReviewerAnnotation>>,
+  TError,
+  {
+    submissionId: string;
+    annotationId: string;
+    data: BodyType<UpdateReviewerAnnotationBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["updateReviewerAnnotation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateReviewerAnnotation>>,
+    {
+      submissionId: string;
+      annotationId: string;
+      data: BodyType<UpdateReviewerAnnotationBody>;
+    }
+  > = (props) => {
+    const { submissionId, annotationId, data } = props ?? {};
+
+    return updateReviewerAnnotation(
+      submissionId,
+      annotationId,
+      data,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateReviewerAnnotationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateReviewerAnnotation>>
+>;
+export type UpdateReviewerAnnotationMutationBody =
+  BodyType<UpdateReviewerAnnotationBody>;
+export type UpdateReviewerAnnotationMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Edit a reviewer annotation
+ */
+export const useUpdateReviewerAnnotation = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateReviewerAnnotation>>,
+    TError,
+    {
+      submissionId: string;
+      annotationId: string;
+      data: BodyType<UpdateReviewerAnnotationBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateReviewerAnnotation>>,
+  TError,
+  {
+    submissionId: string;
+    annotationId: string;
+    data: BodyType<UpdateReviewerAnnotationBody>;
+  },
+  TContext
+> => {
+  return useMutation(getUpdateReviewerAnnotationMutationOptions(options));
+};
+
+/**
+ * Stamps `promotedAt` on each annotation in the request body and
+emits a `reviewer-annotation.promoted` event per row. Idempotent
+per row — annotations that have already been promoted are
+silently skipped (their existing `promotedAt` is preserved and
+no second event is appended). At least one annotation in the
+request body must belong to the submission; ids that do not
+match the submission are reported back via the response's
+`unknown` array so the caller can surface the mismatch.
+
+Promotion is the only path that flips an annotation from
+reviewer-only into architect-visible. Once promoted, the row
+is immutable (PATCH returns 409, repeat promote is a no-op).
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Promote one or more reviewer annotations
+ */
+export const getPromoteReviewerAnnotationsUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/reviewer-annotations/promote`;
+};
+
+export const promoteReviewerAnnotations = async (
+  submissionId: string,
+  promoteReviewerAnnotationsBody: PromoteReviewerAnnotationsBody,
+  options?: RequestInit,
+): Promise<PromoteReviewerAnnotationsResponse> => {
+  return customFetch<PromoteReviewerAnnotationsResponse>(
+    getPromoteReviewerAnnotationsUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(promoteReviewerAnnotationsBody),
+    },
+  );
+};
+
+export const getPromoteReviewerAnnotationsMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof promoteReviewerAnnotations>>,
+    TError,
+    { submissionId: string; data: BodyType<PromoteReviewerAnnotationsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof promoteReviewerAnnotations>>,
+  TError,
+  { submissionId: string; data: BodyType<PromoteReviewerAnnotationsBody> },
+  TContext
+> => {
+  const mutationKey = ["promoteReviewerAnnotations"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof promoteReviewerAnnotations>>,
+    { submissionId: string; data: BodyType<PromoteReviewerAnnotationsBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return promoteReviewerAnnotations(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PromoteReviewerAnnotationsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof promoteReviewerAnnotations>>
+>;
+export type PromoteReviewerAnnotationsMutationBody =
+  BodyType<PromoteReviewerAnnotationsBody>;
+export type PromoteReviewerAnnotationsMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Promote one or more reviewer annotations
+ */
+export const usePromoteReviewerAnnotations = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof promoteReviewerAnnotations>>,
+    TError,
+    { submissionId: string; data: BodyType<PromoteReviewerAnnotationsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof promoteReviewerAnnotations>>,
+  TError,
+  { submissionId: string; data: BodyType<PromoteReviewerAnnotationsBody> },
+  TContext
+> => {
+  return useMutation(getPromoteReviewerAnnotationsMutationOptions(options));
 };

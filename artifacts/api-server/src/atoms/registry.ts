@@ -31,6 +31,7 @@ import { makeNeighboringContextAtom } from "./neighboring-context.atom";
 import { makeBimModelAtom } from "./bim-model.atom";
 import { makeMaterializableElementAtom } from "./materializable-element.atom";
 import { makeBriefingDivergenceAtom } from "./briefing-divergence.atom";
+import { makeReviewerAnnotationAtom } from "./reviewer-annotation.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -147,6 +148,15 @@ export function getAtomRegistry(): AtomRegistry {
   registry.register(makeMaterializableElementAtom({ db, history }));
   registry.register(makeBriefingDivergenceAtom({ db, history }));
   registry.register(makeBimModelAtom({ db, history }));
+  // Wave 2 Sprint C / Spec 307 — reviewer-annotation is the
+  // 12th catalog atom. Composes every potential target type
+  // (submission, briefing-source, materializable-element,
+  // briefing-divergence, sheet, parcel-briefing) declaratively;
+  // only the matching edge is populated at lookup time. Registered
+  // last so the boot-log tail makes the dependency order obvious
+  // (every target has been registered before the annotation atom
+  // declares them as children).
+  registry.register(makeReviewerAnnotationAtom({ db, history }));
   _registry = registry;
   return registry;
 }

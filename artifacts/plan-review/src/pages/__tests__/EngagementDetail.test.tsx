@@ -142,6 +142,38 @@ vi.mock("@workspace/api-client-react", async () => {
       id,
     ],
     getGetSessionQueryKey: () => ["getSession"],
+    // Spec 307 — EngagementDetail now mounts the reviewer-annotation
+    // affordance on each submission row. The affordance hides itself
+    // for non-internal audiences, but the hook is still called
+    // unconditionally (with `enabled: false`), so we have to provide
+    // a stub. Returns an empty list so the badge count is 0 and the
+    // row stays visually identical to the pre-Spec-307 layout.
+    getListReviewerAnnotationsQueryKey: (
+      submissionId: string,
+      params: { targetEntityType: string; targetEntityId: string },
+    ) => [
+      "listReviewerAnnotations",
+      submissionId,
+      params.targetEntityType,
+      params.targetEntityId,
+    ],
+    useListReviewerAnnotations: (
+      submissionId: string,
+      params: { targetEntityType: string; targetEntityId: string },
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          ([
+            "listReviewerAnnotations",
+            submissionId,
+            params.targetEntityType,
+            params.targetEntityId,
+          ] as const),
+        queryFn: async () => ({ annotations: [] }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
     // Task #261 — the engagement page now embeds BriefingRecentRunsPanel,
     // which calls these two named exports. The panel fetches lazily
     // (only when its disclosure is opened), so the runs hook is wired

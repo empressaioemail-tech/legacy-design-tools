@@ -2,14 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "wouter";
 import {
   DashboardLayout,
+  ReviewerAnnotationAffordance,
+  ReviewerAnnotationPanel,
   ReviewerComment,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
 } from "@workspace/portal-ui";
 import {
   useGetEngagement,
+  useGetSession,
   useListEngagementSubmissions,
   getGetEngagementQueryKey,
+  getGetSessionQueryKey,
   getListEngagementSubmissionsQueryKey,
   type EngagementSubmissionSummary,
   type SubmissionReceipt,
@@ -115,11 +119,148 @@ function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
  * invalidates `getListEngagementSubmissionsQueryKey(id)` so the new
  * row appears immediately.
  */
+/**
+ * Closed enum of target atom types a reviewer-annotation may anchor
+ * against — mirrors `REVIEWER_ANNOTATION_TARGET_TYPES` in the schema
+ * (kept inline here so the page doesn't pull in a server-only import).
+ * The deep-link parser uses this set to validate the `targetType=`
+ * query string and silently fall back to `submission` for anything
+ * unrecognized so a typo'd link doesn't crash the page.
+ */
+const REVIEWER_ANNOTATION_TARGET_TYPES = [
+  "submission",
+  "briefing-source",
+  "materializable-element",
+  "briefing-divergence",
+  "sheet",
+  "parcel-briefing",
+] as const;
+type ReviewerAnnotationTargetType =
+  (typeof REVIEWER_ANNOTATION_TARGET_TYPES)[number];
+
+function isValidTargetType(
+  v: string | null,
+): v is ReviewerAnnotationTargetType {
+  return (
+    v != null &&
+    (REVIEWER_ANNOTATION_TARGET_TYPES as readonly string[]).includes(v)
+  );
+}
+
+/**
+ * Parsed `#annotation=<id>&submission=<id>[&targetType=<t>&target=<id>]`
+ * deep-link payload. Used by the Wave 2 Sprint C / Spec 307
+ * reviewer-annotation panel so a reviewer pasting a link from chat
+ * lands directly on the right submission's panel against the right
+ * target tuple, with the highlighted annotation ready to scroll into
+ * view.
+ *
+ * `targetType` + `targetEntityId` are optional — when omitted the
+ * panel opens against the submission row itself (the original Wave 2
+ * Sprint C deep-link shape), so older links keep working.
+ */
+interface AnnotationDeepLink {
+  submissionId: string;
+  annotationId: string;
+  targetEntityType: ReviewerAnnotationTargetType;
+  targetEntityId: string;
+}
+
+/**
+ * Parse the location hash for a reviewer-annotation deep-link.
+ * Returns `null` when the hash is empty / does not carry both
+ * required keys (`annotation` + `submission`).
+ *
+ * Format:
+ *   `#annotation=<annotationId>&submission=<submissionId>` (legacy:
+ *     opens against the submission row), or
+ *   `#annotation=<id>&submission=<id>&targetType=<type>&target=<id>`
+ *     (full tuple: opens against a specific target row inside the
+ *     submission's panel).
+ *
+ * The full-tuple form is the shape the side panel emits when the
+ * reviewer copies a link off a non-submission target (Spec 307's
+ * "right tab, right target, scroll-to-annotation" round-trip);
+ * `targetType` is validated against the closed enum so a typo
+ * silently falls through to the legacy submission-target shape
+ * rather than crashing the page on hydration.
+ */
+function parseAnnotationDeepLink(): AnnotationDeepLink | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash) return null;
+  const params = new URLSearchParams(hash);
+  const annotationId = params.get("annotation");
+  const submissionId = params.get("submission");
+  if (!annotationId || !submissionId) return null;
+
+  const rawTargetType = params.get("targetType");
+  const rawTargetId = params.get("target");
+  // Both target keys must be present together; if either is missing
+  // (or `targetType` is unrecognized), fall back to the submission
+  // tuple so the panel still opens against *something* concrete.
+  const hasFullTuple =
+    isValidTargetType(rawTargetType) &&
+    rawTargetId != null &&
+    rawTargetId.length > 0;
+  return {
+    annotationId,
+    submissionId,
+    targetEntityType: hasFullTuple ? rawTargetType : "submission",
+    targetEntityId: hasFullTuple ? rawTargetId : submissionId,
+  };
+}
+
 export default function EngagementDetail() {
   const navGroups = useNavGroups();
   const params = useParams();
   const id = params.id as string;
   const [submitOpen, setSubmitOpen] = useState(false);
+  // Reviewer-annotation panel state. The panel is shared across every
+  // submission row's affordance — clicking an affordance opens the
+  // panel keyed to the (submissionId, targetEntityType, targetEntityId)
+  // tuple of the row that fired. `null` means the panel is closed.
+  const [annotationTarget, setAnnotationTarget] = useState<{
+    submissionId: string;
+    targetEntityType:
+      | "submission"
+      | "briefing-source"
+      | "materializable-element"
+      | "briefing-divergence"
+      | "sheet"
+      | "parcel-briefing";
+    targetEntityId: string;
+    highlightAnnotationId: string | null;
+  } | null>(null);
+
+  // The session response carries `audience` (internal / user / ai) so
+  // the reviewer affordance can hide itself for non-reviewer sessions
+  // — same gate the route applies, just enforced FE-side so the UI
+  // doesn't render a button that would 403 anyway.
+  const { data: session } = useGetSession({
+    query: { queryKey: getGetSessionQueryKey() },
+  });
+  const audience = session?.audience ?? "user";
+
+  // Deep-link handler: on first mount, scan the URL hash for a
+  // reviewer-annotation deep-link payload and pop the panel open
+  // against the parsed target tuple. The annotation row itself is
+  // highlighted via `highlightAnnotationId`. When the deep-link
+  // omits the target tuple (legacy `#annotation=<id>&submission=<id>`
+  // shape) the parser falls back to the submission target so older
+  // links keep landing on a concrete row.
+  useEffect(() => {
+    if (audience !== "internal") return;
+    const link = parseAnnotationDeepLink();
+    if (!link) return;
+    setAnnotationTarget({
+      submissionId: link.submissionId,
+      targetEntityType: link.targetEntityType,
+      targetEntityId: link.targetEntityId,
+      highlightAnnotationId: link.annotationId,
+    });
+  }, [audience]);
+
   // Top-bar search filters the past-submissions list by jurisdiction,
   // status, note, or reviewer comment (Task #111). The query is held
   // here so the layout's `Header` and the list both see the same
@@ -220,6 +361,10 @@ export default function EngagementDetail() {
           onSubmit={() => setSubmitOpen(true)}
           canSubmit={canSubmit}
           searchQuery={searchQuery}
+          audience={audience}
+          onOpenAnnotations={(target) =>
+            setAnnotationTarget({ ...target, highlightAnnotationId: null })
+          }
         />
 
         {/*
@@ -250,6 +395,31 @@ export default function EngagementDetail() {
           }
         />
       )}
+      {annotationTarget && (
+        <ReviewerAnnotationPanel
+          isOpen={true}
+          onClose={() => {
+            setAnnotationTarget(null);
+            // Clear the deep-link hash so a "Close" doesn't leave a
+            // stale URL that would re-open the panel on refresh.
+            if (
+              typeof window !== "undefined" &&
+              window.location.hash.includes("annotation=")
+            ) {
+              history.replaceState(
+                null,
+                "",
+                window.location.pathname + window.location.search,
+              );
+            }
+          }}
+          submissionId={annotationTarget.submissionId}
+          targetEntityType={annotationTarget.targetEntityType}
+          targetEntityId={annotationTarget.targetEntityId}
+          audience={audience}
+          highlightAnnotationId={annotationTarget.highlightAnnotationId}
+        />
+      )}
     </DashboardLayout>
   );
 }
@@ -259,11 +429,25 @@ function SubmissionsList({
   onSubmit,
   canSubmit,
   searchQuery,
+  audience,
+  onOpenAnnotations,
 }: {
   engagementId: string;
   onSubmit: () => void;
   canSubmit: boolean;
   searchQuery: string;
+  audience: "internal" | "user" | "ai";
+  onOpenAnnotations: (target: {
+    submissionId: string;
+    targetEntityType:
+      | "submission"
+      | "briefing-source"
+      | "materializable-element"
+      | "briefing-divergence"
+      | "sheet"
+      | "parcel-briefing";
+    targetEntityId: string;
+  }) => void;
 }) {
   const { data: submissions, isLoading } = useListEngagementSubmissions(
     engagementId,
@@ -338,6 +522,8 @@ function SubmissionsList({
       searchQuery={searchQuery}
       onSubmit={onSubmit}
       canSubmit={canSubmit}
+      audience={audience}
+      onOpenAnnotations={onOpenAnnotations}
     />
   );
 }
@@ -362,6 +548,8 @@ function SubmissionsCardBody({
   searchQuery,
   onSubmit,
   canSubmit,
+  audience,
+  onOpenAnnotations,
 }: {
   engagementId: string;
   submissions: EngagementSubmissionSummary[];
@@ -370,6 +558,18 @@ function SubmissionsCardBody({
   searchQuery: string;
   onSubmit: () => void;
   canSubmit: boolean;
+  audience: "internal" | "user" | "ai";
+  onOpenAnnotations: (target: {
+    submissionId: string;
+    targetEntityType:
+      | "submission"
+      | "briefing-source"
+      | "materializable-element"
+      | "briefing-divergence"
+      | "sheet"
+      | "parcel-briefing";
+    targetEntityId: string;
+  }) => void;
 }) {
   const [activeSubmission, setActiveSubmission] =
     useState<EngagementSubmissionSummary | null>(null);
@@ -412,6 +612,8 @@ function SubmissionsCardBody({
               key={s.id}
               submission={s}
               onOpenDetail={() => setActiveSubmission(s)}
+              audience={audience}
+              onOpenAnnotations={onOpenAnnotations}
             />
           ))
         )}
@@ -449,6 +651,8 @@ function SubmissionsCardBody({
 function SubmissionRow({
   submission: s,
   onOpenDetail,
+  audience,
+  onOpenAnnotations,
 }: {
   submission: EngagementSubmissionSummary;
   /**
@@ -460,6 +664,27 @@ function SubmissionRow({
    * spans so they don't get their own button semantics.
    */
   onOpenDetail: () => void;
+  /**
+   * Wave 2 Sprint C (Task #307) — reviewer audience and the side-
+   * panel opener. The `ReviewerAnnotationAffordance` rendered inside
+   * the row is gated on `audience === "internal"` and, when clicked,
+   * pops the shared annotation panel against this submission row's
+   * target tuple. The affordance stops click propagation so the
+   * outer row's `onOpenDetail` modal is *not* triggered when a
+   * reviewer wants only the annotation panel.
+   */
+  audience: "internal" | "user" | "ai";
+  onOpenAnnotations: (target: {
+    submissionId: string;
+    targetEntityType:
+      | "submission"
+      | "briefing-source"
+      | "materializable-element"
+      | "briefing-divergence"
+      | "sheet"
+      | "parcel-briefing";
+    targetEntityId: string;
+  }) => void;
 }) {
   // The OpenAPI contract guarantees `status` is always present
   // (defaulted to "pending" by the row schema), so we can drive the
@@ -509,13 +734,22 @@ function SubmissionRow({
           </span>
           <SubmissionStatusBadge status={status} />
         </div>
-        <span
-          className="sc-meta"
-          title={new Date(s.submittedAt).toLocaleString()}
-          style={{ color: "var(--text-secondary)", fontSize: 11 }}
-        >
-          {relativeTime(s.submittedAt)}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <ReviewerAnnotationAffordance
+            submissionId={s.id}
+            targetEntityType="submission"
+            targetEntityId={s.id}
+            audience={audience}
+            onOpen={onOpenAnnotations}
+          />
+          <span
+            className="sc-meta"
+            title={new Date(s.submittedAt).toLocaleString()}
+            style={{ color: "var(--text-secondary)", fontSize: 11 }}
+          >
+            {relativeTime(s.submittedAt)}
+          </span>
+        </div>
       </div>
       {hasResponse && (
         <div

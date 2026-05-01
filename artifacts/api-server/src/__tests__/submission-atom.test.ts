@@ -98,8 +98,12 @@ describe("submission atom (contract)", () => {
 
   const submissionAtom = makeSubmissionAtom({ db: lazyDb });
 
-  // The submission atom has no `composition` edges, so the contract
-  // suite's composition-resolution step has nothing to register.
+  // The submission atom's only `composition` edge is a
+  // `reviewer-annotation` forward ref (Spec 307) — the resolver
+  // silently produces zero children when the child is unregistered
+  // *or* when the parent's `data.reviewerAnnotations` is absent
+  // (which is the audience-gated default), so the contract suite's
+  // composition-resolution step has nothing to register here.
   runAtomContractTests(submissionAtom, {
     withFixture: { entityId: SUBMISSION_ID },
   });

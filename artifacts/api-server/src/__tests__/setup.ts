@@ -74,6 +74,11 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // generate-layers route assert hit/miss behaviour, so we must
   // reset the table between cases.
   "adapter_response_cache",
+  // Wave 2 Sprint C / Spec 307 — reviewer-annotation rows. Cascades
+  // off `submissions` (which cascades off `engagements`), but listed
+  // explicitly per the "if a route writes to it, it's in this list"
+  // invariant.
+  "reviewer_annotations",
 ];
 
 /**

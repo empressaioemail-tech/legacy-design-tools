@@ -82,6 +82,10 @@ describe("lib/db schema integration", () => {
         "findings_code_atoms",
         "materializable_elements",
         "parcel_briefings",
+        // Spec 307 / Task #307 — reviewer scratch-note surface anchored
+        // per (submission, target atom) tuple. Reviewer-only until the
+        // bulk-promote endpoint flips `promoted_at`.
+        "reviewer_annotations",
         "sheets",
         "snapshots",
         "submissions",

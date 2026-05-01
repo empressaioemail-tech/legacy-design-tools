@@ -15,3 +15,4 @@ export * from "./materializableElements";
 export * from "./briefingDivergences";
 export * from "./briefingGenerationJobs";
 export * from "./adapterResponseCache";
+export * from "./reviewerAnnotations";

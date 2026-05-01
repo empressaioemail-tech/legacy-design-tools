@@ -18,10 +18,19 @@
  *   - history-provenance fallback to the row's `submittedAt` when the
  *     history service is absent or has no events for this entity yet.
  *
- * Composition: a submission has no children today, so `composition`
- * is empty. The parent engagement's composition declares this atom as
- * the `submission` child edge (no longer a forward ref now that this
- * registration exists).
+ * Composition: a submission's only declared child edge is
+ * `reviewer-annotation` (Spec 307) — the threaded reviewer scratch
+ * notes anchored against this submission. The edge is `forwardRef:
+ * true` because the data hydration deliberately lives in the
+ * dedicated `/submissions/:id/reviewer-annotations` route (which is
+ * audience-gated to internal reviewers); the resolver silently
+ * produces zero children whenever `parentData.reviewerAnnotations`
+ * is absent, so an external (architect) caller hitting this atom's
+ * `contextSummary` never sees the reviewer-only thread.
+ *
+ * The parent engagement's composition declares the submission atom
+ * as its `submission` child edge (no longer a forward ref now that
+ * this registration exists).
  */
 
 import { eq } from "drizzle-orm";
@@ -225,7 +234,14 @@ export function makeSubmissionAtom(
     domain: "plan-review",
     supportedModes: SUBMISSION_SUPPORTED_MODES,
     defaultMode: "card",
-    composition: [],
+    composition: [
+      {
+        childEntityType: "reviewer-annotation",
+        childMode: "compact",
+        dataKey: "reviewerAnnotations",
+        forwardRef: true,
+      },
+    ],
     eventTypes: SUBMISSION_EVENT_TYPES,
     async contextSummary(
       entityId: string,

@@ -56,6 +56,26 @@ export const BRIEFING_MANUAL_UPLOAD_ACTOR_ID = "briefing-manual-upload";
 export const BRIEFING_ENGINE_ACTOR_ID = "briefing-engine";
 
 /**
+ * Reviewer-annotation create / reply path —
+ * `routes/reviewerAnnotations.ts`. Stamped on
+ * `reviewer-annotation.created` / `.replied` events when the
+ * session does not carry a requestor id (defensive — the route
+ * gates on a session-bound requestor today, but the actor exists
+ * so the audit trail still attributes a write to *something*
+ * stable in the unlikely fallback path).
+ */
+export const REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID = "reviewer-annotation-author";
+
+/**
+ * Reviewer-annotation promotion path —
+ * `routes/reviewerAnnotations.ts`. Stamped on
+ * `reviewer-annotation.promoted` events when promotion was performed
+ * via the bulk-promote endpoint without a session-bound requestor.
+ */
+export const REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID =
+  "reviewer-annotation-promote";
+
+/**
  * Every stable server-side actor id, in declaration order. Consumers
  * iterate this array (e.g. the design-tools actorLabel test) to assert
  * each emitted id has a matching operator-facing label, so a new server
@@ -77,6 +97,8 @@ export const SERVER_ACTOR_IDS = [
   BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID,
   BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
   BRIEFING_ENGINE_ACTOR_ID,
+  REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID,
+  REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,
 ] as const;
 
 /** Literal-id union of {@link SERVER_ACTOR_IDS}. */

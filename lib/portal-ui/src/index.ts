@@ -14,6 +14,10 @@ export { SubmissionRecordedBanner } from "./components/SubmissionRecordedBanner"
 export type { SubmissionRecordedBannerProps } from "./components/SubmissionRecordedBanner";
 export { ReviewerComment } from "./components/ReviewerComment";
 export type { ReviewerCommentProps } from "./components/ReviewerComment";
+export { ReviewerAnnotationAffordance } from "./components/ReviewerAnnotationAffordance";
+export type { ReviewerAnnotationAffordanceProps } from "./components/ReviewerAnnotationAffordance";
+export { ReviewerAnnotationPanel } from "./components/ReviewerAnnotationPanel";
+export type { ReviewerAnnotationPanelProps } from "./components/ReviewerAnnotationPanel";
 
 // Briefing divergences — shared by design-tools (architect surface)
 // and plan-review (read-only reviewer surface). Promoted to portal-ui

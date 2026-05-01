@@ -24,6 +24,12 @@ tags:
     description: Object storage (presigned uploads, file serving)
   - name: session
     description: Current session — audience, requestor, permission claims
+  - name: reviewer-annotations
+    description: |
+      Reviewer-only scratch notes anchored to a target atom render
+      inside a specific submission. Threaded via parentAnnotationId,
+      promoted into architect visibility as part of a jurisdiction
+      response (Wave 2 Sprint C / Spec 307).
 paths:
   /healthz:
     get:
@@ -2249,6 +2255,245 @@ paths:
             Requested `contentType` is not in the allow-list (see
             `RequestUploadUrlBody.contentType`). The avatar flow is the
             only consumer today; it always uploads `image/jpeg`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/reviewer-annotations:
+    get:
+      operationId: listReviewerAnnotations
+      tags: [reviewer-annotations]
+      summary: List reviewer annotations on a submission
+      description: |
+        Returns every reviewer-annotation row anchored to the
+        submission, in newest-first order. Reviewer-only — the
+        endpoint requires the `internal` audience and 403s any
+        non-reviewer caller. Architects must wait until annotations
+        are *promoted* (via `POST .../{annotationId}/promote`) before
+        they can see them in the architect-side jurisdiction-response
+        inbox.
+
+        Annotations are submission-scoped and never leak across
+        submissions of the same engagement. Threading is preserved on
+        the wire (each entry carries `parentAnnotationId`) so the
+        side-panel can render a flat list as a thread tree without a
+        follow-up query.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Submission id.
+        - name: targetEntityType
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ReviewerAnnotationTargetType"
+          description: |
+            Optional filter — restrict the result to annotations
+            anchored to this target type. Combine with `targetEntityId`
+            for a single-target lookup (the affordance's read path).
+        - name: targetEntityId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Optional filter — restrict the result to annotations
+            anchored to this target entity id. Must be paired with
+            `targetEntityType`.
+      responses:
+        "200":
+          description: Newest-first list of reviewer annotations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListReviewerAnnotationsResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createReviewerAnnotation
+      tags: [reviewer-annotations]
+      summary: Create a reviewer annotation on a submission
+      description: |
+        Creates a top-level annotation, or a reply if
+        `parentAnnotationId` is supplied. The route validates that the
+        parent annotation (when present) belongs to the same submission
+        and is itself a top-level annotation — single-level threading
+        is the v1 contract.
+
+        Emits `reviewer-annotation.created` for top-level annotations
+        and `reviewer-annotation.replied` for replies, both anchored
+        to the new annotation row's id.
+
+        Reviewer-only — the endpoint requires the `internal` audience
+        and 403s any non-reviewer caller.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReviewerAnnotationBody"
+      responses:
+        "201":
+          description: Annotation created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewerAnnotationResponse"
+        "400":
+          description: Invalid request body or parent/submission mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/reviewer-annotations/{annotationId}:
+    patch:
+      operationId: updateReviewerAnnotation
+      tags: [reviewer-annotations]
+      summary: Edit a reviewer annotation
+      description: |
+        Edit the body and/or category of a non-promoted reviewer
+        annotation. Promoted annotations (those with a non-null
+        `promotedAt`) are immutable — a PATCH against one returns 409.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+        Today every reviewer in the same submission may edit any
+        annotation; per-author lockdown is a follow-up for when the
+        identity layer carries roles beyond `internal`.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: annotationId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateReviewerAnnotationBody"
+      responses:
+        "200":
+          description: Annotation updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewerAnnotationResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission or annotation not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Annotation has already been promoted (immutable).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/reviewer-annotations/promote:
+    post:
+      operationId: promoteReviewerAnnotations
+      tags: [reviewer-annotations]
+      summary: Promote one or more reviewer annotations
+      description: |
+        Stamps `promotedAt` on each annotation in the request body and
+        emits a `reviewer-annotation.promoted` event per row. Idempotent
+        per row — annotations that have already been promoted are
+        silently skipped (their existing `promotedAt` is preserved and
+        no second event is appended). At least one annotation in the
+        request body must belong to the submission; ids that do not
+        match the submission are reported back via the response's
+        `unknown` array so the caller can surface the mismatch.
+
+        Promotion is the only path that flips an annotation from
+        reviewer-only into architect-visible. Once promoted, the row
+        is immutable (PATCH returns 409, repeat promote is a no-op).
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromoteReviewerAnnotationsBody"
+      responses:
+        "200":
+          description: Promotion result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromoteReviewerAnnotationsResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
           content:
             application/json:
               schema:
@@ -5091,3 +5336,196 @@ components:
             $ref: "#/components/schemas/BimModelDivergenceListEntry"
       required:
         - divergences
+
+    ReviewerAnnotationTargetType:
+      type: string
+      description: |
+        Closed enum of target atom types a reviewer annotation may be
+        anchored to. Mirrors `REVIEWER_ANNOTATION_TARGET_TYPES` in
+        `lib/db/src/schema/reviewerAnnotations.ts` — adding a new
+        target type requires updating both the DB-side tuple and this
+        enum so the route validator and the atom composition list
+        stay in sync.
+      enum:
+        - submission
+        - briefing-source
+        - materializable-element
+        - briefing-divergence
+        - sheet
+        - parcel-briefing
+
+    ReviewerAnnotationCategory:
+      type: string
+      description: |
+        Closed enum of category buckets a reviewer may file an
+        annotation under. Drives the side-panel badge and lets future
+        promotion-side filtering (e.g. "promote all concerns") avoid
+        relying on free-text classification.
+      enum:
+        - concern
+        - question
+        - note
+        - requires-followup
+
+    ReviewerAnnotation:
+      type: object
+      description: |
+        One reviewer-annotation row. Threaded via the optional
+        `parentAnnotationId`. `promotedAt` is null while the
+        annotation is still reviewer-only; once non-null the row is
+        immutable and the architect-side jurisdiction-response inbox
+        picks it up.
+      properties:
+        id:
+          type: string
+        submissionId:
+          type: string
+        targetEntityType:
+          $ref: "#/components/schemas/ReviewerAnnotationTargetType"
+        targetEntityId:
+          type: string
+        reviewerId:
+          type: string
+        body:
+          type: string
+        category:
+          $ref: "#/components/schemas/ReviewerAnnotationCategory"
+        parentAnnotationId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        promotedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - submissionId
+        - targetEntityType
+        - targetEntityId
+        - reviewerId
+        - body
+        - category
+        - parentAnnotationId
+        - createdAt
+        - updatedAt
+        - promotedAt
+
+    CreateReviewerAnnotationBody:
+      type: object
+      description: |
+        Request body for `POST /submissions/{submissionId}/reviewer-annotations`.
+        Top-level annotations omit `parentAnnotationId`; replies set it
+        to the root annotation id of the thread (single-level threading
+        is the v1 contract).
+      properties:
+        targetEntityType:
+          $ref: "#/components/schemas/ReviewerAnnotationTargetType"
+        targetEntityId:
+          type: string
+          minLength: 1
+          maxLength: 512
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        category:
+          $ref: "#/components/schemas/ReviewerAnnotationCategory"
+        parentAnnotationId:
+          type: string
+          nullable: true
+      required:
+        - targetEntityType
+        - targetEntityId
+        - body
+
+    UpdateReviewerAnnotationBody:
+      type: object
+      description: |
+        Request body for `PATCH /submissions/{submissionId}/reviewer-annotations/{annotationId}`.
+        Either or both fields may be supplied; an empty body is a no-op
+        (returns the unchanged row). Promoted annotations reject all
+        updates with 409.
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        category:
+          $ref: "#/components/schemas/ReviewerAnnotationCategory"
+
+    PromoteReviewerAnnotationsBody:
+      type: object
+      description: |
+        Request body for `POST /submissions/{submissionId}/reviewer-annotations/promote`.
+        Multi-promote in a single call so the jurisdiction-response
+        dialog can flip the selected annotations into architect
+        visibility atomically. At least one id is required.
+      properties:
+        annotationIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+      required:
+        - annotationIds
+
+    ReviewerAnnotationResponse:
+      type: object
+      description: |
+        Wire envelope for `POST` and `PATCH` reviewer-annotation
+        endpoints. Carries the affected row in the same shape the
+        list endpoint returns so the FE can splice the response into
+        cached lists without a follow-up fetch.
+      properties:
+        annotation:
+          $ref: "#/components/schemas/ReviewerAnnotation"
+      required:
+        - annotation
+
+    ListReviewerAnnotationsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /submissions/{submissionId}/reviewer-annotations`.
+        Newest-first list, optionally filtered by target entity type +
+        id query parameters.
+      properties:
+        annotations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerAnnotation"
+      required:
+        - annotations
+
+    PromoteReviewerAnnotationsResponse:
+      type: object
+      description: |
+        Wire envelope for the multi-promote endpoint. `promoted` carries
+        every annotation row that flipped from reviewer-only to
+        promoted on this call (idempotent: already-promoted ids land in
+        `alreadyPromoted` instead). `unknown` reports any ids in the
+        request body that did not resolve to an annotation under the
+        submission so the caller can surface the mismatch.
+      properties:
+        promoted:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerAnnotation"
+        alreadyPromoted:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerAnnotation"
+        unknown:
+          type: array
+          items:
+            type: string
+      required:
+        - promoted
+        - alreadyPromoted
+        - unknown

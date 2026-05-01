@@ -2015,6 +2015,156 @@ export interface ListBimModelDivergencesResponse {
   divergences: BimModelDivergenceListEntry[];
 }
 
+/**
+ * Closed enum of target atom types a reviewer annotation may be
+anchored to. Mirrors `REVIEWER_ANNOTATION_TARGET_TYPES` in
+`lib/db/src/schema/reviewerAnnotations.ts` — adding a new
+target type requires updating both the DB-side tuple and this
+enum so the route validator and the atom composition list
+stay in sync.
+
+ */
+export type ReviewerAnnotationTargetType =
+  (typeof ReviewerAnnotationTargetType)[keyof typeof ReviewerAnnotationTargetType];
+
+export const ReviewerAnnotationTargetType = {
+  submission: "submission",
+  "briefing-source": "briefing-source",
+  "materializable-element": "materializable-element",
+  "briefing-divergence": "briefing-divergence",
+  sheet: "sheet",
+  "parcel-briefing": "parcel-briefing",
+} as const;
+
+/**
+ * Closed enum of category buckets a reviewer may file an
+annotation under. Drives the side-panel badge and lets future
+promotion-side filtering (e.g. "promote all concerns") avoid
+relying on free-text classification.
+
+ */
+export type ReviewerAnnotationCategory =
+  (typeof ReviewerAnnotationCategory)[keyof typeof ReviewerAnnotationCategory];
+
+export const ReviewerAnnotationCategory = {
+  concern: "concern",
+  question: "question",
+  note: "note",
+  "requires-followup": "requires-followup",
+} as const;
+
+/**
+ * One reviewer-annotation row. Threaded via the optional
+`parentAnnotationId`. `promotedAt` is null while the
+annotation is still reviewer-only; once non-null the row is
+immutable and the architect-side jurisdiction-response inbox
+picks it up.
+
+ */
+export interface ReviewerAnnotation {
+  id: string;
+  submissionId: string;
+  targetEntityType: ReviewerAnnotationTargetType;
+  targetEntityId: string;
+  reviewerId: string;
+  body: string;
+  category: ReviewerAnnotationCategory;
+  parentAnnotationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  promotedAt: string | null;
+}
+
+/**
+ * Request body for `POST /submissions/{submissionId}/reviewer-annotations`.
+Top-level annotations omit `parentAnnotationId`; replies set it
+to the root annotation id of the thread (single-level threading
+is the v1 contract).
+
+ */
+export interface CreateReviewerAnnotationBody {
+  targetEntityType: ReviewerAnnotationTargetType;
+  /**
+   * @minLength 1
+   * @maxLength 512
+   */
+  targetEntityId: string;
+  /**
+   * @minLength 1
+   * @maxLength 4096
+   */
+  body: string;
+  category?: ReviewerAnnotationCategory;
+  parentAnnotationId?: string | null;
+}
+
+/**
+ * Request body for `PATCH /submissions/{submissionId}/reviewer-annotations/{annotationId}`.
+Either or both fields may be supplied; an empty body is a no-op
+(returns the unchanged row). Promoted annotations reject all
+updates with 409.
+
+ */
+export interface UpdateReviewerAnnotationBody {
+  /**
+   * @minLength 1
+   * @maxLength 4096
+   */
+  body?: string;
+  category?: ReviewerAnnotationCategory;
+}
+
+/**
+ * Request body for `POST /submissions/{submissionId}/reviewer-annotations/promote`.
+Multi-promote in a single call so the jurisdiction-response
+dialog can flip the selected annotations into architect
+visibility atomically. At least one id is required.
+
+ */
+export interface PromoteReviewerAnnotationsBody {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  annotationIds: string[];
+}
+
+/**
+ * Wire envelope for `POST` and `PATCH` reviewer-annotation
+endpoints. Carries the affected row in the same shape the
+list endpoint returns so the FE can splice the response into
+cached lists without a follow-up fetch.
+
+ */
+export interface ReviewerAnnotationResponse {
+  annotation: ReviewerAnnotation;
+}
+
+/**
+ * Wire envelope for `GET /submissions/{submissionId}/reviewer-annotations`.
+Newest-first list, optionally filtered by target entity type +
+id query parameters.
+
+ */
+export interface ListReviewerAnnotationsResponse {
+  annotations: ReviewerAnnotation[];
+}
+
+/**
+ * Wire envelope for the multi-promote endpoint. `promoted` carries
+every annotation row that flipped from reviewer-only to
+promoted on this call (idempotent: already-promoted ids land in
+`alreadyPromoted` instead). `unknown` reports any ids in the
+request body that did not resolve to an annotation under the
+submission so the caller can surface the mismatch.
+
+ */
+export interface PromoteReviewerAnnotationsResponse {
+  promoted: ReviewerAnnotation[];
+  alreadyPromoted: ReviewerAnnotation[];
+  unknown: string[];
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
@@ -2159,4 +2309,21 @@ export type GetAtomHistoryParams = {
    * @maximum 50
    */
   limit?: number;
+};
+
+export type ListReviewerAnnotationsParams = {
+  /**
+ * Optional filter — restrict the result to annotations
+anchored to this target type. Combine with `targetEntityId`
+for a single-target lookup (the affordance's read path).
+
+ */
+  targetEntityType?: ReviewerAnnotationTargetType;
+  /**
+ * Optional filter — restrict the result to annotations
+anchored to this target entity id. Must be paired with
+`targetEntityType`.
+
+ */
+  targetEntityId?: string;
 };
