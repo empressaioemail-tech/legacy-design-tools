@@ -1335,6 +1335,9 @@ importers:
       '@workspace/briefing-diff':
         specifier: workspace:*
         version: link:../briefing-diff
+      '@workspace/briefing-prior-snapshot':
+        specifier: workspace:*
+        version: link:../briefing-prior-snapshot
       '@workspace/server-actor-ids':
         specifier: workspace:*
         version: link:../server-actor-ids

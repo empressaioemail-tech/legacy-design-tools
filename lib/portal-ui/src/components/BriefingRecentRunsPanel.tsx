@@ -21,14 +21,27 @@ import { diffWords } from "@workspace/briefing-diff";
 // "Copied!" confirmation) live in `@workspace/briefing-prior-snapshot`
 // so the testids, copy payload shape, and revert timing stay byte-
 // identical with the design-tools surface without copy-pasting two
-// parallel JSX subtrees. We accept it via the optional
+// parallel JSX subtrees. We accept the header itself via the optional
 // `renderPriorSnapshotHeader` render-prop instead of importing it
 // directly here because `briefing-prior-snapshot` already imports
-// `CopyPlainTextButton` from this package — a direct import would
-// create a workspace-level dependency cycle (portal-ui ↔
+// `CopyPlainTextButton` from this package — pulling the header
+// component in directly would round-trip a React component through
+// a workspace-level dependency cycle (portal-ui ↔
 // briefing-prior-snapshot). Artifact-level consumers
 // (plan-review's SubmissionDetailModal / EngagementDetail) supply
 // the header from the lib they already depend on.
+//
+// Task #373 — the seven-section A–G tuple and the `pickSection`
+// column-router are pure data + a pure function, so importing them
+// directly from the same lib is safe (no React component evaluation
+// at module-init time, ESM resolves the cycle lazily). Both consuming
+// surfaces (this panel and the design-tools mirror) now walk the
+// shared tuple instead of keeping byte-identical private copies that
+// would silently drift the moment the section labels widen.
+import {
+  SECTION_ORDER,
+  pickSection,
+} from "@workspace/briefing-prior-snapshot";
 // Task #332 — the prior-narrative meta line renders the snapshot's
 // `generatedAt` as a relative-time string ("5 min ago", "3d ago",
 // etc.) instead of a raw locale stamp so an auditor scanning the
@@ -101,57 +114,6 @@ function writeRecentRunsOpenToUrl(next: boolean): void {
     url.searchParams.delete(RECENT_RUNS_OPEN_QUERY_PARAM);
   }
   window.history.replaceState(null, "", url.toString());
-}
-
-/**
- * Section ordering used by the prior-narrative diff block.
- *
- * Mirrors `SECTION_ORDER` in
- * `artifacts/design-tools/src/pages/EngagementDetail.tsx` (Task #303)
- * so the Plan Review-side panel walks the seven A–G section bodies
- * in the same order the architect-facing surface does. Kept inline
- * (rather than lifted into `@workspace/briefing-diff`) because the
- * order is panel-rendering-specific — the diff helper itself is
- * section-agnostic — and a forward-compat addition (Task #303 says
- * sections may eventually grow beyond G) is a one-line edit on this
- * tuple alone.
- */
-type BriefingSectionKey = "a" | "b" | "c" | "d" | "e" | "f" | "g";
-
-const SECTION_ORDER: ReadonlyArray<{
-  key: BriefingSectionKey;
-  label: string;
-}> = [
-  { key: "a", label: "A — Executive Summary" },
-  { key: "b", label: "B — Threshold Issues" },
-  { key: "c", label: "C — Regulatory Gates" },
-  { key: "d", label: "D — Site Infrastructure" },
-  { key: "e", label: "E — Buildable Envelope" },
-  { key: "f", label: "F — Neighboring Context" },
-  { key: "g", label: "G — Next-Step Checklist" },
-];
-
-function pickSection(
-  narrative: EngagementBriefingNarrative | null,
-  key: BriefingSectionKey,
-): string | null {
-  if (!narrative) return null;
-  switch (key) {
-    case "a":
-      return narrative.sectionA;
-    case "b":
-      return narrative.sectionB;
-    case "c":
-      return narrative.sectionC;
-    case "d":
-      return narrative.sectionD;
-    case "e":
-      return narrative.sectionE;
-    case "f":
-      return narrative.sectionF;
-    case "g":
-      return narrative.sectionG;
-  }
 }
 
 /**

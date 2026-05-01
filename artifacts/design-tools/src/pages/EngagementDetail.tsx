@@ -55,7 +55,22 @@ import { diffWords, formatBriefingActor } from "@workspace/briefing-diff";
 // copy payload shape, and revert timing stay byte-identical with
 // the Plan Review surface without copy-pasting two parallel JSX
 // subtrees.
-import { BriefingPriorSnapshotHeader } from "@workspace/briefing-prior-snapshot";
+//
+// Task #373 — the seven-section A–G tuple and the `pickSection`
+// column-router that both surfaces walk when laying out the
+// per-section diff (and, on this surface, the main narrative cards)
+// also live in the same lib so the labels and ordering can never
+// disagree across the two consumers. The local copy here had grown
+// a `blurb` field for the cards' subtitle; the blurbs are surface-
+// specific copy (Plan Review's diff block does not render them) so
+// they are kept in `SECTION_BLURBS` below and looked up by key while
+// the tuple itself is shared.
+import {
+  BriefingPriorSnapshotHeader,
+  SECTION_ORDER,
+  pickSection,
+  type BriefingSectionKey,
+} from "@workspace/briefing-prior-snapshot";
 import {
   diffFederalPayload,
   summarizeFederalPayload,
@@ -2587,44 +2602,22 @@ const TIER_ORDER: Array<"federal" | "state" | "local" | "manual"> = [
  * tokens read as inline annotations so the architect can see what the
  * engine cited.
  */
-type BriefingSectionKey = "a" | "b" | "c" | "d" | "e" | "f" | "g";
-
-const SECTION_ORDER: ReadonlyArray<{
-  key: BriefingSectionKey;
-  label: string;
-  blurb: string;
-}> = [
-  { key: "a", label: "A — Executive Summary", blurb: "Three to five sentences capturing the buildable thesis." },
-  { key: "b", label: "B — Threshold Issues", blurb: "Heavy: hard blockers and conditional gates." },
-  { key: "c", label: "C — Regulatory Gates", blurb: "Tight: zoning, overlays, code triggers." },
-  { key: "d", label: "D — Site Infrastructure", blurb: "Tight: utilities, access, easements." },
-  { key: "e", label: "E — Buildable Envelope", blurb: "Heavy: setbacks, height, FAR, geometry." },
-  { key: "f", label: "F — Neighboring Context", blurb: "Heavy: adjacent uses, scale, character." },
-  { key: "g", label: "G — Next-Step Checklist", blurb: "No citations: action items for the architect." },
-];
-
-function pickSection(
-  narrative: EngagementBriefingNarrative | null,
-  key: BriefingSectionKey,
-): string | null {
-  if (!narrative) return null;
-  switch (key) {
-    case "a":
-      return narrative.sectionA;
-    case "b":
-      return narrative.sectionB;
-    case "c":
-      return narrative.sectionC;
-    case "d":
-      return narrative.sectionD;
-    case "e":
-      return narrative.sectionE;
-    case "f":
-      return narrative.sectionF;
-    case "g":
-      return narrative.sectionG;
-  }
-}
+/**
+ * Surface-specific subtitle copy rendered under each section's
+ * label on the main narrative cards. Plan Review's diff block does
+ * not render blurbs, so this map stays local to design-tools while
+ * the section ordering and column-router are shared via
+ * `@workspace/briefing-prior-snapshot` (Task #373).
+ */
+const SECTION_BLURBS: Record<BriefingSectionKey, string> = {
+  a: "Three to five sentences capturing the buildable thesis.",
+  b: "Heavy: hard blockers and conditional gates.",
+  c: "Tight: zoning, overlays, code triggers.",
+  d: "Tight: utilities, access, easements.",
+  e: "Heavy: setbacks, height, FAR, geometry.",
+  f: "Heavy: adjacent uses, scale, character.",
+  g: "No citations: action items for the architect.",
+};
 
 /** Cards default open per the spec: A always, B+E only when non-empty. */
 function defaultExpansion(
@@ -3054,7 +3047,8 @@ function BriefingNarrativePanel({
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
           data-testid="briefing-narrative-sections"
         >
-          {SECTION_ORDER.map(({ key, label, blurb }) => {
+          {SECTION_ORDER.map(({ key, label }) => {
+            const blurb = SECTION_BLURBS[key];
             const body = pickSection(narrative, key);
             const isOpen = expanded[key];
             const isEmpty = !body || body.trim().length === 0;
