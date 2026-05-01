@@ -1195,6 +1195,132 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     );
   });
 
+  // --- Task #408 — tap-to-toggle for tablet reviewers ---
+
+  it("re-summons the legend when the reviewer taps the '?' affordance, and keeps it open after the tap (no hover required)", () => {
+    // Tablet reviewers don't have a hover state and don't typically
+    // Tab through the review flow, so the Task #405 hover/focus
+    // reveals were unreachable for them. Tapping has to open the
+    // legend and have it stay open after the tap finishes.
+    const { container } = render(<BimModelViewport elements={elements} />);
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    const toggle = screen.getByTestId(
+      "bim-model-viewport-gesture-hint-toggle",
+    );
+    // Simulating a touch tap: click without a preceding/following
+    // mouseEnter/mouseLeave — that's what fires on touch devices.
+    fireEvent.click(toggle);
+    const legend = screen.getByTestId("bim-model-viewport-gesture-hint");
+    expect(legend).toBeInTheDocument();
+    // Same on-demand reveal source as hover/focus — keeps the
+    // existing analytics-friendly attribute correct.
+    expect(legend.getAttribute("data-hint-source")).toBe("revealed");
+    // aria-pressed reflects the latched state so screen readers
+    // announce that the toggle is now "pressed" / on.
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    // Pointer-transparent so the tap-revealed legend doesn't start
+    // eating canvas gestures (Task #380 contract).
+    expect(legend.style.pointerEvents).toBe("none");
+  });
+
+  it("closes the tap-opened legend when the reviewer taps the '?' affordance again", () => {
+    const { container } = render(<BimModelViewport elements={elements} />);
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    const toggle = screen.getByTestId(
+      "bim-model-viewport-gesture-hint-toggle",
+    );
+    fireEvent.click(toggle);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    // Second tap toggles the latched state back off — the legend
+    // collapses again and the "?" remains for the next reveal.
+    fireEvent.click(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("closes the tap-opened legend when the reviewer interacts with the canvas (pan/rotate)", () => {
+    // Once the reviewer goes back to driving the scene, the legend
+    // shouldn't sit on top of their newly-framed view — touching
+    // the canvas counts as "I'm done reading" and clears the sticky
+    // tap-open state alongside the existing dismissed flag.
+    const { container } = render(<BimModelViewport elements={elements} />);
+    const canvas = container.querySelector("canvas")!;
+    fireEvent.pointerDown(canvas);
+    fireEvent.click(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    );
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    fireEvent.pointerDown(canvas);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("closes the tap-opened legend when the reviewer scrolls to zoom on the canvas", () => {
+    // Wheel zoom is the other gesture that means "I'm interacting
+    // with the scene now" — same dismiss path as pointerdown.
+    const { container } = render(<BimModelViewport elements={elements} />);
+    const canvas = container.querySelector("canvas")!;
+    fireEvent.pointerDown(canvas);
+    fireEvent.click(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    );
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    fireEvent.wheel(canvas, { deltaY: -100 });
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("hover and focus reveals still work alongside the tap-toggle (desktop / keyboard reviewers unaffected)", () => {
+    // Belt-and-braces — Task #405's hover/focus reveals must keep
+    // working independently of the new sticky tap state, so all
+    // three input models (touch, mouse, keyboard) coexist.
+    const { container } = render(<BimModelViewport elements={elements} />);
+    fireEvent.pointerDown(container.querySelector("canvas")!);
+    const toggle = screen.getByTestId(
+      "bim-model-viewport-gesture-hint-toggle",
+    );
+    // Hover reveals → mouseLeave hides.
+    fireEvent.mouseEnter(toggle);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    fireEvent.mouseLeave(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    // Focus reveals → blur hides.
+    fireEvent.focus(toggle);
+    expect(
+      screen.getByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeInTheDocument();
+    fireEvent.blur(toggle);
+    expect(
+      screen.queryByTestId("bim-model-viewport-gesture-hint"),
+    ).toBeNull();
+    // aria-pressed never flipped to true — clicks are the only
+    // thing that latches the sticky state.
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("keeps the dismissed state for the rest of the same engagement (an unrelated rerender doesn't bring the legend back)", () => {
     const { container, rerender } = render(
       <BimModelViewport elements={elements} />,

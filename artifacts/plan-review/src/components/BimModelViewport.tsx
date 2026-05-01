@@ -514,6 +514,15 @@ export function BimModelViewport({
   // session.
   const [hintDismissed, setHintDismissed] = useState(false);
   const [hintRevealed, setHintRevealed] = useState(false);
+  // Task #408 — sticky tap/click reveal. Tablet reviewers have no
+  // hover state and don't typically Tab through the review flow,
+  // so the hover/focus reveals from Task #405 are unreachable for
+  // them. Tapping the "?" toggles this latched state, which keeps
+  // the legend open until the reviewer either taps the "?" again
+  // or interacts with the canvas (the dismiss ref below clears it
+  // alongside the dismissed flag, matching the canvas-closes-it
+  // half of the task contract).
+  const [hintStickyOpen, setHintStickyOpen] = useState(false);
 
   // Stable callback ref so the scene-lifecycle effect (which only
   // re-runs on `webGlOk`) can dismiss the hint without taking
@@ -522,7 +531,15 @@ export function BimModelViewport({
   // scene on every state transition.
   const dismissHintRef = useRef<() => void>(() => {});
   useEffect(() => {
-    dismissHintRef.current = () => setHintDismissed(true);
+    dismissHintRef.current = () => {
+      setHintDismissed(true);
+      // Task #408 — a canvas pan/zoom/rotate is the reviewer's
+      // signal that they're done reading the legend, so clear the
+      // sticky tap-open state too. Otherwise a reviewer who tapped
+      // "?" to see the legend, then panned the canvas, would see
+      // the legend stay open on top of their newly-framed scene.
+      setHintStickyOpen(false);
+    };
   });
 
   // Reset the dismissed state when the engagement changes — keyed
@@ -537,6 +554,7 @@ export function BimModelViewport({
       lastEngagementKeyRef.current = engagementKey;
       setHintDismissed(false);
       setHintRevealed(false);
+      setHintStickyOpen(false);
     }
   }, [engagementKey]);
 
@@ -1249,7 +1267,9 @@ export function BimModelViewport({
           so it doesn't sit on top of the WebGL-fallback or
           empty-state full-canvas overlays.
         */}
-        {webGlOk && cameraFit && (!hintDismissed || hintRevealed) && (
+        {webGlOk &&
+          cameraFit &&
+          (!hintDismissed || hintRevealed || hintStickyOpen) && (
           <div
             data-testid="bim-model-viewport-gesture-hint"
             data-hint-source={hintDismissed ? "revealed" : "initial"}
@@ -1284,12 +1304,26 @@ export function BimModelViewport({
           // pointerEvents:none so it never absorbs canvas gestures
           // (Task #380 contract). zIndex 1 keeps it under the
           // re-summoned legend (zIndex 2) so the legend visually
-          // covers and replaces the "?" while it's revealed.
+          // covers and replaces the "?" while it's revealed —
+          // and because the legend stays pointerEvents:none, taps
+          // on the "?" still land on the button beneath, which
+          // is what makes the Task #408 tap-to-toggle workable on
+          // touch devices (the "?" is reachable through the
+          // visually-overlapping legend).
+          //
+          // Task #408 — onClick toggles a sticky reveal so tablet
+          // reviewers (no hover, no Tab nav) can tap to open the
+          // legend and tap again to close it. Hover/focus still
+          // drive the transient `hintRevealed` reveal independently
+          // for desktop / keyboard reviewers, so all three input
+          // models work side-by-side without stepping on each other.
           <button
             type="button"
             data-testid="bim-model-viewport-gesture-hint-toggle"
             aria-label="Show 3D viewer controls"
+            aria-pressed={hintStickyOpen}
             title="Show 3D viewer controls"
+            onClick={() => setHintStickyOpen((prev) => !prev)}
             onMouseEnter={() => setHintRevealed(true)}
             onMouseLeave={() => setHintRevealed(false)}
             onFocus={() => setHintRevealed(true)}
