@@ -99,6 +99,23 @@ export function BriefingSourceDetails({
 
       <KindBody source={source} />
 
+      {/* Show "as of <snapshot date> · source: <provider>" beneath
+       * every adapter-driven KindBody branch — generalized from
+       * federal-only (Task #209) to all adapter kinds (Task #221) so
+       * auditors get the same provenance trail for local zoning,
+       * parcels, floodplain features, etc. The `unknown` branch
+       * (RawPayload fallback) is suppressed since we have no
+       * structured body to attach it to. */}
+      {kind !== "unknown" && <ProvenanceFooter source={source} />}
+
+      {/* Federal-only one-line markdown digest button. Rendered
+       * outside KindBody so the order stays
+       * `[summary, footer, copy button]` — matching the layout
+       * established in Task #209 — even now that the footer is
+       * hoisted up to the parent. `CopySummaryButton` returns null
+       * for non-federal payloads so this is a no-op for them. */}
+      <CopySummaryButton source={source} />
+
       {source.sourceKind === "local-adapter" &&
         kind === "zoning" &&
         jurisdictionKey && (
@@ -263,63 +280,16 @@ function KindBody({ source }: { source: EngagementBriefingSource }) {
       );
     }
     case "flood-zone":
-      return (
-        <FederalSummaryGroup source={source}>
-          <FemaFloodZoneSummary payload={payload} />
-        </FederalSummaryGroup>
-      );
+      return <FemaFloodZoneSummary payload={payload} />;
     case "elevation-point":
-      return (
-        <FederalSummaryGroup source={source}>
-          <UsgsElevationSummary payload={payload} />
-        </FederalSummaryGroup>
-      );
+      return <UsgsElevationSummary payload={payload} />;
     case "ejscreen-blockgroup":
-      return (
-        <FederalSummaryGroup source={source}>
-          <EpaEjscreenSummary payload={payload} />
-        </FederalSummaryGroup>
-      );
+      return <EpaEjscreenSummary payload={payload} />;
     case "broadband-availability":
-      return (
-        <FederalSummaryGroup source={source}>
-          <FccBroadbandSummary payload={payload} />
-        </FederalSummaryGroup>
-      );
+      return <FccBroadbandSummary payload={payload} />;
     default:
       return <RawPayload payload={payload} />;
   }
-}
-
-/**
- * Wraps a federal-adapter summary block so auditors can both:
- *   - read a small "as of <snapshot date> · source: <provider>" footer
- *     beneath the summary, to see at a glance how fresh the value is
- *     and which dataset version it came from (Task #209), and
- *   - copy a one-line markdown digest of the summary ("Zone AE, in
- *     SFHA, BFE 432 ft") into the engagement chat or an external
- *     review note via a "Copy summary" button.
- *
- * The provenance footer is suppressed when both `snapshotDate` and
- * `provider` are absent (older rows persisted before the adapters
- * started stamping these fields), and the copy button is suppressed
- * when the formatter cannot build a meaningful one-liner for this
- * payload, so neither affordance ever renders empty.
- */
-function FederalSummaryGroup({
-  source,
-  children,
-}: {
-  source: EngagementBriefingSource;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {children}
-      <FederalProvenanceFooter source={source} />
-      <CopySummaryButton source={source} />
-    </div>
-  );
 }
 
 function CopySummaryButton({ source }: { source: EngagementBriefingSource }) {
@@ -393,7 +363,20 @@ function CopyMarkdownButton({
   );
 }
 
-function FederalProvenanceFooter({
+/**
+ * "as of <snapshot date> · source: <provider>" footer rendered
+ * beneath every adapter-driven KindBody so auditors can see at a
+ * glance how fresh the value is and which dataset version it came
+ * from. Generalized from federal-only (Task #209) to all adapter
+ * kinds (Task #221) — local zoning, parcels, floodplain features,
+ * Edwards Aquifer, etc. — since the same provenance trail is just
+ * as useful there.
+ *
+ * Returns null when both `snapshotDate` and `provider` are absent
+ * (older rows persisted before adapters started stamping these
+ * fields) so the footer never renders empty.
+ */
+function ProvenanceFooter({
   source,
 }: {
   source: EngagementBriefingSource;
@@ -413,7 +396,7 @@ function FederalProvenanceFooter({
   if (!snapshot && !provider) return null;
   return (
     <div
-      data-testid={`briefing-source-federal-provenance-${source.id}`}
+      data-testid={`briefing-source-provenance-${source.id}`}
       style={{
         display: "flex",
         gap: 8,

@@ -326,7 +326,7 @@ describe("BriefingSourceDetails", () => {
       />,
     );
     const footer = screen.getByTestId(
-      "briefing-source-federal-provenance-src-fema-prov",
+      "briefing-source-provenance-src-fema-prov",
     );
     // The footer reuses the same `formatSnapshotDate` helper the
     // federal-summary markdown digest uses (Task #210), which slices
@@ -335,6 +335,40 @@ describe("BriefingSourceDetails", () => {
     expect(footer).toHaveTextContent("as of 2026-03-15");
     expect(footer).toHaveTextContent(
       "source: FEMA National Flood Hazard Layer (NFHL)",
+    );
+  });
+
+  it("renders the snapshot date + provider footer beneath a non-federal zoning summary (Task #221)", () => {
+    // No setback table — keeps the footer assertion isolated from the
+    // setback panel below it, while still exercising the local-tier
+    // zoning case the task calls out by name.
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: { status: 404 },
+    };
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-zoning-prov",
+          layerKind: "zoning",
+          sourceKind: "local-adapter",
+          provider: "grand-county-ut:zoning (Grand County, UT GIS)",
+          snapshotDate: "2026-04-02T12:00:00.000Z",
+          payload: {
+            kind: "zoning",
+            zoning: { attributes: { ZONE_DIST: "RR-1" } },
+          },
+        })}
+      />,
+    );
+    const footer = screen.getByTestId(
+      "briefing-source-provenance-src-zoning-prov",
+    );
+    expect(footer).toHaveTextContent("as of 2026-04-02");
+    expect(footer).toHaveTextContent(
+      "source: grand-county-ut:zoning (Grand County, UT GIS)",
     );
   });
 
