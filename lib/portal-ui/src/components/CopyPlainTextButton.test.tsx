@@ -65,7 +65,7 @@ import {
   act,
 } from "@testing-library/react";
 
-import { CopyPlainTextButton } from "../CopyPlainTextButton";
+import { CopyPlainTextButton } from "./CopyPlainTextButton";
 
 // The revert window the component schedules via setTimeout.
 // Mirrors `COPY_FEEDBACK_MS` in `CopyPlainTextButton.tsx` — held
