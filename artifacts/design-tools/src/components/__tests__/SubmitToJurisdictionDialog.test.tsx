@@ -94,6 +94,10 @@ vi.mock("@workspace/api-client-react", () => ({
     scope,
     id,
   ],
+  getListEngagementSubmissionsQueryKey: (id: string) => [
+    "listEngagementSubmissions",
+    id,
+  ],
   ApiError: hoisted.MockApiError,
 }));
 

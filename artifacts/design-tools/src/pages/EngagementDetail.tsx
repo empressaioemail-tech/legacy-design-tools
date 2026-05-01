@@ -13,12 +13,15 @@ import {
   type EngagementDetail as EngagementDetailType,
   type EngagementSubmissionSummary,
   type SubmissionReceipt,
+  type SubmissionResponse,
+  type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
 import type { SheetSummary } from "@workspace/api-client-react";
 import { AppShell } from "../components/AppShell";
 import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
+import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionResponseDialog";
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmitToJurisdictionDialog } from "../components/SubmitToJurisdictionDialog";
@@ -535,18 +538,82 @@ function SiteContextTab() {
 }
 
 /**
+ * Visual accent for a recorded submission status. Mirrors the
+ * `STATUS_ACCENT` palette used for the engagement-level pill so the
+ * row-level status badge stays visually consistent with the rest of
+ * the page.
+ */
+const SUBMISSION_STATUS_ACCENT: Record<
+  SubmissionStatus,
+  { bg: string; color: string; label: string }
+> = {
+  pending: {
+    bg: "var(--bg-input)",
+    color: "var(--text-muted)",
+    label: "Pending",
+  },
+  approved: {
+    bg: "rgba(34,197,94,0.18)",
+    color: "#22c55e",
+    label: "Approved",
+  },
+  corrections_requested: {
+    bg: "rgba(245,158,11,0.18)",
+    color: "#f59e0b",
+    label: "Corrections requested",
+  },
+  rejected: {
+    bg: "rgba(239,68,68,0.18)",
+    color: "#ef4444",
+    label: "Rejected",
+  },
+};
+
+function SubmissionStatusPill({ status }: { status: SubmissionStatus }) {
+  const accent =
+    SUBMISSION_STATUS_ACCENT[status] ?? SUBMISSION_STATUS_ACCENT.pending;
+  return (
+    <span
+      className="sc-pill"
+      style={{
+        background: accent.bg,
+        color: accent.color,
+        textTransform: "uppercase",
+        fontSize: 10.5,
+        letterSpacing: "0.05em",
+        padding: "2px 7px",
+        borderRadius: 4,
+      }}
+    >
+      {accent.label}
+    </span>
+  );
+}
+
+/**
  * Submissions tab — surfaces the engagement's prior plan-review
- * submissions (Task #75). Reads from
- * `GET /api/engagements/:id/submissions` (newest-first), and renders
- * each row with the captured jurisdiction label, the submitted-at
- * relative timestamp, and the optional free-text note.
+ * submissions (Task #75) and lets a reviewer record the
+ * jurisdiction's reply against any row (Task #85).
  *
- * The list is intentionally minimal today — the create flow already
- * lives in `SubmitToJurisdictionDialog`, and the per-submission
- * detail surface (status updates, attached docs) is a follow-up
- * sprint. Pagination is also a follow-up: engagements typically
- * accumulate a handful of packages, so a bare array is fine for now
- * and matches the route contract.
+ * Reads from `GET /api/engagements/:id/submissions` (newest-first)
+ * and renders each row with the captured jurisdiction label, the
+ * submitted-at relative timestamp, and the optional free-text note.
+ * Each row carries a "Record response" action that opens
+ * `RecordSubmissionResponseDialog`.
+ *
+ * The current `EngagementSubmissionSummary` shape does not include
+ * `status` / `reviewerComment` (the sister task "Show jurisdiction
+ * response status and comment on the engagement page" surfaces them
+ * in the listing). To meet the acceptance criterion that the row
+ * reflects the response *immediately after submitting*, this tab
+ * keeps a local map of just-recorded responses keyed by submission
+ * id. When the listing eventually carries those columns, the
+ * resolver below prefers the listing payload over the local mirror,
+ * so the local-state path collapses to dead weight (and can be
+ * removed) without any change to the dialog or the row shape.
+ *
+ * Pagination is still a follow-up: engagements typically accumulate
+ * a handful of packages, so a bare array is fine for now.
  */
 function SubmissionsTab({ engagementId }: { engagementId: string }) {
   const { data: submissions, isLoading } = useListEngagementSubmissions(
@@ -558,6 +625,35 @@ function SubmissionsTab({ engagementId }: { engagementId: string }) {
       },
     },
   );
+
+  // `responseDialogFor` holds the submission id whose response form
+  // is currently open (null when no dialog is mounted). Stored as the
+  // id rather than the row so a refetch that reorders the list still
+  // resolves the dialog target by id.
+  const [responseDialogFor, setResponseDialogFor] = useState<string | null>(
+    null,
+  );
+  // Local mirror of just-recorded responses, keyed by submission id.
+  // See the doc comment above for why this is here and when it
+  // becomes removable.
+  const [recordedResponses, setRecordedResponses] = useState<
+    Record<string, SubmissionResponse>
+  >({});
+
+  // Reset the local mirror whenever the engagement changes so a
+  // recorded response on engagement A doesn't carry over into a row
+  // on engagement B that happens to share an id (it can't in
+  // practice — submission ids are uuids — but the cleanup keeps the
+  // map bounded for long-lived sessions).
+  useEffect(() => {
+    setRecordedResponses({});
+    setResponseDialogFor(null);
+  }, [engagementId]);
+
+  const dialogTarget =
+    responseDialogFor && submissions
+      ? (submissions.find((s) => s.id === responseDialogFor) ?? null)
+      : null;
 
   if (isLoading) {
     return (
@@ -585,59 +681,163 @@ function SubmissionsTab({ engagementId }: { engagementId: string }) {
   }
 
   return (
-    <div className="sc-card flex flex-col" data-testid="submissions-list">
-      <div className="sc-card-header sc-row-sb">
-        <span className="sc-label">PAST SUBMISSIONS</span>
-        <span className="sc-meta">{submissions.length} total</span>
-      </div>
-      <div className="flex flex-col">
-        {submissions.map((s: EngagementSubmissionSummary) => (
-          <div
-            key={s.id}
-            className="sc-card-row"
-            data-testid={`submission-row-${s.id}`}
-            style={{
-              padding: "12px 16px",
-              borderBottom: "1px solid var(--border-default)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-            }}
-          >
-            <div
-              className="sc-row-sb"
-              style={{ display: "flex", alignItems: "baseline", gap: 12 }}
-            >
-              <span
-                className="sc-medium"
-                style={{ color: "var(--text-primary)", fontSize: 13 }}
-              >
-                {s.jurisdiction ?? "Jurisdiction not recorded"}
-              </span>
-              <span
-                className="sc-meta"
-                title={new Date(s.submittedAt).toLocaleString()}
-                style={{ color: "var(--text-secondary)", fontSize: 11 }}
-              >
-                {relativeTime(s.submittedAt)}
-              </span>
-            </div>
-            {s.note && (
+    <>
+      <div className="sc-card flex flex-col" data-testid="submissions-list">
+        <div className="sc-card-header sc-row-sb">
+          <span className="sc-label">PAST SUBMISSIONS</span>
+          <span className="sc-meta">{submissions.length} total</span>
+        </div>
+        <div className="flex flex-col">
+          {submissions.map((s: EngagementSubmissionSummary) => {
+            // Prefer a row-carried status (sister task) when present;
+            // fall back to the locally-recorded response so the row
+            // updates immediately after the user records a reply.
+            const rowStatus =
+              (s as EngagementSubmissionSummary & {
+                status?: SubmissionStatus | null;
+                reviewerComment?: string | null;
+              }).status ?? null;
+            const rowComment =
+              (s as EngagementSubmissionSummary & {
+                reviewerComment?: string | null;
+              }).reviewerComment ?? null;
+            const localResponse = recordedResponses[s.id] ?? null;
+            const status: SubmissionStatus =
+              rowStatus ?? localResponse?.status ?? "pending";
+            const comment: string | null =
+              rowComment ?? localResponse?.reviewerComment ?? null;
+            const respondedAt: string | null =
+              localResponse?.respondedAt ?? null;
+            return (
               <div
-                className="sc-body"
+                key={s.id}
+                className="sc-card-row"
+                data-testid={`submission-row-${s.id}`}
                 style={{
-                  color: "var(--text-secondary)",
-                  fontSize: 12,
-                  whiteSpace: "pre-wrap",
+                  padding: "12px 16px",
+                  borderBottom: "1px solid var(--border-default)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
                 }}
               >
-                {s.note}
+                <div
+                  className="sc-row-sb"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flex: 1,
+                      minWidth: 0,
+                    }}
+                  >
+                    <span
+                      className="sc-medium"
+                      style={{
+                        color: "var(--text-primary)",
+                        fontSize: 13,
+                      }}
+                    >
+                      {s.jurisdiction ?? "Jurisdiction not recorded"}
+                    </span>
+                    <span
+                      data-testid={`submission-status-${s.id}`}
+                      style={{ display: "inline-flex" }}
+                    >
+                      <SubmissionStatusPill status={status} />
+                    </span>
+                    <span
+                      className="sc-meta"
+                      title={new Date(s.submittedAt).toLocaleString()}
+                      style={{
+                        color: "var(--text-secondary)",
+                        fontSize: 11,
+                      }}
+                    >
+                      {relativeTime(s.submittedAt)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="sc-btn-ghost"
+                    onClick={() => setResponseDialogFor(s.id)}
+                    data-testid={`submission-record-response-${s.id}`}
+                    style={{ padding: "2px 10px", fontSize: 12 }}
+                  >
+                    {status === "pending"
+                      ? "Record response"
+                      : "Update response"}
+                  </button>
+                </div>
+                {s.note && (
+                  <div
+                    className="sc-body"
+                    style={{
+                      color: "var(--text-secondary)",
+                      fontSize: 12,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {s.note}
+                  </div>
+                )}
+                {comment && (
+                  <div
+                    data-testid={`submission-comment-${s.id}`}
+                    className="sc-body"
+                    style={{
+                      borderLeft: "2px solid var(--border-default)",
+                      paddingLeft: 8,
+                      color: "var(--text-primary)",
+                      fontSize: 12,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    <span
+                      className="sc-label"
+                      style={{
+                        color: "var(--text-secondary)",
+                        marginRight: 6,
+                      }}
+                    >
+                      REVIEWER
+                      {respondedAt
+                        ? ` · ${relativeTime(respondedAt)}`
+                        : ""}
+                      :
+                    </span>
+                    {comment}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ))}
+            );
+          })}
+        </div>
       </div>
-    </div>
+
+      {dialogTarget && (
+        <RecordSubmissionResponseDialog
+          engagementId={engagementId}
+          submissionId={dialogTarget.id}
+          jurisdiction={dialogTarget.jurisdiction}
+          isOpen={true}
+          onClose={() => setResponseDialogFor(null)}
+          onRecorded={(response) => {
+            setRecordedResponses((prev) => ({
+              ...prev,
+              [response.id]: response,
+            }));
+          }}
+        />
+      )}
+    </>
   );
 }
 
