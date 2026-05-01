@@ -24,6 +24,34 @@ CREATE TABLE @@SCHEMA@@.atom_events (
 );
 
 
+-- Name: bim_models; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.bim_models (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    active_briefing_id uuid,
+    briefing_version integer DEFAULT 0 NOT NULL,
+    materialized_at timestamp with time zone,
+    revit_document_path text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: briefing_divergences; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.briefing_divergences (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    bim_model_id uuid NOT NULL,
+    materializable_element_id uuid NOT NULL,
+    briefing_id uuid NOT NULL,
+    reason text NOT NULL,
+    note text,
+    detail jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: briefing_sources; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.briefing_sources (
@@ -145,6 +173,22 @@ CREATE TABLE @@SCHEMA@@.findings_code_atoms (
 );
 
 
+-- Name: materializable_elements; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.materializable_elements (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    briefing_id uuid NOT NULL,
+    element_kind text NOT NULL,
+    briefing_source_id uuid,
+    label text,
+    geometry jsonb DEFAULT '{}'::jsonb NOT NULL,
+    glb_object_path text,
+    locked boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: parcel_briefings; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.parcel_briefings (
@@ -247,6 +291,24 @@ ALTER TABLE ONLY @@SCHEMA@@.atom_events
     ADD CONSTRAINT atom_events_pkey PRIMARY KEY (id);
 
 
+-- Name: bim_models bim_models_engagement_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.bim_models
+    ADD CONSTRAINT bim_models_engagement_id_unique UNIQUE (engagement_id);
+
+
+-- Name: bim_models bim_models_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.bim_models
+    ADD CONSTRAINT bim_models_pkey PRIMARY KEY (id);
+
+
+-- Name: briefing_divergences briefing_divergences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_divergences
+    ADD CONSTRAINT briefing_divergences_pkey PRIMARY KEY (id);
+
+
 -- Name: briefing_sources briefing_sources_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
@@ -295,6 +357,12 @@ ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
     ADD CONSTRAINT findings_code_atoms_pkey PRIMARY KEY (id);
 
 
+-- Name: materializable_elements materializable_elements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
+    ADD CONSTRAINT materializable_elements_pkey PRIMARY KEY (id);
+
+
 -- Name: parcel_briefings parcel_briefings_engagement_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
@@ -339,6 +407,31 @@ CREATE UNIQUE INDEX atom_events_chain_hash_uniq ON @@SCHEMA@@.atom_events USING 
 -- Name: atom_events_timeline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX atom_events_timeline_idx ON @@SCHEMA@@.atom_events USING btree (entity_type, entity_id, occurred_at);
+
+
+-- Name: bim_models_active_briefing_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX bim_models_active_briefing_idx ON @@SCHEMA@@.bim_models USING btree (active_briefing_id);
+
+
+-- Name: bim_models_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX bim_models_engagement_idx ON @@SCHEMA@@.bim_models USING btree (engagement_id);
+
+
+-- Name: briefing_divergences_bim_model_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX briefing_divergences_bim_model_idx ON @@SCHEMA@@.briefing_divergences USING btree (bim_model_id);
+
+
+-- Name: briefing_divergences_briefing_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX briefing_divergences_briefing_idx ON @@SCHEMA@@.briefing_divergences USING btree (briefing_id);
+
+
+-- Name: briefing_divergences_element_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX briefing_divergences_element_idx ON @@SCHEMA@@.briefing_divergences USING btree (materializable_element_id);
 
 
 -- Name: briefing_sources_briefing_idx; Type: INDEX; Schema: public; Owner: -
@@ -411,6 +504,16 @@ CREATE INDEX findings_code_atoms_atom_idx ON @@SCHEMA@@.findings_code_atoms USIN
 CREATE INDEX findings_code_atoms_finding_idx ON @@SCHEMA@@.findings_code_atoms USING btree (finding_id);
 
 
+-- Name: materializable_elements_briefing_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX materializable_elements_briefing_idx ON @@SCHEMA@@.materializable_elements USING btree (briefing_id);
+
+
+-- Name: materializable_elements_kind_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX materializable_elements_kind_idx ON @@SCHEMA@@.materializable_elements USING btree (briefing_id, element_kind);
+
+
 -- Name: parcel_briefings_engagement_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
@@ -451,6 +554,36 @@ CREATE INDEX submissions_engagement_idx ON @@SCHEMA@@.submissions USING btree (e
 CREATE INDEX submissions_submitted_at_idx ON @@SCHEMA@@.submissions USING btree (submitted_at);
 
 
+-- Name: bim_models bim_models_active_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.bim_models
+    ADD CONSTRAINT bim_models_active_briefing_id_parcel_briefings_id_fk FOREIGN KEY (active_briefing_id) REFERENCES @@SCHEMA@@.parcel_briefings(id) ON DELETE SET NULL;
+
+
+-- Name: bim_models bim_models_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.bim_models
+    ADD CONSTRAINT bim_models_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: briefing_divergences briefing_divergences_bim_model_id_bim_models_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_divergences
+    ADD CONSTRAINT briefing_divergences_bim_model_id_bim_models_id_fk FOREIGN KEY (bim_model_id) REFERENCES @@SCHEMA@@.bim_models(id) ON DELETE CASCADE;
+
+
+-- Name: briefing_divergences briefing_divergences_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_divergences
+    ADD CONSTRAINT briefing_divergences_briefing_id_parcel_briefings_id_fk FOREIGN KEY (briefing_id) REFERENCES @@SCHEMA@@.parcel_briefings(id) ON DELETE CASCADE;
+
+
+-- Name: briefing_divergences briefing_divergences_materializable_element_id_materializable_e; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.briefing_divergences
+    ADD CONSTRAINT briefing_divergences_materializable_element_id_materializable_e FOREIGN KEY (materializable_element_id) REFERENCES @@SCHEMA@@.materializable_elements(id) ON DELETE CASCADE;
+
+
 -- Name: briefing_sources briefing_sources_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
@@ -479,6 +612,18 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
     ADD CONSTRAINT findings_code_atoms_atom_id_code_atoms_id_fk FOREIGN KEY (atom_id) REFERENCES @@SCHEMA@@.code_atoms(id) ON DELETE CASCADE;
+
+
+-- Name: materializable_elements materializable_elements_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
+    ADD CONSTRAINT materializable_elements_briefing_id_parcel_briefings_id_fk FOREIGN KEY (briefing_id) REFERENCES @@SCHEMA@@.parcel_briefings(id) ON DELETE CASCADE;
+
+
+-- Name: materializable_elements materializable_elements_briefing_source_id_briefing_sources_id_; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
+    ADD CONSTRAINT materializable_elements_briefing_source_id_briefing_sources_id_ FOREIGN KEY (briefing_source_id) REFERENCES @@SCHEMA@@.briefing_sources(id) ON DELETE SET NULL;
 
 
 -- Name: parcel_briefings parcel_briefings_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

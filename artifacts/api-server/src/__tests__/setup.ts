@@ -44,6 +44,14 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // without touching engagements still gets a clean slate.
   "parcel_briefings",
   "briefing_sources",
+  // DA-PI-5 Revit-sensor materialization tables. These cascade off
+  // engagements / parcel_briefings, but listing them keeps the
+  // "if a route writes to it, it's in this list" invariant honest
+  // and lets tests that seed bim_models without an engagement
+  // (impossible today, defensive) still get a clean slate.
+  "bim_models",
+  "materializable_elements",
+  "briefing_divergences",
   "code_atom_fetch_queue",
   "code_atoms",
   "code_atom_sources",

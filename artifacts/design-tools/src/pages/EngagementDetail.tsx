@@ -4,15 +4,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useGenerateEngagementLayers,
   useGenerateEngagementBriefing,
+  useGetBimModelRefresh,
   useGetEngagement,
+  useGetEngagementBimModel,
   useGetEngagementBriefing,
   useGetEngagementBriefingGenerationStatus,
   useGetSnapshot,
   useListEngagementBriefingSources,
   useListEngagementSubmissions,
+  usePushEngagementBimModel,
   useRestoreEngagementBriefingSource,
   useRetryBriefingSourceConversion,
   useUpdateEngagement,
+  getGetBimModelRefreshQueryKey,
+  getGetEngagementBimModelQueryKey,
   getGetEngagementBriefingGenerationStatusQueryKey,
   getGetEngagementBriefingQueryKey,
   getGetEngagementQueryKey,
@@ -1841,6 +1846,11 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
         sources={sources}
       />
 
+      <PushToRevitAffordance
+        engagementId={engagementId}
+        hasBriefing={Boolean(briefingQuery.data?.briefing)}
+      />
+
       <BriefingSourceUploadModal
         engagementId={engagementId}
         isOpen={uploadOpen}
@@ -1849,6 +1859,261 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
       />
     </div>
   );
+}
+
+/**
+ * DA-PI-5 / Spec 53 §3 — the "Push to Revit" affordance the
+ * Site Context tab renders below the briefing-sources list.
+ *
+ * Surfaces three statuses driven by the `bim_models` row's
+ * `materializedAt` vs the active briefing's `updatedAt` (computed
+ * server-side and returned in `refreshStatus`):
+ *
+ *   - `not-pushed`  — neutral "Push to Revit" affordance. The first
+ *     click creates the bim-model row.
+ *   - `current`     — green "Materialized at <ts>" pill. The CTA
+ *     becomes "Push again to Revit" so the architect can force a
+ *     re-materialization (e.g. after deleting and re-uploading a
+ *     QGIS layer that did not bump the briefing version yet).
+ *   - `stale`       — amber "Briefing has changed since last push"
+ *     warning. The CTA becomes the primary "Re-push to Revit"
+ *     action.
+ *
+ * Disabled with a hint when no parcel briefing exists yet (the
+ * server refuses the push without an active briefing — surfacing
+ * the disabled state up front avoids the round-trip).
+ */
+function PushToRevitAffordance({
+  engagementId,
+  hasBriefing,
+}: {
+  engagementId: string;
+  hasBriefing: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const bimModelQuery = useGetEngagementBimModel(engagementId);
+  const bimModelId = bimModelQuery.data?.bimModel?.id ?? null;
+  // The `/refresh` route is the live source of truth — `/bim-model`
+  // returns the row at fetch time, but the status / element-diff
+  // payload the C# add-in uses to plan its next sync only ships from
+  // `/refresh`. Mirroring that shape here keeps the affordance and
+  // the add-in consistent (so an operator can read off "v3, 2 added,
+  // 1 modified" and trust it matches what Revit will see).
+  const refreshQuery = useGetBimModelRefresh(bimModelId ?? "", {
+    query: {
+      enabled: bimModelId !== null,
+      queryKey: getGetBimModelRefreshQueryKey(bimModelId ?? ""),
+    },
+  });
+  const pushMutation = usePushEngagementBimModel({
+    mutation: {
+      onSuccess: () => {
+        // Re-fetch so the status pill flips from `not-pushed` /
+        // `stale` to `current` and `materializedAt` updates without
+        // an out-of-band poll. Also invalidate `/refresh` so the
+        // diff counters reset to zero unchanged-only after a push.
+        void queryClient.invalidateQueries({
+          queryKey: getGetEngagementBimModelQueryKey(engagementId),
+        });
+        if (bimModelId !== null) {
+          void queryClient.invalidateQueries({
+            queryKey: getGetBimModelRefreshQueryKey(bimModelId),
+          });
+        }
+      },
+    },
+  });
+
+  // Prefer the refresh payload when available — it's the canonical
+  // shape the add-in consumes — and fall back to the bim-model row
+  // for the not-pushed / first-render case.
+  const refreshStatus =
+    refreshQuery.data?.refreshStatus ??
+    bimModelQuery.data?.bimModel?.refreshStatus ??
+    "not-pushed";
+  const materializedAt =
+    refreshQuery.data?.materializedAt ??
+    bimModelQuery.data?.bimModel?.materializedAt ??
+    null;
+  const briefingVersion =
+    refreshQuery.data?.briefingVersion ??
+    bimModelQuery.data?.bimModel?.briefingVersion ??
+    null;
+  const diff = refreshQuery.data?.diff ?? null;
+
+  const statusPalette = (() => {
+    if (refreshStatus === "current") {
+      return {
+        bg: "var(--success-dim)",
+        fg: "var(--success-text)",
+        label: "Current",
+      };
+    }
+    if (refreshStatus === "stale") {
+      return {
+        bg: "var(--warning-dim)",
+        fg: "var(--warning-text)",
+        label: "Stale",
+      };
+    }
+    return {
+      bg: "var(--info-dim)",
+      fg: "var(--info-text)",
+      label: "Not pushed",
+    };
+  })();
+
+  const ctaLabel = (() => {
+    if (refreshStatus === "stale") return "Re-push to Revit";
+    if (refreshStatus === "current") return "Push again to Revit";
+    return "Push to Revit";
+  })();
+
+  const explainer = (() => {
+    if (!hasBriefing) {
+      return "Upload a briefing source first — the briefing is what gets materialized.";
+    }
+    if (refreshStatus === "current" && materializedAt) {
+      // Mirrors the relative-timestamp pattern used by the briefing
+      // source rows above; a full ISO is shown in the title attribute
+      // so an operator can hover for the precise instant. The "against
+      // briefing v<n>" tail is the wording the code review asked for —
+      // it lets an operator reading this card cross-reference the
+      // materialization with the briefing version the C# add-in is
+      // working against without opening DevTools.
+      const versionTail =
+        briefingVersion !== null ? ` against briefing v${briefingVersion}` : "";
+      return `Materialized at ${formatRelativeMaterializedAt(materializedAt)}${versionTail}.`;
+    }
+    if (refreshStatus === "stale") {
+      // Surface the per-element delta returned by `/refresh` so the
+      // operator knows roughly how big the re-push will be before
+      // they click. `addedCount + modifiedCount` matches what the
+      // add-in will report once the architect re-runs the sync.
+      const changes = diff
+        ? ` (${diff.addedCount} added, ${diff.modifiedCount} modified)`
+        : "";
+      const tail =
+        materializedAt && briefingVersion !== null
+          ? ` Last materialized at ${formatRelativeMaterializedAt(
+              materializedAt,
+            )} against briefing v${briefingVersion}.`
+          : "";
+      return `The briefing has changed since the last push${changes}. Re-push to refresh the architect's Revit model.${tail}`;
+    }
+    return "Materializes the engagement's briefing into the architect's active Revit model.";
+  })();
+
+  const disabled =
+    !hasBriefing || pushMutation.isPending || bimModelQuery.isLoading;
+
+  return (
+    <div
+      className="sc-card"
+      data-testid="push-to-revit-affordance"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        padding: 12,
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <div className="sc-medium">Push to Revit</div>
+            <span
+              data-testid="push-to-revit-status-badge"
+              data-status={refreshStatus}
+              title={
+                materializedAt
+                  ? new Date(materializedAt).toISOString()
+                  : undefined
+              }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: statusPalette.bg,
+                color: statusPalette.fg,
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                textTransform: "uppercase",
+                lineHeight: 1.4,
+              }}
+            >
+              {statusPalette.label}
+            </span>
+          </div>
+          <div
+            style={{ fontSize: 12, color: "var(--text-muted)" }}
+            data-testid="push-to-revit-explainer"
+          >
+            {explainer}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="sc-btn sc-btn-primary"
+          disabled={disabled}
+          onClick={() =>
+            pushMutation.mutate({ id: engagementId, data: {} })
+          }
+          data-testid="push-to-revit-button"
+          style={{ opacity: disabled ? 0.6 : 1 }}
+        >
+          {pushMutation.isPending ? "Pushing…" : ctaLabel}
+        </button>
+      </div>
+      {pushMutation.isError && (
+        <div
+          role="alert"
+          data-testid="push-to-revit-error"
+          style={{
+            fontSize: 12,
+            color: "var(--danger-text)",
+            background: "var(--danger-dim)",
+            padding: 8,
+            borderRadius: 4,
+          }}
+        >
+          Failed to push to Revit. Try again in a moment.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Tiny relative-time formatter for the "Materialized at" line. Kept
+ * local rather than reaching for a date-fns dependency because the
+ * timestamps the affordance shows only need second / minute / hour /
+ * day granularity — the absolute ISO string is exposed via the
+ * pill's title attribute for anything finer.
+ */
+function formatRelativeMaterializedAt(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const now = Date.now();
+  const deltaSec = Math.max(0, Math.floor((now - then) / 1000));
+  if (deltaSec < 45) return "just now";
+  if (deltaSec < 60 * 60) return `${Math.floor(deltaSec / 60)} min ago`;
+  if (deltaSec < 60 * 60 * 24)
+    return `${Math.floor(deltaSec / 60 / 60)} h ago`;
+  return `${Math.floor(deltaSec / 60 / 60 / 24)} d ago`;
 }
 
 /**

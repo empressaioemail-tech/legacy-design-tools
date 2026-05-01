@@ -10,3 +10,6 @@ export * from "./atomEvents";
 export * from "./users";
 export * from "./parcelBriefings";
 export * from "./briefingSources";
+export * from "./bimModels";
+export * from "./materializableElements";
+export * from "./briefingDivergences";

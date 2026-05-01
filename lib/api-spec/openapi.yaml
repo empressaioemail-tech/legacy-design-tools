@@ -855,6 +855,212 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{id}/bim-model:
+    get:
+      operationId: getEngagementBimModel
+      tags: [engagements]
+      summary: Get the engagement's bim-model + materializable elements
+      description: |
+        DA-PI-5 — read-side surface for the C# Revit add-in. Returns the
+        engagement's `bim_models` row (or `null` when no push has
+        happened yet) along with the `materializable_elements` rows
+        derived from the currently-active briefing.
+
+        The C# add-in calls this on app startup and on every
+        engagement-binding change to discover what it should
+        materialize. The wire envelope mirrors the briefing read shape
+        so the FE can render a "Push to Revit" affordance against the
+        same `null` / non-null discriminator.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The engagement's bim-model + materializable elements, or null when none exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementBimModelResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: pushEngagementBimModel
+      tags: [engagements]
+      summary: Push the engagement's active briefing to Revit (idempotent)
+      description: |
+        DA-PI-5 — the "Push to Revit" affordance writes here. Records
+        (or updates) the engagement's `bim_models` row to point at the
+        engagement's currently-active parcel briefing and stamp
+        `materializedAt` to now.
+
+        Idempotent at the engagement-id level (the `bim_models` table
+        has a unique constraint on `engagement_id`): a re-push for the
+        same engagement updates the existing row's `activeBriefingId`
+        / `materializedAt` rather than inserting a duplicate. Refuses
+        when the engagement has no parcel briefing yet (the architect
+        must upload a briefing source first).
+
+        Emits `bim-model.materialized` against the row through the
+        event-anchoring service. Best-effort: a transient history
+        outage cannot fail the HTTP request — the row is the source
+        of truth.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushBimModelBody"
+      responses:
+        "200":
+          description: Bim-model push recorded; updated bim-model returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementBimModelResponse"
+        "400":
+          description: Engagement has no active briefing yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /bim-models/{id}/refresh:
+    get:
+      operationId: getBimModelRefresh
+      tags: [engagements]
+      summary: Compute the bim-model ↔ active-briefing refresh diff
+      description: |
+        DA-PI-5 / Spec 53 §3 — returns the refresh-diff between the
+        bim-model's last materialization and the briefing's current
+        state. The C# add-in polls this on focus to surface the
+        "briefing has changed" badge in Revit; the design-tools FE
+        uses the same shape to render the three statuses on the
+        Site Context tab's "Push to Revit" affordance.
+
+        Status semantics:
+          - `current`     — bim-model is materialized and the briefing
+            has not been regenerated since the push.
+          - `stale`       — briefing has been regenerated since the
+            last push; the architect's model is out of date.
+          - `not-pushed`  — no push has happened yet (the row exists
+            but `materializedAt` is null), or the briefing was
+            deleted out from under the bim-model.
+
+        Emits `bim-model.refreshed` against the row through the
+        event-anchoring service so the timeline preserves a per-poll
+        audit trail. Best-effort.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Refresh diff result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BimModelRefreshResponse"
+        "404":
+          description: Bim-model not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /bim-models/{id}/divergence:
+    post:
+      operationId: recordBimModelDivergence
+      tags: [engagements]
+      summary: Record an architect divergence against a locked element
+      description: |
+        DA-PI-5 / Spec 51a §2.2 — service-to-service surface the C#
+        Revit add-in calls when its element-watcher detects an
+        unpin / geometry edit / deletion against a locked
+        materializable element.
+
+        Authenticated via HMAC-SHA256 against `BIM_MODEL_SHARED_SECRET`
+        (mirroring the DXF converter precedent in
+        `converterClient.ts`): the request must carry both
+        `x-bim-model-request-id` (a uuid the C# side mints) and
+        `x-bim-model-signature` (the lowercase-hex HMAC of
+        `requestId.bimModelId`). Engagement-scoped browser callers
+        do NOT have access to this surface.
+
+        Append-only: every divergence inserts a new row and emits
+        `briefing-divergence.recorded` (against the divergence row)
+        and `bim-model.diverged` (against the parent bim-model). A
+        subsequent re-pin / unpin lands as a separate row.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: x-bim-model-request-id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: x-bim-model-signature
+          in: header
+          required: true
+          schema:
+            type: string
+            description: Lowercase-hex HMAC-SHA256 of `requestId.bimModelId`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordBimModelDivergenceBody"
+      responses:
+        "201":
+          description: Divergence recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BimModelDivergenceResponse"
+        "400":
+          description: Invalid request body or signature headers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing / invalid HMAC signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Bim-model or referenced materializable element not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /snapshots:
     get:
       operationId: listSnapshots
@@ -3884,3 +4090,352 @@ components:
         - startedAt
         - completedAt
         - lastError
+
+    MaterializableElementKind:
+      type: string
+      enum:
+        - terrain
+        - property-line
+        - setback-plane
+        - buildable-envelope
+        - floodplain
+        - wetland
+        - neighbor-mass
+      description: |
+        DA-PI-5 / Spec 51a §2.4 — the seven element kinds the C# Revit
+        add-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on
+        the api-server `converterClient` so a materializable element
+        sourced from a DXF round-trips through the same closed set.
+
+    BimModelRefreshStatus:
+      type: string
+      enum: [current, stale, not-pushed]
+      description: |
+        DA-PI-5 / Spec 53 §3 — the three statuses the Site Context
+        "Push to Revit" affordance can surface. See the
+        `getBimModelRefresh` description for state semantics.
+
+    BriefingDivergenceReason:
+      type: string
+      enum: [unpinned, geometry-edited, deleted, other]
+      description: |
+        DA-PI-5 / Spec 51a §2.2 — the closed set of reason buckets the
+        C# Revit add-in is allowed to record when an architect
+        modifies a locked materializable element.
+
+    MaterializableElement:
+      type: object
+      description: |
+        DA-PI-5 / Spec 51a §2.4 — one piece of geometry the C# Revit
+        add-in materializes into the architect's active model. The
+        `geometry` payload is discriminator-dependent (see the
+        column docstring on `materializable_elements.geometry`).
+      properties:
+        id:
+          type: string
+        briefingId:
+          type: string
+        elementKind:
+          $ref: "#/components/schemas/MaterializableElementKind"
+        briefingSourceId:
+          type: string
+          nullable: true
+        label:
+          type: string
+          nullable: true
+        geometry:
+          type: object
+          additionalProperties: true
+          description: Discriminator-dependent geometry payload; see schema docstring.
+        glbObjectPath:
+          type: string
+          nullable: true
+        locked:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - briefingId
+        - elementKind
+        - briefingSourceId
+        - label
+        - geometry
+        - glbObjectPath
+        - locked
+        - createdAt
+        - updatedAt
+
+    EngagementBimModel:
+      type: object
+      description: |
+        DA-PI-5 — the engagement's bim-model row plus the
+        materializable elements derived from its currently-active
+        briefing.
+      properties:
+        id:
+          type: string
+        engagementId:
+          type: string
+        activeBriefingId:
+          type: string
+          nullable: true
+        briefingVersion:
+          type: integer
+          minimum: 0
+        materializedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revitDocumentPath:
+          type: string
+          nullable: true
+        refreshStatus:
+          $ref: "#/components/schemas/BimModelRefreshStatus"
+        elements:
+          type: array
+          items:
+            $ref: "#/components/schemas/MaterializableElement"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - engagementId
+        - activeBriefingId
+        - briefingVersion
+        - materializedAt
+        - revitDocumentPath
+        - refreshStatus
+        - elements
+        - createdAt
+        - updatedAt
+
+    EngagementBimModelResponse:
+      type: object
+      description: |
+        Wire envelope for the bim-model read/push routes. `bimModel`
+        is `null` when no push has happened yet for the engagement
+        — the first call to `POST /engagements/{id}/bim-model` is
+        what creates it.
+      properties:
+        bimModel:
+          allOf:
+            - $ref: "#/components/schemas/EngagementBimModel"
+          nullable: true
+      required:
+        - bimModel
+
+    PushBimModelBody:
+      type: object
+      description: |
+        Request body for `POST /engagements/{id}/bim-model`. All
+        fields are optional — the route resolves the engagement's
+        currently-active briefing on the server side rather than
+        trusting the client to name it.
+      properties:
+        revitDocumentPath:
+          type: string
+          maxLength: 1024
+          nullable: true
+          description: |
+            Optional architect-supplied identifier of the Revit
+            document the bim-model is bound to (operator visibility
+            only).
+
+    BimModelElementDiffStatus:
+      type: string
+      enum:
+        - added
+        - modified
+        - unchanged
+      description: |
+        Per-element delta status returned in `BimModelRefreshResponse.diff.elements`.
+        - `added`     — element was created on the briefing AFTER
+          `bimModel.materializedAt` (the C# add-in has never seen it).
+        - `modified`  — element existed at materialization time but
+          its `updatedAt` is newer than `materializedAt` (geometry
+          or label changed since the last push).
+        - `unchanged` — element is older-or-equal to the
+          materialization timestamp (still safe to leave in place).
+        We deliberately do NOT include a `removed` status: api-server
+        does not snapshot the materialized element set at push time,
+        so deletions detected by the C# add-in are reported via
+        `POST /bim-models/{id}/divergence` (`reason: "deleted"`)
+        rather than inferred here.
+
+    BimModelElementDiff:
+      type: object
+      description: |
+        One row in the per-element diff returned by
+        `getBimModelRefresh`. Mirrors the wire fields the C# add-in
+        needs to decide whether to re-instance, re-place, or skip a
+        given materializable element on refresh.
+      properties:
+        id:
+          type: string
+        elementKind:
+          type: string
+        label:
+          type: string
+          nullable: true
+        diffStatus:
+          $ref: "#/components/schemas/BimModelElementDiffStatus"
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - elementKind
+        - label
+        - diffStatus
+        - updatedAt
+
+    BimModelRefreshDiff:
+      type: object
+      description: |
+        Element-level delta between the bim-model's last materialization
+        and the briefing's current state. Always present (even when
+        `refreshStatus === "current"`) so the C# add-in can iterate a
+        single shape regardless of status.
+      properties:
+        elements:
+          type: array
+          items:
+            $ref: "#/components/schemas/BimModelElementDiff"
+        addedCount:
+          type: integer
+          minimum: 0
+        modifiedCount:
+          type: integer
+          minimum: 0
+        unchangedCount:
+          type: integer
+          minimum: 0
+      required:
+        - elements
+        - addedCount
+        - modifiedCount
+        - unchangedCount
+
+    BimModelRefreshResponse:
+      type: object
+      description: |
+        DA-PI-5 / Spec 53 §3 — refresh diff payload. Carries the
+        statuses the FE renders on the Site Context tab, the
+        timestamps the C# add-in uses to decide whether to prompt
+        the architect for a re-push, and the element-level `diff`
+        the add-in iterates to plan its re-materialization protocol.
+      properties:
+        bimModelId:
+          type: string
+        engagementId:
+          type: string
+        refreshStatus:
+          $ref: "#/components/schemas/BimModelRefreshStatus"
+        materializedAt:
+          type: string
+          format: date-time
+          nullable: true
+        briefingVersion:
+          type: integer
+          minimum: 0
+        activeBriefingId:
+          type: string
+          nullable: true
+        activeBriefingUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        diff:
+          $ref: "#/components/schemas/BimModelRefreshDiff"
+      required:
+        - bimModelId
+        - engagementId
+        - refreshStatus
+        - materializedAt
+        - briefingVersion
+        - activeBriefingId
+        - activeBriefingUpdatedAt
+        - diff
+
+    RecordBimModelDivergenceBody:
+      type: object
+      description: |
+        Request body for `POST /bim-models/{id}/divergence`. The C#
+        Revit add-in sends one row per detected override against a
+        locked materializable element.
+      properties:
+        materializableElementId:
+          type: string
+          description: The locked element the architect modified.
+        reason:
+          $ref: "#/components/schemas/BriefingDivergenceReason"
+        note:
+          type: string
+          maxLength: 2048
+          nullable: true
+          description: Optional architect-supplied explanation.
+        detail:
+          type: object
+          additionalProperties: true
+          description: |
+            Free-form bag the C# side may attach (before/after
+            geometry digests, the Revit element id that fired the
+            trigger, etc). Defaults to an empty object on the wire
+            when omitted.
+      required:
+        - materializableElementId
+        - reason
+
+    BriefingDivergence:
+      type: object
+      description: |
+        DA-PI-5 / Spec 51a §2.2 — one append-only audit row produced
+        when an architect modifies a locked materializable element.
+      properties:
+        id:
+          type: string
+        bimModelId:
+          type: string
+        materializableElementId:
+          type: string
+        briefingId:
+          type: string
+        reason:
+          $ref: "#/components/schemas/BriefingDivergenceReason"
+        note:
+          type: string
+          nullable: true
+        detail:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - bimModelId
+        - materializableElementId
+        - briefingId
+        - reason
+        - note
+        - detail
+        - createdAt
+
+    BimModelDivergenceResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /bim-models/{id}/divergence`.
+      properties:
+        divergence:
+          $ref: "#/components/schemas/BriefingDivergence"
+      required:
+        - divergence

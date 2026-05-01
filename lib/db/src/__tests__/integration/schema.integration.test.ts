@@ -61,12 +61,21 @@ describe("lib/db schema integration", () => {
       const names = res.rows.map((r) => r.tablename);
       expect(names).toEqual([
         "atom_events",
+        // DA-PI-5 Revit-sensor materialization tables. Listed in
+        // alphabetical order to match `ORDER BY tablename` from the
+        // pg_tables query above. `bim_models` carries the per-engagement
+        // pointer; `briefing_divergences` carries the operator-edit
+        // log; `materializable_elements` carries the canonicalized
+        // forms the divergences reference.
+        "bim_models",
+        "briefing_divergences",
         "briefing_sources",
         "code_atom_fetch_queue",
         "code_atom_sources",
         "code_atoms",
         "engagements",
         "findings_code_atoms",
+        "materializable_elements",
         "parcel_briefings",
         "sheets",
         "snapshots",

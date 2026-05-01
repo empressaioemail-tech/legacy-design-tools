@@ -1560,6 +1560,339 @@ export const GetBriefingSourceGlbHeader = zod.object({
 });
 
 /**
+ * DA-PI-5 — read-side surface for the C# Revit add-in. Returns the
+engagement's `bim_models` row (or `null` when no push has
+happened yet) along with the `materializable_elements` rows
+derived from the currently-active briefing.
+
+The C# add-in calls this on app startup and on every
+engagement-binding change to discover what it should
+materialize. The wire envelope mirrors the briefing read shape
+so the FE can render a "Push to Revit" affordance against the
+same `null` / non-null discriminator.
+
+ * @summary Get the engagement's bim-model + materializable elements
+ */
+export const GetEngagementBimModelParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getEngagementBimModelResponseBimModelOneBriefingVersionMin = 0;
+
+export const GetEngagementBimModelResponse = zod
+  .object({
+    bimModel: zod
+      .object({
+        id: zod.string(),
+        engagementId: zod.string(),
+        activeBriefingId: zod.string().nullable(),
+        briefingVersion: zod
+          .number()
+          .min(getEngagementBimModelResponseBimModelOneBriefingVersionMin),
+        materializedAt: zod.coerce.date().nullable(),
+        revitDocumentPath: zod.string().nullable(),
+        refreshStatus: zod
+          .enum(["current", "stale", "not-pushed"])
+          .describe(
+            'DA-PI-5 \/ Spec 53 §3 — the three statuses the Site Context\n\"Push to Revit\" affordance can surface. See the\n`getBimModelRefresh` description for state semantics.\n',
+          ),
+        elements: zod.array(
+          zod
+            .object({
+              id: zod.string(),
+              briefingId: zod.string(),
+              elementKind: zod
+                .enum([
+                  "terrain",
+                  "property-line",
+                  "setback-plane",
+                  "buildable-envelope",
+                  "floodplain",
+                  "wetland",
+                  "neighbor-mass",
+                ])
+                .describe(
+                  "DA-PI-5 \/ Spec 51a §2.4 — the seven element kinds the C# Revit\nadd-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on\nthe api-server `converterClient` so a materializable element\nsourced from a DXF round-trips through the same closed set.\n",
+                ),
+              briefingSourceId: zod.string().nullable(),
+              label: zod.string().nullable(),
+              geometry: zod
+                .record(zod.string(), zod.unknown())
+                .describe(
+                  "Discriminator-dependent geometry payload; see schema docstring.",
+                ),
+              glbObjectPath: zod.string().nullable(),
+              locked: zod.boolean(),
+              createdAt: zod.coerce.date(),
+              updatedAt: zod.coerce.date(),
+            })
+            .describe(
+              "DA-PI-5 \/ Spec 51a §2.4 — one piece of geometry the C# Revit\nadd-in materializes into the architect's active model. The\n`geometry` payload is discriminator-dependent (see the\ncolumn docstring on `materializable_elements.geometry`).\n",
+            ),
+        ),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+      })
+      .describe(
+        "DA-PI-5 — the engagement's bim-model row plus the\nmaterializable elements derived from its currently-active\nbriefing.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the bim-model read\/push routes. `bimModel`\nis `null` when no push has happened yet for the engagement\n— the first call to `POST \/engagements\/{id}\/bim-model` is\nwhat creates it.\n",
+  );
+
+/**
+ * DA-PI-5 — the "Push to Revit" affordance writes here. Records
+(or updates) the engagement's `bim_models` row to point at the
+engagement's currently-active parcel briefing and stamp
+`materializedAt` to now.
+
+Idempotent at the engagement-id level (the `bim_models` table
+has a unique constraint on `engagement_id`): a re-push for the
+same engagement updates the existing row's `activeBriefingId`
+/ `materializedAt` rather than inserting a duplicate. Refuses
+when the engagement has no parcel briefing yet (the architect
+must upload a briefing source first).
+
+Emits `bim-model.materialized` against the row through the
+event-anchoring service. Best-effort: a transient history
+outage cannot fail the HTTP request — the row is the source
+of truth.
+
+ * @summary Push the engagement's active briefing to Revit (idempotent)
+ */
+export const PushEngagementBimModelParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const pushEngagementBimModelBodyRevitDocumentPathMax = 1024;
+
+export const PushEngagementBimModelBody = zod
+  .object({
+    revitDocumentPath: zod
+      .string()
+      .max(pushEngagementBimModelBodyRevitDocumentPathMax)
+      .nullish()
+      .describe(
+        "Optional architect-supplied identifier of the Revit\ndocument the bim-model is bound to (operator visibility\nonly).\n",
+      ),
+  })
+  .describe(
+    "Request body for `POST \/engagements\/{id}\/bim-model`. All\nfields are optional — the route resolves the engagement's\ncurrently-active briefing on the server side rather than\ntrusting the client to name it.\n",
+  );
+
+export const pushEngagementBimModelResponseBimModelOneBriefingVersionMin = 0;
+
+export const PushEngagementBimModelResponse = zod
+  .object({
+    bimModel: zod
+      .object({
+        id: zod.string(),
+        engagementId: zod.string(),
+        activeBriefingId: zod.string().nullable(),
+        briefingVersion: zod
+          .number()
+          .min(pushEngagementBimModelResponseBimModelOneBriefingVersionMin),
+        materializedAt: zod.coerce.date().nullable(),
+        revitDocumentPath: zod.string().nullable(),
+        refreshStatus: zod
+          .enum(["current", "stale", "not-pushed"])
+          .describe(
+            'DA-PI-5 \/ Spec 53 §3 — the three statuses the Site Context\n\"Push to Revit\" affordance can surface. See the\n`getBimModelRefresh` description for state semantics.\n',
+          ),
+        elements: zod.array(
+          zod
+            .object({
+              id: zod.string(),
+              briefingId: zod.string(),
+              elementKind: zod
+                .enum([
+                  "terrain",
+                  "property-line",
+                  "setback-plane",
+                  "buildable-envelope",
+                  "floodplain",
+                  "wetland",
+                  "neighbor-mass",
+                ])
+                .describe(
+                  "DA-PI-5 \/ Spec 51a §2.4 — the seven element kinds the C# Revit\nadd-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on\nthe api-server `converterClient` so a materializable element\nsourced from a DXF round-trips through the same closed set.\n",
+                ),
+              briefingSourceId: zod.string().nullable(),
+              label: zod.string().nullable(),
+              geometry: zod
+                .record(zod.string(), zod.unknown())
+                .describe(
+                  "Discriminator-dependent geometry payload; see schema docstring.",
+                ),
+              glbObjectPath: zod.string().nullable(),
+              locked: zod.boolean(),
+              createdAt: zod.coerce.date(),
+              updatedAt: zod.coerce.date(),
+            })
+            .describe(
+              "DA-PI-5 \/ Spec 51a §2.4 — one piece of geometry the C# Revit\nadd-in materializes into the architect's active model. The\n`geometry` payload is discriminator-dependent (see the\ncolumn docstring on `materializable_elements.geometry`).\n",
+            ),
+        ),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+      })
+      .describe(
+        "DA-PI-5 — the engagement's bim-model row plus the\nmaterializable elements derived from its currently-active\nbriefing.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the bim-model read\/push routes. `bimModel`\nis `null` when no push has happened yet for the engagement\n— the first call to `POST \/engagements\/{id}\/bim-model` is\nwhat creates it.\n",
+  );
+
+/**
+ * DA-PI-5 / Spec 53 §3 — returns the refresh-diff between the
+bim-model's last materialization and the briefing's current
+state. The C# add-in polls this on focus to surface the
+"briefing has changed" badge in Revit; the design-tools FE
+uses the same shape to render the three statuses on the
+Site Context tab's "Push to Revit" affordance.
+
+Status semantics:
+  - `current`     — bim-model is materialized and the briefing
+    has not been regenerated since the push.
+  - `stale`       — briefing has been regenerated since the
+    last push; the architect's model is out of date.
+  - `not-pushed`  — no push has happened yet (the row exists
+    but `materializedAt` is null), or the briefing was
+    deleted out from under the bim-model.
+
+Emits `bim-model.refreshed` against the row through the
+event-anchoring service so the timeline preserves a per-poll
+audit trail. Best-effort.
+
+ * @summary Compute the bim-model ↔ active-briefing refresh diff
+ */
+export const GetBimModelRefreshParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getBimModelRefreshResponseBriefingVersionMin = 0;
+
+export const getBimModelRefreshResponseDiffAddedCountMin = 0;
+
+export const getBimModelRefreshResponseDiffModifiedCountMin = 0;
+
+export const getBimModelRefreshResponseDiffUnchangedCountMin = 0;
+
+export const GetBimModelRefreshResponse = zod
+  .object({
+    bimModelId: zod.string(),
+    engagementId: zod.string(),
+    refreshStatus: zod
+      .enum(["current", "stale", "not-pushed"])
+      .describe(
+        'DA-PI-5 \/ Spec 53 §3 — the three statuses the Site Context\n\"Push to Revit\" affordance can surface. See the\n`getBimModelRefresh` description for state semantics.\n',
+      ),
+    materializedAt: zod.coerce.date().nullable(),
+    briefingVersion: zod
+      .number()
+      .min(getBimModelRefreshResponseBriefingVersionMin),
+    activeBriefingId: zod.string().nullable(),
+    activeBriefingUpdatedAt: zod.coerce.date().nullable(),
+    diff: zod
+      .object({
+        elements: zod.array(
+          zod
+            .object({
+              id: zod.string(),
+              elementKind: zod.string(),
+              label: zod.string().nullable(),
+              diffStatus: zod
+                .enum(["added", "modified", "unchanged"])
+                .describe(
+                  'Per-element delta status returned in `BimModelRefreshResponse.diff.elements`.\n- `added`     — element was created on the briefing AFTER\n  `bimModel.materializedAt` (the C# add-in has never seen it).\n- `modified`  — element existed at materialization time but\n  its `updatedAt` is newer than `materializedAt` (geometry\n  or label changed since the last push).\n- `unchanged` — element is older-or-equal to the\n  materialization timestamp (still safe to leave in place).\nWe deliberately do NOT include a `removed` status: api-server\ndoes not snapshot the materialized element set at push time,\nso deletions detected by the C# add-in are reported via\n`POST \/bim-models\/{id}\/divergence` (`reason: \"deleted\"`)\nrather than inferred here.\n',
+                ),
+              updatedAt: zod.coerce.date(),
+            })
+            .describe(
+              "One row in the per-element diff returned by\n`getBimModelRefresh`. Mirrors the wire fields the C# add-in\nneeds to decide whether to re-instance, re-place, or skip a\ngiven materializable element on refresh.\n",
+            ),
+        ),
+        addedCount: zod
+          .number()
+          .min(getBimModelRefreshResponseDiffAddedCountMin),
+        modifiedCount: zod
+          .number()
+          .min(getBimModelRefreshResponseDiffModifiedCountMin),
+        unchangedCount: zod
+          .number()
+          .min(getBimModelRefreshResponseDiffUnchangedCountMin),
+      })
+      .describe(
+        "Element-level delta between the bim-model's last materialization\nand the briefing's current state. Always present (even when\n`refreshStatus === \"current\"`) so the C# add-in can iterate a\nsingle shape regardless of status.\n",
+      ),
+  })
+  .describe(
+    "DA-PI-5 \/ Spec 53 §3 — refresh diff payload. Carries the\nstatuses the FE renders on the Site Context tab, the\ntimestamps the C# add-in uses to decide whether to prompt\nthe architect for a re-push, and the element-level `diff`\nthe add-in iterates to plan its re-materialization protocol.\n",
+  );
+
+/**
+ * DA-PI-5 / Spec 51a §2.2 — service-to-service surface the C#
+Revit add-in calls when its element-watcher detects an
+unpin / geometry edit / deletion against a locked
+materializable element.
+
+Authenticated via HMAC-SHA256 against `BIM_MODEL_SHARED_SECRET`
+(mirroring the DXF converter precedent in
+`converterClient.ts`): the request must carry both
+`x-bim-model-request-id` (a uuid the C# side mints) and
+`x-bim-model-signature` (the lowercase-hex HMAC of
+`requestId.bimModelId`). Engagement-scoped browser callers
+do NOT have access to this surface.
+
+Append-only: every divergence inserts a new row and emits
+`briefing-divergence.recorded` (against the divergence row)
+and `bim-model.diverged` (against the parent bim-model). A
+subsequent re-pin / unpin lands as a separate row.
+
+ * @summary Record an architect divergence against a locked element
+ */
+export const RecordBimModelDivergenceParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const RecordBimModelDivergenceHeader = zod.object({
+  "x-bim-model-request-id": zod.string().uuid(),
+  "x-bim-model-signature": zod.string(),
+});
+
+export const recordBimModelDivergenceBodyNoteMax = 2048;
+
+export const RecordBimModelDivergenceBody = zod
+  .object({
+    materializableElementId: zod
+      .string()
+      .describe("The locked element the architect modified."),
+    reason: zod
+      .enum(["unpinned", "geometry-edited", "deleted", "other"])
+      .describe(
+        "DA-PI-5 \/ Spec 51a §2.2 — the closed set of reason buckets the\nC# Revit add-in is allowed to record when an architect\nmodifies a locked materializable element.\n",
+      ),
+    note: zod
+      .string()
+      .max(recordBimModelDivergenceBodyNoteMax)
+      .nullish()
+      .describe("Optional architect-supplied explanation."),
+    detail: zod
+      .record(zod.string(), zod.unknown())
+      .optional()
+      .describe(
+        "Free-form bag the C# side may attach (before\/after\ngeometry digests, the Revit element id that fired the\ntrigger, etc). Defaults to an empty object on the wire\nwhen omitted.\n",
+      ),
+  })
+  .describe(
+    "Request body for `POST \/bim-models\/{id}\/divergence`. The C#\nRevit add-in sends one row per detected override against a\nlocked materializable element.\n",
+  );
+
+/**
  * Returns all snapshots, newest first, joined with engagementName.
  * @summary List Revit snapshots across all engagements
  */

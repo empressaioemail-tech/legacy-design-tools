@@ -28,6 +28,9 @@ import { makeParcelBriefingAtom } from "./parcel-briefing.atom";
 import { makeIntentAtom } from "./intent.atom";
 import { makeBriefingSourceAtom } from "./briefing-source.atom";
 import { makeNeighboringContextAtom } from "./neighboring-context.atom";
+import { makeBimModelAtom } from "./bim-model.atom";
+import { makeMaterializableElementAtom } from "./materializable-element.atom";
+import { makeBriefingDivergenceAtom } from "./briefing-divergence.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -98,9 +101,18 @@ export function getHistoryService(): EventAnchoringService {
  *     `parcel-briefing` and a forward-ref `parcel` edge.
  *   - `neighboring-context` (DA-PI-1, shape-only) — composes
  *     `briefing-source` and a forward-ref `parcel` edge.
- *
- * `briefing-divergence` is deferred to Spec 53 C-1 and intentionally
- * not registered here.
+ *   - `bim-model` (DA-PI-5) — design-tools-side record of the
+ *     architect's active Revit model bound to an engagement; composes
+ *     `engagement`, `parcel-briefing` (activeBriefing), forward-ref
+ *     `materializable-element`, and concrete `briefing-divergence`.
+ *   - `materializable-element` (DA-PI-5) — one piece of geometry
+ *     (terrain, setback plane, buildable envelope, …) the C# Revit
+ *     add-in materializes; composes `parcel-briefing`,
+ *     `briefing-source`, and `briefing-divergence`.
+ *   - `briefing-divergence` (DA-PI-5) — audit-trail row for an
+ *     architect override against a locked materializable element;
+ *     composes `bim-model`, `materializable-element`,
+ *     `parcel-briefing`.
  */
 export function getAtomRegistry(): AtomRegistry {
   if (_registry) return _registry;
@@ -121,6 +133,13 @@ export function getAtomRegistry(): AtomRegistry {
   registry.register(makeBriefingSourceAtom({ history }));
   registry.register(makeParcelBriefingAtom({ history }));
   registry.register(makeNeighboringContextAtom({ history }));
+  // DA-PI-5 Revit sensor materialization atoms. Registered after
+  // their child types (parcel-briefing, briefing-source, engagement)
+  // so the boot-log tail surfaces the dependency order naturally;
+  // `register()` itself does not care about order.
+  registry.register(makeMaterializableElementAtom({ db, history }));
+  registry.register(makeBriefingDivergenceAtom({ db, history }));
+  registry.register(makeBimModelAtom({ db, history }));
   _registry = registry;
   return registry;
 }

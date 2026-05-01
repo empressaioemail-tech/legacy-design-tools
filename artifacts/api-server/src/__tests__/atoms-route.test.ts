@@ -48,6 +48,13 @@ const { INTENT_EVENT_TYPES } = await import("../atoms/intent.atom");
 const { BRIEFING_SOURCE_EVENT_TYPES } = await import(
   "../atoms/briefing-source.atom"
 );
+const { BIM_MODEL_EVENT_TYPES } = await import("../atoms/bim-model.atom");
+const { MATERIALIZABLE_ELEMENT_EVENT_TYPES } = await import(
+  "../atoms/materializable-element.atom"
+);
+const { BRIEFING_DIVERGENCE_EVENT_TYPES } = await import(
+  "../atoms/briefing-divergence.atom"
+);
 const { NEIGHBORING_CONTEXT_EVENT_TYPES } = await import(
   "../atoms/neighboring-context.atom"
 );
@@ -592,6 +599,60 @@ describe("GET /api/atoms/catalog", () => {
     // Spec 51a §2.13's "compact (line in briefing)" guidance.
     expect(neighboringContext?.defaultMode).toBe("compact");
     expect(neighboringContext?.composes).toEqual(["parcel", "briefing-source"]);
+
+    // DA-PI-5 Revit-sensor materialization atoms — same drift-check
+    // pattern as the DA-PI-1 quartet above. The bim-model registration
+    // is the affordance the Push to Revit button hangs off of, so a
+    // rename of any of its three event types or a reordering of its
+    // composition would be caught here before shipping.
+
+    const bimModel = byType.get("bim-model");
+    expect(bimModel).toBeDefined();
+    expect(bimModel?.eventTypes).toEqual([...BIM_MODEL_EVENT_TYPES]);
+    expect(bimModel?.defaultMode).toBe("card");
+    // Composition order from bim-model.atom: engagement,
+    // parcel-briefing, materializable-element (forwardRef),
+    // briefing-divergence, connector-binding (forwardRef).
+    // forwardRef edges are NOT filtered from `composes` — they
+    // reflect the raw childEntityType order. `connector-binding`
+    // is declared by locked decision #2 even though the connector
+    // atom lives in another service.
+    expect(bimModel?.composes).toEqual([
+      "engagement",
+      "parcel-briefing",
+      "materializable-element",
+      "briefing-divergence",
+      "connector-binding",
+    ]);
+
+    const materializableElement = byType.get("materializable-element");
+    expect(materializableElement).toBeDefined();
+    expect(materializableElement?.eventTypes).toEqual([
+      ...MATERIALIZABLE_ELEMENT_EVENT_TYPES,
+    ]);
+    // materializable-element surfaces inline in element lists — same
+    // compact default the briefing-source atom uses for the same
+    // reason.
+    expect(materializableElement?.defaultMode).toBe("compact");
+    expect(materializableElement?.composes).toEqual([
+      "parcel-briefing",
+      "briefing-source",
+      "briefing-divergence",
+    ]);
+
+    const briefingDivergence = byType.get("briefing-divergence");
+    expect(briefingDivergence).toBeDefined();
+    expect(briefingDivergence?.eventTypes).toEqual([
+      ...BRIEFING_DIVERGENCE_EVENT_TYPES,
+    ]);
+    // briefing-divergence is a leaf row in the divergence list —
+    // compact mode mirrors briefing-source / neighboring-context.
+    expect(briefingDivergence?.defaultMode).toBe("compact");
+    expect(briefingDivergence?.composes).toEqual([
+      "bim-model",
+      "materializable-element",
+      "parcel-briefing",
+    ]);
   });
 
   // The atoms route is fully dynamic (resolves through the registry),

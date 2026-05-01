@@ -19,6 +19,8 @@ import type {
 import type {
   AtomHistoryResponse,
   AtomSummary,
+  BimModelDivergenceResponse,
+  BimModelRefreshResponse,
   BriefingGenerationStatusResponse,
   ChatErrorResponse,
   ChatRequest,
@@ -28,6 +30,7 @@ import type {
   CreateBriefingSourceBody,
   CreateEngagementSubmissionBody,
   CreateUserBody,
+  EngagementBimModelResponse,
   EngagementBriefingResponse,
   EngagementBriefingSourcesResponse,
   EngagementDetail,
@@ -47,6 +50,8 @@ import type {
   ListJurisdictionAtomsParams,
   MatchEngagementBody,
   MatchEngagementResponse,
+  PushBimModelBody,
+  RecordBimModelDivergenceBody,
   RecordSubmissionResponseBody,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
@@ -1941,6 +1946,431 @@ export function useGetBriefingSourceGlb<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * DA-PI-5 — read-side surface for the C# Revit add-in. Returns the
+engagement's `bim_models` row (or `null` when no push has
+happened yet) along with the `materializable_elements` rows
+derived from the currently-active briefing.
+
+The C# add-in calls this on app startup and on every
+engagement-binding change to discover what it should
+materialize. The wire envelope mirrors the briefing read shape
+so the FE can render a "Push to Revit" affordance against the
+same `null` / non-null discriminator.
+
+ * @summary Get the engagement's bim-model + materializable elements
+ */
+export const getGetEngagementBimModelUrl = (id: string) => {
+  return `/api/engagements/${id}/bim-model`;
+};
+
+export const getEngagementBimModel = async (
+  id: string,
+  options?: RequestInit,
+): Promise<EngagementBimModelResponse> => {
+  return customFetch<EngagementBimModelResponse>(
+    getGetEngagementBimModelUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetEngagementBimModelQueryKey = (id: string) => {
+  return [`/api/engagements/${id}/bim-model`] as const;
+};
+
+export const getGetEngagementBimModelQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEngagementBimModel>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagementBimModel>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetEngagementBimModelQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEngagementBimModel>>
+  > = ({ signal }) => getEngagementBimModel(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEngagementBimModel>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEngagementBimModelQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEngagementBimModel>>
+>;
+export type GetEngagementBimModelQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get the engagement's bim-model + materializable elements
+ */
+
+export function useGetEngagementBimModel<
+  TData = Awaited<ReturnType<typeof getEngagementBimModel>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagementBimModel>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEngagementBimModelQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * DA-PI-5 — the "Push to Revit" affordance writes here. Records
+(or updates) the engagement's `bim_models` row to point at the
+engagement's currently-active parcel briefing and stamp
+`materializedAt` to now.
+
+Idempotent at the engagement-id level (the `bim_models` table
+has a unique constraint on `engagement_id`): a re-push for the
+same engagement updates the existing row's `activeBriefingId`
+/ `materializedAt` rather than inserting a duplicate. Refuses
+when the engagement has no parcel briefing yet (the architect
+must upload a briefing source first).
+
+Emits `bim-model.materialized` against the row through the
+event-anchoring service. Best-effort: a transient history
+outage cannot fail the HTTP request — the row is the source
+of truth.
+
+ * @summary Push the engagement's active briefing to Revit (idempotent)
+ */
+export const getPushEngagementBimModelUrl = (id: string) => {
+  return `/api/engagements/${id}/bim-model`;
+};
+
+export const pushEngagementBimModel = async (
+  id: string,
+  pushBimModelBody?: PushBimModelBody,
+  options?: RequestInit,
+): Promise<EngagementBimModelResponse> => {
+  return customFetch<EngagementBimModelResponse>(
+    getPushEngagementBimModelUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(pushBimModelBody),
+    },
+  );
+};
+
+export const getPushEngagementBimModelMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pushEngagementBimModel>>,
+    TError,
+    { id: string; data: BodyType<PushBimModelBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof pushEngagementBimModel>>,
+  TError,
+  { id: string; data: BodyType<PushBimModelBody> },
+  TContext
+> => {
+  const mutationKey = ["pushEngagementBimModel"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof pushEngagementBimModel>>,
+    { id: string; data: BodyType<PushBimModelBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return pushEngagementBimModel(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PushEngagementBimModelMutationResult = NonNullable<
+  Awaited<ReturnType<typeof pushEngagementBimModel>>
+>;
+export type PushEngagementBimModelMutationBody = BodyType<PushBimModelBody>;
+export type PushEngagementBimModelMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Push the engagement's active briefing to Revit (idempotent)
+ */
+export const usePushEngagementBimModel = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pushEngagementBimModel>>,
+    TError,
+    { id: string; data: BodyType<PushBimModelBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof pushEngagementBimModel>>,
+  TError,
+  { id: string; data: BodyType<PushBimModelBody> },
+  TContext
+> => {
+  return useMutation(getPushEngagementBimModelMutationOptions(options));
+};
+
+/**
+ * DA-PI-5 / Spec 53 §3 — returns the refresh-diff between the
+bim-model's last materialization and the briefing's current
+state. The C# add-in polls this on focus to surface the
+"briefing has changed" badge in Revit; the design-tools FE
+uses the same shape to render the three statuses on the
+Site Context tab's "Push to Revit" affordance.
+
+Status semantics:
+  - `current`     — bim-model is materialized and the briefing
+    has not been regenerated since the push.
+  - `stale`       — briefing has been regenerated since the
+    last push; the architect's model is out of date.
+  - `not-pushed`  — no push has happened yet (the row exists
+    but `materializedAt` is null), or the briefing was
+    deleted out from under the bim-model.
+
+Emits `bim-model.refreshed` against the row through the
+event-anchoring service so the timeline preserves a per-poll
+audit trail. Best-effort.
+
+ * @summary Compute the bim-model ↔ active-briefing refresh diff
+ */
+export const getGetBimModelRefreshUrl = (id: string) => {
+  return `/api/bim-models/${id}/refresh`;
+};
+
+export const getBimModelRefresh = async (
+  id: string,
+  options?: RequestInit,
+): Promise<BimModelRefreshResponse> => {
+  return customFetch<BimModelRefreshResponse>(getGetBimModelRefreshUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBimModelRefreshQueryKey = (id: string) => {
+  return [`/api/bim-models/${id}/refresh`] as const;
+};
+
+export const getGetBimModelRefreshQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBimModelRefresh>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBimModelRefresh>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetBimModelRefreshQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBimModelRefresh>>
+  > = ({ signal }) => getBimModelRefresh(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBimModelRefresh>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBimModelRefreshQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBimModelRefresh>>
+>;
+export type GetBimModelRefreshQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Compute the bim-model ↔ active-briefing refresh diff
+ */
+
+export function useGetBimModelRefresh<
+  TData = Awaited<ReturnType<typeof getBimModelRefresh>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBimModelRefresh>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBimModelRefreshQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * DA-PI-5 / Spec 51a §2.2 — service-to-service surface the C#
+Revit add-in calls when its element-watcher detects an
+unpin / geometry edit / deletion against a locked
+materializable element.
+
+Authenticated via HMAC-SHA256 against `BIM_MODEL_SHARED_SECRET`
+(mirroring the DXF converter precedent in
+`converterClient.ts`): the request must carry both
+`x-bim-model-request-id` (a uuid the C# side mints) and
+`x-bim-model-signature` (the lowercase-hex HMAC of
+`requestId.bimModelId`). Engagement-scoped browser callers
+do NOT have access to this surface.
+
+Append-only: every divergence inserts a new row and emits
+`briefing-divergence.recorded` (against the divergence row)
+and `bim-model.diverged` (against the parent bim-model). A
+subsequent re-pin / unpin lands as a separate row.
+
+ * @summary Record an architect divergence against a locked element
+ */
+export const getRecordBimModelDivergenceUrl = (id: string) => {
+  return `/api/bim-models/${id}/divergence`;
+};
+
+export const recordBimModelDivergence = async (
+  id: string,
+  recordBimModelDivergenceBody: RecordBimModelDivergenceBody,
+  options?: RequestInit,
+): Promise<BimModelDivergenceResponse> => {
+  return customFetch<BimModelDivergenceResponse>(
+    getRecordBimModelDivergenceUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(recordBimModelDivergenceBody),
+    },
+  );
+};
+
+export const getRecordBimModelDivergenceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordBimModelDivergence>>,
+    TError,
+    { id: string; data: BodyType<RecordBimModelDivergenceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordBimModelDivergence>>,
+  TError,
+  { id: string; data: BodyType<RecordBimModelDivergenceBody> },
+  TContext
+> => {
+  const mutationKey = ["recordBimModelDivergence"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordBimModelDivergence>>,
+    { id: string; data: BodyType<RecordBimModelDivergenceBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return recordBimModelDivergence(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordBimModelDivergenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordBimModelDivergence>>
+>;
+export type RecordBimModelDivergenceMutationBody =
+  BodyType<RecordBimModelDivergenceBody>;
+export type RecordBimModelDivergenceMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Record an architect divergence against a locked element
+ */
+export const useRecordBimModelDivergence = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordBimModelDivergence>>,
+    TError,
+    { id: string; data: BodyType<RecordBimModelDivergenceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recordBimModelDivergence>>,
+  TError,
+  { id: string; data: BodyType<RecordBimModelDivergenceBody> },
+  TContext
+> => {
+  return useMutation(getRecordBimModelDivergenceMutationOptions(options));
+};
 
 /**
  * Returns all snapshots, newest first, joined with engagementName.

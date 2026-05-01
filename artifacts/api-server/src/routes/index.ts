@@ -15,6 +15,7 @@ import storageRouter from "./storage";
 import sessionRouter from "./session";
 import parcelBriefingsRouter from "./parcelBriefings";
 import briefingSourcesRouter from "./briefingSources";
+import bimModelsRouter from "./bimModels";
 import generateLayersRouter from "./generateLayers";
 
 const router: IRouter = Router();
@@ -38,6 +39,11 @@ router.use(generateLayersRouter);
 // indifferent (no path overlap) but kept adjacent to its sibling so
 // the briefing-related routes stay grouped.
 router.use(briefingSourcesRouter);
+// bimModelsRouter exposes `/engagements/:id/bim-model` (which would
+// otherwise be shadowed by engagementsRouter's `/engagements/:id`
+// parametric handler) plus the top-level `/bim-models/:id/*` group
+// the C# Revit add-in calls.
+router.use(bimModelsRouter);
 router.use(engagementsRouter);
 router.use(snapshotsRouter);
 router.use(sheetsRouter);
