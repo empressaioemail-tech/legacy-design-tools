@@ -42,25 +42,38 @@
  */
 
 import { sql } from "drizzle-orm";
-import { db, pool } from "@workspace/db";
+import { db as defaultDb, pool } from "@workspace/db";
 
-interface CliOptions {
+export interface CliOptions {
   dryRun: boolean;
 }
 
-function parseArgs(argv: string[]): CliOptions {
+export function parseArgs(argv: string[]): CliOptions {
   return {
     dryRun: argv.includes("--dry-run"),
   };
 }
 
-interface BackfillSummary {
+export interface BackfillSummary {
   scanned: number;
   matched: number;
   unmatched: number;
 }
 
-async function backfill(opts: CliOptions): Promise<BackfillSummary> {
+/**
+ * Drizzle-or-pg interface the backfill needs — narrowed to just
+ * `.execute()` so tests can pass a `withTestSchema` db without
+ * pulling in the full Drizzle type surface (Task #303 B.7).
+ */
+type BackfillDb = {
+  execute: <T>(query: ReturnType<typeof sql>) => Promise<{ rows: T[] }>;
+};
+
+export async function backfill(
+  opts: CliOptions,
+  dbArg: BackfillDb = defaultDb as unknown as BackfillDb,
+): Promise<BackfillSummary> {
+  const db = dbArg;
   // One UPDATE…FROM (LATERAL) round trip — Postgres picks the
   // most-recent matching completed job per briefing in a single
   // statement. Doing this in SQL rather than fetching+looping in

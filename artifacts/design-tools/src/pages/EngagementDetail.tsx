@@ -313,6 +313,83 @@ function writeRecentRunsOpenToUrl(next: boolean): void {
   window.history.replaceState(null, "", url.toString());
 }
 
+/**
+ * Word-level diff between two strings — Task #303 B.5.
+ *
+ * Used by the prior-narrative panel to annotate, per A–G section,
+ * what the current narrative *removed* and *added* relative to the
+ * snapshot the briefing was holding before the most recent
+ * regeneration. Computed inline rather than pulled from a `diff`
+ * package to avoid adding a runtime dependency for one consumer.
+ *
+ * Algorithm: standard backwards LCS DP over whitespace-tokenised
+ * inputs (whitespace runs are kept as their own tokens so the
+ * reconstructed body preserves the original spacing exactly).
+ * Output is a flat sequence of ops the renderer walks once: tokens
+ * that survive into the current narrative read as `equal`, tokens
+ * present only in the prior body read as `removed` (rendered with
+ * strikethrough so the auditor sees what was dropped), and tokens
+ * present only in the current body read as `added` (rendered with
+ * underline so the auditor sees what was inserted in their place).
+ *
+ * Inputs are bounded by section length (a few KB at most), so the
+ * O(m·n) memory cost is negligible for the realistic worst case.
+ */
+type WordDiffOp = {
+  type: "equal" | "added" | "removed";
+  text: string;
+};
+
+function diffWords(prior: string, current: string): WordDiffOp[] {
+  // Split on whitespace runs while *preserving* them as tokens so
+  // joining the equal/removed/added pieces back together yields a
+  // body whose whitespace matches the original. `String.split` with
+  // a captured group keeps the separators interleaved with the
+  // word tokens.
+  const a = prior.split(/(\s+)/).filter((tok) => tok.length > 0);
+  const b = current.split(/(\s+)/).filter((tok) => tok.length > 0);
+  const m = a.length;
+  const n = b.length;
+  // Backwards LCS so the reconstruction below can walk forwards.
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    new Array<number>(n + 1).fill(0),
+  );
+  for (let i = m - 1; i >= 0; i -= 1) {
+    for (let j = n - 1; j >= 0; j -= 1) {
+      if (a[i] === b[j]) {
+        dp[i]![j] = (dp[i + 1]![j + 1] ?? 0) + 1;
+      } else {
+        dp[i]![j] = Math.max(dp[i + 1]![j] ?? 0, dp[i]![j + 1] ?? 0);
+      }
+    }
+  }
+  const out: WordDiffOp[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) {
+      out.push({ type: "equal", text: a[i]! });
+      i += 1;
+      j += 1;
+    } else if ((dp[i + 1]![j] ?? 0) >= (dp[i]![j + 1] ?? 0)) {
+      out.push({ type: "removed", text: a[i]! });
+      i += 1;
+    } else {
+      out.push({ type: "added", text: b[j]! });
+      j += 1;
+    }
+  }
+  while (i < m) {
+    out.push({ type: "removed", text: a[i]! });
+    i += 1;
+  }
+  while (j < n) {
+    out.push({ type: "added", text: b[j]! });
+    j += 1;
+  }
+  return out;
+}
+
 function TabBar({
   active,
   onChange,
@@ -2731,6 +2808,44 @@ function BriefingNarrativePanel({
   const hasNarrative = !!narrative && !!narrative.generatedAt;
   const noSources = sourceCount === 0;
   const buttonDisabled = noSources || isPending || generateMutation.isPending;
+
+  // Task #303 B.8 — when the briefing's `narrative.generationId` is
+  // non-null but the producing run has aged out of the keep window
+  // (the sweep dropped it before the auditor opened this card), the
+  // "Recent runs" disclosure cannot mark anything Current — there's
+  // nothing to mark. That makes the briefing card's "Last generated
+  // by …" line read more authoritatively than the underlying audit
+  // trail can support, so we annotate the meta line with a small
+  // "(producing run pruned from history)" pill so the auditor knows
+  // the on-screen narrative is real but its provenance run is no
+  // longer available for inspection.
+  //
+  // We piggy-back on the same `useListEngagementBriefingGenerationRuns`
+  // query the disclosure uses — same key, deduped by React Query —
+  // gated on `narrative?.generationId != null` so engagements whose
+  // briefings have never been generated (or whose row pre-dates the
+  // generation_id column and the post-merge backfill couldn't
+  // attribute to any row) don't pay an extra round trip just to
+  // discover they have nothing to annotate.
+  const annotationRunsQuery = useListEngagementBriefingGenerationRuns(
+    engagementId,
+    {
+      query: {
+        queryKey:
+          getListEngagementBriefingGenerationRunsQueryKey(engagementId),
+        enabled: narrative?.generationId != null,
+        refetchOnWindowFocus: false,
+      },
+    },
+  );
+  const producingRunPruned = useMemo(() => {
+    const id = narrative?.generationId ?? null;
+    if (id === null) return false;
+    if (!annotationRunsQuery.data) return false;
+    return !annotationRunsQuery.data.runs.some(
+      (r: { generationId: string }) => r.generationId === id,
+    );
+  }, [narrative?.generationId, annotationRunsQuery.data]);
   const buttonLabel = hasNarrative ? "Regenerate Briefing" : "Generate Briefing";
   const tooltip = noSources
     ? "Upload a layer or run an adapter first — the engine has nothing to cite."
@@ -2817,6 +2932,34 @@ function BriefingNarrativePanel({
                 {" "}
                 Last generated {generatedAtLabel}
                 {generatedByLabel ? ` by ${generatedByLabel}` : ""}.
+              </>
+            )}
+            {/* Task #303 B.8 — only annotate when we know the
+                producing run has been pruned out of the keep window
+                (the briefing has a non-null generationId but that
+                id is missing from the runs list). Brand-new
+                engagements (generationId null) and engagements
+                whose producer is still on file don't render the
+                pill so it doesn't read as a generic "stale
+                briefing" warning. */}
+            {producingRunPruned && (
+              <>
+                {" "}
+                <span
+                  data-testid="briefing-narrative-producing-run-pruned"
+                  style={{
+                    fontSize: 11,
+                    padding: "1px 6px",
+                    borderRadius: 4,
+                    background: "var(--warning-dim)",
+                    color: "var(--warning-text)",
+                    marginLeft: 2,
+                    whiteSpace: "nowrap",
+                  }}
+                  title="The briefing-generation job that produced this narrative is no longer retained in the audit history."
+                >
+                  producing run pruned from history
+                </span>
               </>
             )}
           </div>
@@ -2916,6 +3059,7 @@ function BriefingNarrativePanel({
         engagementId={engagementId}
         narrativeGenerationId={narrative?.generationId ?? null}
         narrativeIsLoaded={narrative !== null}
+        currentNarrative={narrative}
       />
 
       {hasNarrative && (
@@ -3092,6 +3236,7 @@ function BriefingRecentRunsPanel({
   engagementId,
   narrativeGenerationId,
   narrativeIsLoaded,
+  currentNarrative,
 }: {
   engagementId: string;
   /**
@@ -3130,6 +3275,17 @@ function BriefingRecentRunsPanel({
    * already self-explanatory.
    */
   narrativeIsLoaded: boolean;
+  /**
+   * Task #303 B.5 — the narrative *currently* on screen in the
+   * parent panel. The prior-narrative block diffs each A–G section
+   * against the matching section in this value so the auditor can
+   * see, word by word, what the most recent regeneration removed
+   * and added relative to the snapshot the briefing was holding
+   * before. When `null` (no narrative on file yet) the diff
+   * collapses to "every prior token is unchanged", which renders
+   * the prior body verbatim — the safe degenerate case.
+   */
+  currentNarrative: EngagementBriefingNarrative | null;
 }) {
   // Task #275 — both the open/closed state of the disclosure and the
   // active filter are mirrored to the URL so an auditor who finds a
@@ -3653,6 +3809,27 @@ function BriefingRecentRunsPanel({
                           // either — its narrative is already
                           // rendered above the disclosure, so
                           // duplicating it here would be noise.
+                          //
+                          // Task #303 B.3 / B.4 / B.5 layered on top:
+                          //   B.3 — surface the prior narrative's
+                          //     `generatedAt` + `generatedBy` in the
+                          //     header so the auditor sees who/when
+                          //     produced the snapshot, not just
+                          //     "the previous body".
+                          //   B.4 — "Copy plain text" button that
+                          //     concatenates the seven section bodies
+                          //     and writes them to the clipboard so
+                          //     the auditor can paste the snapshot
+                          //     into a Slack thread or ticket.
+                          //   B.5 — per-section word-level diff vs
+                          //     the current narrative, rendered with
+                          //     strikethrough for tokens the new
+                          //     run dropped and underline for tokens
+                          //     it inserted. When the section is
+                          //     identical the renderer falls through
+                          //     to a "(unchanged)" pill so the
+                          //     auditor isn't asked to re-read
+                          //     identical paragraphs.
                           <div
                             data-testid={`briefing-run-prior-narrative-${run.generationId}`}
                             style={{
@@ -3666,26 +3843,172 @@ function BriefingRecentRunsPanel({
                           >
                             <div
                               style={{
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: "var(--text-default)",
-                                textTransform: "uppercase",
-                                letterSpacing: 0.3,
+                                display: "flex",
+                                alignItems: "flex-start",
+                                justifyContent: "space-between",
+                                gap: 12,
                               }}
                             >
-                              Narrative on screen before this run was
-                              overwritten
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 2,
+                                  minWidth: 0,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    color: "var(--text-default)",
+                                    textTransform: "uppercase",
+                                    letterSpacing: 0.3,
+                                  }}
+                                >
+                                  Narrative on screen before this run was
+                                  overwritten
+                                </div>
+                                {/* Task #303 B.3 — meta line. The wire
+                                    envelope's `priorNarrative.generatedAt`
+                                    and `generatedBy` may be null for
+                                    legacy rows where the backup column
+                                    pre-dates per-row provenance; render
+                                    only the half that's present so we
+                                    never show "by null" or "at —". */}
+                                {(priorNarrative.generatedAt ||
+                                  priorNarrative.generatedBy) && (
+                                  <div
+                                    data-testid={`briefing-run-prior-narrative-meta-${run.generationId}`}
+                                    style={{
+                                      fontSize: 11,
+                                      color: "var(--text-muted)",
+                                    }}
+                                  >
+                                    {priorNarrative.generatedAt && (
+                                      <span
+                                        data-testid={`briefing-run-prior-narrative-generated-at-${run.generationId}`}
+                                      >
+                                        Generated{" "}
+                                        {new Date(
+                                          priorNarrative.generatedAt as
+                                            | Date
+                                            | string,
+                                        ).toLocaleString()}
+                                      </span>
+                                    )}
+                                    {priorNarrative.generatedBy && (
+                                      <>
+                                        {priorNarrative.generatedAt ? " " : ""}
+                                        <span
+                                          data-testid={`briefing-run-prior-narrative-generated-by-${run.generationId}`}
+                                        >
+                                          by{" "}
+                                          {priorNarrative.generatedBy ===
+                                          "system:briefing-engine"
+                                            ? "Briefing engine (mock)"
+                                            : priorNarrative.generatedBy}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              {/* Task #303 B.4 — "Copy plain text"
+                                  button. Concatenates the seven A–G
+                                  bodies as `Label\n\nbody` blocks
+                                  separated by blank lines so the
+                                  pasted output is readable in a
+                                  Slack thread without any post-
+                                  processing. Uses the async
+                                  Clipboard API (which the test
+                                  environment polyfills via JSDOM's
+                                  `navigator.clipboard.writeText`).
+                                  Falls back silently when the API
+                                  is unavailable so we never throw
+                                  inside an event handler. */}
+                              <button
+                                type="button"
+                                data-testid={`briefing-run-prior-narrative-copy-${run.generationId}`}
+                                onClick={() => {
+                                  const text = SECTION_ORDER.map(
+                                    ({ key, label }) => {
+                                      const body =
+                                        pickSection(priorNarrative, key) ?? "";
+                                      return `${label}\n\n${body.trim() || "—"}`;
+                                    },
+                                  ).join("\n\n");
+                                  if (
+                                    typeof navigator !== "undefined" &&
+                                    navigator.clipboard &&
+                                    typeof navigator.clipboard.writeText ===
+                                      "function"
+                                  ) {
+                                    void navigator.clipboard.writeText(text);
+                                  }
+                                }}
+                                style={{
+                                  fontSize: 11,
+                                  padding: "2px 8px",
+                                  background: "transparent",
+                                  border: "1px solid var(--border-subtle)",
+                                  borderRadius: 4,
+                                  cursor: "pointer",
+                                  color: "var(--text-default)",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                Copy plain text
+                              </button>
                             </div>
                             {SECTION_ORDER.map(({ key, label }) => {
-                              const body = pickSection(priorNarrative, key);
-                              const isEmpty = !body || body.trim().length === 0;
+                              const priorBody = pickSection(
+                                priorNarrative,
+                                key,
+                              );
+                              const currentBody = pickSection(
+                                currentNarrative,
+                                key,
+                              );
+                              const priorIsEmpty =
+                                !priorBody || priorBody.trim().length === 0;
+                              // Task #303 B.5 — only diff when both
+                              // sides have a body to compare. When
+                              // the prior side is empty (or the
+                              // section was newly added in the
+                              // current run) we render the prior
+                              // body verbatim and let the auditor
+                              // scan the current narrative above
+                              // for the addition.
+                              // pickSection returns the raw column
+                              // value, which can be `null` (column
+                              // is NULL) OR `undefined` (the wire
+                              // schema marks the field optional and
+                              // the test fixture omitted it). Treat
+                              // both as "no current body to diff
+                              // against" — comparing a string to
+                              // undefined would otherwise propagate
+                              // through to `diffWords` and crash on
+                              // `undefined.split(...)`.
+                              const currentBodyStr =
+                                typeof currentBody === "string"
+                                  ? currentBody
+                                  : null;
+                              const sameAsCurrent =
+                                !priorIsEmpty &&
+                                currentBodyStr !== null &&
+                                priorBody === currentBodyStr;
+                              const shouldDiff =
+                                !priorIsEmpty &&
+                                currentBodyStr !== null &&
+                                !sameAsCurrent;
                               return (
                                 <div
                                   key={key}
                                   data-testid={`briefing-run-prior-section-${key}-${run.generationId}`}
                                   style={{
                                     fontSize: 12,
-                                    color: isEmpty
+                                    color: priorIsEmpty
                                       ? "var(--text-muted)"
                                       : "var(--text-default)",
                                   }}
@@ -3698,13 +4021,91 @@ function BriefingRecentRunsPanel({
                                   >
                                     {label}
                                   </span>
+                                  {sameAsCurrent && (
+                                    <span
+                                      data-testid={`briefing-run-prior-section-unchanged-${key}-${run.generationId}`}
+                                      style={{
+                                        fontSize: 10,
+                                        padding: "1px 6px",
+                                        borderRadius: 4,
+                                        background: "var(--surface-2, transparent)",
+                                        color: "var(--text-muted)",
+                                        marginRight: 6,
+                                        textTransform: "uppercase",
+                                        letterSpacing: 0.3,
+                                      }}
+                                    >
+                                      unchanged
+                                    </span>
+                                  )}
                                   <span
                                     style={{
                                       whiteSpace: "pre-wrap",
                                       lineHeight: 1.5,
                                     }}
                                   >
-                                    {isEmpty ? "—" : body}
+                                    {priorIsEmpty ? (
+                                      "—"
+                                    ) : shouldDiff ? (
+                                      // Word-level diff: render the
+                                      // prior body with surviving
+                                      // tokens plain, dropped tokens
+                                      // strikethrough/red, and
+                                      // inserted tokens
+                                      // underlined/green so the
+                                      // auditor sees both sides of
+                                      // the edit inline. The diff
+                                      // is wrapped in a single span
+                                      // so the white-space rule
+                                      // above still applies.
+                                      <span
+                                        data-testid={`briefing-run-prior-section-diff-${key}-${run.generationId}`}
+                                      >
+                                        {diffWords(
+                                          priorBody,
+                                          currentBodyStr as string,
+                                        ).map((op, idx) => {
+                                          if (op.type === "equal") {
+                                            return (
+                                              <span key={idx}>{op.text}</span>
+                                            );
+                                          }
+                                          if (op.type === "removed") {
+                                            return (
+                                              <span
+                                                key={idx}
+                                                data-testid={`briefing-run-prior-section-diff-removed-${key}-${run.generationId}`}
+                                                style={{
+                                                  textDecoration:
+                                                    "line-through",
+                                                  color: "var(--danger-text)",
+                                                  background:
+                                                    "var(--danger-dim)",
+                                                }}
+                                              >
+                                                {op.text}
+                                              </span>
+                                            );
+                                          }
+                                          return (
+                                            <span
+                                              key={idx}
+                                              data-testid={`briefing-run-prior-section-diff-added-${key}-${run.generationId}`}
+                                              style={{
+                                                textDecoration: "underline",
+                                                color: "var(--success-text)",
+                                                background:
+                                                  "var(--success-dim)",
+                                              }}
+                                            >
+                                              {op.text}
+                                            </span>
+                                          );
+                                        })}
+                                      </span>
+                                    ) : (
+                                      priorBody
+                                    )}
                                   </span>
                                 </div>
                               );

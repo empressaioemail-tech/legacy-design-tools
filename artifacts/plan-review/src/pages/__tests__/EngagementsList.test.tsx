@@ -263,3 +263,67 @@ describe("EngagementsList — empty-pilot pill (Task #278)", () => {
     ).not.toBeNull();
   });
 });
+
+/**
+ * "Show only in-pilot" filter + out-of-pilot tally — Task #303 B.2.
+ *
+ * Mirrors the design-tools EngagementList Task #235 stretch toggle on
+ * the plan-review surface so reviewers can focus triage on the
+ * actionable subset without bouncing back to design-tools. Both
+ * surfaces feed the same `resolveJurisdiction` +
+ * `filterApplicableAdapters` pair from `@workspace/adapters`, and
+ * the row pill, the tally, and the toggle all read the same shared
+ * `eligibilityById` map so the three surfaces' verdicts cannot drift.
+ *
+ * The fixture above seeds three rows: one in-pilot (Moab geocode)
+ * and two out-of-pilot (no geocode → unresolved branch). The All
+ * tab makes every row visible regardless of status, which is what
+ * the toggle's filtering and the tally's count are computed against.
+ */
+describe("EngagementsList — in-pilot filter + tally (Task #303 B.2)", () => {
+  it("renders the out-of-pilot tally inline with the summary", () => {
+    renderAt("/engagements?status=all");
+    const tally = screen.getByTestId("engagements-out-of-pilot-tally");
+    // Two of the three fixture rows resolve to no applicable
+    // adapters (no geocode + null jurisdiction/address).
+    expect(tally.textContent).toBe("2 out of pilot");
+  });
+
+  it("does not render the tally when every engagement is in pilot", async () => {
+    // Swap the fixture for a single in-pilot row so the
+    // outOfPilotCount falls to 0 and the tally <span> is omitted.
+    const original = ENGAGEMENTS.slice();
+    ENGAGEMENTS.splice(0, ENGAGEMENTS.length, original[0]!);
+    cleanup();
+    renderAt("/engagements?status=all");
+    expect(screen.queryByTestId("engagements-out-of-pilot-tally")).toBeNull();
+    // Restore so subsequent tests see the full fixture.
+    ENGAGEMENTS.splice(0, ENGAGEMENTS.length, ...original);
+  });
+
+  it("flipping 'Show only in-pilot' hides every out-of-pilot row", () => {
+    renderAt("/engagements?status=all");
+    expect(screen.getByTestId("engagement-row-eng-active")).not.toBeNull();
+    expect(screen.getByTestId("engagement-row-eng-on-hold")).not.toBeNull();
+    expect(screen.getByTestId("engagement-row-eng-archived")).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId("engagements-filter-in-pilot"));
+
+    expect(screen.getByTestId("engagement-row-eng-active")).not.toBeNull();
+    expect(screen.queryByTestId("engagement-row-eng-on-hold")).toBeNull();
+    expect(screen.queryByTestId("engagement-row-eng-archived")).toBeNull();
+  });
+
+  it("renders the dedicated empty-state when the toggle hides every row in the active tab", () => {
+    // The Active tab only contains the in-pilot row, so the toggle
+    // does NOT empty the list there. Switch to a status with only
+    // out-of-pilot rows (On hold) so the toggle's empty-state hits.
+    renderAt("/engagements?status=on_hold");
+    fireEvent.click(screen.getByTestId("engagements-filter-in-pilot"));
+    const empty = screen.getByTestId("engagements-empty-filtered-in-pilot");
+    expect(empty.textContent).toContain('Uncheck "Show only in-pilot"');
+    // The free-text "No engagements match" copy must NOT show — that
+    // path is reserved for an actual search miss.
+    expect(screen.queryByTestId("engagements-no-matches")).toBeNull();
+  });
+});

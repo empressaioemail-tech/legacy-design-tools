@@ -248,6 +248,15 @@ beforeEach(() => {
   hoisted.submissions = [];
   hoisted.runs = [];
   hoisted.runsFetchCalls = 0;
+  // Task #303 B.6 — the panel now mirrors its open/filter state
+  // into `?recentRunsOpen=` / `?recentRunsFilter=`, so a test that
+  // flips the disclosure leaves those params behind in the JSDOM
+  // URL. Reset to a clean URL between tests so each test sees the
+  // panel at its true defaults (collapsed, "all" filter) rather
+  // than picking up the previous test's pollution.
+  if (typeof window !== "undefined") {
+    window.history.replaceState(null, "", "/");
+  }
 });
 
 afterEach(() => {
@@ -398,6 +407,136 @@ describe("BriefingRecentRunsPanel — Plan Review (Task #261)", () => {
     expect(
       await screen.findByTestId("briefing-recent-runs-empty"),
     ).toHaveTextContent(/No briefing generations have run yet/i);
+    expect(
+      screen.queryByTestId("briefing-recent-runs-list"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * URL helpers + filter chips — Task #303 B.6.
+ *
+ * Mirrors the design-tools `BriefingRecentRunsPanel` URL contract
+ * (Tasks #262 / #275) onto the Plan Review surface so an auditor
+ * who pastes a Plan Review link into Slack lands a teammate on the
+ * same disclosure state — open vs collapsed, "All / Failed only /
+ * Invalid only" filter — that the original auditor was looking at.
+ *
+ * Tests below pin:
+ *   1. The disclosure is OPEN on first paint when
+ *      `?recentRunsOpen=1` is present.
+ *   2. Flipping the toggle writes `?recentRunsOpen=` (or removes it
+ *      when collapsing) via `replaceState` so back-button history
+ *      isn't polluted.
+ *   3. The filter chip array reflects the URL on first paint and
+ *      writes back on click; the visible row count is the bucket's
+ *      count, not the All count.
+ *   4. An invalid `recentRunsFilter` value falls back to "all".
+ */
+describe("BriefingRecentRunsPanel — URL helpers (Task #303 B.6)", () => {
+  it("opens on first paint when ?recentRunsOpen=1 is present", async () => {
+    hoisted.runs = [
+      makeRun({ generationId: "gen-1", state: "completed" }),
+    ];
+    window.history.replaceState(null, "", "/?recentRunsOpen=1");
+    renderPage();
+    // Body is mounted without any toggle click — the panel honoured
+    // the URL state on first paint.
+    expect(
+      await screen.findByTestId("briefing-recent-runs-body"),
+    ).toBeInTheDocument();
+  });
+
+  it("writes ?recentRunsOpen=1 on open and clears it on close", async () => {
+    hoisted.runs = [
+      makeRun({ generationId: "gen-1", state: "completed" }),
+    ];
+    renderPage();
+    expect(window.location.search).not.toContain("recentRunsOpen");
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    expect(window.location.search).toContain("recentRunsOpen=1");
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    expect(window.location.search).not.toContain("recentRunsOpen");
+  });
+
+  it("respects ?recentRunsFilter=failed on first paint and slices the list", async () => {
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-fail",
+        state: "failed",
+        error: "boom",
+      }),
+      makeRun({ generationId: "gen-ok", state: "completed" }),
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      "/?recentRunsOpen=1&recentRunsFilter=failed",
+    );
+    renderPage();
+    // Failed chip should read the URL value and be the selected one.
+    const failedChip = await screen.findByTestId(
+      "briefing-recent-runs-filter-failed",
+    );
+    expect(failedChip.getAttribute("aria-selected")).toBe("true");
+    // Only the failed row is rendered under the filter.
+    expect(screen.getByTestId("briefing-run-gen-fail")).toBeInTheDocument();
+    expect(screen.queryByTestId("briefing-run-gen-ok")).not.toBeInTheDocument();
+  });
+
+  it("clicking a filter chip writes the chip's value to the URL", async () => {
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-fail",
+        state: "failed",
+        error: "boom",
+      }),
+      makeRun({
+        generationId: "gen-ok",
+        state: "completed",
+        invalidCitationCount: 0,
+      }),
+    ];
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    await screen.findByTestId("briefing-recent-runs-filter");
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-failed"));
+    expect(window.location.search).toContain("recentRunsFilter=failed");
+    // Returning to "all" deletes the param so the canonical URL
+    // stays clean for shareable links.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-all"));
+    expect(window.location.search).not.toContain("recentRunsFilter");
+  });
+
+  it("falls back to 'all' when ?recentRunsFilter is an unknown value", async () => {
+    hoisted.runs = [
+      makeRun({ generationId: "gen-1", state: "completed" }),
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      "/?recentRunsOpen=1&recentRunsFilter=banana",
+    );
+    renderPage();
+    const allChip = await screen.findByTestId(
+      "briefing-recent-runs-filter-all",
+    );
+    expect(allChip.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("renders the filtered-empty copy when the filter eats every row", async () => {
+    hoisted.runs = [
+      makeRun({ generationId: "gen-1", state: "completed" }),
+    ];
+    window.history.replaceState(
+      null,
+      "",
+      "/?recentRunsOpen=1&recentRunsFilter=failed",
+    );
+    renderPage();
+    expect(
+      await screen.findByTestId("briefing-recent-runs-filtered-empty"),
+    ).toHaveTextContent(/No runs match the Failed only filter/i);
     expect(
       screen.queryByTestId("briefing-recent-runs-list"),
     ).not.toBeInTheDocument();

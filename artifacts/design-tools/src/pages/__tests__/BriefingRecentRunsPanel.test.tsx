@@ -1727,3 +1727,303 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     ).toBeNull();
   });
 });
+
+/**
+ * Prior-narrative polish — Task #303 B.3 / B.4 / B.5.
+ *
+ * The Prior row's expanded details became the auditor's primary
+ * "what changed in this regeneration?" surface in Task #280. The
+ * polish sub-bundle layers three related improvements on top:
+ *
+ *   - B.3: surface the prior narrative's `generatedAt` +
+ *     `generatedBy` so the auditor sees the snapshot's provenance
+ *     in-place rather than having to read it off the producing run
+ *     row above.
+ *   - B.4: a "Copy plain text" button that concatenates the seven
+ *     section bodies as `Label\n\nbody` blocks so the snapshot
+ *     can be pasted into Slack or a ticket without manual
+ *     reformatting.
+ *   - B.5: per-section word-level diff vs the current narrative
+ *     so the auditor can see the precise edit instead of being
+ *     handed two big paragraphs to compare visually. When a
+ *     section is byte-identical we render an "(unchanged)" pill
+ *     so the auditor isn't asked to scan for diffs that aren't
+ *     there.
+ */
+describe("BriefingRecentRunsPanel — prior-narrative polish (Task #303 B.3/B.4/B.5)", () => {
+  function seedPriorRow(opts: {
+    priorSectionA?: string | null;
+    priorSectionG?: string | null;
+    currentSectionA?: string | null;
+    currentSectionG?: string | null;
+    priorGeneratedBy?: string | null;
+  }) {
+    hoisted.briefing = {
+      narrative: {
+        // Pretend the API also surfaced the section bodies on the
+        // current narrative so the panel can diff them against the
+        // prior body. The real wire envelope from
+        // useGetEngagementBriefing carries the section_* columns
+        // alongside generationId; this fixture mirrors that.
+        generationId: "gen-current",
+        sectionA: opts.currentSectionA ?? null,
+        sectionB: null,
+        sectionC: null,
+        sectionD: null,
+        sectionE: null,
+        sectionF: null,
+        sectionG: opts.currentSectionG ?? null,
+        generatedAt: "2026-04-03T10:00:05.000Z",
+        generatedBy: "system:briefing-engine",
+      } as unknown as { generationId: string | null },
+    };
+    hoisted.priorNarrative = {
+      sectionA: opts.priorSectionA ?? null,
+      sectionB: null,
+      sectionC: null,
+      sectionD: null,
+      sectionE: null,
+      sectionF: null,
+      sectionG: opts.priorSectionG ?? null,
+      generatedAt: "2026-04-02T10:00:02.000Z",
+      generatedBy: opts.priorGeneratedBy ?? "system:briefing-engine",
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-current",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:05.000Z",
+        invalidCitationCount: 0,
+      }),
+      makeRun({
+        generationId: "gen-prior",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+    ];
+  }
+
+  it("B.3 — renders the prior narrative's generatedAt and generatedBy in the meta line", async () => {
+    seedPriorRow({
+      priorSectionA: "Same body in both runs.",
+      currentSectionA: "Same body in both runs.",
+      priorGeneratedBy: "system:briefing-engine",
+    });
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const meta = await screen.findByTestId(
+      "briefing-run-prior-narrative-meta-gen-prior",
+    );
+    // The "system:briefing-engine" actor is rewritten to a friendly
+    // label so the auditor sees "Briefing engine (mock)" rather
+    // than the raw system actor token.
+    expect(
+      within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-by-gen-prior",
+      ),
+    ).toHaveTextContent(/Briefing engine \(mock\)/);
+    expect(
+      within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-at-gen-prior",
+      ),
+    ).toHaveTextContent(/Generated/);
+  });
+
+  it("B.3 — renders only the half of the meta line that's present (legacy backups)", async () => {
+    // Legacy backups can carry `generatedAt` but no `generatedBy`
+    // (or vice versa) because the actor column post-dates the
+    // section_* backups on some installs. The panel must render
+    // only the half that's set so we never show "by null". We
+    // can't drop `generatedAt` here too — the prior-row matcher
+    // relies on its [startedAt, completedAt] interval containing
+    // `priorNarrative.generatedAt`, so a null on that field would
+    // also tear down the prior-narrative block entirely (a
+    // separate concern than this branch is testing).
+    seedPriorRow({
+      priorSectionA: "Body present, actor missing.",
+      currentSectionA: "Body present, actor missing.",
+    });
+    hoisted.priorNarrative!.generatedBy = null;
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const meta = await screen.findByTestId(
+      "briefing-run-prior-narrative-meta-gen-prior",
+    );
+    expect(
+      within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-at-gen-prior",
+      ),
+    ).toBeInTheDocument();
+    // The "by …" half is gone — proves we never show "by null".
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-generated-by-gen-prior",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("B.4 — Copy plain text writes the concatenated A–G bodies to the clipboard", async () => {
+    seedPriorRow({
+      priorSectionA: "Prior A body.",
+      priorSectionG: "Prior G body.",
+      currentSectionA: "Current A body.",
+      currentSectionG: "Current G body.",
+    });
+    // JSDOM/happy-dom may or may not ship navigator.clipboard; pin
+    // a spy regardless so we can assert the button hit it with the
+    // right payload.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    fireEvent.click(
+      await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-gen-prior",
+      ),
+    );
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const payload = writeText.mock.calls[0][0] as string;
+    // The payload preserves both populated bodies so the auditor
+    // can paste the snapshot somewhere readable.
+    expect(payload).toMatch(/Prior A body\./);
+    expect(payload).toMatch(/Prior G body\./);
+    // Empty sections (B–F) render as "—" rather than blank lines
+    // so the pasted output has visible structure.
+    expect(payload).toMatch(/—/);
+  });
+
+  it("B.5 — renders an inline word diff when prior and current sections differ", async () => {
+    seedPriorRow({
+      priorSectionA: "The buildable area is 4500 square feet.",
+      currentSectionA: "The buildable area is 5200 square feet.",
+    });
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const diff = await screen.findByTestId(
+      "briefing-run-prior-section-diff-a-gen-prior",
+    );
+    // The dropped "4500" token survives in the prior body wrapped
+    // in a strike-through span; the inserted "5200" token shows
+    // up in the same diff span. Together they tell the auditor
+    // exactly what the regeneration changed.
+    expect(diff).toHaveTextContent(/4500/);
+    expect(diff).toHaveTextContent(/5200/);
+    expect(
+      within(diff).getByTestId(
+        "briefing-run-prior-section-diff-removed-a-gen-prior",
+      ),
+    ).toHaveTextContent("4500");
+  });
+
+  it("B.5 — surfaces an (unchanged) pill when a section is byte-identical", async () => {
+    seedPriorRow({
+      priorSectionA: "Identical body.",
+      currentSectionA: "Identical body.",
+      priorSectionG: "Different prior G.",
+      currentSectionG: "Different current G.",
+    });
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    // Section A has the unchanged pill (and no diff span)…
+    expect(
+      await screen.findByTestId(
+        "briefing-run-prior-section-unchanged-a-gen-prior",
+      ),
+    ).toHaveTextContent(/unchanged/i);
+    expect(
+      screen.queryByTestId("briefing-run-prior-section-diff-a-gen-prior"),
+    ).not.toBeInTheDocument();
+    // …while section G keeps the diff span (and no unchanged pill).
+    // Proves the unchanged-detection is per-section, not a global
+    // flag.
+    expect(
+      screen.getByTestId("briefing-run-prior-section-diff-g-gen-prior"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-section-unchanged-g-gen-prior",
+      ),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * "Producing run pruned" pill — Task #303 B.8.
+ *
+ * When `parcel_briefings.generation_id` points at a job the sweeper
+ * has already aged out of the keep window, the briefing card's
+ * "Last generated by …" line reads more authoritatively than the
+ * audit trail can support: there's no row left in the disclosure to
+ * mark Current. We annotate the meta line with a small pill so the
+ * auditor knows the on-screen narrative is real but its provenance
+ * run is no longer available for inspection.
+ */
+describe("BriefingRecentRunsPanel — producing-run-pruned pill (Task #303 B.8)", () => {
+  it("renders the pill when narrative.generationId has no matching run in the list", async () => {
+    hoisted.briefing = {
+      narrative: { generationId: "gen-aged-out" },
+    };
+    // Deliberately empty runs list — the producing job aged out
+    // before this auditor opened the card.
+    hoisted.runs = [];
+    renderPage();
+    expect(
+      await screen.findByTestId("briefing-narrative-producing-run-pruned"),
+    ).toHaveTextContent(/producing run pruned from history/i);
+  });
+
+  it("does NOT render the pill when the producing run is still on file", async () => {
+    hoisted.briefing = {
+      narrative: { generationId: "gen-live" },
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-live",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:05.000Z",
+      }),
+    ];
+    renderPage();
+    // Wait for the briefing card to mount so the absence assertion
+    // isn't checking against a still-loading state.
+    await screen.findByTestId("briefing-narrative-panel");
+    expect(
+      screen.queryByTestId("briefing-narrative-producing-run-pruned"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the pill when the briefing has no generationId at all", async () => {
+    // Brand-new engagement, never generated a briefing — the pill
+    // would be a generic "stale briefing" warning here, which the
+    // B.8 spec is explicit about avoiding.
+    hoisted.briefing = { narrative: { generationId: null } };
+    hoisted.runs = [];
+    renderPage();
+    await screen.findByTestId("briefing-narrative-panel");
+    expect(
+      screen.queryByTestId("briefing-narrative-producing-run-pruned"),
+    ).not.toBeInTheDocument();
+  });
+});

@@ -113,7 +113,13 @@ function computeEligibility(e: EngagementSummary): {
   };
 }
 
-function EngagementRow({ engagement }: { engagement: EngagementSummary }) {
+function EngagementRow({
+  engagement,
+  eligibility,
+}: {
+  engagement: EngagementSummary;
+  eligibility: { isInPilot: boolean; message: string };
+}) {
   const initials = engagement.name
     .split(/\s+/)
     .map((w) => w[0])
@@ -125,11 +131,6 @@ function EngagementRow({ engagement }: { engagement: EngagementSummary }) {
   const subtitleParts = [engagement.jurisdiction, engagement.address].filter(
     (s): s is string => !!s,
   );
-
-  // Compute the per-row pilot verdict from the same shared helpers the
-  // design-tools list and the EngagementDetail banner use, so the three
-  // surfaces' "no adapters" copy can never drift (Task #278).
-  const eligibility = useMemo(() => computeEligibility(engagement), [engagement]);
 
   return (
     <Link
@@ -259,6 +260,22 @@ export default function EngagementsList() {
     return c;
   }, [engagements]);
 
+  // Per-row pilot verdict, computed once per engagement and shared
+  // between the row pill, the out-of-pilot tally, and the "Show only
+  // in-pilot" filter so the three surfaces' verdicts cannot drift
+  // (Task #303 B.2 — mirrors the design-tools EngagementList Task
+  // #235 / #277 contract). All three read the same
+  // `resolveJurisdiction` + `filterApplicableAdapters` pair via
+  // `computeEligibility`, which is also the source of truth the
+  // server's generate-layers 422 envelope reads from.
+  const eligibilityById = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof computeEligibility>>();
+    for (const e of engagements) {
+      m.set(e.id, computeEligibility(e));
+    }
+    return m;
+  }, [engagements]);
+
   const statusFiltered = useMemo(
     () =>
       filter === "all"
@@ -273,18 +290,41 @@ export default function EngagementsList() {
       ? `${total} total · ${counts.active} active`
       : `${statusFiltered.length} ${FILTER_TABS.find((t) => t.value === filter)!.label.toLowerCase()} · ${total} total`;
 
+  // Out-of-pilot tally over the entire engagement list (not just the
+  // status-filtered slice) so the count stays stable when the
+  // architect flips between status tabs — the tally is about the
+  // whole pipeline, not a single status bucket.
+  const outOfPilotCount = useMemo(() => {
+    let n = 0;
+    for (const e of engagements) {
+      if (!eligibilityById.get(e.id)?.isInPilot) n += 1;
+    }
+    return n;
+  }, [engagements, eligibilityById]);
+
+  // "Show only in-pilot" toggle (Task #303 B.2). Defaults off so the
+  // existing "show everything" behaviour is preserved on first load;
+  // flipping it on hides every row whose jurisdiction resolves to no
+  // applicable adapters so a reviewer can focus triage on the
+  // actionable subset.
+  const [hideOutOfPilot, setHideOutOfPilot] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const trimmedQuery = searchQuery.trim().toLowerCase();
   const searchFiltered = useMemo(() => {
-    if (!trimmedQuery) return statusFiltered;
-    return statusFiltered.filter((e) => {
+    let rows = statusFiltered;
+    if (hideOutOfPilot) {
+      rows = rows.filter((e) => eligibilityById.get(e.id)?.isInPilot);
+    }
+    if (!trimmedQuery) return rows;
+    return rows.filter((e) => {
       const haystack = [e.name, e.jurisdiction, e.address]
         .filter((s): s is string => !!s)
         .join(" ")
         .toLowerCase();
       return haystack.includes(trimmedQuery);
     });
-  }, [statusFiltered, trimmedQuery]);
+  }, [statusFiltered, trimmedQuery, hideOutOfPilot, eligibilityById]);
 
   return (
     <DashboardLayout
@@ -309,16 +349,58 @@ export default function EngagementsList() {
               data-testid="engagements-summary"
             >
               {summary}
+              {/*
+                Task #303 B.2 — surface the out-of-pilot tally inline
+                with the at-a-glance summary so reviewers can see how
+                many engagements would be hidden by "Show only
+                in-pilot" without needing to flip the toggle. Mirrors
+                the design-tools EngagementList tally testid + copy
+                so the two surfaces' wording cannot drift.
+              */}
+              {outOfPilotCount > 0 ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <span data-testid="engagements-out-of-pilot-tally">
+                    {outOfPilotCount} out of pilot
+                  </span>
+                </>
+              ) : null}
             </div>
           </div>
-          <button
-            className="sc-btn-ghost"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            data-testid="engagements-refresh"
-          >
-            {isFetching ? "Refreshing…" : "Refresh"}
-          </button>
+          <div className="flex items-center gap-3">
+            {/*
+              Task #303 B.2 — "Show only in-pilot" toggle, mirroring
+              the design-tools EngagementList Task #235 stretch goal.
+              Defaults off so the existing "show everything" first
+              load is preserved; flipping it on hides every row
+              whose jurisdiction resolves to no applicable adapters
+              so reviewers can focus triage on the actionable subset.
+              The same `eligibilityById` map drives the row pill,
+              the tally above, and this filter — so the three
+              surfaces' verdicts cannot drift.
+            */}
+            <label
+              className="sc-body opacity-80 flex items-center gap-2"
+              style={{ cursor: "pointer", userSelect: "none" }}
+            >
+              <input
+                type="checkbox"
+                data-testid="engagements-filter-in-pilot"
+                checked={hideOutOfPilot}
+                onChange={(e) => setHideOutOfPilot(e.target.checked)}
+              />
+              Show only in-pilot
+            </label>
+            <button
+              className="sc-btn-ghost"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              data-testid="engagements-refresh"
+            >
+              {isFetching ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
         </div>
 
         <div
@@ -380,16 +462,46 @@ export default function EngagementsList() {
                 {total === 0 ? FILTER_EMPTY.all : FILTER_EMPTY[filter]}
               </div>
             ) : searchFiltered.length === 0 ? (
-              <div
-                className="p-8 text-center sc-body"
-                data-testid="engagements-no-matches"
-              >
-                No engagements match “{searchQuery.trim()}”. Try a different
-                name, jurisdiction, or address.
-              </div>
+              // Distinguish "filtered everything out by hiding
+              // out-of-pilot rows" from "free-text search misses"
+              // (Task #303 B.2). When the in-pilot toggle is what
+              // emptied the slice, surface the dedicated empty-state
+              // so the reviewer knows to uncheck the toggle rather
+              // than hunting for a different search term. We gate on
+              // the toggle being on AND no search query active so a
+              // stale-toggle + miss-typed search still falls through
+              // to the existing copy.
+              hideOutOfPilot && !trimmedQuery ? (
+                <div
+                  className="p-8 text-center sc-body"
+                  data-testid="engagements-empty-filtered-in-pilot"
+                >
+                  No in-pilot engagements right now. Uncheck "Show only
+                  in-pilot" to see the {statusFiltered.length} project
+                  {statusFiltered.length === 1 ? "" : "s"} outside the
+                  current adapter set.
+                </div>
+              ) : (
+                <div
+                  className="p-8 text-center sc-body"
+                  data-testid="engagements-no-matches"
+                >
+                  No engagements match “{searchQuery.trim()}”. Try a different
+                  name, jurisdiction, or address.
+                </div>
+              )
             ) : (
               searchFiltered.map((e) => (
-                <EngagementRow key={e.id} engagement={e} />
+                <EngagementRow
+                  key={e.id}
+                  engagement={e}
+                  eligibility={
+                    eligibilityById.get(e.id) ?? {
+                      isInPilot: false,
+                      message: "",
+                    }
+                  }
+                />
               ))
             )}
           </div>

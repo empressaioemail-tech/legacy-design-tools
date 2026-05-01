@@ -176,7 +176,12 @@ function fakeAdapters(
     }),
     // Utah — state + Grand County local
     makeAdapter(AdapterRunErrorCtor, {
-      adapterKey: "utah:ugrc-parcels",
+      // Real `ugrc:parcels` adapter key — kept aligned with the
+      // real registry so a fixture-vs-registry drift can't sneak
+      // in (test would have asserted on a key that no longer
+      // exists). The layerKind stays `ugrc-parcels` because the
+      // real adapter emits that value too.
+      adapterKey: "ugrc:parcels",
       tier: "state",
       layerKind: "ugrc-parcels",
       provider: "Utah Geospatial Resource Center",
@@ -208,14 +213,15 @@ function fakeAdapters(
       local: "lemhi-county-id",
       payload: { district: "AG-20" },
     }),
-    // Texas — state + Bastrop local
+    // Texas — state + Bastrop local. Real `tceq:edwards-aquifer`
+    // adapter key (the registry's only Texas-bearing state adapter).
     makeAdapter(AdapterRunErrorCtor, {
-      adapterKey: "texas:tceq-floodplain",
+      adapterKey: "tceq:edwards-aquifer",
       tier: "state",
-      layerKind: "tceq-floodplain",
+      layerKind: "tceq-edwards-aquifer",
       provider: "TCEQ",
       state: "texas",
-      payload: { in_floodplain: false },
+      payload: { in_recharge_zone: false },
     }),
     makeAdapter(AdapterRunErrorCtor, {
       adapterKey: "bastrop-tx:zoning",
@@ -226,11 +232,15 @@ function fakeAdapters(
       payload: { district: "RU" },
     }),
     // A deliberately failing local adapter only for Bastrop, so we can
-    // assert the per-adapter failure-isolation contract.
+    // assert the per-adapter failure-isolation contract. We use the
+    // real `bastrop-tx:floodplain` adapter key here (no Bastrop roads
+    // adapter exists in the real registry); the layerKind / provider
+    // / payload are still synthetic because the runner is stubbed and
+    // never touches real upstreams.
     makeAdapter(AdapterRunErrorCtor, {
-      adapterKey: "bastrop-tx:roads",
+      adapterKey: "bastrop-tx:floodplain",
       tier: "local",
-      layerKind: "bastrop-roads",
+      layerKind: "bastrop-floodplain",
       provider: "Bastrop County GIS",
       local: "bastrop-tx",
       fail: { code: "upstream-error", message: "Bastrop GIS returned 503" },
@@ -369,7 +379,7 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       error: { code: "upstream-error", message: "FCC NBM returned 502" },
       sourceId: null,
     });
-    expect(byKey.get("texas:tceq-floodplain")).toMatchObject({
+    expect(byKey.get("tceq:edwards-aquifer")).toMatchObject({
       tier: "state",
       sourceKind: "state-adapter",
       status: "ok",
@@ -379,9 +389,9 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       sourceKind: "local-adapter",
       status: "ok",
     });
-    // Per-adapter failure isolation — bastrop-tx:roads upstream
+    // Per-adapter failure isolation — bastrop-tx:floodplain upstream
     // returned 503, but the run as a whole still succeeds.
-    expect(byKey.get("bastrop-tx:roads")).toMatchObject({
+    expect(byKey.get("bastrop-tx:floodplain")).toMatchObject({
       tier: "local",
       sourceKind: "local-adapter",
       status: "failed",
@@ -400,11 +410,11 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     expect(layers).toEqual([
       "bastrop-zoning",
       "fema-nfhl-flood-zone",
-      "tceq-floodplain",
+      "tceq-edwards-aquifer",
     ]);
-    const tceq = sources.find((s) => s.layerKind === "tceq-floodplain")!;
+    const tceq = sources.find((s) => s.layerKind === "tceq-edwards-aquifer")!;
     expect(tceq.sourceKind).toBe("state-adapter");
-    expect(tceq.provider).toBe("texas:tceq-floodplain (TCEQ)");
+    expect(tceq.provider).toBe("tceq:edwards-aquifer (TCEQ)");
     const fema = sources.find((s) => s.layerKind === "fema-nfhl-flood-zone")!;
     expect(fema.sourceKind).toBe("federal-adapter");
     expect(fema.provider).toBe("fema:nfhl-flood-zone (FEMA NFHL)");
@@ -699,7 +709,7 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       (r) => r.layerKind === "fema-nfhl-flood-zone",
     )!.id;
     const seedTceqId = seedRows.find(
-      (r) => r.layerKind === "tceq-floodplain",
+      (r) => r.layerKind === "tceq-edwards-aquifer",
     )!.id;
     const seedZoningId = seedRows.find(
       (r) => r.layerKind === "bastrop-zoning",
@@ -757,7 +767,7 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     }>;
     const layerSet = new Set(wireSources.map((s) => s.layerKind));
     expect(layerSet).toEqual(
-      new Set(["fema-nfhl-flood-zone", "tceq-floodplain", "bastrop-zoning"]),
+      new Set(["fema-nfhl-flood-zone", "tceq-edwards-aquifer", "bastrop-zoning"]),
     );
     const wireFema = wireSources.find(
       (s) => s.layerKind === "fema-nfhl-flood-zone",
@@ -788,13 +798,16 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       lng: "-97.315600",
     });
 
-    // Off-jurisdiction adapter (Utah parcels on a Texas parcel).
+    // Off-jurisdiction adapter (Utah parcels on a Texas parcel) —
+    // real `ugrc:parcels` adapter key, gated to Utah, so it cannot
+    // apply to a Bastrop parcel and the route must surface
+    // `unknown_adapter_key` rather than running it.
     const offJurisdiction = await request(getApp())
       .post(`/api/engagements/${eng.id}/generate-layers`)
-      .query({ adapterKey: "utah:ugrc-parcels" });
+      .query({ adapterKey: "ugrc:parcels" });
     expect(offJurisdiction.status).toBe(422);
     expect(offJurisdiction.body.error).toBe("unknown_adapter_key");
-    expect(offJurisdiction.body.message).toContain("utah:ugrc-parcels");
+    expect(offJurisdiction.body.message).toContain("ugrc:parcels");
 
     // Garbage adapter key.
     const garbage = await request(getApp())
