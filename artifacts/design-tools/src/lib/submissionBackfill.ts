@@ -124,3 +124,68 @@ export function matchesBackfillFilter(
   // as backfilled.
   return respondedAt != null && !backfilled;
 }
+
+/**
+ * Bucket counts of jurisdiction replies on the engagement timeline,
+ * surfaced as a glanceable "live · backfilled · pending" tally above
+ * the list (Task #136). The three buckets partition the rows the same
+ * way the chip filter does, so the summary line and the chips can
+ * never disagree:
+ *
+ * - `pending` — no `respondedAt` yet (matches the `pending` row
+ *   rendering and is excluded from both `live` and `backfilled`
+ *   chips).
+ * - `backfilled` — `isBackfilledResponse` is true (matches the chip
+ *   and the inline "backfilled on <date>" annotation).
+ * - `live` — has a `respondedAt` and is not flagged as backfilled
+ *   (matches the `live` chip; legacy rows missing
+ *   `responseRecordedAt` count as live, same as the chip filter).
+ */
+export type BackfillTallies = {
+  live: number;
+  backfilled: number;
+  pending: number;
+};
+
+/**
+ * Summarize an array of submission-shaped rows into the three
+ * timeline buckets. Pure helper so the tally line, the chip filter,
+ * and the inline annotation share one source of truth — see
+ * {@link BackfillTallies}.
+ *
+ * Accepts a structurally-typed row so callers can pass either the
+ * raw API row or a `{ respondedAt, responseRecordedAt }` projection
+ * built from the local optimistic mirror without an extra adapter.
+ */
+export function summarizeBackfillTallies(
+  rows: ReadonlyArray<{
+    respondedAt: string | null | undefined;
+    responseRecordedAt: string | null | undefined;
+  }>,
+): BackfillTallies {
+  let live = 0;
+  let backfilled = 0;
+  let pending = 0;
+  for (const row of rows) {
+    if (row.respondedAt == null) {
+      pending += 1;
+    } else if (isBackfilledResponse(row.respondedAt, row.responseRecordedAt)) {
+      backfilled += 1;
+    } else {
+      live += 1;
+    }
+  }
+  return { live, backfilled, pending };
+}
+
+/**
+ * Render the tally as the compact summary line shown above the
+ * timeline (e.g. `"3 live · 2 backfilled · 1 pending"`). Centralised
+ * so the wording — including the middle-dot separator and the
+ * always-three-buckets shape (zeroes are kept rather than hidden so
+ * the line doesn't visually shift between renders) — is pinned by
+ * its unit test rather than re-derived inline in the page.
+ */
+export function formatBackfillTally(tallies: BackfillTallies): string {
+  return `${tallies.live} live · ${tallies.backfilled} backfilled · ${tallies.pending} pending`;
+}

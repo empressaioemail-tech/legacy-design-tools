@@ -3,9 +3,11 @@ import {
   BACKFILL_FILTER_QUERY_PARAM,
   SUBMISSION_BACKFILL_THRESHOLD_MS,
   backfillAnnotation,
+  formatBackfillTally,
   isBackfilledResponse,
   matchesBackfillFilter,
   parseBackfillFilter,
+  summarizeBackfillTallies,
 } from "../submissionBackfill";
 
 /**
@@ -207,6 +209,27 @@ describe("backfill filter (Task #124)", () => {
       ).toBe(false);
     });
 
+    it("agrees with summarizeBackfillTallies row-by-row", () => {
+      // The chip filter and the header tally must put each row into
+      // the same bucket — drift between them would mean the visible
+      // count next to a chip disagrees with the count in the
+      // summary line. Pin the equivalence on the same three
+      // reference rows used above.
+      const rows = [pendingRow, liveRow, backfilledRow];
+      const tallies = summarizeBackfillTallies(rows);
+      expect(rows.filter((r) => matchesBackfillFilter("live", r.respondedAt, r.responseRecordedAt))).toHaveLength(tallies.live);
+      expect(rows.filter((r) => matchesBackfillFilter("backfilled", r.respondedAt, r.responseRecordedAt))).toHaveLength(tallies.backfilled);
+      // Pending bucket isn't a chip mode, but it is everything that
+      // both `live` and `backfilled` chips skip — pin that too.
+      expect(
+        rows.filter(
+          (r) =>
+            !matchesBackfillFilter("live", r.respondedAt, r.responseRecordedAt) &&
+            !matchesBackfillFilter("backfilled", r.respondedAt, r.responseRecordedAt),
+        ),
+      ).toHaveLength(tallies.pending);
+    });
+
     it("treats a row with respondedAt but no responseRecordedAt as live (pre-Task-#106 history)", () => {
       // Older rows recorded before Task #106 shipped don't carry a
       // `responseRecordedAt`. Treating them as live (rather than
@@ -231,5 +254,117 @@ describe("backfill filter (Task #124)", () => {
         ),
       ).toBe(false);
     });
+  });
+});
+
+/**
+ * Pin the header tally that sits above the engagement timeline
+ * (Task #136). The summary line and the chip filter must always
+ * agree on how each row is bucketed — `summarizeBackfillTallies`
+ * delegates to `isBackfilledResponse` so that `backfillAnnotation`
+ * remains the single source of truth.
+ */
+describe("summarizeBackfillTallies (Task #136)", () => {
+  const pendingRow = { respondedAt: null, responseRecordedAt: null };
+  const liveRow = {
+    respondedAt: "2026-04-15T10:00:00.000Z",
+    responseRecordedAt: "2026-04-15T10:30:00.000Z",
+  };
+  const backfilledRow = {
+    respondedAt: "2026-04-10T14:30:00.000Z",
+    responseRecordedAt: "2026-04-15T09:00:00.000Z",
+  };
+  const legacyRow = {
+    respondedAt: "2025-12-01T10:00:00.000Z",
+    responseRecordedAt: null,
+  };
+
+  it("returns zeros for an empty list", () => {
+    // No submissions on the engagement yet — the tally should still
+    // render with three zero buckets so the line is layout-stable
+    // the moment the first row arrives.
+    expect(summarizeBackfillTallies([])).toEqual({
+      live: 0,
+      backfilled: 0,
+      pending: 0,
+    });
+  });
+
+  it("partitions a mixed list into the three buckets", () => {
+    const rows = [
+      pendingRow,
+      pendingRow,
+      liveRow,
+      liveRow,
+      liveRow,
+      backfilledRow,
+      backfilledRow,
+    ];
+    expect(summarizeBackfillTallies(rows)).toEqual({
+      live: 3,
+      backfilled: 2,
+      pending: 2,
+    });
+  });
+
+  it("counts legacy rows (respondedAt without responseRecordedAt) as live", () => {
+    // Mirrors the chip filter's behaviour — a pre-Task-#106 reply
+    // shouldn't be flagged as backfilled in either surface.
+    expect(summarizeBackfillTallies([legacyRow])).toEqual({
+      live: 1,
+      backfilled: 0,
+      pending: 0,
+    });
+  });
+
+  it("totals always match the input length (buckets are a partition)", () => {
+    // The three buckets must always sum to the row count so a
+    // future change can't accidentally drop a row from the summary.
+    const rows = [pendingRow, liveRow, backfilledRow, legacyRow, backfilledRow];
+    const tallies = summarizeBackfillTallies(rows);
+    expect(tallies.live + tallies.backfilled + tallies.pending).toBe(
+      rows.length,
+    );
+  });
+
+  it("ignores extra row fields (structurally typed input)", () => {
+    // The page passes `{ respondedAt, responseRecordedAt }`
+    // projections derived from the local optimistic mirror; this
+    // test guards the helper from a future refactor that tightens
+    // the input shape and breaks that call-site.
+    const enriched = [
+      {
+        id: "row-1",
+        respondedAt: backfilledRow.respondedAt,
+        responseRecordedAt: backfilledRow.responseRecordedAt,
+        unrelated: "value",
+      },
+    ];
+    expect(summarizeBackfillTallies(enriched)).toEqual({
+      live: 0,
+      backfilled: 1,
+      pending: 0,
+    });
+  });
+});
+
+describe("formatBackfillTally (Task #136)", () => {
+  it("pins the rendered copy and middle-dot separator", () => {
+    // The copy is part of the visual contract the auditor scans —
+    // pin it so a future tweak (changing the separator, dropping a
+    // bucket, reordering) is an explicit decision rather than a
+    // silent drift.
+    expect(
+      formatBackfillTally({ live: 3, backfilled: 2, pending: 1 }),
+    ).toBe("3 live · 2 backfilled · 1 pending");
+  });
+
+  it("keeps zero buckets visible so the line is layout-stable", () => {
+    // Hiding zero buckets would make the line jitter as rows
+    // arrive (e.g. "2 live" → "2 live · 1 backfilled"). Keep all
+    // three buckets so the line stays the same width.
+    expect(
+      formatBackfillTally({ live: 0, backfilled: 0, pending: 0 }),
+    ).toBe("0 live · 0 backfilled · 0 pending");
   });
 });

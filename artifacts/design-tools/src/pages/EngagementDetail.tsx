@@ -43,8 +43,10 @@ import { relativeTime } from "../lib/relativeTime";
 import {
   BACKFILL_FILTER_QUERY_PARAM,
   backfillAnnotation,
+  formatBackfillTally,
   matchesBackfillFilter,
   parseBackfillFilter,
+  summarizeBackfillTallies,
   type BackfillFilter,
 } from "../lib/submissionBackfill";
 
@@ -1195,25 +1197,47 @@ function SubmissionsTab({
       ? (submissions.find((s) => s.id === responseDialogFor) ?? null)
       : null;
 
-  // Apply the backfill filter (Task #124) using the *resolved* row
-  // payload — i.e. the local optimistic mirror takes precedence over
-  // the listing query so a freshly-recorded reply is filtered by its
-  // new state, not the stale "pending" snapshot the server still
-  // returns until the next refetch.
-  const visibleSubmissions = useMemo(() => {
+  // Resolve the timeline rows once: local optimistic mirror wins
+  // over the listing query so a freshly-recorded reply is bucketed
+  // by its new state, not the stale "pending" snapshot the server
+  // still returns until the next refetch. Both the chip filter
+  // (Task #124) and the live/backfilled/pending tally line above
+  // the timeline (Task #136) consume this same resolved view, so
+  // they can never disagree.
+  const resolvedSubmissions = useMemo(() => {
     if (!submissions) return [];
-    return submissions.filter((s) => {
+    return submissions.map((s) => {
       const local = recordedResponses[s.id] ?? null;
-      const respondedAt = local?.respondedAt ?? s.respondedAt;
-      const responseRecordedAt =
-        local?.responseRecordedAt ?? s.responseRecordedAt;
-      return matchesBackfillFilter(
-        backfillFilter,
-        respondedAt,
-        responseRecordedAt,
-      );
+      return {
+        row: s,
+        respondedAt: local?.respondedAt ?? s.respondedAt,
+        responseRecordedAt:
+          local?.responseRecordedAt ?? s.responseRecordedAt,
+      };
     });
-  }, [submissions, recordedResponses, backfillFilter]);
+  }, [submissions, recordedResponses]);
+
+  const visibleSubmissions = useMemo(
+    () =>
+      resolvedSubmissions
+        .filter((r) =>
+          matchesBackfillFilter(
+            backfillFilter,
+            r.respondedAt,
+            r.responseRecordedAt,
+          ),
+        )
+        .map((r) => r.row),
+    [resolvedSubmissions, backfillFilter],
+  );
+
+  // Header tally — driven off the same resolved view so optimistic
+  // recordings move out of the "pending" bucket the moment the user
+  // submits the dialog, mirroring the chip filter's behaviour.
+  const submissionTallies = useMemo(
+    () => summarizeBackfillTallies(resolvedSubmissions),
+    [resolvedSubmissions],
+  );
 
   if (isLoading) {
     return (
@@ -1244,7 +1268,26 @@ function SubmissionsTab({
     <>
       <div className="sc-card flex flex-col" data-testid="submissions-list">
         <div className="sc-card-header sc-row-sb">
-          <span className="sc-label">PAST SUBMISSIONS</span>
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: 4 }}
+          >
+            <span className="sc-label">PAST SUBMISSIONS</span>
+            {/*
+              Compact "live · backfilled · pending" tally (Task #136).
+              Lets auditors gauge whether a deeper review is warranted
+              without having to click through each chip — the counts
+              are a partition of the engagement's full timeline and
+              react to optimistic local updates the same way the
+              chip filter does (both consume `resolvedSubmissions`).
+            */}
+            <span
+              className="sc-meta"
+              data-testid="submissions-tally"
+              style={{ opacity: 0.7 }}
+            >
+              {formatBackfillTally(submissionTallies)}
+            </span>
+          </div>
           <div
             style={{ display: "flex", alignItems: "center", gap: 12 }}
           >
