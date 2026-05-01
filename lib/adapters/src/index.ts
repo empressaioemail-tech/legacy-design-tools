@@ -28,6 +28,7 @@ export {
   toCacheKey,
   CACHE_COORDINATE_PRECISION,
   FEDERAL_TIER_CACHE_PREDICATE,
+  type AdapterCacheHit,
   type AdapterCacheKey,
   type AdapterCachePredicate,
   type AdapterResultCache,

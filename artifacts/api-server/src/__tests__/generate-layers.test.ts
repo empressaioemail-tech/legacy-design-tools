@@ -585,4 +585,95 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     // bounded across re-runs.
     expect(cacheRowsAfter).toHaveLength(1);
   });
+
+  it("propagates fromCache/cachedAt on outcomes and ?forceRefresh=true bypasses the cache (Task #204)", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement({
+      city: "Bastrop",
+      state: "TX",
+      lat: "30.110800",
+      lng: "-97.315600",
+    });
+
+    // Run #1 — live fetch. Every successful outcome should report
+    // fromCache=false / cachedAt=null because the cache started cold.
+    const first = await request(getApp()).post(
+      `/api/engagements/${eng.id}/generate-layers`,
+    );
+    expect(first.status).toBe(200);
+    const firstFema = first.body.outcomes.find(
+      (o: { adapterKey: string }) =>
+        o.adapterKey === "fema:nfhl-flood-zone",
+    );
+    expect(firstFema.status).toBe("ok");
+    expect(firstFema.fromCache).toBe(false);
+    expect(firstFema.cachedAt).toBeNull();
+
+    // Run #2 — default (cache honored). The FEMA outcome should now
+    // come back fromCache=true with a recent cachedAt timestamp; the
+    // FCC outcome (failed → not cached) stays fromCache=false.
+    const second = await request(getApp()).post(
+      `/api/engagements/${eng.id}/generate-layers`,
+    );
+    expect(second.status).toBe(200);
+    const secondFema = second.body.outcomes.find(
+      (o: { adapterKey: string }) =>
+        o.adapterKey === "fema:nfhl-flood-zone",
+    );
+    expect(secondFema.status).toBe("ok");
+    expect(secondFema.fromCache).toBe(true);
+    expect(typeof secondFema.cachedAt).toBe("string");
+    const cachedAtMs = Date.parse(secondFema.cachedAt);
+    expect(Number.isNaN(cachedAtMs)).toBe(false);
+    // The cached row was just written by the first run, so its age
+    // should be well under a minute.
+    expect(Date.now() - cachedAtMs).toBeLessThan(60_000);
+    const secondFcc = second.body.outcomes.find(
+      (o: { adapterKey: string }) => o.adapterKey === "fcc:broadband-907",
+    );
+    if (secondFcc) {
+      expect(secondFcc.fromCache).toBe(false);
+      expect(secondFcc.cachedAt).toBeNull();
+    }
+
+    // Run #3 — ?forceRefresh=true. The cache should be bypassed, so
+    // even a freshly-warm row reports fromCache=false. The cached
+    // row itself stays in place (still upserted), but the OUTCOME
+    // wire envelope tells the FE this run was live.
+    const third = await request(getApp())
+      .post(`/api/engagements/${eng.id}/generate-layers`)
+      .query({ forceRefresh: "true" });
+    expect(third.status).toBe(200);
+    const thirdFema = third.body.outcomes.find(
+      (o: { adapterKey: string }) =>
+        o.adapterKey === "fema:nfhl-flood-zone",
+    );
+    expect(thirdFema.status).toBe("ok");
+    expect(thirdFema.fromCache).toBe(false);
+    expect(thirdFema.cachedAt).toBeNull();
+
+    // The cache row is still there (we always write through, even on
+    // forceRefresh) — confirms the table stays bounded.
+    const cacheRowsAfter = await ctx.schema.db
+      .select()
+      .from(adapterResponseCache)
+      .where(
+        eq(adapterResponseCache.adapterKey, "fema:nfhl-flood-zone"),
+      );
+    expect(cacheRowsAfter).toHaveLength(1);
+
+    // Garbage values for `?forceRefresh` MUST behave like the flag
+    // is absent (cache honored). This locks the parser's strict
+    // "true"/"1" allow-list so a typo can't accidentally drop into
+    // a forced live run.
+    const fourth = await request(getApp())
+      .post(`/api/engagements/${eng.id}/generate-layers`)
+      .query({ forceRefresh: "yes" });
+    expect(fourth.status).toBe(200);
+    const fourthFema = fourth.body.outcomes.find(
+      (o: { adapterKey: string }) =>
+        o.adapterKey === "fema:nfhl-flood-zone",
+    );
+    expect(fourthFema.fromCache).toBe(true);
+  });
 });

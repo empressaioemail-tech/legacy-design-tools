@@ -60,6 +60,7 @@ export * from "./errorResponse";
 export * from "./generateBriefingBody";
 export * from "./generateBriefingResponse";
 export * from "./generateBriefingResponseState";
+export * from "./generateEngagementLayersParams";
 export * from "./generateLayersOutcome";
 export * from "./generateLayersOutcomeError";
 export * from "./generateLayersOutcomeErrorCode";

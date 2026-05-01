@@ -134,6 +134,13 @@ export interface AdapterError {
  * One adapter's run outcome. Either `result` (success) or `error`
  * (deterministic failure) is set; never both. The runner returns an
  * array of these — per-source failure isolation per locked decision #6.
+ *
+ * `fromCache` / `cachedAt` (Task #204): set on `status="ok"` outcomes
+ * that were replayed from {@link AdapterResultCache} rather than
+ * re-fetched live. `fromCache` defaults to `false` for live runs and
+ * for non-`ok` statuses; `cachedAt` is the ISO8601 timestamp of when
+ * the cache row was originally written so the UI can render a
+ * "cached <n>h ago" pill without re-deriving the age elsewhere.
  */
 export interface AdapterRunOutcome {
   adapterKey: string;
@@ -142,6 +149,10 @@ export interface AdapterRunOutcome {
   status: "ok" | "no-coverage" | "failed";
   result?: AdapterResult;
   error?: AdapterError;
+  /** True when this outcome's `result` was replayed from the cache. */
+  fromCache?: boolean;
+  /** ISO8601 cache write time when {@link fromCache} is true; otherwise null. */
+  cachedAt?: string | null;
 }
 
 /**

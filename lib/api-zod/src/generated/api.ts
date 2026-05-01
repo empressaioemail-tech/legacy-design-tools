@@ -1286,6 +1286,19 @@ export const GenerateEngagementLayersParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const generateEngagementLayersQueryForceRefreshDefault = false;
+
+export const GenerateEngagementLayersQueryParams = zod.object({
+  forceRefresh: zod.coerce
+    .boolean()
+    .default(generateEngagementLayersQueryForceRefreshDefault)
+    .describe(
+      "Task #204 — when `true`, bypass the federal-adapter response\ncache for this run. Every cacheable adapter is re-fetched\nlive (still subject to the per-adapter timeout) and the\nfresh result is written back through the cache so the next\nnon-forced run picks it up. Use this when an architect\nsuspects the upstream feed has shifted (e.g. FEMA\npublished a new flood-zone snapshot) and wants to confirm\nthe current parcel reading is fresh.\n",
+    ),
+});
+
+export const generateEngagementLayersResponseOutcomesItemFromCacheDefault = false;
+
 export const GenerateEngagementLayersResponse = zod
   .object({
     briefing: zod
@@ -1461,6 +1474,20 @@ export const GenerateEngagementLayersResponse = zod
             .nullish()
             .describe(
               "The id of the persisted `briefing_sources` row, set only on\n`status=ok` outcomes. The row itself is also embedded in\n`briefing.sources` on the same response so clients usually\ndon't need to follow up.\n",
+            ),
+          fromCache: zod
+            .boolean()
+            .default(
+              generateEngagementLayersResponseOutcomesItemFromCacheDefault,
+            )
+            .describe(
+              'Task #204 — `true` when the runner replayed a cached\nAdapterResult instead of re-fetching live from the upstream\nfeed. Always `false` for non-`ok` outcomes and for live\nruns. The Site Context tab uses this (with `cachedAt`) to\nrender a \"cached <n>h ago\" pill so an architect knows\nwhen to consider a \"Force refresh\".\n',
+            ),
+          cachedAt: zod.coerce
+            .date()
+            .nullable()
+            .describe(
+              "Task #204 — ISO8601 timestamp of when the cached row was\nwritten (i.e. when the underlying upstream lookup actually\nran). Always `null` when `fromCache` is `false`.\n",
             ),
         })
         .describe(

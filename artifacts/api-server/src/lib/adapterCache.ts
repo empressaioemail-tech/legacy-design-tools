@@ -18,6 +18,7 @@
 
 import { db, adapterResponseCache } from "@workspace/db";
 import type {
+  AdapterCacheHit,
   AdapterCacheKey,
   AdapterResult,
   AdapterResultCache,
@@ -91,13 +92,20 @@ class PostgresAdapterResponseCache implements AdapterResultCache {
     private readonly log: Logger,
   ) {}
 
-  async get(key: AdapterCacheKey): Promise<AdapterResult | null> {
+  async get(key: AdapterCacheKey): Promise<AdapterCacheHit | null> {
     try {
       // numeric columns round-trip as strings via node-postgres; we
       // pass the toFixed'd form so the equality match is byte-exact
-      // and the unique index can serve the lookup.
+      // and the unique index can serve the lookup. We also pull
+      // `created_at` so the runner can stamp the outcome's `cachedAt`
+      // for the FE pill — the upsert in `put` resets `created_at` to
+      // `now()`, so it tracks the most recent successful fetch (Task
+      // #204).
       const rows = await db
-        .select({ payload: adapterResponseCache.resultPayload })
+        .select({
+          payload: adapterResponseCache.resultPayload,
+          createdAt: adapterResponseCache.createdAt,
+        })
         .from(adapterResponseCache)
         .where(
           and(
@@ -116,7 +124,10 @@ class PostgresAdapterResponseCache implements AdapterResultCache {
       // rather than a runtime crash inside the runner.
       const payload = row.payload as unknown;
       if (!payload || typeof payload !== "object") return null;
-      return payload as AdapterResult;
+      return {
+        result: payload as AdapterResult,
+        cachedAt: row.createdAt,
+      };
     } catch (err) {
       this.log.warn(
         { err, adapterKey: key.adapterKey },

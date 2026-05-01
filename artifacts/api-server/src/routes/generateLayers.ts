@@ -258,6 +258,20 @@ interface GenerateLayersOutcomeWire {
   status: "ok" | "no-coverage" | "failed";
   error: { code: string; message: string } | null;
   sourceId: string | null;
+  /**
+   * Task #204: true when the runner replayed a cached AdapterResult
+   * instead of re-fetching live from the upstream feed. The Site
+   * Context tab uses this (with {@link cachedAt}) to render a
+   * "cached <n>h ago" pill on per-source rows so an architect knows
+   * when to consider a "Force refresh".
+   */
+  fromCache: boolean;
+  /**
+   * Task #204: ISO8601 timestamp of when the cached row was written
+   * (i.e. when the underlying upstream lookup actually ran). Always
+   * `null` when {@link fromCache} is false.
+   */
+  cachedAt: string | null;
 }
 
 const router: IRouter = Router();
@@ -379,12 +393,27 @@ router.post(
     // runner skips the cache entirely.
     const cache = createAdapterResponseCache({ log: reqLog });
 
+    // Task #204 — `?forceRefresh=true` punches through the cache so
+    // the architect can confirm the upstream hasn't moved (e.g. after
+    // FEMA publishes a new flood-zone snapshot). The flag only skips
+    // the cache `get`; successful runs are still written back through
+    // so the next non-forced run hits the freshly-warmed entry. Any
+    // other value (including absent) means "honor the cache".
+    const forceRefresh = parseForceRefreshQuery(req.query["forceRefresh"]);
+    if (forceRefresh) {
+      reqLog.info(
+        { engagementId },
+        "generate-layers: forceRefresh=true — bypassing adapter cache for this run",
+      );
+    }
+
     let outcomes: AdapterRunOutcome[];
     try {
       outcomes = await runAdapters({
         adapters: applicable,
         context: ctx,
         cache,
+        forceRefresh,
       });
     } catch (err) {
       // The runner contract is "never throws" — a thrown error here
@@ -542,6 +571,12 @@ router.post(
         ? { code: o.error.code, message: o.error.message }
         : null,
       sourceId: persistedByAdapterKey.get(o.adapterKey) ?? null,
+      // Task #204: surface the cache hint on the wire. The runner
+      // populates `fromCache`/`cachedAt` on every "ok" outcome; we
+      // collapse to the strict `false` / `null` defaults for non-`ok`
+      // outcomes so the FE never has to handle `undefined`.
+      fromCache: o.fromCache === true,
+      cachedAt: o.fromCache === true ? o.cachedAt ?? null : null,
     }));
 
     if (!briefingRow) {
@@ -558,5 +593,19 @@ router.post(
     });
   },
 );
+
+/**
+ * Parse the `?forceRefresh` query param into a strict boolean. Accepts
+ * the strings `"true"` / `"1"` (case-insensitive) as truthy; everything
+ * else (missing, `"false"`, `"0"`, repeated values, garbage) is false.
+ * Express decodes repeated `?forceRefresh=true&forceRefresh=...` query
+ * params into an array — we only honor the flag when the canonical
+ * single-value form was supplied.
+ */
+function parseForceRefreshQuery(raw: unknown): boolean {
+  if (typeof raw !== "string") return false;
+  const v = raw.trim().toLowerCase();
+  return v === "true" || v === "1";
+}
 
 export default router;

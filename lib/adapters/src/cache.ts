@@ -64,13 +64,31 @@ export function toCacheKey(
 }
 
 /**
+ * Cache hit envelope — wraps the replayed {@link AdapterResult} with
+ * the original write timestamp so the runner can surface a
+ * `cachedAt` on the outcome (Task #204). The Postgres-backed cache
+ * fills `cachedAt` from the row's `created_at`, which is bumped to
+ * `now()` on each upsert so it tracks the most recent successful
+ * fetch.
+ */
+export interface AdapterCacheHit {
+  result: AdapterResult;
+  /** When the cache row was written (i.e. when the underlying lookup ran). */
+  cachedAt: Date;
+}
+
+/**
  * Backing store the runner consults before invoking an adapter and
  * writes through after a successful run. Implementations are expected
  * to enforce TTL themselves and to never throw — see the file-level
  * comment for the failure-isolation contract.
+ *
+ * `get` returns an {@link AdapterCacheHit} on a hit so the runner can
+ * propagate the cache-write timestamp, or `null` on a miss / stale
+ * row.
  */
 export interface AdapterResultCache {
-  get(key: AdapterCacheKey): Promise<AdapterResult | null>;
+  get(key: AdapterCacheKey): Promise<AdapterCacheHit | null>;
   put(key: AdapterCacheKey, result: AdapterResult): Promise<void>;
 }
 

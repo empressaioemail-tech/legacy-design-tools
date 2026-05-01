@@ -39,6 +39,7 @@ import type {
   ErrorResponse,
   GenerateBriefingBody,
   GenerateBriefingResponse,
+  GenerateEngagementLayersParams,
   GenerateLayersResponse,
   GetAtomHistoryParams,
   GetAtomSummaryParams,
@@ -1543,16 +1544,32 @@ the HTTP request — the rows are the source of truth.
 
  * @summary Run all applicable adapters and persist briefing-source rows
  */
-export const getGenerateEngagementLayersUrl = (id: string) => {
-  return `/api/engagements/${id}/generate-layers`;
+export const getGenerateEngagementLayersUrl = (
+  id: string,
+  params?: GenerateEngagementLayersParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${id}/generate-layers?${stringifiedParams}`
+    : `/api/engagements/${id}/generate-layers`;
 };
 
 export const generateEngagementLayers = async (
   id: string,
+  params?: GenerateEngagementLayersParams,
   options?: RequestInit,
 ): Promise<GenerateLayersResponse> => {
   return customFetch<GenerateLayersResponse>(
-    getGenerateEngagementLayersUrl(id),
+    getGenerateEngagementLayersUrl(id, params),
     {
       ...options,
       method: "POST",
@@ -1567,14 +1584,14 @@ export const getGenerateEngagementLayersMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof generateEngagementLayers>>,
     TError,
-    { id: string },
+    { id: string; params?: GenerateEngagementLayersParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof generateEngagementLayers>>,
   TError,
-  { id: string },
+  { id: string; params?: GenerateEngagementLayersParams },
   TContext
 > => {
   const mutationKey = ["generateEngagementLayers"];
@@ -1588,11 +1605,11 @@ export const getGenerateEngagementLayersMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof generateEngagementLayers>>,
-    { id: string }
+    { id: string; params?: GenerateEngagementLayersParams }
   > = (props) => {
-    const { id } = props ?? {};
+    const { id, params } = props ?? {};
 
-    return generateEngagementLayers(id, requestOptions);
+    return generateEngagementLayers(id, params, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -1614,14 +1631,14 @@ export const useGenerateEngagementLayers = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof generateEngagementLayers>>,
     TError,
-    { id: string },
+    { id: string; params?: GenerateEngagementLayersParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof generateEngagementLayers>>,
   TError,
-  { id: string },
+  { id: string; params?: GenerateEngagementLayersParams },
   TContext
 > => {
   return useMutation(getGenerateEngagementLayersMutationOptions(options));

@@ -343,6 +343,93 @@ describe("BriefingSourceRow — Generate Layers attribution (Task #178)", () => 
     ).toBe("Local adapter");
   });
 
+  it("renders a 'cached <n>h ago' pill when the parent passes cacheInfo.fromCache=true (Task #204)", () => {
+    const source = mkSource({
+      id: "src-fed-cached",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+    });
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const client = makeQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={source as never}
+          cacheInfo={{ fromCache: true, cachedAt: sixHoursAgo }}
+        />
+      </QueryClientProvider>,
+    );
+
+    const pill = screen.getByTestId(
+      `briefing-source-cache-pill-${source.id}`,
+    );
+    expect(pill).toBeInTheDocument();
+    // Six hours ago should render as exactly "cached 6h ago" — pins
+    // the formatter against silent regressions in unit selection.
+    expect(pill.textContent).toBe("cached 6h ago");
+    // The full ISO timestamp must be in the tooltip so an architect
+    // can hover for the precise capture time.
+    expect(pill.getAttribute("title")).toContain(
+      new Date(sixHoursAgo).toLocaleString(),
+    );
+  });
+
+  it("renders 'cached just now' for sub-minute cachedAt (Task #204)", () => {
+    const source = mkSource({
+      id: "src-fed-fresh-cache",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const justNow = new Date(Date.now() - 10 * 1000).toISOString();
+    const client = makeQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={source as never}
+          cacheInfo={{ fromCache: true, cachedAt: justNow }}
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.getByTestId(`briefing-source-cache-pill-${source.id}`).textContent,
+    ).toBe("cached just now");
+  });
+
+  it("does NOT render the cache pill when cacheInfo is null or fromCache=false (Task #204)", () => {
+    const source = mkSource({
+      id: "src-fed-live",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    // No cacheInfo prop → no pill.
+    const { rerender, client } = renderRow(source);
+    expect(
+      screen.queryByTestId(`briefing-source-cache-pill-${source.id}`),
+    ).not.toBeInTheDocument();
+
+    // Explicit cacheInfo with fromCache=false → still no pill, even
+    // if a cachedAt happens to be present (defensive: the runner
+    // should not send this combo, but we don't want a stray pill).
+    rerender(
+      <QueryClientProvider client={client}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={source as never}
+          cacheInfo={{
+            fromCache: false,
+            cachedAt: new Date().toISOString(),
+          }}
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.queryByTestId(`briefing-source-cache-pill-${source.id}`),
+    ).not.toBeInTheDocument();
+  });
+
   it("does NOT render the Generate Layers attribution line for manual-upload rows", () => {
     const manual = mkSource({
       id: "src-manual-1",

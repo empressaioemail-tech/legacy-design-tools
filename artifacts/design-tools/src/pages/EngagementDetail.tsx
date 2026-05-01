@@ -551,6 +551,31 @@ function formatByteSize(bytes: number | null): string {
 }
 
 /**
+ * Task #204 — render a Site-Context cache pill label like
+ * `cached 6h ago`, `cached 12m ago`, or `cached just now` from the
+ * runner's `cachedAt` ISO8601 string.
+ *
+ * Future timestamps (clock skew between server and client) collapse
+ * to "cached just now" rather than rendering a confusing negative.
+ * Bad/missing input renders just "cached" so we still flag the row
+ * without lying about the age — the tooltip carries the full ISO
+ * string for forensic context.
+ */
+function formatCacheAgeLabel(cachedAt: string | null): string {
+  if (!cachedAt) return "cached";
+  const captured = Date.parse(cachedAt);
+  if (Number.isNaN(captured)) return "cached";
+  const diffMs = Date.now() - captured;
+  if (diffMs < 60_000) return "cached just now";
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `cached ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `cached ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `cached ${days}d ago`;
+}
+
+/**
  * Render one current briefing source as a card row. The presentation
  * is intentionally producer-agnostic — both `manual-upload` and
  * `federal-adapter` rows route through this component, with the
@@ -697,6 +722,7 @@ export function BriefingSourceRow({
   engagementId,
   source,
   isHighlighted = false,
+  cacheInfo = null,
 }: {
   engagementId: string;
   source: EngagementBriefingSource;
@@ -707,6 +733,15 @@ export function BriefingSourceRow({
    * that toggles this back to false after ~1.6s.
    */
   isHighlighted?: boolean;
+  /**
+   * Task #204 — when the most recent Generate Layers run for this
+   * engagement replayed a cached AdapterResult for the adapter that
+   * persisted this row, the parent passes the runner's
+   * `{ fromCache: true, cachedAt }` envelope here so we can render a
+   * "cached <n>h ago" pill. `null` (or `fromCache: false`) renders
+   * nothing — a fresh live run intentionally has no cache pill.
+   */
+  cacheInfo?: { fromCache: boolean; cachedAt: string | null } | null;
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const isAdapter = isAdapterSourceKind(source.sourceKind);
@@ -825,6 +860,35 @@ export function BriefingSourceRow({
           >
             {SOURCE_KIND_BADGE_LABEL[source.sourceKind] ?? source.sourceKind}
           </span>
+          {cacheInfo?.fromCache && (
+            // Task #204 — surface "served from cache" so the architect
+            // knows the reading is not a fresh upstream lookup. The
+            // pill renders the row's age in whole hours when the cache
+            // is older than 1h ("cached 6h ago"), in minutes for very
+            // recent hits ("cached 12m ago"), or "cached just now" for
+            // sub-minute hits. Missing/garbled `cachedAt` falls back
+            // to a neutral "cached" so we still flag it.
+            <span
+              className="sc-pill"
+              data-testid={`briefing-source-cache-pill-${source.id}`}
+              title={
+                cacheInfo.cachedAt
+                  ? `Reused a cached upstream response captured at ${new Date(cacheInfo.cachedAt).toLocaleString()}. Click "Force refresh" above to bypass the cache.`
+                  : "Reused a cached upstream response. Click \"Force refresh\" above to bypass the cache."
+              }
+              style={{
+                fontSize: 10,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "var(--surface-muted)",
+                color: "var(--text-secondary)",
+                textTransform: "uppercase",
+                letterSpacing: 0.3,
+              }}
+            >
+              {formatCacheAgeLabel(cacheInfo.cachedAt)}
+            </span>
+          )}
         </div>
       </div>
       {adapterSummary && (
@@ -2188,6 +2252,29 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
     [sources],
   );
 
+  // Task #204 — index the most recent run's outcomes by the
+  // `briefing_sources.id` they wrote so each row can render a
+  // "cached <n>h ago" pill when the runner served it from the
+  // adapter response cache. We only retain `fromCache=true` outcomes
+  // with a non-null `sourceId` (the row was actually persisted) so
+  // there's no entry at all for fresh-live or no-coverage outcomes —
+  // the row component renders nothing in that case.
+  const cacheInfoBySourceId = useMemo(() => {
+    const map = new Map<
+      string,
+      { fromCache: boolean; cachedAt: string | null }
+    >();
+    for (const o of lastOutcomes) {
+      if (o.fromCache && o.sourceId) {
+        map.set(o.sourceId, {
+          fromCache: true,
+          cachedAt: o.cachedAt ?? null,
+        });
+      }
+    }
+    return map;
+  }, [lastOutcomes]);
+
   // Bucket sources by tier (DA-PI-4). Manual-upload rows land in
   // their own tier so the "manually uploaded" set stays distinct
   // from the auto-fetched federal/state/local rows. Each bucket
@@ -2283,7 +2370,7 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
             it on the timeline.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button
             type="button"
             className="sc-btn"
@@ -2293,6 +2380,40 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
             title="Run every applicable federal/state/local adapter and persist the results as briefing sources."
           >
             {generateMutation.isPending ? "Generating…" : "Generate Layers"}
+          </button>
+          {/*
+           * Task #204 — "Force refresh" runs the same Generate Layers
+           * mutation but with `?forceRefresh=true`, which makes the
+           * runner bypass the federal-adapter response cache for this
+           * one run (the result still gets cached for the *next*
+           * run). Rendered as a link rather than a primary button so
+           * it sits alongside Generate Layers without competing with
+           * the upload-source CTA.
+           */}
+          <button
+            type="button"
+            className="sc-btn-link"
+            onClick={() =>
+              generateMutation.mutate({
+                id: engagementId,
+                params: { forceRefresh: true },
+              })
+            }
+            disabled={generateMutation.isPending}
+            data-testid="generate-layers-force-refresh-button"
+            title="Re-run every adapter live, bypassing the federal-adapter response cache for this one run."
+            style={{
+              fontSize: 12,
+              color: "var(--text-link, var(--cyan, #06b6d4))",
+              background: "transparent",
+              border: "none",
+              padding: "2px 4px",
+              cursor: generateMutation.isPending ? "not-allowed" : "pointer",
+              textDecoration: "underline",
+              opacity: generateMutation.isPending ? 0.5 : 1,
+            }}
+          >
+            Force refresh
           </button>
           <button
             type="button"
@@ -2621,6 +2742,7 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
                     engagementId={engagementId}
                     source={source}
                     isHighlighted={highlightedSourceId === source.id}
+                    cacheInfo={cacheInfoBySourceId.get(source.id) ?? null}
                   />
                 ))}
               </div>

@@ -609,6 +609,19 @@ the persisted row carries in `provider`.
 don't need to follow up.
  */
   sourceId?: string | null;
+  /** Task #204 — `true` when the runner replayed a cached
+AdapterResult instead of re-fetching live from the upstream
+feed. Always `false` for non-`ok` outcomes and for live
+runs. The Site Context tab uses this (with `cachedAt`) to
+render a "cached <n>h ago" pill so an architect knows
+when to consider a "Force refresh".
+ */
+  fromCache: boolean;
+  /** Task #204 — ISO8601 timestamp of when the cached row was
+written (i.e. when the underlying upstream lookup actually
+ran). Always `null` when `fromCache` is `false`.
+ */
+  cachedAt: string | null;
 }
 
 /**
@@ -1781,6 +1794,21 @@ want the current source do not need to filter client-side.
 
  */
   includeSuperseded?: boolean;
+};
+
+export type GenerateEngagementLayersParams = {
+  /**
+ * Task #204 — when `true`, bypass the federal-adapter response
+cache for this run. Every cacheable adapter is re-fetched
+live (still subject to the per-adapter timeout) and the
+fresh result is written back through the cache so the next
+non-forced run picks it up. Use this when an architect
+suspects the upstream feed has shifted (e.g. FEMA
+published a new flood-zone snapshot) and wants to confirm
+the current parcel reading is fresh.
+
+ */
+  forceRefresh?: boolean;
 };
 
 export type UploadSnapshotSheetsBody = {

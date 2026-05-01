@@ -90,12 +90,22 @@ describe("PostgresAdapterResponseCache", () => {
     expect(hit).toBeNull();
   });
 
-  it("round-trips a put + get", async () => {
+  it("round-trips a put + get and exposes the row's createdAt as cachedAt", async () => {
     const cache = createAdapterResponseCache({ ttlMs: 60_000 });
     const key = toCacheKey("fema:nfhl-flood-zone", 38.5733, -109.5499);
+    const beforePut = new Date();
     await cache!.put(key!, sampleResult);
     const hit = await cache!.get(key!);
-    expect(hit).toEqual(sampleResult);
+    expect(hit).not.toBeNull();
+    expect(hit!.result).toEqual(sampleResult);
+    expect(hit!.cachedAt).toBeInstanceOf(Date);
+    // The Postgres row's createdAt should land within a generous
+    // window around the put — this proves we're reading it through
+    // (and not stamping a new Date on the read path).
+    expect(hit!.cachedAt.getTime()).toBeGreaterThanOrEqual(
+      beforePut.getTime() - 1000,
+    );
+    expect(hit!.cachedAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
   });
 
   it("upserts on conflict so a re-run replaces the row in place", async () => {
@@ -113,7 +123,7 @@ describe("PostgresAdapterResponseCache", () => {
       .where(eq(adapterResponseCache.adapterKey, "fema:nfhl-flood-zone"));
     expect(rows).toHaveLength(1);
     const hit = await cache!.get(key!);
-    expect((hit as AdapterResult).payload).toEqual({
+    expect(hit?.result.payload).toEqual({
       kind: "flood-zone",
       floodZone: "X",
     });
@@ -148,8 +158,8 @@ describe("PostgresAdapterResponseCache", () => {
     });
     const femaHit = await cache!.get(fema!);
     const usgsHit = await cache!.get(usgs!);
-    expect(femaHit?.adapterKey).toBe("fema:nfhl");
-    expect(usgsHit?.adapterKey).toBe("usgs:ned-elevation");
+    expect(femaHit?.result.adapterKey).toBe("fema:nfhl");
+    expect(usgsHit?.result.adapterKey).toBe("usgs:ned-elevation");
   });
 
   it("isolates the same adapter at different coordinates", async () => {
@@ -163,8 +173,8 @@ describe("PostgresAdapterResponseCache", () => {
     });
     const moabHit = await cache!.get(moab!);
     const bastropHit = await cache!.get(bastrop!);
-    expect((moabHit as AdapterResult).payload).toEqual({ city: "moab" });
-    expect((bastropHit as AdapterResult).payload).toEqual({ city: "bastrop" });
+    expect(moabHit?.result.payload).toEqual({ city: "moab" });
+    expect(bastropHit?.result.payload).toEqual({ city: "bastrop" });
   });
 
   it("treats coordinates that round to the same 5-decimal value as one cache entry", async () => {
@@ -177,7 +187,7 @@ describe("PostgresAdapterResponseCache", () => {
     const rows = await ctx.schema!.db.select().from(adapterResponseCache);
     expect(rows).toHaveLength(1);
     const hit = await cache!.get(a!);
-    expect((hit as AdapterResult).payload).toEqual({ v: 2 });
+    expect(hit?.result.payload).toEqual({ v: 2 });
   });
 });
 

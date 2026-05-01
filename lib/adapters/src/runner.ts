@@ -49,12 +49,22 @@ export interface RunAdaptersInput {
    * only. Ignored when {@link cache} is undefined.
    */
   cachePredicate?: AdapterCachePredicate;
+  /**
+   * Bypass the cache lookup for this run — every cacheable adapter is
+   * re-fetched live, but successful results are still written back
+   * through `cache.put` so subsequent runs (without `forceRefresh`)
+   * can hit the freshly-warmed entry. Task #204 wires this through
+   * `?forceRefresh=true` on the generate-layers route so an architect
+   * can manually punch through the cache when they suspect upstream
+   * data has shifted.
+   */
+  forceRefresh?: boolean;
 }
 
 export async function runAdapters(
   input: RunAdaptersInput,
 ): Promise<AdapterRunOutcome[]> {
-  const { adapters, context, cache, cachePredicate } = input;
+  const { adapters, context, cache, cachePredicate, forceRefresh } = input;
   // Filter first so the per-adapter timeout doesn't fire on adapters
   // that are gated out before they ever touch the network.
   const applicable = adapters.filter((a) => a.appliesTo(context));
@@ -79,7 +89,7 @@ export async function runAdapters(
   // "Generate Layers" call should be as snappy as the slowest adapter.
   const ran = await Promise.all(
     applicable.map((adapter) =>
-      runOne(adapter, context, cache, cachePredicate),
+      runOne(adapter, context, cache, cachePredicate, forceRefresh ?? false),
     ),
   );
   return [...ran, ...skipped];
@@ -90,6 +100,7 @@ async function runOne(
   context: AdapterContext,
   cache: AdapterResultCache | undefined,
   cachePredicate: AdapterCachePredicate | undefined,
+  forceRefresh: boolean,
 ): Promise<AdapterRunOutcome> {
   // Cache lookup — only when the adapter is cacheable AND the
   // coordinates are finite (NaN coordinates produce a deterministic
@@ -97,6 +108,10 @@ async function runOne(
   // surface as `no-coverage` per-adapter outcomes). The cache contract
   // says implementations never throw, but we wrap defensively so a
   // misbehaving cache cannot break the runner.
+  //
+  // When `forceRefresh` is true we still compute the cache key so we
+  // can `put` the fresh result back, but skip the `get` entirely so
+  // the live upstream is consulted regardless of TTL.
   const cacheKey =
     cache && (cachePredicate ?? defaultCachePredicate)(adapter)
       ? toCacheKey(
@@ -105,7 +120,7 @@ async function runOne(
           context.parcel.longitude,
         )
       : null;
-  if (cache && cacheKey) {
+  if (cache && cacheKey && !forceRefresh) {
     try {
       const hit = await cache.get(cacheKey);
       if (hit) {
@@ -114,7 +129,9 @@ async function runOne(
           tier: adapter.tier,
           layerKind: adapter.layerKind,
           status: "ok",
-          result: hit,
+          result: hit.result,
+          fromCache: true,
+          cachedAt: hit.cachedAt.toISOString(),
         };
       }
     } catch {
@@ -149,6 +166,8 @@ async function runOne(
       layerKind: adapter.layerKind,
       status: "ok",
       result,
+      fromCache: false,
+      cachedAt: null,
     };
   } catch (err) {
     const error = toAdapterError(err, ac.signal.aborted, timeoutMs);

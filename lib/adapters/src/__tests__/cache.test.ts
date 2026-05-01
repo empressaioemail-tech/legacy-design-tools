@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { runAdapters } from "../runner";
 import {
   toCacheKey,
+  type AdapterCacheHit,
   type AdapterCacheKey,
   type AdapterResultCache,
 } from "../cache";
@@ -62,16 +63,16 @@ function makeAdapter(opts: {
 }
 
 class InMemoryCache implements AdapterResultCache {
-  readonly store = new Map<string, AdapterResult>();
+  readonly store = new Map<string, AdapterCacheHit>();
   readonly getCalls: AdapterCacheKey[] = [];
   readonly putCalls: AdapterCacheKey[] = [];
-  async get(key: AdapterCacheKey): Promise<AdapterResult | null> {
+  async get(key: AdapterCacheKey): Promise<AdapterCacheHit | null> {
     this.getCalls.push(key);
     return this.store.get(this.k(key)) ?? null;
   }
   async put(key: AdapterCacheKey, result: AdapterResult): Promise<void> {
     this.putCalls.push(key);
-    this.store.set(this.k(key), result);
+    this.store.set(this.k(key), { result, cachedAt: new Date() });
   }
   private k(key: AdapterCacheKey): string {
     return `${key.adapterKey}|${key.latRounded}|${key.lngRounded}`;
@@ -112,9 +113,10 @@ describe("runAdapters with cache", () => {
       snapshotDate: "2025-12-01T00:00:00.000Z",
       payload: { kind: "flood-zone", floodZone: "AE" },
     };
+    const cachedAt = new Date("2026-04-30T12:00:00.000Z");
     cache.store.set(
       `fema:nfhl-flood-zone|38.5733|-109.5499`,
-      cachedResult,
+      { result: cachedResult, cachedAt },
     );
     const runMock = vi.fn(async () => {
       throw new Error("should not run on cache hit");
@@ -131,8 +133,72 @@ describe("runAdapters with cache", () => {
     });
     expect(outcomes[0].status).toBe("ok");
     expect(outcomes[0].result).toEqual(cachedResult);
+    expect(outcomes[0].fromCache).toBe(true);
+    expect(outcomes[0].cachedAt).toBe(cachedAt.toISOString());
     expect(runMock).not.toHaveBeenCalled();
     expect(cache.putCalls).toHaveLength(0);
+  });
+
+  it("marks live runs with fromCache=false and a null cachedAt", async () => {
+    const cache = new InMemoryCache();
+    const adapter = makeAdapter({
+      key: "fema:nfhl-flood-zone",
+      tier: "federal",
+    });
+    const outcomes = await runAdapters({
+      adapters: [adapter],
+      context: utahCtx,
+      cache,
+    });
+    expect(outcomes[0].status).toBe("ok");
+    expect(outcomes[0].fromCache).toBe(false);
+    expect(outcomes[0].cachedAt).toBeNull();
+  });
+
+  it("forceRefresh skips the cache.get but still writes the fresh result through", async () => {
+    const cache = new InMemoryCache();
+    const cachedResult: AdapterResult = {
+      adapterKey: "fema:nfhl-flood-zone",
+      tier: "federal",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "FEMA",
+      snapshotDate: "2025-12-01T00:00:00.000Z",
+      payload: { kind: "flood-zone", floodZone: "AE-stale" },
+    };
+    cache.store.set(`fema:nfhl-flood-zone|38.5733|-109.5499`, {
+      result: cachedResult,
+      cachedAt: new Date("2026-04-30T12:00:00.000Z"),
+    });
+    const runMock = vi.fn(async () => ({
+      adapterKey: "fema:nfhl-flood-zone",
+      tier: "federal" as const,
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter" as const,
+      provider: "FEMA",
+      snapshotDate: "2026-05-01T00:00:00.000Z",
+      payload: { kind: "flood-zone", floodZone: "X-fresh" },
+    }));
+    const adapter = makeAdapter({
+      key: "fema:nfhl-flood-zone",
+      tier: "federal",
+      runMock,
+    });
+    const outcomes = await runAdapters({
+      adapters: [adapter],
+      context: utahCtx,
+      cache,
+      forceRefresh: true,
+    });
+    expect(cache.getCalls).toHaveLength(0);
+    expect(runMock).toHaveBeenCalledOnce();
+    expect(outcomes[0].fromCache).toBe(false);
+    expect(outcomes[0].result?.payload).toEqual({
+      kind: "flood-zone",
+      floodZone: "X-fresh",
+    });
+    // Fresh result is still written through so the next non-forced run hits.
+    expect(cache.putCalls).toHaveLength(1);
   });
 
   it("writes a successful result through to the cache", async () => {
