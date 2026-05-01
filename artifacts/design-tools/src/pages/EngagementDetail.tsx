@@ -38,7 +38,10 @@ import {
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
-import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
+import {
+  diffFederalPayload,
+  summarizeFederalPayload,
+} from "@workspace/adapters/federal/summaries";
 import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
 import { summarizeLocalPayload } from "@workspace/adapters/local/summaries";
 import type { SheetSummary } from "@workspace/api-client-react";
@@ -1228,6 +1231,38 @@ export function BriefingSourceHistoryPanel({
           priorIsAdapter && currentSource
             ? diffBriefingSourceFields(prior, currentSource)
             : [];
+        // Federal-tier rows carry a structured `payload` blob whose
+        // per-key contents (FEMA flood zone, USGS elevation, …) drive
+        // the design downstream. The metadata-only diff above misses
+        // those moves, so for federal prior rows whose payload `kind`
+        // matches the current row we also surface a "Payload changes"
+        // subsection inside the reveal (Task #211). State/local rows
+        // are skipped — `diffFederalPayload` returns null for any
+        // non-federal `layerKind`, so the subsection silently turns
+        // off for them. An empty array (kinds match, every value is
+        // identical) also suppresses the subsection so we don't show
+        // an empty "Payload changes" heading on a true no-op rerun.
+        const payloadChanges =
+          priorIsAdapter &&
+          currentSource &&
+          prior.sourceKind === "federal-adapter" &&
+          currentSource.sourceKind === "federal-adapter"
+            ? diffFederalPayload(
+                prior.layerKind,
+                prior.payload,
+                currentSource.payload,
+              )
+            : null;
+        const hasPayloadChanges =
+          payloadChanges !== null && payloadChanges.length > 0;
+        // Hint label combines the metadata field names with the
+        // payload field labels so a payload-only rerun (snapshotDate
+        // unchanged but flood zone moved) still surfaces *something*
+        // in the chip rather than silently hiding the reveal trigger.
+        const hintParts: string[] = [
+          ...changedFields,
+          ...(payloadChanges?.map((c) => c.label) ?? []),
+        ];
         return (
         <div
           key={prior.id}
@@ -1313,7 +1348,7 @@ export function BriefingSourceHistoryPanel({
               </>
             )}
           </div>
-          {changedFields.length > 0 && currentSource && (
+          {(changedFields.length > 0 || hasPayloadChanges) && currentSource && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <button
                 type="button"
@@ -1334,57 +1369,128 @@ export function BriefingSourceHistoryPanel({
                 }}
               >
                 {expandedDiffs.has(prior.id) ? "▾" : "▸"} Changed:{" "}
-                {changedFields.join(", ")}
+                {hintParts.join(", ")}
               </button>
               {expandedDiffs.has(prior.id) && (
-                <table
+                <div
                   id={`briefing-source-history-row-changed-detail-${prior.id}`}
                   data-testid={`briefing-source-history-row-changed-detail-${prior.id}`}
                   style={{
-                    fontSize: 10,
-                    color: "var(--text-muted)",
-                    borderCollapse: "collapse",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
                     marginLeft: 12,
                   }}
                 >
-                  <tbody>
-                    {changedFields.map((f) => (
-                      <tr key={f}>
-                        <th
-                          scope="row"
-                          style={{
-                            textAlign: "left",
-                            fontWeight: 500,
-                            padding: "1px 8px 1px 0",
-                            whiteSpace: "nowrap",
-                            verticalAlign: "top",
-                          }}
-                        >
-                          {f}
-                        </th>
-                        <td style={{ padding: "1px 0" }}>
-                          <span
-                            data-testid={`briefing-source-history-row-changed-before-${f}-${prior.id}`}
-                          >
-                            {formatBriefingDiffValue(
-                              f,
-                              (prior[f] as string | null) ?? null,
-                            )}
-                          </span>
-                          {" → "}
-                          <span
-                            data-testid={`briefing-source-history-row-changed-after-${f}-${prior.id}`}
-                          >
-                            {formatBriefingDiffValue(
-                              f,
-                              (currentSource[f] as string | null) ?? null,
-                            )}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                  {changedFields.length > 0 && (
+                    <table
+                      style={{
+                        fontSize: 10,
+                        color: "var(--text-muted)",
+                        borderCollapse: "collapse",
+                      }}
+                    >
+                      <tbody>
+                        {changedFields.map((f) => (
+                          <tr key={f}>
+                            <th
+                              scope="row"
+                              style={{
+                                textAlign: "left",
+                                fontWeight: 500,
+                                padding: "1px 8px 1px 0",
+                                whiteSpace: "nowrap",
+                                verticalAlign: "top",
+                              }}
+                            >
+                              {f}
+                            </th>
+                            <td style={{ padding: "1px 0" }}>
+                              <span
+                                data-testid={`briefing-source-history-row-changed-before-${f}-${prior.id}`}
+                              >
+                                {formatBriefingDiffValue(
+                                  f,
+                                  (prior[f] as string | null) ?? null,
+                                )}
+                              </span>
+                              {" → "}
+                              <span
+                                data-testid={`briefing-source-history-row-changed-after-${f}-${prior.id}`}
+                              >
+                                {formatBriefingDiffValue(
+                                  f,
+                                  (currentSource[f] as string | null) ?? null,
+                                )}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {hasPayloadChanges && payloadChanges && (
+                    <div
+                      data-testid={`briefing-source-history-row-payload-changes-${prior.id}`}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: "var(--text-muted)",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.3,
+                        }}
+                      >
+                        Payload changes
+                      </div>
+                      <table
+                        style={{
+                          fontSize: 10,
+                          color: "var(--text-muted)",
+                          borderCollapse: "collapse",
+                        }}
+                      >
+                        <tbody>
+                          {payloadChanges.map((c) => (
+                            <tr key={c.key}>
+                              <th
+                                scope="row"
+                                style={{
+                                  textAlign: "left",
+                                  fontWeight: 500,
+                                  padding: "1px 8px 1px 0",
+                                  whiteSpace: "nowrap",
+                                  verticalAlign: "top",
+                                }}
+                              >
+                                {c.label}
+                              </th>
+                              <td style={{ padding: "1px 0" }}>
+                                <span
+                                  data-testid={`briefing-source-history-row-payload-before-${c.key}-${prior.id}`}
+                                >
+                                  {c.before}
+                                </span>
+                                {" → "}
+                                <span
+                                  data-testid={`briefing-source-history-row-payload-after-${c.key}-${prior.id}`}
+                                >
+                                  {c.after}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}

@@ -233,3 +233,183 @@ export function summarizeFederalPayload(
       return null;
   }
 }
+
+/**
+ * One per-key payload delta surfaced by {@link diffFederalPayload}.
+ * `key` is the underlying payload property name (stable, used as a
+ * test-id and React key); `label` is the reader-friendly heading the
+ * UI shows next to the before/after pair (matches the wording of the
+ * inline summary chip — "Flood Zone", "BFE", "Elevation", …).
+ */
+export interface FederalPayloadFieldChange {
+  key: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
+interface FederalPayloadField {
+  key: string;
+  label: string;
+  format: (payload: Record<string, unknown>) => string;
+}
+
+/**
+ * "(none)" mirrors the wording {@link formatBriefingDiffValue} uses
+ * for missing metadata fields so the per-key payload reveal reads
+ * consistently with the metadata table directly above it.
+ */
+const NONE = "(none)";
+
+/**
+ * Per-layer field readers keyed by `FederalLayerKind`. Each reader
+ * pulls one value out of the structured payload and formats it the
+ * same way the inline summary chip does (so an architect comparing
+ * the rerun delta sees the same units / ordinal suffix / Mbps→Gbps
+ * normalization they're already familiar with from the row itself).
+ *
+ * The list defines the *order* of rows in the "Payload changes"
+ * table. Boolean/numeric/string fields are handled inline rather
+ * than via a generic `pick*` so a malformed payload (missing key,
+ * wrong type) degrades to "(none)" instead of throwing.
+ */
+const FEDERAL_PAYLOAD_FIELDS: Record<
+  FederalLayerKind,
+  ReadonlyArray<FederalPayloadField>
+> = {
+  "fema-nfhl-flood-zone": [
+    {
+      key: "floodZone",
+      label: "Flood Zone",
+      format: (p) => pickString(p["floodZone"]) ?? NONE,
+    },
+    {
+      key: "inSpecialFloodHazardArea",
+      label: "In SFHA",
+      format: (p) => {
+        const v = p["inSpecialFloodHazardArea"];
+        if (v === true) return "Yes";
+        if (v === false) return "No";
+        return NONE;
+      },
+    },
+    {
+      key: "baseFloodElevation",
+      label: "BFE",
+      format: (p) => {
+        const bfe = pickNumber(p["baseFloodElevation"]);
+        return bfe === null ? NONE : `${bfe} ft`;
+      },
+    },
+  ],
+  "usgs-ned-elevation": [
+    {
+      key: "elevationFeet",
+      label: "Elevation",
+      format: (p) => {
+        const elev = pickNumber(p["elevationFeet"]);
+        if (elev === null) return NONE;
+        const units = pickString(p["units"]) ?? "Feet";
+        return formatElevation(elev, units).replace(/^Elevation:\s*/, "");
+      },
+    },
+  ],
+  "epa-ejscreen-blockgroup": [
+    {
+      key: "demographicIndexPercentile",
+      label: "EJ Index",
+      format: (p) => {
+        const v = pickNumber(p["demographicIndexPercentile"]);
+        return v === null ? NONE : `${ordinal(v)} pctile`;
+      },
+    },
+    {
+      key: "pm25Percentile",
+      label: "PM2.5",
+      format: (p) => {
+        const v = pickNumber(p["pm25Percentile"]);
+        return v === null ? NONE : `${ordinal(v)} pctile`;
+      },
+    },
+  ],
+  "fcc-broadband-availability": [
+    {
+      key: "providerCount",
+      label: "Providers",
+      format: (p) => {
+        const v = pickNumber(p["providerCount"]);
+        return v === null ? NONE : String(Math.round(v));
+      },
+    },
+    {
+      key: "fastestDownstreamMbps",
+      label: "Fastest",
+      format: (p) => {
+        const v = pickNumber(p["fastestDownstreamMbps"]);
+        return v === null ? NONE : formatMbps(v);
+      },
+    },
+  ],
+};
+
+function isFederalLayerKind(kind: string): kind is FederalLayerKind {
+  return Object.prototype.hasOwnProperty.call(
+    FEDERAL_PAYLOAD_FIELDS,
+    kind,
+  );
+}
+
+/**
+ * Diff a prior federal-adapter payload against the current row's
+ * payload, returning one {@link FederalPayloadFieldChange} per
+ * payload key whose formatted value moved between the two reruns.
+ *
+ * Returns `null` (caller skips the "Payload changes" subsection)
+ * when:
+ *
+ *   - `layerKind` is not a federal-tier adapter (state/local rows
+ *     have less standardized payloads — see the task #211 brief);
+ *   - either side's payload is not an object (manual-upload rows
+ *     default to `{}` and would still be objects, but this guards
+ *     against a producer accidentally writing a scalar);
+ *   - the two payload `kind` discriminants differ — comparing a
+ *     `flood-zone` payload against an `elevation-point` payload
+ *     would emit a wall of garbage rows. A producer that has
+ *     legitimately changed the payload `kind` between reruns
+ *     should be looked at via the existing "View layer details"
+ *     expander, not the rerun-delta surface.
+ *
+ * Returns an empty array when the kinds match and every key
+ * formats to the same string (a true byte-identical rerun) — the
+ * caller should then suppress the subsection so an architect
+ * isn't shown an empty "Payload changes" heading.
+ *
+ * Otherwise returns one entry per moved key, in the order the
+ * field list above declares (matches the order the inline summary
+ * chip composes its parts so the reveal reads top-down the same
+ * way the chip reads left-to-right).
+ */
+export function diffFederalPayload(
+  layerKind: string,
+  priorPayload: unknown,
+  currentPayload: unknown,
+): FederalPayloadFieldChange[] | null {
+  if (!isFederalLayerKind(layerKind)) return null;
+  if (!isRecord(priorPayload) || !isRecord(currentPayload)) return null;
+  const priorKind = priorPayload["kind"];
+  const currentKind = currentPayload["kind"];
+  if (typeof priorKind !== "string" || typeof currentKind !== "string") {
+    return null;
+  }
+  if (priorKind !== currentKind) return null;
+  const fields = FEDERAL_PAYLOAD_FIELDS[layerKind];
+  const changes: FederalPayloadFieldChange[] = [];
+  for (const f of fields) {
+    const before = f.format(priorPayload);
+    const after = f.format(currentPayload);
+    if (before !== after) {
+      changes.push({ key: f.key, label: f.label, before, after });
+    }
+  }
+  return changes;
+}

@@ -197,6 +197,12 @@ interface BriefingSourceFixture {
   createdAt: string;
   supersededAt: string | null;
   supersededById: string | null;
+  // Structured producer payload — adapter rows write the raw
+  // `AdapterResult.payload` (a `{ kind, ... }` blob whose shape
+  // depends on the adapter), manual-upload rows default to `{}`.
+  // Tests that exercise the federal-payload diff (Task #211) seed
+  // this with a `flood-zone` / `elevation-point` / etc. shape.
+  payload: Record<string, unknown>;
 }
 
 function mkSource(
@@ -221,6 +227,7 @@ function mkSource(
     createdAt: over.createdAt ?? new Date().toISOString(),
     supersededAt: over.supersededAt ?? null,
     supersededById: over.supersededById ?? null,
+    payload: over.payload ?? {},
   };
 }
 
@@ -750,6 +757,176 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
         `briefing-source-history-filter-manual-count-${current.id}`,
       ).textContent,
     ).toBe("(1)");
+  });
+
+  it("reveals a 'Payload changes' subsection that lists per-key federal-payload deltas (Task #211)", () => {
+    // FEMA flood-zone rerun: the metadata snapshotDate moved AND the
+    // structured payload's `floodZone` flipped from "AE" → "X". The
+    // existing reveal already covers snapshotDate; the subsection
+    // under it must surface the payload-level delta so the architect
+    // doesn't have to crack open "View layer details" on both rows.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-nfhl (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload: {
+        kind: "flood-zone",
+        floodZone: "X",
+        inSpecialFloodHazardArea: false,
+        baseFloodElevation: null,
+      },
+    });
+    const prior = mkSource({
+      id: "src-prior-flood",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-nfhl (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-01-01T00:00:00.000Z",
+      payload: {
+        kind: "flood-zone",
+        floodZone: "AE",
+        inSpecialFloodHazardArea: true,
+        baseFloodElevation: 425.5,
+      },
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    // Hint pulls in both the metadata field name and the payload
+    // labels — collapsed by default so the subsection isn't yet in
+    // the DOM.
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    expect(hint.textContent).toContain("snapshotDate");
+    expect(hint.textContent).toContain("Flood Zone");
+    expect(hint.textContent).toContain("In SFHA");
+    expect(hint.textContent).toContain("BFE");
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-payload-changes-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(hint);
+
+    const subsection = screen.getByTestId(
+      `briefing-source-history-row-payload-changes-${prior.id}`,
+    );
+    expect(within(subsection).getByText(/Payload changes/i)).toBeInTheDocument();
+
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-floodZone-${prior.id}`,
+      ).textContent,
+    ).toBe("AE");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-floodZone-${prior.id}`,
+      ).textContent,
+    ).toBe("X");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-baseFloodElevation-${prior.id}`,
+      ).textContent,
+    ).toBe("425.5 ft");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-baseFloodElevation-${prior.id}`,
+      ).textContent,
+    ).toBe("(none)");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-inSpecialFloodHazardArea-${prior.id}`,
+      ).textContent,
+    ).toBe("Yes");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-inSpecialFloodHazardArea-${prior.id}`,
+      ).textContent,
+    ).toBe("No");
+
+    // The metadata table is still rendered above the subsection so
+    // the snapshotDate move stays visible at the same glance.
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-changed-before-snapshotDate-${prior.id}`,
+      ).textContent,
+    ).toBe("2026-01-01");
+  });
+
+  it("does NOT render the 'Payload changes' subsection when the federal payload is identical between reruns (Task #211)", () => {
+    // snapshotDate moved (so the reveal still opens via the existing
+    // metadata diff) but every payload key formats identically — the
+    // subsection must stay out of the DOM and the hint must not list
+    // any payload labels.
+    const payload = {
+      kind: "flood-zone",
+      floodZone: "AE",
+      inSpecialFloodHazardArea: true,
+      baseFloodElevation: 425.5,
+    };
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-nfhl (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload,
+    });
+    const prior = mkSource({
+      id: "src-prior-noop-payload",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-nfhl (FEMA NFHL)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-01-01T00:00:00.000Z",
+      payload: { ...payload },
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    // Hint only lists snapshotDate — none of the payload labels
+    // leaked in even though the federal-payload diff was attempted.
+    expect(hint.textContent).toMatch(/Changed:\s*snapshotDate\s*$/);
+    expect(hint.textContent).not.toContain("Flood Zone");
+    expect(hint.textContent).not.toContain("BFE");
+    expect(hint.textContent).not.toContain("In SFHA");
+
+    fireEvent.click(hint);
+
+    // Reveal opens (snapshotDate moved) but the payload subsection
+    // is suppressed so the architect isn't shown an empty heading.
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-changed-detail-${prior.id}`,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-payload-changes-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {

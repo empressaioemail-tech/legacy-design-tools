@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  diffFederalPayload,
   summarizeFederalPayload,
   summarizeFemaNfhlPayload,
   summarizeUsgsNedPayload,
@@ -258,6 +259,191 @@ describe("summarizeFederalPayload (registry)", () => {
       summarizeFederalPayload("grand-county-ut:zoning", {
         kind: "zoning",
       }),
+    ).toBeNull();
+  });
+});
+
+describe("diffFederalPayload", () => {
+  it("returns one entry per moved key for a FEMA flood-zone rerun", () => {
+    const prior = {
+      kind: "flood-zone",
+      inSpecialFloodHazardArea: true,
+      floodZone: "AE",
+      baseFloodElevation: 425.5,
+    };
+    const current = {
+      kind: "flood-zone",
+      inSpecialFloodHazardArea: false,
+      floodZone: "X",
+      baseFloodElevation: null,
+    };
+    const changes = diffFederalPayload(
+      "fema-nfhl-flood-zone",
+      prior,
+      current,
+    );
+    expect(changes).toEqual([
+      { key: "floodZone", label: "Flood Zone", before: "AE", after: "X" },
+      {
+        key: "inSpecialFloodHazardArea",
+        label: "In SFHA",
+        before: "Yes",
+        after: "No",
+      },
+      {
+        key: "baseFloodElevation",
+        label: "BFE",
+        before: "425.5 ft",
+        after: "(none)",
+      },
+    ]);
+  });
+
+  it("returns an empty array when every key formats identically (true no-op)", () => {
+    const payload = {
+      kind: "flood-zone",
+      inSpecialFloodHazardArea: true,
+      floodZone: "AE",
+      baseFloodElevation: 425.5,
+    };
+    expect(
+      diffFederalPayload("fema-nfhl-flood-zone", payload, { ...payload }),
+    ).toEqual([]);
+  });
+
+  it("emits BFE deltas with the same 'ft' unit suffix as the inline summary chip", () => {
+    const changes = diffFederalPayload(
+      "fema-nfhl-flood-zone",
+      {
+        kind: "flood-zone",
+        inSpecialFloodHazardArea: true,
+        floodZone: "AE",
+        baseFloodElevation: 425.5,
+      },
+      {
+        kind: "flood-zone",
+        inSpecialFloodHazardArea: true,
+        floodZone: "AE",
+        baseFloodElevation: 426.1,
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "baseFloodElevation",
+        label: "BFE",
+        before: "425.5 ft",
+        after: "426.1 ft",
+      },
+    ]);
+  });
+
+  it("formats USGS elevation deltas with the chip's unit normalization (Feet → ft, thousands grouping)", () => {
+    const changes = diffFederalPayload(
+      "usgs-ned-elevation",
+      {
+        kind: "elevation-point",
+        elevationFeet: 4033,
+        units: "Feet",
+      },
+      {
+        kind: "elevation-point",
+        elevationFeet: 4034,
+        units: "Feet",
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "elevationFeet",
+        label: "Elevation",
+        before: "4,033 ft",
+        after: "4,034 ft",
+      },
+    ]);
+  });
+
+  it("emits ordinal-suffix percentile deltas for EJScreen reruns", () => {
+    const changes = diffFederalPayload(
+      "epa-ejscreen-blockgroup",
+      {
+        kind: "ejscreen-blockgroup",
+        demographicIndexPercentile: 65,
+        pm25Percentile: 72,
+      },
+      {
+        kind: "ejscreen-blockgroup",
+        demographicIndexPercentile: 71,
+        pm25Percentile: 72,
+      },
+    );
+    expect(changes).toEqual([
+      {
+        key: "demographicIndexPercentile",
+        label: "EJ Index",
+        before: "65th pctile",
+        after: "71st pctile",
+      },
+    ]);
+  });
+
+  it("normalizes FCC broadband Mbps → Gbps the same way the chip does", () => {
+    const changes = diffFederalPayload(
+      "fcc-broadband-availability",
+      {
+        kind: "broadband-availability",
+        providerCount: 1,
+        fastestDownstreamMbps: 100,
+      },
+      {
+        kind: "broadband-availability",
+        providerCount: 2,
+        fastestDownstreamMbps: 1000,
+      },
+    );
+    expect(changes).toEqual([
+      { key: "providerCount", label: "Providers", before: "1", after: "2" },
+      {
+        key: "fastestDownstreamMbps",
+        label: "Fastest",
+        before: "100 Mbps",
+        after: "1 Gbps",
+      },
+    ]);
+  });
+
+  it("returns null when the payload kinds differ between reruns", () => {
+    expect(
+      diffFederalPayload(
+        "fema-nfhl-flood-zone",
+        { kind: "flood-zone", floodZone: "AE" },
+        { kind: "elevation-point", elevationFeet: 100 },
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null when either payload is malformed (missing kind / not an object)", () => {
+    expect(
+      diffFederalPayload(
+        "fema-nfhl-flood-zone",
+        { floodZone: "AE" },
+        { kind: "flood-zone", floodZone: "X" },
+      ),
+    ).toBeNull();
+    expect(
+      diffFederalPayload(
+        "fema-nfhl-flood-zone",
+        null,
+        { kind: "flood-zone", floodZone: "X" },
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for non-federal layer kinds (state/local rows are skipped)", () => {
+    expect(
+      diffFederalPayload(
+        "grand-county-ut:zoning",
+        { kind: "zoning", zoning: "RR-1" },
+        { kind: "zoning", zoning: "RR-2" },
+      ),
     ).toBeNull();
   });
 });
