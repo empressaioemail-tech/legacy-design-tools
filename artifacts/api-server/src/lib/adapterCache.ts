@@ -53,6 +53,24 @@ export const DEFAULT_ADAPTER_CACHE_SWEEP_GRACE_MS = 60 * 60 * 1000;
 export const DEFAULT_ADAPTER_CACHE_SWEEP_BATCH_SIZE = 1000;
 
 /**
+ * Skip-streak warning threshold — Task #239.
+ *
+ * The Task #218 advisory lock means every multi-instance peer except
+ * the lucky one each tick logs at debug and returns `0`. That is
+ * correct behaviour, but if a particular instance never wins the lock
+ * for an extended period (clock skew, a wedged peer transaction, etc.)
+ * we have no signal — the table can grow unbounded while every
+ * instance reports "peer had it" forever.
+ *
+ * The worker tracks consecutive skips per process and emits a single
+ * warn-level log once the streak crosses this threshold. Default 24h
+ * is well past the worst-case 1h sweep cadence, so a healthy multi-
+ * instance deploy where the lock simply rotates to other peers never
+ * trips it. `0` disables the warning entirely.
+ */
+export const DEFAULT_ADAPTER_CACHE_SWEEP_SKIP_WARN_MS = 24 * 60 * 60 * 1000;
+
+/**
  * Resolve the configured TTL from `ADAPTER_CACHE_TTL_MS`. A value of
  * `0` (or any non-positive integer) disables the cache entirely —
  * {@link createAdapterResponseCache} returns `undefined` so the runner
@@ -242,6 +260,22 @@ export function getAdapterCacheSweepBatchSize(
 }
 
 /**
+ * Resolve the skip-streak warning threshold from
+ * `ADAPTER_CACHE_SWEEP_SKIP_WARN_MS`. `0` disables the warning so an
+ * operator running a single-instance deploy (or one that does not
+ * care about the signal) can opt out without also disabling the
+ * sweep itself. Negative / garbage input falls back to the default.
+ */
+export function getAdapterCacheSweepSkipWarnMs(
+  envValue: string | undefined = process.env.ADAPTER_CACHE_SWEEP_SKIP_WARN_MS,
+): number {
+  return parseNonNegativeIntEnv(
+    envValue,
+    DEFAULT_ADAPTER_CACHE_SWEEP_SKIP_WARN_MS,
+  );
+}
+
+/**
  * Namespace for the cluster-wide Postgres advisory lock that
  * serializes sweep ticks across api-server instances. We append
  * `current_schema()` inside the SQL so the lock key is automatically
@@ -279,6 +313,15 @@ export async function sweepExpiredAdapterCacheRows(opts?: {
   graceMs?: number;
   batchSize?: number;
   log?: Logger;
+  /**
+   * Invoked exactly when this tick short-circuited because a peer
+   * instance held the advisory lock. Lets a caller (the in-process
+   * sweep worker) distinguish "swept, deleted 0 rows" from "skipped
+   * by lock contention" — both still return `0` so the existing
+   * numeric contract is preserved for the on-demand admin route and
+   * legacy callers. Task #239.
+   */
+  onSkipped?: () => void;
 }): Promise<number> {
   const graceMs = opts?.graceMs ?? getAdapterCacheSweepGraceMs();
   const batchSize = opts?.batchSize ?? getAdapterCacheSweepBatchSize();
@@ -308,6 +351,7 @@ export async function sweepExpiredAdapterCacheRows(opts?: {
           {},
           "adapterCache sweep: peer holds advisory lock, skipping tick",
         );
+        opts?.onSkipped?.();
         return 0;
       }
       const victims = tx
@@ -377,6 +421,26 @@ let sweepBootstrapTimer: ReturnType<typeof setTimeout> | null = null;
 let sweepInFlight = false;
 
 /**
+ * Per-process skip-streak tracker (Task #239). Module-scoped because
+ * the in-process worker is itself a singleton — there is at most one
+ * armed timer per Node process and the warning is a per-process
+ * signal ("this instance has been starved on the lock"). The state
+ * is reset on every successful tick (one that actually held the
+ * lock, regardless of whether any rows were deleted) and on
+ * {@link stopAdapterCacheSweepWorker} so a fresh `start` always
+ * begins with a clean streak.
+ */
+let sweepConsecutiveSkips = 0;
+let sweepSkipStreakStartedAtMs: number | null = null;
+let sweepSkipWarningEmitted = false;
+
+function resetSweepSkipTracking(): void {
+  sweepConsecutiveSkips = 0;
+  sweepSkipStreakStartedAtMs = null;
+  sweepSkipWarningEmitted = false;
+}
+
+/**
  * Boot the periodic sweep worker. Idempotent — a second call logs and
  * returns. When the interval env resolves to `0` (disabled) the worker
  * is not armed at all, which is the only safe way to opt out without
@@ -394,6 +458,7 @@ export function startAdapterCacheSweepWorker(opts?: {
   intervalMs?: number;
   graceMs?: number;
   batchSize?: number;
+  skipWarnThresholdMs?: number;
 }): void {
   const log = opts?.log ?? defaultLogger;
   if (sweepTimer) {
@@ -413,12 +478,18 @@ export function startAdapterCacheSweepWorker(opts?: {
   }
   const graceMs = opts?.graceMs ?? getAdapterCacheSweepGraceMs();
   const batchSize = opts?.batchSize ?? getAdapterCacheSweepBatchSize();
+  const skipWarnThresholdMs =
+    opts?.skipWarnThresholdMs ?? getAdapterCacheSweepSkipWarnMs();
+  // Reset the per-process skip tracker so a fresh `start` (or a
+  // start-after-stop in tests) begins with a clean streak.
+  resetSweepSkipTracking();
   log.info(
-    { intervalMs, graceMs, batchSize },
+    { intervalMs, graceMs, batchSize, skipWarnThresholdMs },
     "adapterCache sweep: starting",
   );
+  const tickOpts = { log, graceMs, batchSize, skipWarnThresholdMs };
   sweepTimer = setInterval(() => {
-    void sweepTick({ log, graceMs, batchSize });
+    void runAdapterCacheSweepTick(tickOpts);
   }, intervalMs);
   if (typeof sweepTimer.unref === "function") sweepTimer.unref();
   // Run a first sweep ~1s after boot so a process restarted with a
@@ -428,7 +499,7 @@ export function startAdapterCacheSweepWorker(opts?: {
   // `stop` (common in tests) would still let the bootstrap fire ~1s
   // later against a closed schema.
   sweepBootstrapTimer = setTimeout(
-    () => void sweepTick({ log, graceMs, batchSize }),
+    () => void runAdapterCacheSweepTick(tickOpts),
     1000,
   );
   if (typeof sweepBootstrapTimer.unref === "function") {
@@ -442,21 +513,82 @@ export function stopAdapterCacheSweepWorker(): void {
   sweepTimer = null;
   if (sweepBootstrapTimer) clearTimeout(sweepBootstrapTimer);
   sweepBootstrapTimer = null;
+  // Drop the skip streak so a subsequent `start` (or a unit test that
+  // drives `runAdapterCacheSweepTick` directly) doesn't inherit stale
+  // state from a previous run.
+  resetSweepSkipTracking();
 }
 
-async function sweepTick(opts: {
+/**
+ * Run a single sweep tick through the in-process worker pipeline:
+ * delegates to {@link sweepExpiredAdapterCacheRows} and additionally
+ * tracks the per-process consecutive-skip streak so we can warn once
+ * an instance has been starved on the advisory lock for an extended
+ * period (Task #239).
+ *
+ * Exported (rather than the original private `sweepTick`) so tests
+ * can drive the skip tracker deterministically with an injected
+ * `now()` instead of waiting a real interval.
+ *
+ * Behaviour:
+ *   - "Skipped" tick (peer holds the lock): increment the streak,
+ *     stamp `streakStartedAtMs` if this is the first skip, and emit
+ *     a single warn-level log when the elapsed streak duration
+ *     crosses `skipWarnThresholdMs`. Subsequent skipped ticks within
+ *     the same streak do NOT re-fire the warning.
+ *   - "Successful" tick (lock acquired, regardless of how many rows
+ *     were deleted): reset the streak and the warning latch.
+ *   - Errors thrown from the helper are caught and logged; they
+ *     count as neither skip nor success so the streak is unchanged.
+ */
+export async function runAdapterCacheSweepTick(opts: {
   log: Logger;
   graceMs: number;
   batchSize: number;
+  skipWarnThresholdMs: number;
+  /** Injection seam for tests; defaults to `Date.now`. */
+  now?: () => number;
 }): Promise<void> {
   if (sweepInFlight) return;
   sweepInFlight = true;
+  const now = opts.now ?? Date.now;
+  let wasSkipped = false;
   try {
     const deleted = await sweepExpiredAdapterCacheRows({
       graceMs: opts.graceMs,
       batchSize: opts.batchSize,
       log: opts.log,
+      onSkipped: () => {
+        wasSkipped = true;
+      },
     });
+    if (wasSkipped) {
+      sweepConsecutiveSkips += 1;
+      if (sweepSkipStreakStartedAtMs === null) {
+        sweepSkipStreakStartedAtMs = now();
+      }
+      const elapsedMs = now() - sweepSkipStreakStartedAtMs;
+      if (
+        opts.skipWarnThresholdMs > 0 &&
+        !sweepSkipWarningEmitted &&
+        elapsedMs >= opts.skipWarnThresholdMs
+      ) {
+        opts.log.warn(
+          {
+            consecutiveSkips: sweepConsecutiveSkips,
+            elapsedMs,
+            thresholdMs: opts.skipWarnThresholdMs,
+          },
+          "adapterCache sweep: this instance has been skipped on every tick for an extended period — a peer may be wedged on the advisory lock",
+        );
+        sweepSkipWarningEmitted = true;
+      }
+      return;
+    }
+    // Tick actually held the lock — counts as success even if the
+    // table was already clean, because the streak is about lock
+    // starvation, not about row-level work.
+    resetSweepSkipTracking();
     // Only log when we actually did something — the table is small by
     // design, so a quiet sweep is the common case and shouldn't fill
     // logs. A non-zero count is meaningful (capacity signal).

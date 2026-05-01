@@ -33,12 +33,15 @@ const {
   getAdapterCacheSweepIntervalMs,
   getAdapterCacheSweepGraceMs,
   getAdapterCacheSweepBatchSize,
+  getAdapterCacheSweepSkipWarnMs,
   sweepExpiredAdapterCacheRows,
   startAdapterCacheSweepWorker,
   stopAdapterCacheSweepWorker,
+  runAdapterCacheSweepTick,
   DEFAULT_ADAPTER_CACHE_SWEEP_INTERVAL_MS,
   DEFAULT_ADAPTER_CACHE_SWEEP_GRACE_MS,
   DEFAULT_ADAPTER_CACHE_SWEEP_BATCH_SIZE,
+  DEFAULT_ADAPTER_CACHE_SWEEP_SKIP_WARN_MS,
   ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE,
 } = await import("../lib/adapterCache");
 import type { AdapterResult } from "@workspace/adapters";
@@ -229,6 +232,23 @@ describe("adapter cache sweep env helpers", () => {
     expect(getAdapterCacheSweepBatchSize("250")).toBe(250);
     expect(getAdapterCacheSweepBatchSize(undefined)).toBe(
       DEFAULT_ADAPTER_CACHE_SWEEP_BATCH_SIZE,
+    );
+  });
+
+  it("getAdapterCacheSweepSkipWarnMs defaults to 24h, parses values, and treats `0` as disabled", () => {
+    expect(getAdapterCacheSweepSkipWarnMs(undefined)).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_SKIP_WARN_MS,
+    );
+    expect(getAdapterCacheSweepSkipWarnMs("")).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_SKIP_WARN_MS,
+    );
+    expect(getAdapterCacheSweepSkipWarnMs("0")).toBe(0);
+    expect(getAdapterCacheSweepSkipWarnMs("90000")).toBe(90_000);
+    expect(getAdapterCacheSweepSkipWarnMs("nope")).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_SKIP_WARN_MS,
+    );
+    expect(getAdapterCacheSweepSkipWarnMs("-1")).toBe(
+      DEFAULT_ADAPTER_CACHE_SWEEP_SKIP_WARN_MS,
     );
   });
 });
@@ -556,6 +576,181 @@ describe("startAdapterCacheSweepWorker", () => {
         batchSize: 1,
       });
     } finally {
+      stopAdapterCacheSweepWorker();
+    }
+  });
+});
+
+describe("runAdapterCacheSweepTick — skip-streak warning (Task #239)", () => {
+  /**
+   * Build a pino-shaped logger that captures `warn` / `info` / `error`
+   * calls into arrays so each test can assert exactly one warn fires
+   * across the whole streak, not one per skipped tick.
+   */
+  function makeCapturingLogger() {
+    const warns: Array<{ obj: Record<string, unknown>; msg: string }> = [];
+    const infos: Array<{ obj: Record<string, unknown>; msg: string }> = [];
+    const errors: Array<{ obj: Record<string, unknown>; msg: string }> = [];
+    const log = {
+      warn: (obj: Record<string, unknown>, msg: string) =>
+        warns.push({ obj, msg }),
+      info: (obj: Record<string, unknown>, msg: string) =>
+        infos.push({ obj, msg }),
+      debug: () => {},
+      error: (obj: Record<string, unknown>, msg: string) =>
+        errors.push({ obj, msg }),
+    } as unknown as import("pino").Logger;
+    return { log, warns, infos, errors };
+  }
+
+  /**
+   * Acquire the cluster-wide sweep advisory lock on a dedicated pool
+   * connection so every `runAdapterCacheSweepTick` call inside the
+   * caller's body sees the lock as taken and skips. Returns a
+   * teardown that releases the lock and the connection.
+   */
+  async function holdPeerSweepLock(): Promise<() => Promise<void>> {
+    const peer = await ctx.schema!.pool.connect();
+    await peer.query(
+      `SELECT pg_advisory_lock(
+         hashtextextended($1 || '|' || current_schema(), 0)
+       )`,
+      [ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE],
+    );
+    return async () => {
+      try {
+        await peer.query(
+          `SELECT pg_advisory_unlock(
+             hashtextextended($1 || '|' || current_schema(), 0)
+           )`,
+          [ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE],
+        );
+      } finally {
+        peer.release();
+      }
+    };
+  }
+
+  it("emits exactly one warn after the threshold and does not re-fire on subsequent skipped ticks", async () => {
+    // Reset module-level skip state — `stop` clears it and is safe
+    // to call when nothing is running. Without this, prior tests in
+    // this suite could have left state behind.
+    stopAdapterCacheSweepWorker();
+    const { log, warns } = makeCapturingLogger();
+    let fakeNow = 1_000_000;
+    const tickOpts = {
+      log,
+      graceMs: 0,
+      batchSize: 100,
+      skipWarnThresholdMs: 60_000,
+      now: () => fakeNow,
+    };
+
+    const releasePeer = await holdPeerSweepLock();
+    try {
+      // Tick 1 — first skip stamps the streak start; nothing to warn yet.
+      await runAdapterCacheSweepTick(tickOpts);
+      expect(warns).toHaveLength(0);
+
+      // Tick 2 — still well inside the threshold window.
+      fakeNow += 30_000;
+      await runAdapterCacheSweepTick(tickOpts);
+      expect(warns).toHaveLength(0);
+
+      // Tick 3 — elapsed = 61s, crosses the 60s threshold => one warn.
+      fakeNow += 31_000;
+      await runAdapterCacheSweepTick(tickOpts);
+      expect(warns).toHaveLength(1);
+      expect(warns[0].msg).toContain("extended period");
+      expect(warns[0].obj.consecutiveSkips).toBe(3);
+      expect(warns[0].obj.thresholdMs).toBe(60_000);
+      expect(typeof warns[0].obj.elapsedMs).toBe("number");
+      expect(warns[0].obj.elapsedMs as number).toBeGreaterThanOrEqual(60_000);
+
+      // Ticks 4 + 5 — still skipped, but the warning latch must hold
+      // so we don't spam logs every interval.
+      fakeNow += 60_000;
+      await runAdapterCacheSweepTick(tickOpts);
+      fakeNow += 60_000;
+      await runAdapterCacheSweepTick(tickOpts);
+      expect(warns).toHaveLength(1);
+    } finally {
+      await releasePeer();
+      stopAdapterCacheSweepWorker();
+    }
+  });
+
+  it("resets the consecutive-skip counter after a successful tick and only warns again on a fresh streak", async () => {
+    stopAdapterCacheSweepWorker();
+    const { log, warns } = makeCapturingLogger();
+    let fakeNow = 2_000_000;
+    const tickOpts = {
+      log,
+      graceMs: 0,
+      batchSize: 100,
+      skipWarnThresholdMs: 60_000,
+      now: () => fakeNow,
+    };
+
+    // Phase 1: build up a skip streak and trip the warning.
+    let releasePeer = await holdPeerSweepLock();
+    try {
+      await runAdapterCacheSweepTick(tickOpts); // streak start
+      fakeNow += 70_000;
+      await runAdapterCacheSweepTick(tickOpts); // crosses threshold
+      expect(warns).toHaveLength(1);
+    } finally {
+      await releasePeer();
+    }
+
+    // Phase 2: a successful tick (lock available, no peer holding it,
+    // no rows to delete — irrelevant to the streak). The streak and
+    // the warning latch must both reset.
+    fakeNow += 1_000;
+    await runAdapterCacheSweepTick(tickOpts);
+    expect(warns).toHaveLength(1); // success doesn't add a warn
+    // Sanity: a follow-up skipped tick that happens *immediately*
+    // after the successful one should not trip the warning again
+    // because the streak just started over.
+    releasePeer = await holdPeerSweepLock();
+    try {
+      fakeNow += 1_000;
+      await runAdapterCacheSweepTick(tickOpts);
+      expect(warns).toHaveLength(1);
+
+      // Phase 3: continue skipping past the threshold from the
+      // *new* streak's start. A second warn fires — proving the
+      // latch reset rather than being permanently disabled.
+      fakeNow += 70_000;
+      await runAdapterCacheSweepTick(tickOpts);
+      expect(warns).toHaveLength(2);
+      expect(warns[1].obj.consecutiveSkips).toBe(2);
+    } finally {
+      await releasePeer();
+      stopAdapterCacheSweepWorker();
+    }
+  });
+
+  it("never warns when the threshold is set to 0 (warning disabled)", async () => {
+    stopAdapterCacheSweepWorker();
+    const { log, warns } = makeCapturingLogger();
+    let fakeNow = 3_000_000;
+    const tickOpts = {
+      log,
+      graceMs: 0,
+      batchSize: 100,
+      skipWarnThresholdMs: 0,
+      now: () => fakeNow,
+    };
+    const releasePeer = await holdPeerSweepLock();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await runAdapterCacheSweepTick(tickOpts);
+        fakeNow += 60 * 60 * 1000; // 1h between ticks
+      }
+      expect(warns).toHaveLength(0);
+    } finally {
+      await releasePeer();
       stopAdapterCacheSweepWorker();
     }
   });
