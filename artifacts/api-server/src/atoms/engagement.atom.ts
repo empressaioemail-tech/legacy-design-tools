@@ -3,10 +3,14 @@
  *
  * An engagement is the project-context container every other plan-review
  * atom eventually composes into (snapshot, sheet, submission, …). It
- * already has a stable Drizzle row, so this sprint is a pure registration
- * pass — no schema changes, no producer wiring (event types are declared
- * in {@link ENGAGEMENT_EVENT_TYPES} as the single source of truth for
- * future producers, but nobody emits them yet).
+ * already has a stable Drizzle row, so this file owns the registration,
+ * the typed payload contract, and the canonical event vocabulary. The
+ * event vocabulary is declared in {@link ENGAGEMENT_EVENT_TYPES} as the
+ * single source of truth and is wired onto the registration's
+ * `eventTypes` field so the catalog endpoint surfaces it; today the
+ * snapshot ingest's create-new branch emits `engagement.created`, with
+ * the rest of the vocabulary pending wiring as the relevant routes
+ * adopt the history service.
  *
  * Mirrors the structural choices made by `sheet.atom.ts`:
  *   - factory style so tests can inject a per-schema `db` and an
@@ -62,9 +66,19 @@ export type EngagementSupportedModes = typeof ENGAGEMENT_SUPPORTED_MODES;
 /**
  * Single source of truth for engagement-domain event types. Declared here
  * (not in `@workspace/empressa-atom`, which is per-atom-agnostic) so that
- * future producers — `chat.ts`, snapshot ingest, jurisdiction resolver,
- * submission flow — can import the same constant rather than open-coding
- * the strings. No producers wired this sprint (out of scope per task A3).
+ * producers — snapshot ingest's create-new branch, the jurisdiction
+ * resolver, the submission flow — can import the same constant rather
+ * than open-coding the strings. The full vocabulary is also surfaced via
+ * the registration's `eventTypes` field, so `GET /api/atoms/catalog`
+ * (and the Dev Atoms Probe) reflect it without grepping.
+ *
+ * Producers wired so far:
+ *   - `engagement.created` — emitted by `routes/snapshots.ts` on the
+ *     create-new-engagement branch of the snapshot ingest.
+ *   - `engagement.address-updated`, `engagement.jurisdiction-resolved`,
+ *     `engagement.snapshot-received`, `engagement.submitted` — declared
+ *     here but not yet emitted (TBD as the relevant routes adopt the
+ *     history service).
  */
 export const ENGAGEMENT_EVENT_TYPES = [
   "engagement.created",
@@ -163,6 +177,14 @@ export function makeEngagementAtom(
     supportedModes: ENGAGEMENT_SUPPORTED_MODES,
     defaultMode: "card",
     composition,
+    // Wired onto the registration so `GET /api/atoms/catalog` and any
+    // operator surface (Dev Atoms Probe, boot-log tail) can introspect
+    // the engagement-domain event vocabulary without grepping. Mirrors
+    // the pattern Task #26 established for sheet/snapshot. Producers
+    // (`routes/snapshots.ts` for `engagement.created`, more to come)
+    // import {@link ENGAGEMENT_EVENT_TYPES} so a rename here flows
+    // through the catalog and every emit site at once.
+    eventTypes: ENGAGEMENT_EVENT_TYPES,
     async contextSummary(
       entityId: string,
       scope: Scope,

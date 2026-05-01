@@ -30,6 +30,17 @@ import type { EventAnchoringService } from "@workspace/empressa-atom";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { getHistoryService } from "../atoms/registry";
+import type { EngagementEventType } from "../atoms/engagement.atom";
+
+/**
+ * Engagement event-type literals used by the producers in this file.
+ * Pinning the local constant to {@link EngagementEventType} (the union
+ * derived from `ENGAGEMENT_EVENT_TYPES`) keeps the strings here typed
+ * against the atom's single source of truth — a rename in the atom
+ * makes this assignment fail to compile rather than silently emit a
+ * stale name.
+ */
+const ENGAGEMENT_CREATED_EVENT_TYPE: EngagementEventType = "engagement.created";
 
 const snapshotSecret = getSnapshotSecret();
 
@@ -63,6 +74,55 @@ const SNAPSHOT_INGEST_ACTOR = {
   kind: "system" as const,
   id: "snapshot-ingest",
 };
+
+/**
+ * Best-effort emission of `engagement.created` against a freshly-inserted
+ * engagement. Fires only on the create-new branch where the snapshot
+ * ingest just inserted the engagement row itself — never on the
+ * existing-engagement bind branch, never on the GUID-race rebind (the
+ * engagement already exists, somebody else's request already emitted
+ * `engagement.created` for it). Failures are swallowed and logged so a
+ * history outage cannot roll back the row insert; the event chain is
+ * observability, not the source of truth (mirrors the contract used by
+ * {@link emitSnapshotLifecycleEvents}).
+ */
+async function emitEngagementCreatedEvent(
+  history: EventAnchoringService,
+  outcome: SnapshotAttachOutcome,
+  reqLog: typeof logger,
+): Promise<void> {
+  if (!outcome.result.autoCreated) return;
+  try {
+    const event = await history.appendEvent({
+      entityType: "engagement",
+      entityId: outcome.result.engagementId,
+      eventType: ENGAGEMENT_CREATED_EVENT_TYPE,
+      actor: SNAPSHOT_INGEST_ACTOR,
+      payload: {
+        engagementName: outcome.result.engagementName,
+        firstSnapshotId: outcome.result.id,
+      },
+    });
+    reqLog.info(
+      {
+        engagementId: outcome.result.engagementId,
+        snapshotId: outcome.result.id,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "engagement.created event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        engagementId: outcome.result.engagementId,
+        snapshotId: outcome.result.id,
+      },
+      "engagement.created event append failed — row insert kept",
+    );
+  }
+}
 
 /**
  * Best-effort emission of `snapshot.replaced` (against the prior latest
@@ -473,7 +533,11 @@ router.post("/snapshots", async (req: Request, res: Response) => {
     // Best-effort lifecycle events. Same contract as the existing
     // branch above — `snapshot.replaced` only fires on the GUID-race
     // rebind where the existing engagement already carried snapshots.
+    // `engagement.created` only fires when this branch actually inserted
+    // a fresh engagement row (autoCreated=true); the GUID-race rebind
+    // bound to an existing engagement and must NOT re-emit it.
     await emitSnapshotLifecycleEvents(history, outcome, reqLog);
+    await emitEngagementCreatedEvent(history, outcome, reqLog);
 
     res.status(201).json(outcome.result);
   } catch (err) {

@@ -40,6 +40,7 @@ const { resetAtomRegistryForTests, getHistoryService } = await import(
 );
 const { SHEET_EVENT_TYPES } = await import("../atoms/sheet.atom");
 const { SNAPSHOT_EVENT_TYPES } = await import("../atoms/snapshot.atom");
+const { ENGAGEMENT_EVENT_TYPES } = await import("../atoms/engagement.atom");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -351,10 +352,13 @@ describe("GET /api/atoms/catalog", () => {
     expect(snapshot?.eventTypes).toEqual([...SNAPSHOT_EVENT_TYPES]);
     expect(snapshot?.composes).toEqual(["sheet"]);
 
-    // Engagement doesn't declare events today — the catalog must still
-    // surface it with `eventTypes: []` so the UI can map without a guard.
+    // Engagement now declares its event vocabulary via the registration
+    // (Task #45 wired `ENGAGEMENT_EVENT_TYPES` onto the registration's
+    // `eventTypes` field). Asserts against the constant — same pattern as
+    // sheet/snapshot above — so a rename in the atom flows straight into
+    // this test without a parallel edit.
     const engagement = byType.get("engagement");
     expect(engagement).toBeDefined();
-    expect(engagement?.eventTypes).toEqual([]);
+    expect(engagement?.eventTypes).toEqual([...ENGAGEMENT_EVENT_TYPES]);
   });
 });
