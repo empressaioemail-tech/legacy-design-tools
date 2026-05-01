@@ -25,6 +25,18 @@ export const users = pgTable("users", {
   displayName: text("display_name").notNull(),
   email: text("email"),
   avatarUrl: text("avatar_url"),
+  /**
+   * DA-PI-6 — Optional per-architect override for the header text the
+   * stakeholder-briefing PDF export prints on every page (default
+   * "SmartCity Design Tools — Pre-Design Briefing"). The column is
+   * deliberately not surfaced through any editor UI in this sprint:
+   * the override is operator-set today (a single UPDATE in support
+   * cases) and we want the schema slot reserved before the FE
+   * settings surface lands so the PDF endpoint can read it without
+   * waiting on the next migration window. Null → fall back to the
+   * default header.
+   */
+  architectPdfHeader: text("architect_pdf_header"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

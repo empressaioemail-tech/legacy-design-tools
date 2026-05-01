@@ -2895,22 +2895,64 @@ function BriefingNarrativePanel({
             )}
           </div>
         </div>
-        <button
-          type="button"
-          className="sc-btn sc-btn-primary"
-          onClick={() =>
-            generateMutation.mutate({
-              id: engagementId,
-              data: { regenerate: hasNarrative },
-            })
-          }
-          disabled={buttonDisabled}
-          title={tooltip}
-          aria-disabled={buttonDisabled}
-          data-testid="briefing-generate-button"
-        >
-          {isPending ? "Generating…" : buttonLabel}
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            type="button"
+            className="sc-btn sc-btn-primary"
+            onClick={() =>
+              generateMutation.mutate({
+                id: engagementId,
+                data: { regenerate: hasNarrative },
+              })
+            }
+            disabled={buttonDisabled}
+            title={tooltip}
+            aria-disabled={buttonDisabled}
+            data-testid="briefing-generate-button"
+          >
+            {isPending ? "Generating…" : buttonLabel}
+          </button>
+          {/*
+            DA-PI-6 Export PDF button — opens the synchronous PDF
+            export endpoint in a new tab. Disabled (with an explanatory
+            tooltip) until a narrative exists, since the API would
+            return 422 `no_briefing_to_export` and the user would just
+            see a broken tab. We use `import.meta.env.BASE_URL` so the
+            URL is correct under the artifact's path-prefixed proxy
+            mount (BASE_URL already includes a trailing slash).
+          */}
+          <a
+            className="sc-btn sc-btn-ghost"
+            href={
+              hasNarrative
+                ? `${import.meta.env.BASE_URL}api/engagements/${engagementId}/briefing/export.pdf`
+                : undefined
+            }
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={!hasNarrative}
+            title={
+              hasNarrative
+                ? "Render the current A–G briefing as a stakeholder PDF (opens in a new tab)."
+                : "Generate the briefing first — there's nothing to export yet."
+            }
+            data-testid="briefing-export-pdf-button"
+            style={
+              hasNarrative
+                ? undefined
+                : {
+                    pointerEvents: "none",
+                    opacity: 0.5,
+                    cursor: "not-allowed",
+                  }
+            }
+            onClick={(e) => {
+              if (!hasNarrative) e.preventDefault();
+            }}
+          >
+            Export PDF
+          </a>
+        </div>
       </div>
 
       {sources.length === 0 && !hasNarrative && (

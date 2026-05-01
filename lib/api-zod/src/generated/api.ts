@@ -1548,6 +1548,41 @@ export const GenerateEngagementLayersResponse = zod
   );
 
 /**
+ * DA-PI-6 — synchronous PDF export of the persisted A–G briefing.
+Inline by default (`Content-Disposition: inline`) so the
+architect's "Export PDF" button can open the document in a
+browser tab; pass `?download=1` to flip the disposition to
+`attachment` for a save-to-disk flow.
+
+The response carries cover page, table of contents, the seven
+narrative sections with citation tokens flattened to inline
+plain-text labels, the citation appendix grouped by adapter
+tier (federal → state → local → manual → other), a map
+composite slot, and a briefing-source thumbnail grid slot.
+Header text defaults to "SmartCity Design Tools — Pre-Design
+Briefing" and is overridable per-architect via the
+`users.architect_pdf_header` column.
+
+Returns `422 no_briefing_to_export` when the engagement has no
+generated narrative yet — the FE button is gated on the same
+condition so this is defense-in-depth for a direct API call.
+
+ * @summary Render the engagement's A–G briefing as a stakeholder PDF
+ */
+export const ExportEngagementBriefingPdfParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ExportEngagementBriefingPdfQueryParams = zod.object({
+  download: zod
+    .enum(["1"])
+    .optional()
+    .describe(
+      "When `1`, the response uses `Content-Disposition:\nattachment` so the browser saves the PDF instead of\ninlining it. Any other value (or omission) keeps the\ninline default.\n",
+    ),
+});
+
+/**
  * Asynchronously runs the briefing engine (Spec 51 §2): reads the
 engagement's current `briefing_sources`, calls the LLM (or the
 deterministic mock when `BRIEFING_LLM_MODE=mock`), validates

@@ -29,7 +29,8 @@
     "express": "^5",
     "google-auth-library": "^10.6.2",
     "pino": "^9",
-    "pino-http": "^10"
+    "pino-http": "^10",
+    "puppeteer": "^24.42.0"
   },
   "devDependencies": {
     "@types/busboy": "^1.5.4",

@@ -2226,6 +2226,24 @@ successful).
   adapterKey?: string;
 };
 
+export type ExportEngagementBriefingPdfParams = {
+  /**
+ * When `1`, the response uses `Content-Disposition:
+attachment` so the browser saves the PDF instead of
+inlining it. Any other value (or omission) keeps the
+inline default.
+
+ */
+  download?: ExportEngagementBriefingPdfDownload;
+};
+
+export type ExportEngagementBriefingPdfDownload =
+  (typeof ExportEngagementBriefingPdfDownload)[keyof typeof ExportEngagementBriefingPdfDownload];
+
+export const ExportEngagementBriefingPdfDownload = {
+  NUMBER_1: "1",
+} as const;
+
 export type UploadSnapshotSheetsBody = {
   /** JSON-encoded array of SheetMetadata */
   metadata: string;

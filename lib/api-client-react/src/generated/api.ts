@@ -39,6 +39,7 @@ import type {
   EngagementSubmissionSummary,
   EngagementSummary,
   ErrorResponse,
+  ExportEngagementBriefingPdfParams,
   GenerateBriefingBody,
   GenerateBriefingResponse,
   GenerateEngagementLayersParams,
@@ -1652,6 +1653,143 @@ export const useGenerateEngagementLayers = <
 > => {
   return useMutation(getGenerateEngagementLayersMutationOptions(options));
 };
+
+/**
+ * DA-PI-6 — synchronous PDF export of the persisted A–G briefing.
+Inline by default (`Content-Disposition: inline`) so the
+architect's "Export PDF" button can open the document in a
+browser tab; pass `?download=1` to flip the disposition to
+`attachment` for a save-to-disk flow.
+
+The response carries cover page, table of contents, the seven
+narrative sections with citation tokens flattened to inline
+plain-text labels, the citation appendix grouped by adapter
+tier (federal → state → local → manual → other), a map
+composite slot, and a briefing-source thumbnail grid slot.
+Header text defaults to "SmartCity Design Tools — Pre-Design
+Briefing" and is overridable per-architect via the
+`users.architect_pdf_header` column.
+
+Returns `422 no_briefing_to_export` when the engagement has no
+generated narrative yet — the FE button is gated on the same
+condition so this is defense-in-depth for a direct API call.
+
+ * @summary Render the engagement's A–G briefing as a stakeholder PDF
+ */
+export const getExportEngagementBriefingPdfUrl = (
+  id: string,
+  params?: ExportEngagementBriefingPdfParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${id}/briefing/export.pdf?${stringifiedParams}`
+    : `/api/engagements/${id}/briefing/export.pdf`;
+};
+
+export const exportEngagementBriefingPdf = async (
+  id: string,
+  params?: ExportEngagementBriefingPdfParams,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getExportEngagementBriefingPdfUrl(id, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportEngagementBriefingPdfQueryKey = (
+  id: string,
+  params?: ExportEngagementBriefingPdfParams,
+) => {
+  return [
+    `/api/engagements/${id}/briefing/export.pdf`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getExportEngagementBriefingPdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportEngagementBriefingPdf>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: ExportEngagementBriefingPdfParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportEngagementBriefingPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getExportEngagementBriefingPdfQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportEngagementBriefingPdf>>
+  > = ({ signal }) =>
+    exportEngagementBriefingPdf(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportEngagementBriefingPdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportEngagementBriefingPdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportEngagementBriefingPdf>>
+>;
+export type ExportEngagementBriefingPdfQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Render the engagement's A–G briefing as a stakeholder PDF
+ */
+
+export function useExportEngagementBriefingPdf<
+  TData = Awaited<ReturnType<typeof exportEngagementBriefingPdf>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: ExportEngagementBriefingPdfParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportEngagementBriefingPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportEngagementBriefingPdfQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Asynchronously runs the briefing engine (Spec 51 §2): reads the

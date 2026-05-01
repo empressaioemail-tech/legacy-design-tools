@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.libgbm
     pkgs.xorg.libxcb
     pkgs.libglvnd
     pkgs.mesa-gl-headers

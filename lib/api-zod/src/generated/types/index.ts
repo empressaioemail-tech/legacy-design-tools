@@ -61,6 +61,8 @@ export * from "./engagementStatus";
 export * from "./engagementSubmissionSummary";
 export * from "./engagementSummary";
 export * from "./errorResponse";
+export * from "./exportEngagementBriefingPdfDownload";
+export * from "./exportEngagementBriefingPdfParams";
 export * from "./generateBriefingBody";
 export * from "./generateBriefingResponse";
 export * from "./generateBriefingResponseState";

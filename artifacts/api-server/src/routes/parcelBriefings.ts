@@ -33,6 +33,7 @@ import {
   parcelBriefings,
   briefingSources,
   briefingGenerationJobs,
+  users,
   type ParcelBriefing,
   type BriefingSource,
   type BriefingGenerationJob,
@@ -41,6 +42,8 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import {
   CreateEngagementBriefingSourceBody,
   CreateEngagementBriefingSourceParams,
+  ExportEngagementBriefingPdfParams,
+  ExportEngagementBriefingPdfQueryParams,
   GenerateEngagementBriefingBody,
   GenerateEngagementBriefingParams,
   GetEngagementBriefingGenerationStatusParams,
@@ -88,6 +91,11 @@ import {
 } from "../lib/briefingLlmClient";
 import { resolveKeepPerEngagement } from "../lib/briefingGenerationJobsSweep";
 import { ObjectStorageService } from "../lib/objectStorage";
+import {
+  DEFAULT_BRIEFING_PDF_HEADER,
+  renderBriefingPdf,
+  type PdfBriefingSource,
+} from "../lib/briefingPdf";
 
 /**
  * Lazily-instantiated singleton — the constructor reads env at the
@@ -1961,6 +1969,209 @@ router.get(
         "list briefing generation runs failed",
       );
       res.status(500).json({ error: "Failed to read briefing runs" });
+    }
+  },
+);
+
+/**
+ * GET /engagements/:id/briefing/export.pdf — DA-PI-6 stakeholder PDF.
+ *
+ * Synchronous render: reads the engagement + persisted briefing in one
+ * round trip, hands the row to {@link renderBriefingPdf}, and streams
+ * the resulting buffer back as `application/pdf`. Inline by default;
+ * `?download=1` flips `Content-Disposition` to `attachment`.
+ *
+ * 422 `no_briefing_to_export` when the engagement exists but has no
+ * generated narrative on file (the FE button is gated on the same
+ * condition; this is defense-in-depth for direct API calls).
+ *
+ * Per-architect header override: when the request session carries a
+ * `user`-kind requestor, we look up `users.architect_pdf_header` and
+ * pass it through. Anonymous requests and missing rows fall back to
+ * the default header. The lookup failure is non-fatal — a flaky
+ * `users` read should not nuke the export.
+ */
+async function loadArchitectIdentity(
+  req: Request,
+  reqLog: typeof logger,
+): Promise<{ header: string | null; displayName: string | null }> {
+  const requestor = req.session?.requestor;
+  if (!requestor || requestor.kind !== "user") {
+    return { header: null, displayName: null };
+  }
+  try {
+    const rows = await db
+      .select({
+        header: users.architectPdfHeader,
+        displayName: users.displayName,
+      })
+      .from(users)
+      .where(eq(users.id, requestor.id))
+      .limit(1);
+    const row = rows[0];
+    return {
+      header: row?.header ?? null,
+      displayName: row?.displayName ?? null,
+    };
+  } catch (err) {
+    reqLog.warn(
+      { err, userId: requestor.id },
+      "briefing pdf export: architect identity lookup failed — falling back to defaults",
+    );
+    return { header: null, displayName: null };
+  }
+}
+
+router.get(
+  "/engagements/:id/briefing/export.pdf",
+  async (req: Request, res: Response) => {
+    const paramsParse = ExportEngagementBriefingPdfParams.safeParse(req.params);
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_engagement_id" });
+      return;
+    }
+    const queryParse = ExportEngagementBriefingPdfQueryParams.safeParse(
+      req.query,
+    );
+    if (!queryParse.success) {
+      res.status(400).json({ error: "invalid_briefing_export_query" });
+      return;
+    }
+    const engagementId = paramsParse.data.id;
+    const wantsDownload = queryParse.data.download === "1";
+    const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+
+    try {
+      const [engRows, briefingRows] = await Promise.all([
+        db
+          .select({
+            id: engagements.id,
+            name: engagements.name,
+            jurisdiction: engagements.jurisdiction,
+            address: engagements.address,
+            latitude: engagements.latitude,
+            longitude: engagements.longitude,
+          })
+          .from(engagements)
+          .where(eq(engagements.id, engagementId))
+          .limit(1),
+        db
+          .select()
+          .from(parcelBriefings)
+          .where(eq(parcelBriefings.engagementId, engagementId))
+          .limit(1),
+      ]);
+      const eng = engRows[0];
+      if (!eng) {
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+      const briefing = briefingRows[0];
+      // Empty-export contract: no briefing row at all OR a briefing
+      // row that has never been generated (every section_* column is
+      // null) → 422 with the documented `no_briefing_to_export` code
+      // so the FE can render its targeted "Generate the briefing
+      // first" message rather than blanket-handling 4xx.
+      if (!briefing || !briefing.generatedAt) {
+        res.status(422).json({ error: "no_briefing_to_export" });
+        return;
+      }
+
+      const sourceRows = await loadCurrentSources(briefing.id);
+      const pdfSources: PdfBriefingSource[] = sourceRows.map((s) => ({
+        id: s.id,
+        layerKind: s.layerKind,
+        sourceKind: s.sourceKind,
+        provider: s.provider,
+        snapshotDate: s.snapshotDate,
+        note: s.note,
+        // Wired through so the thumbnail page can render the
+        // architect's actual upload (image preview when the file is
+        // image-shaped, file-type tag otherwise) instead of a
+        // placeholder card.
+        uploadObjectPath: s.uploadObjectPath ?? null,
+        uploadOriginalFilename: s.uploadOriginalFilename ?? null,
+        uploadContentType: s.uploadContentType ?? null,
+      }));
+
+      const identity = await loadArchitectIdentity(req, reqLog);
+      const header = identity.header ?? DEFAULT_BRIEFING_PDF_HEADER;
+
+      const pdfBuffer = await renderBriefingPdf({
+        engagement: {
+          id: eng.id,
+          name: eng.name,
+          jurisdiction: eng.jurisdiction,
+          address: eng.address,
+          // Wired through so the site-map page can render a real
+          // OSM static-tile capture centred on the engagement's
+          // geocoded coordinates. Falls back to a labelled "no
+          // coordinates" panel when null.
+          latitude: eng.latitude,
+          longitude: eng.longitude,
+        },
+        narrative: {
+          // The PDF stamps the per-run `generation_id` (FK to
+          // `briefing_generation_jobs`), so re-exporting after a
+          // regeneration cycles the id and stakeholders can tell
+          // two PDFs apart. Legacy rows whose producing job was
+          // pruned before Task #281 carry NULL here; the renderer
+          // surfaces that explicitly rather than fabricating an id.
+          generationId: briefing.generationId,
+          briefingId: briefing.id,
+          sections: {
+            a: briefing.sectionA ?? "",
+            b: briefing.sectionB ?? "",
+            c: briefing.sectionC ?? "",
+            d: briefing.sectionD ?? "",
+            e: briefing.sectionE ?? "",
+            f: briefing.sectionF ?? "",
+            g: briefing.sectionG ?? "",
+          },
+          generatedAt: briefing.generatedAt,
+          generatedBy: briefing.generatedBy,
+        },
+        sources: pdfSources,
+        header,
+        architectName: identity.displayName,
+      });
+
+      // Stable filename — engagement name slugged, no embedded
+      // timestamp so a second export overwrites the first when the
+      // architect saves to disk (matches the implicit contract of an
+      // "Export PDF" button).
+      const slug =
+        eng.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 80) || "briefing";
+      const disposition = wantsDownload ? "attachment" : "inline";
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `${disposition}; filename="${slug}-briefing.pdf"`,
+      );
+      res.setHeader("Content-Length", String(pdfBuffer.length));
+      res.setHeader("Cache-Control", "private, no-store");
+      res.status(200).end(pdfBuffer);
+
+      reqLog.info(
+        {
+          engagementId,
+          briefingId: briefing.id,
+          sourceCount: pdfSources.length,
+          bytes: pdfBuffer.length,
+          disposition,
+        },
+        "briefing pdf export: rendered",
+      );
+    } catch (err) {
+      logger.error(
+        { err, engagementId },
+        "briefing pdf export: render failed",
+      );
+      res.status(500).json({ error: "Failed to render briefing PDF" });
     }
   },
 );
