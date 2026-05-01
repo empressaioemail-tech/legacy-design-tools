@@ -15,6 +15,17 @@ import {
 // routine. Both artifacts cannot import each other, so the helper
 // has to live in a shared lib if both are to use it.
 import { diffWords } from "@workspace/briefing-diff";
+// Task #332 — the prior-narrative meta line renders the snapshot's
+// `generatedAt` as a relative-time string ("5 min ago", "3d ago",
+// etc.) instead of a raw locale stamp so an auditor scanning the
+// disclosure can tell at a glance how recent the prior body is
+// without parsing a full date. The absolute timestamp is preserved
+// in the element's `title` attribute for the precise-time tooltip
+// (and so a hover still reveals the exact instant a screenshot was
+// captured against). Mirrors the per-artifact helper Plan Review
+// already uses for submission timestamps; lifting it into a shared
+// lib is tracked separately so this task stays focused.
+import { relativeTime } from "../lib/relativeTime";
 
 /**
  * URL helpers — Task #303 B.6.
@@ -751,6 +762,70 @@ export function BriefingRecentRunsPanel({
                                 Copy plain text
                               </button>
                             </div>
+                            {/* Task #332 — mirror the design-tools Task #303
+                                B.3 meta line onto the Plan Review surface
+                                so an external auditor sees who/when produced
+                                the prior snapshot in-place, instead of
+                                bouncing back to design-tools to investigate
+                                the producing actor. The wire envelope's
+                                `priorNarrative.generatedAt` and
+                                `generatedBy` may be null for legacy backups
+                                where the per-row provenance post-dates the
+                                section_* columns; render only the half
+                                that's set so we never show "by null". The
+                                "system:briefing-engine" actor is rewritten
+                                to the same friendly "Briefing engine (mock)"
+                                label design-tools uses so the two surfaces
+                                read identically. */}
+                            {(priorNarrative.generatedAt ||
+                              priorNarrative.generatedBy) && (
+                              <div
+                                data-testid={`briefing-run-prior-narrative-meta-${run.generationId}`}
+                                style={{
+                                  fontSize: 11,
+                                  color: "var(--text-muted)",
+                                }}
+                              >
+                                {priorNarrative.generatedAt && (
+                                  <span
+                                    data-testid={`briefing-run-prior-narrative-generated-at-${run.generationId}`}
+                                    // Task #332 — absolute timestamp
+                                    // lives in the tooltip so a hover
+                                    // still reveals the precise
+                                    // instant. The visible text is the
+                                    // relative-time string so the
+                                    // auditor can tell at a glance how
+                                    // recent the prior body is.
+                                    title={new Date(
+                                      priorNarrative.generatedAt as
+                                        | Date
+                                        | string,
+                                    ).toLocaleString()}
+                                  >
+                                    Generated{" "}
+                                    {relativeTime(
+                                      priorNarrative.generatedAt as
+                                        | Date
+                                        | string,
+                                    )}
+                                  </span>
+                                )}
+                                {priorNarrative.generatedBy && (
+                                  <>
+                                    {priorNarrative.generatedAt ? " " : ""}
+                                    <span
+                                      data-testid={`briefing-run-prior-narrative-generated-by-${run.generationId}`}
+                                    >
+                                      by{" "}
+                                      {priorNarrative.generatedBy ===
+                                      "system:briefing-engine"
+                                        ? "Briefing engine (mock)"
+                                        : priorNarrative.generatedBy}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            )}
                             {SECTION_ORDER.map(({ key, label }) => {
                               const priorBody = pickSection(
                                 priorNarrative,

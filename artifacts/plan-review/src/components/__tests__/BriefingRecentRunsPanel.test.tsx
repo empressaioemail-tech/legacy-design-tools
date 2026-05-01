@@ -663,6 +663,12 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
     priorSectionG?: string | null;
     currentSectionA?: string | null;
     currentSectionG?: string | null;
+    // Task #332 — the B.3 tests below need to flex the actor token
+    // independently of the section bodies so the friendly label
+    // rewrite (`system:briefing-engine` -> `Briefing engine (mock)`)
+    // can be exercised. Default to the system actor so the existing
+    // diff tests above keep their previous semantics.
+    priorGeneratedBy?: string | null;
   }) {
     hoisted.briefing = {
       narrative: {
@@ -694,7 +700,7 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
       // [startedAt, completedAt] interval of the `gen-prior` run
       // below so the panel resolves that row as the Prior row.
       generatedAt: "2026-04-02T10:00:02.000Z",
-      generatedBy: "system:briefing-engine",
+      generatedBy: opts.priorGeneratedBy ?? "system:briefing-engine",
     };
     hoisted.runs = [
       makeRun({
@@ -819,6 +825,110 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
     expect(
       screen.queryByTestId(
         "briefing-run-prior-section-unchanged-g-gen-prior",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * Task #332 — Prior-narrative meta line.
+   *
+   * Mirrors the design-tools Task #303 B.3 cases onto the Plan
+   * Review surface so an external auditor sees who/when produced
+   * the prior snapshot in-place rather than bouncing back to
+   * design-tools to investigate the producing actor. Both halves
+   * are gated independently so legacy backups that only carry one
+   * side never render "by null" or "Generated —".
+   */
+  it("B.3 — renders the prior narrative's generatedAt as relative time (with absolute tooltip) and generatedBy in the meta line", async () => {
+    // Pin `Date.now()` so `relativeTime()`'s bucket boundaries
+    // are deterministic — without this the test would render
+    // anywhere from "Xd ago" to a locale date depending on when
+    // CI ran. The seed `generatedAt` is 5 min before this
+    // pinned "now", which lands in the "5 min ago" bucket.
+    //
+    // We stub `Date.now` directly rather than reaching for
+    // `vi.useFakeTimers()` because react-query's internal
+    // microtask scheduling relies on real `setTimeout` /
+    // `queueMicrotask` plumbing — fake timers stall the runs
+    // hook's `queryFn` and the disclosure body never paints,
+    // hanging the test until the 10s timeout.
+    const pinnedNow = new Date("2026-04-02T10:05:02.000Z").getTime();
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(pinnedNow);
+    try {
+      seedPriorRow({
+        priorSectionA: "Same body in both runs.",
+        currentSectionA: "Same body in both runs.",
+        priorGeneratedBy: "system:briefing-engine",
+      });
+      renderPage();
+      fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+      fireEvent.click(
+        await screen.findByTestId("briefing-run-toggle-gen-prior"),
+      );
+      const meta = await screen.findByTestId(
+        "briefing-run-prior-narrative-meta-gen-prior",
+      );
+      // The "system:briefing-engine" actor is rewritten to a friendly
+      // label so the auditor sees "Briefing engine (mock)" rather
+      // than the raw system actor token — same wording the
+      // architect-facing surface uses.
+      expect(
+        within(meta).getByTestId(
+          "briefing-run-prior-narrative-generated-by-gen-prior",
+        ),
+      ).toHaveTextContent(/Briefing engine \(mock\)/);
+      const generatedAtEl = within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-at-gen-prior",
+      );
+      // Relative-time output: 5 minutes between seed and pinned
+      // "now" lands in the "5 min ago" bucket. Asserting the
+      // exact bucket text proves the panel is using the
+      // relative-time helper (not the raw locale stamp), so a
+      // future change that swaps it back to `.toLocaleString()`
+      // — which would render the absolute "10:00:02 AM" instead —
+      // will fail this assertion.
+      expect(generatedAtEl).toHaveTextContent(/Generated 5 min ago/);
+      // The absolute timestamp survives in the tooltip so a hover
+      // still reveals the precise instant.
+      expect(generatedAtEl.getAttribute("title")).toBeTruthy();
+      expect(generatedAtEl.getAttribute("title")).toMatch(/2026/);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+
+  it("B.3 — renders only the half of the meta line that's present (legacy backups)", async () => {
+    // Legacy backups can carry `generatedAt` but no `generatedBy`
+    // (or vice versa) because the actor column post-dates the
+    // section_* backups on some installs. The panel must render
+    // only the half that's set so we never show "by null". We
+    // can't drop `generatedAt` here too — the prior-row matcher
+    // relies on its [startedAt, completedAt] interval containing
+    // `priorNarrative.generatedAt`, so a null on that field would
+    // also tear down the prior-narrative block entirely (a
+    // separate concern than this branch is testing).
+    seedPriorRow({
+      priorSectionA: "Body present, actor missing.",
+      currentSectionA: "Body present, actor missing.",
+    });
+    hoisted.priorNarrative!.generatedBy = null;
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const meta = await screen.findByTestId(
+      "briefing-run-prior-narrative-meta-gen-prior",
+    );
+    expect(
+      within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-at-gen-prior",
+      ),
+    ).toBeInTheDocument();
+    // The "by …" half is gone — proves we never show "by null".
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-generated-by-gen-prior",
       ),
     ).not.toBeInTheDocument();
   });
