@@ -208,6 +208,45 @@ export const BriefingSourceKind = {
 } as const;
 
 /**
+ * Lifecycle marker for the DXF→glb conversion pipeline (DA-MV-1).
+`pending` (queued / never attempted), `converting` (request in
+flight to the converter service), `ready` (glb available — the
+viewer can fetch bytes), `failed` (converter rejected — the UI
+surfaces a retry action), `dxf-only` (DXF stored but no
+conversion attempted, e.g. a legacy/imported row). Only set on
+the DXF branch — QGIS uploads and federal-adapter rows leave
+this field null.
+
+ */
+export type BriefingSourceConversionStatus =
+  (typeof BriefingSourceConversionStatus)[keyof typeof BriefingSourceConversionStatus];
+
+export const BriefingSourceConversionStatus = {
+  pending: "pending",
+  converting: "converting",
+  ready: "ready",
+  failed: "failed",
+  "dxf-only": "dxf-only",
+} as const;
+
+/**
+ * Discriminator for the upload modality on
+`POST /engagements/{id}/briefing/sources`. `qgis` (default)
+keeps the DA-PI-1B 2D overlay path; `dxf` selects the DA-MV-1
+DXF→glb conversion branch — the bytes are stored as the
+original DXF and the converter service is invoked synchronously
+before the row is committed.
+
+ */
+export type BriefingSourceUploadKind =
+  (typeof BriefingSourceUploadKind)[keyof typeof BriefingSourceUploadKind];
+
+export const BriefingSourceUploadKind = {
+  qgis: "qgis",
+  dxf: "dxf",
+} as const;
+
+/**
  * One current (non-superseded) source attached to an engagement's
 parcel briefing. The `upload*` fields are populated only on
 `manual-upload` rows and describe the file the architect picked.
@@ -226,6 +265,31 @@ export interface EngagementBriefingSource {
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;
   uploadByteSize: number | null;
+  /** DA-MV-1 — canonical `/objects/<id>` pointer of the original
+DXF when the row took the DXF→glb branch. Mirrors
+`uploadObjectPath` for the DXF case; null on the QGIS branch
+and on adapter rows. The viewer never reads this directly —
+it is the input the converter retry route re-runs against.
+ */
+  dxfObjectPath: string | null;
+  /** DA-MV-1 — canonical `/objects/<id>` pointer of the converted
+glb when conversion has succeeded (`conversionStatus =
+ready`). The viewer fetches the bytes via
+`GET /briefing-sources/{id}/glb` rather than this path
+directly so the response can carry the right
+`Content-Type` + caching headers.
+ */
+  glbObjectPath: string | null;
+  /** DA-MV-1 — DXF→glb conversion lifecycle marker. Null on QGIS
+and adapter rows; populated on the DXF branch.
+ */
+  conversionStatus: BriefingSourceConversionStatus | null;
+  /** DA-MV-1 — short human-readable error blurb stamped when
+conversion fails. Surfaced verbatim in the per-source
+status pill so the architect can decide whether to retry
+or re-export the DXF. Null on success and on non-DXF rows.
+ */
+  conversionError: string | null;
   /** Stamped when the row is no longer the current source for its
 `(briefing_id, layer_kind)` slot — null while the row is
 current. Surfaced on the wire so the history view can
@@ -282,6 +346,14 @@ export interface EngagementBriefingSourcesResponse {
  * Metadata for the file uploaded out-of-band to object storage.
  */
 export type CreateBriefingSourceBodyUpload = {
+  /** Selects the upload modality. Defaults to `qgis` so the
+pre-DA-MV-1 callers (which never sent this field) keep
+working unchanged. `dxf` selects the DXF→glb conversion
+branch — the route stores the bytes as the original
+DXF, calls the converter service, and stamps
+`conversionStatus` on the row.
+ */
+  kind?: BriefingSourceUploadKind;
   /**
    * Canonical `/objects/<id>` path returned by `POST
 /storage/uploads/request-url` and persisted on the row.

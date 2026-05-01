@@ -43,6 +43,7 @@ import {
   ListEngagementBriefingSourcesParams,
   ListEngagementBriefingSourcesQueryParams,
   RestoreEngagementBriefingSourceParams,
+  RetryBriefingSourceConversionParams,
 } from "@workspace/api-zod";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import { logger } from "../lib/logger";
@@ -51,6 +52,25 @@ import {
   BRIEFING_SOURCE_EVENT_TYPES,
   type BriefingSourceEventType,
 } from "../atoms/briefing-source.atom";
+import {
+  ConverterError,
+  DXF_LAYER_KINDS,
+  getConverterClient,
+  isDxfLayerKind,
+  type DxfLayerKind,
+} from "../lib/converterClient";
+import { ObjectStorageService } from "../lib/objectStorage";
+
+/**
+ * Lazily-instantiated singleton — the constructor reads env at the
+ * first call site (e.g. PRIVATE_OBJECT_DIR), so creating it at
+ * module load order would race with the test harness's env setup.
+ */
+let cachedObjectStorage: ObjectStorageService | null = null;
+function objectStorage(): ObjectStorageService {
+  if (!cachedObjectStorage) cachedObjectStorage = new ObjectStorageService();
+  return cachedObjectStorage;
+}
 
 const router: IRouter = Router();
 
@@ -86,6 +106,17 @@ interface BriefingSourceWire {
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;
   uploadByteSize: number | null;
+  /** DA-MV-1 — see column docs on `briefing_sources` schema. */
+  dxfObjectPath: string | null;
+  glbObjectPath: string | null;
+  conversionStatus:
+    | "pending"
+    | "converting"
+    | "ready"
+    | "failed"
+    | "dxf-only"
+    | null;
+  conversionError: string | null;
   supersededAt: string | null;
   supersededById: string | null;
   createdAt: string;
@@ -122,6 +153,15 @@ function toBriefingSourceWire(s: BriefingSource): BriefingSourceWire {
     uploadOriginalFilename: s.uploadOriginalFilename,
     uploadContentType: s.uploadContentType,
     uploadByteSize: s.uploadByteSize,
+    dxfObjectPath: s.dxfObjectPath,
+    glbObjectPath: s.glbObjectPath,
+    // The column is `text`; the only producers are this route + the
+    // retry endpoint, which both write one of the closed-set values.
+    // Cast keeps the wire shape's discriminated-union honest while
+    // still surfacing a schema violation as a TS error rather than a
+    // silent round-trip.
+    conversionStatus: s.conversionStatus as BriefingSourceWire["conversionStatus"],
+    conversionError: s.conversionError,
     supersededAt: s.supersededAt ? s.supersededAt.toISOString() : null,
     supersededById: s.supersededById,
     createdAt: s.createdAt.toISOString(),
@@ -162,6 +202,85 @@ async function loadCurrentSources(
       ),
     )
     .orderBy(desc(briefingSources.createdAt));
+}
+
+/**
+ * DA-MV-1 — outcome of running the DXF→glb converter against an
+ * already-stored DXF. The result is a partial column projection —
+ * the route applies it on top of a `briefingSources` insert (POST)
+ * or update (retry endpoint), so the same helper drives both
+ * write paths.
+ *
+ * On success: `glbObjectPath` is the freshly-uploaded converted glb,
+ * `conversionStatus` is `ready`, and `conversionError` is null.
+ * On failure: `glbObjectPath` is null (no bytes to persist),
+ * `conversionStatus` is `failed`, and `conversionError` carries the
+ * `ConverterError.message` blurb verbatim — that string is what the
+ * UI's per-source status pill renders.
+ */
+interface ConversionOutcome {
+  glbObjectPath: string | null;
+  conversionStatus: "ready" | "failed";
+  conversionError: string | null;
+}
+
+/**
+ * Run the DXF→glb converter against an already-stored DXF.
+ * Network failures (converter timeout, 5xx, malformed response) are
+ * caught here and translated into a `failed` outcome — the calling
+ * route still inserts/updates the row so the architect has something
+ * to retry against rather than getting a 500 with no row to point
+ * at.
+ *
+ * Object-storage read errors are *not* caught here — those mean the
+ * request body referenced a path that doesn't exist (or our bucket
+ * is down), which the route should surface as a 400/500 rather than
+ * stamp a misleading `failed` status on the row.
+ */
+async function runDxfConversion(args: {
+  dxfObjectPath: string;
+  layerKind: DxfLayerKind;
+  originalFilename: string;
+  reqLog: typeof logger;
+}): Promise<ConversionOutcome> {
+  const { dxfObjectPath, layerKind, originalFilename, reqLog } = args;
+  const dxfBytes = await objectStorage().getObjectEntityBytes(dxfObjectPath);
+
+  let glbBytes: Buffer;
+  try {
+    const result = await getConverterClient().convert({
+      dxfBytes,
+      layerKind,
+      originalFilename,
+    });
+    glbBytes = result.glbBytes;
+  } catch (err) {
+    if (err instanceof ConverterError) {
+      reqLog.warn(
+        { err, layerKind, dxfObjectPath, code: err.code },
+        "dxf→glb conversion failed — recording row with status=failed",
+      );
+      return {
+        glbObjectPath: null,
+        conversionStatus: "failed",
+        conversionError: err.message,
+      };
+    }
+    // Anything not a `ConverterError` is unexpected — propagate so
+    // the route layer logs it as an unhandled 500 instead of
+    // swallowing it into the row.
+    throw err;
+  }
+
+  const glbObjectPath = await objectStorage().uploadObjectEntityFromBuffer(
+    glbBytes,
+    "model/gltf-binary",
+  );
+  return {
+    glbObjectPath,
+    conversionStatus: "ready",
+    conversionError: null,
+  };
 }
 
 /**
@@ -288,6 +407,70 @@ router.post(
 
     const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
 
+    // DA-MV-1 — branch on upload modality. Default is "qgis" (the
+    // pre-DA-MV-1 path) so old clients that never sent the field
+    // keep working unchanged. The dxf branch is gated to the seven
+    // Spec 52 §2 layer kinds and rejects mismatched pairings before
+    // we touch storage / the converter.
+    const uploadKind = body.upload.kind ?? "qgis";
+    if (uploadKind === "dxf" && !isDxfLayerKind(body.layerKind)) {
+      res.status(400).json({
+        error: "invalid_dxf_layer_kind",
+        message: `upload.kind="dxf" requires layerKind to be one of: ${DXF_LAYER_KINDS.join(", ")}`,
+      });
+      return;
+    }
+    if (uploadKind === "qgis" && isDxfLayerKind(body.layerKind)) {
+      res.status(400).json({
+        error: "dxf_layer_kind_requires_dxf_upload",
+        message: `layerKind="${body.layerKind}" must be uploaded as upload.kind="dxf"`,
+      });
+      return;
+    }
+
+    // Run the converter outside the DB transaction — it's a network
+    // call that can take seconds, and we don't want to hold a row
+    // lock while waiting on an external service. The conversion
+    // helper translates ConverterError into a `failed` outcome so
+    // the row is still inserted (which is what the retry endpoint
+    // operates against).
+    //
+    // BUT first: short-circuit on a missing engagement so a bad id
+    // can't trigger an avoidable converter call + glb upload that
+    // we'd then throw away. The in-transaction re-check below stays
+    // for race safety.
+    let conversion: ConversionOutcome | null = null;
+    if (uploadKind === "dxf") {
+      const engPre = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      if (engPre.length === 0) {
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+      try {
+        conversion = await runDxfConversion({
+          dxfObjectPath: body.upload.objectPath,
+          layerKind: body.layerKind as DxfLayerKind,
+          originalFilename: body.upload.originalFilename,
+          reqLog,
+        });
+      } catch (err) {
+        // Only object-storage / unexpected failures land here —
+        // ConverterErrors are caught inside the helper. Surface as
+        // 500 so the architect sees something is wrong rather than
+        // a row stamped `failed` that masks a bucket-level issue.
+        logger.error(
+          { err, engagementId, layerKind: body.layerKind },
+          "create briefing source: dxf prep failed",
+        );
+        res.status(500).json({ error: "Failed to prepare DXF for conversion" });
+        return;
+      }
+    }
+
     let outcome: {
       briefing: ParcelBriefing;
       newSource: BriefingSource;
@@ -370,6 +553,13 @@ router.post(
             uploadOriginalFilename: body.upload.originalFilename,
             uploadContentType: body.upload.contentType,
             uploadByteSize: body.upload.byteSize,
+            // DA-MV-1 — DXF branch carries the converter outcome.
+            // QGIS branch leaves all four fields null so a "this
+            // doesn't apply here" reads unambiguously on the wire.
+            dxfObjectPath: uploadKind === "dxf" ? body.upload.objectPath : null,
+            glbObjectPath: conversion?.glbObjectPath ?? null,
+            conversionStatus: conversion?.conversionStatus ?? null,
+            conversionError: conversion?.conversionError ?? null,
           })
           .returning();
 
@@ -700,6 +890,147 @@ router.post(
 
     const sources = await loadCurrentSources(outcome.briefing.id);
     res.json({ briefing: toBriefingWire(outcome.briefing, sources) });
+  },
+);
+
+/**
+ * POST /engagements/:id/briefing/sources/:sourceId/retry-conversion
+ *
+ * DA-MV-1 — re-run the DXF→glb converter against the briefing
+ * source's already-stored DXF (`dxfObjectPath`) without forcing the
+ * architect to re-upload. The retry path operates on the same row
+ * (no new row inserted, no supersession) so the row's id stays
+ * stable and the timeline doesn't grow a phantom version per retry.
+ *
+ * Idempotent against the row's identity: the row id is unchanged,
+ * `glbObjectPath` and `conversionStatus` flip to whatever the
+ * latest converter result is. (We do *not* delete the prior glb's
+ * bytes — orphaned bytes are cheap and keeping them simplifies
+ * recovery if a botched retry needs to be inspected.)
+ *
+ * Refuses non-DXF rows (a QGIS row has `conversionStatus = null`,
+ * a federal-adapter row likewise) — those would silently no-op
+ * which is harder to debug than a 400 stating the contract.
+ */
+router.post(
+  "/engagements/:id/briefing/sources/:sourceId/retry-conversion",
+  async (req: Request, res: Response) => {
+    const paramsParse = RetryBriefingSourceConversionParams.safeParse(
+      req.params,
+    );
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_route_parameters" });
+      return;
+    }
+    const { id: engagementId, sourceId } = paramsParse.data;
+    const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+
+    let target: BriefingSource;
+    let briefing: ParcelBriefing;
+    try {
+      const eng = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      if (eng.length === 0) {
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+      const briefingRows = await db
+        .select()
+        .from(parcelBriefings)
+        .where(eq(parcelBriefings.engagementId, engagementId))
+        .limit(1);
+      if (!briefingRows[0]) {
+        res.status(404).json({ error: "briefing_source_not_found" });
+        return;
+      }
+      briefing = briefingRows[0];
+      const targetRows = await db
+        .select()
+        .from(briefingSources)
+        .where(eq(briefingSources.id, sourceId))
+        .limit(1);
+      if (!targetRows[0]) {
+        res.status(404).json({ error: "briefing_source_not_found" });
+        return;
+      }
+      target = targetRows[0];
+      if (target.briefingId !== briefing.id) {
+        res
+          .status(400)
+          .json({ error: "briefing_source_engagement_mismatch" });
+        return;
+      }
+      // Refuse non-DXF rows. The conversionStatus column is the
+      // canonical "this row owns a DXF" marker; a QGIS row has it
+      // null and a federal-adapter row likewise. The dxfObjectPath
+      // null check is belt-and-braces — it would only trip on a
+      // DXF row whose path got nulled by hand.
+      if (target.conversionStatus === null || !target.dxfObjectPath) {
+        res.status(400).json({ error: "not_a_dxf_briefing_source" });
+        return;
+      }
+      if (!isDxfLayerKind(target.layerKind)) {
+        // Defensive: a DXF row with a non-DXF layer kind would mean
+        // the schema was hand-edited. Refuse rather than reattempt
+        // a conversion the converter would reject anyway.
+        res.status(400).json({ error: "not_a_dxf_briefing_source" });
+        return;
+      }
+    } catch (err) {
+      logger.error(
+        { err, engagementId, sourceId },
+        "retry conversion: lookup failed",
+      );
+      res.status(500).json({ error: "Failed to retry briefing source conversion" });
+      return;
+    }
+
+    let conversion: ConversionOutcome;
+    try {
+      conversion = await runDxfConversion({
+        dxfObjectPath: target.dxfObjectPath,
+        layerKind: target.layerKind as DxfLayerKind,
+        originalFilename: target.uploadOriginalFilename ?? "upload.dxf",
+        reqLog,
+      });
+    } catch (err) {
+      logger.error(
+        { err, engagementId, sourceId },
+        "retry conversion: prep failed",
+      );
+      res.status(500).json({ error: "Failed to retry briefing source conversion" });
+      return;
+    }
+
+    try {
+      await db
+        .update(briefingSources)
+        .set({
+          glbObjectPath: conversion.glbObjectPath,
+          conversionStatus: conversion.conversionStatus,
+          conversionError: conversion.conversionError,
+        })
+        .where(eq(briefingSources.id, target.id));
+      // Touch the briefing's updatedAt so consumers polling the
+      // briefing read see a fresh timestamp without having to peek
+      // into the source rows.
+      const [updatedBriefing] = await db
+        .update(parcelBriefings)
+        .set({ updatedAt: new Date() })
+        .where(eq(parcelBriefings.id, briefing.id))
+        .returning();
+      const sources = await loadCurrentSources(briefing.id);
+      res.json({ briefing: toBriefingWire(updatedBriefing, sources) });
+    } catch (err) {
+      logger.error(
+        { err, engagementId, sourceId },
+        "retry conversion: persist failed",
+      );
+      res.status(500).json({ error: "Failed to retry briefing source conversion" });
+    }
   },
 );
 

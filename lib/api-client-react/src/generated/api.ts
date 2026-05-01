@@ -1399,6 +1399,215 @@ export const useRestoreEngagementBriefingSource = <
 };
 
 /**
+ * Re-runs the DXF→glb converter against the briefing source's
+already-stored DXF (`dxfObjectPath`) without forcing the
+architect to re-upload. Used when the original conversion
+landed in `failed` (or got stuck in `pending` / `converting`)
+and the architect wants to retry — typically after an upstream
+converter outage cleared.
+
+Refuses non-DXF rows (`conversionStatus` is null on the QGIS
+and adapter branches) and refuses rows that have no stored
+DXF. On success the row's `conversionStatus` flips back to
+`pending` → `ready` (or `failed`) inside the same request and
+the response carries the updated briefing.
+
+ * @summary Re-run DXF→glb conversion for a briefing source
+ */
+export const getRetryBriefingSourceConversionUrl = (
+  id: string,
+  sourceId: string,
+) => {
+  return `/api/engagements/${id}/briefing/sources/${sourceId}/retry-conversion`;
+};
+
+export const retryBriefingSourceConversion = async (
+  id: string,
+  sourceId: string,
+  options?: RequestInit,
+): Promise<EngagementBriefingResponse> => {
+  return customFetch<EngagementBriefingResponse>(
+    getRetryBriefingSourceConversionUrl(id, sourceId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getRetryBriefingSourceConversionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retryBriefingSourceConversion>>,
+    TError,
+    { id: string; sourceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof retryBriefingSourceConversion>>,
+  TError,
+  { id: string; sourceId: string },
+  TContext
+> => {
+  const mutationKey = ["retryBriefingSourceConversion"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof retryBriefingSourceConversion>>,
+    { id: string; sourceId: string }
+  > = (props) => {
+    const { id, sourceId } = props ?? {};
+
+    return retryBriefingSourceConversion(id, sourceId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RetryBriefingSourceConversionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof retryBriefingSourceConversion>>
+>;
+
+export type RetryBriefingSourceConversionMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Re-run DXF→glb conversion for a briefing source
+ */
+export const useRetryBriefingSourceConversion = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof retryBriefingSourceConversion>>,
+    TError,
+    { id: string; sourceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof retryBriefingSourceConversion>>,
+  TError,
+  { id: string; sourceId: string },
+  TContext
+> => {
+  return useMutation(getRetryBriefingSourceConversionMutationOptions(options));
+};
+
+/**
+ * Streams the binary glTF (`model/gltf-binary`) for a briefing
+source whose DXF→glb conversion has reached `ready`. The
+response body is the raw glb bytes (not JSON), with an ETag
+derived from a SHA-1 of the bytes so re-conversion of the
+same source busts cached entries even though the URL is
+unchanged.
+
+Honors `If-None-Match` with a 304 response. Cached for one
+day on intermediate proxies (`Cache-Control: public,
+max-age=86400, immutable`); the URL is content-addressed via
+the row id and a fresh conversion writes a new row, so the
+immutable hint is safe.
+
+404 when the row does not exist, when conversion is not yet
+`ready`, or when the row is on a non-DXF branch.
+
+ * @summary Stream the converted glb for one briefing source
+ */
+export const getGetBriefingSourceGlbUrl = (id: string) => {
+  return `/api/briefing-sources/${id}/glb`;
+};
+
+export const getBriefingSourceGlb = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetBriefingSourceGlbUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBriefingSourceGlbQueryKey = (id: string) => {
+  return [`/api/briefing-sources/${id}/glb`] as const;
+};
+
+export const getGetBriefingSourceGlbQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBriefingSourceGlb>>,
+  TError = ErrorType<void | ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBriefingSourceGlb>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBriefingSourceGlbQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBriefingSourceGlb>>
+  > = ({ signal }) => getBriefingSourceGlb(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBriefingSourceGlb>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBriefingSourceGlbQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBriefingSourceGlb>>
+>;
+export type GetBriefingSourceGlbQueryError = ErrorType<void | ErrorResponse>;
+
+/**
+ * @summary Stream the converted glb for one briefing source
+ */
+
+export function useGetBriefingSourceGlb<
+  TData = Awaited<ReturnType<typeof getBriefingSourceGlb>>,
+  TError = ErrorType<void | ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBriefingSourceGlb>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBriefingSourceGlbQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * Returns all snapshots, newest first, joined with engagementName.
  * @summary List Revit snapshots across all engagements
  */

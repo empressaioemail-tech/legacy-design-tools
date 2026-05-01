@@ -412,4 +412,116 @@ describe("BriefingSourceUploadModal", () => {
     expect(hoisted.uploadFileMock).not.toHaveBeenCalled();
     expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
   });
+
+  // DA-MV-1: the new DXF branch in the picker must (a) flip
+  // `upload.kind` to "dxf" so the route takes the converter path, and
+  // (b) reject non-`.dxf` files at the client gate so the architect
+  // doesn't pay the network round-trip for a guaranteed 4xx.
+  it("forwards upload.kind='dxf' for a DXF layer kind and a .dxf file", async () => {
+    hoisted.uploadFileMock.mockResolvedValueOnce({
+      uploadURL: "https://storage.example/put-target",
+      objectPath: "uploads/eng-1/terrain.dxf",
+      metadata: {
+        name: "terrain.dxf",
+        size: 4096,
+        contentType: "application/octet-stream",
+      },
+    });
+    hoisted.mutateAsyncMock.mockResolvedValueOnce({
+      id: "src-3",
+      layerKind: "terrain",
+    });
+
+    const onClose = vi.fn();
+    renderModal({ engagementId: "eng-9", onClose });
+
+    fireEvent.change(screen.getByLabelText("Layer kind"), {
+      target: { value: "terrain" },
+    });
+    attachFile(
+      new File(["dxf bytes"], "terrain.dxf", {
+        type: "application/octet-stream",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(hoisted.mutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "eng-9",
+        data: expect.objectContaining({
+          layerKind: "terrain",
+          upload: expect.objectContaining({
+            kind: "dxf",
+            objectPath: "uploads/eng-1/terrain.dxf",
+            originalFilename: "terrain.dxf",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects a non-DXF file under a DXF layer kind before any upload fires", () => {
+    renderModal();
+    fireEvent.change(screen.getByLabelText("Layer kind"), {
+      target: { value: "buildable-envelope" },
+    });
+    attachFile(
+      new File(["not dxf"], "envelope.geojson", {
+        type: "application/geo+json",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /3D-geometry layers expect a DXF file/,
+    );
+    expect(hoisted.uploadFileMock).not.toHaveBeenCalled();
+    expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a .dxf file under a 2D-overlay layer kind before any upload fires", () => {
+    renderModal();
+    // Default selection is the first qgis row (qgis-zoning); attach a
+    // .dxf to confirm the inverse mismatch is also caught.
+    attachFile(
+      new File(["dxf bytes"], "rogue.dxf", {
+        type: "application/octet-stream",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /2D-overlay layers expect a vector file/,
+    );
+    expect(hoisted.uploadFileMock).not.toHaveBeenCalled();
+    expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards upload.kind='qgis' on the default 2D-overlay branch", async () => {
+    hoisted.uploadFileMock.mockResolvedValueOnce({
+      uploadURL: "https://storage.example/put-target",
+      objectPath: "uploads/eng-1/zoning.zip",
+      metadata: {
+        name: "zoning.zip",
+        size: 22,
+        contentType: "application/zip",
+      },
+    });
+    hoisted.mutateAsyncMock.mockResolvedValueOnce({ id: "src-4" });
+
+    const onClose = vi.fn();
+    renderModal({ onClose });
+    attachFile(sampleFile());
+    fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(hoisted.mutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          upload: expect.objectContaining({ kind: "qgis" }),
+        }),
+      }),
+    );
+  });
 });

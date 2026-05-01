@@ -2,6 +2,7 @@ import { ensureCodeAtomSources } from "@workspace/codes";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { bootstrapAtomRegistry } from "./atoms/registry";
+import { validateConverterEnvAtBoot } from "./lib/converterClient";
 
 const rawPort = process.env["PORT"];
 
@@ -29,6 +30,12 @@ ensureCodeAtomSources(logger).catch((err) => {
     "ensureCodeAtomSources: unexpected boot-time failure — continuing",
   );
 });
+
+// Fail-fast on misconfigured DXF converter env (DA-MV-1): when
+// DXF_CONVERTER_MODE=http we require CONVERTER_URL and
+// CONVERTER_SHARED_SECRET. Surfaces at boot rather than at the first
+// upload so a bad deploy is caught immediately.
+validateConverterEnvAtBoot();
 
 // Empressa atom framework: register every catalog atom this artifact owns
 // and run the registry's composition validator. This is a hard boot gate

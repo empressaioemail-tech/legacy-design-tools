@@ -16,7 +16,7 @@
  *   - 400 on invalid body shape.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -34,6 +34,34 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
+/**
+ * DA-MV-1 — Mock object storage. The QGIS branch never instantiates
+ * ObjectStorageService (it just stores `upload.objectPath` verbatim),
+ * so existing QGIS tests are unaffected. The DXF branch calls
+ * `getObjectEntityBytes` (to feed the converter) and
+ * `uploadObjectEntityFromBuffer` (to stash the converted glb), so
+ * the new DXF-branch + retry-endpoint tests exercise these mocks.
+ */
+const getObjectEntityBytesMock = vi.fn<(rawPath: string) => Promise<Buffer>>();
+const uploadObjectEntityFromBufferMock = vi.fn<
+  (bytes: Buffer, contentType: string) => Promise<string>
+>();
+class ObjectNotFoundErrorClass extends Error {
+  constructor() {
+    super("Object not found");
+    this.name = "ObjectNotFoundError";
+  }
+}
+vi.mock("../lib/objectStorage", () => {
+  return {
+    ObjectStorageService: vi.fn().mockImplementation(() => ({
+      getObjectEntityBytes: getObjectEntityBytesMock,
+      uploadObjectEntityFromBuffer: uploadObjectEntityFromBufferMock,
+    })),
+    ObjectNotFoundError: ObjectNotFoundErrorClass,
+  };
+});
+
 const { setupRouteTests } = await import("./setup");
 const {
   engagements,
@@ -42,6 +70,13 @@ const {
   atomEvents,
 } = await import("@workspace/db");
 const { eq, and, isNull } = await import("drizzle-orm");
+const {
+  setConverterClient,
+  MockConverterClient,
+  ConverterError,
+  DXF_LAYER_KINDS,
+} = await import("../lib/converterClient");
+type DxfLayerKind = (typeof DXF_LAYER_KINDS)[number];
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -553,6 +588,318 @@ describe("POST /api/engagements/:id/briefing/sources/:sourceId/restore", () => {
 
     const res = await request(getApp()).post(
       `/api/engagements/${engB.id}/briefing/sources/${sourceFromA}/restore`,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("briefing_source_engagement_mismatch");
+  });
+});
+
+/**
+ * DA-MV-1 — DXF upload branch (Stream B).
+ *
+ * The DXF branch differs from the QGIS branch in three ways:
+ *   1. it accepts only the seven Spec 52 §2 layer kinds (gated by
+ *      `isDxfLayerKind` against `body.layerKind`);
+ *   2. it stamps `dxfObjectPath` from the upload, then runs the
+ *      converter and stamps `glbObjectPath` + `conversionStatus` +
+ *      `conversionError` from the outcome;
+ *   3. converter failures translate to a `failed` row (not a 5xx) so
+ *      the architect can hit the retry endpoint without re-uploading.
+ *
+ * Object-storage and the converter client are both stubbed at the
+ * module level so the route exercises its full transactional path
+ * without any network or sidecar I/O.
+ */
+function dxfUploadFor(name: string, byteSize = 4096) {
+  return {
+    objectPath: `/objects/dxf-${name.replace(/[^a-z0-9]/gi, "-")}-${byteSize}`,
+    originalFilename: name,
+    contentType: "application/octet-stream",
+    byteSize,
+    kind: "dxf" as const,
+  };
+}
+
+describe("POST /api/engagements/:id/briefing/sources — DXF branch (DA-MV-1)", () => {
+  beforeEach(() => {
+    getObjectEntityBytesMock.mockReset();
+    getObjectEntityBytesMock.mockResolvedValue(Buffer.from("FAKE-DXF-BYTES"));
+    uploadObjectEntityFromBufferMock.mockReset();
+    uploadObjectEntityFromBufferMock.mockResolvedValue(
+      "/objects/glb-from-converter",
+    );
+    setConverterClient(new MockConverterClient({ fixedRequestId: "req-test" }));
+  });
+
+  afterAll(() => {
+    setConverterClient(null);
+  });
+
+  it("happy path: stamps dxfObjectPath, glbObjectPath, conversionStatus=ready", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({
+        layerKind: "terrain",
+        provider: "Surveyor",
+        upload: dxfUploadFor("terrain.dxf", 8192),
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.briefing.sources).toHaveLength(1);
+    const src = res.body.briefing.sources[0];
+    expect(src).toMatchObject({
+      layerKind: "terrain",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "terrain.dxf",
+      conversionStatus: "ready",
+      dxfObjectPath: "/objects/dxf-terrain-dxf-8192",
+      glbObjectPath: "/objects/glb-from-converter",
+      conversionError: null,
+    });
+
+    expect(getObjectEntityBytesMock).toHaveBeenCalledWith(
+      "/objects/dxf-terrain-dxf-8192",
+    );
+    expect(uploadObjectEntityFromBufferMock).toHaveBeenCalledTimes(1);
+    const [glbBytesArg, ctypeArg] =
+      uploadObjectEntityFromBufferMock.mock.calls[0]!;
+    expect(Buffer.isBuffer(glbBytesArg)).toBe(true);
+    expect(glbBytesArg.subarray(0, 4).toString("ascii")).toBe("glTF");
+    expect(ctypeArg).toBe("model/gltf-binary");
+
+    // DB row carries all four new DA-MV-1 columns.
+    const rows = await ctx.schema.db
+      .select()
+      .from(briefingSources)
+      .where(eq(briefingSources.id, src.id));
+    expect(rows[0]!.dxfObjectPath).toBe("/objects/dxf-terrain-dxf-8192");
+    expect(rows[0]!.glbObjectPath).toBe("/objects/glb-from-converter");
+    expect(rows[0]!.conversionStatus).toBe("ready");
+    expect(rows[0]!.conversionError).toBeNull();
+  });
+
+  it("converter failure: row inserted with conversionStatus=failed and error message", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    setConverterClient(new MockConverterClient({ alwaysFail: true }));
+    const eng = await seedEngagement();
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({
+        layerKind: "buildable-envelope",
+        upload: dxfUploadFor("envelope.dxf", 2048),
+      });
+
+    expect(res.status).toBe(201);
+    const src = res.body.briefing.sources[0];
+    expect(src.conversionStatus).toBe("failed");
+    expect(src.glbObjectPath).toBeNull();
+    expect(src.dxfObjectPath).toBe("/objects/dxf-envelope-dxf-2048");
+    expect(src.conversionError).toMatch(/MockConverterClient: forced failure/);
+
+    // Storage upload is never called when the converter throws.
+    expect(uploadObjectEntityFromBufferMock).not.toHaveBeenCalled();
+
+    // Atom event still emitted so the timeline reflects the upload.
+    const evRows = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "briefing-source"),
+          eq(atomEvents.entityId, src.id),
+        ),
+      );
+    expect(evRows).toHaveLength(1);
+    expect(evRows[0]!.eventType).toBe("briefing-source.fetched");
+  });
+
+  it("400 invalid_dxf_layer_kind when upload.kind=dxf but layerKind is qgis-*", async () => {
+    const eng = await seedEngagement();
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({
+        layerKind: "qgis-zoning",
+        upload: dxfUploadFor("nope.dxf"),
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_dxf_layer_kind");
+    expect(getObjectEntityBytesMock).not.toHaveBeenCalled();
+  });
+
+  it("400 dxf_layer_kind_requires_dxf_upload when upload.kind=qgis but layerKind is a DXF kind", async () => {
+    const eng = await seedEngagement();
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({
+        layerKind: "terrain",
+        upload: { ...uploadFor("terrain.geojson"), kind: "qgis" as const },
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("dxf_layer_kind_requires_dxf_upload");
+  });
+
+  it("rejects every Spec 52 §2 DXF layer kind without an explicit kind=dxf", async () => {
+    const eng = await seedEngagement();
+    for (const kind of DXF_LAYER_KINDS as readonly DxfLayerKind[]) {
+      const res = await request(getApp())
+        .post(`/api/engagements/${eng.id}/briefing/sources`)
+        .send({
+          layerKind: kind,
+          upload: uploadFor(`${kind}.geojson`),
+        });
+      expect(res.status, `kind=${kind}`).toBe(400);
+      expect(res.body.error).toBe("dxf_layer_kind_requires_dxf_upload");
+    }
+  });
+});
+
+describe("POST /api/engagements/:id/briefing/sources/:sourceId/retry-conversion", () => {
+  beforeEach(() => {
+    getObjectEntityBytesMock.mockReset();
+    getObjectEntityBytesMock.mockResolvedValue(Buffer.from("FAKE-DXF-BYTES"));
+    uploadObjectEntityFromBufferMock.mockReset();
+    uploadObjectEntityFromBufferMock.mockResolvedValue(
+      "/objects/glb-from-retry",
+    );
+    setConverterClient(new MockConverterClient());
+  });
+
+  afterAll(() => {
+    setConverterClient(null);
+  });
+
+  async function seedFailedDxfRow(eng: { id: string }) {
+    setConverterClient(new MockConverterClient({ alwaysFail: true }));
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({
+        layerKind: "terrain",
+        upload: dxfUploadFor("terrain-v1.dxf"),
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.briefing.sources[0].conversionStatus).toBe("failed");
+    return res.body.briefing.sources[0].id as string;
+  }
+
+  it("flips a failed row to ready without inserting a new row", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+    const sourceId = await seedFailedDxfRow(eng);
+
+    // Reset converter to success for the retry call.
+    setConverterClient(new MockConverterClient());
+    uploadObjectEntityFromBufferMock.mockReset();
+    uploadObjectEntityFromBufferMock.mockResolvedValue(
+      "/objects/glb-from-retry",
+    );
+
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/briefing/sources/${sourceId}/retry-conversion`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.briefing.sources).toHaveLength(1);
+    const src = res.body.briefing.sources[0];
+    expect(src.id).toBe(sourceId);
+    expect(src.conversionStatus).toBe("ready");
+    expect(src.glbObjectPath).toBe("/objects/glb-from-retry");
+    expect(src.conversionError).toBeNull();
+
+    // Row count unchanged — the same row was updated in-place.
+    const allRows = await ctx.schema.db
+      .select()
+      .from(briefingSources)
+      .where(eq(briefingSources.briefingId, res.body.briefing.id));
+    expect(allRows).toHaveLength(1);
+    expect(allRows[0]!.id).toBe(sourceId);
+    expect(allRows[0]!.supersededAt).toBeNull();
+  });
+
+  it("a second consecutive failure leaves the row stamped failed with the new error", async () => {
+    const eng = await seedEngagement();
+    const sourceId = await seedFailedDxfRow(eng);
+
+    setConverterClient({
+      async convert() {
+        throw new ConverterError("converter_timeout", "retry timeout");
+      },
+    });
+
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/briefing/sources/${sourceId}/retry-conversion`,
+    );
+    expect(res.status).toBe(200);
+    const src = res.body.briefing.sources[0];
+    expect(src.conversionStatus).toBe("failed");
+    expect(src.conversionError).toBe("retry timeout");
+    expect(src.glbObjectPath).toBeNull();
+  });
+
+  it("400 not_a_dxf_briefing_source on a QGIS row", async () => {
+    const eng = await seedEngagement();
+    const created = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({
+        layerKind: "qgis-zoning",
+        upload: uploadFor("zoning.geojson"),
+      });
+    const sourceId = created.body.briefing.sources[0].id;
+
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/briefing/sources/${sourceId}/retry-conversion`,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("not_a_dxf_briefing_source");
+  });
+
+  it("404 engagement_not_found when engagement does not exist", async () => {
+    const res = await request(getApp()).post(
+      `/api/engagements/00000000-0000-0000-0000-000000000000/briefing/sources/00000000-0000-0000-0000-000000000001/retry-conversion`,
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("engagement_not_found");
+  });
+
+  it("404 briefing_source_not_found when source does not exist", async () => {
+    const eng = await seedEngagement();
+    // Seed any briefing so the briefing-row guard passes.
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({
+        layerKind: "qgis-zoning",
+        upload: uploadFor("zoning.geojson"),
+      });
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/briefing/sources/00000000-0000-0000-0000-000000000099/retry-conversion`,
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("briefing_source_not_found");
+  });
+
+  it("400 briefing_source_engagement_mismatch when source belongs to a different engagement", async () => {
+    const engA = await seedEngagement("Eng A");
+    const engB = await seedEngagement("Eng B");
+    const a = await request(getApp())
+      .post(`/api/engagements/${engA.id}/briefing/sources`)
+      .send({
+        layerKind: "terrain",
+        upload: dxfUploadFor("a.dxf"),
+      });
+    const sourceFromA = a.body.briefing.sources[0].id;
+
+    // Seed a briefing on B so the briefing-row guard does not short-circuit.
+    await request(getApp())
+      .post(`/api/engagements/${engB.id}/briefing/sources`)
+      .send({
+        layerKind: "terrain",
+        upload: dxfUploadFor("b.dxf"),
+      });
+
+    const res = await request(getApp()).post(
+      `/api/engagements/${engB.id}/briefing/sources/${sourceFromA}/retry-conversion`,
     );
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("briefing_source_engagement_mismatch");

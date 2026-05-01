@@ -5,11 +5,20 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { BriefingSourceUploadKind } from "./briefingSourceUploadKind";
 
 /**
  * Metadata for the file uploaded out-of-band to object storage.
  */
 export type CreateBriefingSourceBodyUpload = {
+  /** Selects the upload modality. Defaults to `qgis` so the
+pre-DA-MV-1 callers (which never sent this field) keep
+working unchanged. `dxf` selects the DXF→glb conversion
+branch — the route stores the bytes as the original
+DXF, calls the converter service, and stamps
+`conversionStatus` on the row.
+ */
+  kind?: BriefingSourceUploadKind;
   /**
    * Canonical `/objects/<id>` path returned by `POST
 /storage/uploads/request-url` and persisted on the row.

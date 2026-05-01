@@ -106,6 +106,75 @@ export class ObjectStorageService {
     return new Response(webStream, { headers });
   }
 
+  /**
+   * Server-side upload of a buffer into the private object dir under
+   * a fresh `/objects/<uuid>` path. Used by write paths that mint
+   * bytes themselves rather than receiving them from the browser via
+   * a presigned URL — e.g. the DA-MV-1 DXF→glb route, where the
+   * server holds the converter response in memory and needs to
+   * persist it without round-tripping a presign / PUT cycle.
+   *
+   * Returns the canonical `/objects/<id>` path the rest of the
+   * codebase uses (mirrors what
+   * {@link normalizeObjectEntityPath}({@link getObjectEntityUploadURL})
+   * would yield for a browser-side upload).
+   */
+  async uploadObjectEntityFromBuffer(
+    bytes: Buffer,
+    contentType: string,
+  ): Promise<string> {
+    const privateObjectDir = this.getPrivateObjectDir();
+    const objectId = randomUUID();
+    const fullPath = `${privateObjectDir}/uploads/${objectId}`;
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+    const bucket = objectStorageClient.bucket(bucketName);
+    const file = bucket.file(objectName);
+    await file.save(bytes, {
+      contentType,
+      // Don't add the gzip resumable handshake for tiny payloads —
+      // the converter glbs are typically <1 MiB and a single PUT is
+      // measurably faster than the multi-step resumable flow.
+      resumable: false,
+    });
+    return `/objects/uploads/${objectId}`;
+  }
+
+  /**
+   * Read the full bytes of a stored object entity into a Buffer.
+   *
+   * Used by paths that need the raw content (rather than streaming
+   * it through to a Response), e.g. the DA-MV-1 DXF→glb route which
+   * loads the DXF into memory before handing it to the converter,
+   * and the glb-bytes serve route which hashes the bytes for an
+   * ETag before writing them to the response.
+   *
+   * For very large objects this is wasteful — but the briefing
+   * source byte-size is capped (RequestUploadUrlBody.size, currently
+   * 2 MiB at the request-URL door), so reading into memory is fine
+   * for this use case. If a future caller needs to handle larger
+   * objects, prefer streaming from {@link getObjectEntityFile}'s
+   * `createReadStream()` directly.
+   */
+  async getObjectEntityBytes(rawPath: string): Promise<Buffer> {
+    const objectFile = await this.getObjectEntityFile(
+      this.normalizeObjectEntityPath(rawPath),
+    );
+    const stream = objectFile.createReadStream();
+    const chunks: Array<Buffer> = [];
+    try {
+      for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === 404) {
+        throw new ObjectNotFoundError();
+      }
+      throw err;
+    }
+    return Buffer.concat(chunks);
+  }
+
   async getObjectEntityUploadURL(): Promise<string> {
     const privateObjectDir = this.getPrivateObjectDir();
     if (!privateObjectDir) {

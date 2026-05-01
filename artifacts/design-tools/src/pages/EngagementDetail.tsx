@@ -8,6 +8,7 @@ import {
   useListEngagementBriefingSources,
   useListEngagementSubmissions,
   useRestoreEngagementBriefingSource,
+  useRetryBriefingSourceConversion,
   useUpdateEngagement,
   getGetEngagementBriefingQueryKey,
   getGetEngagementQueryKey,
@@ -24,8 +25,10 @@ import {
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
 import type { SheetSummary } from "@workspace/api-client-react";
+import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { AppShell } from "../components/AppShell";
 import { BriefingSourceUploadModal } from "../components/BriefingSourceUploadModal";
+import { SiteContextViewer } from "../components/SiteContextViewer";
 import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
 import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionResponseDialog";
@@ -533,6 +536,47 @@ function formatByteSize(bytes: number | null): string {
  * and so reading history is a discoverable, opt-in interaction. The
  * fetch is gated on `expanded` so unrelated rows do not pay for it.
  */
+/**
+ * Visual styling per `conversionStatus` value, kept inline so the row
+ * does not depend on the design-system pill styles changing under it.
+ * The four DA-MV-1 statuses come straight from
+ * `BriefingSourceConversionStatus`; QGIS rows have a `null` status and
+ * skip the pill entirely.
+ */
+const CONVERSION_STATUS_STYLE: Record<
+  "pending" | "converting" | "ready" | "failed" | "dxf-only",
+  { label: string; bg: string; fg: string }
+> = {
+  pending: {
+    label: "Conversion pending",
+    bg: "var(--info-dim)",
+    fg: "var(--info-text)",
+  },
+  converting: {
+    label: "Converting…",
+    bg: "var(--info-dim)",
+    fg: "var(--info-text)",
+  },
+  ready: {
+    label: "3D ready",
+    bg: "var(--success-dim)",
+    fg: "var(--success-text)",
+  },
+  failed: {
+    label: "Conversion failed",
+    bg: "var(--danger-dim)",
+    fg: "var(--danger-text)",
+  },
+  // `dxf-only` rows have a stored DXF but no glb (e.g. an imported
+  // legacy row). The viewer skips them; the pill just acknowledges
+  // they exist so the architect knows why no 3D mesh shows up.
+  "dxf-only": {
+    label: "DXF only",
+    bg: "var(--neutral-dim, var(--info-dim))",
+    fg: "var(--text-muted)",
+  },
+};
+
 function BriefingSourceRow({
   engagementId,
   source,
@@ -542,6 +586,24 @@ function BriefingSourceRow({
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const [expanded, setExpanded] = useState(false);
+  const queryClient = useQueryClient();
+  // Retry mutation re-runs the converter on an existing DXF row. The
+  // route returns the updated source; on success we invalidate the
+  // briefing read so the row re-renders with the new status (and the
+  // 3D viewer picks the freshly-written glb on its next fetch).
+  const retryMutation = useRetryBriefingSourceConversion({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: getGetEngagementBriefingQueryKey(engagementId),
+        });
+      },
+    },
+  });
+  const conversionStatus = source.conversionStatus;
+  const conversionStyle = conversionStatus
+    ? CONVERSION_STATUS_STYLE[conversionStatus]
+    : null;
   return (
     <div
       className="sc-card"
@@ -570,21 +632,85 @@ function BriefingSourceRow({
         >
           {source.layerKind}
         </span>
-        <span
-          className="sc-pill"
-          style={{
-            fontSize: 10,
-            padding: "2px 8px",
-            borderRadius: 999,
-            background: isManual ? "var(--info-dim)" : "var(--success-dim)",
-            color: isManual ? "var(--info-text)" : "var(--success-text)",
-            textTransform: "uppercase",
-            letterSpacing: 0.3,
-          }}
+        <div
+          style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}
         >
-          {isManual ? "Manual upload" : "Federal adapter"}
-        </span>
+          {conversionStyle && (
+            <span
+              className="sc-pill"
+              data-testid={`briefing-source-conversion-status-${source.id}`}
+              style={{
+                fontSize: 10,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: conversionStyle.bg,
+                color: conversionStyle.fg,
+                textTransform: "uppercase",
+                letterSpacing: 0.3,
+              }}
+            >
+              {conversionStyle.label}
+            </span>
+          )}
+          <span
+            className="sc-pill"
+            style={{
+              fontSize: 10,
+              padding: "2px 8px",
+              borderRadius: 999,
+              background: isManual ? "var(--info-dim)" : "var(--success-dim)",
+              color: isManual ? "var(--info-text)" : "var(--success-text)",
+              textTransform: "uppercase",
+              letterSpacing: 0.3,
+            }}
+          >
+            {isManual ? "Manual upload" : "Federal adapter"}
+          </span>
+        </div>
       </div>
+      {conversionStatus === "failed" && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "6px 8px",
+            background: "var(--danger-dim)",
+            borderRadius: 4,
+            marginTop: 4,
+          }}
+          data-testid={`briefing-source-conversion-failed-${source.id}`}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--danger-text)",
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {source.conversionError ?? "Conversion failed."}
+          </span>
+          <button
+            type="button"
+            className="sc-btn"
+            disabled={retryMutation.isPending}
+            onClick={() =>
+              retryMutation.mutate({
+                id: engagementId,
+                sourceId: source.id,
+              })
+            }
+            data-testid={`briefing-source-retry-conversion-${source.id}`}
+            style={{ fontSize: 11, padding: "2px 8px" }}
+          >
+            {retryMutation.isPending ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
       {source.uploadOriginalFilename && (
         <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
           {source.uploadOriginalFilename}
@@ -858,6 +984,29 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
     [sources],
   );
 
+  // Sub-tab toggle (DA-MV-1, Spec 52 §2). The viewer is the primary
+  // surface for an engagement that already has converted DXF
+  // geometry, so we default the sub-tab to "3d" once any source has
+  // reached `ready`. Until then the toggle stays on "map" so the
+  // legacy 2D-overlay placeholder is what the architect sees first.
+  // The default is computed from the latest briefing read; once the
+  // user has manually flipped the toggle we leave their choice
+  // alone (initial-state-only).
+  const hasReadyDxf = sources.some((s) => s.conversionStatus === "ready");
+  const defaultSubTab: "map" | "3d" = hasReadyDxf ? "3d" : "map";
+  const [subTab, setSubTab] = useState<"map" | "3d">(defaultSubTab);
+  // If the briefing read finishes after the initial render and the
+  // user has not yet toggled, snap to the data-driven default. Once
+  // the user has interacted, `userPickedRef` blocks further auto-
+  // adjustments so a converter completing mid-session does not yank
+  // the viewer out from under them.
+  const userPickedRef = useRef(false);
+  useEffect(() => {
+    if (!userPickedRef.current && hasReadyDxf && subTab !== "3d") {
+      setSubTab("3d");
+    }
+  }, [hasReadyDxf, subTab]);
+
   return (
     <div className="sc-card p-6 flex flex-col gap-4 flex-1">
       <div
@@ -888,9 +1037,117 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
           onClick={() => setUploadOpen(true)}
           data-testid="briefing-source-upload-button"
         >
-          Upload QGIS layer
+          Upload site context source
         </button>
       </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--text-secondary)",
+          }}
+        >
+          Site context view
+        </div>
+        <ToggleGroup.Root
+          type="single"
+          value={subTab}
+          aria-label="Site context view"
+          onValueChange={(v) => {
+            // Radix sends "" when the user clicks the active item; we
+            // require a value at all times so ignore empty strings.
+            if (v === "map" || v === "3d") {
+              userPickedRef.current = true;
+              setSubTab(v);
+            }
+          }}
+          data-testid="site-context-subtab-toggle"
+          style={{
+            display: "inline-flex",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 6,
+            overflow: "hidden",
+          }}
+        >
+          <ToggleGroup.Item
+            value="map"
+            data-testid="site-context-subtab-map"
+            style={{
+              padding: "4px 12px",
+              fontSize: 12,
+              background:
+                subTab === "map" ? "var(--info-dim)" : "transparent",
+              color:
+                subTab === "map"
+                  ? "var(--info-text)"
+                  : "var(--text-secondary)",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            Map view
+          </ToggleGroup.Item>
+          <ToggleGroup.Item
+            value="3d"
+            data-testid="site-context-subtab-3d"
+            style={{
+              padding: "4px 12px",
+              fontSize: 12,
+              background:
+                subTab === "3d" ? "var(--info-dim)" : "transparent",
+              color:
+                subTab === "3d"
+                  ? "var(--info-text)"
+                  : "var(--text-secondary)",
+              border: "none",
+              borderLeft: "1px solid var(--border-subtle)",
+              cursor: "pointer",
+            }}
+          >
+            3D view
+          </ToggleGroup.Item>
+        </ToggleGroup.Root>
+      </div>
+
+      {subTab === "map" ? (
+        <div
+          data-testid="site-context-map-placeholder"
+          className="sc-card"
+          style={{
+            padding: 16,
+            background: "var(--surface-2, var(--info-dim))",
+            color: "var(--text-muted)",
+            fontSize: 13,
+            textAlign: "center",
+            minHeight: 320,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          Map view ships in DA-PI-2.
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 320,
+            flex: 1,
+          }}
+        >
+          <SiteContextViewer sources={sources} />
+        </div>
+      )}
 
       {briefingQuery.isLoading && (
         <div

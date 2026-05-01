@@ -79,11 +79,47 @@ export const briefingSources = pgTable(
     /**
      * Object storage path (`/objects/<id>`) the manual upload landed at.
      * Null on the adapter branch.
+     *
+     * For the DXF-conversion branch (DA-MV-1), this column carries the
+     * canonical path of the *original* file the architect picked
+     * (typically the same value as {@link dxfObjectPath} for symmetry
+     * with the QGIS branch — {@link dxfObjectPath} is the
+     * convention-named pointer the converter retry path reads).
      */
     uploadObjectPath: text("upload_object_path"),
     uploadOriginalFilename: text("upload_original_filename"),
     uploadContentType: text("upload_content_type"),
     uploadByteSize: integer("upload_byte_size"),
+    /**
+     * DA-MV-1 — DXF→glb conversion branch.
+     *
+     * `dxfObjectPath` is the canonical `/objects/<id>` pointer the
+     * converter retry path uses to re-run conversion against the
+     * already-stored DXF without forcing the architect to re-upload.
+     * Always equals {@link uploadObjectPath} for rows the manual-DXF
+     * route inserts; null on the QGIS branch and on adapter rows.
+     *
+     * `glbObjectPath` is the `/objects/<id>` pointer of the converted
+     * glb (`model/gltf-binary`). Populated only when
+     * {@link conversionStatus} is `ready`; null otherwise.
+     *
+     * `conversionStatus` is the lifecycle marker for the conversion
+     * pipeline: `pending` (queued / never attempted), `converting`
+     * (in flight), `ready` (glb available), `failed` (conversion
+     * threw), or `dxf-only` (DXF stored but no conversion attempted —
+     * used for legacy/imported rows). Null on the QGIS branch and on
+     * adapter rows so a "this column doesn't apply here" reads
+     * unambiguously on the wire.
+     *
+     * `conversionError` is a short human-readable error blurb stamped
+     * when conversion fails, surfaced verbatim in the per-source
+     * status pill so an architect can decide whether to retry or
+     * re-export the DXF. Null on success and on non-DXF rows.
+     */
+    dxfObjectPath: text("dxf_object_path"),
+    glbObjectPath: text("glb_object_path"),
+    conversionStatus: text("conversion_status"),
+    conversionError: text("conversion_error"),
     /**
      * Optional free-text note from the producer (e.g. "exported from
      * QGIS 3.34 with the city's basemap layer applied").

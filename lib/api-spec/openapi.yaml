@@ -586,6 +586,114 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{id}/briefing/sources/{sourceId}/retry-conversion:
+    post:
+      operationId: retryBriefingSourceConversion
+      tags: [engagements]
+      summary: Re-run DXF→glb conversion for a briefing source
+      description: |
+        Re-runs the DXF→glb converter against the briefing source's
+        already-stored DXF (`dxfObjectPath`) without forcing the
+        architect to re-upload. Used when the original conversion
+        landed in `failed` (or got stuck in `pending` / `converting`)
+        and the architect wants to retry — typically after an upstream
+        converter outage cleared.
+
+        Refuses non-DXF rows (`conversionStatus` is null on the QGIS
+        and adapter branches) and refuses rows that have no stored
+        DXF. On success the row's `conversionStatus` flips back to
+        `pending` → `ready` (or `failed`) inside the same request and
+        the response carries the updated briefing.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conversion retried; updated briefing returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementBriefingResponse"
+        "400":
+          description: |
+            Source does not own a DXF (e.g. it is a QGIS row, or
+            `dxfObjectPath` is missing) or belongs to a different
+            engagement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement or briefing source not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /briefing-sources/{id}/glb:
+    get:
+      operationId: getBriefingSourceGlb
+      tags: [engagements]
+      summary: Stream the converted glb for one briefing source
+      description: |
+        Streams the binary glTF (`model/gltf-binary`) for a briefing
+        source whose DXF→glb conversion has reached `ready`. The
+        response body is the raw glb bytes (not JSON), with an ETag
+        derived from a SHA-1 of the bytes so re-conversion of the
+        same source busts cached entries even though the URL is
+        unchanged.
+
+        Honors `If-None-Match` with a 304 response. Cached for one
+        day on intermediate proxies (`Cache-Control: public,
+        max-age=86400, immutable`); the URL is content-addressed via
+        the row id and a fresh conversion writes a new row, so the
+        immutable hint is safe.
+
+        404 when the row does not exist, when conversion is not yet
+        `ready`, or when the row is on a non-DXF branch.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Glb bytes
+          content:
+            model/gltf-binary:
+              schema:
+                type: string
+                format: binary
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+        "304":
+          description: Cached copy still fresh
+        "404":
+          description: Briefing source not found, or no glb yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /snapshots:
     get:
       operationId: listSnapshots
@@ -1909,6 +2017,37 @@ components:
         - manual-upload
         - federal-adapter
 
+    BriefingSourceConversionStatus:
+      type: string
+      description: |
+        Lifecycle marker for the DXF→glb conversion pipeline (DA-MV-1).
+        `pending` (queued / never attempted), `converting` (request in
+        flight to the converter service), `ready` (glb available — the
+        viewer can fetch bytes), `failed` (converter rejected — the UI
+        surfaces a retry action), `dxf-only` (DXF stored but no
+        conversion attempted, e.g. a legacy/imported row). Only set on
+        the DXF branch — QGIS uploads and federal-adapter rows leave
+        this field null.
+      enum:
+        - pending
+        - converting
+        - ready
+        - failed
+        - dxf-only
+
+    BriefingSourceUploadKind:
+      type: string
+      description: |
+        Discriminator for the upload modality on
+        `POST /engagements/{id}/briefing/sources`. `qgis` (default)
+        keeps the DA-PI-1B 2D overlay path; `dxf` selects the DA-MV-1
+        DXF→glb conversion branch — the bytes are stored as the
+        original DXF and the converter service is invoked synchronously
+        before the row is committed.
+      enum:
+        - qgis
+        - dxf
+
     EngagementBriefingSource:
       type: object
       description: |
@@ -1945,6 +2084,40 @@ components:
         uploadByteSize:
           type: integer
           nullable: true
+        dxfObjectPath:
+          type: string
+          nullable: true
+          description: |
+            DA-MV-1 — canonical `/objects/<id>` pointer of the original
+            DXF when the row took the DXF→glb branch. Mirrors
+            `uploadObjectPath` for the DXF case; null on the QGIS branch
+            and on adapter rows. The viewer never reads this directly —
+            it is the input the converter retry route re-runs against.
+        glbObjectPath:
+          type: string
+          nullable: true
+          description: |
+            DA-MV-1 — canonical `/objects/<id>` pointer of the converted
+            glb when conversion has succeeded (`conversionStatus =
+            ready`). The viewer fetches the bytes via
+            `GET /briefing-sources/{id}/glb` rather than this path
+            directly so the response can carry the right
+            `Content-Type` + caching headers.
+        conversionStatus:
+          allOf:
+            - $ref: "#/components/schemas/BriefingSourceConversionStatus"
+          nullable: true
+          description: |
+            DA-MV-1 — DXF→glb conversion lifecycle marker. Null on QGIS
+            and adapter rows; populated on the DXF branch.
+        conversionError:
+          type: string
+          nullable: true
+          description: |
+            DA-MV-1 — short human-readable error blurb stamped when
+            conversion fails. Surfaced verbatim in the per-source
+            status pill so the architect can decide whether to retry
+            or re-export the DXF. Null on success and on non-DXF rows.
         supersededAt:
           type: string
           format: date-time
@@ -1977,6 +2150,10 @@ components:
         - uploadOriginalFilename
         - uploadContentType
         - uploadByteSize
+        - dxfObjectPath
+        - glbObjectPath
+        - conversionStatus
+        - conversionError
         - supersededAt
         - supersededById
         - createdAt
@@ -2080,6 +2257,16 @@ components:
           type: object
           description: Metadata for the file uploaded out-of-band to object storage.
           properties:
+            kind:
+              allOf:
+                - $ref: "#/components/schemas/BriefingSourceUploadKind"
+              description: |
+                Selects the upload modality. Defaults to `qgis` so the
+                pre-DA-MV-1 callers (which never sent this field) keep
+                working unchanged. `dxf` selects the DXF→glb conversion
+                branch — the route stores the bytes as the original
+                DXF, calls the converter service, and stamps
+                `conversionStatus` on the row.
             objectPath:
               type: string
               minLength: 1

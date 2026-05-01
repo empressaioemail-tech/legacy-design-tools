@@ -590,6 +590,33 @@ export const GetEngagementBriefingResponse = zod
               uploadOriginalFilename: zod.string().nullable(),
               uploadContentType: zod.string().nullable(),
               uploadByteSize: zod.number().nullable(),
+              dxfObjectPath: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — canonical `\/objects\/<id>` pointer of the original\nDXF when the row took the DXF→glb branch. Mirrors\n`uploadObjectPath` for the DXF case; null on the QGIS branch\nand on adapter rows. The viewer never reads this directly —\nit is the input the converter retry route re-runs against.\n",
+                ),
+              glbObjectPath: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — canonical `\/objects\/<id>` pointer of the converted\nglb when conversion has succeeded (`conversionStatus =\nready`). The viewer fetches the bytes via\n`GET \/briefing-sources\/{id}\/glb` rather than this path\ndirectly so the response can carry the right\n`Content-Type` + caching headers.\n",
+                ),
+              conversionStatus: zod
+                .enum(["pending", "converting", "ready", "failed", "dxf-only"])
+                .describe(
+                  "Lifecycle marker for the DXF→glb conversion pipeline (DA-MV-1).\n`pending` (queued \/ never attempted), `converting` (request in\nflight to the converter service), `ready` (glb available — the\nviewer can fetch bytes), `failed` (converter rejected — the UI\nsurfaces a retry action), `dxf-only` (DXF stored but no\nconversion attempted, e.g. a legacy\/imported row). Only set on\nthe DXF branch — QGIS uploads and federal-adapter rows leave\nthis field null.\n",
+                )
+                .nullable()
+                .describe(
+                  "DA-MV-1 — DXF→glb conversion lifecycle marker. Null on QGIS\nand adapter rows; populated on the DXF branch.\n",
+                ),
+              conversionError: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — short human-readable error blurb stamped when\nconversion fails. Surfaced verbatim in the per-source\nstatus pill so the architect can decide whether to retry\nor re-export the DXF. Null on success and on non-DXF rows.\n",
+                ),
               supersededAt: zod.coerce
                 .date()
                 .nullable()
@@ -676,6 +703,33 @@ export const ListEngagementBriefingSourcesResponse = zod
           uploadOriginalFilename: zod.string().nullable(),
           uploadContentType: zod.string().nullable(),
           uploadByteSize: zod.number().nullable(),
+          dxfObjectPath: zod
+            .string()
+            .nullable()
+            .describe(
+              "DA-MV-1 — canonical `\/objects\/<id>` pointer of the original\nDXF when the row took the DXF→glb branch. Mirrors\n`uploadObjectPath` for the DXF case; null on the QGIS branch\nand on adapter rows. The viewer never reads this directly —\nit is the input the converter retry route re-runs against.\n",
+            ),
+          glbObjectPath: zod
+            .string()
+            .nullable()
+            .describe(
+              "DA-MV-1 — canonical `\/objects\/<id>` pointer of the converted\nglb when conversion has succeeded (`conversionStatus =\nready`). The viewer fetches the bytes via\n`GET \/briefing-sources\/{id}\/glb` rather than this path\ndirectly so the response can carry the right\n`Content-Type` + caching headers.\n",
+            ),
+          conversionStatus: zod
+            .enum(["pending", "converting", "ready", "failed", "dxf-only"])
+            .describe(
+              "Lifecycle marker for the DXF→glb conversion pipeline (DA-MV-1).\n`pending` (queued \/ never attempted), `converting` (request in\nflight to the converter service), `ready` (glb available — the\nviewer can fetch bytes), `failed` (converter rejected — the UI\nsurfaces a retry action), `dxf-only` (DXF stored but no\nconversion attempted, e.g. a legacy\/imported row). Only set on\nthe DXF branch — QGIS uploads and federal-adapter rows leave\nthis field null.\n",
+            )
+            .nullable()
+            .describe(
+              "DA-MV-1 — DXF→glb conversion lifecycle marker. Null on QGIS\nand adapter rows; populated on the DXF branch.\n",
+            ),
+          conversionError: zod
+            .string()
+            .nullable()
+            .describe(
+              "DA-MV-1 — short human-readable error blurb stamped when\nconversion fails. Surfaced verbatim in the per-source\nstatus pill so the architect can decide whether to retry\nor re-export the DXF. Null on success and on non-DXF rows.\n",
+            ),
           supersededAt: zod.coerce
             .date()
             .nullable()
@@ -767,6 +821,15 @@ export const CreateEngagementBriefingSourceBody = zod
       ),
     upload: zod
       .object({
+        kind: zod
+          .enum(["qgis", "dxf"])
+          .describe(
+            "Discriminator for the upload modality on\n`POST \/engagements\/{id}\/briefing\/sources`. `qgis` (default)\nkeeps the DA-PI-1B 2D overlay path; `dxf` selects the DA-MV-1\nDXF→glb conversion branch — the bytes are stored as the\noriginal DXF and the converter service is invoked synchronously\nbefore the row is committed.\n",
+          )
+          .optional()
+          .describe(
+            "Selects the upload modality. Defaults to `qgis` so the\npre-DA-MV-1 callers (which never sent this field) keep\nworking unchanged. `dxf` selects the DXF→glb conversion\nbranch — the route stores the bytes as the original\nDXF, calls the converter service, and stamps\n`conversionStatus` on the row.\n",
+          ),
         objectPath: zod
           .string()
           .min(1)
@@ -844,6 +907,33 @@ export const RestoreEngagementBriefingSourceResponse = zod
               uploadOriginalFilename: zod.string().nullable(),
               uploadContentType: zod.string().nullable(),
               uploadByteSize: zod.number().nullable(),
+              dxfObjectPath: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — canonical `\/objects\/<id>` pointer of the original\nDXF when the row took the DXF→glb branch. Mirrors\n`uploadObjectPath` for the DXF case; null on the QGIS branch\nand on adapter rows. The viewer never reads this directly —\nit is the input the converter retry route re-runs against.\n",
+                ),
+              glbObjectPath: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — canonical `\/objects\/<id>` pointer of the converted\nglb when conversion has succeeded (`conversionStatus =\nready`). The viewer fetches the bytes via\n`GET \/briefing-sources\/{id}\/glb` rather than this path\ndirectly so the response can carry the right\n`Content-Type` + caching headers.\n",
+                ),
+              conversionStatus: zod
+                .enum(["pending", "converting", "ready", "failed", "dxf-only"])
+                .describe(
+                  "Lifecycle marker for the DXF→glb conversion pipeline (DA-MV-1).\n`pending` (queued \/ never attempted), `converting` (request in\nflight to the converter service), `ready` (glb available — the\nviewer can fetch bytes), `failed` (converter rejected — the UI\nsurfaces a retry action), `dxf-only` (DXF stored but no\nconversion attempted, e.g. a legacy\/imported row). Only set on\nthe DXF branch — QGIS uploads and federal-adapter rows leave\nthis field null.\n",
+                )
+                .nullable()
+                .describe(
+                  "DA-MV-1 — DXF→glb conversion lifecycle marker. Null on QGIS\nand adapter rows; populated on the DXF branch.\n",
+                ),
+              conversionError: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — short human-readable error blurb stamped when\nconversion fails. Surfaced verbatim in the per-source\nstatus pill so the architect can decide whether to retry\nor re-export the DXF. Null on success and on non-DXF rows.\n",
+                ),
               supersededAt: zod.coerce
                 .date()
                 .nullable()
@@ -871,6 +961,134 @@ export const RestoreEngagementBriefingSourceResponse = zod
   .describe(
     "Wire envelope for the briefing read\/write routes. `briefing` is\n`null` when no briefing has been created yet for the engagement\n— the first call to `POST \/engagements\/{id}\/briefing\/sources`\nis what creates it. The envelope exists because OpenAPI 3.0's\n`nullable` modifier on a `$ref` to an object schema does not\ngenerate a clean `T | null` in our codegen toolchain.\n",
   );
+
+/**
+ * Re-runs the DXF→glb converter against the briefing source's
+already-stored DXF (`dxfObjectPath`) without forcing the
+architect to re-upload. Used when the original conversion
+landed in `failed` (or got stuck in `pending` / `converting`)
+and the architect wants to retry — typically after an upstream
+converter outage cleared.
+
+Refuses non-DXF rows (`conversionStatus` is null on the QGIS
+and adapter branches) and refuses rows that have no stored
+DXF. On success the row's `conversionStatus` flips back to
+`pending` → `ready` (or `failed`) inside the same request and
+the response carries the updated briefing.
+
+ * @summary Re-run DXF→glb conversion for a briefing source
+ */
+export const RetryBriefingSourceConversionParams = zod.object({
+  id: zod.coerce.string(),
+  sourceId: zod.coerce.string(),
+});
+
+export const RetryBriefingSourceConversionResponse = zod
+  .object({
+    briefing: zod
+      .object({
+        id: zod.string(),
+        engagementId: zod.string(),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+        sources: zod.array(
+          zod
+            .object({
+              id: zod.string(),
+              layerKind: zod.string(),
+              sourceKind: zod
+                .enum(["manual-upload", "federal-adapter"])
+                .describe(
+                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table. The two share the supersession contract so a\nconsumer renders either kind without a producer-specific code\npath.\n",
+                ),
+              provider: zod.string().nullable(),
+              snapshotDate: zod.coerce.date(),
+              note: zod.string().nullable(),
+              uploadObjectPath: zod.string().nullable(),
+              uploadOriginalFilename: zod.string().nullable(),
+              uploadContentType: zod.string().nullable(),
+              uploadByteSize: zod.number().nullable(),
+              dxfObjectPath: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — canonical `\/objects\/<id>` pointer of the original\nDXF when the row took the DXF→glb branch. Mirrors\n`uploadObjectPath` for the DXF case; null on the QGIS branch\nand on adapter rows. The viewer never reads this directly —\nit is the input the converter retry route re-runs against.\n",
+                ),
+              glbObjectPath: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — canonical `\/objects\/<id>` pointer of the converted\nglb when conversion has succeeded (`conversionStatus =\nready`). The viewer fetches the bytes via\n`GET \/briefing-sources\/{id}\/glb` rather than this path\ndirectly so the response can carry the right\n`Content-Type` + caching headers.\n",
+                ),
+              conversionStatus: zod
+                .enum(["pending", "converting", "ready", "failed", "dxf-only"])
+                .describe(
+                  "Lifecycle marker for the DXF→glb conversion pipeline (DA-MV-1).\n`pending` (queued \/ never attempted), `converting` (request in\nflight to the converter service), `ready` (glb available — the\nviewer can fetch bytes), `failed` (converter rejected — the UI\nsurfaces a retry action), `dxf-only` (DXF stored but no\nconversion attempted, e.g. a legacy\/imported row). Only set on\nthe DXF branch — QGIS uploads and federal-adapter rows leave\nthis field null.\n",
+                )
+                .nullable()
+                .describe(
+                  "DA-MV-1 — DXF→glb conversion lifecycle marker. Null on QGIS\nand adapter rows; populated on the DXF branch.\n",
+                ),
+              conversionError: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — short human-readable error blurb stamped when\nconversion fails. Surfaced verbatim in the per-source\nstatus pill so the architect can decide whether to retry\nor re-export the DXF. Null on success and on non-DXF rows.\n",
+                ),
+              supersededAt: zod.coerce
+                .date()
+                .nullable()
+                .describe(
+                  "Stamped when the row is no longer the current source for its\n`(briefing_id, layer_kind)` slot — null while the row is\ncurrent. Surfaced on the wire so the history view can\ndistinguish current from superseded entries without an\nextra round-trip.\n",
+                ),
+              supersededById: zod
+                .string()
+                .nullable()
+                .describe(
+                  "Pointer to the briefing-source row that superseded this one,\nor null when this row is still current. Lets the UI\nreconstruct the per-layer chain (`prior → current`) without\nasking the server.\n",
+                ),
+              createdAt: zod.coerce.date(),
+            })
+            .describe(
+              "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+            ),
+        ),
+      })
+      .describe(
+        "The engagement's parcel briefing row plus its current sources.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the briefing read\/write routes. `briefing` is\n`null` when no briefing has been created yet for the engagement\n— the first call to `POST \/engagements\/{id}\/briefing\/sources`\nis what creates it. The envelope exists because OpenAPI 3.0's\n`nullable` modifier on a `$ref` to an object schema does not\ngenerate a clean `T | null` in our codegen toolchain.\n",
+  );
+
+/**
+ * Streams the binary glTF (`model/gltf-binary`) for a briefing
+source whose DXF→glb conversion has reached `ready`. The
+response body is the raw glb bytes (not JSON), with an ETag
+derived from a SHA-1 of the bytes so re-conversion of the
+same source busts cached entries even though the URL is
+unchanged.
+
+Honors `If-None-Match` with a 304 response. Cached for one
+day on intermediate proxies (`Cache-Control: public,
+max-age=86400, immutable`); the URL is content-addressed via
+the row id and a fresh conversion writes a new row, so the
+immutable hint is safe.
+
+404 when the row does not exist, when conversion is not yet
+`ready`, or when the row is on a non-DXF branch.
+
+ * @summary Stream the converted glb for one briefing source
+ */
+export const GetBriefingSourceGlbParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetBriefingSourceGlbHeader = zod.object({
+  "If-None-Match": zod.string().optional(),
+});
 
 /**
  * Returns all snapshots, newest first, joined with engagementName.

@@ -13,38 +13,109 @@ import { useUpload } from "@workspace/object-storage-web";
  * upload UI surfaces a curated list of the layers QGIS exports today
  * so an architect does not have to memorize the slug. The "Other"
  * entry opens a free-text field for the long-tail.
+ *
+ * DA-MV-1 — `kind` discriminates which upload modality the picker
+ * sends to the route: `qgis` rows go through the existing 2D-overlay
+ * branch, `dxf` rows go through the new DXF→glb conversion branch
+ * and feed the 3D viewer. The two groups render as separate
+ * `<optgroup>` blocks so the visual grouping mirrors the route's
+ * branching contract — there is no "DXF easements" catch-all today.
  */
 interface LayerKindOption {
   value: string;
   label: string;
+  kind: "qgis" | "dxf";
   hint?: string;
 }
 
 const LAYER_KIND_OPTIONS: LayerKindOption[] = [
+  // -- 2D overlays (QGIS / GeoJSON) --
   {
     value: "qgis-zoning",
     label: "Zoning",
+    kind: "qgis",
     hint: "Zoning districts and overlays exported from QGIS.",
   },
   {
     value: "qgis-parcel",
     label: "Parcel boundaries",
+    kind: "qgis",
     hint: "Parcel polygons + attributes exported from QGIS.",
   },
   {
     value: "qgis-flood",
     label: "Flood / hazard",
+    kind: "qgis",
     hint: "FEMA flood zones or other hazard overlays.",
   },
   {
     value: "qgis-utilities",
     label: "Utilities",
+    kind: "qgis",
     hint: "Sewer / water / power infrastructure layers.",
+  },
+  // -- 3D geometry (DXF) — DA-MV-1, Spec 52 §2 materializable variants --
+  {
+    value: "terrain",
+    label: "Terrain mesh",
+    kind: "dxf",
+    hint: "Site terrain mesh (DXF, exported from civil software).",
+  },
+  {
+    value: "property-line",
+    label: "Property line",
+    kind: "dxf",
+    hint: "Site boundary polyline (DXF).",
+  },
+  {
+    value: "setback-plane",
+    label: "Setback plane",
+    kind: "dxf",
+    hint: "Translucent setback envelope volume (DXF).",
+  },
+  {
+    value: "buildable-envelope",
+    label: "Buildable envelope",
+    kind: "dxf",
+    hint: "Allowable building volume (DXF).",
+  },
+  {
+    value: "floodplain",
+    label: "Floodplain",
+    kind: "dxf",
+    hint: "FEMA floodplain volume (DXF).",
+  },
+  {
+    value: "wetland",
+    label: "Wetland",
+    kind: "dxf",
+    hint: "Wetland boundary volume (DXF).",
+  },
+  {
+    value: "neighbor-mass",
+    label: "Neighboring mass",
+    kind: "dxf",
+    hint: "Neighboring building mass (DXF).",
   },
 ];
 
 const OTHER_OPTION_VALUE = "__other__";
 const LAYER_KIND_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/;
+
+/** Allowed file extensions per upload kind. The picker rejects
+ * mismatched files in the client so a wrong extension doesn't
+ * round-trip to the server's 400. The lists are intentionally
+ * permissive — a `.geojson.txt` is still a GeoJSON in spirit, but
+ * the route's content-type check is the authoritative gate. */
+const ALLOWED_EXTENSIONS: Record<"qgis" | "dxf", readonly string[]> = {
+  qgis: [".geojson", ".json", ".shp", ".kml", ".gpkg", ".zip"],
+  dxf: [".dxf"],
+};
+
+function fileExtension(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i >= 0 ? name.slice(i).toLowerCase() : "";
+}
 
 export interface BriefingSourceUploadModalProps {
   engagementId: string;
@@ -131,6 +202,17 @@ export function BriefingSourceUploadModal({
       ? form.customLayerKind.trim().toLowerCase()
       : form.layerKindChoice;
 
+  // Picker selection drives the upload modality: any of the curated
+  // 3D-geometry rows resolves to `dxf`, everything else (curated
+  // QGIS rows + the free-text `OTHER` slug) resolves to `qgis`. The
+  // route enforces the same pairing server-side, so a mismatch here
+  // fails closed.
+  const selectedOption = LAYER_KIND_OPTIONS.find(
+    (o) => o.value === form.layerKindChoice,
+  );
+  const resolvedUploadKind: "qgis" | "dxf" =
+    selectedOption?.kind === "dxf" ? "dxf" : "qgis";
+
   const willSupersede =
     resolvedLayerKind.length > 0 &&
     existingLayerKinds.includes(resolvedLayerKind);
@@ -156,6 +238,21 @@ export function BriefingSourceUploadModal({
     ) {
       setError(
         "Layer slug must be lowercase letters / digits / dashes (e.g. qgis-zoning).",
+      );
+      return;
+    }
+    // Client-side extension check. The server accepts content-type
+    // strings (not extensions) so this is a UX guardrail, not a
+    // security boundary — its job is to catch a `.dxf` accidentally
+    // landing on the QGIS branch (or vice versa) before bytes hit the
+    // network.
+    const ext = fileExtension(form.file.name);
+    const allowed = ALLOWED_EXTENSIONS[resolvedUploadKind];
+    if (ext && !allowed.includes(ext)) {
+      setError(
+        resolvedUploadKind === "dxf"
+          ? `3D-geometry layers expect a DXF file (.dxf); picked ${ext}.`
+          : `2D-overlay layers expect a vector file (${allowed.join(", ")}); picked ${ext}.`,
       );
       return;
     }
@@ -191,6 +288,7 @@ export function BriefingSourceUploadModal({
           snapshotDate: snapshotDate ?? null,
           note: trimmedNote.length > 0 ? trimmedNote : null,
           upload: {
+            kind: resolvedUploadKind,
             objectPath: uploadResponse.objectPath,
             originalFilename: form.file.name,
             contentType: form.file.type || "application/octet-stream",
@@ -241,12 +339,12 @@ export function BriefingSourceUploadModal({
                 color: "var(--text-primary)",
               }}
             >
-              Upload QGIS layer
+              Upload site context source
             </span>
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              Manually-exported overlays attach to this engagement's parcel
-              briefing. Re-uploading the same layer kind supersedes the prior
-              source.
+              Manually-exported QGIS overlays (2D) and DXF site geometry (3D)
+              attach to this engagement's parcel briefing. Re-uploading the
+              same layer kind supersedes the prior source.
             </span>
           </div>
         </div>
@@ -272,12 +370,25 @@ export function BriefingSourceUploadModal({
                 }))
               }
             >
-              {LAYER_KIND_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-              <option value={OTHER_OPTION_VALUE}>Other (custom slug)</option>
+              <optgroup label="2D overlays (QGIS)">
+                {LAYER_KIND_OPTIONS.filter((o) => o.kind === "qgis").map(
+                  (opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ),
+                )}
+                <option value={OTHER_OPTION_VALUE}>Other (custom slug)</option>
+              </optgroup>
+              <optgroup label="3D geometry (DXF)">
+                {LAYER_KIND_OPTIONS.filter((o) => o.kind === "dxf").map(
+                  (opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ),
+                )}
+              </optgroup>
             </select>
             {form.layerKindChoice !== OTHER_OPTION_VALUE && (
               <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
@@ -326,6 +437,10 @@ export function BriefingSourceUploadModal({
               type="file"
               className="sc-input"
               disabled={submitting}
+              // `accept` is a UX nudge — the file picker still allows
+              // overriding via "All files". The submit-time extension
+              // check is the actual enforcement.
+              accept={ALLOWED_EXTENSIONS[resolvedUploadKind].join(",")}
               onChange={handleFileChange}
             />
             {form.file && (

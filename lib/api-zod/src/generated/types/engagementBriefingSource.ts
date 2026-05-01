@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { BriefingSourceConversionStatus } from "./briefingSourceConversionStatus";
 import type { BriefingSourceKind } from "./briefingSourceKind";
 
 /**
@@ -26,6 +27,31 @@ export interface EngagementBriefingSource {
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;
   uploadByteSize: number | null;
+  /** DA-MV-1 — canonical `/objects/<id>` pointer of the original
+DXF when the row took the DXF→glb branch. Mirrors
+`uploadObjectPath` for the DXF case; null on the QGIS branch
+and on adapter rows. The viewer never reads this directly —
+it is the input the converter retry route re-runs against.
+ */
+  dxfObjectPath: string | null;
+  /** DA-MV-1 — canonical `/objects/<id>` pointer of the converted
+glb when conversion has succeeded (`conversionStatus =
+ready`). The viewer fetches the bytes via
+`GET /briefing-sources/{id}/glb` rather than this path
+directly so the response can carry the right
+`Content-Type` + caching headers.
+ */
+  glbObjectPath: string | null;
+  /** DA-MV-1 — DXF→glb conversion lifecycle marker. Null on QGIS
+and adapter rows; populated on the DXF branch.
+ */
+  conversionStatus: BriefingSourceConversionStatus | null;
+  /** DA-MV-1 — short human-readable error blurb stamped when
+conversion fails. Surfaced verbatim in the per-source
+status pill so the architect can decide whether to retry
+or re-export the DXF. Null on success and on non-DXF rows.
+ */
+  conversionError: string | null;
   /** Stamped when the row is no longer the current source for its
 `(briefing_id, layer_kind)` slot — null while the row is
 current. Surfaced on the wire so the history view can
