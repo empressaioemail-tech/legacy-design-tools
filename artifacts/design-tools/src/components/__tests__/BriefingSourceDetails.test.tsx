@@ -297,6 +297,45 @@ describe("BriefingSourceDetails", () => {
     expect(screen.getByText("432 ft")).toBeInTheDocument();
   });
 
+  it("renders the snapshot date + provider footer beneath a federal flood-zone summary (Task #209)", () => {
+    setbackHook.state = {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+    render(
+      <BriefingSourceDetails
+        source={mkSource({
+          id: "src-fema-prov",
+          layerKind: "fema-nfhl-flood-zone",
+          sourceKind: "federal-adapter",
+          provider: "FEMA National Flood Hazard Layer (NFHL)",
+          // Stamped at noon UTC so toLocaleDateString lands on the
+          // same calendar day in every test runner timezone.
+          snapshotDate: "2026-03-15T12:00:00.000Z",
+          payload: {
+            kind: "flood-zone",
+            inSpecialFloodHazardArea: true,
+            floodZone: "AE",
+            features: [{ attributes: { FLD_ZONE: "AE" } }],
+          },
+        })}
+      />,
+    );
+    const footer = screen.getByTestId(
+      "briefing-source-federal-provenance-src-fema-prov",
+    );
+    // The footer reuses the same `formatSnapshotDate` helper the
+    // federal-summary markdown digest uses (Task #210), which slices
+    // the ISO snapshot to its `YYYY-MM-DD` head — timezone-stable
+    // across runners.
+    expect(footer).toHaveTextContent("as of 2026-03-15");
+    expect(footer).toHaveTextContent(
+      "source: FEMA National Flood Hazard Layer (NFHL)",
+    );
+  });
+
   it("renders the FEMA flood-zone graceful empty hint when the parcel is unmapped", () => {
     setbackHook.state = {
       data: undefined,

@@ -291,12 +291,19 @@ function KindBody({ source }: { source: EngagementBriefingSource }) {
 }
 
 /**
- * Wraps a federal-adapter summary so the architect can copy a one-line
- * markdown digest of it ("Zone AE, in SFHA, BFE 432 ft") into the
- * engagement chat or an external review note. The wrapper renders the
- * summary body and a "Copy summary" button; if the formatter cannot
- * build a meaningful one-liner for this payload, the button is
- * suppressed so we never copy an empty string.
+ * Wraps a federal-adapter summary block so auditors can both:
+ *   - read a small "as of <snapshot date> · source: <provider>" footer
+ *     beneath the summary, to see at a glance how fresh the value is
+ *     and which dataset version it came from (Task #209), and
+ *   - copy a one-line markdown digest of the summary ("Zone AE, in
+ *     SFHA, BFE 432 ft") into the engagement chat or an external
+ *     review note via a "Copy summary" button.
+ *
+ * The provenance footer is suppressed when both `snapshotDate` and
+ * `provider` are absent (older rows persisted before the adapters
+ * started stamping these fields), and the copy button is suppressed
+ * when the formatter cannot build a meaningful one-liner for this
+ * payload, so neither affordance ever renders empty.
  */
 function FederalSummaryGroup({
   source,
@@ -308,6 +315,7 @@ function FederalSummaryGroup({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {children}
+      <FederalProvenanceFooter source={source} />
       <CopySummaryButton source={source} />
     </div>
   );
@@ -359,6 +367,43 @@ function CopySummaryButton({ source }: { source: EngagementBriefingSource }) {
     >
       {label}
     </button>
+  );
+}
+
+function FederalProvenanceFooter({
+  source,
+}: {
+  source: EngagementBriefingSource;
+}) {
+  // Reuse the same `formatSnapshotDate` helper the federal-summary
+  // markdown digest uses (Task #210) so the YYYY-MM-DD value the
+  // footer shows is byte-identical to the one the architect copies
+  // out into a code-review note. The generated client types
+  // `snapshotDate` as `Date` but the wire shape is an ISO string.
+  const snapshot = formatSnapshotDate(
+    source.snapshotDate as unknown as string | null | undefined,
+  );
+  const provider =
+    typeof source.provider === "string" && source.provider.trim().length > 0
+      ? source.provider.trim()
+      : null;
+  if (!snapshot && !provider) return null;
+  return (
+    <div
+      data-testid={`briefing-source-federal-provenance-${source.id}`}
+      style={{
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        fontSize: 11,
+        color: "var(--text-muted)",
+        marginTop: 2,
+      }}
+    >
+      {snapshot && <span>as of {snapshot}</span>}
+      {snapshot && provider && <span aria-hidden="true">·</span>}
+      {provider && <span>source: {provider}</span>}
+    </div>
   );
 }
 
