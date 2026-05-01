@@ -157,6 +157,18 @@ CREATE TABLE @@SCHEMA@@.snapshots (
 );
 
 
+-- Name: users; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.users (
+    id text NOT NULL,
+    display_name text NOT NULL,
+    email text,
+    avatar_url text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: atom_events atom_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.atom_events
@@ -215,6 +227,12 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_pkey PRIMARY KEY (id);
+
+
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
 
 
 -- Name: atom_events_chain_hash_uniq; Type: INDEX; Schema: public; Owner: -

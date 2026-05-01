@@ -609,9 +609,27 @@ export const GetSnapshotSheetHistoryResponse = zod
                   .object({
                     kind: zod.enum(["user", "agent", "system"]),
                     id: zod.string(),
+                    displayName: zod
+                      .string()
+                      .optional()
+                      .describe(
+                        "Hydrated profile display name. Only set for `kind: user` actors with a matching `users` row.",
+                      ),
+                    email: zod
+                      .string()
+                      .optional()
+                      .describe(
+                        "Hydrated profile email. Only set for `kind: user` actors when present on the profile.",
+                      ),
+                    avatarUrl: zod
+                      .string()
+                      .optional()
+                      .describe(
+                        "Hydrated profile avatar URL. Only set for `kind: user` actors when present on the profile.",
+                      ),
                   })
                   .describe(
-                    "Identity of the actor that produced an event. Mirrors the\n`EventActor` type in `@workspace\/empressa-atom`. `id` is opaque\nto the framework; producers (e.g. snapshot ingest) choose the\nidentity scheme.\n",
+                    'Identity of the actor that produced an event. Mirrors the\n`EventActor` type in `@workspace\/empressa-atom`. `id` is opaque\nto the framework; producers (e.g. snapshot ingest) choose the\nidentity scheme.\n\nFor `kind: user` actors the server hydrates the optional\n`displayName` (and, when available, `email` \/ `avatarUrl`) from\nthe `users` profile table so timeline UIs can render\n\"Jane Doe changed the address\" instead of \"user:u_abc123 …\".\nThese fields are absent when:\n  - the actor kind is `agent` or `system` (those carry their\n    own stable code-side label in `id`); or\n  - the user-id has no matching profile row (deleted account,\n    ad-hoc dev id, etc.) — UIs should fall back to \"Unknown\n    user\" in that case.\n',
                   ),
                 occurredAt: zod.coerce.date(),
                 recordedAt: zod.coerce.date(),
@@ -1107,9 +1125,27 @@ export const GetAtomHistoryResponse = zod.object({
           .object({
             kind: zod.enum(["user", "agent", "system"]),
             id: zod.string(),
+            displayName: zod
+              .string()
+              .optional()
+              .describe(
+                "Hydrated profile display name. Only set for `kind: user` actors with a matching `users` row.",
+              ),
+            email: zod
+              .string()
+              .optional()
+              .describe(
+                "Hydrated profile email. Only set for `kind: user` actors when present on the profile.",
+              ),
+            avatarUrl: zod
+              .string()
+              .optional()
+              .describe(
+                "Hydrated profile avatar URL. Only set for `kind: user` actors when present on the profile.",
+              ),
           })
           .describe(
-            "Identity of the actor that produced an event. Mirrors the\n`EventActor` type in `@workspace\/empressa-atom`. `id` is opaque\nto the framework; producers (e.g. snapshot ingest) choose the\nidentity scheme.\n",
+            'Identity of the actor that produced an event. Mirrors the\n`EventActor` type in `@workspace\/empressa-atom`. `id` is opaque\nto the framework; producers (e.g. snapshot ingest) choose the\nidentity scheme.\n\nFor `kind: user` actors the server hydrates the optional\n`displayName` (and, when available, `email` \/ `avatarUrl`) from\nthe `users` profile table so timeline UIs can render\n\"Jane Doe changed the address\" instead of \"user:u_abc123 …\".\nThese fields are absent when:\n  - the actor kind is `agent` or `system` (those carry their\n    own stable code-side label in `id`); or\n  - the user-id has no matching profile row (deleted account,\n    ad-hoc dev id, etc.) — UIs should fall back to \"Unknown\n    user\" in that case.\n',
           ),
         occurredAt: zod.coerce.date(),
         recordedAt: zod.coerce.date(),

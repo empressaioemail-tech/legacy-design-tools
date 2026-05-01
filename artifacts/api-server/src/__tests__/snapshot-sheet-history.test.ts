@@ -33,7 +33,7 @@ vi.mock("@workspace/db", async () => {
 });
 
 const { setupRouteTests } = await import("./setup");
-const { engagements, snapshots, sheets } = await import("@workspace/db");
+const { engagements, snapshots, sheets, users } = await import("@workspace/db");
 const { resetAtomRegistryForTests, getHistoryService } = await import(
   "../atoms/registry"
 );
@@ -271,6 +271,71 @@ describe("GET /api/snapshots/:id/sheet-history", () => {
       .query({ limit: "not-a-number" });
     expect(res.status).toBe(200);
     expect(res.body.histories).toHaveLength(1);
+  });
+
+  it("hydrates user-kind actors across the flattened batch in a single lookup", async () => {
+    // Two sheets, both with a user actor that points at the same profile —
+    // proves the batched WHERE id IN (...) covers events grouped under
+    // different sheetIds, not just events for one sheet.
+    const seed = await seedSnapshotWithSheets(2, "hydrate");
+    const [sheetA, sheetB] = seed.sheetIds;
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values([
+      { id: "u-known", displayName: "Jane Doe", email: null, avatarUrl: null },
+    ]);
+    const history = getHistoryService();
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetA,
+      eventType: "sheet.updated",
+      actor: { kind: "user", id: "u-known" },
+      payload: {},
+      occurredAt: new Date("2026-05-01T10:00:00Z"),
+    });
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetB,
+      eventType: "sheet.updated",
+      actor: { kind: "user", id: "u-ghost" },
+      payload: {},
+      occurredAt: new Date("2026-05-02T10:00:00Z"),
+    });
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetB,
+      eventType: "sheet.created",
+      actor: { kind: "system", id: "test" },
+      payload: {},
+      occurredAt: new Date("2026-05-01T09:00:00Z"),
+    });
+
+    const res = await request(getApp()).get(
+      `/api/snapshots/${seed.snapshotId}/sheet-history`,
+    );
+    expect(res.status).toBe(200);
+    const byId = new Map<
+      string,
+      Array<{ actor: { kind: string; id: string; displayName?: string } }>
+    >(
+      (
+        res.body.histories as Array<{
+          sheetId: string;
+          events: Array<{
+            actor: { kind: string; id: string; displayName?: string };
+          }>;
+        }>
+      ).map((h) => [h.sheetId, h.events]),
+    );
+    expect(byId.get(sheetA)![0].actor).toEqual({
+      kind: "user",
+      id: "u-known",
+      displayName: "Jane Doe",
+    });
+    const bEvents = byId.get(sheetB)!;
+    // Newest first: u-ghost (unknown) then system. Unknown user → no
+    // displayName field; system actor unchanged.
+    expect(bEvents[0].actor).toEqual({ kind: "user", id: "u-ghost" });
+    expect(bEvents[1].actor).toEqual({ kind: "system", id: "test" });
   });
 
   it("404s when the snapshot id is unknown", async () => {

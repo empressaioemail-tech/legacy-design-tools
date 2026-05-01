@@ -1640,6 +1640,17 @@ components:
         `EventActor` type in `@workspace/empressa-atom`. `id` is opaque
         to the framework; producers (e.g. snapshot ingest) choose the
         identity scheme.
+
+        For `kind: user` actors the server hydrates the optional
+        `displayName` (and, when available, `email` / `avatarUrl`) from
+        the `users` profile table so timeline UIs can render
+        "Jane Doe changed the address" instead of "user:u_abc123 …".
+        These fields are absent when:
+          - the actor kind is `agent` or `system` (those carry their
+            own stable code-side label in `id`); or
+          - the user-id has no matching profile row (deleted account,
+            ad-hoc dev id, etc.) — UIs should fall back to "Unknown
+            user" in that case.
       type: object
       properties:
         kind:
@@ -1647,6 +1658,15 @@ components:
           enum: [user, agent, system]
         id:
           type: string
+        displayName:
+          type: string
+          description: "Hydrated profile display name. Only set for `kind: user` actors with a matching `users` row."
+        email:
+          type: string
+          description: "Hydrated profile email. Only set for `kind: user` actors when present on the profile."
+        avatarUrl:
+          type: string
+          description: "Hydrated profile avatar URL. Only set for `kind: user` actors when present on the profile."
       required:
         - kind
         - id

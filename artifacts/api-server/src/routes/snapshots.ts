@@ -32,6 +32,7 @@ import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { getHistoryService } from "../atoms/registry";
 import type { EngagementEventType } from "../atoms/engagement.atom";
 import { emitEngagementJurisdictionResolvedEvent } from "../lib/engagementEvents";
+import { hydrateActors, type HydratedActor } from "../lib/userLookup";
 
 /**
  * Engagement event-type literals used by the producers in this file.
@@ -808,28 +809,47 @@ router.get(
           ORDER BY entity_id, occurred_at DESC, recorded_at DESC, event_id DESC
       `);
 
+      // Hydrate user-kind actors with display-name metadata in one
+      // batched lookup across the whole flattened result set, so the
+      // FE renders "Jane Doe" instead of "user:u_abc123" without any
+      // per-sheet round-trip. Best-effort: if the lookup throws (e.g.
+      // transient DB hiccup against the `users` table) we fall back
+      // to the raw actors — same posture as the per-atom history
+      // endpoint, since an audit-trail UI is more useful with ugly
+      // labels than with a 500.
+      const rawActors = result.rows.map((r) => r.actor);
+      let hydrated = rawActors;
+      try {
+        hydrated = await hydrateActors(rawActors);
+      } catch (err) {
+        logger.warn(
+          { err, id: params.data.id },
+          "snapshot sheet-history: actor hydration failed, returning raw actors",
+        );
+      }
+
       const eventsBySheet = new Map<
         string,
         Array<{
           id: string;
           eventType: string;
-          actor: { kind: string; id: string };
+          actor: HydratedActor;
           occurredAt: string;
           recordedAt: string;
         }>
       >();
       for (const id of sheetIds) eventsBySheet.set(id, []);
-      for (const row of result.rows) {
+      result.rows.forEach((row, i) => {
         const list = eventsBySheet.get(row.entity_id);
-        if (!list) continue;
+        if (!list) return;
         list.push({
           id: row.event_id,
           eventType: row.event_type,
-          actor: row.actor,
+          actor: hydrated[i] ?? row.actor,
           occurredAt: new Date(row.occurred_at).toISOString(),
           recordedAt: new Date(row.recorded_at).toISOString(),
         });
-      }
+      });
 
       res.json({
         histories: sheetIds.map((id) => ({

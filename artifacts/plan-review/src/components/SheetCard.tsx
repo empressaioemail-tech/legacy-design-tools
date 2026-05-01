@@ -1,6 +1,7 @@
 import {
   getGetAtomSummaryQueryKey,
   useGetAtomSummary,
+  type AtomEventActor,
   type AtomHistoryEvent,
   type AtomSummary,
   type SheetSummary,
@@ -358,9 +359,7 @@ function TimelineRow({ event }: { event: AtomHistoryEvent }) {
               <strong>{event.eventType}</strong>
             </div>
             <div style={{ marginTop: 2 }}>{absolute}</div>
-            <div style={{ marginTop: 2 }}>
-              by {event.actor.kind}:{event.actor.id}
-            </div>
+            <div style={{ marginTop: 2 }}>by {actorLabel(event.actor)}</div>
           </div>
         </TooltipContent>
       </Tooltip>
@@ -403,10 +402,27 @@ function ExpandedTimelineRow({ event }: { event: AtomHistoryEvent }) {
         </span>
       </div>
       <div style={{ color: "var(--text-secondary)", fontSize: 10 }}>
-        by {event.actor.kind}:{event.actor.id}
+        by {actorLabel(event.actor)}
       </div>
     </div>
   );
+}
+
+/**
+ * Render an actor for a timeline row. The history endpoints hydrate
+ * `kind: "user"` actors with a `displayName` from the `users` profile
+ * table; if the lookup didn't find a row (deleted user, ad-hoc dev id,
+ * etc.) we degrade to "Unknown user" rather than leaking a raw id.
+ *
+ * Non-user kinds (`agent`, `system`) keep the historical `kind:id`
+ * format because those identifiers are stable code-side labels and
+ * useful when triaging events.
+ */
+function actorLabel(actor: AtomEventActor): string {
+  if (actor.kind === "user") {
+    return actor.displayName ?? "Unknown user";
+  }
+  return `${actor.kind}:${actor.id}`;
 }
 
 function prettyEventType(type: string): string {

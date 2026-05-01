@@ -380,10 +380,27 @@ export const AtomEventActorKind = {
 to the framework; producers (e.g. snapshot ingest) choose the
 identity scheme.
 
+For `kind: user` actors the server hydrates the optional
+`displayName` (and, when available, `email` / `avatarUrl`) from
+the `users` profile table so timeline UIs can render
+"Jane Doe changed the address" instead of "user:u_abc123 …".
+These fields are absent when:
+  - the actor kind is `agent` or `system` (those carry their
+    own stable code-side label in `id`); or
+  - the user-id has no matching profile row (deleted account,
+    ad-hoc dev id, etc.) — UIs should fall back to "Unknown
+    user" in that case.
+
  */
 export interface AtomEventActor {
   kind: AtomEventActorKind;
   id: string;
+  /** Hydrated profile display name. Only set for `kind: user` actors with a matching `users` row. */
+  displayName?: string;
+  /** Hydrated profile email. Only set for `kind: user` actors when present on the profile. */
+  email?: string;
+  /** Hydrated profile avatar URL. Only set for `kind: user` actors when present on the profile. */
+  avatarUrl?: string;
 }
 
 /**

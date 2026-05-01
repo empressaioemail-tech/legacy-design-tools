@@ -6,3 +6,4 @@ export * from "./codeAtoms";
 export * from "./codeAtomFetchQueue";
 export * from "./findingsCodeAtoms";
 export * from "./atomEvents";
+export * from "./users";

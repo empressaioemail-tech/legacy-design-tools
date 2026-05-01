@@ -45,6 +45,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // here, so we must reset it between tests to keep chain assertions
   // independent.
   "atom_events",
+  // `users` is the profile-lookup table the actor-hydration helper
+  // reads through. Tests that seed display names via this table need
+  // it reset between cases so the rows do not leak across `it`s.
+  "users",
 ];
 
 /**

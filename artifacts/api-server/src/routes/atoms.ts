@@ -20,6 +20,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { defaultScope, type Scope } from "@workspace/empressa-atom";
 import { getAtomRegistry, getHistoryService } from "../atoms/registry";
+import { hydrateActors } from "../lib/userLookup";
 import { logger } from "../lib/logger";
 
 /** Default and hard cap for the history endpoint's page size. Mirrors the
@@ -178,14 +179,31 @@ router.get(
         { kind: "atom", entityType: slug, entityId: id },
         { limit, reverse: true },
       );
+      // Hydrate user actors with display-name metadata from the
+      // `users` profile table so timeline UIs can render
+      // "Jane Doe changed the address" instead of "user:u_abc123 …".
+      // Best-effort: if the lookup throws (transient DB hiccup) fall
+      // back to the raw actors so the timeline still renders — the
+      // raw `kind:id` label is uglier but accurate, which is better
+      // than a 500 from an audit-trail endpoint.
+      const rawActors = events.map((e) => e.actor);
+      let hydrated = rawActors;
+      try {
+        hydrated = await hydrateActors(rawActors);
+      } catch (err) {
+        logger.warn(
+          { err, slug, id },
+          "atoms history: actor hydration failed, returning raw actors",
+        );
+      }
       // Strip chain hashes — they're an implementation detail of the
       // anchoring service and not part of the public contract. Keep
       // ISO strings for the timestamp fields per the OpenAPI schema.
       res.json({
-        events: events.map((e) => ({
+        events: events.map((e, i) => ({
           id: e.id,
           eventType: e.eventType,
-          actor: e.actor,
+          actor: hydrated[i] ?? e.actor,
           occurredAt: e.occurredAt.toISOString(),
           recordedAt: e.recordedAt.toISOString(),
         })),

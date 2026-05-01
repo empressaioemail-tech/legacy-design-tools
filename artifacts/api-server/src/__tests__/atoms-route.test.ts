@@ -34,7 +34,7 @@ vi.mock("@workspace/db", async () => {
 });
 
 const { setupRouteTests } = await import("./setup");
-const { engagements, snapshots, sheets } = await import("@workspace/db");
+const { engagements, snapshots, sheets, users } = await import("@workspace/db");
 const { resetAtomRegistryForTests, getHistoryService } = await import(
   "../atoms/registry"
 );
@@ -314,6 +314,101 @@ describe("GET /api/atoms/:slug/:id/history", () => {
     expect(res.body).toEqual({
       error: "atom_type_not_registered",
       slug: "no-such-atom",
+    });
+  });
+
+  it("hydrates user-kind actors with displayName from the users table; agent/system actors pass through; unknown user ids degrade to no displayName", async () => {
+    const { sheetId } = await seedSheet();
+    if (!ctx.schema) throw new Error("schema not ready");
+    // Two known profiles: u-known (Jane Doe) and u-no-email (no email/avatar).
+    // A third event uses u-ghost which has no row — must come back without
+    // a displayName so the FE can render "Unknown user".
+    await ctx.schema.db.insert(users).values([
+      {
+        id: "u-known",
+        displayName: "Jane Doe",
+        email: "jane@example.com",
+        avatarUrl: "https://example.com/jane.png",
+      },
+      { id: "u-no-email", displayName: "Sam Author", email: null, avatarUrl: null },
+    ]);
+
+    const history = getHistoryService();
+    const t0 = new Date("2026-04-01T10:00:00Z");
+    const t1 = new Date("2026-04-02T10:00:00Z");
+    const t2 = new Date("2026-04-03T10:00:00Z");
+    const t3 = new Date("2026-04-04T10:00:00Z");
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetId,
+      eventType: "sheet.created",
+      actor: { kind: "system", id: "test" },
+      payload: {},
+      occurredAt: t0,
+    });
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetId,
+      eventType: "sheet.updated",
+      actor: { kind: "user", id: "u-known" },
+      payload: { revision: 1 },
+      occurredAt: t1,
+    });
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetId,
+      eventType: "sheet.updated",
+      actor: { kind: "user", id: "u-no-email" },
+      payload: { revision: 2 },
+      occurredAt: t2,
+    });
+    await history.appendEvent({
+      entityType: "sheet",
+      entityId: sheetId,
+      eventType: "sheet.updated",
+      actor: { kind: "user", id: "u-ghost" },
+      payload: { revision: 3 },
+      occurredAt: t3,
+    });
+
+    const res = await request(getApp()).get(
+      `/api/atoms/sheet/${sheetId}/history`,
+    );
+    expect(res.status).toBe(200);
+    const events = res.body.events as Array<{
+      occurredAt: string;
+      actor: {
+        kind: string;
+        id: string;
+        displayName?: string;
+        email?: string;
+        avatarUrl?: string;
+      };
+    }>;
+    const byOccurred = new Map(events.map((e) => [e.occurredAt, e.actor]));
+    // Known profile gets displayName + email + avatarUrl.
+    expect(byOccurred.get(t1.toISOString())).toEqual({
+      kind: "user",
+      id: "u-known",
+      displayName: "Jane Doe",
+      email: "jane@example.com",
+      avatarUrl: "https://example.com/jane.png",
+    });
+    // Profile present but email/avatar nullable → only displayName surfaces.
+    expect(byOccurred.get(t2.toISOString())).toEqual({
+      kind: "user",
+      id: "u-no-email",
+      displayName: "Sam Author",
+    });
+    // Unknown user id → actor returned as-is (no displayName field).
+    expect(byOccurred.get(t3.toISOString())).toEqual({
+      kind: "user",
+      id: "u-ghost",
+    });
+    // Non-user actor unchanged.
+    expect(byOccurred.get(t0.toISOString())).toEqual({
+      kind: "system",
+      id: "test",
     });
   });
 
