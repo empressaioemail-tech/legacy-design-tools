@@ -16,6 +16,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  FEDERAL_PILOT_LAYER_KINDS,
+  PILOT_JURISDICTION_COVERAGE,
   PILOT_JURISDICTIONS,
   PILOT_LOCAL_KEYS,
   PILOT_STATE_KEYS,
@@ -75,5 +77,137 @@ describe("pilot jurisdictions", () => {
     expect(stateByLocal["bastrop-tx"]).toBe("texas");
     expect(stateByLocal["grand-county-ut"]).toBe("utah");
     expect(stateByLocal["lemhi-county-id"]).toBe("idaho");
+  });
+
+  /**
+   * Task #253 — per-jurisdiction coverage. The Site Context tab's
+   * supported-jurisdictions disclosure renders {@link
+   * PILOT_JURISDICTION_COVERAGE} so an architect can see *what*
+   * Generate Layers will fetch for each pilot jurisdiction inline,
+   * without having to click through and read the per-adapter outcome
+   * panel. The contract these assertions pin is:
+   *
+   *   - the coverage list is exhaustive on `PILOT_JURISDICTIONS` and
+   *     stays in the same display order;
+   *   - each row's `layers` set matches *exactly* the adapters whose
+   *     `jurisdictionGate` selects that jurisdiction's local key (or
+   *     the state implied by it) — so adding a new state/local
+   *     adapter to `ALL_ADAPTERS` automatically extends the visible
+   *     coverage with no FE change required;
+   *   - federal-tier adapters are deliberately excluded from the
+   *     per-jurisdiction list (they ungate and live in
+   *     {@link FEDERAL_PILOT_LAYER_KINDS} as the always-on header).
+   */
+  describe("PILOT_JURISDICTION_COVERAGE", () => {
+    it("covers every pilot jurisdiction in the same display order", () => {
+      expect(PILOT_JURISDICTION_COVERAGE.map((c) => c.localKey)).toEqual(
+        PILOT_JURISDICTIONS.map((j) => j.localKey),
+      );
+      for (const cov of PILOT_JURISDICTION_COVERAGE) {
+        const j = PILOT_JURISDICTIONS.find((x) => x.localKey === cov.localKey)!;
+        expect(cov.label).toBe(j.label);
+        expect(cov.shortLabel).toBe(j.shortLabel);
+        expect(cov.stateKey).toBe(j.stateKey);
+      }
+    });
+
+    it("matches the adapters whose jurisdictionGate selects each jurisdiction", () => {
+      for (const cov of PILOT_JURISDICTION_COVERAGE) {
+        const expected = ALL_ADAPTERS.filter((a) => {
+          if (a.tier === "state")
+            return a.jurisdictionGate.state === cov.stateKey;
+          if (a.tier === "local")
+            return a.jurisdictionGate.local === cov.localKey;
+          return false;
+        }).map((a) => a.adapterKey);
+        expect(cov.layers.map((l) => l.adapterKey)).toEqual(expected);
+      }
+    });
+
+    it("ships at least one layer per pilot jurisdiction (no empty buckets)", () => {
+      for (const cov of PILOT_JURISDICTION_COVERAGE) {
+        expect(
+          cov.layers.length,
+          `pilot jurisdiction "${cov.localKey}" has no adapter coverage`,
+        ).toBeGreaterThan(0);
+      }
+    });
+
+    it("only enumerates state-tier and local-tier adapters (federal lives elsewhere)", () => {
+      for (const cov of PILOT_JURISDICTION_COVERAGE) {
+        for (const layer of cov.layers) {
+          expect(["state", "local"]).toContain(layer.tier);
+        }
+      }
+    });
+
+    it("renders the DA-PI-4 layer kinds architects expect for each jurisdiction", () => {
+      const byKey = Object.fromEntries(
+        PILOT_JURISDICTION_COVERAGE.map((c) => [
+          c.localKey,
+          c.layers.map((l) => l.layerKind),
+        ]),
+      );
+      // Bastrop, TX → Texas Edwards Aquifer (state) + Bastrop County
+      // parcels / zoning / floodplain (local).
+      expect(byKey["bastrop-tx"]).toEqual(
+        expect.arrayContaining([
+          "tceq-edwards-aquifer",
+          "bastrop-tx-parcels",
+          "bastrop-tx-zoning",
+          "bastrop-tx-floodplain",
+        ]),
+      );
+      // Moab, UT → UGRC DEM / parcels / address points (state) +
+      // Grand County parcels / zoning / roads (local).
+      expect(byKey["grand-county-ut"]).toEqual(
+        expect.arrayContaining([
+          "ugrc-dem",
+          "ugrc-parcels",
+          "ugrc-address-points",
+          "grand-county-ut-parcels",
+          "grand-county-ut-zoning",
+          "grand-county-ut-roads",
+        ]),
+      );
+      // Salmon, ID → INSIDE Idaho DEM + parcels (state) + Lemhi
+      // County parcels / zoning / roads (local).
+      expect(byKey["lemhi-county-id"]).toEqual(
+        expect.arrayContaining([
+          "inside-idaho-dem",
+          "inside-idaho-parcels",
+          "lemhi-county-id-parcels",
+          "lemhi-county-id-zoning",
+          "lemhi-county-id-roads",
+        ]),
+      );
+    });
+  });
+
+  describe("FEDERAL_PILOT_LAYER_KINDS", () => {
+    it("derives from every ungated federal-tier adapter", () => {
+      const expected = ALL_ADAPTERS.filter(
+        (a) =>
+          a.tier === "federal" &&
+          !a.jurisdictionGate.state &&
+          !a.jurisdictionGate.local,
+      ).map((a) => a.layerKind);
+      expect([...FEDERAL_PILOT_LAYER_KINDS]).toEqual(expected);
+    });
+
+    it("includes the four DA-PI-2 federal adapters today", () => {
+      expect(FEDERAL_PILOT_LAYER_KINDS.length).toBeGreaterThan(0);
+      // Sanity that the well-known federal layer kinds are surfaced
+      // — a regression that drops one of these would break this
+      // assertion instead of silently shrinking the disclosure.
+      expect(FEDERAL_PILOT_LAYER_KINDS).toEqual(
+        expect.arrayContaining([
+          "fema-nfhl-flood-zone",
+          "usgs-ned-elevation",
+          "epa-ejscreen-blockgroup",
+          "fcc-broadband-availability",
+        ]),
+      );
+    });
   });
 });

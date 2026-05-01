@@ -52,6 +52,8 @@ import {
   summarizeLocalPayload,
 } from "@workspace/adapters/local/summaries";
 import {
+  FEDERAL_PILOT_LAYER_KINDS,
+  PILOT_JURISDICTION_COVERAGE,
   PILOT_JURISDICTIONS,
   filterApplicableAdapters,
   noApplicableAdaptersMessage,
@@ -3315,17 +3317,75 @@ function SiteContextTab({
         >
           Supported jurisdictions ({PILOT_JURISDICTIONS.length})
         </summary>
+        {/*
+          Task #253 — surface what Generate Layers will *fetch* for each
+          pilot jurisdiction, not just the jurisdiction names. An
+          architect scoping a Bastrop project should not have to click
+          Generate Layers and read the per-adapter outcome panel to
+          discover the run produces "state parcels + county zoning +
+          floodplain". The per-jurisdiction breakdown is derived from
+          {@link PILOT_JURISDICTION_COVERAGE} so adding a new state or
+          local adapter to `ALL_ADAPTERS` automatically extends the
+          visible coverage with no FE change required.
+
+          Federal adapters ungate (they fire for every jurisdiction)
+          so they're surfaced once via {@link FEDERAL_PILOT_LAYER_KINDS}
+          rather than repeated under every row, keeping the
+          per-jurisdiction view focused on what actually varies.
+        */}
         <div
           data-testid="generate-layers-supported-jurisdictions-list"
           style={{
             marginTop: 6,
             color: "var(--text-secondary)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
           }}
         >
-          Generate Layers currently runs against:{" "}
-          {PILOT_JURISDICTIONS.map((j) => j.label).join(" • ")}. Projects
-          outside this set need a manual QGIS overlay upload to seed the
-          briefing.
+          <div>
+            Generate Layers currently runs against:{" "}
+            {PILOT_JURISDICTIONS.map((j) => j.label).join(" • ")}. Projects
+            outside this set need a manual QGIS overlay upload to seed the
+            briefing.
+          </div>
+          {FEDERAL_PILOT_LAYER_KINDS.length > 0 && (
+            <div
+              data-testid="generate-layers-supported-jurisdictions-federal"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <span style={{ fontWeight: 600 }}>
+                Always-on federal layers:
+              </span>{" "}
+              {FEDERAL_PILOT_LAYER_KINDS.join(", ")}
+            </div>
+          )}
+          <ul
+            data-testid="generate-layers-supported-jurisdictions-coverage"
+            style={{
+              listStyle: "none",
+              padding: 0,
+              margin: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            {PILOT_JURISDICTION_COVERAGE.map((cov) => (
+              <li
+                key={cov.localKey}
+                data-testid={`generate-layers-supported-coverage-${cov.localKey}`}
+                style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
+              >
+                <span style={{ fontWeight: 600 }}>{cov.shortLabel}:</span>
+                <span>
+                  {cov.layers.length === 0
+                    ? "No state or local adapters yet"
+                    : cov.layers.map((l) => l.layerKind).join(", ")}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       </details>
 

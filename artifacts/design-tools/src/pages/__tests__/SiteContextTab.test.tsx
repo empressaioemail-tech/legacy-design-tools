@@ -53,7 +53,11 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { PILOT_JURISDICTIONS } from "@workspace/adapters";
+import {
+  FEDERAL_PILOT_LAYER_KINDS,
+  PILOT_JURISDICTION_COVERAGE,
+  PILOT_JURISDICTIONS,
+} from "@workspace/adapters";
 
 // ── Hoisted mock state ──────────────────────────────────────────────────
 //
@@ -657,6 +661,41 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     );
     for (const j of PILOT_JURISDICTIONS) {
       expect(list).toHaveTextContent(j.label);
+    }
+
+    // Task #253 — per-jurisdiction coverage. Each pilot row exposes
+    // its own testid and lists the layer-kinds Generate Layers will
+    // fetch for that jurisdiction (e.g. Bastrop, TX → tceq-edwards-
+    // aquifer + bastrop-tx-parcels + bastrop-tx-zoning + bastrop-tx-
+    // floodplain). Iterating `PILOT_JURISDICTION_COVERAGE` here pins
+    // the visible layer-kind set to the same registry the server's
+    // `appliesTo` gate filters on — adding a new state/local adapter
+    // automatically extends the assertion without a test edit.
+    for (const cov of PILOT_JURISDICTION_COVERAGE) {
+      const row = within(list).getByTestId(
+        `generate-layers-supported-coverage-${cov.localKey}`,
+      );
+      expect(row).toHaveTextContent(cov.shortLabel);
+      // Sanity: we don't ship a pilot jurisdiction with zero state +
+      // local adapters — the disclosure would read meaninglessly.
+      expect(cov.layers.length).toBeGreaterThan(0);
+      for (const layer of cov.layers) {
+        expect(row).toHaveTextContent(layer.layerKind);
+      }
+    }
+
+    // Federal-tier adapters ungate (they fire for every pilot
+    // jurisdiction), so the disclosure surfaces them once at the top
+    // rather than repeating them under every row. The assertion
+    // iterates `FEDERAL_PILOT_LAYER_KINDS` so a future federal adapter
+    // automatically extends the visible set without a copy edit here.
+    expect(FEDERAL_PILOT_LAYER_KINDS.length).toBeGreaterThan(0);
+    const federal = within(list).getByTestId(
+      "generate-layers-supported-jurisdictions-federal",
+    );
+    expect(federal).toHaveTextContent("Always-on federal layers:");
+    for (const layerKind of FEDERAL_PILOT_LAYER_KINDS) {
+      expect(federal).toHaveTextContent(layerKind);
     }
   });
 

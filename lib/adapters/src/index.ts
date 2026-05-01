@@ -50,9 +50,13 @@ export {
 
 export {
   PILOT_JURISDICTIONS,
+  PILOT_JURISDICTION_COVERAGE,
   PILOT_LOCAL_KEYS,
   PILOT_STATE_KEYS,
+  FEDERAL_PILOT_LAYER_KINDS,
   type PilotJurisdiction,
+  type PilotJurisdictionCoverage,
+  type PilotJurisdictionLayer,
 } from "./pilotJurisdictions";
 
 export {

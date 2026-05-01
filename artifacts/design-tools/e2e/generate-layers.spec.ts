@@ -86,7 +86,11 @@
 import { test, expect } from "@playwright/test";
 import { eq } from "drizzle-orm";
 import { db, engagements } from "@workspace/db";
-import { PILOT_JURISDICTIONS } from "@workspace/adapters";
+import {
+  FEDERAL_PILOT_LAYER_KINDS,
+  PILOT_JURISDICTION_COVERAGE,
+  PILOT_JURISDICTIONS,
+} from "@workspace/adapters";
 
 const RUN_TAG = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const TEST_PROJECT_NAME = `e2e Generate Layers ${RUN_TAG}`;
@@ -309,6 +313,33 @@ test("Generate Layers: POST → outcome panel + cache-invalidation re-renders th
   await expect(preClickSupportedList).toBeVisible();
   for (const j of PILOT_JURISDICTIONS) {
     await expect(preClickSupportedList).toContainText(j.label);
+  }
+
+  // Task #253 — the disclosure now also enumerates the per-
+  // jurisdiction adapter coverage so an architect scoping a Bastrop
+  // (or Moab, or Salmon) project can see what Generate Layers will
+  // fetch *before* clicking. Iterating `PILOT_JURISDICTION_COVERAGE`
+  // pins the visible layer-kind set to the same registry the
+  // server's `appliesTo` gate filters on — adding a new state/local
+  // adapter automatically extends the assertion.
+  for (const cov of PILOT_JURISDICTION_COVERAGE) {
+    const row = page.getByTestId(
+      `generate-layers-supported-coverage-${cov.localKey}`,
+    );
+    await expect(row).toBeVisible();
+    await expect(row).toContainText(cov.shortLabel);
+    for (const layer of cov.layers) {
+      await expect(row).toContainText(layer.layerKind);
+    }
+  }
+  // Federal-tier adapters ungate, so the disclosure surfaces them
+  // once at the top rather than repeating under every row.
+  const federalRow = page.getByTestId(
+    "generate-layers-supported-jurisdictions-federal",
+  );
+  await expect(federalRow).toBeVisible();
+  for (const layerKind of FEDERAL_PILOT_LAYER_KINDS) {
+    await expect(federalRow).toContainText(layerKind);
   }
 
   const button = page.getByTestId("generate-layers-button");
