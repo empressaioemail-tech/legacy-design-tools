@@ -16,7 +16,11 @@
  * or no-ops (for `put`).
  */
 
-import { db, adapterResponseCache } from "@workspace/db";
+import {
+  db,
+  adapterResponseCache,
+  withClusterSweepLock,
+} from "@workspace/db";
 import type {
   AdapterCacheHit,
   AdapterCacheKey,
@@ -328,43 +332,34 @@ export async function sweepExpiredAdapterCacheRows(opts?: {
   const log = opts?.log ?? defaultLogger;
   const cutoff = new Date(Date.now() - graceMs);
   try {
-    return await db.transaction(async (tx) => {
-      // pg_try_advisory_xact_lock returns true if it acquired the
-      // lock, false if any other session is already holding it. The
-      // hash key is derived in-DB from the namespace + current schema
-      // so production instances (all on `public`) share one key while
-      // concurrent test schemas stay isolated from each other.
-      const lockResult = (await tx.execute(
-        sql`SELECT pg_try_advisory_xact_lock(
-              hashtextextended(
-                ${ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE} || '|' || current_schema(),
-                0
-              )
-            ) AS locked`,
-      )) as unknown as { rows: Array<{ locked?: unknown }> };
-      const locked = lockResult.rows?.[0]?.locked === true;
-      if (!locked) {
-        // Another instance is already sweeping this tick. Logging at
-        // debug because in a multi-instance deploy this is the steady
-        // state for every instance except the lucky one each tick.
-        log.debug(
-          {},
-          "adapterCache sweep: peer holds advisory lock, skipping tick",
-        );
-        opts?.onSkipped?.();
-        return 0;
-      }
-      const victims = tx
-        .select({ id: adapterResponseCache.id })
-        .from(adapterResponseCache)
-        .where(lt(adapterResponseCache.expiresAt, cutoff))
-        .limit(batchSize);
-      const deleted = await tx
-        .delete(adapterResponseCache)
-        .where(inArray(adapterResponseCache.id, victims))
-        .returning({ id: adapterResponseCache.id });
-      return deleted.length;
-    });
+    const outcome = await withClusterSweepLock(
+      db,
+      ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE,
+      async (tx) => {
+        const victims = tx
+          .select({ id: adapterResponseCache.id })
+          .from(adapterResponseCache)
+          .where(lt(adapterResponseCache.expiresAt, cutoff))
+          .limit(batchSize);
+        const deleted = await tx
+          .delete(adapterResponseCache)
+          .where(inArray(adapterResponseCache.id, victims))
+          .returning({ id: adapterResponseCache.id });
+        return deleted.length;
+      },
+    );
+    if (!outcome.acquired) {
+      // Another instance is already sweeping this tick. Logging at
+      // debug because in a multi-instance deploy this is the steady
+      // state for every instance except the lucky one each tick.
+      log.debug(
+        {},
+        "adapterCache sweep: peer holds advisory lock, skipping tick",
+      );
+      opts?.onSkipped?.();
+      return 0;
+    }
+    return outcome.result;
   } catch (err) {
     log.warn(
       { err, graceMs, batchSize },

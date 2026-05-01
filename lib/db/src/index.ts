@@ -14,3 +14,9 @@ export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
+export {
+  withClusterSweepLock,
+  type ClusterLockDbHandle,
+  type ClusterLockTxHandle,
+  type WithClusterSweepLockResult,
+} from "./clusterLock";

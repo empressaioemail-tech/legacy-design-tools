@@ -44,7 +44,11 @@
  */
 
 import { sql } from "drizzle-orm";
-import { db, briefingGenerationJobs } from "@workspace/db";
+import {
+  db,
+  briefingGenerationJobs,
+  withClusterSweepLock,
+} from "@workspace/db";
 import type { Logger } from "pino";
 
 /**
@@ -194,52 +198,42 @@ export async function pruneOldBriefingGenerationJobs(
       ? Math.floor(rawKeep)
       : DEFAULT_KEEP_PER_ENGAGEMENT;
 
-  return await dbHandle.transaction(async (tx) => {
-    // pg_try_advisory_xact_lock returns true if it acquired the
-    // lock, false if any other session is already holding it. The
-    // hash key is derived in-DB from the namespace + current schema
-    // so production instances (all on `public`) share one key while
-    // concurrent test schemas stay isolated from each other.
-    const lockResult = (await tx.execute(
-      sql`SELECT pg_try_advisory_xact_lock(
-            hashtextextended(
-              ${BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE} || '|' || current_schema(),
-              0
-            )
-          ) AS locked`,
-    )) as unknown as { rows: Array<{ locked?: unknown }> };
-    const locked = lockResult.rows?.[0]?.locked === true;
-    if (!locked) {
-      // Another instance is already sweeping this tick. Logging at
-      // debug because in a multi-instance deploy this is the steady
-      // state for every instance except the lucky one each tick.
-      opts.log?.debug(
-        {},
-        "briefing-generation-jobs sweep: peer holds advisory lock, skipping tick",
-      );
-      return 0;
-    }
-
-    // The "newer" comparison uses the row-value `(started_at, id)`
-    // tuple instead of `started_at` alone so two rows that happen to
-    // share an identical `started_at` (default `now()` resolution is
-    // microseconds, but a backfill or rapid test seed can still tie)
-    // get a deterministic order. Without the tiebreaker, tied rows
-    // each see "no newer sibling" and the keep cap silently retains
-    // more than N rows per engagement.
-    const result = await tx.execute(sql`
-      DELETE FROM ${briefingGenerationJobs} AS j
-      WHERE j.state IN ('completed', 'failed')
-        AND j.started_at < ${cutoff}
-        AND (
-          SELECT COUNT(*) FROM ${briefingGenerationJobs} AS k
-          WHERE k.engagement_id = j.engagement_id
-            AND (k.started_at, k.id) > (j.started_at, j.id)
-        ) >= ${keepPerEngagement}
-      RETURNING j.id
-    `);
-    return result.rows.length;
-  });
+  const outcome = await withClusterSweepLock(
+    dbHandle,
+    BRIEFING_GENERATION_JOBS_SWEEP_LOCK_NAMESPACE,
+    async (tx) => {
+      // The "newer" comparison uses the row-value `(started_at, id)`
+      // tuple instead of `started_at` alone so two rows that happen to
+      // share an identical `started_at` (default `now()` resolution is
+      // microseconds, but a backfill or rapid test seed can still tie)
+      // get a deterministic order. Without the tiebreaker, tied rows
+      // each see "no newer sibling" and the keep cap silently retains
+      // more than N rows per engagement.
+      const result = await tx.execute(sql`
+        DELETE FROM ${briefingGenerationJobs} AS j
+        WHERE j.state IN ('completed', 'failed')
+          AND j.started_at < ${cutoff}
+          AND (
+            SELECT COUNT(*) FROM ${briefingGenerationJobs} AS k
+            WHERE k.engagement_id = j.engagement_id
+              AND (k.started_at, k.id) > (j.started_at, j.id)
+          ) >= ${keepPerEngagement}
+        RETURNING j.id
+      `);
+      return result.rows.length;
+    },
+  );
+  if (!outcome.acquired) {
+    // Another instance is already sweeping this tick. Logging at
+    // debug because in a multi-instance deploy this is the steady
+    // state for every instance except the lucky one each tick.
+    opts.log?.debug(
+      {},
+      "briefing-generation-jobs sweep: peer holds advisory lock, skipping tick",
+    );
+    return 0;
+  }
+  return outcome.result;
 }
 
 /**
