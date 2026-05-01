@@ -19,4 +19,21 @@ the current parcel reading is fresh.
 
  */
   forceRefresh?: boolean;
+  /**
+ * Task #228 — when present, scope this run to the single
+adapter whose `adapterKey` matches. The applicable-adapter
+filter (jurisdiction gate) is applied first, then narrowed
+to that one adapter. Use this with `?forceRefresh=true` to
+re-fetch a single layer (e.g. just FEMA flood zone) without
+paying the per-adapter timeout for every other layer in the
+engagement's jurisdiction.
+
+Returns 422 with `error: "unknown_adapter_key"` if the value
+does not match any adapter that applies to the engagement's
+resolved jurisdiction (so a stale UI bookmark or a typo
+cannot silently degrade to a no-op run that looks
+successful).
+
+ */
+  adapterKey?: string;
 };

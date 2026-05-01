@@ -1295,6 +1295,12 @@ export const GenerateEngagementLayersQueryParams = zod.object({
     .describe(
       "Task #204 — when `true`, bypass the federal-adapter response\ncache for this run. Every cacheable adapter is re-fetched\nlive (still subject to the per-adapter timeout) and the\nfresh result is written back through the cache so the next\nnon-forced run picks it up. Use this when an architect\nsuspects the upstream feed has shifted (e.g. FEMA\npublished a new flood-zone snapshot) and wants to confirm\nthe current parcel reading is fresh.\n",
     ),
+  adapterKey: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Task #228 — when present, scope this run to the single\nadapter whose `adapterKey` matches. The applicable-adapter\nfilter (jurisdiction gate) is applied first, then narrowed\nto that one adapter. Use this with `?forceRefresh=true` to\nre-fetch a single layer (e.g. just FEMA flood zone) without\npaying the per-adapter timeout for every other layer in the\nengagement's jurisdiction.\n\nReturns 422 with `error: \"unknown_adapter_key\"` if the value\ndoes not match any adapter that applies to the engagement's\nresolved jurisdiction (so a stale UI bookmark or a typo\ncannot silently degrade to a no-op run that looks\nsuccessful).\n",
+    ),
 });
 
 export const generateEngagementLayersResponseOutcomesItemFromCacheDefault = false;

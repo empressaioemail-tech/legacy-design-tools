@@ -448,6 +448,166 @@ describe("BriefingSourceRow — Generate Layers attribution (Task #178)", () => 
   });
 });
 
+describe("BriefingSourceRow — per-row 'Refresh this layer' (Task #228)", () => {
+  it("renders the affordance for federal-adapter rows and forwards the parsed adapterKey on click", () => {
+    const source = mkSource({
+      id: "src-fed-fema",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:nfhl-flood-zone (FEMA NFHL)",
+    });
+    const onRefreshLayer = vi.fn();
+    const client = makeQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={source as never}
+          onRefreshLayer={onRefreshLayer}
+        />
+      </QueryClientProvider>,
+    );
+
+    const btn = screen.getByTestId(`briefing-source-refresh-layer-${source.id}`);
+    expect(btn).toBeInTheDocument();
+    expect(btn.textContent).toBe("Refresh this layer");
+    expect(btn.getAttribute("data-adapter-key")).toBe("fema:nfhl-flood-zone");
+    expect(btn).not.toBeDisabled();
+
+    fireEvent.click(btn);
+    expect(onRefreshLayer).toHaveBeenCalledTimes(1);
+    expect(onRefreshLayer).toHaveBeenCalledWith("fema:nfhl-flood-zone");
+  });
+
+  it("shows 'Refreshing…' and disables the button when isRefreshing is true", () => {
+    const source = mkSource({
+      id: "src-fed-fema",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:nfhl-flood-zone (FEMA NFHL)",
+    });
+    const onRefreshLayer = vi.fn();
+    const client = makeQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={source as never}
+          onRefreshLayer={onRefreshLayer}
+          isRefreshing
+        />
+      </QueryClientProvider>,
+    );
+    const btn = screen.getByTestId(`briefing-source-refresh-layer-${source.id}`);
+    expect(btn.textContent).toBe("Refreshing…");
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(onRefreshLayer).not.toHaveBeenCalled();
+  });
+
+  it("does NOT render the affordance on state-adapter, local-adapter, or manual-upload rows", () => {
+    const onRefreshLayer = vi.fn();
+    const client = makeQueryClient();
+    const stateSrc = mkSource({
+      id: "src-state",
+      layerKind: "ut-zoning",
+      sourceKind: "state-adapter",
+      provider: "utah:ugrc-parcels (UGRC)",
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={stateSrc as never}
+          onRefreshLayer={onRefreshLayer}
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.queryByTestId(`briefing-source-refresh-layer-${stateSrc.id}`),
+    ).not.toBeInTheDocument();
+    cleanup();
+
+    const localSrc = mkSource({
+      id: "src-local",
+      layerKind: "boulder-parcels",
+      sourceKind: "local-adapter",
+      provider: "boulder-co:parcels (Boulder GIS)",
+    });
+    render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={localSrc as never}
+          onRefreshLayer={onRefreshLayer}
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.queryByTestId(`briefing-source-refresh-layer-${localSrc.id}`),
+    ).not.toBeInTheDocument();
+    cleanup();
+
+    const manualSrc = mkSource({
+      id: "src-manual",
+      layerKind: "qgis-overlay",
+      sourceKind: "manual-upload",
+      provider: "Architect-supplied DXF",
+    });
+    render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={manualSrc as never}
+          onRefreshLayer={onRefreshLayer}
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.queryByTestId(`briefing-source-refresh-layer-${manualSrc.id}`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the affordance when onRefreshLayer is not provided (default null)", () => {
+    const source = mkSource({
+      id: "src-fed-no-cb",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:nfhl-flood-zone (FEMA NFHL)",
+    });
+    renderRow(source);
+    expect(
+      screen.queryByTestId(`briefing-source-refresh-layer-${source.id}`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the affordance when the provider does not follow the packed `<key> (<label>)` convention", () => {
+    // E.g. an upstream that wrote a malformed/legacy provider value
+    // (no parens, no namespace colon). The federal-tier check alone
+    // would otherwise show a button whose adapterKey is unsafe to
+    // round-trip.
+    const source = mkSource({
+      id: "src-fed-legacy",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "FEMA NFHL",
+    });
+    const onRefreshLayer = vi.fn();
+    render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={source as never}
+          onRefreshLayer={onRefreshLayer}
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.queryByTestId(`briefing-source-refresh-layer-${source.id}`),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)", () => {
   it("renders adapter-driven prior versions with the layerKind, source-kind badge, and 'by Generate Layers' actor stamp", () => {
     const current = mkSource({

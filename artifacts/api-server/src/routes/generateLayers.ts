@@ -383,6 +383,33 @@ router.post(
       return;
     }
 
+    // Task #228 — `?adapterKey=<key>` narrows the run to a single
+    // adapter (still subject to the jurisdiction gate above). The
+    // architect uses this from the per-row "Refresh this layer"
+    // affordance to re-fetch one upstream feed (e.g. just FEMA flood
+    // zone) without paying every other adapter's per-run timeout
+    // budget. We validate against `applicable` rather than
+    // `ALL_ADAPTERS` so an off-jurisdiction key (e.g. a Utah-only
+    // adapter on a Texas engagement) cannot silently no-op the run.
+    const adapterKeyScope = parseAdapterKeyQuery(req.query["adapterKey"]);
+    let scopedApplicable = applicable;
+    if (adapterKeyScope !== null) {
+      scopedApplicable = applicable.filter(
+        (a) => a.adapterKey === adapterKeyScope,
+      );
+      if (scopedApplicable.length === 0) {
+        res.status(422).json({
+          error: "unknown_adapter_key",
+          message: `No applicable adapter matches adapterKey "${adapterKeyScope}" for this engagement's jurisdiction.`,
+        });
+        return;
+      }
+      reqLog.info(
+        { engagementId, adapterKey: adapterKeyScope },
+        "generate-layers: adapterKey scope — running a single adapter",
+      );
+    }
+
     // Federal lookups (FEMA NFHL, USGS EPQS, EPA EJScreen, FCC
     // broadband) are slow / rate-limited. Wire a Postgres-backed
     // result cache through the runner so a re-run against the same
@@ -410,7 +437,7 @@ router.post(
     let outcomes: AdapterRunOutcome[];
     try {
       outcomes = await runAdapters({
-        adapters: applicable,
+        adapters: scopedApplicable,
         context: ctx,
         cache,
         forceRefresh,
@@ -606,6 +633,22 @@ function parseForceRefreshQuery(raw: unknown): boolean {
   if (typeof raw !== "string") return false;
   const v = raw.trim().toLowerCase();
   return v === "true" || v === "1";
+}
+
+/**
+ * Task #228 — parse `?adapterKey=<key>` into a trimmed string or
+ * `null` ("no scope, run every applicable adapter"). Express
+ * decodes repeated `?adapterKey=a&adapterKey=b` into an array; we
+ * only honor the canonical single-string form so an architect
+ * cannot accidentally smuggle a multi-adapter scope through the
+ * single-layer affordance. An empty / whitespace-only value is
+ * also treated as `null` so a `?adapterKey=` typo behaves like the
+ * flag is absent rather than 422-ing on an "" lookup.
+ */
+function parseAdapterKeyQuery(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const v = raw.trim();
+  return v.length > 0 ? v : null;
 }
 
 export default router;

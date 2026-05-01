@@ -676,4 +676,143 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     );
     expect(fourthFema.fromCache).toBe(true);
   });
+
+  it("?adapterKey=<key> scopes the run to that single adapter (Task #228)", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement({
+      city: "Bastrop",
+      state: "TX",
+      lat: "30.110800",
+      lng: "-97.315600",
+    });
+
+    // Seed the briefing with a full Generate Layers run so there are
+    // existing rows for the supersession contract to bite on.
+    const seedRes = await request(getApp()).post(
+      `/api/engagements/${eng.id}/generate-layers`,
+    );
+    expect(seedRes.status).toBe(200);
+    // Bastrop's pilot has 3 ok rows persisted (fema-nfhl, tceq, bastrop-zoning).
+    const seedRows = await ctx.schema.db.select().from(briefingSources);
+    expect(seedRows).toHaveLength(3);
+    const seedFemaId = seedRows.find(
+      (r) => r.layerKind === "fema-nfhl-flood-zone",
+    )!.id;
+    const seedTceqId = seedRows.find(
+      (r) => r.layerKind === "tceq-floodplain",
+    )!.id;
+    const seedZoningId = seedRows.find(
+      (r) => r.layerKind === "bastrop-zoning",
+    )!.id;
+
+    // Force-refresh JUST the FEMA layer.
+    const single = await request(getApp())
+      .post(`/api/engagements/${eng.id}/generate-layers`)
+      .query({ adapterKey: "fema:nfhl-flood-zone", forceRefresh: "true" });
+    expect(single.status).toBe(200);
+
+    // Outcomes envelope: exactly one outcome, for the targeted
+    // adapter. None of the other applicable adapters (state,
+    // local, sibling federal FCC) should appear — that is what
+    // proves the route ran a single adapter.
+    const outcomes = single.body.outcomes as Array<{
+      adapterKey: string;
+      status: string;
+    }>;
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]!.adapterKey).toBe("fema:nfhl-flood-zone");
+    expect(outcomes[0]!.status).toBe("ok");
+
+    // Persistence: exactly one NEW briefing_sources row landed.
+    const allRows = await ctx.schema.db.select().from(briefingSources);
+    // 3 originals + 1 new for the refreshed layer = 4 total.
+    expect(allRows).toHaveLength(4);
+    const femaRows = allRows.filter(
+      (r) => r.layerKind === "fema-nfhl-flood-zone",
+    );
+    expect(femaRows).toHaveLength(2);
+    const newFema = femaRows.find((r) => r.id !== seedFemaId)!;
+    expect(newFema.id).not.toBe(seedFemaId);
+
+    // Supersession wired correctly: prior FEMA row stamped + linked,
+    // OTHER layers untouched. This is the "didn't re-run every
+    // adapter" assertion: a sibling adapter run would also have
+    // stamped + replaced the tceq + bastrop-zoning rows.
+    const priorFema = femaRows.find((r) => r.id === seedFemaId)!;
+    expect(priorFema.supersededAt).not.toBeNull();
+    expect(priorFema.supersededById).toBe(newFema.id);
+    const tceqRow = allRows.find((r) => r.id === seedTceqId)!;
+    expect(tceqRow.supersededAt).toBeNull();
+    expect(tceqRow.supersededById).toBeNull();
+    const zoningRow = allRows.find((r) => r.id === seedZoningId)!;
+    expect(zoningRow.supersededAt).toBeNull();
+    expect(zoningRow.supersededById).toBeNull();
+
+    // Wire-shape briefing on the response only carries the current
+    // rows, so the new fema id is in there alongside the unchanged
+    // tceq + bastrop-zoning rows.
+    const wireSources = single.body.briefing.sources as Array<{
+      id: string;
+      layerKind: string;
+    }>;
+    const layerSet = new Set(wireSources.map((s) => s.layerKind));
+    expect(layerSet).toEqual(
+      new Set(["fema-nfhl-flood-zone", "tceq-floodplain", "bastrop-zoning"]),
+    );
+    const wireFema = wireSources.find(
+      (s) => s.layerKind === "fema-nfhl-flood-zone",
+    )!;
+    expect(wireFema.id).toBe(newFema.id);
+
+    // briefing-source.fetched event was emitted only for the new
+    // FEMA row (one event from this scoped run), in addition to
+    // the 3 emitted by the seed run.
+    const evRows = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityType, "briefing-source"));
+    expect(evRows).toHaveLength(4);
+    const newFemaEvents = evRows.filter((e) => e.entityId === newFema.id);
+    expect(newFemaEvents).toHaveLength(1);
+    expect(newFemaEvents[0]!.actor).toEqual({
+      kind: "system",
+      id: "briefing-generate-layers",
+    });
+  });
+
+  it("422 unknown_adapter_key when ?adapterKey=<key> does not match an applicable adapter (Task #228)", async () => {
+    const eng = await seedEngagement({
+      city: "Bastrop",
+      state: "TX",
+      lat: "30.110800",
+      lng: "-97.315600",
+    });
+
+    // Off-jurisdiction adapter (Utah parcels on a Texas parcel).
+    const offJurisdiction = await request(getApp())
+      .post(`/api/engagements/${eng.id}/generate-layers`)
+      .query({ adapterKey: "utah:ugrc-parcels" });
+    expect(offJurisdiction.status).toBe(422);
+    expect(offJurisdiction.body.error).toBe("unknown_adapter_key");
+    expect(offJurisdiction.body.message).toContain("utah:ugrc-parcels");
+
+    // Garbage adapter key.
+    const garbage = await request(getApp())
+      .post(`/api/engagements/${eng.id}/generate-layers`)
+      .query({ adapterKey: "does-not-exist:nope" });
+    expect(garbage.status).toBe(422);
+    expect(garbage.body.error).toBe("unknown_adapter_key");
+
+    // Empty/whitespace-only ?adapterKey= behaves like the flag is
+    // absent (full run) rather than 422-ing on "" — this locks the
+    // parser's "trim then null" behavior.
+    const emptyKey = await request(getApp())
+      .post(`/api/engagements/${eng.id}/generate-layers`)
+      .query({ adapterKey: "   " });
+    expect(emptyKey.status).toBe(200);
+    // Full Bastrop run produces 5 outcomes (2 federal + 1 state +
+    // 2 local). Anything less would mean we accidentally narrowed
+    // the run on the empty value.
+    expect(emptyKey.body.outcomes).toHaveLength(5);
+  });
 });

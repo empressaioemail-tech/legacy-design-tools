@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -726,11 +726,43 @@ export function formatBriefingDiffValue(
   return value;
 }
 
+/**
+ * Task #228 — pull the original `adapterKey` back out of the
+ * `provider` column the generate-layers route packs as
+ * `<adapterKey> (<provider-label>)` (see `generateLayers.ts`). Used
+ * by `BriefingSourceRow` to wire the per-row "Refresh this layer"
+ * button to the same adapter that wrote the row. Returns null when
+ * the provider doesn't follow the packed convention so a
+ * manual-upload row's free-text provider can never accidentally
+ * surface the refresh affordance.
+ *
+ * Exported so the `BriefingSourceRow` test harness can pin the
+ * extraction contract independently of the row's render logic.
+ */
+export function extractAdapterKeyFromProvider(
+  provider: string | null,
+): string | null {
+  if (!provider) return null;
+  const tailStart = provider.indexOf(" (");
+  if (tailStart <= 0) return null;
+  if (!provider.endsWith(")")) return null;
+  const key = provider.slice(0, tailStart).trim();
+  // The adapterKey contract uses `<jurisdiction>:<source-name>`
+  // (see lib/adapters/src/types.ts locked decision #3). Requiring
+  // a colon keeps free-text providers (e.g. an architect typing
+  // "FEMA NFHL (downloaded 2026-01-12)" into the upload form)
+  // from being mistaken for an adapter key.
+  if (!key.includes(":")) return null;
+  return key;
+}
+
 export function BriefingSourceRow({
   engagementId,
   source,
   isHighlighted = false,
   cacheInfo = null,
+  onRefreshLayer = null,
+  isRefreshing = false,
 }: {
   engagementId: string;
   source: EngagementBriefingSource;
@@ -750,9 +782,41 @@ export function BriefingSourceRow({
    * nothing — a fresh live run intentionally has no cache pill.
    */
   cacheInfo?: { fromCache: boolean; cachedAt: string | null } | null;
+  /**
+   * Task #228 — when the parent passes a callback, federal-adapter
+   * rows render a "Refresh this layer" affordance that hands back
+   * the adapter key parsed out of the row's packed `provider` string
+   * (`<adapterKey> (<provider-label>)`). The parent (`SiteContextTab`)
+   * fires the same `useGenerateEngagementLayers` mutation but with
+   * `?adapterKey=<key>&forceRefresh=true`, so the architect can
+   * re-fetch a single upstream feed without paying every other
+   * adapter's per-run timeout. `null` (the default) hides the
+   * affordance entirely — used by tests + by non-federal rows.
+   */
+  onRefreshLayer?: ((adapterKey: string) => void) | null;
+  /**
+   * Task #228 — true while the single-layer refresh mutation for this
+   * specific row's adapter key is in flight. Drives the button's
+   * disabled + label state without needing the row to inspect the
+   * mutation's `variables` shape directly.
+   */
+  isRefreshing?: boolean;
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const isAdapter = isAdapterSourceKind(source.sourceKind);
+  // Task #228 — recover the original adapterKey from the row's
+  // packed `provider` string. The generate-layers route writes
+  // `<adapterKey> (<provider-label>)` (see generateLayers.ts), so
+  // the adapterKey is everything before the first " (". The check is
+  // strict (must contain a `:` namespace prefix and the trailing
+  // " (...)" tail) so a manual-upload row whose architect-typed
+  // provider happens to start with text doesn't accidentally render
+  // a refresh button.
+  const adapterKeyForRefresh = extractAdapterKeyFromProvider(source.provider);
+  const showRefreshLayer =
+    onRefreshLayer !== null &&
+    source.sourceKind === "federal-adapter" &&
+    adapterKeyForRefresh !== null;
   // Adapter rows (federal, state, and local) each carry small
   // structured payloads with one or two reader-friendly readings.
   // We pull a one-line summary for inline display so reviewers see
@@ -1024,6 +1088,36 @@ export function BriefingSourceRow({
           added {relativeTime(source.createdAt)}
         </span>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          {showRefreshLayer && (
+            // Task #228 — per-row "Refresh this layer" affordance.
+            // Rendered as an underlined link (matches the row's
+            // existing "View layer details" / "View history" links)
+            // so it sits visually with the row's metadata controls
+            // rather than competing with the page-level Generate
+            // Layers / Force refresh CTAs above. Disabled while the
+            // mutation is in flight; the parent owns the actual
+            // network call.
+            <button
+              type="button"
+              onClick={() => onRefreshLayer!(adapterKeyForRefresh!)}
+              disabled={isRefreshing}
+              data-testid={`briefing-source-refresh-layer-${source.id}`}
+              data-adapter-key={adapterKeyForRefresh}
+              title={`Re-fetch this layer live from the upstream feed (adapter: ${adapterKeyForRefresh}). Other adapters are not re-run.`}
+              style={{
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: isRefreshing ? "not-allowed" : "pointer",
+                fontSize: 11,
+                color: "var(--info-text)",
+                textDecoration: "underline",
+                opacity: isRefreshing ? 0.5 : 1,
+              }}
+            >
+              {isRefreshing ? "Refreshing…" : "Refresh this layer"}
+            </button>
+          )}
           {!isManual && (
             <button
               type="button"
@@ -2549,6 +2643,43 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
   const [lastGenerateErrorSlug, setLastGenerateErrorSlug] = useState<
     string | null
   >(null);
+  // Task #228 — tracks which adapterKey, if any, the architect just
+  // clicked "Refresh this layer" for. Cleared on settle (success or
+  // error) so the per-row spinner only shows on the row that
+  // actually triggered the run, not on every other federal-adapter
+  // row in the list.
+  const [refreshingAdapterKey, setRefreshingAdapterKey] = useState<
+    string | null
+  >(null);
+  const handleRefreshLayer = useCallback(
+    (adapterKey: string) => {
+      // Don't fire a second single-layer mutation while one is in
+      // flight — the runner doesn't serialize per-row clicks for us
+      // and concurrent supersessions for the same layerKind would
+      // race against each other.
+      if (generateMutation.isPending) return;
+      setRefreshingAdapterKey(adapterKey);
+      generateMutation.mutate(
+        {
+          id: engagementId,
+          // Bypass the cache too — the whole point of "Refresh this
+          // layer" is to confirm the upstream feed hasn't moved.
+          // Without forceRefresh a recent cache hit would replay the
+          // same payload and the architect would think nothing
+          // changed.
+          params: { adapterKey, forceRefresh: true },
+        },
+        {
+          onSettled: () => {
+            setRefreshingAdapterKey((curr) =>
+              curr === adapterKey ? null : curr,
+            );
+          },
+        },
+      );
+    },
+    [engagementId, generateMutation],
+  );
 
   const sources = briefingQuery.data?.briefing?.sources ?? [];
   const narrative = briefingQuery.data?.briefing?.narrative ?? null;
@@ -3058,15 +3189,25 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
                     {TIER_DESCRIPTIONS[tier]}
                   </div>
                 </div>
-                {sourcesByTier[tier].map((source) => (
-                  <BriefingSourceRow
-                    key={source.id}
-                    engagementId={engagementId}
-                    source={source}
-                    isHighlighted={highlightedSourceId === source.id}
-                    cacheInfo={cacheInfoBySourceId.get(source.id) ?? null}
-                  />
-                ))}
+                {sourcesByTier[tier].map((source) => {
+                  const adapterKey = extractAdapterKeyFromProvider(
+                    source.provider,
+                  );
+                  return (
+                    <BriefingSourceRow
+                      key={source.id}
+                      engagementId={engagementId}
+                      source={source}
+                      isHighlighted={highlightedSourceId === source.id}
+                      cacheInfo={cacheInfoBySourceId.get(source.id) ?? null}
+                      onRefreshLayer={handleRefreshLayer}
+                      isRefreshing={
+                        refreshingAdapterKey !== null &&
+                        adapterKey === refreshingAdapterKey
+                      }
+                    />
+                  );
+                })}
               </div>
             ),
           )}

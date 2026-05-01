@@ -690,6 +690,25 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: adapterKey
+          in: query
+          required: false
+          description: |
+            Task #228 — when present, scope this run to the single
+            adapter whose `adapterKey` matches. The applicable-adapter
+            filter (jurisdiction gate) is applied first, then narrowed
+            to that one adapter. Use this with `?forceRefresh=true` to
+            re-fetch a single layer (e.g. just FEMA flood zone) without
+            paying the per-adapter timeout for every other layer in the
+            engagement's jurisdiction.
+
+            Returns 422 with `error: "unknown_adapter_key"` if the value
+            does not match any adapter that applies to the engagement's
+            resolved jurisdiction (so a stale UI bookmark or a typo
+            cannot silently degrade to a no-op run that looks
+            successful).
+          schema:
+            type: string
       responses:
         "200":
           description: Adapters dispatched; per-adapter outcomes + updated briefing returned.
@@ -705,10 +724,13 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: |
-            The engagement's jurisdiction did not resolve to any
-            applicable adapter (e.g. an out-of-pilot state). The
-            response body still uses the standard error envelope so
-            clients can render the message.
+            Either the engagement's jurisdiction did not resolve to any
+            applicable adapter (e.g. an out-of-pilot state —
+            `error: "no_applicable_adapters"`), or a `?adapterKey=…`
+            scope did not match any of the applicable adapters
+            (`error: "unknown_adapter_key"`). The response body still
+            uses the standard error envelope so clients can render the
+            message.
           content:
             application/json:
               schema:
