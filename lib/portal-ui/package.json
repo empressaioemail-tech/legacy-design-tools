@@ -21,6 +21,7 @@
     "@workspace/api-zod": "workspace:*",
     "@workspace/briefing-diff": "workspace:*",
     "@workspace/server-actor-ids": "workspace:*",
+    "@workspace/site-context": "workspace:*",
     "lucide-react": "catalog:",
     "three": "catalog:",
     "wouter": "^3.7.1",

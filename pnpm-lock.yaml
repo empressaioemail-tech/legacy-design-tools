@@ -1365,6 +1365,9 @@ importers:
       '@workspace/server-actor-ids':
         specifier: workspace:*
         version: link:../server-actor-ids
+      '@workspace/site-context':
+        specifier: workspace:*
+        version: link:../site-context
       lucide-react:
         specifier: 'catalog:'
         version: 0.545.0(react@19.1.0)

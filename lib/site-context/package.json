@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./server": "./src/server/index.ts",
-    "./client": "./src/client/index.ts"
+    "./client": "./src/client/index.ts",
+    "./client/overlays": "./src/client/overlays.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit"

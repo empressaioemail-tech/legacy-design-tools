@@ -1,17 +1,32 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import {
+  useGetEngagement,
   useGetEngagementBriefing,
   useListEngagementBriefingGenerationRuns,
+  getGetEngagementQueryKey,
   getGetEngagementBriefingQueryKey,
   getListEngagementBriefingGenerationRunsQueryKey,
   type EngagementBriefing,
   type EngagementBriefingSource,
   type EngagementBriefingNarrative,
+  type EngagementDetail,
 } from "@workspace/api-client-react";
 import { BriefingSourceRow } from "./BriefingSourceRow";
 import { renderBriefingBody, scrollToBriefingSource } from "./briefingCitations";
 import { BriefingRecentRunsPanel } from "./BriefingRecentRunsPanel";
 import { SiteContextViewer } from "./SiteContextViewer";
+
+// Lazy-loaded so Leaflet + its CSS only ship when the map renders.
+const SiteMap = lazy(() =>
+  import("@workspace/site-context/client").then((m) => ({ default: m.SiteMap })),
+);
+
+// Pure helper; imported from the `/client/overlays` sub-path so it
+// does not drag SiteMap (Leaflet + CSS) into consumer module graphs.
+import {
+  extractBriefingSourceOverlays,
+  type SiteMapOverlay,
+} from "@workspace/site-context/client/overlays";
 
 /**
  * Read-only briefing context surface — Task #305 (Wave 2 Sprint A).
@@ -55,7 +70,15 @@ import { SiteContextViewer } from "./SiteContextViewer";
  *   6. Recent generation runs (read-only collapsed disclosure).
  *      When the briefing has a current `generationId`, the matching
  *      row is highlighted with a "Current" pill.
- *   7. 3D site-context viewer for `ready` glb sources.
+ *   7. Site-context viewer — the 2D OpenStreetMap overlay (Task
+ *      #317) showing the engagement's geocoded parcel pin alongside
+ *      the existing Three.js viewer for `ready` glb sources, so
+ *      auditors can frame the geometry against the surrounding
+ *      neighborhood instead of staring at meshes in a vacuum. The
+ *      map is gated by the `VITE_REVIEWER_SITE_MAP_ENABLED` env var
+ *      (defaults to "on"; set to `"false"` to drop the Leaflet
+ *      bundle), and only renders when the engagement actually has a
+ *      `site.geocode` — there's nothing useful to show otherwise.
  */
 
 export interface EngagementContextPanelProps {
@@ -249,7 +272,10 @@ export function EngagementContextPanel({
         renderPriorSnapshotHeader={renderPriorSnapshotHeader}
         renderPriorNarrativeDiff={renderPriorNarrativeDiff}
       />
-      <SiteContextSection sources={briefing.sources} />
+      <SiteContextSection
+        engagementId={engagementId}
+        sources={briefing.sources}
+      />
     </div>
   );
 }
@@ -735,11 +761,44 @@ function PriorNarrativeSection({ engagementId }: { engagementId: string }) {
   );
 }
 
+// Default-on; set `VITE_REVIEWER_SITE_MAP_ENABLED="false"` to opt out.
+function isSiteMapEnabled(): boolean {
+  const raw = import.meta.env.VITE_REVIEWER_SITE_MAP_ENABLED;
+  if (raw == null || raw === "") return true;
+  return raw.toLowerCase() !== "false";
+}
+
+// OSM defaults; overridable via env for keyed/self-hosted tile sources.
+function getMapTileConfig(): { url: string; attribution: string } {
+  const url =
+    import.meta.env.VITE_REVIEWER_SITE_MAP_TILE_URL ||
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+  const attribution =
+    import.meta.env.VITE_REVIEWER_SITE_MAP_TILE_ATTRIBUTION ||
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  return { url, attribution };
+}
+
 function SiteContextSection({
+  engagementId,
   sources,
 }: {
+  engagementId: string;
   sources: EngagementBriefingSource[];
 }) {
+  const mapEnabled = isSiteMapEnabled();
+  const engagementQuery = useGetEngagement(engagementId, {
+    query: {
+      queryKey: getGetEngagementQueryKey(engagementId),
+      enabled: mapEnabled && !!engagementId,
+    },
+  });
+  const engagement: EngagementDetail | undefined = engagementQuery.data;
+  const overlays = useMemo(
+    () => extractBriefingSourceOverlays(sources),
+    [sources],
+  );
+
   return (
     <section
       data-testid="engagement-context-site-viewer"
@@ -758,9 +817,134 @@ function SiteContextSection({
           color: "var(--text-muted)",
         }}
       >
-        3D site context
+        Site context
       </header>
-      <SiteContextViewer sources={sources} />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            mapEnabled ? "minmax(0, 1fr) minmax(0, 1fr)" : "minmax(0, 1fr)",
+          gap: 12,
+          alignItems: "stretch",
+        }}
+      >
+        {mapEnabled && (
+          <SiteContextMapPanel
+            engagement={engagement ?? null}
+            isLoading={engagementQuery.isLoading}
+            isError={engagementQuery.isError}
+            overlays={overlays}
+          />
+        )}
+        <div
+          data-testid="engagement-context-site-viewer-3d"
+          style={{ display: "flex", flexDirection: "column", minHeight: 320 }}
+        >
+          <SiteContextViewer sources={sources} />
+        </div>
+      </div>
     </section>
+  );
+}
+
+function SiteContextMapPanel({
+  engagement,
+  isLoading,
+  isError,
+  overlays,
+}: {
+  engagement: EngagementDetail | null;
+  isLoading: boolean;
+  isError: boolean;
+  overlays: ReadonlyArray<SiteMapOverlay>;
+}) {
+  const geocode = engagement?.site?.geocode ?? null;
+  const address = engagement?.site?.address ?? engagement?.address ?? null;
+  const { url, attribution } = getMapTileConfig();
+
+  return (
+    <div
+      data-testid="engagement-context-site-map"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        minHeight: 320,
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        background: "var(--surface-1, transparent)",
+        padding: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--text-secondary)",
+          letterSpacing: 0.2,
+        }}
+      >
+        Geographic context
+      </div>
+      {geocode ? (
+        <Suspense
+          fallback={
+            <div
+              data-testid="engagement-context-site-map-suspense"
+              style={{
+                flex: 1,
+                minHeight: 280,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 12,
+                color: "var(--text-muted)",
+              }}
+            >
+              Loading map…
+            </div>
+          }
+        >
+          <SiteMap
+            latitude={geocode.latitude}
+            longitude={geocode.longitude}
+            addressLabel={address ?? undefined}
+            tileUrl={url}
+            tileAttribution={attribution}
+            height={300}
+            overlays={overlays}
+          />
+        </Suspense>
+      ) : (
+        <div
+          data-testid="engagement-context-site-map-empty"
+          style={{
+            flex: 1,
+            minHeight: 280,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textAlign: "center",
+            fontSize: 12,
+            color: "var(--text-muted)",
+            padding: 12,
+          }}
+        >
+          {isLoading
+            ? "Loading parcel location…"
+            : isError
+              ? "Couldn't load the parcel location for this engagement."
+              : "No parcel location on file. Once an architect adds a geocoded address to this engagement, it will appear here on a map."}
+        </div>
+      )}
+      {address && (
+        <div
+          data-testid="engagement-context-site-map-address"
+          style={{ fontSize: 11, color: "var(--text-muted)" }}
+        >
+          {address}
+        </div>
+      )}
+    </div>
   );
 }

@@ -22,6 +22,7 @@
     { "path": "../api-client-react" },
     { "path": "../api-zod" },
     { "path": "../briefing-diff" },
-    { "path": "../server-actor-ids" }
+    { "path": "../server-actor-ids" },
+    { "path": "../site-context" }
   ]
 }
