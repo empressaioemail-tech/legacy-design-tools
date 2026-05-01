@@ -19,6 +19,7 @@
     "@workspace/db": "workspace:*",
     "@workspace/empressa-atom": "workspace:*",
     "@workspace/integrations-anthropic-ai": "workspace:*",
+    "@workspace/mnml-client": "workspace:*",
     "@workspace/server-actor-ids": "workspace:*",
     "@workspace/site-context": "workspace:*",
     "busboy": "^1.6.0",

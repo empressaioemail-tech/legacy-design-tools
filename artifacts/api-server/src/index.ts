@@ -1,4 +1,5 @@
 import { ensureCodeAtomSources } from "@workspace/codes";
+import { validateMnmlEnvAtBoot } from "@workspace/mnml-client";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { bootstrapAtomRegistry } from "./atoms/registry";
@@ -36,6 +37,32 @@ ensureCodeAtomSources(logger).catch((err) => {
 // CONVERTER_SHARED_SECRET. Surfaces at boot rather than at the first
 // upload so a bad deploy is caught immediately.
 validateConverterEnvAtBoot();
+
+// Fail-fast on misconfigured mnml.ai render env (DA-RP-INFRA, Spec
+// 54 §5): when MNML_RENDER_MODE=http we require MNML_API_URL and
+// MNML_API_KEY (configured in GCP Secret Manager — see
+// `docs/wave-2/02-mnml-secrets-handoff.md`). Mock mode is the
+// default and boots clean with no env config. The client itself is
+// wired (lazy singleton in `@workspace/mnml-client`) but NOT yet
+// invoked from any route — DA-RP-1 wires the trigger endpoint that
+// consumes it.
+//
+// We wrap with an explicit log + process.exit(1) because the import
+// of `./app` above has already started pino's worker threads and the
+// background sweepers — a bare top-level throw would surface as an
+// uncaught exception but the worker threads would keep the event
+// loop alive (no HTTP listener, no useful error in the boot log).
+// Logging + exiting matches the "fail-fast at boot with a clear
+// error message naming the missing secret(s)" contract.
+try {
+  validateMnmlEnvAtBoot();
+} catch (err) {
+  logger.error(
+    { err },
+    "mnml.ai env validation failed — refusing to start",
+  );
+  process.exit(1);
+}
 
 // Empressa atom framework: register every catalog atom this artifact owns
 // and run the registry's composition validator. This is a hard boot gate
