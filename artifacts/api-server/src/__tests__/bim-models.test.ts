@@ -453,6 +453,107 @@ describe("GET /api/bim-models/:id/divergences", () => {
     expect(res.status).toBe(403);
     expect(res.body.error).toBe("bim_model_requires_architect_audience");
   });
+
+  it(
+    "is reachable for any internal-audience caller (Wave 2 Sprint B / Task #306) " +
+      "— locks in that plan-review reviewers (also internal audience) hit the " +
+      "same endpoint as design-tools architects without a separate route",
+    async () => {
+      // Wave 2 Sprint B (Task #306) surfaces the bim-model + briefing
+      // divergences feedback loop to the reviewer audience inside the
+      // plan-review submission detail modal. The audience model has
+      // exactly three values (`internal | user | ai` — see
+      // `middlewares/session.ts`) and both architects (design-tools)
+      // and reviewers (plan-review) map to `internal`. This test
+      // pins that contract: a request whose session carries a
+      // *reviewer-flavored* requestor + permission set must still
+      // pass `requireArchitectAudience` and receive the divergence
+      // list, because widening the guard or splitting the route by
+      // role would silently fork the two surfaces' contract.
+      const { engagementId, briefingId } = await seedEngagementAndBriefing();
+      const push = await asArchitect(
+        request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
+      ).send({});
+      const bimModelId = push.body.bimModel.id as string;
+
+      // Seed a reviewer-flavored user + a single open divergence so
+      // the response body has something to assert on (an empty list
+      // would still 200 here, but a populated list also exercises
+      // the joined element kind/label fields the reviewer surface
+      // renders).
+      if (!ctx.schema) throw new Error("ctx.schema not set");
+      await ctx.schema.db
+        .insert(users)
+        .values({
+          id: "reviewer-1",
+          displayName: "Riley Reviewer",
+          email: null,
+          avatarUrl: null,
+        })
+        .onConflictDoNothing({ target: users.id });
+      const [elem] = await ctx.schema.db
+        .insert(materializableElements)
+        .values({
+          briefingId,
+          elementKind: "buildable-envelope",
+          label: "Site terrain",
+          geometry: { ring: [] },
+        })
+        .returning();
+      await ctx.schema.db.insert(briefingDivergences).values({
+        bimModelId,
+        briefingId,
+        materializableElementId: elem.id,
+        reason: "geometry-edited",
+        detail: { before: { area: 100 }, after: { area: 110 } },
+      });
+
+      const res = await request(getApp())
+        .get(`/api/bim-models/${bimModelId}/divergences`)
+        // Same `internal` audience the architect surface uses — the
+        // header overrides also let us paint the session as a
+        // distinct *reviewer* requestor with reviewer-flavored
+        // permissions, proving the guard accepts the audience
+        // bucket regardless of the role / permission claims layered
+        // on top.
+        .set("x-audience", "internal")
+        .set("x-requestor", "user:reviewer-1")
+        .set("x-permissions", "review.read");
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.divergences)).toBe(true);
+      expect(res.body.divergences).toHaveLength(1);
+      expect(res.body.divergences[0].bimModelId).toBe(bimModelId);
+      expect(res.body.divergences[0].reason).toBe("geometry-edited");
+      expect(res.body.divergences[0].elementKind).toBe("buildable-envelope");
+      expect(res.body.divergences[0].elementLabel).toBe("Site terrain");
+    },
+  );
+
+  it(
+    "GET /api/engagements/:id/bim-model is also reachable for reviewer-flavored " +
+      "internal sessions (the BIM Model tab loads the bim-model row first)",
+    async () => {
+      // The plan-review BIM Model tab calls
+      // `useGetEngagementBimModel` before mounting the divergences
+      // panel — gate that endpoint with the same regression so a
+      // future tightening of the guard can't lock the reviewer out
+      // of the parent fetch.
+      const { engagementId } = await seedEngagementAndBriefing();
+      await asArchitect(
+        request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
+      ).send({});
+
+      const res = await request(getApp())
+        .get(`/api/engagements/${engagementId}/bim-model`)
+        .set("x-audience", "internal")
+        .set("x-permissions", "review.read");
+
+      expect(res.status).toBe(200);
+      expect(res.body.bimModel).toBeTruthy();
+      expect(res.body.bimModel.engagementId).toBe(engagementId);
+    },
+  );
 });
 
 describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {

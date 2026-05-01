@@ -54,12 +54,12 @@ isValidation = true
 name = "e2e"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/design-tools run test:e2e"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/design-tools run test:e2e && pnpm --filter @workspace/plan-review run test:e2e"
 
 [agent]
 stack = "PNPM_WORKSPACE"

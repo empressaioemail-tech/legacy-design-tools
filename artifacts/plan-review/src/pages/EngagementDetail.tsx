@@ -17,6 +17,7 @@ import {
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
 import { BriefingRecentRunsPanel } from "../components/BriefingRecentRunsPanel";
+import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
 import { relativeTime } from "../lib/relativeTime";
 
 /**
@@ -329,6 +330,50 @@ function SubmissionsList({
 
   const visibleSubmissions = filteredSubmissions ?? [];
   return (
+    <SubmissionsCardBody
+      engagementId={engagementId}
+      submissions={submissions}
+      visibleSubmissions={visibleSubmissions}
+      trimmedQuery={trimmedQuery}
+      searchQuery={searchQuery}
+      onSubmit={onSubmit}
+      canSubmit={canSubmit}
+    />
+  );
+}
+
+/**
+ * Inner body of {@link SubmissionsCard} that owns the per-submission
+ * detail modal selection state. Split out so the surrounding card
+ * (loading / empty / error rendering) stays a pure derivation of the
+ * list query, and the click-to-open behavior is colocated with the
+ * modal mount.
+ *
+ * Wave 2 Sprint B (Task #306): each row is now an interactive
+ * trigger — clicking opens the {@link SubmissionDetailModal} which
+ * houses the new BIM Model tab surfacing the bim-model + briefing
+ * divergences feedback loop to the reviewer.
+ */
+function SubmissionsCardBody({
+  engagementId,
+  submissions,
+  visibleSubmissions,
+  trimmedQuery,
+  searchQuery,
+  onSubmit,
+  canSubmit,
+}: {
+  engagementId: string;
+  submissions: EngagementSubmissionSummary[];
+  visibleSubmissions: EngagementSubmissionSummary[];
+  trimmedQuery: string;
+  searchQuery: string;
+  onSubmit: () => void;
+  canSubmit: boolean;
+}) {
+  const [activeSubmission, setActiveSubmission] =
+    useState<EngagementSubmissionSummary | null>(null);
+  return (
     <div className="sc-card flex flex-col" data-testid="submissions-list">
       <div
         className="sc-card-header sc-row-sb"
@@ -363,10 +408,19 @@ function SubmissionsList({
           </div>
         ) : (
           visibleSubmissions.map((s: EngagementSubmissionSummary) => (
-            <SubmissionRow key={s.id} submission={s} />
+            <SubmissionRow
+              key={s.id}
+              submission={s}
+              onOpenDetail={() => setActiveSubmission(s)}
+            />
           ))
         )}
       </div>
+      <SubmissionDetailModal
+        submission={activeSubmission}
+        engagementId={engagementId}
+        onClose={() => setActiveSubmission(null)}
+      />
     </div>
   );
 }
@@ -394,8 +448,18 @@ function SubmissionsList({
  */
 function SubmissionRow({
   submission: s,
+  onOpenDetail,
 }: {
   submission: EngagementSubmissionSummary;
+  /**
+   * Wave 2 Sprint B (Task #306) — click handler that opens the
+   * submission detail modal where the BIM Model tab surfaces the
+   * bim-model + briefing divergences feedback loop. Wired by
+   * {@link SubmissionsCardBody} to set its `activeSubmission`
+   * state. The whole row becomes a button; nested elements stay as
+   * spans so they don't get their own button semantics.
+   */
+  onOpenDetail: () => void;
 }) {
   // The OpenAPI contract guarantees `status` is always present
   // (defaulted to "pending" by the row schema), so we can drive the
@@ -407,12 +471,22 @@ function SubmissionRow({
     <div
       className="sc-card-row"
       data-testid={`submission-row-${s.id}`}
+      role="button"
+      tabIndex={0}
+      onClick={onOpenDetail}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenDetail();
+        }
+      }}
       style={{
         padding: "12px 16px",
         borderBottom: "1px solid var(--border-default)",
         display: "flex",
         flexDirection: "column",
         gap: 6,
+        cursor: "pointer",
       }}
     >
       <div

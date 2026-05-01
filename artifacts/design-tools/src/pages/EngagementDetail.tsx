@@ -82,11 +82,13 @@ import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionRe
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
-import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import {
+  BriefingDivergenceRow as PortalBriefingDivergenceRow,
+  BriefingDivergencesPanel as PortalBriefingDivergencesPanel,
   ReviewerComment,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
+  formatRelativeMaterializedAt,
 } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import { useSidebarState } from "@workspace/portal-ui";
@@ -5360,842 +5362,124 @@ export function PushToRevitAffordance({
   );
 }
 
-/**
- * Tiny relative-time formatter for the "Materialized at" line. Kept
- * local rather than reaching for a date-fns dependency because the
- * timestamps the affordance shows only need second / minute / hour /
- * day granularity — the absolute ISO string is exposed via the
- * pill's title attribute for anything finer.
- */
-function formatRelativeMaterializedAt(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const now = Date.now();
-  const deltaSec = Math.max(0, Math.floor((now - then) / 1000));
-  if (deltaSec < 45) return "just now";
-  if (deltaSec < 60 * 60) return `${Math.floor(deltaSec / 60)} min ago`;
-  if (deltaSec < 60 * 60 * 24)
-    return `${Math.floor(deltaSec / 60 / 60)} h ago`;
-  return `${Math.floor(deltaSec / 60 / 60 / 24)} d ago`;
-}
+// ---------------------------------------------------------------------------
+  // Briefing-divergences UI — DA-PI-5 / Spec 51a §2.2
+  // ---------------------------------------------------------------------------
+  // The presentational primitives (helpers, ResolvedByChip, the row /
+  // group / panel components) live in @workspace/portal-ui as of Wave 2
+  // Sprint B (Task #306) so the architect surface here and the read-
+  // only reviewer surface in plan-review render the same recorded-
+  // override audit trail without a copy/paste fork. The portal-ui
+  // imports are pulled in at the top of this file alongside the other
+  // shared symbols.
+  //
+  // design-tools owns the *architect-only* concerns layered on top:
+  // the Resolve mutation + cache invalidation, surfaced as the
+  // row's right-aligned action slot.
 
-/**
- * Compact 1–2 letter avatar fallback derived from the resolver's
- * display name (or raw id when the API hasn't hydrated a friendlier
- * label). Mirrors the helper of the same name on the plan-review
- * `SheetCard` actor badge so the two audit-trail surfaces stay in
- * lockstep visually. Falls back to a generic `?` when no usable
- * letters are available so the avatar slot never collapses to an
- * empty circle.
- */
-function resolverInitials(name: string): string {
-  const parts = name
-    .split(/\s+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (parts.length === 0) return "?";
-  const first = parts[0]?.[0] ?? "";
-  const second = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
-  const initials = `${first}${second}`.toUpperCase();
-  return initials || "?";
-}
-
-/**
- * Pick the human-friendly label for a divergence resolver. Falls
- * back from the API-hydrated `displayName` to the raw `id` so a
- * profile that the server couldn't (or didn't) hydrate still
- * renders an attribution rather than blanking the row. A null
- * requestor means the resolve was recorded without a session-bound
- * caller (e.g. dev / system path) and shows up as `system`,
- * matching the wording the timeline already uses.
- */
-function resolverLabel(
-  resolvedByRequestor:
-    | { kind: string; id: string; displayName?: string }
-    | null,
-): string {
-  // `null` requestor → "system" (matches the timeline wording for
-  // resolves recorded without a session-bound caller).
-  // Otherwise delegate to {@link formatActorLabel}, which handles
-  //   - `kind === "user"`: hydrated `displayName` → raw `id`
-  //   - `kind === "agent"` / `"system"`: friendly label from
-  //     {@link FRIENDLY_AGENT_LABELS} (Task #270) → raw `id`
-  // so a stable code-side id like `snapshot-ingest` reads as
-  // "Site-context automation" instead of leaking into the audit
-  // trail, while unknown ids still attribute themselves.
-  if (!resolvedByRequestor) return "system";
-  return formatActorLabel(resolvedByRequestor);
-}
-
-/**
- * Avatar + name chip rendered beside each "Resolved {time} by …"
- * row on the divergence panel (Task #269). Mirrors the visual
- * treatment of the plan-review `ActorBadge` so the two audit-trail
- * surfaces (sheet timeline and divergence panel) read the same at
- * a glance:
- *
- *   - Hydrated user with `avatarUrl` → image avatar + display name
- *   - Hydrated user without `avatarUrl` → initials fallback + name
- *   - Un-hydrated user → initials derived from raw id + raw id
- *   - `null` requestor (system / unattributed) → neutral "·" glyph
- *     instead of an initials chip so it can't be confused with a
- *     real user named "S"
- *
- * Kept inline in EngagementDetail rather than promoted to a shared
- * component because the second consumer (the submission timeline
- * avatar work) is still queued — once both surfaces have landed,
- * the two ActorBadge implementations should be folded into a
- * shared `lib/portal-ui` chip.
- */
-function ResolvedByChip({
-  resolvedByRequestor,
-}: {
-  resolvedByRequestor:
-    | { kind: string; id: string; displayName?: string; avatarUrl?: string }
-    | null;
-}) {
-  const isSystem = resolvedByRequestor == null;
-  const name = resolverLabel(resolvedByRequestor);
-  // 14px keeps the chip height aligned with the surrounding 11px
-  // `var(--text-muted)` line so the row doesn't grow vertically.
-  const avatarSize = 14;
-  const sizeStyle = { height: avatarSize, width: avatarSize };
-  return (
-    <span
-      data-testid="briefing-divergences-resolver-chip"
-      data-resolver-kind={isSystem ? "system" : resolvedByRequestor.kind}
-      // Radix's `AvatarImage` only mounts an actual `<img>` after the
-      // browser fires a `load` event, which never happens in
-      // happy-dom — so tests can't reach for the rendered image. We
-      // mirror the avatar URL onto the chip itself so test assertions
-      // (and any external automation) can verify the URL flowed
-      // through without depending on the Radix image-load gating.
-      data-resolver-avatar-url={
-        !isSystem && resolvedByRequestor.avatarUrl
-          ? resolvedByRequestor.avatarUrl
-          : undefined
-      }
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        minWidth: 0,
-      }}
-    >
-      <Avatar
-        className="h-auto w-auto"
-        style={sizeStyle}
-        data-testid="briefing-divergences-resolver-avatar"
-      >
-        {!isSystem && resolvedByRequestor.avatarUrl ? (
-          <AvatarImage src={resolvedByRequestor.avatarUrl} alt="" />
-        ) : null}
-        <AvatarFallback
-          className="bg-muted text-[var(--text-secondary)]"
-          style={{
-            fontSize: Math.max(8, Math.round(avatarSize * 0.55)),
-            lineHeight: 1,
-          }}
-          data-testid="briefing-divergences-resolver-avatar-fallback"
-        >
-          {/* `·` (middle dot) reads as "no specific person" without
-           *  collapsing to an empty circle the way a blank string
-           *  would. Real users get their initials. */}
-          {isSystem ? "·" : resolverInitials(name)}
-        </AvatarFallback>
-      </Avatar>
-      <span style={{ minWidth: 0 }}>{name}</span>
-    </span>
-  );
-}
-
-/**
- * Operator-facing copy for the timeline entry that mirrors the
- * `briefing-divergence.resolved` atom event (Task #213 / Task #268).
- * The same display-name / raw-id / system fallback the inline
- * "Resolved {time} by {who}" badge uses applies here so the two
- * surfaces stay in lock-step — only the verb wording differs.
- *
- * Returned shape is "<operator> acknowledged the override" which
- * matches the audit-trail vocabulary the task brief locked. The
- * relative-time prefix is rendered as a separate sibling so it can
- * carry its own `title` for absolute-precision hover, mirroring the
- * pattern the rest of the divergences panel uses.
- */
-function formatResolvedAcknowledgement(
-  resolvedByRequestor: { kind: string; id: string; displayName?: string } | null,
-): string {
-  // Reuse the same {@link formatActorLabel} helper that
-  // `formatResolvedAttribution` uses so the display-name / raw-id /
-  // friendly-agent-label / "system" fallback chain stays in lock-step
-  // across both the inline "Resolved {time} by {who}" badge and this
-  // timeline entry. A regression in any branch must surface on both
-  // surfaces at once, not just one.
-  const who = resolvedByRequestor
-    ? formatActorLabel(resolvedByRequestor)
-    : "system";
-  return `${who} acknowledged the override`;
-}
-
-/**
- * Stable in-page DOM id for a divergence row, used as the link
- * target the `briefing-divergence.resolved` timeline entry
- * navigates to (Task #268). Mirrors the recorded row's "deep-link"
- * semantics — the recorded row carries this id, and the
- * acknowledgement entry's anchor `href` resolves to it — so an
- * operator scrolling the resolved section can click an
- * acknowledgement and land on the originating recorded-divergence
- * row card.
- */
-function briefingDivergenceRowDomId(divergenceId: string): string {
-  return `briefing-divergence-${divergenceId}`;
-}
-
-/**
- * Human-readable label for each {@link MaterializableElementKind}
- * the C# Revit add-in can materialize. Mirrors the kinds defined in
- * the OpenAPI spec at `MaterializableElementKind`.
- */
-const MATERIALIZABLE_ELEMENT_KIND_LABELS: Record<string, string> = {
-  terrain: "Terrain",
-  "property-line": "Property line",
-  "setback-plane": "Setback plane",
-  "buildable-envelope": "Buildable envelope",
-  floodplain: "Floodplain",
-  wetland: "Wetland",
-  "neighbor-mass": "Neighbor mass",
-};
-
-/**
- * Human-readable label for each {@link BriefingDivergenceReason}.
- * The closed set mirrors `BriefingDivergenceReason` in the OpenAPI
- * spec so renaming a reason bucket on the schema side surfaces here
- * as a missing-label fallback rather than a runtime crash.
- */
-const BRIEFING_DIVERGENCE_REASON_LABELS: Record<string, string> = {
-  unpinned: "Unpinned",
-  "geometry-edited": "Geometry edited",
-  deleted: "Deleted",
-  other: "Other override",
-};
-
-/**
- * Per-reason badge palette, keyed off the SmartCity theme tokens so
- * the pill picks the right dark/light contrast. We treat `deleted`
- * as the loudest signal (danger) — a deleted locked element is the
- * scenario the operator most needs to chase down — and the other
- * three reasons land on the warning palette so they read as
- * "noticed, not blocking".
- */
-const BRIEFING_DIVERGENCE_REASON_COLORS: Record<
-  string,
-  { bg: string; fg: string }
-> = {
-  deleted: { bg: "var(--danger-dim)", fg: "var(--danger-text)" },
-  unpinned: { bg: "var(--warning-dim)", fg: "var(--warning-text)" },
-  "geometry-edited": {
-    bg: "var(--warning-dim)",
-    fg: "var(--warning-text)",
-  },
-  other: { bg: "var(--info-dim)", fg: "var(--info-text)" },
-};
-
-/**
- * DA-PI-5 / Spec 51a §2.2 — the "what did the architect change
- * inside Revit" feedback panel that closes the loop opened by the
- * `PushToRevitAffordance` above. Reads the engagement's bim-model
- * (to discover the bim-model id) and lists the recorded divergences
- * grouped by element so the operator can scan "Buildable envelope:
- * geometry edited" at a glance instead of paging through a flat
- * stream of rows.
- *
- * Renders nothing while the bim-model query is still loading or
- * when no bim-model has ever been pushed — the affordance card
- * above already explains "Push to Revit first", and a second empty
- * card on a fresh engagement would just be visual noise. Once the
- * bim-model row exists, the panel always renders (with an empty
- * state when no divergence has been recorded yet) so the operator
- * has a stable place to look.
- *
- * The list refreshes automatically: the push mutation invalidates
- * the divergence query key (so a re-push picks up any divergences
- * the C# add-in recorded between the prior poll and now), and the
- * 60s `staleTime` keeps the read cheap during normal browsing.
- */
-export function BriefingDivergencesPanel({
-  engagementId,
-}: {
-  engagementId: string;
-}) {
-  const bimModelQuery = useGetEngagementBimModel(engagementId);
-  const bimModelId = bimModelQuery.data?.bimModel?.id ?? null;
-
-  const divergencesQuery = useListBimModelDivergences(bimModelId ?? "", {
-    query: {
-      enabled: bimModelId !== null,
-      queryKey: getListBimModelDivergencesQueryKey(bimModelId ?? ""),
-      staleTime: 60_000,
-    },
-  });
-
-  // Resolved rows are the long tail — most engagements will rack up
-  // far more acknowledged overrides than open ones over time. Start
-  // collapsed so the operator's eye lands on the Open section first
-  // (Task #191 spec), and persist nothing across reloads: this is a
-  // per-mount UI affordance, not user state.
-  const [resolvedExpanded, setResolvedExpanded] = useState(false);
-
-  // Hide the panel until the engagement has actually been pushed to
-  // Revit at least once. This is the same guard the affordance uses
-  // to flip from "Push" to "Push again" — if there's no bim-model
-  // row, there cannot be any divergences either, and the empty card
-  // would just duplicate the affordance's "not pushed yet" state.
-  if (bimModelQuery.isLoading || bimModelId === null) {
-    return null;
-  }
-
-  const divergences = divergencesQuery.data?.divergences ?? [];
-  // Partition into Open / Resolved. The server already returns Open
-  // rows first (NULLS FIRST on `resolvedAt`) so we don't re-sort —
-  // just split on the boundary marker. This preserves the
-  // newest-first order *within* each section that the server's
-  // secondary `createdAt DESC` clause guarantees.
-  // Tolerate `resolvedAt: undefined` as well as `null` so test
-  // fixtures and any forward-compat partial wire shape that omits
-  // the field both fall into the Open partition (the server contract
-  // returns `null` for open rows; treating undefined as Open keeps
-  // the FE robust).
-  const openRows = divergences.filter((row) => row.resolvedAt == null);
-  const resolvedRows = divergences.filter((row) => row.resolvedAt != null);
-  const openGrouped = groupDivergencesByElement(openRows);
-  const resolvedGrouped = groupDivergencesByElement(resolvedRows);
-
-  return (
-    <div
-      className="sc-card"
-      data-testid="briefing-divergences-panel"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        padding: 12,
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-      }}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flexWrap: "wrap",
-          }}
-        >
-          <div className="sc-medium">Architect overrides in Revit</div>
-          <span
-            data-testid="briefing-divergences-open-count"
-            data-open-count={openRows.length}
-            title={`${openRows.length} open override${openRows.length === 1 ? "" : "s"}`}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "1px 8px",
-              borderRadius: 999,
-              background:
-                openRows.length > 0
-                  ? "var(--warning-dim)"
-                  : "var(--bg-subtle)",
-              color:
-                openRows.length > 0
-                  ? "var(--warning-text)"
-                  : "var(--text-muted)",
-              fontSize: 11,
-              fontWeight: 600,
-              lineHeight: 1.6,
-            }}
-          >
-            {openRows.length} open
-          </span>
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          The C# add-in records every edit an architect makes to a
-          locked element. Use this list to confirm the briefing still
-          matches what's in the model.
-        </div>
-      </div>
-
-      {divergencesQuery.isLoading && (
-        <div
-          data-testid="briefing-divergences-loading"
-          style={{ fontSize: 12, color: "var(--text-muted)" }}
-        >
-          Loading recent overrides…
-        </div>
-      )}
-
-      {divergencesQuery.isError && (
-        <div
-          role="alert"
-          data-testid="briefing-divergences-error"
-          style={{
-            fontSize: 12,
-            color: "var(--danger-text)",
-            background: "var(--danger-dim)",
-            padding: 8,
-            borderRadius: 4,
-          }}
-        >
-          Couldn't load recent overrides. Try refreshing in a moment.
-        </div>
-      )}
-
-      {!divergencesQuery.isLoading &&
-        !divergencesQuery.isError &&
-        divergences.length === 0 && (
-          <div
-            data-testid="briefing-divergences-empty"
-            style={{
-              fontSize: 12,
-              color: "var(--text-muted)",
-              fontStyle: "italic",
-              padding: "8px 0",
-            }}
-          >
-            No overrides recorded yet — the briefing matches what's in
-            Revit.
-          </div>
-        )}
-
-      {openGrouped.length > 0 && (
-        <div
-          data-testid="briefing-divergences-open-section"
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: 0.4,
-              color: "var(--text-muted)",
-            }}
-          >
-            Open
-          </div>
-          <div
-            data-testid="briefing-divergences-list"
-            style={{ display: "flex", flexDirection: "column", gap: 12 }}
-          >
-            {openGrouped.map((group) => (
-              <BriefingDivergenceGroup
-                key={group.elementId}
-                group={group}
-                bimModelId={bimModelId}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/*
-        Empty-Open hint: when every divergence has been acknowledged
-        but Resolved rows still exist, surface a positive
-        confirmation rather than rendering nothing — otherwise an
-        operator who just resolved the last row sees only the
-        collapsed Resolved chevron with no signal that the queue is
-        actually clear.
-      */}
-      {openGrouped.length === 0 && resolvedGrouped.length > 0 && (
-        <div
-          data-testid="briefing-divergences-open-empty"
-          style={{
-            fontSize: 12,
-            color: "var(--text-muted)",
-            fontStyle: "italic",
-          }}
-        >
-          No open overrides — every recorded override has been
-          acknowledged.
-        </div>
-      )}
-
-      {resolvedGrouped.length > 0 && (
-        <div
-          data-testid="briefing-divergences-resolved-section"
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <button
-            type="button"
-            data-testid="briefing-divergences-resolved-toggle"
-            aria-expanded={resolvedExpanded}
-            onClick={() => setResolvedExpanded((v) => !v)}
-            style={{
-              all: "unset",
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: 0.4,
-              color: "var(--text-muted)",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <span aria-hidden style={{ display: "inline-block", width: 10 }}>
-              {resolvedExpanded ? "▾" : "▸"}
-            </span>
-            Resolved ({resolvedRows.length})
-          </button>
-          {resolvedExpanded && (
-            <div
-              data-testid="briefing-divergences-resolved-list"
-              style={{ display: "flex", flexDirection: "column", gap: 12 }}
-            >
-              {resolvedGrouped.map((group) => (
-                <BriefingDivergenceGroup
-                  key={group.elementId}
-                  group={group}
-                  bimModelId={bimModelId}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface BriefingDivergenceGroupShape {
-  elementId: string;
-  elementKind: string | null;
-  elementLabel: string | null;
-  rows: BimModelDivergenceListEntry[];
-}
-
-/**
- * Group divergences by `materializableElementId` so the panel can
- * render one card per element. Within a group, rows stay in the
- * server's newest-first order so the most recent override is the
- * first thing the operator reads. Groups themselves are ordered by
- * the newest divergence in the group — an element the architect just
- * touched bubbles to the top.
- */
-function groupDivergencesByElement(
-  rows: ReadonlyArray<BimModelDivergenceListEntry>,
-): BriefingDivergenceGroupShape[] {
-  const byId = new Map<string, BriefingDivergenceGroupShape>();
-  for (const row of rows) {
-    const existing = byId.get(row.materializableElementId);
-    if (existing) {
-      existing.rows.push(row);
-      // Keep `elementKind` / `elementLabel` populated from whichever
-      // row in the group has them — a deleted-element fallback row
-      // shouldn't blank out a label that an earlier row carried.
-      if (!existing.elementKind && row.elementKind) {
-        existing.elementKind = row.elementKind;
-      }
-      if (!existing.elementLabel && row.elementLabel) {
-        existing.elementLabel = row.elementLabel;
-      }
-    } else {
-      byId.set(row.materializableElementId, {
-        elementId: row.materializableElementId,
-        elementKind: row.elementKind,
-        elementLabel: row.elementLabel,
-        rows: [row],
-      });
-    }
-  }
-  return Array.from(byId.values());
-}
-
-function BriefingDivergenceGroup({
-  group,
-  bimModelId,
-}: {
-  group: BriefingDivergenceGroupShape;
-  bimModelId: string;
-}) {
-  const kindLabel = group.elementKind
-    ? (MATERIALIZABLE_ELEMENT_KIND_LABELS[group.elementKind] ??
-      group.elementKind)
-    : "Element no longer in briefing";
-  return (
-    <div
-      data-testid="briefing-divergences-group"
-      data-element-id={group.elementId}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        padding: 8,
-        border: "1px solid var(--border-default)",
-        borderRadius: 4,
-      }}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <div className="sc-medium" style={{ fontSize: 13 }}>
-          {kindLabel}
-        </div>
-        {group.elementLabel && (
-          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            {group.elementLabel}
-          </div>
-        )}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {group.rows.map((row) => (
-          <BriefingDivergenceRow
-            key={row.id}
-            row={row}
-            bimModelId={bimModelId}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function BriefingDivergenceRow({
-  row,
-  bimModelId,
-}: {
-  row: BimModelDivergenceListEntry;
-  bimModelId: string;
-}) {
-  const queryClient = useQueryClient();
-  const reasonLabel =
-    BRIEFING_DIVERGENCE_REASON_LABELS[row.reason] ?? row.reason;
-  const palette =
-    BRIEFING_DIVERGENCE_REASON_COLORS[row.reason] ??
-    BRIEFING_DIVERGENCE_REASON_COLORS.other;
-  const isResolved = row.resolvedAt != null;
-  const resolveMutation = useResolveBimModelDivergence({
-    mutation: {
-      onSuccess: () => {
-        // Invalidate the *list* query so the row physically moves
-        // from the Open into the Resolved section without us having
-        // to splice the cache by hand. The list endpoint is cheap
-        // enough (single indexed select) that a full re-fetch is
-        // simpler and impossible to drift from the server's
-        // Open / Resolved partition.
-        void queryClient.invalidateQueries({
-          queryKey: getListBimModelDivergencesQueryKey(bimModelId),
-        });
+  /**
+   * Architect-side wrapper around the presentational
+   * {@link PortalBriefingDivergenceRow} from portal-ui. Supplies the
+   * Resolve button (when the row is still Open) and the resolve-error
+   * toast — the two pieces that diverge from the read-only reviewer
+   * surface in plan-review.
+   *
+   * Uses `row.bimModelId` directly for the mutation + cache key so
+   * the wrapper stays pure (no engagement-id prop drilling) and a
+   * row's bim-model scope is always the source of truth.
+   */
+  function ArchitectBriefingDivergenceRow({
+    row,
+  }: {
+    row: BimModelDivergenceListEntry;
+  }) {
+    const queryClient = useQueryClient();
+    const isResolved = row.resolvedAt != null;
+    const resolveMutation = useResolveBimModelDivergence({
+      mutation: {
+        onSuccess: () => {
+          // Invalidate the *list* query so the row physically moves
+          // from Open into Resolved without splicing the cache by hand.
+          void queryClient.invalidateQueries({
+            queryKey: getListBimModelDivergencesQueryKey(row.bimModelId),
+          });
+        },
       },
-    },
-  });
-  return (
-    <div
-      // Stable in-page id so the matching `briefing-divergence.resolved`
-      // timeline entry's `<a href="#…">` anchor (Task #268) can deep-
-      // link straight to the originating recorded-divergence row.
-      // The id is the row's "link target" the task brief calls out;
-      // the acknowledgement entry below mirrors it via `href`.
-      id={briefingDivergenceRowDomId(row.id)}
-      data-testid="briefing-divergences-row"
-      data-divergence-id={row.id}
-      data-divergence-reason={row.reason}
-      data-divergence-resolved={isResolved ? "true" : "false"}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        padding: "6px 8px",
-        background: "var(--bg-subtle)",
-        borderRadius: 4,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-        }}
-      >
-        <span
-          data-testid="briefing-divergences-reason-badge"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            padding: "2px 8px",
-            borderRadius: 999,
-            background: palette.bg,
-            color: palette.fg,
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: 0.2,
-            textTransform: "uppercase",
-            lineHeight: 1.4,
-          }}
-        >
-          {reasonLabel}
-        </span>
-        <span
-          title={new Date(row.createdAt).toISOString()}
-          style={{ fontSize: 11, color: "var(--text-muted)" }}
-        >
-          {formatRelativeMaterializedAt(row.createdAt)}
-        </span>
-        <div style={{ flex: 1 }} />
-        {isResolved ? (
-          <>
-            <span
-              data-testid="briefing-divergences-resolved-badge"
-              title={
-                row.resolvedAt
-                  ? `Resolved ${new Date(row.resolvedAt).toISOString()}`
-                  : undefined
+    });
+    return (
+      <PortalBriefingDivergenceRow
+        row={row}
+        rightSlot={
+          isResolved ? null : (
+            <button
+              type="button"
+              data-testid="briefing-divergences-resolve-button"
+              disabled={resolveMutation.isPending}
+              onClick={() =>
+                resolveMutation.mutate({
+                  id: row.bimModelId,
+                  divergenceId: row.id,
+                })
               }
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "2px 8px",
-                borderRadius: 999,
-                background: "var(--success-dim)",
-                color: "var(--success-text)",
+                all: "unset",
+                cursor: resolveMutation.isPending ? "wait" : "pointer",
+                padding: "3px 10px",
+                borderRadius: 4,
                 fontSize: 11,
                 fontWeight: 600,
-                letterSpacing: 0.2,
-                textTransform: "uppercase",
-                lineHeight: 1.4,
+                background: "var(--bg-default)",
+                color: "var(--text-default)",
+                border: "1px solid var(--border-default)",
+                opacity: resolveMutation.isPending ? 0.6 : 1,
               }}
             >
-              Resolved
-            </span>
-            <span
-              data-testid="briefing-divergences-resolved-attribution"
-              title={
-                row.resolvedAt
-                  ? new Date(row.resolvedAt).toISOString()
-                  : undefined
-              }
+              {resolveMutation.isPending ? "Resolving…" : "Resolve"}
+            </button>
+          )
+        }
+        errorSlot={
+          resolveMutation.isError ? (
+            <div
+              role="alert"
+              data-testid="briefing-divergences-resolve-error"
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
                 fontSize: 11,
-                color: "var(--text-muted)",
+                color: "var(--danger-text)",
               }}
             >
-              {row.resolvedAt
-                ? `${formatRelativeMaterializedAt(row.resolvedAt)} by`
-                : "by"}
-              <ResolvedByChip resolvedByRequestor={row.resolvedByRequestor} />
-            </span>
-          </>
-        ) : (
-          <button
-            type="button"
-            data-testid="briefing-divergences-resolve-button"
-            disabled={resolveMutation.isPending}
-            onClick={() =>
-              resolveMutation.mutate({
-                id: bimModelId,
-                divergenceId: row.id,
-              })
-            }
-            style={{
-              all: "unset",
-              cursor: resolveMutation.isPending ? "wait" : "pointer",
-              padding: "3px 10px",
-              borderRadius: 4,
-              fontSize: 11,
-              fontWeight: 600,
-              background: "var(--bg-default)",
-              color: "var(--text-default)",
-              border: "1px solid var(--border-default)",
-              opacity: resolveMutation.isPending ? 0.6 : 1,
-            }}
-          >
-            {resolveMutation.isPending ? "Resolving…" : "Resolve"}
-          </button>
+              Couldn't mark as resolved. Try again in a moment.
+            </div>
+          ) : null
+        }
+      />
+    );
+  }
+
+  /**
+   * Architect-flavored wrapper around the shared
+   * {@link PortalBriefingDivergencesPanel} from portal-ui. Wires the
+   * panel's per-row render slot to {@link ArchitectBriefingDivergenceRow}
+   * so each Open row gets a Resolve button. Keeps the architect-facing
+   * panel header copy unchanged. Re-exported so existing tests
+   * (`artifacts/design-tools/src/pages/__tests__/BriefingDivergencesPanel.test.tsx`)
+   * keep importing `BriefingDivergencesPanel` from this module.
+   */
+  export function BriefingDivergencesPanel({
+    engagementId,
+  }: {
+    engagementId: string;
+  }) {
+    return (
+      <PortalBriefingDivergencesPanel
+        engagementId={engagementId}
+        renderRow={(row) => (
+          <ArchitectBriefingDivergenceRow key={row.id} row={row} />
         )}
-      </div>
-      {row.note && (
-        <div
-          data-testid="briefing-divergences-note"
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {row.note}
-        </div>
-      )}
-      {isResolved && (
-        // Timeline entry mirroring the `briefing-divergence.resolved`
-        // atom event (Task #213 / Task #268). Sits beneath the
-        // header badge row as a distinct line so the operator reads
-        // a true two-sided audit trail — the recorded override
-        // above, the acknowledgement below — rather than collapsing
-        // both into a single attribution badge.
-        //
-        // Rendered as a real `<a href="#…">` anchor that deep-links
-        // to the parent row's `id` (set above via
-        // `briefingDivergenceRowDomId`). This is the row's "link
-        // target" the task brief calls out: the recorded row is the
-        // divergence detail surface today, and the anchor focuses /
-        // scrolls to it without any client-side routing — the same
-        // hash-link semantics the rest of the page uses for
-        // section anchors. `data-divergence-id` is also exposed for
-        // tests and any future detail-panel hand-off.
-        <a
-          href={`#${briefingDivergenceRowDomId(row.id)}`}
-          data-testid="briefing-divergences-acknowledged-entry"
-          data-divergence-id={row.id}
-          aria-label={`${formatResolvedAcknowledgement(row.resolvedByRequestor)} — open divergence detail`}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 11,
-            color: "var(--text-muted)",
-            textDecoration: "none",
-            paddingTop: 2,
-            borderTop: "1px dashed var(--border-subtle)",
-            marginTop: 2,
-          }}
-        >
-          <span aria-hidden style={{ color: "var(--success-text)" }}>
-            ✓
-          </span>
-          <span data-testid="briefing-divergences-acknowledged-text">
-            {formatResolvedAcknowledgement(row.resolvedByRequestor)}
-          </span>
-          {row.resolvedAt && (
-            <>
-              <span aria-hidden>·</span>
-              <span
-                title={new Date(row.resolvedAt).toISOString()}
-                data-testid="briefing-divergences-acknowledged-time"
-              >
-                {formatRelativeMaterializedAt(row.resolvedAt)}
-              </span>
-            </>
-          )}
-        </a>
-      )}
-      {resolveMutation.isError && (
-        <div
-          role="alert"
-          data-testid="briefing-divergences-resolve-error"
-          style={{
-            fontSize: 11,
-            color: "var(--danger-text)",
-          }}
-        >
-          Couldn't mark as resolved. Try again in a moment.
-        </div>
-      )}
-    </div>
-  );
-}
+      />
+    );
+  }
+  
 
 /**
  * Human-readable label for each {@link SubmissionStatus}. Kept in
