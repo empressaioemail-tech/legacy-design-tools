@@ -9,6 +9,8 @@ import codesRouter from "./codes";
 import devAtomsRouter from "./devAtoms";
 import atomsRouter from "./atoms";
 import usersRouter from "./users";
+import reviewersRouter from "./reviewers";
+import settingsRouter from "./settings";
 import storageRouter from "./storage";
 import sessionRouter from "./session";
 
@@ -26,6 +28,8 @@ router.use(codesRouter);
 router.use(devAtomsRouter);
 router.use(atomsRouter);
 router.use(usersRouter);
+router.use(reviewersRouter);
+router.use(settingsRouter);
 router.use(storageRouter);
 router.use(sessionRouter);
 
