@@ -234,13 +234,38 @@ export function ClaudeChat({ engagementId, hasSnapshots }: ClaudeChatProps) {
 
           if (isUser) {
             return (
-              <div key={i} className="self-end max-w-[80%]">
+              <div
+                key={i}
+                className="self-end max-w-[80%] flex flex-col items-end gap-1"
+              >
                 <div
                   className="rounded-lg px-3 py-2 text-white sc-ui"
                   style={{ background: "var(--cyan)" }}
                 >
                   {msg.content}
                 </div>
+                {msg.snapshotFocus && (
+                  <span
+                    className="sc-ui"
+                    title="Sent with Dive deeper — full snapshot loaded for this turn"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      fontSize: 10,
+                      letterSpacing: "0.04em",
+                      textTransform: "uppercase",
+                      padding: "2px 6px",
+                      borderRadius: 3,
+                      background: "rgba(0,180,216,0.15)",
+                      color: "var(--cyan)",
+                      border: "1px solid var(--cyan)",
+                    }}
+                  >
+                    <Telescope size={10} />
+                    Snapshot focus
+                  </span>
+                )}
               </div>
             );
           }

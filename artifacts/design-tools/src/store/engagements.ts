@@ -4,6 +4,9 @@ import type { SheetSummary } from "@workspace/api-client-react";
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  // True when this user turn was sent with the "Dive deeper" toggle on, so the
+  // transcript can show a chip indicating the full snapshot payload was loaded.
+  snapshotFocus?: boolean;
 }
 
 interface EngagementsUiState {
@@ -104,7 +107,7 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
           ...state.messagesByEngagement,
           [engagementId]: [
             ...msgs,
-            { role: "user", content: question },
+            { role: "user", content: question, snapshotFocus },
             { role: "assistant", content: "" },
           ],
         },

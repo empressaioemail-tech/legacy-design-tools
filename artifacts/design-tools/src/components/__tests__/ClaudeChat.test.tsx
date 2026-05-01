@@ -130,6 +130,24 @@ describe("ClaudeChat", () => {
     expect(screen.queryByPlaceholderText(/Ask a question/i)).toBeNull();
   });
 
+  it("renders the Snapshot focus chip on user messages that opted in", () => {
+    stores.streaming = false;
+    stores.rightCollapsed = false;
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "with focus", snapshotFocus: true },
+        { role: "assistant", content: "ok" },
+        { role: "user", content: "without focus" },
+        { role: "assistant", content: "ok again" },
+      ] as Array<{ role: string; content: string; snapshotFocus?: boolean }>,
+    };
+
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+    // Exactly one chip — only the first user turn was sent with focus.
+    const chips = screen.getAllByText(/Snapshot focus/i);
+    expect(chips).toHaveLength(1);
+  });
+
   it("does not call sendMessage when input is whitespace only", () => {
     sendMessage.mockClear();
     stores.streaming = false;
