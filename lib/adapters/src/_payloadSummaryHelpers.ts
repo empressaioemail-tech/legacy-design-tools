@@ -1,9 +1,9 @@
 /**
- * Tiny payload-shape helpers shared by the state-tier and local-tier
- * summary chip formatters. The federal-tier formatters keep their own
- * inlined helpers (they predate this module) and are intentionally not
- * touched here — the goal is to keep state/local helpers symmetric
- * without forcing a federal refactor in the same change.
+ * Tiny payload-shape helpers shared by the federal-tier, state-tier,
+ * and local-tier summary chip formatters. Keeping a single copy here
+ * means a future tweak (e.g. "accept BigInt" in `pickNumber`) lands
+ * for every tier at once instead of drifting between three near-identical
+ * inlined definitions.
  *
  * Every helper accepts `unknown` and returns either a typed value or
  * `null` so the callers can stay defensive: the chip should degrade to

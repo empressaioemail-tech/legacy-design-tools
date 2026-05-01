@@ -31,29 +31,13 @@
  * new federal adapter ships, add its kind here so the registry
  * picks it up.
  */
+import { isRecord, pickNumber, pickString } from "../_payloadSummaryHelpers";
+
 export type FederalLayerKind =
   | "fema-nfhl-flood-zone"
   | "usgs-ned-elevation"
   | "epa-ejscreen-blockgroup"
   | "fcc-broadband-availability";
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function pickNumber(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
-
-function pickString(v: unknown): string | null {
-  if (typeof v === "string" && v.trim() !== "") return v.trim();
-  return null;
-}
 
 /**
  * Format a number as an ordinal percentile (e.g. 1 → "1st", 22 → "22nd",
