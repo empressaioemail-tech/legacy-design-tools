@@ -8,6 +8,14 @@
  * into `briefing_sources` rows. Keeping IO out of the runner keeps it
  * trivially testable and lets the same code path drive a future "dry
  * run" preview UI without writing rows.
+ *
+ * Optional caching (Task #180): callers may pass a {@link
+ * AdapterResultCache} + {@link AdapterCachePredicate} so federal
+ * lookups (FEMA NFHL, USGS EPQS, EPA EJScreen, FCC broadband) skip the
+ * network on a re-run within the cache's TTL. The cache is consulted
+ * before `appliesTo` would have caused a network call, and a successful
+ * run is written back through. Cache failures are best-effort — they
+ * never fail the run; the underlying adapter is still invoked.
  */
 
 import {
@@ -17,6 +25,11 @@ import {
   type AdapterRunOutcome,
   AdapterRunError,
 } from "./types";
+import {
+  toCacheKey,
+  type AdapterCachePredicate,
+  type AdapterResultCache,
+} from "./cache";
 
 /** Default per-adapter network timeout. */
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -24,12 +37,24 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 export interface RunAdaptersInput {
   adapters: ReadonlyArray<Adapter>;
   context: AdapterContext;
+  /**
+   * Optional result cache. When set, the runner consults it before
+   * invoking any adapter for which {@link cachePredicate} returns true,
+   * and writes successful runs back through. See `cache.ts` for the
+   * key shape and failure-isolation contract.
+   */
+  cache?: AdapterResultCache;
+  /**
+   * Decides which adapters are cacheable. Defaults to federal tier
+   * only. Ignored when {@link cache} is undefined.
+   */
+  cachePredicate?: AdapterCachePredicate;
 }
 
 export async function runAdapters(
   input: RunAdaptersInput,
 ): Promise<AdapterRunOutcome[]> {
-  const { adapters, context } = input;
+  const { adapters, context, cache, cachePredicate } = input;
   // Filter first so the per-adapter timeout doesn't fire on adapters
   // that are gated out before they ever touch the network.
   const applicable = adapters.filter((a) => a.appliesTo(context));
@@ -53,7 +78,9 @@ export async function runAdapters(
   // services so there's no rate-limit concern, and the user-facing
   // "Generate Layers" call should be as snappy as the slowest adapter.
   const ran = await Promise.all(
-    applicable.map((adapter) => runOne(adapter, context)),
+    applicable.map((adapter) =>
+      runOne(adapter, context, cache, cachePredicate),
+    ),
   );
   return [...ran, ...skipped];
 }
@@ -61,7 +88,40 @@ export async function runAdapters(
 async function runOne(
   adapter: Adapter,
   context: AdapterContext,
+  cache: AdapterResultCache | undefined,
+  cachePredicate: AdapterCachePredicate | undefined,
 ): Promise<AdapterRunOutcome> {
+  // Cache lookup — only when the adapter is cacheable AND the
+  // coordinates are finite (NaN coordinates produce a deterministic
+  // miss; the runner already documents that no-coords engagements
+  // surface as `no-coverage` per-adapter outcomes). The cache contract
+  // says implementations never throw, but we wrap defensively so a
+  // misbehaving cache cannot break the runner.
+  const cacheKey =
+    cache && (cachePredicate ?? defaultCachePredicate)(adapter)
+      ? toCacheKey(
+          adapter.adapterKey,
+          context.parcel.latitude,
+          context.parcel.longitude,
+        )
+      : null;
+  if (cache && cacheKey) {
+    try {
+      const hit = await cache.get(cacheKey);
+      if (hit) {
+        return {
+          adapterKey: adapter.adapterKey,
+          tier: adapter.tier,
+          layerKind: adapter.layerKind,
+          status: "ok",
+          result: hit,
+        };
+      }
+    } catch {
+      // Best-effort cache — fall through to a live run.
+    }
+  }
+
   const timeoutMs = context.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -76,6 +136,13 @@ async function runOne(
 
   try {
     const result = await adapter.run({ ...context, signal: ac.signal });
+    if (cache && cacheKey) {
+      try {
+        await cache.put(cacheKey, result);
+      } catch {
+        // Non-fatal — the row was still produced.
+      }
+    }
     return {
       adapterKey: adapter.adapterKey,
       tier: adapter.tier,
@@ -105,6 +172,9 @@ async function runOne(
     clearTimeout(timer);
   }
 }
+
+const defaultCachePredicate: AdapterCachePredicate = (a) =>
+  a.tier === "federal";
 
 function toAdapterError(
   err: unknown,

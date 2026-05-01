@@ -52,6 +52,7 @@ import { GenerateEngagementLayersParams } from "@workspace/api-zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import { logger } from "../lib/logger";
+import { createAdapterResponseCache } from "../lib/adapterCache";
 import { getHistoryService } from "../atoms/registry";
 import {
   BRIEFING_SOURCE_EVENT_TYPES,
@@ -368,9 +369,23 @@ router.post(
       return;
     }
 
+    // Federal lookups (FEMA NFHL, USGS EPQS, EPA EJScreen, FCC
+    // broadband) are slow / rate-limited. Wire a Postgres-backed
+    // result cache through the runner so a re-run against the same
+    // parcel within the TTL replays the cached envelope instead of
+    // re-hitting the upstream feed. The cache predicate defaults to
+    // "federal tier only" inside the runner — see Task #180. A `0`
+    // TTL (`ADAPTER_CACHE_TTL_MS=0`) returns `undefined` here so the
+    // runner skips the cache entirely.
+    const cache = createAdapterResponseCache({ log: reqLog });
+
     let outcomes: AdapterRunOutcome[];
     try {
-      outcomes = await runAdapters({ adapters: applicable, context: ctx });
+      outcomes = await runAdapters({
+        adapters: applicable,
+        context: ctx,
+        cache,
+      });
     } catch (err) {
       // The runner contract is "never throws" — a thrown error here
       // is a programming bug rather than a runtime upstream failure.

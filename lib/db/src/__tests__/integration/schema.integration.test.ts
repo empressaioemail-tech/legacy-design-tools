@@ -60,6 +60,10 @@ describe("lib/db schema integration", () => {
       );
       const names = res.rows.map((r) => r.tablename);
       expect(names).toEqual([
+        // Federal-adapter response cache (Task #180) — keyed on
+        // (adapter_key, lat_rounded, lng_rounded) with a TTL gate so
+        // re-runs of generate-layers skip the slow upstream feeds.
+        "adapter_response_cache",
         "atom_events",
         // DA-PI-5 Revit-sensor materialization tables. Listed in
         // alphabetical order to match `ORDER BY tablename` from the

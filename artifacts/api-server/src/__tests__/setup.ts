@@ -70,6 +70,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // reads through. Tests that seed display names via this table need
   // it reset between cases so the rows do not leak across `it`s.
   "users",
+  // Federal-adapter response cache (Task #180). Tests for the
+  // generate-layers route assert hit/miss behaviour, so we must
+  // reset the table between cases.
+  "adapter_response_cache",
 ];
 
 /**

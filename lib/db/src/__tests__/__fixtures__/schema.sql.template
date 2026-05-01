@@ -8,6 +8,19 @@
 
 
 
+-- Name: adapter_response_cache; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.adapter_response_cache (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    adapter_key text NOT NULL,
+    lat_rounded numeric(9,5) NOT NULL,
+    lng_rounded numeric(9,5) NOT NULL,
+    result_payload jsonb NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: atom_events; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.atom_events (
@@ -300,6 +313,12 @@ CREATE TABLE @@SCHEMA@@.users (
 );
 
 
+-- Name: adapter_response_cache adapter_response_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.adapter_response_cache
+    ADD CONSTRAINT adapter_response_cache_pkey PRIMARY KEY (id);
+
+
 -- Name: atom_events atom_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.atom_events
@@ -418,6 +437,16 @@ ALTER TABLE ONLY @@SCHEMA@@.submissions
 
 ALTER TABLE ONLY @@SCHEMA@@.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+-- Name: adapter_response_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX adapter_response_cache_expires_idx ON @@SCHEMA@@.adapter_response_cache USING btree (expires_at);
+
+
+-- Name: adapter_response_cache_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX adapter_response_cache_uniq ON @@SCHEMA@@.adapter_response_cache USING btree (adapter_key, lat_rounded, lng_rounded);
 
 
 -- Name: atom_events_chain_hash_uniq; Type: INDEX; Schema: public; Owner: -

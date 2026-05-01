@@ -8,6 +8,7 @@
     "./types": "./src/types.ts",
     "./registry": "./src/registry.ts",
     "./runner": "./src/runner.ts",
+    "./cache": "./src/cache.ts",
     "./federal/fema-nfhl": "./src/federal/fema-nfhl.ts",
     "./federal/usgs-ned": "./src/federal/usgs-ned.ts",
     "./federal/epa-ejscreen": "./src/federal/epa-ejscreen.ts",

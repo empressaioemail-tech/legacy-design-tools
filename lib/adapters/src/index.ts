@@ -25,6 +25,15 @@ export {
 export { runAdapters, type RunAdaptersInput } from "./runner";
 
 export {
+  toCacheKey,
+  CACHE_COORDINATE_PRECISION,
+  FEDERAL_TIER_CACHE_PREDICATE,
+  type AdapterCacheKey,
+  type AdapterCachePredicate,
+  type AdapterResultCache,
+} from "./cache";
+
+export {
   ALL_ADAPTERS,
   FEDERAL_ADAPTERS,
   STATE_ADAPTERS,
