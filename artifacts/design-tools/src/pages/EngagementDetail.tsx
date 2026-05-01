@@ -597,6 +597,21 @@ function BriefingSourceRow({
   source: EngagementBriefingSource;
 }) {
   const isManual = source.sourceKind === "manual-upload";
+  // Adapter-tier pill label. The row used to read either "Manual
+  // upload" or "Federal adapter", but state-tier and local-tier
+  // adapters now flow through the same surface — and the new layer-
+  // details panel exposes adapter-tier-specific content (e.g. a
+  // matched setback row from `grand-county-ut:zoning`). Showing the
+  // wrong tier here would make the row contradict the panel below it,
+  // so map every `sourceKind` to its own label.
+  const sourceKindLabel =
+    source.sourceKind === "manual-upload"
+      ? "Manual upload"
+      : source.sourceKind === "federal-adapter"
+        ? "Federal adapter"
+        : source.sourceKind === "state-adapter"
+          ? "State adapter"
+          : "Local adapter";
   const [expanded, setExpanded] = useState(false);
   // Layer-details panel is independent of the history panel; the
   // architect should be able to keep "what does this layer say about
@@ -680,7 +695,7 @@ function BriefingSourceRow({
               letterSpacing: 0.3,
             }}
           >
-            {isManual ? "Manual upload" : "Federal adapter"}
+            {sourceKindLabel}
           </span>
         </div>
       </div>

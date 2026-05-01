@@ -309,12 +309,21 @@ test("Generate Layers: POST → outcome panel + cache-invalidation re-renders th
   // per-source row exposes its own testid.
   await expect(page.getByTestId("briefing-sources-tier-state")).toBeVisible();
   await expect(page.getByTestId("briefing-sources-tier-local")).toBeVisible();
-  await expect(
-    page.getByTestId(`briefing-source-${utahSourceId}`),
-  ).toBeVisible();
-  await expect(
-    page.getByTestId(`briefing-source-${grandSourceId}`),
-  ).toBeVisible();
+  const utahRow = page.getByTestId(`briefing-source-${utahSourceId}`);
+  const grandRow = page.getByTestId(`briefing-source-${grandSourceId}`);
+  await expect(utahRow).toBeVisible();
+  await expect(grandRow).toBeVisible();
+
+  // Adapter-tier pill mirrors the wire `sourceKind`: a state-adapter
+  // row reads "State adapter", a local-adapter row reads "Local
+  // adapter". The previous code path collapsed both onto the
+  // "Federal adapter" label, so this guards against regressing to
+  // that mislabel now that the View-layer-details panel below the
+  // pill exposes adapter-tier-specific content.
+  await expect(utahRow).toContainText("State adapter");
+  await expect(utahRow).not.toContainText("Federal adapter");
+  await expect(grandRow).toContainText("Local adapter");
+  await expect(grandRow).not.toContainText("Federal adapter");
 
   // Sanity: the mutation fired exactly once. A regression that
   // dropped `disabled={generateMutation.isPending}` (or that wired
