@@ -19,6 +19,7 @@ import type {
 import type {
   AtomHistoryResponse,
   AtomSummary,
+  BriefingGenerationStatusResponse,
   ChatErrorResponse,
   ChatRequest,
   CodeAtomDetail,
@@ -33,6 +34,8 @@ import type {
   EngagementSubmissionSummary,
   EngagementSummary,
   ErrorResponse,
+  GenerateBriefingBody,
+  GenerateBriefingResponse,
   GenerateLayersResponse,
   GetAtomHistoryParams,
   GetAtomSummaryParams,
@@ -1616,6 +1619,224 @@ export const useGenerateEngagementLayers = <
 > => {
   return useMutation(getGenerateEngagementLayersMutationOptions(options));
 };
+
+/**
+ * Asynchronously runs the briefing engine (Spec 51 §2): reads the
+engagement's current `briefing_sources`, calls the LLM (or the
+deterministic mock when `BRIEFING_LLM_MODE=mock`), validates
+every citation token resolves to a known source / code section,
+and persists the resulting seven-section narrative on the
+`parcel_briefings` row.
+
+First-generation calls populate `section_a`..`section_g` +
+`generated_at` + `generated_by`. Regeneration backs the prior
+narrative up into the `prior_section_*` columns so a redo can
+be compared against the previous draft.
+
+Returns `202 Accepted` with a `generationId`; clients poll
+`GET /engagements/{id}/briefing/status` until the job's
+`state` flips from `pending` to `completed` or `failed`.
+
+ * @summary Kick off A–G briefing synthesis for an engagement
+ */
+export const getGenerateEngagementBriefingUrl = (id: string) => {
+  return `/api/engagements/${id}/briefing/generate`;
+};
+
+export const generateEngagementBriefing = async (
+  id: string,
+  generateBriefingBody?: GenerateBriefingBody,
+  options?: RequestInit,
+): Promise<GenerateBriefingResponse> => {
+  return customFetch<GenerateBriefingResponse>(
+    getGenerateEngagementBriefingUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(generateBriefingBody),
+    },
+  );
+};
+
+export const getGenerateEngagementBriefingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateEngagementBriefing>>,
+    TError,
+    { id: string; data: BodyType<GenerateBriefingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateEngagementBriefing>>,
+  TError,
+  { id: string; data: BodyType<GenerateBriefingBody> },
+  TContext
+> => {
+  const mutationKey = ["generateEngagementBriefing"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateEngagementBriefing>>,
+    { id: string; data: BodyType<GenerateBriefingBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return generateEngagementBriefing(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateEngagementBriefingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateEngagementBriefing>>
+>;
+export type GenerateEngagementBriefingMutationBody =
+  BodyType<GenerateBriefingBody>;
+export type GenerateEngagementBriefingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Kick off A–G briefing synthesis for an engagement
+ */
+export const useGenerateEngagementBriefing = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateEngagementBriefing>>,
+    TError,
+    { id: string; data: BodyType<GenerateBriefingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateEngagementBriefing>>,
+  TError,
+  { id: string; data: BodyType<GenerateBriefingBody> },
+  TContext
+> => {
+  return useMutation(getGenerateEngagementBriefingMutationOptions(options));
+};
+
+/**
+ * Returns the in-process generation job state for the engagement.
+`state` is `idle` when no generation has ever run on this
+process (the persisted briefing may still have a narrative
+from a previous process); `pending` while the engine is
+running; `completed` when the row's `section_a..g` columns
+have just been written; `failed` when the engine errored
+(the `error` field carries a short reason).
+
+Job state is process-local and best-effort — clients should
+treat the persisted briefing (`GET /engagements/{id}/briefing`)
+as the source of truth for the narrative itself.
+
+ * @summary Poll the most recent briefing-generation job
+ */
+export const getGetEngagementBriefingGenerationStatusUrl = (id: string) => {
+  return `/api/engagements/${id}/briefing/status`;
+};
+
+export const getEngagementBriefingGenerationStatus = async (
+  id: string,
+  options?: RequestInit,
+): Promise<BriefingGenerationStatusResponse> => {
+  return customFetch<BriefingGenerationStatusResponse>(
+    getGetEngagementBriefingGenerationStatusUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetEngagementBriefingGenerationStatusQueryKey = (
+  id: string,
+) => {
+  return [`/api/engagements/${id}/briefing/status`] as const;
+};
+
+export const getGetEngagementBriefingGenerationStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEngagementBriefingGenerationStatus>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagementBriefingGenerationStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetEngagementBriefingGenerationStatusQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEngagementBriefingGenerationStatus>>
+  > = ({ signal }) =>
+    getEngagementBriefingGenerationStatus(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEngagementBriefingGenerationStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEngagementBriefingGenerationStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEngagementBriefingGenerationStatus>>
+>;
+export type GetEngagementBriefingGenerationStatusQueryError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Poll the most recent briefing-generation job
+ */
+
+export function useGetEngagementBriefingGenerationStatus<
+  TData = Awaited<ReturnType<typeof getEngagementBriefingGenerationStatus>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagementBriefingGenerationStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEngagementBriefingGenerationStatusQueryOptions(
+    id,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Streams the binary glTF (`model/gltf-binary`) for a briefing

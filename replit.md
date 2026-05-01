@@ -87,6 +87,14 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
 - `pnpm --filter @workspace/db run seed` — idempotent seed (Seguin + Musgrave)
 - `pnpm --filter <pkg> run dev` — start any artifact
 
+## DA-PI-3 — Briefing engine
+
+- `lib/briefing-engine` is the workspace lib that synthesizes the seven-section A–G site briefing (Spec 51 §2). `generateBriefing()` takes the engagement's current `briefing_sources`, groups them by category, builds the prompt, and either returns a deterministic `mockGenerator` payload (default) or calls Claude Sonnet 4.5 via `@workspace/integrations-anthropic-ai` (when `BRIEFING_LLM_MODE=anthropic`). Unresolved citation tokens (`{{atom|briefing-source|<id>|<label>}}`, `[[CODE:<atomId>]]`) are stripped and reported via `invalidCitations`.
+- `parcel_briefings` carries `section_a..g`, `generated_at`, `generated_by`, plus `prior_section_*` / `prior_generated_*` backup columns that the route copies the previous narrative into on regenerate, all in one transaction.
+- API: `POST /api/engagements/:id/briefing/generate` returns 202 + `generationId` and runs the engine fire-and-forget; `GET /api/engagements/:id/briefing/status` reports the in-process job state (idle/pending/completed/failed). The persisted briefing on `GET /briefing` is the source of truth.
+- Events: `parcel-briefing.generated` (first run) / `parcel-briefing.regenerated` (subsequent) appended best-effort. `materializable-element` event emission is gated behind `BRIEFING_EMIT_MATERIALIZABLE=true` because the atom is not yet registered (DA-PI-5).
+- UI: the Site Context tab renders an A–G section card stack (A always expanded, B+E auto-expanded when non-empty, C/D/F/G collapsed) plus a "Generate Briefing" / "Regenerate Briefing" button that polls status every ~2s while pending and re-fetches the briefing read on completion.
+
 ## One-off Maintenance Scripts
 
 - **Sweep orphaned avatar files** — `pnpm --filter @workspace/scripts run sweep:orphan-avatars`. Lists every object under `<PRIVATE_OBJECT_DIR>/uploads/` in the private bucket, cross-references against live `users.avatar_url` values, and reports the unreferenced ones. Runs in dry-run mode by default and only prints what *would* be deleted; pass `-- --apply` to actually delete (e.g. `pnpm --filter @workspace/scripts run sweep:orphan-avatars -- --apply`). Use this once after the avatar-cleanup fix from Task #90 to clear out the historical backlog of orphans; the api-server now deletes the prior object on every replace/clear, so repeated runs should report zero orphans.

@@ -14,6 +14,7 @@
     "@google-cloud/storage": "^7.19.0",
     "@workspace/adapters": "workspace:*",
     "@workspace/api-zod": "workspace:*",
+    "@workspace/briefing-engine": "workspace:*",
     "@workspace/codes": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/empressa-atom": "workspace:*",

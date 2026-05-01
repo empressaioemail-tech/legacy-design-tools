@@ -1,0 +1,347 @@
+/**
+ * POST /api/engagements/:id/briefing/generate +
+ * GET /api/engagements/:id/briefing/status — DA-PI-3 briefing engine
+ * kickoff + status polling.
+ *
+ * Covers:
+ *   - first-generation happy path (mock mode):
+ *     * 202 + generationId on POST,
+ *     * status flips pending → completed,
+ *     * row's `section_a..g` + `generated_at` populated,
+ *     * GET /briefing surfaces the narrative on the wire,
+ *     * `parcel-briefing.generated` event anchored.
+ *   - regeneration: previously-generated row gets backed up into
+ *     `prior_section_*` columns and a `parcel-briefing.regenerated`
+ *     event fires.
+ *   - 400 when the engagement has no briefing row (no sources).
+ *   - 404 when the engagement does not exist.
+ *
+ * The engine itself is mock-mode by default
+ * (`BRIEFING_LLM_MODE=mock`), so no Anthropic mocking is required —
+ * the deterministic `mockGenerator` writes the seven sections.
+ */
+
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterAll,
+} from "vitest";
+import request from "supertest";
+import type { Express } from "express";
+import { ctx } from "./test-context";
+
+vi.mock("@workspace/db", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
+  return {
+    ...actual,
+    get db() {
+      if (!ctx.schema)
+        throw new Error("parcel-briefings-generate.test: ctx.schema not set");
+      return ctx.schema.db;
+    },
+  };
+});
+
+const { setupRouteTests } = await import("./setup");
+const {
+  engagements,
+  parcelBriefings,
+  briefingSources,
+  atomEvents,
+} = await import("@workspace/db");
+const { eq, and } = await import("drizzle-orm");
+const { __clearBriefingGenerationJobsForTests } = await import(
+  "../routes/parcelBriefings"
+);
+
+let getApp: () => Express;
+setupRouteTests((g) => {
+  getApp = g;
+});
+
+beforeEach(() => {
+  __clearBriefingGenerationJobsForTests();
+});
+afterAll(() => {
+  __clearBriefingGenerationJobsForTests();
+});
+
+async function seedEngagement(name = "Briefing Generate Engagement") {
+  if (!ctx.schema) throw new Error("schema not ready");
+  const [eng] = await ctx.schema.db
+    .insert(engagements)
+    .values({
+      name,
+      nameLower: name.trim().toLowerCase(),
+      jurisdiction: "Boulder, CO",
+      address: "1 Pearl St",
+      status: "active",
+    })
+    .returning();
+  return eng;
+}
+
+/**
+ * Seed a briefing row + one current source so the engine has
+ * something to cite. The route's `loadCurrentSources` reads
+ * `briefing_sources` directly, so we don't need to hit the upload
+ * route — we go straight at the DB.
+ */
+async function seedBriefingWithSource(engagementId: string) {
+  if (!ctx.schema) throw new Error("schema not ready");
+  const [briefing] = await ctx.schema.db
+    .insert(parcelBriefings)
+    .values({ engagementId })
+    .returning();
+  const [source] = await ctx.schema.db
+    .insert(briefingSources)
+    .values({
+      briefingId: briefing.id,
+      layerKind: "qgis-zoning",
+      sourceKind: "manual-upload",
+      provider: "City of Boulder QGIS",
+      note: "test seed",
+      uploadObjectPath: "/objects/zoning",
+      uploadOriginalFilename: "zoning.geojson",
+      uploadContentType: "application/geo+json",
+      uploadByteSize: 1024,
+      snapshotDate: new Date("2026-01-01T00:00:00Z"),
+    })
+    .returning();
+  return { briefing, source };
+}
+
+/**
+ * Poll the status endpoint until it leaves `pending`. Mock-mode
+ * generation completes synchronously inside the route's
+ * fire-and-forget call, so a handful of 50ms intervals is plenty.
+ */
+async function waitForStatus(
+  engagementId: string,
+  expected: "completed" | "failed",
+  timeoutMs = 2000,
+): Promise<{ state: string; body: Record<string, unknown> }> {
+  const deadline = Date.now() + timeoutMs;
+  let last: { state: string; body: Record<string, unknown> } = {
+    state: "pending",
+    body: {},
+  };
+  while (Date.now() < deadline) {
+    const res = await request(getApp()).get(
+      `/api/engagements/${engagementId}/briefing/status`,
+    );
+    last = { state: res.body.state, body: res.body };
+    if (res.body.state === expected) return last;
+    if (res.body.state === "failed" && expected === "completed") {
+      throw new Error(
+        `briefing generation failed: ${JSON.stringify(res.body)}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(
+    `briefing status did not reach ${expected} within ${timeoutMs}ms; last=${JSON.stringify(last)}`,
+  );
+}
+
+describe("POST /api/engagements/:id/briefing/generate (mock mode)", () => {
+  it("404s when the engagement does not exist", async () => {
+    const res = await request(getApp())
+      .post(
+        `/api/engagements/00000000-0000-0000-0000-000000000000/briefing/generate`,
+      )
+      .send({});
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("engagement_not_found");
+  });
+
+  it("400s when the engagement has no briefing/sources to cite", async () => {
+    const eng = await seedEngagement();
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("no_briefing_sources_for_engagement");
+  });
+
+  it("kicks off, completes, populates section_a..g and emits generated event", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+    const { briefing } = await seedBriefingWithSource(eng.id);
+
+    const kickoff = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({});
+    expect(kickoff.status).toBe(202);
+    expect(kickoff.body).toMatchObject({ state: "pending" });
+    expect(typeof kickoff.body.generationId).toBe("string");
+    const generationId = kickoff.body.generationId as string;
+
+    const completed = await waitForStatus(eng.id, "completed");
+    expect(completed.body.generationId).toBe(generationId);
+    expect(completed.body.invalidCitationCount).toBe(0);
+    expect(completed.body.error).toBeNull();
+
+    const rows = await ctx.schema.db
+      .select()
+      .from(parcelBriefings)
+      .where(eq(parcelBriefings.id, briefing.id));
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.sectionA).toBeTruthy();
+    expect(row.sectionB).toBeTruthy();
+    expect(row.sectionC).toBeTruthy();
+    expect(row.sectionD).toBeTruthy();
+    expect(row.sectionE).toBeTruthy();
+    expect(row.sectionF).toBeTruthy();
+    expect(row.sectionG).toBeTruthy();
+    expect(row.generatedAt).toBeTruthy();
+    expect(row.generatedBy).toBe("system:briefing-engine");
+    // First-generation invariant: prior_* columns stay null until the
+    // engine runs again.
+    expect(row.priorSectionA).toBeNull();
+    expect(row.priorGeneratedAt).toBeNull();
+
+    const events = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "parcel-briefing"),
+          eq(atomEvents.entityId, eng.id),
+        ),
+      );
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect(events[0]!.eventType).toBe("parcel-briefing.generated");
+    expect(events[0]!.payload).toMatchObject({
+      briefingId: briefing.id,
+      engagementId: eng.id,
+      wasRegeneration: false,
+    });
+
+    // Wire shape: GET /briefing now surfaces the narrative envelope.
+    const briefingRead = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing`,
+    );
+    expect(briefingRead.status).toBe(200);
+    expect(briefingRead.body.briefing.narrative).toBeTruthy();
+    expect(briefingRead.body.briefing.narrative.sectionA).toBe(row.sectionA);
+    expect(briefingRead.body.briefing.narrative.generatedAt).toBeTruthy();
+  });
+
+  it("409s when a generation is already in flight for the engagement", async () => {
+    const eng = await seedEngagement();
+    await seedBriefingWithSource(eng.id);
+
+    // Kick off twice in rapid succession. The first call seeds the
+    // job map with state=pending before the engine call resolves
+    // (mock generator is synchronous inside the fire-and-forget
+    // microtask, but the second supertest request fires before that
+    // microtask drains, so the second hit sees `pending`).
+    const [first, second] = await Promise.all([
+      request(getApp())
+        .post(`/api/engagements/${eng.id}/briefing/generate`)
+        .send({}),
+      request(getApp())
+        .post(`/api/engagements/${eng.id}/briefing/generate`)
+        .send({}),
+    ]);
+    // Exactly one of the two requests should land 202; the other
+    // should land 409. We don't assert ordering — supertest can
+    // serialize the two requests in either order.
+    const codes = [first.status, second.status].sort();
+    expect(codes).toEqual([202, 409]);
+
+    await waitForStatus(eng.id, "completed");
+  });
+
+  it("regeneration backs up sections into prior_* columns and emits regenerated event", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+    const { briefing } = await seedBriefingWithSource(eng.id);
+
+    // First generation.
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({});
+    await waitForStatus(eng.id, "completed");
+    const [afterFirst] = await ctx.schema.db
+      .select()
+      .from(parcelBriefings)
+      .where(eq(parcelBriefings.id, briefing.id));
+    expect(afterFirst.sectionA).toBeTruthy();
+    const firstSectionA = afterFirst.sectionA;
+    const firstGeneratedAt = afterFirst.generatedAt;
+
+    // Reset the in-process job map between generations so the second
+    // POST is allowed (route blocks while a `pending` job exists).
+    __clearBriefingGenerationJobsForTests();
+
+    // Second generation — explicit regenerate flag (informational
+    // today; the route auto-detects).
+    const second = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({ regenerate: true });
+    expect(second.status).toBe(202);
+    await waitForStatus(eng.id, "completed");
+    const [afterSecond] = await ctx.schema.db
+      .select()
+      .from(parcelBriefings)
+      .where(eq(parcelBriefings.id, briefing.id));
+    // Prior backup populated.
+    expect(afterSecond.priorSectionA).toBe(firstSectionA);
+    expect(afterSecond.priorGeneratedAt?.toISOString()).toBe(
+      firstGeneratedAt!.toISOString(),
+    );
+    expect(afterSecond.priorGeneratedBy).toBe("system:briefing-engine");
+    // Current narrative is freshly stamped — generatedAt strictly
+    // greater than the first run's stamp.
+    expect(afterSecond.generatedAt!.getTime()).toBeGreaterThanOrEqual(
+      firstGeneratedAt!.getTime(),
+    );
+
+    // Two events total (generated + regenerated). The regenerated
+    // event is the most recent.
+    const events = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "parcel-briefing"),
+          eq(atomEvents.entityId, eng.id),
+        ),
+      );
+    const types = events.map((e) => e.eventType);
+    expect(types).toContain("parcel-briefing.generated");
+    expect(types).toContain("parcel-briefing.regenerated");
+  });
+});
+
+describe("GET /api/engagements/:id/briefing/status idle path", () => {
+  it("returns idle when no generation has run on this process", async () => {
+    const eng = await seedEngagement();
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing/status`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      generationId: null,
+      state: "idle",
+      startedAt: null,
+      completedAt: null,
+      error: null,
+      invalidCitationCount: null,
+    });
+  });
+
+  it("404s when the engagement does not exist", async () => {
+    const res = await request(getApp()).get(
+      `/api/engagements/00000000-0000-0000-0000-000000000000/briefing/status`,
+    );
+    expect(res.status).toBe(404);
+  });
+});

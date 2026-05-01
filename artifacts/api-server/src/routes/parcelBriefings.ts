@@ -39,6 +39,9 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import {
   CreateEngagementBriefingSourceBody,
   CreateEngagementBriefingSourceParams,
+  GenerateEngagementBriefingBody,
+  GenerateEngagementBriefingParams,
+  GetEngagementBriefingGenerationStatusParams,
   GetEngagementBriefingParams,
   ListEngagementBriefingSourcesParams,
   ListEngagementBriefingSourcesQueryParams,
@@ -46,6 +49,12 @@ import {
   RetryBriefingSourceConversionParams,
 } from "@workspace/api-zod";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
+import { randomUUID } from "node:crypto";
+import {
+  generateBriefing,
+  type BriefingSourceInput,
+  type GenerateBriefingResult,
+} from "@workspace/briefing-engine";
 import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";
 import {
@@ -53,12 +62,20 @@ import {
   type BriefingSourceEventType,
 } from "../atoms/briefing-source.atom";
 import {
+  PARCEL_BRIEFING_EVENT_TYPES,
+  type ParcelBriefingEventType,
+} from "../atoms/parcel-briefing.atom";
+import {
   ConverterError,
   DXF_LAYER_KINDS,
   getConverterClient,
   isDxfLayerKind,
   type DxfLayerKind,
 } from "../lib/converterClient";
+import {
+  getBriefingLlmClient,
+  getBriefingLlmMode,
+} from "../lib/briefingLlmClient";
 import { ObjectStorageService } from "../lib/objectStorage";
 
 /**
@@ -126,12 +143,31 @@ interface BriefingSourceWire {
   createdAt: string;
 }
 
+/**
+ * The seven A–G section narrative + generation metadata, surfaced via
+ * `EngagementBriefingNarrative` in the OpenAPI spec. Returned `null`
+ * by {@link toBriefingNarrativeWire} when no generation has run on
+ * the row (every section column + `generatedAt` is null).
+ */
+interface BriefingNarrativeWire {
+  sectionA: string | null;
+  sectionB: string | null;
+  sectionC: string | null;
+  sectionD: string | null;
+  sectionE: string | null;
+  sectionF: string | null;
+  sectionG: string | null;
+  generatedAt: string | null;
+  generatedBy: string | null;
+}
+
 interface BriefingWire {
   id: string;
   engagementId: string;
   createdAt: string;
   updatedAt: string;
   sources: BriefingSourceWire[];
+  narrative: BriefingNarrativeWire | null;
 }
 
 /**
@@ -174,6 +210,41 @@ function toBriefingSourceWire(s: BriefingSource): BriefingSourceWire {
   };
 }
 
+/**
+ * Project the seven section columns + generation metadata into the
+ * `EngagementBriefingNarrative` wire shape, or return `null` when the
+ * row has never been generated. The "never generated" sentinel is
+ * "every section is null AND `generatedAt` is null" — this is what
+ * the `null`-narrative envelope tells the UI to render the
+ * "Generate Briefing" button instead of the section cards.
+ */
+function toBriefingNarrativeWire(
+  b: ParcelBriefing,
+): BriefingNarrativeWire | null {
+  const everySectionNull =
+    b.sectionA === null &&
+    b.sectionB === null &&
+    b.sectionC === null &&
+    b.sectionD === null &&
+    b.sectionE === null &&
+    b.sectionF === null &&
+    b.sectionG === null;
+  if (everySectionNull && b.generatedAt === null) {
+    return null;
+  }
+  return {
+    sectionA: b.sectionA,
+    sectionB: b.sectionB,
+    sectionC: b.sectionC,
+    sectionD: b.sectionD,
+    sectionE: b.sectionE,
+    sectionF: b.sectionF,
+    sectionG: b.sectionG,
+    generatedAt: b.generatedAt ? b.generatedAt.toISOString() : null,
+    generatedBy: b.generatedBy,
+  };
+}
+
 function toBriefingWire(
   briefing: ParcelBriefing,
   sources: BriefingSource[],
@@ -184,6 +255,7 @@ function toBriefingWire(
     createdAt: briefing.createdAt.toISOString(),
     updatedAt: briefing.updatedAt.toISOString(),
     sources: sources.map(toBriefingSourceWire),
+    narrative: toBriefingNarrativeWire(briefing),
   };
 }
 
@@ -1074,5 +1146,490 @@ class NoCurrentRowError extends Error {
     this.name = "NoCurrentRowError";
   }
 }
+
+/**
+ * --- DA-PI-3: briefing generation kickoff + status polling ---
+ *
+ * Two endpoints:
+ *
+ *   - POST /engagements/:id/briefing/generate
+ *       Kicks off an asynchronous run of the briefing engine
+ *       (`@workspace/briefing-engine`). The route returns 202 +
+ *       `{ generationId, state: "pending" }` immediately; the engine
+ *       call runs in the background, persists the seven-section
+ *       narrative on the `parcel_briefings` row, and emits
+ *       `parcel-briefing.generated` (first run) or
+ *       `parcel-briefing.regenerated` (subsequent runs, with the
+ *       prior narrative copied into the `prior_section_*` backup
+ *       columns inside the same transaction).
+ *
+ *   - GET /engagements/:id/briefing/status
+ *       Returns the in-process job state for that engagement so the
+ *       UI can poll until the run settles. Job state is process-local
+ *       and best-effort — the persisted briefing on `GET /briefing`
+ *       is the source of truth.
+ *
+ * The job map is in-memory (mirrors the federal-layers polling
+ * pattern). It is NOT durable across restarts — the persisted row's
+ * `generated_at` column is what the UI ultimately reads to know a
+ * narrative is on file.
+ */
+
+interface BriefingGenerationJob {
+  generationId: string;
+  state: "pending" | "completed" | "failed";
+  startedAt: Date;
+  completedAt: Date | null;
+  error: string | null;
+  invalidCitationCount: number | null;
+}
+
+const briefingGenerationJobs = new Map<string, BriefingGenerationJob>();
+
+/** Test-only: clear the job map between vitest cases. */
+export function __clearBriefingGenerationJobsForTests(): void {
+  briefingGenerationJobs.clear();
+}
+
+/** Pinned event-type constants — break compilation on a rename. */
+const PARCEL_BRIEFING_GENERATED_EVENT_TYPE: ParcelBriefingEventType =
+  PARCEL_BRIEFING_EVENT_TYPES[1];
+const PARCEL_BRIEFING_REGENERATED_EVENT_TYPE: ParcelBriefingEventType =
+  PARCEL_BRIEFING_EVENT_TYPES[3];
+
+/** Stable system actor for engine-driven generation events. */
+const BRIEFING_ENGINE_ACTOR = {
+  kind: "system" as const,
+  id: "briefing-engine",
+};
+
+/**
+ * `generatedBy` value persisted on `parcel_briefings.generated_by`.
+ * Mirrors the audit-trail convention used elsewhere ("system:<id>")
+ * so the wire payload is unambiguous to humans reading it without
+ * having to inspect the actor envelope on the event chain.
+ */
+const BRIEFING_ENGINE_GENERATED_BY = "system:briefing-engine";
+
+/**
+ * Project a current `briefing_sources` row into the engine's input
+ * shape. The engine only needs the cited surface — id, layerKind,
+ * sourceKind, provider, snapshotDate, note. Payload is intentionally
+ * omitted for now (DA-PI-3 baseline): the federal-adapter rows that
+ * carry parsed JSON in a payload column will be wired in DA-PI-2 / 4.
+ */
+function toEngineSourceInput(s: BriefingSource): BriefingSourceInput {
+  return {
+    id: s.id,
+    layerKind: s.layerKind,
+    sourceKind: s.sourceKind,
+    provider: s.provider,
+    snapshotDate: s.snapshotDate.toISOString(),
+    note: s.note,
+  };
+}
+
+/**
+ * Persist the engine's output to the briefing row in one transaction.
+ * If the row already had a generated narrative, copy it into the
+ * `prior_section_*` backup columns first so the audit trail can
+ * reconstruct the prior version without loading the event chain.
+ *
+ * Returns:
+ *   - the updated row,
+ *   - whether this was a regeneration (a prior narrative existed and
+ *     was backed up), so the caller can pick the right event type.
+ */
+async function persistGenerationResult(
+  briefingId: string,
+  result: GenerateBriefingResult,
+): Promise<{ row: ParcelBriefing; wasRegeneration: boolean }> {
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(parcelBriefings)
+      .where(eq(parcelBriefings.id, briefingId))
+      .limit(1);
+    if (!current) {
+      throw new Error(`parcel_briefings row vanished mid-generation: ${briefingId}`);
+    }
+    const hadPrior =
+      current.sectionA !== null ||
+      current.sectionB !== null ||
+      current.sectionC !== null ||
+      current.sectionD !== null ||
+      current.sectionE !== null ||
+      current.sectionF !== null ||
+      current.sectionG !== null ||
+      current.generatedAt !== null;
+    const [updated] = await tx
+      .update(parcelBriefings)
+      .set({
+        sectionA: result.sections.a,
+        sectionB: result.sections.b,
+        sectionC: result.sections.c,
+        sectionD: result.sections.d,
+        sectionE: result.sections.e,
+        sectionF: result.sections.f,
+        sectionG: result.sections.g,
+        generatedAt: result.generatedAt,
+        generatedBy: result.generatedBy,
+        // Backup columns: copy the previous narrative into the prior_*
+        // slots (or clear them on first generation so the row's invariant
+        // is "prior_* set ↔ current narrative was overwritten at least
+        // once"). Drizzle's set() accepts null to clear.
+        priorSectionA: hadPrior ? current.sectionA : null,
+        priorSectionB: hadPrior ? current.sectionB : null,
+        priorSectionC: hadPrior ? current.sectionC : null,
+        priorSectionD: hadPrior ? current.sectionD : null,
+        priorSectionE: hadPrior ? current.sectionE : null,
+        priorSectionF: hadPrior ? current.sectionF : null,
+        priorSectionG: hadPrior ? current.sectionG : null,
+        priorGeneratedAt: hadPrior ? current.generatedAt : null,
+        priorGeneratedBy: hadPrior ? current.generatedBy : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(parcelBriefings.id, briefingId))
+      .returning();
+    return { row: updated, wasRegeneration: hadPrior };
+  });
+}
+
+/**
+ * Best-effort emission of `parcel-briefing.generated` /
+ * `parcel-briefing.regenerated`. Failures are caught + logged so a
+ * history outage cannot fail the in-flight generation — the row is
+ * the source of truth, the event chain is observability (mirrors the
+ * contract used by `emitBriefingSourceFetchedEvent` above).
+ */
+async function emitParcelBriefingGeneratedEvent(
+  history: EventAnchoringService,
+  briefing: ParcelBriefing,
+  result: GenerateBriefingResult,
+  wasRegeneration: boolean,
+  reqLog: typeof logger,
+): Promise<void> {
+  const eventType = wasRegeneration
+    ? PARCEL_BRIEFING_REGENERATED_EVENT_TYPE
+    : PARCEL_BRIEFING_GENERATED_EVENT_TYPE;
+  try {
+    const event = await history.appendEvent({
+      entityType: "parcel-briefing",
+      entityId: briefing.engagementId,
+      eventType,
+      actor: BRIEFING_ENGINE_ACTOR,
+      payload: {
+        briefingId: briefing.id,
+        engagementId: briefing.engagementId,
+        producer: result.producer,
+        generatedAt: result.generatedAt.toISOString(),
+        generatedBy: result.generatedBy,
+        invalidCitationCount: result.invalidCitations.length,
+        wasRegeneration,
+      },
+    });
+    reqLog.info(
+      {
+        briefingId: briefing.id,
+        engagementId: briefing.engagementId,
+        eventType,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "parcel-briefing generation event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        briefingId: briefing.id,
+        engagementId: briefing.engagementId,
+        eventType,
+      },
+      "parcel-briefing generation event append failed — row update kept",
+    );
+  }
+  // DA-PI-5 hook: emit a `materializable-element` atom event when the
+  // feature flag is on. The atom is not yet registered (DA-PI-5 not
+  // landed), so by default we skip emission entirely. When the flag
+  // is on we attempt the append best-effort; a registry rejection is
+  // logged but does not bubble up.
+  if (process.env.BRIEFING_EMIT_MATERIALIZABLE === "true") {
+    try {
+      await history.appendEvent({
+        entityType: "materializable-element",
+        entityId: briefing.engagementId,
+        eventType: "materializable-element.derived",
+        actor: BRIEFING_ENGINE_ACTOR,
+        payload: {
+          briefingId: briefing.id,
+          engagementId: briefing.engagementId,
+          producer: result.producer,
+          generatedAt: result.generatedAt.toISOString(),
+        },
+      });
+      reqLog.info(
+        { briefingId: briefing.id },
+        "materializable-element event emitted (BRIEFING_EMIT_MATERIALIZABLE=true)",
+      );
+    } catch (err) {
+      reqLog.warn(
+        { err, briefingId: briefing.id },
+        "materializable-element event emission failed (atom likely not yet registered)",
+      );
+    }
+  }
+}
+
+/**
+ * Body of the async generation kickoff. Updates the in-memory job
+ * map at every state transition. Never throws — terminal failures
+ * land in the job map's `state="failed"` slot and the route's status
+ * endpoint surfaces the reason to the UI.
+ */
+async function runBriefingGeneration(args: {
+  engagementId: string;
+  briefingId: string;
+  generationId: string;
+  generatedBy: string;
+  sources: BriefingSource[];
+  reqLog: typeof logger;
+}): Promise<void> {
+  const { engagementId, briefingId, generationId, generatedBy, sources, reqLog } = args;
+  try {
+    const client = await getBriefingLlmClient();
+    const mode = getBriefingLlmMode();
+    reqLog.info(
+      { engagementId, briefingId, generationId, mode, sourceCount: sources.length },
+      "briefing generation: engine call starting",
+    );
+    const result = await generateBriefing(
+      {
+        engagementId,
+        sources: sources.map(toEngineSourceInput),
+        generatedBy,
+      },
+      {
+        mode,
+        ...(client ? { anthropicClient: client } : {}),
+      },
+    );
+    const { row, wasRegeneration } = await persistGenerationResult(
+      briefingId,
+      result,
+    );
+    await emitParcelBriefingGeneratedEvent(
+      getHistoryService(),
+      row,
+      result,
+      wasRegeneration,
+      reqLog,
+    );
+    if (result.invalidCitations.length > 0) {
+      reqLog.warn(
+        {
+          engagementId,
+          briefingId,
+          generationId,
+          invalidCount: result.invalidCitations.length,
+          sample: result.invalidCitations.slice(0, 5),
+        },
+        "briefing generation: engine emitted unresolved citation tokens (stripped)",
+      );
+    }
+    briefingGenerationJobs.set(engagementId, {
+      generationId,
+      state: "completed",
+      startedAt:
+        briefingGenerationJobs.get(engagementId)?.startedAt ?? new Date(),
+      completedAt: new Date(),
+      error: null,
+      invalidCitationCount: result.invalidCitations.length,
+    });
+    reqLog.info(
+      {
+        engagementId,
+        briefingId,
+        generationId,
+        wasRegeneration,
+        producer: result.producer,
+      },
+      "briefing generation: completed",
+    );
+  } catch (err) {
+    const message = (err as Error).message ?? "unknown engine failure";
+    briefingGenerationJobs.set(engagementId, {
+      generationId,
+      state: "failed",
+      startedAt:
+        briefingGenerationJobs.get(engagementId)?.startedAt ?? new Date(),
+      completedAt: new Date(),
+      error: message,
+      invalidCitationCount: null,
+    });
+    reqLog.error(
+      { err, engagementId, briefingId, generationId },
+      "briefing generation: failed",
+    );
+  }
+}
+
+router.post(
+  "/engagements/:id/briefing/generate",
+  async (req: Request, res: Response) => {
+    const paramsParse = GenerateEngagementBriefingParams.safeParse(req.params);
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_engagement_id" });
+      return;
+    }
+    const engagementId = paramsParse.data.id;
+    // Body is optional — `regenerate` is informational today (the
+    // route auto-detects a prior narrative). Parse defensively.
+    const bodyParse = GenerateEngagementBriefingBody.safeParse(req.body ?? {});
+    if (!bodyParse.success) {
+      res.status(400).json({ error: "invalid_briefing_generate_body" });
+      return;
+    }
+
+    const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+
+    try {
+      const eng = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      if (eng.length === 0) {
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+
+      const briefingRows = await db
+        .select()
+        .from(parcelBriefings)
+        .where(eq(parcelBriefings.engagementId, engagementId))
+        .limit(1);
+      const briefing = briefingRows[0];
+      if (!briefing) {
+        // No briefing → no sources → nothing to synthesize. The 400
+        // mirrors what the UI's tooltip says ("Upload a layer or run
+        // an adapter first").
+        res
+          .status(400)
+          .json({ error: "no_briefing_sources_for_engagement" });
+        return;
+      }
+      const sources = await loadCurrentSources(briefing.id);
+      if (sources.length === 0) {
+        res
+          .status(400)
+          .json({ error: "no_briefing_sources_for_engagement" });
+        return;
+      }
+
+      // Single-flight guard: a generation already in flight for this
+      // engagement is a 409, not a "queue another one" because the
+      // engine call is non-trivial and the result would race the
+      // first run's persist. Once the first run settles, the second
+      // call can succeed.
+      const existing = briefingGenerationJobs.get(engagementId);
+      if (existing && existing.state === "pending") {
+        res.status(409).json({
+          error: "briefing_generation_already_in_flight",
+          generationId: existing.generationId,
+        });
+        return;
+      }
+
+      const generationId = randomUUID();
+      briefingGenerationJobs.set(engagementId, {
+        generationId,
+        state: "pending",
+        startedAt: new Date(),
+        completedAt: null,
+        error: null,
+        invalidCitationCount: null,
+      });
+
+      // Fire-and-forget. The job map carries the state the status
+      // endpoint reads. We do not await — the 202 returns immediately.
+      void runBriefingGeneration({
+        engagementId,
+        briefingId: briefing.id,
+        generationId,
+        generatedBy: BRIEFING_ENGINE_GENERATED_BY,
+        sources,
+        reqLog,
+      });
+
+      reqLog.info(
+        {
+          engagementId,
+          briefingId: briefing.id,
+          generationId,
+          regenerate: bodyParse.data?.regenerate ?? false,
+          sourceCount: sources.length,
+        },
+        "briefing generation: kicked off",
+      );
+      res.status(202).json({ generationId, state: "pending" });
+    } catch (err) {
+      logger.error({ err, engagementId }, "kickoff briefing generation failed");
+      res.status(500).json({ error: "Failed to kick off briefing generation" });
+    }
+  },
+);
+
+router.get(
+  "/engagements/:id/briefing/status",
+  async (req: Request, res: Response) => {
+    const paramsParse = GetEngagementBriefingGenerationStatusParams.safeParse(
+      req.params,
+    );
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_engagement_id" });
+      return;
+    }
+    const engagementId = paramsParse.data.id;
+
+    try {
+      const eng = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      if (eng.length === 0) {
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+      const job = briefingGenerationJobs.get(engagementId);
+      if (!job) {
+        res.json({
+          generationId: null,
+          state: "idle",
+          startedAt: null,
+          completedAt: null,
+          error: null,
+          invalidCitationCount: null,
+        });
+        return;
+      }
+      res.json({
+        generationId: job.generationId,
+        state: job.state,
+        startedAt: job.startedAt.toISOString(),
+        completedAt: job.completedAt ? job.completedAt.toISOString() : null,
+        error: job.error,
+        invalidCitationCount: job.invalidCitationCount,
+      });
+    } catch (err) {
+      logger.error(
+        { err, engagementId },
+        "get briefing generation status failed",
+      );
+      res.status(500).json({ error: "Failed to read briefing status" });
+    }
+  },
+);
 
 export default router;

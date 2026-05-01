@@ -32,6 +32,12 @@
     },
     {
       "path": "./lib/adapters"
+    },
+    {
+      "path": "./lib/briefing-engine"
+    },
+    {
+      "path": "./lib/integrations-anthropic-ai"
     }
   ]
 }

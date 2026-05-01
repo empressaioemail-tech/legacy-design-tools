@@ -1,5 +1,6 @@
 /**
- * The `parcel-briefing` atom registration — DA-PI-1 sprint, shape-only.
+ * The `parcel-briefing` atom registration — DA-PI-1 sprint shape, DA-PI-3
+ * narrative pass-through.
  *
  * Per Spec 51 §5 / Spec 51a §2.10, a *parcel briefing* is the
  * model-readable bundle of parcel facts + cited code sections + sourced
@@ -8,14 +9,15 @@
  *
  *   parcel-briefing:{parcelId}:{intentHash}
  *
- * Sprint scope (DA-PI-1) is **registration-only**: this file ships the
- * registration contract — entityType, supportedModes, defaultMode,
- * composition edges, event vocabulary — so the registry, catalog
- * endpoint, and chat inline-reference resolver can recognize the type.
- * The data engine that resolves a briefing id to typed payload data
- * lands in **DA-PI-3** per Spec 51 §7's sprint table; until then
- * `contextSummary` returns a structurally-complete not-found envelope
- * that explains the deferral in `prose` and never throws.
+ * DA-PI-1 shipped this atom as registration-only with a structurally-
+ * complete not-found envelope. DA-PI-3 wires the database lookup —
+ * `contextSummary` now reads the engagement's `parcel_briefings` row
+ * directly (no parcel/intent lookup yet — those land in DA-PI-4) and
+ * surfaces the seven A–G section narrative bodies + generation metadata
+ * in Layer 1 prose and Layer 3 keyMetrics. Engagements without a
+ * briefing row continue to return the not-found envelope so the chat
+ * inline-reference resolver and catalog endpoint do not crash on a
+ * never-generated briefing.
  *
  * Composition (Spec 51 wins on the Spec 51 ↔ 51a discrepancy at §2.10
  * — Spec 51 §5 calls the 4th child `code-section`; Spec 51a calls it
@@ -28,15 +30,12 @@
  *                       not yet registered; backed by the existing
  *                       `code_atoms` table but without an atom shim)
  *
- * supportedModes is **all five** per Spec 20 §10 anti-pattern
- * "Registering an atom type without all 5 render modes". Renderer
- * implementations are out of DA-PI-1 scope; the contract surface is
+ * supportedModes is **all five** per Spec 20 §10 anti-pattern. Renderer
+ * implementations are out of DA-PI-1/3 scope; the contract surface is
  * what registers. `defaultMode: "card"` per Spec 51a §2.10's primary
  * presentation guidance.
  *
- * Event types per **Spec 51 §5** (which wins on the Spec 51 ↔ 51a
- * discrepancy: 51a lists `saved`/`shared`; 51 lists `materialized-revit`
- * and omits both — Spec 51 wording is canonical):
+ * Event types per **Spec 51 §5**:
  *
  *   - `parcel-briefing.requested`
  *   - `parcel-briefing.generated`
@@ -44,13 +43,11 @@
  *   - `parcel-briefing.regenerated`
  *   - `parcel-briefing.exported`
  *
- * `briefing-divergence` (also produced by the briefing engine) is
- * a separate atom and is deferred to **Spec 53 C-1**, not registered
- * here.
+ * `briefing-divergence` (also produced by the briefing engine) is a
+ * separate atom and is deferred to **Spec 53 C-1**, not registered here.
  *
- * VDA wrapping (`wrapForStorage`) is intentionally **not** invoked here
- * to match the snapshot/engagement convention — captured as a downstream
- * cleanup item (do every atom in one sweep, not piecemeal).
+ * VDA wrapping (`wrapForStorage`) intentionally not invoked — matches
+ * snapshot/engagement convention.
  */
 
 import {
@@ -58,7 +55,10 @@ import {
   type AtomRegistration,
   type ContextSummary,
   type EventAnchoringService,
+  type KeyMetric,
 } from "@workspace/empressa-atom";
+import { db, parcelBriefings, type ParcelBriefing } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 /** Hard cap on the prose summary so we don't blow up token budget. */
 export const PARCEL_BRIEFING_PROSE_MAX_CHARS = 600;
@@ -94,43 +94,52 @@ export type ParcelBriefingEventType =
 
 /**
  * Typed payload returned by `parcel-briefing`'s `contextSummary.typed`.
- * In DA-PI-1 only the `id` + `found` discriminator are populated — the
- * data engine that fills the rest ships in DA-PI-3.
+ * Pre-DA-PI-3 only `id` + `found` were populated; the engine now also
+ * surfaces the section narrative bodies + generation metadata. Sections
+ * are nullable because a briefing row may exist (because uploads have
+ * landed via DA-PI-1B) without ever having been generated.
  */
 export interface ParcelBriefingTypedPayload {
   id: string;
   found: boolean;
+  sectionA: string | null;
+  sectionB: string | null;
+  sectionC: string | null;
+  sectionD: string | null;
+  sectionE: string | null;
+  sectionF: string | null;
+  sectionG: string | null;
+  generatedAt: string | null;
+  generatedBy: string | null;
 }
 
 /**
- * Dependencies of {@link makeParcelBriefingAtom}. Only `history` is
- * accepted in DA-PI-1 — there is no DB lookup yet. DA-PI-3 will add a
- * `db` dep (and likely a parcel-fetch + code-retrieval service) when
- * the engine wires up.
+ * Dependencies of {@link makeParcelBriefingAtom}. `db` is now required
+ * to read the briefing row in `contextSummary`; passing it in (rather
+ * than importing the singleton inside this module) keeps tests in
+ * control of which schema the atom reads from. `history` is best-
+ * effort and stays optional.
  */
 export interface ParcelBriefingAtomDeps {
+  db?: typeof db;
   history?: EventAnchoringService;
 }
 
 /**
- * Build the parcel-briefing atom registration. Shape-only in DA-PI-1;
- * `contextSummary` always returns the structural not-found envelope.
+ * Build the parcel-briefing atom registration. Reads the briefing row
+ * by `engagementId` (the route convention treats engagementId as the
+ * atom id for parcel-briefing — see DA-PI-1B routing), surfacing the
+ * narrative + generation metadata in the typed payload.
  */
 export function makeParcelBriefingAtom(
   deps: ParcelBriefingAtomDeps = {},
 ): AtomRegistration<"parcel-briefing", ParcelBriefingSupportedModes> {
-  // Composition edges per Spec 51 §5 / Spec 51a §2.10.
-  //   - `parcel`: forwardRef — the parcel atom registers in DA-PI-2
-  //     / DA-PI-4 (county GIS adapters). Declaring it as a forward
-  //     ref means the framework's `validate()` step does not crash on
-  //     the missing child registration; `resolveComposition` returns
-  //     zero parcel children at lookup time until that atom registers.
-  //   - `intent`, `briefing-source`: registered alongside this atom in
-  //     DA-PI-1, so these are concrete edges that validate at boot.
-  //   - `code-section`: forwardRef — Code Library has a `code_atoms`
-  //     table today but no atom shim. Spec 51 names it `code-section`;
-  //     a future sprint registers the atom and this edge becomes
-  //     concrete without changing the composition shape here.
+  // Resolve the db lazily on each `contextSummary` call. Doing the
+  // `deps.db ?? db` coalesce at construction time would force the
+  // singleton `db` import to evaluate even when the caller passed an
+  // explicit override — which breaks vi.mock'd test setups that throw
+  // on access to the un-set test schema before any test body runs.
+  const resolveDb = () => deps.db ?? db;
   const composition: ReadonlyArray<AtomComposition> = [
     {
       childEntityType: "parcel",
@@ -170,11 +179,7 @@ export function makeParcelBriefingAtom(
       entityId: string,
       _scope,
     ): Promise<ContextSummary<"parcel-briefing">> {
-      // History is best-effort even pre-engine: a producer in DA-PI-3
-      // may emit a `parcel-briefing.requested` event before the data
-      // engine can return a typed payload, and that event should still
-      // surface on the timeline. Falls back to epoch when no events
-      // exist.
+      // History first (best-effort, mirrors DA-PI-1 fallback semantics).
       let latestEventId = "";
       let latestEventAt = new Date(0).toISOString();
       if (deps.history) {
@@ -189,31 +194,103 @@ export function makeParcelBriefingAtom(
             latestEventAt = latest.occurredAt.toISOString();
           }
         } catch {
-          // History is best-effort; structural fallback above keeps
-          // the chat path working when the anchoring service is down.
+          // History is best-effort.
         }
       }
 
-      const proseRaw =
-        `Parcel briefing ${entityId} is registered as a catalog atom but the briefing engine that resolves it ` +
-        `is not implemented yet (ships in DA-PI-3). The composition edges (parcel, intent, briefing-source, code-section) ` +
-        `and event vocabulary are declared so producers and the chat inline-reference resolver can recognize this type.`;
+      // Look up by engagementId (the route convention). A briefing row
+      // may not exist yet — that's the "no upload has happened" case.
+      let row: ParcelBriefing | undefined;
+      try {
+        const found = await resolveDb()
+          .select()
+          .from(parcelBriefings)
+          .where(eq(parcelBriefings.engagementId, entityId))
+          .limit(1);
+        row = found[0];
+      } catch {
+        // DB lookup failure falls through to the not-found envelope so
+        // the chat inline-reference resolver does not crash a turn.
+      }
+
+      if (!row) {
+        const proseRaw =
+          `Parcel briefing for engagement ${entityId} has not been generated yet. ` +
+          `Upload a manual layer or run the federal adapters, then trigger generation ` +
+          `via the Site Context tab.`;
+        const prose =
+          proseRaw.length > PARCEL_BRIEFING_PROSE_MAX_CHARS
+            ? proseRaw.slice(0, PARCEL_BRIEFING_PROSE_MAX_CHARS - 1) + "…"
+            : proseRaw;
+        return {
+          prose,
+          typed: {
+            id: entityId,
+            found: false,
+            sectionA: null,
+            sectionB: null,
+            sectionC: null,
+            sectionD: null,
+            sectionE: null,
+            sectionF: null,
+            sectionG: null,
+            generatedAt: null,
+            generatedBy: null,
+          } as unknown as Record<string, unknown>,
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: { latestEventId, latestEventAt },
+          scopeFiltered: false,
+        };
+      }
+
+      const generatedAt = row.generatedAt ? row.generatedAt.toISOString() : null;
+      const proseRaw = row.sectionA
+        ? `Parcel briefing ${row.id} (engagement ${row.engagementId}). ` +
+          `Section A — Executive Summary: ${row.sectionA.replace(/\s+/g, " ").trim()}`
+        : `Parcel briefing ${row.id} for engagement ${row.engagementId} ` +
+          `exists but the A–G narrative has not been generated yet.`;
       const prose =
         proseRaw.length > PARCEL_BRIEFING_PROSE_MAX_CHARS
           ? proseRaw.slice(0, PARCEL_BRIEFING_PROSE_MAX_CHARS - 1) + "…"
           : proseRaw;
 
+      const keyMetrics: KeyMetric[] = [];
+      const sections: ReadonlyArray<{ key: string; body: string | null }> = [
+        { key: "section_a_present", body: row.sectionA },
+        { key: "section_b_present", body: row.sectionB },
+        { key: "section_c_present", body: row.sectionC },
+        { key: "section_d_present", body: row.sectionD },
+        { key: "section_e_present", body: row.sectionE },
+        { key: "section_f_present", body: row.sectionF },
+        { key: "section_g_present", body: row.sectionG },
+      ];
+      for (const s of sections) {
+        keyMetrics.push({ label: s.key, value: s.body ? "true" : "false" });
+      }
+      if (generatedAt) {
+        keyMetrics.push({ label: "generated_at", value: generatedAt });
+      }
+      if (row.generatedBy) {
+        keyMetrics.push({ label: "generated_by", value: row.generatedBy });
+      }
+
       return {
         prose,
-        // Cast through `unknown` per the snapshot.atom convention:
-        // `ParcelBriefingTypedPayload` deliberately has no index
-        // signature, so a direct assignment to `Record<string, unknown>`
-        // would fail TS2322; the cast is the established escape hatch.
-        typed: { id: entityId, found: false } as unknown as Record<
-          string,
-          unknown
-        >,
-        keyMetrics: [],
+        typed: {
+          id: entityId,
+          found: true,
+          sectionA: row.sectionA,
+          sectionB: row.sectionB,
+          sectionC: row.sectionC,
+          sectionD: row.sectionD,
+          sectionE: row.sectionE,
+          sectionF: row.sectionF,
+          sectionG: row.sectionG,
+          generatedAt,
+          generatedBy: row.generatedBy,
+        } as unknown as Record<string, unknown>,
+        keyMetrics,
         relatedAtoms: [],
         historyProvenance: { latestEventId, latestEventAt },
         scopeFiltered: false,

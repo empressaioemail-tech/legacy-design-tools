@@ -5,10 +5,12 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { EngagementBriefingNarrative } from "./engagementBriefingNarrative";
 import type { EngagementBriefingSource } from "./engagementBriefingSource";
 
 /**
- * The engagement's parcel briefing row plus its current sources.
+ * The engagement's parcel briefing row plus its current sources
+and (when generated) the seven-section A–G narrative.
 
  */
 export interface EngagementBriefing {
@@ -17,4 +19,10 @@ export interface EngagementBriefing {
   createdAt: Date;
   updatedAt: Date;
   sources: EngagementBriefingSource[];
+  /** The latest generated A–G narrative for this engagement.
+`null` when the engine has never run on this row (the
+briefing exists but no `POST /briefing/generate` call has
+populated `section_a..g` yet).
+ */
+  narrative: EngagementBriefingNarrative | null;
 }

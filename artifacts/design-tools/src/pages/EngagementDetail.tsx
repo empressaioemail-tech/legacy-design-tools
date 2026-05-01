@@ -3,20 +3,24 @@ import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGenerateEngagementLayers,
+  useGenerateEngagementBriefing,
   useGetEngagement,
   useGetEngagementBriefing,
+  useGetEngagementBriefingGenerationStatus,
   useGetSnapshot,
   useListEngagementBriefingSources,
   useListEngagementSubmissions,
   useRestoreEngagementBriefingSource,
   useRetryBriefingSourceConversion,
   useUpdateEngagement,
+  getGetEngagementBriefingGenerationStatusQueryKey,
   getGetEngagementBriefingQueryKey,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
   getListEngagementBriefingSourcesQueryKey,
   getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
+  type EngagementBriefingNarrative,
   type EngagementBriefingSource,
   type EngagementDetail as EngagementDetailType,
   type EngagementSubmissionSummary,
@@ -1029,6 +1033,403 @@ const TIER_ORDER: Array<"federal" | "state" | "local" | "manual"> = [
   "manual",
 ];
 
+/**
+ * --- DA-PI-3 Site Context narrative panel ---
+ *
+ * Renders the seven-section A–G briefing the engine produces under
+ * the briefing sources list inside SiteContextTab. The panel handles
+ * three concerns:
+ *
+ *   1. Surfaces the persisted narrative as a stack of expandable
+ *      cards, one per section. Defaults follow the DA-PI-3 spec —
+ *      A is always expanded; B and E are expanded only when their
+ *      body is non-empty; C/D/F/G are collapsed by default. The user
+ *      can toggle any card.
+ *
+ *   2. Provides the kickoff button — "Generate Briefing" when no
+ *      narrative is on file, "Regenerate" once one exists. The button
+ *      is disabled when there are no sources (the canonical tooltip
+ *      explains why) and when a generation is in flight.
+ *
+ *   3. Polls the status endpoint every ~2s while a generation is
+ *      pending, and on the `pending → completed | failed` edge it
+ *      re-fetches the briefing read so the cards re-render with the
+ *      freshly persisted sections.
+ *
+ * Citation tokens are kept verbatim in the rendered text — DA-PI-4
+ * resolves them into clickable inline pills; until that ships the
+ * tokens read as inline annotations so the architect can see what the
+ * engine cited.
+ */
+type BriefingSectionKey = "a" | "b" | "c" | "d" | "e" | "f" | "g";
+
+const SECTION_ORDER: ReadonlyArray<{
+  key: BriefingSectionKey;
+  label: string;
+  blurb: string;
+}> = [
+  { key: "a", label: "A — Executive Summary", blurb: "Three to five sentences capturing the buildable thesis." },
+  { key: "b", label: "B — Threshold Issues", blurb: "Heavy: hard blockers and conditional gates." },
+  { key: "c", label: "C — Regulatory Gates", blurb: "Tight: zoning, overlays, code triggers." },
+  { key: "d", label: "D — Site Infrastructure", blurb: "Tight: utilities, access, easements." },
+  { key: "e", label: "E — Buildable Envelope", blurb: "Heavy: setbacks, height, FAR, geometry." },
+  { key: "f", label: "F — Neighboring Context", blurb: "Heavy: adjacent uses, scale, character." },
+  { key: "g", label: "G — Next-Step Checklist", blurb: "No citations: action items for the architect." },
+];
+
+function pickSection(
+  narrative: EngagementBriefingNarrative | null,
+  key: BriefingSectionKey,
+): string | null {
+  if (!narrative) return null;
+  switch (key) {
+    case "a":
+      return narrative.sectionA;
+    case "b":
+      return narrative.sectionB;
+    case "c":
+      return narrative.sectionC;
+    case "d":
+      return narrative.sectionD;
+    case "e":
+      return narrative.sectionE;
+    case "f":
+      return narrative.sectionF;
+    case "g":
+      return narrative.sectionG;
+  }
+}
+
+/** Cards default open per the spec: A always, B+E only when non-empty. */
+function defaultExpansion(
+  narrative: EngagementBriefingNarrative | null,
+): Record<BriefingSectionKey, boolean> {
+  const hasB = !!pickSection(narrative, "b");
+  const hasE = !!pickSection(narrative, "e");
+  return {
+    a: true,
+    b: hasB,
+    c: false,
+    d: false,
+    e: hasE,
+    f: false,
+    g: false,
+  };
+}
+
+function BriefingNarrativePanel({
+  engagementId,
+  narrative,
+  sourceCount,
+  sources,
+}: {
+  engagementId: string;
+  narrative: EngagementBriefingNarrative | null;
+  sourceCount: number;
+  sources: EngagementBriefingSource[];
+}) {
+  const queryClient = useQueryClient();
+
+  // Card expansion state — recomputed only when the narrative
+  // identity changes (i.e. a fresh generation finishes), so toggles
+  // the user makes during a session are not blown away on
+  // component re-render.
+  const [expanded, setExpanded] = useState(() => defaultExpansion(narrative));
+  const lastNarrativeKey = useRef<string | null>(null);
+  const narrativeKey = narrative?.generatedAt ?? null;
+  useEffect(() => {
+    if (lastNarrativeKey.current !== narrativeKey) {
+      lastNarrativeKey.current = narrativeKey;
+      setExpanded(defaultExpansion(narrative));
+    }
+  }, [narrative, narrativeKey]);
+
+  // Status polling — only enabled while a generation is in flight.
+  // We start in "watching" mode for two reasons:
+  //   (a) a previous render kicked off a generation and the user
+  //       reloaded the page — the in-process job map will report
+  //       `pending` and we want to keep polling.
+  //   (b) a fresh page load with no in-flight job will report `idle`,
+  //       which causes the poll to immediately drop back to disabled.
+  const [watching, setWatching] = useState(true);
+  const statusQuery = useGetEngagementBriefingGenerationStatus(engagementId, {
+    query: {
+      queryKey: getGetEngagementBriefingGenerationStatusQueryKey(engagementId),
+      refetchInterval: watching ? 2000 : false,
+      refetchOnWindowFocus: false,
+    },
+  });
+  const statusState = statusQuery.data?.state ?? "idle";
+  const isPending = statusState === "pending";
+
+  // Edge detector: when the in-flight job transitions out of
+  // `pending`, drop polling and re-fetch the briefing read so the
+  // sections render. We track the last observed state in a ref so
+  // the effect only fires on the actual transition.
+  const lastStateRef = useRef<typeof statusState>(statusState);
+  useEffect(() => {
+    const prev = lastStateRef.current;
+    if (
+      prev === "pending" &&
+      (statusState === "completed" || statusState === "failed")
+    ) {
+      void queryClient.invalidateQueries({
+        queryKey: getGetEngagementBriefingQueryKey(engagementId),
+      });
+      setWatching(false);
+    }
+    if (statusState !== "pending" && watching && prev !== "pending") {
+      // Idle on first load or after a completion settled — stop
+      // polling until the next kickoff.
+      setWatching(false);
+    }
+    lastStateRef.current = statusState;
+  }, [statusState, queryClient, engagementId, watching]);
+
+  const generateMutation = useGenerateEngagementBriefing({
+    mutation: {
+      onSuccess: () => {
+        // Kicking off — re-arm polling and warm the status cache.
+        setWatching(true);
+        void queryClient.invalidateQueries({
+          queryKey:
+            getGetEngagementBriefingGenerationStatusQueryKey(engagementId),
+        });
+      },
+    },
+  });
+
+  const hasNarrative = !!narrative && !!narrative.generatedAt;
+  const noSources = sourceCount === 0;
+  const buttonDisabled = noSources || isPending || generateMutation.isPending;
+  const buttonLabel = hasNarrative ? "Regenerate Briefing" : "Generate Briefing";
+  const tooltip = noSources
+    ? "Upload a layer or run an adapter first — the engine has nothing to cite."
+    : isPending
+      ? "Generation in progress…"
+      : hasNarrative
+        ? "Re-run the engine. The current narrative is preserved as the prior version."
+        : "Synthesize a seven-section A–G briefing from the cited sources.";
+
+  // The mock generator stamps `system:briefing-engine` for the
+  // `generatedBy` field; render a friendlier label when we
+  // recognise it.
+  const generatedByLabel = narrative?.generatedBy
+    ? narrative.generatedBy === "system:briefing-engine"
+      ? "Briefing engine (mock)"
+      : narrative.generatedBy
+    : null;
+  const generatedAtLabel = narrative?.generatedAt
+    ? new Date(narrative.generatedAt).toLocaleString()
+    : null;
+
+  // Citation count surfaced from the status payload — non-zero is a
+  // model-quality regression and we want the architect to see it
+  // surfaced in the UI, not just the server logs.
+  const invalidCount =
+    statusQuery.data?.state === "completed"
+      ? (statusQuery.data.invalidCitationCount ?? 0)
+      : 0;
+  const failureMessage =
+    statusQuery.data?.state === "failed" ? statusQuery.data.error : null;
+
+  return (
+    <div
+      data-testid="briefing-narrative-panel"
+      className="sc-card"
+      style={{
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div>
+          <div className="sc-medium">Site briefing (A–G)</div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-muted)",
+              marginTop: 2,
+            }}
+          >
+            Synthesized by the briefing engine from the {sourceCount}{" "}
+            cited source{sourceCount === 1 ? "" : "s"} above.
+            {generatedAtLabel && (
+              <>
+                {" "}
+                Last generated {generatedAtLabel}
+                {generatedByLabel ? ` by ${generatedByLabel}` : ""}.
+              </>
+            )}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="sc-btn sc-btn-primary"
+          onClick={() =>
+            generateMutation.mutate({
+              id: engagementId,
+              data: { regenerate: hasNarrative },
+            })
+          }
+          disabled={buttonDisabled}
+          title={tooltip}
+          aria-disabled={buttonDisabled}
+          data-testid="briefing-generate-button"
+        >
+          {isPending ? "Generating…" : buttonLabel}
+        </button>
+      </div>
+
+      {sources.length === 0 && !hasNarrative && (
+        <div
+          className="sc-prose"
+          style={{
+            opacity: 0.7,
+            fontSize: 13,
+            padding: 12,
+            border: "1px dashed var(--border-subtle)",
+            borderRadius: 6,
+          }}
+          data-testid="briefing-narrative-empty"
+        >
+          The briefing engine cites the sources listed above. Upload a layer
+          (or wait for a federal-data adapter run) before generating.
+        </div>
+      )}
+
+      {failureMessage && (
+        <div
+          role="alert"
+          data-testid="briefing-generation-error"
+          style={{
+            fontSize: 12,
+            color: "var(--danger-text)",
+            background: "var(--danger-dim)",
+            padding: 8,
+            borderRadius: 4,
+          }}
+        >
+          Briefing generation failed: {failureMessage}
+        </div>
+      )}
+
+      {invalidCount > 0 && (
+        <div
+          role="status"
+          data-testid="briefing-invalid-citations-warning"
+          style={{
+            fontSize: 12,
+            color: "var(--warning-text)",
+            background: "var(--warning-dim)",
+            padding: 8,
+            borderRadius: 4,
+          }}
+        >
+          {invalidCount} citation{invalidCount === 1 ? "" : "s"} pointed at
+          unknown sources and were stripped from the narrative.
+        </div>
+      )}
+
+      {hasNarrative && (
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+          data-testid="briefing-narrative-sections"
+        >
+          {SECTION_ORDER.map(({ key, label, blurb }) => {
+            const body = pickSection(narrative, key);
+            const isOpen = expanded[key];
+            const isEmpty = !body || body.trim().length === 0;
+            return (
+              <div
+                key={key}
+                className="sc-card"
+                data-testid={`briefing-section-${key}`}
+                style={{
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 6,
+                  background: "var(--surface-1, transparent)",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
+                  }
+                  aria-expanded={isOpen}
+                  aria-controls={`briefing-section-body-${key}`}
+                  data-testid={`briefing-section-toggle-${key}`}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <span
+                      style={{ fontSize: 13, fontWeight: 600 }}
+                    >
+                      {label}
+                    </span>
+                    <span
+                      style={{ fontSize: 11, color: "var(--text-muted)" }}
+                    >
+                      {blurb}
+                    </span>
+                  </div>
+                  <span
+                    aria-hidden
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-muted)",
+                      marginLeft: 12,
+                    }}
+                  >
+                    {isOpen ? "▾" : "▸"}
+                  </span>
+                </button>
+                {isOpen && (
+                  <div
+                    id={`briefing-section-body-${key}`}
+                    data-testid={`briefing-section-body-${key}`}
+                    className="sc-prose"
+                    style={{
+                      fontSize: 13,
+                      padding: "0 12px 12px 12px",
+                      whiteSpace: "pre-wrap",
+                      lineHeight: 1.5,
+                      color: isEmpty ? "var(--text-muted)" : undefined,
+                    }}
+                  >
+                    {isEmpty
+                      ? "No content in this section."
+                      : body}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SiteContextTab({ engagementId }: { engagementId: string }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const briefingQuery = useGetEngagementBriefing(engagementId);
@@ -1071,6 +1472,7 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
   );
 
   const sources = briefingQuery.data?.briefing?.sources ?? [];
+  const narrative = briefingQuery.data?.briefing?.narrative ?? null;
   const existingLayerKinds = useMemo(
     () => sources.map((s) => s.layerKind),
     [sources],
@@ -1431,6 +1833,13 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
           )}
         </div>
       )}
+
+      <BriefingNarrativePanel
+        engagementId={engagementId}
+        narrative={narrative}
+        sourceCount={sources.length}
+        sources={sources}
+      />
 
       <BriefingSourceUploadModal
         engagementId={engagementId}

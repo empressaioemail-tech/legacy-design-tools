@@ -699,6 +699,106 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{id}/briefing/generate:
+    post:
+      operationId: generateEngagementBriefing
+      tags: [engagements]
+      summary: Kick off A–G briefing synthesis for an engagement
+      description: |
+        Asynchronously runs the briefing engine (Spec 51 §2): reads the
+        engagement's current `briefing_sources`, calls the LLM (or the
+        deterministic mock when `BRIEFING_LLM_MODE=mock`), validates
+        every citation token resolves to a known source / code section,
+        and persists the resulting seven-section narrative on the
+        `parcel_briefings` row.
+
+        First-generation calls populate `section_a`..`section_g` +
+        `generated_at` + `generated_by`. Regeneration backs the prior
+        narrative up into the `prior_section_*` columns so a redo can
+        be compared against the previous draft.
+
+        Returns `202 Accepted` with a `generationId`; clients poll
+        `GET /engagements/{id}/briefing/status` until the job's
+        `state` flips from `pending` to `completed` or `failed`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateBriefingBody"
+      responses:
+        "202":
+          description: Generation kicked off; poll status for completion.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateBriefingResponse"
+        "400":
+          description: |
+            Engagement has no `briefing_sources` rows yet — generation
+            is rejected because there is nothing to synthesize.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            A generation for this engagement is already in flight.
+            Poll `/briefing/status` and retry once it settles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{id}/briefing/status:
+    get:
+      operationId: getEngagementBriefingGenerationStatus
+      tags: [engagements]
+      summary: Poll the most recent briefing-generation job
+      description: |
+        Returns the in-process generation job state for the engagement.
+        `state` is `idle` when no generation has ever run on this
+        process (the persisted briefing may still have a narrative
+        from a previous process); `pending` while the engine is
+        running; `completed` when the row's `section_a..g` columns
+        have just been written; `failed` when the engine errored
+        (the `error` field carries a short reason).
+
+        Job state is process-local and best-effort — clients should
+        treat the persisted briefing (`GET /engagements/{id}/briefing`)
+        as the source of truth for the narrative itself.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current job state for the engagement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BriefingGenerationStatusResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /briefing-sources/{id}/glb:
     get:
       operationId: getBriefingSourceGlb
@@ -2228,7 +2328,8 @@ components:
     EngagementBriefing:
       type: object
       description: |
-        The engagement's parcel briefing row plus its current sources.
+        The engagement's parcel briefing row plus its current sources
+        and (when generated) the seven-section A–G narrative.
       properties:
         id:
           type: string
@@ -2244,12 +2345,174 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/EngagementBriefingSource"
+        narrative:
+          allOf:
+            - $ref: "#/components/schemas/EngagementBriefingNarrative"
+          nullable: true
+          description: |
+            The latest generated A–G narrative for this engagement.
+            `null` when the engine has never run on this row (the
+            briefing exists but no `POST /briefing/generate` call has
+            populated `section_a..g` yet).
       required:
         - id
         - engagementId
         - createdAt
         - updatedAt
         - sources
+        - narrative
+
+    EngagementBriefingNarrative:
+      type: object
+      description: |
+        The seven-section A–G briefing produced by the briefing engine
+        (Spec 51 §2). Each section is independently nullable so a
+        partial rewrite (e.g. one section regenerated by a future
+        per-section endpoint) can leave the others intact. In the
+        DA-PI-3 baseline the engine writes all seven on every call
+        and `generatedAt` / `generatedBy` are stamped together.
+      properties:
+        sectionA:
+          type: string
+          nullable: true
+          description: A — Executive Summary (no citations).
+        sectionB:
+          type: string
+          nullable: true
+          description: B — Threshold Issues (heavy, citation-heavy).
+        sectionC:
+          type: string
+          nullable: true
+          description: C — Regulatory Gates (tight, citation-heavy).
+        sectionD:
+          type: string
+          nullable: true
+          description: D — Site Infrastructure (tight, citation-heavy).
+        sectionE:
+          type: string
+          nullable: true
+          description: E — Buildable Envelope (heavy, citation-heavy).
+        sectionF:
+          type: string
+          nullable: true
+          description: F — Neighboring Context (heavy, citation-heavy).
+        sectionG:
+          type: string
+          nullable: true
+          description: G — Next-Step Checklist (no citations).
+        generatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            UTC timestamp of the most recent successful generation.
+            Null on briefings that have never been generated.
+        generatedBy:
+          type: string
+          nullable: true
+          description: |
+            Actor identity that triggered the generation — a user
+            uuid for architect-initiated runs, `system:briefing-engine`
+            for unattended runs.
+      required:
+        - sectionA
+        - sectionB
+        - sectionC
+        - sectionD
+        - sectionE
+        - sectionF
+        - sectionG
+        - generatedAt
+        - generatedBy
+
+    GenerateBriefingBody:
+      type: object
+      description: |
+        Optional body for `POST /engagements/{id}/briefing/generate`.
+        Fields are forward-looking — the DA-PI-3 baseline ignores them
+        and always runs a fresh full-A–G synthesis. The schema is
+        documented here so callers can adopt the wire shape today and
+        the engine can grow into per-section regeneration without a
+        breaking change.
+      properties:
+        regenerate:
+          type: boolean
+          description: |
+            When true, signals an explicit redo (the route persists the
+            existing narrative into the `prior_section_*` backup
+            columns before overwriting). The route auto-detects this
+            from the persisted state today, so the flag is currently
+            informational.
+
+    GenerateBriefingResponse:
+      type: object
+      description: |
+        202 envelope returned by `POST /engagements/{id}/briefing/generate`.
+        The job is identified by `generationId` for the duration of the
+        process; clients should poll `/briefing/status` until `state`
+        reaches a terminal value, then re-fetch `GET /briefing` to read
+        the persisted narrative.
+      properties:
+        generationId:
+          type: string
+          description: Opaque id for this generation job.
+        state:
+          type: string
+          enum: [pending, completed, failed]
+          description: Initial state — almost always `pending` on the 202.
+      required:
+        - generationId
+        - state
+
+    BriefingGenerationStatusResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /engagements/{id}/briefing/status`. Job
+        state is process-local and best-effort; the persisted briefing
+        narrative on `GET /briefing` is the source of truth.
+      properties:
+        generationId:
+          type: string
+          nullable: true
+          description: |
+            Id of the most recent generation tracked in this process.
+            Null when no generation has run on this process for this
+            engagement.
+        state:
+          type: string
+          enum: [idle, pending, completed, failed]
+          description: |
+            `idle` when the process has no record of a generation;
+            `pending` while the engine is running; `completed` after
+            the row's `section_a..g` columns were written; `failed`
+            when the engine errored.
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+          nullable: true
+          description: Short, human-readable error reason on `failed`.
+        invalidCitationCount:
+          type: integer
+          nullable: true
+          description: |
+            On `completed`, the number of citation tokens the engine
+            stripped because they pointed at unknown ids. A non-zero
+            value is a model-quality regression and is logged
+            server-side.
+      required:
+        - generationId
+        - state
+        - startedAt
+        - completedAt
+        - error
+        - invalidCitationCount
 
     EngagementBriefingResponse:
       type: object

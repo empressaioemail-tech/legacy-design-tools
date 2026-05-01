@@ -151,7 +151,25 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     engagement_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    section_a text,
+    section_b text,
+    section_c text,
+    section_d text,
+    section_e text,
+    section_f text,
+    section_g text,
+    generated_at timestamp with time zone,
+    generated_by text,
+    prior_section_a text,
+    prior_section_b text,
+    prior_section_c text,
+    prior_section_d text,
+    prior_section_e text,
+    prior_section_f text,
+    prior_section_g text,
+    prior_generated_at timestamp with time zone,
+    prior_generated_by text
 );
 
 

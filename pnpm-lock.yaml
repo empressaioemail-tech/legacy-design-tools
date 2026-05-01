@@ -193,6 +193,9 @@ importers:
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod
+      '@workspace/briefing-engine':
+        specifier: workspace:*
+        version: link:../../lib/briefing-engine
       '@workspace/codes':
         specifier: workspace:*
         version: link:../../lib/codes
@@ -1015,6 +1018,28 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 3.25.76
+
+  lib/briefing-engine:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.78.0
+        version: 0.78.0(zod@4.3.6)
+      '@workspace/integrations-anthropic-ai':
+        specifier: workspace:*
+        version: link:../integrations-anthropic-ai
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.3.5
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
 
   lib/codes:
     dependencies:

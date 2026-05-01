@@ -21,6 +21,9 @@
     },
     {
       "path": "../../lib/empressa-atom"
+    },
+    {
+      "path": "../../lib/briefing-engine"
     }
   ]
 }

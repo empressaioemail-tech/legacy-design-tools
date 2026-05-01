@@ -601,8 +601,10 @@ describe("GET /api/atoms/catalog", () => {
   // not-found envelope DA-PI-1 ships (data engine deferred to DA-PI-3
   // for parcel-briefing) is well-formed.
   describe("DA-PI-1 atoms surface through /api/atoms/:slug/:id/summary", () => {
+    // Atoms whose data engine has not yet been wired (DA-PI-1 baseline)
+    // — these still return the bare `{ id, found: false }` typed
+    // envelope on a fixture id.
     it.each([
-      ["parcel-briefing"],
       ["intent"],
       ["briefing-source"],
       ["neighboring-context"],
@@ -624,5 +626,38 @@ describe("GET /api/atoms/catalog", () => {
         expect(res.body.scopeFiltered).toBe(false);
       },
     );
+
+    // parcel-briefing's data engine landed in DA-PI-3 — the typed
+    // envelope is enriched with the seven nullable section slots +
+    // generation metadata even on the not-found branch (a fixture id
+    // resolves to no engagement and so no briefing row). All slots
+    // are null until a generation has actually persisted them.
+    it("parcel-briefing: returns the DA-PI-3 enriched not-found envelope", async () => {
+      const opaqueId = "parcel-briefing:test-fixture-id";
+      const res = await request(getApp()).get(
+        `/api/atoms/parcel-briefing/${encodeURIComponent(opaqueId)}/summary`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.typed).toEqual({
+        id: opaqueId,
+        found: false,
+        sectionA: null,
+        sectionB: null,
+        sectionC: null,
+        sectionD: null,
+        sectionE: null,
+        sectionF: null,
+        sectionG: null,
+        generatedAt: null,
+        generatedBy: null,
+      });
+      expect(res.body.relatedAtoms).toEqual([]);
+      expect(res.body.keyMetrics).toEqual([]);
+      expect(typeof res.body.prose).toBe("string");
+      expect(res.body.prose.length).toBeGreaterThan(0);
+      expect(typeof res.body.historyProvenance.latestEventId).toBe("string");
+      expect(typeof res.body.historyProvenance.latestEventAt).toBe("string");
+      expect(res.body.scopeFiltered).toBe(false);
+    });
   });
 });
