@@ -268,6 +268,125 @@ describe("RecordSubmissionResponseDialog", () => {
     });
   });
 
+  it("omits respondedAt by default so the server stamps its own clock", () => {
+    renderDialog({ engagementId: "eng-7", submissionId: "sub-9" });
+    // Even though the field is pre-filled with the current local time as
+    // a visual hint, the user hasn't touched it so the request body must
+    // *not* include `respondedAt` — we want the server clock to be
+    // authoritative whenever the dialog wasn't being used to backfill.
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+    const call = hoisted.mutateMock.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(call.data).toEqual({ status: "approved" });
+    expect("respondedAt" in call.data).toBe(false);
+  });
+
+  it("sends the picked respondedAt as ISO when the user backfills a past time", () => {
+    renderDialog({ engagementId: "eng-7", submissionId: "sub-9" });
+
+    // Pick "last Tuesday" — pin a fixed local-time string the input would
+    // produce so the assertion is deterministic regardless of the test's
+    // wall clock. `new Date("YYYY-MM-DDTHH:mm")` parses as local time.
+    const localValue = "2024-03-12T14:30";
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: localValue },
+    });
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+
+    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+    const call = hoisted.mutateMock.mock.calls[0]?.[0] as {
+      data: { status: string; respondedAt?: string };
+    };
+    expect(call.data.status).toBe("approved");
+    // The dialog converts the local-time picker value to an ISO string
+    // before sending it to the API.
+    expect(call.data.respondedAt).toBe(
+      new Date(localValue).toISOString(),
+    );
+  });
+
+  it("rejects a future respondedAt with a clear inline error and does not submit", () => {
+    renderDialog();
+
+    // 10 minutes in the future, formatted for datetime-local in the
+    // user's local timezone.
+    const future = new Date(Date.now() + 10 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const localFuture =
+      `${future.getFullYear()}-${pad(future.getMonth() + 1)}-` +
+      `${pad(future.getDate())}T${pad(future.getHours())}:` +
+      `${pad(future.getMinutes())}`;
+
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: localFuture },
+    });
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+
+    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/can't be in the future/i);
+  });
+
+  it("treats a cleared (touched-then-empty) field as unset and omits respondedAt", () => {
+    renderDialog({ engagementId: "eng-7", submissionId: "sub-9" });
+
+    // Touch the field with a real value, then wipe it back to "".
+    // Since the field is genuinely optional, this should fall back to
+    // server-clock semantics — i.e. omit `respondedAt` entirely
+    // rather than blocking submit on "Enter a valid date and time".
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2024-03-12T14:30" },
+    });
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+
+    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+    const call = hoisted.mutateMock.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(call.data).toEqual({ status: "approved" });
+    expect("respondedAt" in call.data).toBe(false);
+    // Help copy should be back to the default, not a validation error.
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/Defaults to now/i);
+  });
+
+  it("clears the future-date error once the user picks a valid past time", () => {
+    renderDialog();
+
+    const future = new Date(Date.now() + 60 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const localFuture =
+      `${future.getFullYear()}-${pad(future.getMonth() + 1)}-` +
+      `${pad(future.getDate())}T${pad(future.getHours())}:` +
+      `${pad(future.getMinutes())}`;
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: localFuture },
+    });
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/can't be in the future/i);
+
+    // Correcting to a clearly-past time should drop the inline error
+    // back to the help copy and let the request go out.
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2024-01-01T09:00" },
+    });
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/Defaults to now/i);
+
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+  });
+
   it("disables Record / Cancel and flips the button label while pending", () => {
     hoisted.state.isPending = true;
     renderDialog();

@@ -68,6 +68,19 @@ export function RecordSubmissionResponseDialog({
   );
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The "When did the jurisdiction respond?" field is pre-filled with the
+  // current local time as a visual hint, but until the user touches it we
+  // omit `respondedAt` from the request and let the server stamp its own
+  // clock — that keeps the default behavior identical to before this
+  // field existed (see Task #104) and avoids drifting the recorded time
+  // by however long the dialog sat open.
+  const [respondedAtInput, setRespondedAtInput] = useState(() =>
+    formatForDateTimeLocal(new Date()),
+  );
+  const [respondedAtTouched, setRespondedAtTouched] = useState(false);
+  const [respondedAtError, setRespondedAtError] = useState<string | null>(
+    null,
+  );
 
   // Reset form whenever the dialog re-opens so the previous submission's
   // draft doesn't leak into the next one. Mirrors SubmitToJurisdictionDialog.
@@ -76,6 +89,9 @@ export function RecordSubmissionResponseDialog({
       setStatus(RecordSubmissionResponseBodyStatus.approved);
       setComment("");
       setError(null);
+      setRespondedAtInput(formatForDateTimeLocal(new Date()));
+      setRespondedAtTouched(false);
+      setRespondedAtError(null);
     }
   }, [isOpen]);
 
@@ -126,13 +142,47 @@ export function RecordSubmissionResponseDialog({
   const handleSubmit = () => {
     if (overLimit || submitting) return;
     setError(null);
+
+    // Resolve the optional `respondedAt`. The field is genuinely
+    // optional: when the user hasn't touched it (or has touched it and
+    // then cleared it back to empty) we omit `respondedAt` from the
+    // request body so the server stamps its own clock — the canonical
+    // "now". When they leave a real value behind we parse + validate
+    // and surface a future-date error inline rather than letting the
+    // request go out and bounce off the server.
+    let respondedAtIso: string | undefined;
+    if (respondedAtTouched && respondedAtInput.trim().length > 0) {
+      const parsed = parseDateTimeLocal(respondedAtInput);
+      if (!parsed) {
+        setRespondedAtError("Enter a valid date and time.");
+        return;
+      }
+      if (parsed.getTime() > Date.now()) {
+        setRespondedAtError(
+          "Response time can't be in the future.",
+        );
+        return;
+      }
+      setRespondedAtError(null);
+      respondedAtIso = parsed.toISOString();
+    } else {
+      // Cleared-after-touched (or never touched at all) — treat as
+      // unset and let the server clock win. Drop any stale inline
+      // error so the help copy reappears.
+      setRespondedAtError(null);
+    }
+
+    const baseBody =
+      trimmed.length > 0
+        ? { status, reviewerComment: trimmed }
+        : { status };
     mutation.mutate({
       id: engagementId,
       submissionId,
       data:
-        trimmed.length > 0
-          ? { status, reviewerComment: trimmed }
-          : { status },
+        respondedAtIso !== undefined
+          ? { ...baseBody, respondedAt: respondedAtIso }
+          : baseBody,
     });
   };
 
@@ -309,6 +359,49 @@ export function RecordSubmissionResponseDialog({
             </div>
           </label>
 
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span
+              className="sc-label"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              When did the jurisdiction respond? (optional)
+            </span>
+            <input
+              type="datetime-local"
+              value={respondedAtInput}
+              onChange={(e) => {
+                setRespondedAtInput(e.target.value);
+                setRespondedAtTouched(true);
+                setRespondedAtError(null);
+              }}
+              disabled={submitting}
+              data-testid="record-response-responded-at"
+              className="sc-ui"
+              style={{
+                width: "100%",
+                background: "var(--bg-input)",
+                border: `1px solid ${
+                  respondedAtError ? "#ef4444" : "var(--border-default)"
+                }`,
+                color: "var(--text-primary)",
+                padding: "8px 10px",
+                borderRadius: 4,
+                outline: "none",
+                fontSize: 12.5,
+              }}
+            />
+            <div
+              className="sc-meta"
+              style={{
+                color: respondedAtError ? "#ef4444" : "var(--text-muted)",
+              }}
+              data-testid="record-response-responded-at-help"
+            >
+              {respondedAtError ??
+                "Defaults to now (server clock). Adjust when backfilling an offline reply."}
+            </div>
+          </label>
+
           {error && (
             <div
               data-testid="record-response-error"
@@ -368,6 +461,39 @@ function formatRecordError(err: unknown): string {
   }
   if (err instanceof Error) return err.message;
   return "Failed to record response — please try again.";
+}
+
+/**
+ * Format a `Date` as the local-time string a `<input type="datetime-local">`
+ * expects ("YYYY-MM-DDTHH:mm"). The native input only accepts local time,
+ * never a timezone suffix or seconds, so we hand-roll the formatting
+ * instead of slicing `toISOString()` (which would shift the displayed
+ * time by the user's UTC offset).
+ */
+function formatForDateTimeLocal(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
+}
+
+/**
+ * Parse the value of a `<input type="datetime-local">` ("YYYY-MM-DDTHH:mm",
+ * sometimes with seconds) into a `Date` interpreted in the *user's* local
+ * timezone — that's what the picker visually represents. Returns `null`
+ * for anything we can't safely parse so the caller can surface a
+ * validation error instead of silently submitting NaN.
+ */
+function parseDateTimeLocal(value: string): Date | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  // `new Date("YYYY-MM-DDTHH:mm")` (no Z / offset) is interpreted as
+  // local time per the HTML / ECMA spec — exactly what we want for a
+  // datetime-local input value.
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
 }
 
 function extractApiDetail(err: ApiError<unknown>): string | null {
