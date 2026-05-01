@@ -86,6 +86,7 @@
 import { test, expect } from "@playwright/test";
 import { eq } from "drizzle-orm";
 import { db, engagements } from "@workspace/db";
+import { PILOT_JURISDICTIONS } from "@workspace/adapters";
 
 const RUN_TAG = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const TEST_PROJECT_NAME = `e2e Generate Layers ${RUN_TAG}`;
@@ -430,6 +431,22 @@ test("Generate Layers: 422 no_applicable_adapters renders the empty-pilot banner
   await expect(
     page.getByTestId("generate-layers-no-adapters-message"),
   ).toContainText(serverMessage);
+  // Task #188 — the banner now also surfaces the actual pilot
+  // jurisdictions so an architect on a non-pilot project (Boulder
+  // CO in the message above) immediately sees the supported set
+  // without leaving the page. The list is sourced from the same
+  // `@workspace/adapters` registry the server's `appliesTo` gate
+  // filters on, so iterating `PILOT_JURISDICTIONS` here pins the
+  // visible set to the registry — a future drift between the two
+  // breaks this test instead of hiding behind stale copy.
+  const supported = page.getByTestId(
+    "generate-layers-no-adapters-supported",
+  );
+  await expect(supported).toBeVisible();
+  await expect(supported).toContainText("Currently supported:");
+  for (const j of PILOT_JURISDICTIONS) {
+    await expect(supported).toContainText(j.label);
+  }
   await expect(banner).toContainText(
     "Upload a QGIS overlay below to seed the briefing manually.",
   );

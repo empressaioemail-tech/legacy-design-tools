@@ -44,6 +44,7 @@ import {
 } from "@workspace/adapters/federal/summaries";
 import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
 import { summarizeLocalPayload } from "@workspace/adapters/local/summaries";
+import { PILOT_JURISDICTIONS } from "@workspace/adapters";
 import type { SheetSummary } from "@workspace/api-client-react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { AppShell } from "../components/AppShell";
@@ -2460,6 +2461,23 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
               style={{ color: "var(--text-secondary)" }}
             >
               {lastGenerateError}
+            </div>
+            {/*
+              Task #188 — surface the actual pilot list inline so an
+              architect on a non-pilot project knows the dead-end is
+              systemic (the Generate Layers run only covers the three
+              jurisdictions below) rather than specific to their
+              current engagement. The list is sourced from
+              `@workspace/adapters` so the visible set tracks the
+              server's `appliesTo` gate without a separate manual
+              copy here.
+            */}
+            <div
+              data-testid="generate-layers-no-adapters-supported"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <span style={{ fontWeight: 600 }}>Currently supported:</span>{" "}
+              {PILOT_JURISDICTIONS.map((j) => j.label).join(" • ")}
             </div>
             <div style={{ color: "var(--text-secondary)" }}>
               Upload a QGIS overlay below to seed the briefing manually.

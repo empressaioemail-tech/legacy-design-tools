@@ -47,6 +47,13 @@ export {
 } from "./jurisdictionResolver";
 
 export {
+  PILOT_JURISDICTIONS,
+  PILOT_LOCAL_KEYS,
+  PILOT_STATE_KEYS,
+  type PilotJurisdiction,
+} from "./pilotJurisdictions";
+
+export {
   getSetbackTable,
   getSetbackDistrict,
   listSetbackTables,
