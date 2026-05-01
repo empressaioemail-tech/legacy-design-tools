@@ -1373,6 +1373,178 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     ).toBe("1 Gbps");
   });
 
+  it("syncs the active tier across two simultaneously-mounted panels for the same engagement so flipping the filter on one re-renders the other on the same tick (Task #206)", () => {
+    const engagementId = "eng-sync";
+    const currentA = mkSource({
+      id: "src-current-A",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const currentB = mkSource({
+      id: "src-current-B",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const priorAdapter = mkSource({
+      id: "src-prior-adapter",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    const priorManual = mkSource({
+      id: "src-prior-manual",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [currentA, currentB, priorAdapter, priorManual];
+
+    // Mount both panels for the same engagement, simulating an
+    // architect who has expanded two per-layer history panels at
+    // once (one per current source row on the same page).
+    renderPanel({
+      engagementId,
+      currentSourceId: currentA.id,
+      layerKind: currentA.layerKind,
+    });
+    renderPanel({
+      engagementId,
+      currentSourceId: currentB.id,
+      layerKind: currentB.layerKind,
+    });
+
+    // Both panels start at the default "all" tier and show the
+    // manual prior row alongside the adapter prior row.
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-all-${currentA.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-all-${currentB.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen.getAllByTestId(
+        `briefing-source-history-row-${priorManual.id}`,
+      ).length,
+    ).toBe(2);
+
+    // Click "Generate Layers" on panel A. Panel B must pick up the
+    // new tier in the same tick — no remount, no waitFor, no manual
+    // collapse/reopen on the sibling.
+    fireEvent.click(
+      screen.getByTestId(
+        `briefing-source-history-filter-adapter-${currentA.id}`,
+      ),
+    );
+
+    // Panel B's pill swapped to "adapter" active and its "all" pill
+    // dropped its checked state.
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-adapter-${currentB.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-all-${currentB.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+
+    // Filter is actually applied on panel B's row list, not just on
+    // its pill state — the manual prior row vanishes from both
+    // panels and the adapter prior row remains visible in both.
+    expect(
+      screen.queryAllByTestId(
+        `briefing-source-history-row-${priorManual.id}`,
+      ).length,
+    ).toBe(0);
+    expect(
+      screen.getAllByTestId(
+        `briefing-source-history-row-${priorAdapter.id}`,
+      ).length,
+    ).toBe(2);
+
+    // localStorage is still the persistence layer — the click on A
+    // must have round-tripped the new value through the engagement
+    // -scoped key so a future remount would still restore it.
+    expect(
+      window.localStorage.getItem(
+        briefingSourceHistoryTierStorageKey(engagementId),
+      ),
+    ).toBe("adapter");
+  });
+
+  it("scopes the cross-panel sync per engagement so a write on engagement A does NOT touch a panel mounted for engagement B (Task #206)", () => {
+    const currentA = mkSource({
+      id: "src-current-A",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const currentB = mkSource({
+      id: "src-current-B",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const priorManual = mkSource({
+      id: "src-prior-manual",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [currentA, currentB, priorManual];
+
+    renderPanel({
+      engagementId: "eng-A",
+      currentSourceId: currentA.id,
+      layerKind: currentA.layerKind,
+    });
+    renderPanel({
+      engagementId: "eng-B",
+      currentSourceId: currentB.id,
+      layerKind: currentB.layerKind,
+    });
+
+    // Click "Generate Layers" on the panel for engagement A.
+    fireEvent.click(
+      screen.getByTestId(
+        `briefing-source-history-filter-adapter-${currentA.id}`,
+      ),
+    );
+
+    // The panel for engagement B must stay on its default "all" pill
+    // — the subscriber registry is keyed by storage key (which
+    // already encodes the engagement id), so engagement A's write
+    // never reaches engagement B's subscribers.
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-all-${currentB.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId(`briefing-source-history-filter-adapter-${currentB.id}`)
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+    // And the manual prior row is still visible inside engagement
+    // B's panel — its "all" filter wasn't flipped to "adapter".
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-${priorManual.id}`,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {
     const current = mkSource({
       id: "src-only",

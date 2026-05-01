@@ -1090,6 +1090,41 @@ function readBriefingSourceHistoryTier(
   return "all";
 }
 
+/**
+ * In-tab subscriber registry for the briefing-source history tier
+ * filter. `localStorage` writes already round-trip the choice across
+ * page reloads, but the native `storage` event only fires in *other*
+ * tabs — never in the tab that did the write — so two panels mounted
+ * for the same engagement on the same page would otherwise drift
+ * apart until each was individually remounted. Keying by the storage
+ * key (which already encodes the engagement id) means a write under
+ * one engagement only nudges panels belonging to the same engagement.
+ */
+const briefingSourceHistoryTierSubscribers = new Map<
+  string,
+  Set<(value: "all" | "adapter" | "manual") => void>
+>();
+
+function subscribeBriefingSourceHistoryTier(
+  storageKey: string,
+  listener: (value: "all" | "adapter" | "manual") => void,
+): () => void {
+  let listeners = briefingSourceHistoryTierSubscribers.get(storageKey);
+  if (!listeners) {
+    listeners = new Set();
+    briefingSourceHistoryTierSubscribers.set(storageKey, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = briefingSourceHistoryTierSubscribers.get(storageKey);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) {
+      briefingSourceHistoryTierSubscribers.delete(storageKey);
+    }
+  };
+}
+
 function writeBriefingSourceHistoryTier(
   storageKey: string,
   value: "all" | "adapter" | "manual",
@@ -1099,6 +1134,15 @@ function writeBriefingSourceHistoryTier(
     window.localStorage.setItem(storageKey, value);
   } catch {
     /* ignore — falling back to in-memory state is acceptable */
+  }
+  // Notify any sibling panels mounted for the same engagement so they
+  // re-render with the new tier without waiting to be individually
+  // collapsed/reopened. A copy of the set guards against subscribers
+  // that mutate the registry inside their own callback.
+  const listeners = briefingSourceHistoryTierSubscribers.get(storageKey);
+  if (!listeners) return;
+  for (const listener of Array.from(listeners)) {
+    listener(value);
   }
 }
 
@@ -1167,8 +1211,26 @@ export function BriefingSourceHistoryPanel({
   const [tierFilter, setTierFilterState] = useState<
     "all" | "adapter" | "manual"
   >(() => readBriefingSourceHistoryTier(tierStorageKey));
+  // Cross-panel sync: subscribe to writes made by sibling panels for
+  // this same engagement so flipping the filter on one open panel
+  // immediately re-renders every other open panel with the new value.
+  // The local state is the source of truth for this panel; the
+  // subscriber just mirrors writes that originate elsewhere.
+  useEffect(() => {
+    const unsubscribe = subscribeBriefingSourceHistoryTier(
+      tierStorageKey,
+      (next) => {
+        setTierFilterState((prev) => (prev === next ? prev : next));
+      },
+    );
+    return unsubscribe;
+  }, [tierStorageKey]);
   const setTierFilter = (next: "all" | "adapter" | "manual") => {
     setTierFilterState(next);
+    // `writeBriefingSourceHistoryTier` notifies sibling subscribers,
+    // including this component's own listener. The state setter above
+    // is idempotent for the matching value, so the redundant nudge is
+    // harmless and keeps the write path single-source.
     writeBriefingSourceHistoryTier(tierStorageKey, next);
   };
 
