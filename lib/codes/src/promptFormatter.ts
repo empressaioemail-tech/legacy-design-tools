@@ -379,16 +379,21 @@ export interface ShapeSnapshotPayloadResult {
    */
   fitsBudget: boolean;
   /**
-   * Top-level keys removed from the payload, in the order they were
-   * shed (low-priority first, then medium, then high as a last
-   * resort). Empty when nothing was dropped.
+   * Keys removed from the payload, in the order they were shed (low-
+   * priority first, then medium, then high as a last resort). Nested
+   * keys are reported as dotted paths (e.g. `schedules.warnings`)
+   * when the recursive shape pass (Task #60) peels out a sub-tree
+   * from inside a parent that survives. Empty when nothing was
+   * dropped.
    */
   droppedKeys: string[];
   /**
    * High-priority array keys whose element count was reduced to fit
    * the budget. `kept` is the number of leading items retained;
-   * `total` is the original array length. Empty when no arrays were
-   * shrunk.
+   * `total` is the original array length. The `key` is a dotted path
+   * for nested arrays (e.g. `schedules.rooms`) so callers can
+   * attribute exactly which branch was shrunk. Empty when no arrays
+   * were shrunk.
    */
   truncatedArrays: ReadonlyArray<{
     key: string;
@@ -398,32 +403,240 @@ export interface ShapeSnapshotPayloadResult {
 }
 
 /**
+ * Maximum number of nesting levels {@link shapeSnapshotPayloadForBudget}
+ * recurses into when peeling out sub-tree noise. Depth 0 is the root
+ * payload; depth 1 is a key's direct value; depth 2 is a value's
+ * value, etc. Bounded so a pathological payload (deeply nested junk)
+ * can't blow up the formatter — three levels are enough to handle the
+ * Revit shapes we see in practice (`{ schedules: { rooms, warnings,
+ * meta: { … } } }`) while keeping the work bounded.
+ */
+const MAX_SHAPE_RECURSION_DEPTH = 3;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
+ * Recursive worker for {@link shapeSnapshotPayloadForBudget}. Operates
+ * in-place on a shallow-cloned `obj` and pushes any sheds into the
+ * shared `droppedKeys` / `truncatedArrays` accumulators using
+ * `pathPrefix` so nested entries get dotted paths
+ * (e.g. `schedules.warnings`).
+ *
+ * `depth` tracks how many levels deep we are below the root payload
+ * (root call is depth 0). Recursion is gated by
+ * {@link MAX_SHAPE_RECURSION_DEPTH} so deeply-nested junk can't blow
+ * up the formatter.
+ */
+function shapeObjectInPlace(
+  obj: Record<string, unknown>,
+  targetBytes: number,
+  pathPrefix: string,
+  droppedKeys: string[],
+  truncatedArrays: { key: string; kept: number; total: number }[],
+  depth: number,
+): void {
+  function priorityOf(key: string): "high" | "medium" | "low" {
+    if (HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS.has(key)) return "high";
+    if (LOW_PRIORITY_SNAPSHOT_PAYLOAD_KEYS.has(key)) return "low";
+    return "medium";
+  }
+
+  function currentJson(): string {
+    return JSON.stringify(obj, null, 2);
+  }
+
+  function fits(): boolean {
+    return currentJson().length <= targetBytes;
+  }
+
+  function keysAtPriority(priority: "high" | "medium" | "low"): string[] {
+    return Object.keys(obj)
+      .filter((k) => priorityOf(k) === priority)
+      .map((k) => ({ k, size: JSON.stringify(obj[k] ?? null).length }))
+      .sort((a, b) => b.size - a.size)
+      .map((e) => e.k);
+  }
+
+  /**
+   * Try to shape the value at `key` (in place) so the parent fits.
+   * Only attempts recursion when the value is a non-empty plain
+   * object and we still have depth budget. Returns `true` iff the
+   * recursion was both (a) successful at fitting the parent under
+   * `targetBytes` and (b) left the nested object with at least one
+   * surviving sub-key — if recursion empties the value out, the
+   * caller should drop the parent instead so we don't surface a
+   * meaningless `{}` literal in the output.
+   *
+   * The nested call's `targetBytes` is initially set to the value's
+   * stand-alone JSON length minus how much we're over budget at the
+   * parent level. The depth-N indentation cost differs from the
+   * value's stand-alone pretty-print (each nested line gains +2
+   * spaces per level), so the first attempt's budget is approximate.
+   * On overshoot we tighten by the actual overshoot bytes and retry
+   * up to a small fixed number of attempts; this converges quickly
+   * because the indentation delta is linear in the number of
+   * surviving lines. If we still don't fit after all attempts, the
+   * value is restored and the caller drops the parent cleanly.
+   */
+  function tryRecurseInto(key: string): boolean {
+    if (depth + 1 >= MAX_SHAPE_RECURSION_DEPTH) return false;
+    const value = obj[key];
+    if (!isPlainObject(value)) return false;
+    if (Object.keys(value).length === 0) return false;
+    if (currentJson().length <= targetBytes) return true;
+    // Measure the parent's wrapper cost (everything except this key's
+    // value) by temporarily replacing the value with `null` and re-
+    // serialising. This gives an accurate base size to subtract from
+    // `targetBytes` — naïvely using `valueJson.length - overBy` goes
+    // negative when the value dominates the parent (because the
+    // wrapper bytes outside the value don't appear in `valueJson`),
+    // which would starve the nested recursion of any budget at all.
+    obj[key] = null;
+    const wrapperSize = currentJson().length;
+    obj[key] = value;
+    // `+4` credits back the "null" literal bytes the wrapper currently
+    // includes; `-16` leaves a small safety margin for the depth-N
+    // indentation overhead the standalone pretty-print doesn't see.
+    let nestedTarget = targetBytes - wrapperSize + 4 - 16;
+    if (nestedTarget <= 0) return false;
+    const MAX_RECURSION_ATTEMPTS = 4;
+    for (let attempt = 0; attempt < MAX_RECURSION_ATTEMPTS; attempt++) {
+      const cloned: Record<string, unknown> = { ...value };
+      const localDropped: string[] = [];
+      const localTruncated: { key: string; kept: number; total: number }[] =
+        [];
+      shapeObjectInPlace(
+        cloned,
+        nestedTarget,
+        `${pathPrefix}${key}.`,
+        localDropped,
+        localTruncated,
+        depth + 1,
+      );
+      // If recursion fully emptied the nested object, prefer
+      // dropping the parent — keeping a literal `{}` is
+      // semantically equivalent to dropping and avoids confusing
+      // droppedKeys with a partial sub-tree of paths under a key
+      // that's effectively gone.
+      if (Object.keys(cloned).length === 0) {
+        return false;
+      }
+      obj[key] = cloned;
+      const newSize = currentJson().length;
+      if (newSize <= targetBytes) {
+        for (const d of localDropped) droppedKeys.push(d);
+        for (const t of localTruncated) truncatedArrays.push(t);
+        return true;
+      }
+      // Overshoot — typically a small per-line indentation cost the
+      // stand-alone pretty-print didn't account for. Tighten by the
+      // actual overshoot bytes (with a small safety margin) and
+      // retry. Restore the original value first so the next attempt
+      // sees the same starting state.
+      obj[key] = value;
+      const overshoot = newSize - targetBytes;
+      const tightened = nestedTarget - overshoot - 16;
+      if (tightened <= 0 || tightened >= nestedTarget) break;
+      nestedTarget = tightened;
+    }
+    obj[key] = value;
+    return false;
+  }
+
+  // Phase 1: LOW priority — recurse to peel out nested junk first,
+  // then drop the whole key if recursion didn't suffice.
+  for (const key of keysAtPriority("low")) {
+    if (fits()) break;
+    if (tryRecurseInto(key)) continue;
+    delete obj[key];
+    droppedKeys.push(`${pathPrefix}${key}`);
+  }
+
+  // Phase 2: MEDIUM priority — same recurse-then-drop preference.
+  if (!fits()) {
+    for (const key of keysAtPriority("medium")) {
+      if (fits()) break;
+      if (tryRecurseInto(key)) continue;
+      delete obj[key];
+      droppedKeys.push(`${pathPrefix}${key}`);
+    }
+  }
+
+  // Phase 3: shrink HIGH priority arrays, largest first. We halve the
+  // kept count each iteration; this is O(log n) shrinks per array
+  // and lands on a length that fits the remaining budget without
+  // requiring a precise byte-by-byte search.
+  if (!fits()) {
+    for (const key of keysAtPriority("high")) {
+      const value = obj[key];
+      if (!Array.isArray(value) || value.length === 0) continue;
+      const total = value.length;
+      let kept = total;
+      // Snapshot the original array so successive halvings always
+      // slice from the full source rather than already-trimmed copies.
+      const source = value;
+      while (true) {
+        obj[key] = source.slice(0, kept);
+        if (fits() || kept <= 1) break;
+        kept = Math.max(1, Math.floor(kept / 2));
+      }
+      if (kept < total) {
+        truncatedArrays.push({ key: `${pathPrefix}${key}`, kept, total });
+      }
+      if (fits()) break;
+    }
+  }
+
+  // Phase 4: last resort — for HIGH priority keys we still try
+  // recursion first (so a payload like `{ schedules: { rooms,
+  // warnings } }` keeps `schedules.rooms` by dropping
+  // `schedules.warnings` instead of dropping the whole branch). If
+  // recursion doesn't fit (or empties the value), drop the key.
+  if (!fits()) {
+    for (const key of keysAtPriority("high")) {
+      if (fits()) break;
+      if (tryRecurseInto(key)) continue;
+      delete obj[key];
+      droppedKeys.push(`${pathPrefix}${key}`);
+    }
+  }
+}
+
+/**
  * Walk a snapshot payload and return a structurally-valid JSON subset
  * that fits under `targetBytes`, sacrificing low-value Revit metadata
  * branches (families, parameters, warnings, ...) before the high-value
  * collections chat questions actually mine (rooms, doors, sheets,
  * schedules, ...).
  *
- * Strategy (top-level, single pass over the root object):
+ * Strategy (applied to the root object, then recursively to each
+ * plain-object value up to {@link MAX_SHAPE_RECURSION_DEPTH} levels
+ * deep — see {@link shapeObjectInPlace} for the in-place worker):
  *   1. If the full pretty-printed JSON already fits, return it
  *      verbatim with `trimmed: false`.
- *   2. Drop {@link LOW_PRIORITY_SNAPSHOT_PAYLOAD_KEYS}, largest first,
- *      until the JSON fits (or none are left).
+ *   2. Drop {@link LOW_PRIORITY_SNAPSHOT_PAYLOAD_KEYS}, largest first.
+ *      If a key holds a plain object, first try recursing into it
+ *      (Task #60) so a low-priority parent that hides high-value
+ *      sub-keys (e.g. `metadata: { rooms: [...] }`) doesn't get
+ *      dropped wholesale.
  *   3. Drop medium-priority keys (anything not in the high or low
- *      sets), largest first, until it fits.
+ *      sets) with the same recurse-then-drop preference.
  *   4. Shrink {@link HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS} arrays by
  *      halving `length` until each fits the remaining budget,
  *      recording how many leading items were kept vs. originally
  *      present.
- *   5. As a last resort, drop high-priority keys outright.
+ *   5. As a last resort, drop high-priority keys — but recurse first
+ *      so a payload like `{ schedules: { rooms: [...],
+ *      warnings: [...] } }` keeps the `schedules.rooms` branch by
+ *      peeling out `schedules.warnings` from inside, instead of
+ *      dropping the whole `schedules` key.
  *
- * Limitations: the helper only walks the *root* object. Nested
- * sub-trees (e.g. `schedules: { rooms: [...], warnings: [...] }`) are
- * treated as opaque — if `schedules` is the only oversized key, Phase
- * 4 drops the whole branch rather than peeling out `warnings` from
- * inside it. This keeps the helper bounded and predictable; recursion
- * is a follow-up if real Revit pushes show deeply-nested over-budget
- * sub-trees in practice.
+ * The trim report records dotted paths for nested entries
+ * (`schedules.warnings` for a dropped sub-key, `schedules.rooms` with
+ * `kept`/`total` for a nested array that got shrunk) so downstream UI
+ * / logging can attribute exactly which branch was shed.
  *
  * Top-level arrays / primitives / null payloads are returned verbatim
  * (the helper only knows how to prune object keys); the result's
@@ -447,11 +660,7 @@ export function shapeSnapshotPayloadForBudget(
   // Only plain objects are shapeable — arrays / primitives / null
   // have no key tree to walk. Caller is expected to fall back to
   // tail-truncation when fitsBudget is false.
-  if (
-    payload === null ||
-    typeof payload !== "object" ||
-    Array.isArray(payload)
-  ) {
+  if (!isPlainObject(payload)) {
     return {
       json: fullJson,
       trimmed: false,
@@ -461,85 +670,13 @@ export function shapeSnapshotPayloadForBudget(
     };
   }
 
-  const obj: Record<string, unknown> = {
-    ...(payload as Record<string, unknown>),
-  };
+  const obj: Record<string, unknown> = { ...payload };
   const droppedKeys: string[] = [];
   const truncatedArrays: { key: string; kept: number; total: number }[] = [];
 
-  function priorityOf(key: string): "high" | "medium" | "low" {
-    if (HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS.has(key)) return "high";
-    if (LOW_PRIORITY_SNAPSHOT_PAYLOAD_KEYS.has(key)) return "low";
-    return "medium";
-  }
+  shapeObjectInPlace(obj, targetBytes, "", droppedKeys, truncatedArrays, 0);
 
-  function currentJson(): string {
-    return JSON.stringify(obj, null, 2);
-  }
-
-  function fits(): boolean {
-    return currentJson().length <= targetBytes;
-  }
-
-  function keysAtPriority(priority: "high" | "medium" | "low"): string[] {
-    return Object.keys(obj)
-      .filter((k) => priorityOf(k) === priority)
-      .map((k) => ({ k, size: JSON.stringify(obj[k] ?? null).length }))
-      .sort((a, b) => b.size - a.size)
-      .map((e) => e.k);
-  }
-
-  // Phase 1: drop LOW priority, largest first.
-  for (const key of keysAtPriority("low")) {
-    if (fits()) break;
-    delete obj[key];
-    droppedKeys.push(key);
-  }
-
-  // Phase 2: drop MEDIUM priority, largest first.
-  if (!fits()) {
-    for (const key of keysAtPriority("medium")) {
-      if (fits()) break;
-      delete obj[key];
-      droppedKeys.push(key);
-    }
-  }
-
-  // Phase 3: shrink HIGH priority arrays, largest first. We halve the
-  // kept count each iteration; this is O(log n) shrinks per array
-  // and lands on a length that fits the remaining budget without
-  // requiring a precise byte-by-byte search.
-  if (!fits()) {
-    for (const key of keysAtPriority("high")) {
-      const value = obj[key];
-      if (!Array.isArray(value) || value.length === 0) continue;
-      const total = value.length;
-      let kept = total;
-      // Snapshot the original array so successive halvings always
-      // slice from the full source rather than already-trimmed copies.
-      const source = value;
-      while (true) {
-        obj[key] = source.slice(0, kept);
-        if (fits() || kept <= 1) break;
-        kept = Math.max(1, Math.floor(kept / 2));
-      }
-      if (kept < total) {
-        truncatedArrays.push({ key, kept, total });
-      }
-      if (fits()) break;
-    }
-  }
-
-  // Phase 4: last resort — drop HIGH priority keys, largest first.
-  if (!fits()) {
-    for (const key of keysAtPriority("high")) {
-      if (fits()) break;
-      delete obj[key];
-      droppedKeys.push(key);
-    }
-  }
-
-  const finalJson = currentJson();
+  const finalJson = JSON.stringify(obj, null, 2);
   return {
     json: finalJson,
     trimmed: true,

@@ -919,6 +919,104 @@ describe("shapeSnapshotPayloadForBudget: smart trim (Task #52)", () => {
     expect(JSON.parse(result.json)).toEqual(payload);
   });
 
+  it("recurses into a high-priority sub-tree to peel out a low-priority nested branch (Task #60)", () => {
+    // Real-shape Revit case: `schedules` carries both useful data
+    // (rooms) AND a noisy nested branch (warnings) that's by far the
+    // largest contributor. The pre-Task-#60 helper would Phase-4 drop
+    // the entire `schedules` key. With recursion the helper peels
+    // `schedules.warnings` out from inside `schedules` and keeps
+    // `schedules.rooms` intact.
+    const warnings = Array.from({ length: 200 }, (_, i) => ({
+      id: i,
+      msg: bigString(80),
+    }));
+    const rooms = [
+      { id: "r1", area: 100 },
+      { id: "r2", area: 120 },
+    ];
+    const payload = { schedules: { rooms, warnings } };
+    // Tight enough to force a trim, loose enough to keep `rooms`.
+    const result = shapeSnapshotPayloadForBudget(payload, 2_000);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.trimmed).toBe(true);
+    // The noisy nested branch is dropped via dotted path; the parent
+    // `schedules` survives so its useful sub-key is preserved.
+    expect(result.droppedKeys).toContain("schedules.warnings");
+    expect(result.droppedKeys).not.toContain("schedules");
+    const parsed = JSON.parse(result.json);
+    expect(parsed.schedules).toBeDefined();
+    expect(parsed.schedules.rooms).toEqual(rooms);
+    expect(parsed.schedules.warnings).toBeUndefined();
+  });
+
+  it("recurses into a low-priority parent that hides a high-value nested branch (Task #60)", () => {
+    // `metadata` is low-priority, but here it carries a nested
+    // `rooms` branch that the chat experience cares about. The
+    // recursive pass must shed only the noisy `metadata.lib` blob
+    // and keep `metadata.rooms` rather than dropping `metadata`
+    // wholesale (which would lose the rooms data).
+    const rooms = [{ id: "r1", area: 100 }];
+    const payload = {
+      metadata: { lib: bigString(5_000), rooms },
+      customField: { value: "keep-me" },
+    };
+    const fullSize = JSON.stringify(payload, null, 2).length;
+    const budget = fullSize - 4_000;
+    const result = shapeSnapshotPayloadForBudget(payload, budget);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.trimmed).toBe(true);
+    expect(result.droppedKeys).toContain("metadata.lib");
+    expect(result.droppedKeys).not.toContain("metadata");
+    const parsed = JSON.parse(result.json);
+    expect(parsed.metadata).toEqual({ rooms });
+    expect(parsed.customField).toEqual({ value: "keep-me" });
+  });
+
+  it("records nested array truncations with dotted paths (Task #60)", () => {
+    // A high-priority parent carrying a nested high-priority array.
+    // Phase 3 at depth 1 must shrink the array and report the
+    // `schedules.rooms` dotted path so downstream UI / logging can
+    // attribute exactly which branch shrank.
+    const rooms = Array.from({ length: 500 }, (_, i) => ({
+      id: `r-${i}`,
+      area: 100 + i,
+      department: "Lab",
+    }));
+    const payload = { schedules: { rooms } };
+    const result = shapeSnapshotPayloadForBudget(payload, 1_500);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.droppedKeys).not.toContain("schedules");
+    expect(result.truncatedArrays).toHaveLength(1);
+    const trim = result.truncatedArrays[0];
+    expect(trim.key).toBe("schedules.rooms");
+    expect(trim.total).toBe(500);
+    expect(trim.kept).toBeLessThan(500);
+    expect(trim.kept).toBeGreaterThan(0);
+    const parsed = JSON.parse(result.json);
+    expect(parsed.schedules.rooms).toHaveLength(trim.kept);
+  });
+
+  it("falls back to dropping the parent when recursion empties out the value (no `{}` left behind)", () => {
+    // `unknownKey` is medium priority and its only sub-key is also
+    // unknown (medium). The recursive pass would shed `unknownKey.lib`
+    // but that empties the value out; in that case the helper should
+    // prefer dropping the parent rather than emitting a confusing
+    // empty-object literal.
+    const payload = {
+      unknownKey: { lib: bigString(5_000) },
+      rooms: [{ id: "r1", area: 100 }],
+    };
+    const fullSize = JSON.stringify(payload, null, 2).length;
+    const budget = fullSize - 1_000;
+    const result = shapeSnapshotPayloadForBudget(payload, budget);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.droppedKeys).toContain("unknownKey");
+    expect(result.droppedKeys).not.toContain("unknownKey.lib");
+    const parsed = JSON.parse(result.json);
+    expect(parsed.unknownKey).toBeUndefined();
+    expect(parsed.rooms).toEqual([{ id: "r1", area: 100 }]);
+  });
+
   it("formatSnapshotFocus uses smart trim and embeds a structurally-valid JSON subset", () => {
     // End-to-end: feed an over-cap payload through the public
     // formatter and confirm (a) the inner body parses as JSON minus
