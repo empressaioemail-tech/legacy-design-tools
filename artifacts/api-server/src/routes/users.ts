@@ -40,6 +40,16 @@
  * is the source of truth and an orphaned object is the very problem
  * this code is trying to *reduce*, so a transient GCS blip should
  * never turn into a 500 on a profile edit.
+ *
+ * The mirror leak — a freshly-uploaded avatar that the FE pushed to
+ * GCS just before a PATCH/POST that ends up failing (validation 400,
+ * 404, transient 500, …) — is closed by the rollback path on both
+ * write handlers: any `avatarUrl` the request body advertised gets
+ * fed to `deleteObjectIfStored` once we know the row never landed
+ * pointing at it. The same "best-effort, log-and-continue" posture
+ * applies — losing the rollback to a GCS blip leaves the orphan we
+ * were already trying to mitigate, which is no worse than the
+ * pre-existing failure mode.
  */
 
 import {
@@ -101,6 +111,43 @@ const requireUsersManage: RequestHandler = (
   res.status(403).json({ error: "Requires users:manage permission" });
 };
 
+/**
+ * Pull a string `avatarUrl` candidate out of the raw request body
+ * BEFORE zod validation runs. We need this so that even a 400 (body
+ * shape rejected by `UpdateUserBody` / `CreateUserBody`) can still
+ * roll back the freshly-uploaded GCS object the FE pushed up just
+ * ahead of the PATCH/POST. `deleteObjectIfStored` is internally
+ * defensive (no-ops for empty / external / non-`/objects/...`
+ * inputs), so we don't need to filter on shape here.
+ */
+function readCandidateAvatarUrl(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const value = (body as Record<string, unknown>)["avatarUrl"];
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * Best-effort rollback for an `avatarUrl` the request advertised but
+ * that no row ever ended up pointing at. Mirrors the posture of the
+ * existing OLD-avatar cleanup branches — log and continue on failure
+ * so a transient GCS blip during rollback never turns into a 500 on
+ * top of whatever the user was already trying to recover from.
+ */
+async function rollbackOrphanedAvatar(
+  candidate: string | null,
+  userId: string | null,
+): Promise<void> {
+  if (!candidate) return;
+  try {
+    await objectStorage.deleteObjectIfStored(candidate);
+  } catch (cleanupErr) {
+    logger.warn(
+      { err: cleanupErr, id: userId, orphanedAvatarUrl: candidate },
+      "failed to delete orphaned avatar object after failed user write",
+    );
+  }
+}
+
 type UserRow = typeof users.$inferSelect;
 
 interface UserResponse {
@@ -137,14 +184,25 @@ router.get("/users", async (_req: Request, res: Response) => {
 });
 
 router.post("/users", requireUsersManage, async (req: Request, res: Response) => {
-  const parsed = CreateUserBody.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request body" });
-    return;
-  }
-  const body = parsed.data;
+  // Read the raw avatarUrl up-front so the rollback can fire even on
+  // body-validation 400s (where `parsed.data` doesn't exist yet).
+  const candidateAvatar = readCandidateAvatarUrl(req.body);
+  // Tracks whether a row that points at `candidateAvatar` actually
+  // landed in the DB. If we exit the handler without flipping this
+  // true and the body advertised an avatar, the freshly-uploaded
+  // object is orphaned and we roll it back.
+  let avatarPersisted = false;
+  let candidateUserId: string | null = null;
 
   try {
+    const parsed = CreateUserBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+    const body = parsed.data;
+    candidateUserId = body.id;
+
     // Conflict-aware insert: `id` is the primary key, so a duplicate id
     // surfaces as a Postgres 23505 unique-violation. We pre-check for the
     // common case (clearer 409 path, no log spam from "expected" errors)
@@ -160,15 +218,30 @@ router.post("/users", requireUsersManage, async (req: Request, res: Response) =>
       return;
     }
 
-    const [row] = await db
-      .insert(users)
-      .values({
-        id: body.id,
-        displayName: body.displayName,
-        email: body.email ?? null,
-        avatarUrl: body.avatarUrl ?? null,
-      })
-      .returning();
+    let row;
+    try {
+      [row] = await db
+        .insert(users)
+        .values({
+          id: body.id,
+          displayName: body.displayName,
+          email: body.email ?? null,
+          avatarUrl: body.avatarUrl ?? null,
+        })
+        .returning();
+    } catch (err) {
+      // Map raced unique-violations onto the same 409 the pre-check uses.
+      // node-postgres surfaces the SQLSTATE on `.code`; drizzle wraps the
+      // driver error and exposes it on `.cause`. Check both defensively.
+      const pgCode =
+        (err as { code?: string }).code ??
+        (err as { cause?: { code?: string } }).cause?.code;
+      if (pgCode === "23505") {
+        res.status(409).json({ error: "A user with this id already exists" });
+        return;
+      }
+      throw err;
+    }
     if (!row) {
       // Defensive: drizzle's `.returning()` always returns the inserted
       // rows on Postgres, but typing it as optional keeps the contract
@@ -176,20 +249,21 @@ router.post("/users", requireUsersManage, async (req: Request, res: Response) =>
       res.status(500).json({ error: "Insert returned no row" });
       return;
     }
+    // Row landed pointing at whatever the body asked for, including
+    // `avatarUrl`. From here the candidate is referenced — skip rollback.
+    avatarPersisted = true;
     res.status(201).json(toUserResponse(row));
   } catch (err) {
-    // Map raced unique-violations onto the same 409 the pre-check uses.
-    // node-postgres surfaces the SQLSTATE on `.code`; drizzle wraps the
-    // driver error and exposes it on `.cause`. Check both defensively.
-    const pgCode =
-      (err as { code?: string }).code ??
-      (err as { cause?: { code?: string } }).cause?.code;
-    if (pgCode === "23505") {
-      res.status(409).json({ error: "A user with this id already exists" });
-      return;
-    }
-    logger.error({ err, id: body.id }, "create user failed");
+    logger.error({ err, id: candidateUserId }, "create user failed");
     res.status(500).json({ error: "Failed to create user" });
+  } finally {
+    if (!avatarPersisted) {
+      // No row was inserted that points at `candidateAvatar`, so any
+      // freshly-uploaded GCS object the FE pushed up is now an orphan.
+      // For POST there's no pre-existing row to compare against, so we
+      // don't have to worry about deleting a still-referenced path.
+      await rollbackOrphanedAvatar(candidateAvatar, candidateUserId);
+    }
   }
 });
 
@@ -218,31 +292,48 @@ router.get("/users/:id", async (req: Request, res: Response) => {
 });
 
 router.patch("/users/:id", requireUsersManage, async (req: Request, res: Response) => {
-  const params = UpdateUserParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-  const parsedBody = UpdateUserBody.safeParse(req.body ?? {});
-  if (!parsedBody.success) {
-    res.status(400).json({ error: "Invalid request body" });
-    return;
-  }
-  const body = parsedBody.data;
-
-  // Reject empty patches up front — silently no-op'ing them would let
-  // the FE swallow a buggy form submission, and `updatedAt` would still
-  // tick which is also confusing. Easier to surface the mistake.
-  const hasUpdate =
-    body.displayName !== undefined ||
-    body.email !== undefined ||
-    body.avatarUrl !== undefined;
-  if (!hasUpdate) {
-    res.status(400).json({ error: "Empty update" });
-    return;
-  }
+  // Read the raw avatarUrl up-front so the rollback fires even on the
+  // 400 paths below (where we haven't parsed the body yet).
+  const candidateAvatar = readCandidateAvatarUrl(req.body);
+  // Tracks whether a row landed pointing at `candidateAvatar`. If we
+  // exit the handler without flipping this true, the freshly-uploaded
+  // object is orphaned and we roll it back in the `finally` block.
+  let avatarPersisted = false;
+  // Captured once we've successfully read the existing row so the
+  // rollback can avoid deleting a path the existing row still
+  // references (e.g. caller PATCHes the same avatarUrl back and the
+  // DB write later fails — the row still points at it, so we must
+  // NOT rip the object out from under it).
+  let existingAvatar: string | null = null;
+  let existingFetched = false;
+  const idForLog =
+    typeof req.params?.["id"] === "string" ? req.params["id"] : null;
 
   try {
+    const params = UpdateUserParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const parsedBody = UpdateUserBody.safeParse(req.body ?? {});
+    if (!parsedBody.success) {
+      res.status(400).json({ error: "Invalid request body" });
+      return;
+    }
+    const body = parsedBody.data;
+
+    // Reject empty patches up front — silently no-op'ing them would let
+    // the FE swallow a buggy form submission, and `updatedAt` would still
+    // tick which is also confusing. Easier to surface the mistake.
+    const hasUpdate =
+      body.displayName !== undefined ||
+      body.email !== undefined ||
+      body.avatarUrl !== undefined;
+    if (!hasUpdate) {
+      res.status(400).json({ error: "Empty update" });
+      return;
+    }
+
     const existingRows = await db
       .select()
       .from(users)
@@ -253,6 +344,8 @@ router.patch("/users/:id", requireUsersManage, async (req: Request, res: Respons
       res.status(404).json({ error: "User not found" });
       return;
     }
+    existingAvatar = existing.avatarUrl;
+    existingFetched = true;
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (body.displayName !== undefined) update["displayName"] = body.displayName;
@@ -274,6 +367,10 @@ router.patch("/users/:id", requireUsersManage, async (req: Request, res: Respons
       res.status(404).json({ error: "User not found" });
       return;
     }
+    // Row landed pointing at the requested avatarUrl (or kept the
+    // existing one when the patch didn't touch it). Either way, the
+    // candidate is now referenced and must NOT be rolled back.
+    avatarPersisted = true;
 
     // Once the row update has committed, garbage-collect the prior
     // avatar object if the patch is replacing or clearing it. We only
@@ -302,8 +399,23 @@ router.patch("/users/:id", requireUsersManage, async (req: Request, res: Respons
 
     res.json(toUserResponse(row));
   } catch (err) {
-    logger.error({ err, id: params.data.id }, "update user failed");
+    logger.error({ err, id: idForLog }, "update user failed");
     res.status(500).json({ error: "Failed to update user" });
+  } finally {
+    // The freshly-uploaded path is orphaned iff: the request body
+    // advertised one AND the row never landed pointing at it. The
+    // existingAvatar guard prevents us from yanking the file out from
+    // under a row that already references the same path (e.g. a 5xx
+    // landed mid-update on a no-op re-send). When we never managed to
+    // fetch the existing row (e.g. body validation 400) we fall
+    // through to cleanup — the FE owns the rollback no matter what,
+    // and `deleteObjectIfStored` is a no-op for non-`/objects/` paths
+    // so a pasted external URL is harmless to forward.
+    if (!avatarPersisted && candidateAvatar) {
+      if (!existingFetched || existingAvatar !== candidateAvatar) {
+        await rollbackOrphanedAvatar(candidateAvatar, idForLog);
+      }
+    }
   }
 });
 

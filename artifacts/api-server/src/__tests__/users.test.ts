@@ -192,6 +192,66 @@ describe("POST /api/users", () => {
       .where(eq(users.id, "u-dup"));
     expect(rows[0]?.displayName).toBe("Original");
   });
+
+  // ---- freshly-uploaded avatar rollback on POST failure ------------
+  // Same mirror leak as the PATCH path: the create modal also pushes
+  // the avatar to GCS before the row exists. If the POST fails (409
+  // duplicate, 400 bad body, 500), the freshly-uploaded object has
+  // nothing pointing at it. The handler must roll it back.
+
+  it("rolls back the freshly-uploaded avatar when the id already exists (409)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db
+      .insert(users)
+      .values({ id: "u-dup-rollback", displayName: "Original" });
+
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-dup-rollback",
+        displayName: "Duplicate",
+        avatarUrl: "/objects/uploads/orphan-from-409",
+      });
+    expect(res.status).toBe(409);
+
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledTimes(1);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/orphan-from-409",
+    );
+  });
+
+  it("rolls back the freshly-uploaded avatar when the body fails validation (400)", async () => {
+    // Missing `id` triggers the zod 400 path, but the freshly-
+    // uploaded avatar in the same body still needs to be cleaned up.
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        displayName: "No Id",
+        avatarUrl: "/objects/uploads/orphan-from-400",
+      });
+    expect(res.status).toBe(400);
+
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledTimes(1);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/orphan-from-400",
+    );
+  });
+
+  it("does not roll back when the create succeeds — the row references the avatar", async () => {
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-create-keeps-avatar",
+        displayName: "Keeps Avatar",
+        avatarUrl: "/objects/uploads/freshly-bound",
+      });
+    expect(res.status).toBe(201);
+
+    expect(deleteObjectIfStoredMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/users/:id", () => {
@@ -436,6 +496,158 @@ describe("PATCH /api/users/:id", () => {
       .from(users)
       .where(eq(users.id, "u-cleanup-fails"));
     expect(rows[0]?.avatarUrl).toBe("/objects/uploads/new-uuid");
+  });
+
+  // ---- freshly-uploaded avatar rollback on PATCH failure -----------
+  // Mirror leak: when the admin picks a new avatar, the FE pushes it
+  // to GCS *first* and then PATCHes the row. If the PATCH fails for
+  // any reason (validation 400, 404, transient 500), the new
+  // `/objects/uploads/<uuid>` is already in the bucket and nothing
+  // points at it. The handler must hand that path to
+  // `deleteObjectIfStored` so the bucket doesn't accumulate orphans.
+
+  it("rolls back the freshly-uploaded avatar when the user does not exist (404)", async () => {
+    const res = await request(getApp())
+      .patch("/api/users/u-ghost-rollback")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/orphan-from-404" });
+    expect(res.status).toBe(404);
+
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledTimes(1);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/orphan-from-404",
+    );
+  });
+
+  it("rolls back the freshly-uploaded avatar when the body fails validation (400)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db
+      .insert(users)
+      .values({ id: "u-bad-body", displayName: "Bad Body" });
+
+    // displayName=null trips the zod schema (it's `.optional()`, not
+    // `.nullish()`), so the route 400s before any DB read. The
+    // freshly-uploaded avatar in the same body still needs to be
+    // cleaned up.
+    const res = await request(getApp())
+      .patch("/api/users/u-bad-body")
+      .set(ADMIN_HEADERS)
+      .send({
+        displayName: null,
+        avatarUrl: "/objects/uploads/orphan-from-400",
+      });
+    expect(res.status).toBe(400);
+
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledTimes(1);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/orphan-from-400",
+    );
+  });
+
+  it("rolls back the freshly-uploaded avatar when the DB update throws (500)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-db-blows-up",
+      displayName: "DB Blows Up",
+      avatarUrl: "/objects/uploads/old-still-referenced",
+    });
+
+    // Spy on the schema's `update` to force a transient failure mid-
+    // PATCH. Reset after the assertion so other tests aren't affected.
+    const updateSpy = vi
+      .spyOn(ctx.schema.db, "update")
+      .mockImplementationOnce(() => {
+        throw new Error("simulated DB outage");
+      });
+
+    try {
+      const res = await request(getApp())
+        .patch("/api/users/u-db-blows-up")
+        .set(ADMIN_HEADERS)
+        .send({ avatarUrl: "/objects/uploads/orphan-from-500" });
+      expect(res.status).toBe(500);
+
+      // The freshly-uploaded path is the only one we should clean up
+      // — the existing row's avatarUrl is still referenced (the row
+      // didn't change), so we must NOT delete it.
+      expect(deleteObjectIfStoredMock).toHaveBeenCalledTimes(1);
+      expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+        "/objects/uploads/orphan-from-500",
+      );
+
+      const rows = await ctx.schema.db
+        .select()
+        .from(users)
+        .where(eq(users.id, "u-db-blows-up"));
+      expect(rows[0]?.avatarUrl).toBe("/objects/uploads/old-still-referenced");
+    } finally {
+      updateSpy.mockRestore();
+    }
+  });
+
+  it("does NOT roll back when the failed PATCH re-sends the same avatarUrl the existing row already references", async () => {
+    // Subtle but important: a caller that PATCHes with the same
+    // avatarUrl the row already has, and runs into a downstream 5xx,
+    // must NOT see that referenced object yanked from under them.
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-resend-same",
+      displayName: "Resend Same",
+      avatarUrl: "/objects/uploads/keep-me-around",
+    });
+
+    const updateSpy = vi
+      .spyOn(ctx.schema.db, "update")
+      .mockImplementationOnce(() => {
+        throw new Error("simulated DB outage");
+      });
+
+    try {
+      const res = await request(getApp())
+        .patch("/api/users/u-resend-same")
+        .set(ADMIN_HEADERS)
+        .send({ avatarUrl: "/objects/uploads/keep-me-around" });
+      expect(res.status).toBe(500);
+
+      expect(deleteObjectIfStoredMock).not.toHaveBeenCalled();
+
+      const rows = await ctx.schema.db
+        .select()
+        .from(users)
+        .where(eq(users.id, "u-resend-same"));
+      expect(rows[0]?.avatarUrl).toBe("/objects/uploads/keep-me-around");
+    } finally {
+      updateSpy.mockRestore();
+    }
+  });
+
+  it("does not roll back anything when the failing PATCH did not include an avatarUrl", async () => {
+    // No avatar on the wire = nothing freshly uploaded = nothing to
+    // roll back, and no spurious cleanup call either.
+    const res = await request(getApp())
+      .patch("/api/users/u-no-avatar-in-body")
+      .set(ADMIN_HEADERS)
+      .send({ displayName: "Doesn't Exist" });
+    expect(res.status).toBe(404);
+
+    expect(deleteObjectIfStoredMock).not.toHaveBeenCalled();
+  });
+
+  it("still returns the original failure status when the rollback itself fails", async () => {
+    // Posture check: a transient GCS outage during rollback must not
+    // mutate the failure the caller already saw — the orphan we
+    // failed to delete is precisely the failure mode this whole
+    // feature is mitigating, so we log and move on.
+    deleteObjectIfStoredMock.mockRejectedValueOnce(new Error("GCS down"));
+
+    const res = await request(getApp())
+      .patch("/api/users/u-ghost-rollback-fails")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/will-stay-orphaned" });
+    expect(res.status).toBe(404);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/will-stay-orphaned",
+    );
   });
 });
 
