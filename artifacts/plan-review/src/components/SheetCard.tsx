@@ -14,6 +14,7 @@ import {
 } from "./ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { friendlyAgentLabel } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
 import { Clock, FileText, History } from "lucide-react";
 
@@ -438,14 +439,21 @@ function ExpandedTimelineRow({ event }: { event: AtomHistoryEvent }) {
  * "fall back gracefully to the ID" contract the BE hydration helper
  * upholds.
  *
- * Non-user kinds (`agent`, `system`) keep the historical `kind:id`
- * format because those identifiers are stable code-side labels and
- * useful when triaging events.
+ * Non-user kinds (`agent`, `system`) look up a friendly label in the
+ * shared {@link FRIENDLY_AGENT_LABELS} map (`@workspace/portal-ui`)
+ * so e.g. `snapshot-ingest` reads as "Site-context automation" — the
+ * same polish the Resolved divergences panel and submission status
+ * timeline already get from this helper (Tasks #270 / #282). Unknown
+ * ids degrade to the historical `kind:id` shape so a newly-introduced
+ * producer that hasn't been added to the map yet still attributes
+ * itself.
  */
 function actorLabel(actor: AtomEventActor): string {
   if (actor.kind === "user") {
     return actor.displayName ?? actor.id;
   }
+  const friendly = friendlyAgentLabel(actor.id);
+  if (friendly) return friendly;
   return `${actor.kind}:${actor.id}`;
 }
 

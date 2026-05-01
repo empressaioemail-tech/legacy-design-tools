@@ -27,3 +27,10 @@ export {
   useSidebarState,
   type SidebarStateValue,
 } from "./lib/sidebar-state";
+
+export {
+  FRIENDLY_AGENT_LABELS,
+  friendlyAgentLabel,
+  formatActorLabel,
+  type ActorLike,
+} from "./lib/actorLabel";
