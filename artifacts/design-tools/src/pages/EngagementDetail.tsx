@@ -913,6 +913,10 @@ function SubmissionsTab({
           engagementId={engagementId}
           submissionId={dialogTarget.id}
           jurisdiction={dialogTarget.jurisdiction}
+          // Pass the row's `submittedAt` so the dialog can mirror the
+          // server's lower-bound guard (Task #119) and surface the
+          // problem inline before the request goes out.
+          submittedAt={dialogTarget.submittedAt}
           isOpen={true}
           onClose={() => setResponseDialogFor(null)}
           onRecorded={(response) => {

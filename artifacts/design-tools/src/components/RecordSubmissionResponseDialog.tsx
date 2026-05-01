@@ -16,6 +16,17 @@ export interface RecordSubmissionResponseDialogProps {
   engagementId: string;
   submissionId: string;
   jurisdiction: string | null;
+  /**
+   * ISO timestamp of when the package was originally submitted to the
+   * jurisdiction. Used to mirror the server's lower-bound guard
+   * (Task #116): a reply cannot pre-date the row's `submittedAt`, and
+   * showing the same rule inline (Task #119) saves a round trip and a
+   * confusing 400 from the API. Optional so the component degrades
+   * gracefully if a future caller wires it up before the listing
+   * surface knows the value — in that case the lower-bound check is
+   * skipped and the server remains the authoritative guard.
+   */
+  submittedAt?: string | null;
   isOpen: boolean;
   onClose: () => void;
   /**
@@ -58,6 +69,7 @@ export function RecordSubmissionResponseDialog({
   engagementId,
   submissionId,
   jurisdiction,
+  submittedAt,
   isOpen,
   onClose,
   onRecorded,
@@ -138,6 +150,14 @@ export function RecordSubmissionResponseDialog({
   const overLimit =
     comment.length > recordSubmissionResponseBodyReviewerCommentMax;
   const submitting = mutation.isPending;
+  // Pre-compute the lower bound shown in the picker's `min` attribute.
+  // Memoization is overkill here (the input re-renders only when the
+  // dialog re-renders, and `submittedAt` is a stable string from the
+  // listing), but factoring it out keeps the JSX legible.
+  const submittedAtDateForMin = parseSubmittedAt(submittedAt);
+  const submittedAtInputMin = submittedAtDateForMin
+    ? formatForDateTimeLocal(submittedAtDateForMin)
+    : null;
 
   const handleSubmit = () => {
     if (overLimit || submitting) return;
@@ -160,6 +180,19 @@ export function RecordSubmissionResponseDialog({
       if (parsed.getTime() > Date.now()) {
         setRespondedAtError(
           "Response time can't be in the future.",
+        );
+        return;
+      }
+      // Symmetric lower bound (Task #119): mirror the server guard
+      // shipped in Task #116 so the user sees the problem inline
+      // instead of bouncing off a 400. The submittedAt prop is the
+      // authoritative anchor (it's what the server compares against);
+      // when it's missing or unparseable we skip the local check and
+      // let the server stay authoritative.
+      const submittedAtDate = parseSubmittedAt(submittedAt);
+      if (submittedAtDate && parsed.getTime() < submittedAtDate.getTime()) {
+        setRespondedAtError(
+          `Reply date can't be before the package was sent on ${submittedAtDate.toLocaleString()}.`,
         );
         return;
       }
@@ -369,6 +402,14 @@ export function RecordSubmissionResponseDialog({
             <input
               type="datetime-local"
               value={respondedAtInput}
+              // The native picker's `min` attribute matches the server
+              // lower-bound guard (Task #119) so a reviewer who uses
+              // the picker's arrow keys / spinner can't even land on a
+              // pre-submission date — and the inline check below stays
+              // as the authoritative belt-and-braces for the typed-in
+              // case. Omitted when we don't have a parseable
+              // `submittedAt` so the input degrades to "no minimum".
+              min={submittedAtInputMin ?? undefined}
               onChange={(e) => {
                 setRespondedAtInput(e.target.value);
                 setRespondedAtTouched(true);
@@ -476,6 +517,21 @@ function formatForDateTimeLocal(date: Date): string {
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
     `T${pad(date.getHours())}:${pad(date.getMinutes())}`
   );
+}
+
+/**
+ * Parse the `submittedAt` prop (an ISO string from the listing endpoint,
+ * already serialized in UTC) into a `Date`. Returns `null` for missing
+ * / blank / unparseable values so the caller can skip the lower-bound
+ * check rather than synthesize a fake bound from a NaN date.
+ */
+function parseSubmittedAt(value: string | null | undefined): Date | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
 }
 
 /**

@@ -120,6 +120,7 @@ function renderDialog(overrides: {
   engagementId?: string;
   submissionId?: string;
   jurisdiction?: string | null;
+  submittedAt?: string | null;
   client?: QueryClient;
 } = {}) {
   const onClose = overrides.onClose ?? vi.fn();
@@ -135,6 +136,7 @@ function renderDialog(overrides: {
             ? "Moab, UT"
             : overrides.jurisdiction
         }
+        submittedAt={overrides.submittedAt}
         isOpen={overrides.isOpen ?? true}
         onClose={onClose}
         onRecorded={onRecorded}
@@ -512,6 +514,112 @@ describe("RecordSubmissionResponseDialog", () => {
     expect(
       await screen.findByTestId("record-response-error"),
     ).toHaveTextContent(/server hit a snag/i);
+  });
+
+  it("rejects a respondedAt earlier than submittedAt with an inline error and does not submit (Task #119)", () => {
+    // Package was sent on Jan 15 2024, and the reviewer accidentally
+    // picks Jan 10 2024 — a clear pre-submission date. The dialog
+    // should mirror the server's lower-bound guard and surface the
+    // problem inline rather than letting the request go out and bounce
+    // off a 400.
+    renderDialog({ submittedAt: "2024-01-15T12:00:00.000Z" });
+
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2024-01-10T09:00" },
+    });
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+
+    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/can't be before the package was sent/i);
+  });
+
+  it("exposes submittedAt as the picker's `min` attribute so the native control prevents pre-submission picks", () => {
+    renderDialog({ submittedAt: "2024-01-15T12:00:00.000Z" });
+    const input = screen.getByTestId(
+      "record-response-responded-at",
+    ) as HTMLInputElement;
+    // The exact string is locale-formatted ("YYYY-MM-DDTHH:mm" in the
+    // user's local timezone), so we just assert the attribute is
+    // present rather than pinning the formatted value.
+    expect(input).toHaveAttribute("min");
+    expect(input.getAttribute("min")).not.toBe("");
+  });
+
+  it("omits the picker's `min` attribute when no submittedAt is supplied", () => {
+    renderDialog({ submittedAt: null });
+    const input = screen.getByTestId(
+      "record-response-responded-at",
+    ) as HTMLInputElement;
+    expect(input).not.toHaveAttribute("min");
+  });
+
+  it("accepts a respondedAt that exactly equals submittedAt as a boundary case (Task #119)", () => {
+    // Sent yesterday at 14:30 local — replying at the same instant is
+    // unusual but permissible (the server's guard is "earlier than",
+    // not "<=", so the dialog must match).
+    const submittedDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    submittedDate.setSeconds(0, 0);
+    const submittedIso = submittedDate.toISOString();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const localValue =
+      `${submittedDate.getFullYear()}-${pad(submittedDate.getMonth() + 1)}-` +
+      `${pad(submittedDate.getDate())}T${pad(submittedDate.getHours())}:` +
+      `${pad(submittedDate.getMinutes())}`;
+
+    renderDialog({
+      engagementId: "eng-7",
+      submissionId: "sub-9",
+      submittedAt: submittedIso,
+    });
+
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: localValue },
+    });
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+
+    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the lower-bound check when no submittedAt is supplied (graceful degradation)", () => {
+    // Caller didn't wire up `submittedAt`. The dialog should fall back
+    // to the existing future-date check only, leaving the server as
+    // the authoritative lower-bound enforcer.
+    renderDialog({
+      engagementId: "eng-7",
+      submissionId: "sub-9",
+      submittedAt: null,
+    });
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2010-01-01T09:00" },
+    });
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the lower-bound error once the user picks a valid post-submission time", () => {
+    renderDialog({ submittedAt: "2024-01-15T12:00:00.000Z" });
+
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2024-01-10T09:00" },
+    });
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/can't be before the package was sent/i);
+
+    // Bumping to a clearly-after-submission time should drop the error
+    // back to help copy and let the request go out.
+    fireEvent.change(screen.getByTestId("record-response-responded-at"), {
+      target: { value: "2024-01-20T09:00" },
+    });
+    expect(
+      screen.getByTestId("record-response-responded-at-help"),
+    ).toHaveTextContent(/Defaults to now/i);
+
+    fireEvent.click(screen.getByTestId("record-response-confirm"));
+    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
   });
 
   it("clears the previous error when the user resubmits", async () => {
