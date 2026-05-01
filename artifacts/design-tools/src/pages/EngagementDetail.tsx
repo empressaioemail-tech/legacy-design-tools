@@ -39,6 +39,8 @@ import {
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
 import { summarizeFederalPayload } from "@workspace/adapters/federal/summaries";
+import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
+import { summarizeLocalPayload } from "@workspace/adapters/local/summaries";
 import type { SheetSummary } from "@workspace/api-client-react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import { AppShell } from "../components/AppShell";
@@ -705,18 +707,23 @@ export function BriefingSourceRow({
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const isAdapter = isAdapterSourceKind(source.sourceKind);
-  // Federal-tier rows (FEMA, USGS, EJScreen, FCC) carry small
-  // structured payloads with one or two reader-friendly readings
-  // each. We pull a one-line summary for inline display so reviewers
-  // see the actual value (e.g. "Flood Zone AE · BFE 425.5 ft")
-  // without having to expand "View layer details". The summarizer
-  // returns null for state/local rows and for malformed payloads —
-  // we just skip the chip in that case rather than rendering a
-  // misleading "—".
-  const federalSummary =
+  // Adapter rows (federal, state, and local) each carry small
+  // structured payloads with one or two reader-friendly readings.
+  // We pull a one-line summary for inline display so reviewers see
+  // the actual value (e.g. "Flood Zone AE · BFE 425.5 ft", "Zoning
+  // R-1 · Single-Family Residential", "In Edwards Aquifer recharge
+  // zone") without having to expand "View layer details". Each
+  // tier-specific summarizer returns null for layer kinds outside
+  // its tier — and for malformed payloads — so we just skip the chip
+  // in that case rather than rendering a misleading "—".
+  const adapterSummary =
     source.sourceKind === "federal-adapter"
       ? summarizeFederalPayload(source.layerKind, source.payload)
-      : null;
+      : source.sourceKind === "state-adapter"
+        ? summarizeStatePayload(source.layerKind, source.payload)
+        : source.sourceKind === "local-adapter"
+          ? summarizeLocalPayload(source.layerKind, source.payload)
+          : null;
   const [expanded, setExpanded] = useState(false);
   // Layer-details panel is independent of the history panel; the
   // architect should be able to keep "what does this layer say about
@@ -817,7 +824,7 @@ export function BriefingSourceRow({
           </span>
         </div>
       </div>
-      {federalSummary && (
+      {adapterSummary && (
         <div
           data-testid={`briefing-source-summary-${source.id}`}
           style={{
@@ -831,7 +838,7 @@ export function BriefingSourceRow({
             alignSelf: "flex-start",
           }}
         >
-          {federalSummary}
+          {adapterSummary}
         </div>
       )}
       {conversionStatus === "failed" && (

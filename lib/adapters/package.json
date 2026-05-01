@@ -17,9 +17,11 @@
     "./state/utah": "./src/state/utah.ts",
     "./state/idaho": "./src/state/idaho.ts",
     "./state/texas": "./src/state/texas.ts",
+    "./state/summaries": "./src/state/summaries.ts",
     "./local/grand-county-ut": "./src/local/grand-county-ut.ts",
     "./local/lemhi-county-id": "./src/local/lemhi-county-id.ts",
     "./local/bastrop-tx": "./src/local/bastrop-tx.ts",
+    "./local/summaries": "./src/local/summaries.ts",
     "./setbacks": "./src/local/setbacks/index.ts"
   },
   "scripts": {
