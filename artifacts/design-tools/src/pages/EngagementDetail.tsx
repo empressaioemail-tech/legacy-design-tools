@@ -3,31 +3,23 @@ import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGenerateEngagementLayers,
-  useGenerateEngagementBriefing,
   useGetBimModelRefresh,
   useGetEngagement,
   useGetEngagementBimModel,
   useGetEngagementBriefing,
-  useGetEngagementBriefingGenerationStatus,
   useGetSnapshot,
-  useListBimModelDivergences,
   useListEngagementBriefingGenerationRuns,
-  useListEngagementBriefingSources,
   useListEngagementSubmissions,
   usePushEngagementBimModel,
   useResolveBimModelDivergence,
-  useRestoreEngagementBriefingSource,
-  useRetryBriefingSourceConversion,
   useUpdateEngagement,
   getGetBimModelRefreshQueryKey,
   getGetEngagementBimModelQueryKey,
-  getGetEngagementBriefingGenerationStatusQueryKey,
   getGetEngagementBriefingQueryKey,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
   getListBimModelDivergencesQueryKey,
   getListEngagementBriefingGenerationRunsQueryKey,
-  getListEngagementBriefingSourcesQueryKey,
   getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
   type BimModelDivergenceListEntry,
@@ -48,7 +40,6 @@ import { SiteMap } from "@workspace/site-context/client";
 // render the same diff without copy-pasting the LCS routine. Both
 // artifacts cannot import each other, so the helper has to live in
 // a shared lib if both are to use it.
-import { formatBriefingActor } from "@workspace/briefing-diff";
 // Task #355 — the prior-narrative title row, "Generated <when> by
 // <actor>" meta line, and "Copy plain text" button (with its 2 s
 // "Copied!" confirmation) live in this shared lib so the testids,
@@ -75,21 +66,7 @@ import { formatBriefingActor } from "@workspace/briefing-diff";
 import {
   BriefingPriorNarrativeDiff,
   BriefingPriorSnapshotHeader,
-  SECTION_ORDER,
-  pickSection,
 } from "@workspace/briefing-prior-snapshot";
-import {
-  diffFederalPayload,
-  summarizeFederalPayload,
-} from "@workspace/adapters/federal/summaries";
-import {
-  diffStatePayload,
-  summarizeStatePayload,
-} from "@workspace/adapters/state/summaries";
-import {
-  diffLocalPayload,
-  summarizeLocalPayload,
-} from "@workspace/adapters/local/summaries";
 import {
   FEDERAL_PILOT_LAYER_KINDS,
   PILOT_JURISDICTION_COVERAGE,
@@ -113,14 +90,6 @@ import {
   BriefingDivergenceDetailDialog,
   BriefingDivergenceRow as PortalBriefingDivergenceRow,
   BriefingDivergencesPanel as PortalBriefingDivergencesPanel,
-  BriefingSourceDetails,
-  // Task #350 — shared "Copy plain text" button used by the prior-
-  // narrative block on both this surface and the Plan Review one.
-  // Lifted out of EngagementDetail so the discriminated success/
-  // failure pill state, ~2 s feedback timer, unmount cleanup, and
-  // `briefing-run-prior-narrative-copy-*` testids can't drift
-  // between the two consumers.
-  CopyPlainTextButton,
   ReviewerComment,
   SiteContextViewer,
   SubmissionRecordedBanner,
@@ -142,7 +111,6 @@ import {
 } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import { relativeTime } from "../lib/relativeTime";
-import { formatActorLabel } from "../lib/actorLabel";
 import {
   BACKFILL_FILTER_QUERY_PARAM,
   backfillAnnotation,
@@ -152,11 +120,7 @@ import {
   summarizeBackfillTallies,
   type BackfillFilter,
 } from "../lib/submissionBackfill";
-import {
-  BriefingInvalidCitationPill,
-  renderBriefingBody,
-  scrollToBriefingSource,
-} from "@workspace/portal-ui";
+import { scrollToBriefingSource } from "@workspace/portal-ui";
 
 const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
   active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },

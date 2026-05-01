@@ -80,13 +80,6 @@ interface ProbeFilters {
   topN: number;
 }
 
-const DEFAULT_FILTERS: ProbeFilters = {
-  engagementId: "",
-  jurisdiction: "",
-  query: "",
-  topN: TOPN_DEFAULT,
-};
-
 function readFiltersFromUrl(): ProbeFilters {
   const params = new URLSearchParams(window.location.search);
   const topNRaw = Number(params.get("topN") ?? "");
