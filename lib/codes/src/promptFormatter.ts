@@ -120,12 +120,82 @@ export interface PromptSnapshot {
  * on. Real Revit pushes can be tens of KB — far below Claude Sonnet's
  * context but worth bounding so a degenerate payload (e.g. an
  * accidentally-attached BIM family library) cannot starve the rest of
- * the prompt. The truncation is byte-naive (post-`JSON.stringify`
- * substring) so the resulting block is *not* guaranteed to be valid
- * JSON when the cap fires; we add an explicit ellipsis + warning line
- * inside the block so the model knows the payload was clipped.
+ * the prompt.
+ *
+ * Task #52 added the smart-trim path: the formatter calls
+ * {@link shapeSnapshotPayloadForBudget} first so over-cap payloads get
+ * a structurally-valid subset of the original JSON with low-priority
+ * Revit metadata (families/parameters/...) shed before the high-value
+ * collections chat questions actually mine (rooms/doors/sheets/
+ * schedules). Tail-truncation remains as the fallback for payloads the
+ * helper cannot shape (top-level arrays, single oversized primitives,
+ * etc.) — when that path fires the resulting block is *not*
+ * guaranteed to be valid JSON, and an explicit ellipsis + `[truncated:
+ * payload exceeded the focus-mode size cap]` warning line is appended
+ * so the model knows the payload was clipped.
  */
 export const MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS = 60_000;
+
+/**
+ * Top-level snapshot-payload keys carrying the high-value information
+ * the chat experience exists to mine — rooms, doors, sheets, schedules,
+ * and so on. {@link shapeSnapshotPayloadForBudget} preserves these last
+ * (and shrinks their arrays before dropping them outright) so a budget-
+ * forced trim still leaves the data the user is most likely asking
+ * about.
+ *
+ * Bias: keep this set small and conservative. Any unknown key falls
+ * into the medium tier and gets shed before the high-value set, but
+ * adding a key here makes it survive at the expense of unknown keys —
+ * that should be a deliberate prioritisation choice. The keys here
+ * mirror what `deriveCounts` reads in the snapshot ingest route
+ * (sheets/rooms/levels/walls) plus the obvious Revit collections
+ * (doors/windows/spaces/areas/schedules) and the address-bearing
+ * `projectInformation` block. Snapshot payload schemas vary across
+ * Revit versions — if your push uses a different naming convention,
+ * add the corresponding key here.
+ */
+export const HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS: ReadonlySet<string> =
+  new Set([
+    "rooms",
+    "doors",
+    "windows",
+    "sheets",
+    "schedules",
+    "levels",
+    "walls",
+    "spaces",
+    "areas",
+    "projectInformation",
+  ]);
+
+/**
+ * Top-level snapshot-payload keys that are typically verbose, low-
+ * signal Revit metadata — the BIM family library, applied parameters,
+ * warnings about deprecated families, materials/categories/line styles
+ * /fill patterns/view templates and so on.
+ * {@link shapeSnapshotPayloadForBudget} drops these first so the
+ * high-value collections (see {@link HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS})
+ * survive a budget-forced trim. As with the high-priority set, any
+ * unknown key sits at medium priority — it's only the keys explicitly
+ * listed here that get sacrificed first.
+ */
+export const LOW_PRIORITY_SNAPSHOT_PAYLOAD_KEYS: ReadonlySet<string> =
+  new Set([
+    "families",
+    "materials",
+    "parameters",
+    "warnings",
+    "metadata",
+    "revitMetadata",
+    "categories",
+    "lineStyles",
+    "fillPatterns",
+    "viewTemplates",
+    "linkedFiles",
+    "phases",
+    "appliedDisciplines",
+  ]);
 
 /**
  * Cumulative cap across ALL `<snapshot_focus>` blocks emitted in a
@@ -286,7 +356,230 @@ export function formatFrameworkAtoms(atoms: PromptFrameworkAtom[]): string {
 }
 
 /**
- * Assemble the `<snapshot_focus>` block carrying the raw structured
+ * Result of {@link shapeSnapshotPayloadForBudget}. Carries the chosen
+ * JSON subset, a flag for whether any pruning happened, a flag for
+ * whether the result actually fits the requested budget, and a
+ * structured report describing what got shed (handy for surfacing a
+ * "we trimmed N keys" note in the wrapper block, and for tests).
+ */
+export interface ShapeSnapshotPayloadResult {
+  /**
+   * Pretty-printed JSON of the chosen subset of the original payload.
+   * Always parses (provided the input was JSON-serializable) — the
+   * helper never tail-cuts mid-token.
+   */
+  json: string;
+  /** True when the helper had to drop keys or shrink arrays. */
+  trimmed: boolean;
+  /**
+   * True iff {@link json} fits under the requested byte budget.
+   * Callers that need a hard size guarantee should fall back to
+   * tail-truncation when this is false (e.g. for top-level array or
+   * primitive payloads, which the helper cannot shape).
+   */
+  fitsBudget: boolean;
+  /**
+   * Top-level keys removed from the payload, in the order they were
+   * shed (low-priority first, then medium, then high as a last
+   * resort). Empty when nothing was dropped.
+   */
+  droppedKeys: string[];
+  /**
+   * High-priority array keys whose element count was reduced to fit
+   * the budget. `kept` is the number of leading items retained;
+   * `total` is the original array length. Empty when no arrays were
+   * shrunk.
+   */
+  truncatedArrays: ReadonlyArray<{
+    key: string;
+    kept: number;
+    total: number;
+  }>;
+}
+
+/**
+ * Walk a snapshot payload and return a structurally-valid JSON subset
+ * that fits under `targetBytes`, sacrificing low-value Revit metadata
+ * branches (families, parameters, warnings, ...) before the high-value
+ * collections chat questions actually mine (rooms, doors, sheets,
+ * schedules, ...).
+ *
+ * Strategy (top-level, single pass over the root object):
+ *   1. If the full pretty-printed JSON already fits, return it
+ *      verbatim with `trimmed: false`.
+ *   2. Drop {@link LOW_PRIORITY_SNAPSHOT_PAYLOAD_KEYS}, largest first,
+ *      until the JSON fits (or none are left).
+ *   3. Drop medium-priority keys (anything not in the high or low
+ *      sets), largest first, until it fits.
+ *   4. Shrink {@link HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS} arrays by
+ *      halving `length` until each fits the remaining budget,
+ *      recording how many leading items were kept vs. originally
+ *      present.
+ *   5. As a last resort, drop high-priority keys outright.
+ *
+ * Limitations: the helper only walks the *root* object. Nested
+ * sub-trees (e.g. `schedules: { rooms: [...], warnings: [...] }`) are
+ * treated as opaque — if `schedules` is the only oversized key, Phase
+ * 4 drops the whole branch rather than peeling out `warnings` from
+ * inside it. This keeps the helper bounded and predictable; recursion
+ * is a follow-up if real Revit pushes show deeply-nested over-budget
+ * sub-trees in practice.
+ *
+ * Top-level arrays / primitives / null payloads are returned verbatim
+ * (the helper only knows how to prune object keys); the result's
+ * `fitsBudget` flag tells callers whether a fallback is needed.
+ */
+export function shapeSnapshotPayloadForBudget(
+  payload: unknown,
+  targetBytes: number,
+): ShapeSnapshotPayloadResult {
+  const fullJson = JSON.stringify(payload, null, 2) ?? "null";
+  if (fullJson.length <= targetBytes) {
+    return {
+      json: fullJson,
+      trimmed: false,
+      fitsBudget: true,
+      droppedKeys: [],
+      truncatedArrays: [],
+    };
+  }
+
+  // Only plain objects are shapeable — arrays / primitives / null
+  // have no key tree to walk. Caller is expected to fall back to
+  // tail-truncation when fitsBudget is false.
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    Array.isArray(payload)
+  ) {
+    return {
+      json: fullJson,
+      trimmed: false,
+      fitsBudget: false,
+      droppedKeys: [],
+      truncatedArrays: [],
+    };
+  }
+
+  const obj: Record<string, unknown> = {
+    ...(payload as Record<string, unknown>),
+  };
+  const droppedKeys: string[] = [];
+  const truncatedArrays: { key: string; kept: number; total: number }[] = [];
+
+  function priorityOf(key: string): "high" | "medium" | "low" {
+    if (HIGH_PRIORITY_SNAPSHOT_PAYLOAD_KEYS.has(key)) return "high";
+    if (LOW_PRIORITY_SNAPSHOT_PAYLOAD_KEYS.has(key)) return "low";
+    return "medium";
+  }
+
+  function currentJson(): string {
+    return JSON.stringify(obj, null, 2);
+  }
+
+  function fits(): boolean {
+    return currentJson().length <= targetBytes;
+  }
+
+  function keysAtPriority(priority: "high" | "medium" | "low"): string[] {
+    return Object.keys(obj)
+      .filter((k) => priorityOf(k) === priority)
+      .map((k) => ({ k, size: JSON.stringify(obj[k] ?? null).length }))
+      .sort((a, b) => b.size - a.size)
+      .map((e) => e.k);
+  }
+
+  // Phase 1: drop LOW priority, largest first.
+  for (const key of keysAtPriority("low")) {
+    if (fits()) break;
+    delete obj[key];
+    droppedKeys.push(key);
+  }
+
+  // Phase 2: drop MEDIUM priority, largest first.
+  if (!fits()) {
+    for (const key of keysAtPriority("medium")) {
+      if (fits()) break;
+      delete obj[key];
+      droppedKeys.push(key);
+    }
+  }
+
+  // Phase 3: shrink HIGH priority arrays, largest first. We halve the
+  // kept count each iteration; this is O(log n) shrinks per array
+  // and lands on a length that fits the remaining budget without
+  // requiring a precise byte-by-byte search.
+  if (!fits()) {
+    for (const key of keysAtPriority("high")) {
+      const value = obj[key];
+      if (!Array.isArray(value) || value.length === 0) continue;
+      const total = value.length;
+      let kept = total;
+      // Snapshot the original array so successive halvings always
+      // slice from the full source rather than already-trimmed copies.
+      const source = value;
+      while (true) {
+        obj[key] = source.slice(0, kept);
+        if (fits() || kept <= 1) break;
+        kept = Math.max(1, Math.floor(kept / 2));
+      }
+      if (kept < total) {
+        truncatedArrays.push({ key, kept, total });
+      }
+      if (fits()) break;
+    }
+  }
+
+  // Phase 4: last resort — drop HIGH priority keys, largest first.
+  if (!fits()) {
+    for (const key of keysAtPriority("high")) {
+      if (fits()) break;
+      delete obj[key];
+      droppedKeys.push(key);
+    }
+  }
+
+  const finalJson = currentJson();
+  return {
+    json: finalJson,
+    trimmed: true,
+    fitsBudget: finalJson.length <= targetBytes,
+    droppedKeys,
+    truncatedArrays,
+  };
+}
+
+/**
+ * Marker emitted inside a `<snapshot_focus>` block when the smart
+ * shape-trim helper successfully reduced the payload to fit under the
+ * per-block cap. Distinct from the tail-truncation marker so the
+ * model (and a human reading the prompt) can tell that the JSON above
+ * is still structurally valid (just a subset).
+ *
+ * Begins with `[truncated:` so existing consumers searching for that
+ * sentinel keep working.
+ */
+const SHAPE_TRIM_MARKER_PREFIX =
+  "[truncated: snapshot payload was shape-trimmed to fit the focus-mode size cap";
+
+function shapeTrimMarker(result: ShapeSnapshotPayloadResult): string {
+  const parts: string[] = [];
+  if (result.droppedKeys.length > 0) {
+    parts.push(`dropped keys: ${result.droppedKeys.join(",")}`);
+  }
+  if (result.truncatedArrays.length > 0) {
+    parts.push(
+      `truncated arrays: ${result.truncatedArrays
+        .map((t) => `${t.key} (${t.kept}/${t.total})`)
+        .join(",")}`,
+    );
+  }
+  const detail = parts.length > 0 ? `; ${parts.join("; ")}` : "";
+  return `${SHAPE_TRIM_MARKER_PREFIX}${detail}]`;
+}
+
+/**
+ * Assemble the `<snapshot_focus>` block carrying the structured
  * `snapshots.payload` JSON for the engagement's latest snapshot. Only
  * emitted when chat is in focus mode for this turn (see
  * {@link PromptSnapshot.focusPayloads}); the default chat path does NOT
@@ -299,20 +592,35 @@ export function formatFrameworkAtoms(atoms: PromptFrameworkAtom[]): string {
  * attributes via inline `{{atom:snapshot:<id>:…}}` references stays
  * consistent across the two surfaces.
  *
- * Payload longer than {@link MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS} is
- * tail-truncated with an explicit `…` and a `[truncated]` marker on a
- * new line so the LLM knows it cannot rely on the JSON being complete.
+ * When the JSON would exceed {@link MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS}
+ * the formatter first tries the smart trim path
+ * ({@link shapeSnapshotPayloadForBudget}) which returns a
+ * structurally-valid JSON subset prioritising the high-value Revit
+ * collections. If smart trim cannot fit (top-level array / primitive
+ * payloads), the formatter falls back to tail-truncation with an
+ * explicit `…` + `[truncated]` marker so the LLM knows the JSON is
+ * incomplete.
  */
 export function formatSnapshotFocus(
   snapshotId: string,
   payload: unknown,
 ): string {
-  const json = JSON.stringify(payload, null, 2);
+  const shaped = shapeSnapshotPayloadForBudget(
+    payload,
+    MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS,
+  );
+  if (shaped.fitsBudget) {
+    const body = shaped.trimmed
+      ? `${shaped.json}\n${shapeTrimMarker(shaped)}`
+      : shaped.json;
+    return `<snapshot_focus snapshot_id="${snapshotId}">\n${body}\n</snapshot_focus>`;
+  }
+  // Smart trim couldn't fit (degenerate payload — top-level array or
+  // primitive bigger than the cap). Fall back to tail-truncation so
+  // the per-block cap stays bounded.
   const body =
-    json.length > MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS
-      ? json.slice(0, MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS - 1) +
-        "…\n[truncated: payload exceeded the focus-mode size cap]"
-      : json;
+    shaped.json.slice(0, MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS - 1) +
+    "…\n[truncated: payload exceeded the focus-mode size cap]";
   return `<snapshot_focus snapshot_id="${snapshotId}">\n${body}\n</snapshot_focus>`;
 }
 
@@ -454,7 +762,21 @@ export function formatSnapshotFocusBlocks(
     const bodyRoom =
       remaining - overhead - COMBINED_CAP_TRUNC_MARKER.length - 1; // -1 for the leading "…"
     if (bodyRoom > 0) {
-      const json = JSON.stringify(fp.payload, null, 2);
+      // Task #52: try smart shaping first so the downgraded block
+      // ships a structurally-valid JSON subset instead of a
+      // mid-token tail-cut. Falls back to tail-truncation when the
+      // payload isn't shapeable (top-level arrays / primitives) or
+      // when even an aggressively-trimmed subset cannot fit the
+      // remaining budget.
+      const shaped = shapeSnapshotPayloadForBudget(fp.payload, bodyRoom);
+      if (shaped.fitsBudget) {
+        const block =
+          header + shaped.json + COMBINED_CAP_TRUNC_MARKER + footer;
+        blocks.push(block);
+        cumulative += block.length;
+        continue;
+      }
+      const json = shaped.json;
       const partial =
         json.length > bodyRoom ? json.slice(0, bodyRoom) : json;
       const body = partial + "…" + COMBINED_CAP_TRUNC_MARKER;

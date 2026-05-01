@@ -18,6 +18,7 @@ import {
   formatSnapshotFocus,
   formatSnapshotFocusBlocks,
   relativeTime,
+  shapeSnapshotPayloadForBudget,
   MAX_ATOM_BODY_CHARS,
   MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS,
   MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
@@ -461,24 +462,43 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
     expect(systemPrompt).toContain(`{{atom:snapshot:${SNAP_B}:focus}}`);
   });
 
-  it("focus mode payload is hard-truncated when JSON exceeds the cap, with a [truncated] marker", () => {
-    // Build a payload whose JSON form clears the cap. We ship a
-    // single string field full of `x`s — its JSON-encoded length is
-    // (chars + 2) for the surrounding quotes, plus the field-name
-    // overhead, all comfortably above MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS
-    // when we feed in cap+200 raw chars.
+  it("focus mode payload over the cap is shape-trimmed (not tail-cut) when shapeable, with a [truncated:] marker", () => {
+    // Task #52 changed the per-block over-cap path from raw-JSON
+    // tail-cut to a structurally-valid subset chosen by
+    // shapeSnapshotPayloadForBudget. A `{ blob: <huge string> }`
+    // payload's only key is medium-priority, so the helper drops it
+    // outright — the resulting block is tiny but still carries a
+    // `[truncated:` marker so the model knows the payload was clipped.
     const big = "x".repeat(MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 200);
     const block = formatSnapshotFocus(SNAPSHOT_ID, { blob: big });
-    // The `[truncated: …]` marker is what the LLM sees; absence of it
-    // would mean the cap silently failed and the prompt could blow
-    // budget on a degenerate payload.
     expect(block).toContain("[truncated:");
-    // Body length stays bounded — the cap (and a small fixed marker
-    // suffix) is the upper bound on the inner block size.
-    const inner = block.replace(
-      `<snapshot_focus snapshot_id="${SNAPSHOT_ID}">\n`,
-      "",
-    ).replace("\n</snapshot_focus>", "");
+    expect(block).toContain("shape-trimmed");
+    expect(block).toContain("dropped keys: blob");
+    // Body length stays bounded — for shapeable payloads we end up
+    // well under the per-block cap, not just under it.
+    const inner = block
+      .replace(`<snapshot_focus snapshot_id="${SNAPSHOT_ID}">\n`, "")
+      .replace("\n</snapshot_focus>", "");
+    expect(inner.length).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 100,
+    );
+  });
+
+  it("focus mode falls back to tail-truncation when the helper cannot shape the payload (top-level array)", () => {
+    // Top-level arrays / primitives have no key tree to walk, so the
+    // smart-trim helper returns the full JSON with fitsBudget=false
+    // and the formatter must fall back to tail-truncation. The legacy
+    // `[truncated: payload exceeded the focus-mode size cap]` marker
+    // (NOT the shape-trim marker) signals this fallback.
+    const big = "x".repeat(MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 200);
+    const block = formatSnapshotFocus(SNAPSHOT_ID, [{ blob: big }]);
+    expect(block).toContain(
+      "[truncated: payload exceeded the focus-mode size cap]",
+    );
+    expect(block).not.toContain("shape-trimmed");
+    const inner = block
+      .replace(`<snapshot_focus snapshot_id="${SNAPSHOT_ID}">\n`, "")
+      .replace("\n</snapshot_focus>", "");
     expect(inner.length).toBeLessThanOrEqual(
       MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 100,
     );
@@ -501,14 +521,16 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
 
 describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
   // Helper that produces a payload whose JSON-serialized form is at
-  // least `chars` characters long. We ship a single string field full
-  // of `x`s; the JSON encoding adds a few bytes of overhead (field
-  // name + quotes + braces + indentation) so the resulting block is
-  // always strictly larger than the requested `chars` value.
+  // least `chars` characters long. Wrapped in a top-level array so the
+  // smart-trim helper from Task #52 (which only shapes plain objects)
+  // falls through to tail-truncation — these tests exercise the
+  // *fallback* tail-truncation path that backstops the cumulative cap.
+  // The companion suite below covers the smart-trim path against the
+  // same cap.
   function payloadOfRoughSize(
     chars: number,
-  ): { canary: string; blob: string } {
-    return { canary: "CANARY", blob: "x".repeat(chars) };
+  ): ReadonlyArray<{ canary: string; blob: string }> {
+    return [{ canary: "CANARY", blob: "x".repeat(chars) }];
   }
 
   it("single block under the per-block cap is emitted intact (no cumulative-cap marker)", () => {
@@ -748,5 +770,209 @@ describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
       combinedCapTruncatedCount: 0,
       combinedCapOmittedCount: 0,
     });
+  });
+});
+
+describe("shapeSnapshotPayloadForBudget: smart trim (Task #52)", () => {
+  // Helper: build a top-level key whose JSON-stringified value clears
+  // the requested character budget. Wrapping in an object ensures the
+  // helper actually walks the key tree (top-level arrays/primitives
+  // are intentionally not shapeable).
+  function bigString(chars: number): string {
+    return "x".repeat(chars);
+  }
+
+  it("returns the full JSON verbatim when it already fits the budget", () => {
+    const payload = { rooms: [{ id: "r1", area: 100 }] };
+    const result = shapeSnapshotPayloadForBudget(payload, 10_000);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.trimmed).toBe(false);
+    expect(result.droppedKeys).toEqual([]);
+    expect(result.truncatedArrays).toEqual([]);
+    expect(JSON.parse(result.json)).toEqual(payload);
+  });
+
+  it("drops low-priority keys before medium-priority keys", () => {
+    // `families` is low priority, `customField` is medium. With a
+    // budget that forces dropping exactly one, the helper must shed
+    // `families` and keep `customField` intact.
+    const payload = {
+      families: { lib: bigString(5_000) },
+      customField: { value: "keep-me" },
+    };
+    const fullSize = JSON.stringify(payload, null, 2).length;
+    const budget = fullSize - 1_000;
+    const result = shapeSnapshotPayloadForBudget(payload, budget);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.trimmed).toBe(true);
+    expect(result.droppedKeys).toContain("families");
+    expect(result.droppedKeys).not.toContain("customField");
+    const parsed = JSON.parse(result.json);
+    expect(parsed.families).toBeUndefined();
+    expect(parsed.customField).toEqual({ value: "keep-me" });
+  });
+
+  it("drops medium-priority keys before high-priority keys", () => {
+    // `unknownKey` is medium, `rooms` is high. Budget forces dropping
+    // one — must be the medium one.
+    const payload = {
+      unknownKey: { lib: bigString(5_000) },
+      rooms: [{ id: "r1", area: 100 }],
+    };
+    const fullSize = JSON.stringify(payload, null, 2).length;
+    const budget = fullSize - 1_000;
+    const result = shapeSnapshotPayloadForBudget(payload, budget);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.droppedKeys).toContain("unknownKey");
+    expect(result.droppedKeys).not.toContain("rooms");
+    const parsed = JSON.parse(result.json);
+    expect(parsed.unknownKey).toBeUndefined();
+    expect(parsed.rooms).toEqual([{ id: "r1", area: 100 }]);
+  });
+
+  it("shrinks high-priority arrays before dropping them", () => {
+    // Only one high-priority key, payload over budget. Phase 3 must
+    // halve the array length until it fits — Phase 4's drop-the-key
+    // path must NOT fire.
+    const rooms = Array.from({ length: 1_000 }, (_, i) => ({
+      id: `room-${i}`,
+      area: 100 + i,
+      department: "Lab",
+    }));
+    const payload = { rooms };
+    const result = shapeSnapshotPayloadForBudget(payload, 5_000);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.trimmed).toBe(true);
+    expect(result.droppedKeys).toEqual([]);
+    expect(result.truncatedArrays).toHaveLength(1);
+    const trim = result.truncatedArrays[0];
+    expect(trim.key).toBe("rooms");
+    expect(trim.total).toBe(1_000);
+    expect(trim.kept).toBeLessThan(1_000);
+    expect(trim.kept).toBeGreaterThan(0);
+    // The retained items are a leading slice of the original array
+    // (callers can rely on the first N being preserved for stable
+    // comparison questions).
+    const parsed = JSON.parse(result.json);
+    expect(parsed.rooms).toHaveLength(trim.kept);
+    expect(parsed.rooms[0]).toEqual(rooms[0]);
+    expect(parsed.rooms[trim.kept - 1]).toEqual(rooms[trim.kept - 1]);
+  });
+
+  it("falls back to dropping high-priority keys as a last resort", () => {
+    // A single high-priority key whose value is one giant primitive
+    // (not an array) cannot be shrunk via Phase 3, so Phase 4 must
+    // drop the key outright. The helper still returns parseable JSON.
+    const payload = { rooms: bigString(20_000) };
+    const result = shapeSnapshotPayloadForBudget(payload, 1_000);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.droppedKeys).toContain("rooms");
+    const parsed = JSON.parse(result.json);
+    expect(parsed.rooms).toBeUndefined();
+  });
+
+  it("always returns parseable JSON, even when heavily trimmed", () => {
+    // Mixed payload across all three priorities; budget forces
+    // aggressive trimming. The result MUST still parse — this is the
+    // core contract distinguishing smart trim from tail-truncation.
+    const payload = {
+      families: { lib: bigString(3_000) },
+      materials: { lib: bigString(3_000) },
+      customA: { lib: bigString(3_000) },
+      customB: { lib: bigString(3_000) },
+      rooms: Array.from({ length: 500 }, (_, i) => ({ id: `r-${i}` })),
+      doors: Array.from({ length: 500 }, (_, i) => ({ id: `d-${i}` })),
+    };
+    const result = shapeSnapshotPayloadForBudget(payload, 2_000);
+    expect(result.fitsBudget).toBe(true);
+    expect(result.json.length).toBeLessThanOrEqual(2_000);
+    expect(() => JSON.parse(result.json)).not.toThrow();
+    // Low-priority keys went first.
+    expect(result.droppedKeys).toContain("families");
+    expect(result.droppedKeys).toContain("materials");
+    // Low-priority drops appear before high-priority drops in the
+    // shed order.
+    const familiesIdx = result.droppedKeys.indexOf("families");
+    const roomsIdx = result.droppedKeys.indexOf("rooms");
+    if (roomsIdx >= 0) {
+      expect(familiesIdx).toBeLessThan(roomsIdx);
+    }
+  });
+
+  it("returns fitsBudget=false (and full JSON) when payload is a top-level array", () => {
+    // The helper only walks plain object keys; arrays/primitives are
+    // returned verbatim so the caller can fall back to tail-truncation.
+    const payload = [{ blob: bigString(5_000) }];
+    const result = shapeSnapshotPayloadForBudget(payload, 1_000);
+    expect(result.fitsBudget).toBe(false);
+    expect(result.trimmed).toBe(false);
+    expect(result.droppedKeys).toEqual([]);
+    expect(result.truncatedArrays).toEqual([]);
+    expect(JSON.parse(result.json)).toEqual(payload);
+  });
+
+  it("returns fitsBudget=false (and full JSON) when payload is a primitive", () => {
+    const payload = bigString(5_000);
+    const result = shapeSnapshotPayloadForBudget(payload, 1_000);
+    expect(result.fitsBudget).toBe(false);
+    expect(result.trimmed).toBe(false);
+    expect(JSON.parse(result.json)).toEqual(payload);
+  });
+
+  it("formatSnapshotFocus uses smart trim and embeds a structurally-valid JSON subset", () => {
+    // End-to-end: feed an over-cap payload through the public
+    // formatter and confirm (a) the inner body parses as JSON minus
+    // the trailing marker, (b) the high-value `rooms` data was
+    // preserved, (c) low-priority `families` data was shed.
+    const families = { lib: bigString(MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS) };
+    const rooms = [{ id: "r1", area: 100 }];
+    const block = formatSnapshotFocus("snap-shape-1", { families, rooms });
+    expect(block).toContain("[truncated:");
+    expect(block).toContain("shape-trimmed");
+    expect(block).toContain("dropped keys: families");
+    // Carve out the inner body, drop the trailing marker line, and
+    // confirm what's left is parseable JSON containing the rooms.
+    const inner = block
+      .replace(`<snapshot_focus snapshot_id="snap-shape-1">\n`, "")
+      .replace("\n</snapshot_focus>", "");
+    const markerLineStart = inner.lastIndexOf("\n[truncated:");
+    expect(markerLineStart).toBeGreaterThan(-1);
+    const jsonOnly = inner.slice(0, markerLineStart);
+    const parsed = JSON.parse(jsonOnly);
+    expect(parsed.rooms).toEqual(rooms);
+    expect(parsed.families).toBeUndefined();
+  });
+
+  it("formatSnapshotFocusBlocks uses smart trim for cumulative-cap downgrades (still emits a structurally-valid subset)", () => {
+    // Four shapeable payloads, each with a giant low-priority `families`
+    // blob plus a small high-priority `rooms` array. Without smart
+    // trim each block would tail-truncate to ~60 KB and the cumulative
+    // cap would have to fire; with smart trim each block shape-trims
+    // to a few hundred bytes and the prompt stays compact.
+    const families = { lib: bigString(MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS) };
+    const { blocks } = formatSnapshotFocusBlocks([
+      { snapshotId: "ss-1", payload: { families, rooms: [{ id: "r1" }] } },
+      { snapshotId: "ss-2", payload: { families, rooms: [{ id: "r2" }] } },
+      { snapshotId: "ss-3", payload: { families, rooms: [{ id: "r3" }] } },
+      { snapshotId: "ss-4", payload: { families, rooms: [{ id: "r4" }] } },
+    ]);
+    expect(blocks).toHaveLength(4);
+    for (const b of blocks) {
+      expect(b).toContain("shape-trimmed");
+      expect(b).toContain("dropped keys: families");
+      // Each block stays well under the per-block cap (smart trim
+      // collapses it to a few hundred bytes).
+      expect(b.length).toBeLessThan(2_000);
+    }
+    // Combined size must respect the cumulative cap.
+    const combined = blocks.reduce((sum, b) => sum + b.length, 0);
+    expect(combined).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
+    );
+    // High-priority `rooms` data is preserved on every block.
+    expect(blocks[0]).toContain('"r1"');
+    expect(blocks[1]).toContain('"r2"');
+    expect(blocks[2]).toContain('"r3"');
+    expect(blocks[3]).toContain('"r4"');
   });
 });
