@@ -38,6 +38,17 @@
  *      that races the disclosure being collapsed (or the page
  *      navigating away) doesn't fire a setTimeout against an
  *      already-unmounted tree.
+ *
+ * Task #363 — this suite previously waited out the real ~2 s revert
+ * window in four cases via `waitFor({ timeout: 2500 })`, costing
+ * ~10 s end-to-end. Unlike the surface-level integration tests on
+ * Plan Review and design-tools — which can't use fake timers
+ * without deadlocking react-query — this standalone test mounts
+ * only the button (no react-query in the tree), so swapping in
+ * `vi.useFakeTimers()` + `vi.advanceTimersByTime(COPY_FEEDBACK_MS)`
+ * is safe and drops the suite to well under 2 s. All six cases
+ * keep the same behavioural assertions; only the timing mechanism
+ * changes.
  */
 import {
   describe,
@@ -51,11 +62,17 @@ import {
   render,
   screen,
   fireEvent,
-  waitFor,
   act,
 } from "@testing-library/react";
 
 import { CopyPlainTextButton } from "../CopyPlainTextButton";
+
+// The revert window the component schedules via setTimeout.
+// Mirrors `COPY_FEEDBACK_MS` in `CopyPlainTextButton.tsx` — held
+// here as a local constant so a future timing tweak only needs to
+// change the production constant + this number, and every
+// `advanceTimersByTime` call below picks up the new value.
+const COPY_FEEDBACK_MS = 2000;
 
 // ── Clipboard descriptor save/restore ─────────────────────────────
 //
@@ -71,9 +88,22 @@ beforeEach(() => {
     navigator,
     "clipboard",
   );
+  // Fake timers replace setTimeout/clearTimeout for the duration
+  // of each test. The component's revert is the only timer that
+  // matters here; we advance it explicitly via
+  // `vi.advanceTimersByTime(COPY_FEEDBACK_MS)` instead of waiting
+  // out the real ~2 s window. Microtasks (the resolved/rejected
+  // `writeText` promises) are NOT faked, so the existing
+  // `await act(async () => {})` flushes still let the `.then` /
+  // `.catch` callbacks run.
+  vi.useFakeTimers();
 });
 
 afterEach(() => {
+  // Restore real timers first so any teardown (including
+  // `unmount` cleanup effects) runs against the real scheduler
+  // and can't leak a fake-timer state into the next test.
+  vi.useRealTimers();
   if (originalClipboardDescriptor) {
     Object.defineProperty(
       navigator,
@@ -91,6 +121,16 @@ function installClipboard(value: unknown): void {
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value,
+  });
+}
+
+// Flush the microtask queue so a resolved/rejected `writeText`
+// promise's `.then` / `.catch` callback runs and React commits the
+// resulting state update. Wrapped in `act` so React doesn't warn
+// about an unbatched update during the flush.
+async function flushMicrotasks(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
   });
 }
 
@@ -140,32 +180,32 @@ describe("CopyPlainTextButton", () => {
 
     fireEvent.click(button);
 
-    // The confirmation pill mounts once the writeText promise
-    // resolves on the next microtask flush. The component preserves
-    // the captured-id-at-click-time invariant by tagging the pill
-    // with the same generationId the click captured.
+    // Flush the resolved `writeText` promise's microtask so the
+    // `.then` callback runs and React commits the success state.
+    // The component preserves the captured-id-at-click-time
+    // invariant by tagging the pill with the same generationId
+    // the click captured.
+    await flushMicrotasks();
     expect(
-      await screen.findByTestId(
+      screen.getByTestId(
         "briefing-run-prior-narrative-copy-confirm-gen-1",
       ),
     ).toHaveTextContent(/copied/i);
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText).toHaveBeenCalledWith("hello clipboard");
 
-    // After the ~2 s revert window the pill is unmounted and the
-    // default label is back. waitFor's default 1 s budget is too
-    // tight for the 2 s revert, so bump it to give a small margin
-    // for scheduler jitter (mirrors the integration tests).
-    await waitFor(
-      () => {
-        expect(
-          screen.queryByTestId(
-            "briefing-run-prior-narrative-copy-confirm-gen-1",
-          ),
-        ).not.toBeInTheDocument();
-      },
-      { timeout: 2500 },
-    );
+    // Advance past the ~2 s revert window using fake timers
+    // instead of waiting in real time. The component's setTimeout
+    // callback fires inside `act` so React commits the revert
+    // state cleanly before we assert the pill is gone.
+    act(() => {
+      vi.advanceTimersByTime(COPY_FEEDBACK_MS);
+    });
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-copy-confirm-gen-1",
+      ),
+    ).not.toBeInTheDocument();
     expect(button).toHaveTextContent("Copy plain text");
   });
 
@@ -182,7 +222,10 @@ describe("CopyPlainTextButton", () => {
 
     fireEvent.click(button);
 
-    const errorPill = await screen.findByTestId(
+    // The early-return branch is synchronous — no promise to
+    // flush. `fireEvent` already wraps in `act`, so the error
+    // pill is in the tree by the time control returns.
+    const errorPill = screen.getByTestId(
       "briefing-run-prior-narrative-copy-error-gen-1",
     );
     expect(errorPill).toHaveTextContent(/couldn.?t copy/i);
@@ -194,16 +237,14 @@ describe("CopyPlainTextButton", () => {
       ),
     ).not.toBeInTheDocument();
 
-    await waitFor(
-      () => {
-        expect(
-          screen.queryByTestId(
-            "briefing-run-prior-narrative-copy-error-gen-1",
-          ),
-        ).not.toBeInTheDocument();
-      },
-      { timeout: 2500 },
-    );
+    act(() => {
+      vi.advanceTimersByTime(COPY_FEEDBACK_MS);
+    });
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-copy-error-gen-1",
+      ),
+    ).not.toBeInTheDocument();
     expect(button).toHaveTextContent("Copy plain text");
   });
 
@@ -224,8 +265,11 @@ describe("CopyPlainTextButton", () => {
     fireEvent.click(button);
     expect(writeText).toHaveBeenCalledTimes(1);
 
+    // Flush the rejected `writeText` promise's microtask so the
+    // `.catch` callback runs and React commits the error state.
+    await flushMicrotasks();
     expect(
-      await screen.findByTestId(
+      screen.getByTestId(
         "briefing-run-prior-narrative-copy-error-gen-1",
       ),
     ).toHaveTextContent(/couldn.?t copy/i);
@@ -237,16 +281,14 @@ describe("CopyPlainTextButton", () => {
       ),
     ).not.toBeInTheDocument();
 
-    await waitFor(
-      () => {
-        expect(
-          screen.queryByTestId(
-            "briefing-run-prior-narrative-copy-error-gen-1",
-          ),
-        ).not.toBeInTheDocument();
-      },
-      { timeout: 2500 },
-    );
+    act(() => {
+      vi.advanceTimersByTime(COPY_FEEDBACK_MS);
+    });
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-copy-error-gen-1",
+      ),
+    ).not.toBeInTheDocument();
     expect(button).toHaveTextContent("Copy plain text");
   });
 
@@ -281,8 +323,9 @@ describe("CopyPlainTextButton", () => {
 
     // Success pill honours the override.
     fireEvent.click(button);
+    await flushMicrotasks();
     expect(
-      await screen.findByTestId("custom-copy-confirm-gen-1"),
+      screen.getByTestId("custom-copy-confirm-gen-1"),
     ).toHaveTextContent(/copied/i);
     expect(
       screen.queryByTestId(
@@ -290,24 +333,23 @@ describe("CopyPlainTextButton", () => {
       ),
     ).not.toBeInTheDocument();
 
-    // Wait for the success pill to revert before flipping the
+    // Advance past the success pill's revert before flipping the
     // clipboard into the failure mode — the discriminated state
     // is single-slot, so we want a clean transition rather than
     // a back-to-back error replacing an in-flight success.
-    await waitFor(
-      () => {
-        expect(
-          screen.queryByTestId("custom-copy-confirm-gen-1"),
-        ).not.toBeInTheDocument();
-      },
-      { timeout: 2500 },
-    );
+    act(() => {
+      vi.advanceTimersByTime(COPY_FEEDBACK_MS);
+    });
+    expect(
+      screen.queryByTestId("custom-copy-confirm-gen-1"),
+    ).not.toBeInTheDocument();
 
     // Error pill honours the override.
     installClipboard(undefined);
     fireEvent.click(button);
+    // Error branch is synchronous — no microtask flush needed.
     expect(
-      await screen.findByTestId("custom-copy-error-gen-1"),
+      screen.getByTestId("custom-copy-error-gen-1"),
     ).toHaveTextContent(/couldn.?t copy/i);
     expect(
       screen.queryByTestId(
@@ -323,9 +365,8 @@ describe("CopyPlainTextButton", () => {
     // (which schedules the 2 s revert timeout) before we unmount.
     // A real promise with a manually-controlled resolver gives us
     // deterministic control over the .then(...) flush without
-    // mocking setTimeout (which the integration tests note can
-    // deadlock react-query in surface tests; not a concern here,
-    // but keeping the same approach makes a future lift painless).
+    // also needing to drive the inner setTimeout — fake timers
+    // handle the revert window, microtasks resolve naturally.
     let resolveWrite: (() => void) | undefined;
     const writeText = vi.fn(
       () =>
@@ -338,7 +379,11 @@ describe("CopyPlainTextButton", () => {
     // Spy on clearTimeout so we can assert the unmount cleanup
     // actually called it. Spying directly on the global preserves
     // every other call path (vitest's own scheduler etc.) so we
-    // only need to verify our handle made it through.
+    // only need to verify our handle made it through. With fake
+    // timers active, both setTimeout and clearTimeout are still
+    // spy-able — vitest swaps in fake implementations on the same
+    // global slots, so the spy captures the fake-timer handle the
+    // component receives and the cleanup hands back.
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
 
@@ -387,15 +432,17 @@ describe("CopyPlainTextButton", () => {
       .map((call) => call[0]);
     expect(clearedHandles).toContain(componentTimerHandle);
 
-    // Now wait past the 2 s revert window. If the cleanup did
-    // NOT clear the timer, the queued setState would fire against
-    // an unmounted tree — React 18+ surfaces that as a console
-    // error / warning. Spy on console.error and assert the
-    // window passes silently.
+    // Now advance past the 2 s revert window using fake timers.
+    // If the cleanup did NOT clear the timer, the queued setState
+    // would fire against an unmounted tree — React 18+ surfaces
+    // that as a console error / warning. Spy on console.error
+    // and assert the window passes silently.
     const consoleErrorSpy = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 2200));
+    act(() => {
+      vi.advanceTimersByTime(COPY_FEEDBACK_MS + 200);
+    });
     expect(consoleErrorSpy).not.toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();
