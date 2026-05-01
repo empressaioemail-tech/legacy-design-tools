@@ -1,8 +1,14 @@
 import { Bell, Search } from "lucide-react";
 
+export interface HeaderSearch {
+  placeholder?: string;
+  value?: string;
+  onChange?: (value: string) => void;
+}
+
 export interface HeaderProps {
   title?: string;
-  search?: { placeholder?: string };
+  search?: HeaderSearch;
 }
 
 export function Header({ title, search }: HeaderProps) {
@@ -57,6 +63,10 @@ export function Header({ title, search }: HeaderProps) {
             <input
               type="text"
               placeholder={search.placeholder ?? "Search"}
+              {...(search.value !== undefined ? { value: search.value } : {})}
+              {...(search.onChange
+                ? { onChange: (e) => search.onChange!(e.target.value) }
+                : {})}
               style={{
                 width: "100%",
                 height: 32,

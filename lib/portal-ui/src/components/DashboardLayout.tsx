@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Sidebar, type SidebarGroup } from "./Sidebar";
-import { Header } from "./Header";
+import { Header, type HeaderSearch } from "./Header";
 import { useSidebarState } from "../lib/sidebar-state";
 
 export interface DashboardLayoutProps {
@@ -10,7 +10,7 @@ export interface DashboardLayoutProps {
   brandProductName: string;
   navGroups: SidebarGroup[];
   rightPanel?: ReactNode;
-  search?: { placeholder?: string };
+  search?: HeaderSearch;
 }
 
 export function DashboardLayout({

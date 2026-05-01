@@ -151,7 +151,7 @@ export default function EngagementsList() {
     return c;
   }, [engagements]);
 
-  const filtered = useMemo(
+  const statusFiltered = useMemo(
     () =>
       filter === "all"
         ? engagements
@@ -163,7 +163,20 @@ export default function EngagementsList() {
   const summary =
     filter === "all"
       ? `${total} total · ${counts.active} active`
-      : `${filtered.length} ${FILTER_TABS.find((t) => t.value === filter)!.label.toLowerCase()} · ${total} total`;
+      : `${statusFiltered.length} ${FILTER_TABS.find((t) => t.value === filter)!.label.toLowerCase()} · ${total} total`;
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const searchFiltered = useMemo(() => {
+    if (!trimmedQuery) return statusFiltered;
+    return statusFiltered.filter((e) => {
+      const haystack = [e.name, e.jurisdiction, e.address]
+        .filter((s): s is string => !!s)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(trimmedQuery);
+    });
+  }, [statusFiltered, trimmedQuery]);
 
   return (
     <DashboardLayout
@@ -171,7 +184,11 @@ export default function EngagementsList() {
       navGroups={navGroups}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
-      search={{ placeholder: "Search engagements..." }}
+      search={{
+        placeholder: "Search engagements...",
+        value: searchQuery,
+        onChange: setSearchQuery,
+      }}
     >
       <div className="flex flex-col gap-6">
         <div className="flex items-end justify-between">
@@ -226,7 +243,11 @@ export default function EngagementsList() {
         <div className="sc-card">
           <div className="sc-card-header sc-row-sb">
             <span className="sc-label">{FILTER_HEADER[filter]}</span>
-            <span className="sc-meta">{filtered.length} items</span>
+            <span className="sc-meta">
+              {trimmedQuery
+                ? `${searchFiltered.length} of ${statusFiltered.length} items`
+                : `${statusFiltered.length} items`}
+            </span>
           </div>
           <div className="flex flex-col" data-testid="engagements-list">
             {isLoading ? (
@@ -243,15 +264,23 @@ export default function EngagementsList() {
               >
                 Couldn't load engagements. Try refreshing.
               </div>
-            ) : filtered.length === 0 ? (
+            ) : statusFiltered.length === 0 ? (
               <div
                 className="p-8 text-center sc-body"
                 data-testid="engagements-empty"
               >
                 {total === 0 ? FILTER_EMPTY.all : FILTER_EMPTY[filter]}
               </div>
+            ) : searchFiltered.length === 0 ? (
+              <div
+                className="p-8 text-center sc-body"
+                data-testid="engagements-no-matches"
+              >
+                No engagements match “{searchQuery.trim()}”. Try a different
+                name, jurisdiction, or address.
+              </div>
             ) : (
-              filtered.map((e) => (
+              searchFiltered.map((e) => (
                 <EngagementRow key={e.id} engagement={e} />
               ))
             )}
