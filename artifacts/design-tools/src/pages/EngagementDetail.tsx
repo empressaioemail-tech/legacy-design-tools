@@ -48,7 +48,7 @@ import { SiteMap } from "@workspace/site-context/client";
 // render the same diff without copy-pasting the LCS routine. Both
 // artifacts cannot import each other, so the helper has to live in
 // a shared lib if both are to use it.
-import { diffWords } from "@workspace/briefing-diff";
+import { diffWords, formatBriefingActor } from "@workspace/briefing-diff";
 import {
   diffFederalPayload,
   summarizeFederalPayload,
@@ -2789,13 +2789,11 @@ function BriefingNarrativePanel({
         : "Synthesize a seven-section A–G briefing from the cited sources.";
 
   // The mock generator stamps `system:briefing-engine` for the
-  // `generatedBy` field; render a friendlier label when we
-  // recognise it.
-  const generatedByLabel = narrative?.generatedBy
-    ? narrative.generatedBy === "system:briefing-engine"
-      ? "Briefing engine (mock)"
-      : narrative.generatedBy
-    : null;
+  // `generatedBy` field; the friendly-label rewrite (and its
+  // null/empty short-circuit) lives in `formatBriefingActor`
+  // (Task #340) so the Plan Review mirror can't drift from this
+  // panel when the actor vocabulary grows.
+  const generatedByLabel = formatBriefingActor(narrative?.generatedBy ?? null);
   const generatedAtLabel = narrative?.generatedAt
     ? new Date(narrative.generatedAt).toLocaleString()
     : null;
@@ -3914,10 +3912,9 @@ function BriefingRecentRunsPanel({
                                           data-testid={`briefing-run-prior-narrative-generated-by-${run.generationId}`}
                                         >
                                           by{" "}
-                                          {priorNarrative.generatedBy ===
-                                          "system:briefing-engine"
-                                            ? "Briefing engine (mock)"
-                                            : priorNarrative.generatedBy}
+                                          {formatBriefingActor(
+                                            priorNarrative.generatedBy,
+                                          ) ?? priorNarrative.generatedBy}
                                         </span>
                                       </>
                                     )}

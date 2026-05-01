@@ -14,3 +14,4 @@
  */
 
 export { diffWords, type WordDiffOp } from "./diffWords";
+export { formatBriefingActor } from "./formatBriefingActor";

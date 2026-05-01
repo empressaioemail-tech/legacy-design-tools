@@ -14,7 +14,7 @@ import {
 // view can render the same diff without copy-pasting the LCS
 // routine. Both artifacts cannot import each other, so the helper
 // has to live in a shared lib if both are to use it.
-import { diffWords } from "@workspace/briefing-diff";
+import { diffWords, formatBriefingActor } from "@workspace/briefing-diff";
 // Task #332 — the prior-narrative meta line renders the snapshot's
 // `generatedAt` as a relative-time string ("5 min ago", "3d ago",
 // etc.) instead of a raw locale stamp so an auditor scanning the
@@ -910,10 +910,9 @@ export function BriefingRecentRunsPanel({
                                       data-testid={`briefing-run-prior-narrative-generated-by-${run.generationId}`}
                                     >
                                       by{" "}
-                                      {priorNarrative.generatedBy ===
-                                      "system:briefing-engine"
-                                        ? "Briefing engine (mock)"
-                                        : priorNarrative.generatedBy}
+                                      {formatBriefingActor(
+                                        priorNarrative.generatedBy,
+                                      ) ?? priorNarrative.generatedBy}
                                     </span>
                                   </>
                                 )}
