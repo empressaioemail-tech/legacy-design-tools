@@ -5,13 +5,26 @@ import { FINDINGS } from "../data/mock";
 import { DisciplineBadge } from "../components/DisciplineBadge";
 import { Link } from "wouter";
 
+type QuickFilter = "all" | "blocking" | "ai-only" | "open";
+
+const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "blocking", label: "Blocking" },
+  { id: "ai-only", label: "AI-only" },
+  { id: "open", label: "Open" },
+];
+
 export default function FindingsLibrary() {
   const navGroups = useNavGroups();
   const [searchQuery, setSearchQuery] = useState("");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
   const trimmedQuery = searchQuery.trim().toLowerCase();
   const filteredFindings = useMemo(() => {
-    if (!trimmedQuery) return FINDINGS;
     return FINDINGS.filter((f) => {
+      if (quickFilter === "blocking" && f.severity !== "blocking") return false;
+      if (quickFilter === "ai-only" && f.source !== "ai-reviewer") return false;
+      if (quickFilter === "open" && f.status !== "open") return false;
+      if (!trimmedQuery) return true;
       const haystack = [
         f.id,
         f.title,
@@ -28,7 +41,7 @@ export default function FindingsLibrary() {
         .toLowerCase();
       return haystack.includes(trimmedQuery);
     });
-  }, [trimmedQuery]);
+  }, [trimmedQuery, quickFilter]);
 
   return (
     <DashboardLayout
@@ -44,10 +57,25 @@ export default function FindingsLibrary() {
     >
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
-          <button className="sc-btn-sm bg-[var(--cyan-dim)] border-[var(--border-focus)]">All</button>
-          <button className="sc-btn-sm text-[var(--text-secondary)] border-[var(--border-default)]">Blocking</button>
-          <button className="sc-btn-sm text-[var(--text-secondary)] border-[var(--border-default)]">AI-only</button>
-          <button className="sc-btn-sm text-[var(--text-secondary)] border-[var(--border-default)]">Open</button>
+          {QUICK_FILTERS.map((qf) => {
+            const isActive = quickFilter === qf.id;
+            return (
+              <button
+                key={qf.id}
+                type="button"
+                onClick={() => setQuickFilter(qf.id)}
+                aria-pressed={isActive}
+                data-testid={`findings-quick-filter-${qf.id}`}
+                className={
+                  isActive
+                    ? "sc-btn-sm bg-[var(--cyan-dim)] border-[var(--border-focus)]"
+                    : "sc-btn-sm text-[var(--text-secondary)] border-[var(--border-default)]"
+                }
+              >
+                {qf.label}
+              </button>
+            );
+          })}
         </div>
 
         <div className="sc-card overflow-x-auto">
@@ -76,8 +104,19 @@ export default function FindingsLibrary() {
                     className="px-4 py-8 text-center sc-body"
                     data-testid="findings-no-matches"
                   >
-                    No findings match “{searchQuery.trim()}”. Try a different
-                    title, code, discipline, or submittal.
+                    {(() => {
+                      const activeFilter = QUICK_FILTERS.find((qf) => qf.id === quickFilter);
+                      const filterLabel =
+                        quickFilter !== "all" && activeFilter ? activeFilter.label : null;
+                      const trimmed = searchQuery.trim();
+                      if (filterLabel && trimmed) {
+                        return `No ${filterLabel} findings match “${trimmed}”. Try a different filter or search.`;
+                      }
+                      if (filterLabel) {
+                        return `No ${filterLabel} findings yet.`;
+                      }
+                      return `No findings match “${trimmed}”. Try a different title, code, discipline, or submittal.`;
+                    })()}
                   </td>
                 </tr>
               ) : (
