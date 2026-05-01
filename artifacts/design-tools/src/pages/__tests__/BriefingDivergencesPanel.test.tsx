@@ -547,6 +547,54 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
     ).toHaveTextContent("Other override");
   });
 
+  it("falls back to the raw reason string and the 'other' palette for an unknown reason", () => {
+    // The unknown-reason fallback the `BriefingDivergenceRow`
+    // comment calls out: when the OpenAPI `BriefingDivergenceReason`
+    // union grows or renames a bucket on the schema side, the row
+    // must keep rendering rather than crashing — the label drops
+    // back to `row.reason` verbatim and the palette drops back to
+    // `BRIEFING_DIVERGENCE_REASON_COLORS.other`. A regression that
+    // swapped `?? row.reason` for `?? ""` (empty pill) or that
+    // dropped the `?? COLORS.other` palette default would slip past
+    // the four-known-reason test above; this case pins both
+    // fallback branches for a renamed-on-server reason.
+    hoisted.divergences = [
+      {
+        id: "div-renamed",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-renamed",
+        briefingId: "brief-1",
+        // Cast is required because the hoisted-state type narrows
+        // `reason` to the four known buckets — the whole point of
+        // this case is to exercise a value the union doesn't list.
+        reason: "renamed-on-server" as unknown as "other",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T09:00:00.000Z",
+        elementKind: "neighbor-mass",
+        elementLabel: null,
+      },
+    ];
+    renderPanel();
+
+    const rows = screen
+      .getAllByTestId("briefing-divergences-row")
+      .filter(
+        (r) =>
+          r.getAttribute("data-divergence-reason") === "renamed-on-server",
+      );
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    const badge = within(row).getByTestId("briefing-divergences-reason-badge");
+    // Label fallback: the raw reason string surfaces verbatim
+    // because the labels map has no entry for it.
+    expect(badge).toHaveTextContent("renamed-on-server");
+    // Palette fallback: the `other` info palette is reused so the
+    // pill stays legible against the SmartCity theme.
+    expect((badge as HTMLElement).style.background).toBe("var(--info-dim)");
+    expect((badge as HTMLElement).style.color).toBe("var(--info-text)");
+  });
+
   it("renders the 'Element no longer in briefing' header when every row in a group has null kind/label", () => {
     // The deleted-element scenario: the architect deleted a locked
     // briefing element in Revit, so the row the C# add-in records
