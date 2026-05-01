@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, engagements, snapshots } from "@workspace/db";
 import { desc, eq, sql } from "drizzle-orm";
@@ -7,8 +8,10 @@ import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";
 import {
   ENGAGEMENT_EDIT_ACTOR,
+  SUBMISSION_INGEST_ACTOR,
   emitEngagementAddressUpdatedEvent,
   emitEngagementJurisdictionResolvedEvent,
+  emitEngagementSubmittedEvent,
   type EngagementEventActor,
 } from "../lib/engagementEvents";
 
@@ -459,5 +462,92 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to re-geocode engagement" });
   }
 });
+
+/**
+ * POST /engagements/:id/submissions — record that a plan-review package
+ * has been submitted to the jurisdiction.
+ *
+ * The submission flow is still a forward-ref child in
+ * `engagement.atom.ts`'s composition (no dedicated submissions table or
+ * catalog atom yet), so this route's only side effect today is appending
+ * an `engagement.submitted` event to the history chain via the singleton
+ * service. That makes the timeline event the canonical submission record
+ * for now — when the catalog atom and table land, this handler grows a
+ * row insert in front of the event emit (keeping the same payload shape
+ * so consumers don't have to re-wire).
+ *
+ * Best-effort emit by the same contract as the sibling lifecycle routes:
+ * a transient history outage cannot fail the submission HTTP request —
+ * the response 201s either way, the event-append failure is logged, and
+ * the audit chain self-heals on the next successful append.
+ *
+ * Body is intentionally permissive (no zod schema yet, in line with the
+ * placeholder nature of the submission flow): only an optional `note`
+ * string is read off the request, capped at 2 KB to keep the event
+ * payload bounded.
+ */
+const SUBMISSION_NOTE_MAX_CHARS = 2048;
+
+router.post(
+  "/engagements/:id/submissions",
+  async (req: Request, res: Response) => {
+    const params = GetEngagementParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+
+    try {
+      const existingRows = await db
+        .select()
+        .from(engagements)
+        .where(eq(engagements.id, params.data.id))
+        .limit(1);
+      const existing = existingRows[0];
+      if (!existing) {
+        res.status(404).json({ error: "Engagement not found" });
+        return;
+      }
+
+      const rawNote = (req.body ?? {})["note"];
+      const note =
+        typeof rawNote === "string" && rawNote.trim().length > 0
+          ? rawNote.trim().slice(0, SUBMISSION_NOTE_MAX_CHARS)
+          : null;
+
+      // Generate the submission id locally for now. When the
+      // submissions table lands this becomes the inserted row's id.
+      const submissionId = randomUUID();
+      const submittedAt = new Date().toISOString();
+
+      const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+      await emitEngagementSubmittedEvent(
+        getHistoryService(),
+        {
+          engagementId: existing.id,
+          submissionId,
+          jurisdiction: existing.jurisdiction,
+          jurisdictionCity: existing.jurisdictionCity,
+          jurisdictionState: existing.jurisdictionState,
+          note,
+          actor: SUBMISSION_INGEST_ACTOR,
+        },
+        reqLog,
+      );
+
+      res.status(201).json({
+        submissionId,
+        engagementId: existing.id,
+        submittedAt,
+      });
+    } catch (err) {
+      logger.error(
+        { err, id: params.data.id },
+        "create submission failed",
+      );
+      res.status(500).json({ error: "Failed to record submission" });
+    }
+  },
+);
 
 export default router;

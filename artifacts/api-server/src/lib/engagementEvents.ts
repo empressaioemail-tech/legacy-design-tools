@@ -1,7 +1,7 @@
 /**
  * Best-effort emitters for engagement-domain lifecycle events.
  *
- * Two producers live here:
+ * Three producers live here:
  *   - `engagement.address-updated`: emitted when the engagement's stored
  *     address transitions to a different value. Producer is the PATCH
  *     /engagements/:id route (the only entry point that mutates the
@@ -12,8 +12,16 @@
  *     PATCH /engagements/:id and POST /engagements/:id/geocode route
  *     handlers AND the snapshot-ingest's async `fireGeocodeAndWarmup`
  *     post-create-new geocode pass.
+ *   - `engagement.submitted`: emitted when a plan-review package is
+ *     submitted to the jurisdiction. Producer is the POST
+ *     /engagements/:id/submissions route. The submission entity itself
+ *     is still a forward-ref child in `engagement.atom.ts`'s composition
+ *     (no dedicated submissions table yet), so for now the timeline
+ *     event IS the canonical submission record — when the catalog atom
+ *     and table land, the producer here keeps the same event-type and
+ *     payload shape so consumers don't have to re-wire.
  *
- * Both follow the same "best-effort" contract used by
+ * All three follow the same "best-effort" contract used by
  * `emitSnapshotLifecycleEvents` and `emitEngagementCreatedEvent` in
  * `routes/snapshots.ts`: failures are caught and logged so a transient
  * history outage cannot roll back the underlying row update — events
@@ -33,6 +41,8 @@ const ENGAGEMENT_ADDRESS_UPDATED_EVENT_TYPE: EngagementEventType =
   "engagement.address-updated";
 const ENGAGEMENT_JURISDICTION_RESOLVED_EVENT_TYPE: EngagementEventType =
   "engagement.jurisdiction-resolved";
+const ENGAGEMENT_SUBMITTED_EVENT_TYPE: EngagementEventType =
+  "engagement.submitted";
 
 /**
  * Stable system actor for engagement lifecycle events emitted from the
@@ -47,6 +57,20 @@ const ENGAGEMENT_JURISDICTION_RESOLVED_EVENT_TYPE: EngagementEventType =
 export const ENGAGEMENT_EDIT_ACTOR = {
   kind: "system" as const,
   id: "engagement-edit",
+};
+
+/**
+ * Stable system actor for `engagement.submitted` events emitted by the
+ * submission create route. Distinct from `engagement-edit` (PATCH /
+ * regeocode) so the timeline can attribute submissions to the
+ * submission ingest path rather than the engagement-edit surface, even
+ * before there is a dedicated user-bound identity to attach to the
+ * event. Mirrors the snapshot ingest's `snapshot-ingest` actor
+ * convention in `routes/snapshots.ts`.
+ */
+export const SUBMISSION_INGEST_ACTOR = {
+  kind: "system" as const,
+  id: "submission-ingest",
 };
 
 export interface EngagementEventActor {
@@ -188,6 +212,72 @@ export async function emitEngagementJurisdictionResolvedEvent(
         jurisdictionState: state,
       },
       "engagement.jurisdiction-resolved event append failed — row update kept",
+    );
+  }
+}
+
+/**
+ * Append an `engagement.submitted` event against the parent engagement
+ * when a plan-review package is submitted to the jurisdiction. Closes
+ * out the engagement event vocabulary declared in
+ * {@link import("../atoms/engagement.atom").ENGAGEMENT_EVENT_TYPES}.
+ *
+ * The payload mirrors the snapshot/jurisdiction emitters' "self-
+ * contained" stance: enough fields to render the timeline entry and
+ * audit-trail row without joining back to a submission row (there is
+ * no submissions table yet — see file header). When the catalog atom
+ * lands, the producer can grow `submissionId` from a generated id to
+ * the persisted row's id without changing the event-type or any other
+ * payload key, so consumers don't have to re-wire.
+ *
+ * Best-effort by the same contract as the sibling helpers: failures
+ * are caught and logged so a transient history outage cannot fail the
+ * submission HTTP request.
+ */
+export async function emitEngagementSubmittedEvent(
+  history: EventAnchoringService,
+  params: {
+    engagementId: string;
+    submissionId: string;
+    jurisdiction: string | null;
+    jurisdictionCity: string | null;
+    jurisdictionState: string | null;
+    note: string | null;
+    actor: EngagementEventActor;
+  },
+  reqLog: Logger,
+): Promise<void> {
+  try {
+    const event = await history.appendEvent({
+      entityType: "engagement",
+      entityId: params.engagementId,
+      eventType: ENGAGEMENT_SUBMITTED_EVENT_TYPE,
+      actor: params.actor,
+      payload: {
+        submissionId: params.submissionId,
+        jurisdiction: params.jurisdiction,
+        jurisdictionCity: params.jurisdictionCity,
+        jurisdictionState: params.jurisdictionState,
+        note: params.note,
+      },
+    });
+    reqLog.info(
+      {
+        engagementId: params.engagementId,
+        submissionId: params.submissionId,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "engagement.submitted event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        engagementId: params.engagementId,
+        submissionId: params.submissionId,
+      },
+      "engagement.submitted event append failed — submission HTTP response kept",
     );
   }
 }

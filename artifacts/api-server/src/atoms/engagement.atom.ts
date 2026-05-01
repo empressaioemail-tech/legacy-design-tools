@@ -87,8 +87,17 @@ export type EngagementSupportedModes = typeof ENGAGEMENT_SUPPORTED_MODES;
  *     regeocode emissions use the `engagement-edit` system actor; the
  *     snapshot-ingest emission uses the `snapshot-ingest` actor so the
  *     timeline can attribute resolutions to the right producer.
- *   - `engagement.submitted` — declared here but not yet emitted; the
- *     submission route does not exist yet (tracked as a follow-up).
+ *   - `engagement.submitted` — emitted by `routes/engagements.ts`'s
+ *     POST `/:id/submissions` handler via the
+ *     `lib/engagementEvents.ts` helper. Uses the `submission-ingest`
+ *     system actor so the timeline can attribute submissions to the
+ *     submission ingest path rather than the engagement-edit surface.
+ *     The submissions table / catalog atom does not exist yet (the
+ *     `submission` child edge is `forwardRef: true` in `composition`
+ *     below), so for now the timeline event IS the canonical
+ *     submission record; the producer keeps a stable payload shape so
+ *     a future submissions-table backfill is a row insert in front of
+ *     the existing emit, not a re-wire.
  */
 export const ENGAGEMENT_EVENT_TYPES = [
   "engagement.created",

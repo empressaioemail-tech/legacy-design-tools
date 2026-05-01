@@ -403,6 +403,85 @@ describe("POST /api/engagements/:id/geocode — lifecycle events", () => {
   });
 });
 
+describe("POST /api/engagements/:id/submissions — engagement.submitted", () => {
+  it("emits engagement.submitted and surfaces it on the engagement timeline", async () => {
+    const eng = await seedEngagement({
+      address: "123 Submitted Way",
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+      jurisdictionFips: "4950150",
+    });
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions`)
+      .send({ note: "Permit set v1, all sheets cleaned." });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ engagementId: eng.id });
+    expect(typeof res.body.submissionId).toBe("string");
+    expect(typeof res.body.submittedAt).toBe("string");
+
+    // Underlying atom_event row carries the canonical payload + actor.
+    const events = await readEngagementEvents(eng.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.eventType).toBe("engagement.submitted");
+    expect(events[0]!.actor).toEqual({
+      kind: "system",
+      id: "submission-ingest",
+    });
+    expect(events[0]!.payload).toMatchObject({
+      submissionId: res.body.submissionId,
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+      note: "Permit set v1, all sheets cleaned.",
+    });
+
+    // Contract-level assertion: the same event must surface on the
+    // public history endpoint, not just the underlying atom_events row.
+    // This guards against the timeline route accidentally hiding
+    // submission-ingest-attributed events from the engagement timeline.
+    const histRes = await request(getApp()).get(
+      `/api/atoms/engagement/${eng.id}/history`,
+    );
+    expect(histRes.status).toBe(200);
+    const histTypes = (
+      histRes.body.events as Array<{ eventType: string }>
+    ).map((e) => e.eventType);
+    expect(histTypes).toContain("engagement.submitted");
+  });
+
+  it("404s when the engagement does not exist (no event emitted)", async () => {
+    const fakeId = "00000000-0000-0000-0000-000000000000";
+    const res = await request(getApp())
+      .post(`/api/engagements/${fakeId}/submissions`)
+      .send({});
+    expect(res.status).toBe(404);
+
+    const events = await readEngagementEvents(fakeId);
+    expect(events).toHaveLength(0);
+  });
+
+  it("accepts a body with no note (note coerced to null on the event)", async () => {
+    const eng = await seedEngagement({
+      address: "456 Quiet Submission Lane",
+      jurisdictionCity: null,
+      jurisdictionState: null,
+    });
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions`)
+      .send({});
+    expect(res.status).toBe(201);
+
+    const events = await readEngagementEvents(eng.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.payload).toMatchObject({
+      note: null,
+      jurisdictionCity: null,
+      jurisdictionState: null,
+    });
+  });
+});
+
 describe("POST /api/snapshots create-new — fireGeocodeAndWarmup emits jurisdiction-resolved", () => {
   it("emits engagement.jurisdiction-resolved on the create-new branch when geocode resolves a city/state", async () => {
     mockedGeocodeAddress.mockResolvedValueOnce({
