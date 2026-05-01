@@ -343,4 +343,75 @@ describe("ClaudeChat", () => {
       screen.queryByText(/\{\{atom:snapshot:/),
     ).toBeNull();
   });
+
+  it("links snapshot citation chips to the compare view when the preceding user turn focused 2+ snapshots", () => {
+    // Task #54: when the user pinned a multi-snapshot compare on the
+    // preceding turn, every chip in the assistant reply should deep-link
+    // to /engagements/<id>/compare?a=<chip-id>&b=<other-id> so a click
+    // takes the engineer straight to a side-by-side diff. Single-focus
+    // turns (and orphan citations) fall back to the engagement detail
+    // page so we never break navigation.
+    stores.messagesByEngagement = {
+      "eng-1": [
+        {
+          role: "user",
+          content: "diff",
+          snapshotFocusIds: [SNAP_A, SNAP_B],
+        },
+        {
+          role: "assistant",
+          content: `Compared {{atom:snapshot:${SNAP_A}:focus}} vs {{atom:snapshot:${SNAP_B}:focus}}.`,
+        },
+      ] as Array<{ role: string; content: string; snapshotFocusIds?: string[] }>,
+    };
+    render(
+      <ClaudeChat
+        engagementId="eng-1"
+        hasSnapshots={true}
+        snapshots={[mkSnap(SNAP_A, 60), mkSnap(SNAP_B, 600)]}
+      />,
+    );
+    const chipA = screen.getByTestId(`snapshot-citation-${SNAP_A}`);
+    const chipB = screen.getByTestId(`snapshot-citation-${SNAP_B}`);
+    // Each chip pins itself as `a` and the *other* picked id as `b`,
+    // so symmetric clicks stay coherent: clicking A flips a/b vs B.
+    expect(chipA.tagName).toBe("A");
+    expect(chipA.getAttribute("href")).toMatch(
+      new RegExp(`engagements/eng-1/compare\\?a=${SNAP_A}&b=${SNAP_B}$`),
+    );
+    expect(chipB.getAttribute("href")).toMatch(
+      new RegExp(`engagements/eng-1/compare\\?a=${SNAP_B}&b=${SNAP_A}$`),
+    );
+  });
+
+  it("falls back to the engagement detail href when only one snapshot is in focus", () => {
+    // Single-focus turns have nothing to compare against, so the chip
+    // routes back to the engagement detail (where the latest snapshot
+    // lives). Also exercises the no-focus-ids fallback for older
+    // assistant replies that predate the compare feature.
+    stores.messagesByEngagement = {
+      "eng-1": [
+        {
+          role: "user",
+          content: "summarize",
+          snapshotFocusIds: [SNAP_A],
+        },
+        {
+          role: "assistant",
+          content: `See {{atom:snapshot:${SNAP_A}:focus}}.`,
+        },
+      ] as Array<{ role: string; content: string; snapshotFocusIds?: string[] }>,
+    };
+    render(
+      <ClaudeChat
+        engagementId="eng-1"
+        hasSnapshots={true}
+        snapshots={[mkSnap(SNAP_A, 60)]}
+      />,
+    );
+    const chip = screen.getByTestId(`snapshot-citation-${SNAP_A}`);
+    expect(chip.tagName).toBe("A");
+    expect(chip.getAttribute("href")).toMatch(/engagements\/eng-1$/);
+    expect(chip.getAttribute("href")).not.toContain("compare");
+  });
 });

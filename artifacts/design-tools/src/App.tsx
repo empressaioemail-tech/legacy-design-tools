@@ -2,6 +2,7 @@ import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { EngagementList } from "./pages/EngagementList";
 import { EngagementDetail } from "./pages/EngagementDetail";
+import { EngagementCompare } from "./pages/EngagementCompare";
 import StyleProbe from "./pages/StyleProbe";
 import { Health } from "./pages/Health";
 import { CodeLibrary } from "./pages/CodeLibrary";
@@ -16,6 +17,9 @@ function Router() {
     <Switch>
       <Route path="/">
         <EngagementList />
+      </Route>
+      <Route path="/engagements/:id/compare">
+        <EngagementCompare />
       </Route>
       <Route path="/engagements/:id">
         <EngagementDetail />

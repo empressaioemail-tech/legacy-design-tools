@@ -17,11 +17,14 @@ import {
   buildChatPrompt,
   formatSnapshotFocus,
   formatSnapshotFocusBlocks,
+  formatSnapshotDiffBlock,
+  formatSnapshotDiffBlocks,
   relativeTime,
   shapeSnapshotPayloadForBudget,
   MAX_ATOM_BODY_CHARS,
   MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS,
   MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
+  SNAPSHOT_DIFF_NAME_LIMIT,
   type BuildChatPromptInput,
 } from "./promptFormatter";
 import type { RetrievedAtom } from "./retrieval";
@@ -1304,3 +1307,226 @@ const HIGH_PRIORITY_VALIDATED_KEYS = [
   "documentTitle",
   "clientName",
 ] as const;
+
+describe("formatSnapshotDiffBlock: pairwise per-entity diff (Task #54)", () => {
+  // Sample payloads modelled after the real Revit ingest shape: rooms
+  // keyed by `number` + a human `name`, sheets by `sheetNumber` +
+  // `sheetName`, levels by `name`, walls by raw array. The diff helper
+  // is supposed to collapse "what's in head but not base" into a
+  // labelled added/removed list per bucket.
+  const BASE_ID = "snap-base-1111";
+  const HEAD_ID = "snap-head-2222";
+
+  function payloadA() {
+    return {
+      rooms: [
+        { number: "101", name: "Lobby" },
+        { number: "102", name: "Office" },
+        { number: "103", name: "Storage" },
+      ],
+      sheets: [
+        { sheetNumber: "A101", sheetName: "First Floor Plan" },
+        { sheetNumber: "A102", sheetName: "Second Floor Plan" },
+      ],
+      levels: [{ name: "L1" }, { name: "L2" }],
+      walls: new Array(20).fill({}),
+    };
+  }
+  function payloadB() {
+    return {
+      rooms: [
+        { number: "101", name: "Lobby" }, // unchanged
+        { number: "102", name: "Open Office" }, // renamed (key matches)
+        { number: "104", name: "Mechanical" }, // added
+        { number: "105", name: "Electrical" }, // added
+      ],
+      sheets: [
+        { sheetNumber: "A101", sheetName: "First Floor Plan" },
+        { sheetNumber: "A102", sheetName: "Second Floor Plan" },
+        { sheetNumber: "A301", sheetName: "Roof Plan" }, // added
+      ],
+      levels: [{ name: "L1" }, { name: "L2" }, { name: "L3" }], // L3 added
+      walls: new Array(35).fill({}),
+    };
+  }
+
+  it("emits a `<snapshot_diff base='…' head='…'>` block with rooms/sheets/levels/walls deltas", () => {
+    const block = formatSnapshotDiffBlock(
+      { snapshotId: BASE_ID, payload: payloadA() },
+      { snapshotId: HEAD_ID, payload: payloadB() },
+    );
+    expect(block).toContain(`<snapshot_diff base="${BASE_ID}" head="${HEAD_ID}">`);
+    expect(block).toContain("</snapshot_diff>");
+    // Rooms: 3 → 4 with two added (104, 105) and one removed (103). The
+    // 102-name change is NOT counted as add/remove because the identity
+    // key (`number`) matches.
+    expect(block).toMatch(/Rooms: 3 → 4 \(\+2\/-1\)/);
+    expect(block).toMatch(/added: 104 Mechanical; 105 Electrical/);
+    expect(block).toMatch(/removed: 103 Storage/);
+    // Sheets: 2 → 3, +1/-0
+    expect(block).toMatch(/Sheets: 2 → 3 \(\+1\/-0\)/);
+    expect(block).toMatch(/added: A301 Roof Plan/);
+    // Levels: 2 → 3, +1/-0 (key == name → label collapses to bare key)
+    expect(block).toMatch(/Levels: 2 → 3 \(\+1\/-0\)/);
+    expect(block).toMatch(/added: L3/);
+    // Walls: count-only, +15
+    expect(block).toMatch(/Walls: 20 → 35 \(\+15\)/);
+  });
+
+  it("includes only per-bucket entries when at least one side has that bucket; skips buckets absent from both", () => {
+    // Areas absent from both payloads → no Areas line. Walls present in
+    // both → Walls line emitted even when delta is zero.
+    const block = formatSnapshotDiffBlock(
+      { snapshotId: BASE_ID, payload: { rooms: [], walls: [{}, {}] } },
+      { snapshotId: HEAD_ID, payload: { rooms: [{ number: "1" }], walls: [{}, {}] } },
+    );
+    expect(block).toMatch(/Rooms: 0 → 1 \(\+1\/-0\)/);
+    expect(block).toMatch(/Walls: 2 → 2 \(\+0\)/);
+    expect(block).not.toMatch(/Areas:/);
+    expect(block).not.toMatch(/Sheets:/);
+    expect(block).not.toMatch(/Levels:/);
+  });
+
+  it("falls back through identity fields (number → id → name) so partial-shape payloads still diff", () => {
+    // Some Revit pushes ship rooms keyed only by `id` (e.g. unplaced
+    // rooms with no number assigned yet). The fallback chain should
+    // pick `id` and still produce stable add/remove sets.
+    const block = formatSnapshotDiffBlock(
+      {
+        snapshotId: "a",
+        payload: {
+          rooms: [
+            { id: "uuid-aaa", name: "Room A" },
+            { id: "uuid-bbb", name: "Room B" },
+          ],
+        },
+      },
+      {
+        snapshotId: "b",
+        payload: {
+          rooms: [
+            { id: "uuid-aaa", name: "Room A" },
+            { id: "uuid-ccc", name: "Room C" },
+          ],
+        },
+      },
+    );
+    expect(block).toMatch(/Rooms: 2 → 2 \(\+1\/-1\)/);
+    expect(block).toMatch(/added: uuid-aaa Room A|added: uuid-ccc Room C/);
+    expect(block).toMatch(/removed: uuid-bbb Room B/);
+  });
+
+  it("caps the inline label list at SNAPSHOT_DIFF_NAME_LIMIT and surfaces a `+N more` tail", () => {
+    // Adding a whole floor of rooms (50+ entries) should not let the
+    // diff block balloon — only the first N are listed by name and the
+    // remainder collapse to `+N more`. The headline count is still
+    // exact so the model can answer "how many rooms were added?"
+    const big = Array.from({ length: SNAPSHOT_DIFF_NAME_LIMIT + 7 }, (_, i) => ({
+      number: `9${String(i).padStart(2, "0")}`,
+      name: `Room ${i}`,
+    }));
+    const block = formatSnapshotDiffBlock(
+      { snapshotId: "a", payload: { rooms: [] } },
+      { snapshotId: "b", payload: { rooms: big } },
+    );
+    expect(block).toMatch(
+      new RegExp(`Rooms: 0 → ${big.length} \\(\\+${big.length}\\/-0\\)`),
+    );
+    expect(block).toMatch(new RegExp(`\\+${7} more`));
+    // Bound: number of `;` separators in the added list is at most
+    // (LIMIT - 1) + 1 (for the "+N more" suffix). Easier to check is
+    // that the cap fired by counting the named entries:
+    const addedLine = block.split("\n").find((l) => l.startsWith("  added:"))!;
+    const named = addedLine.replace("  added: ", "").split("; ");
+    // Last entry is `+7 more`; rest are real labels capped at LIMIT.
+    expect(named).toHaveLength(SNAPSHOT_DIFF_NAME_LIMIT + 1);
+    expect(named[named.length - 1]).toMatch(/^\+\d+ more$/);
+  });
+
+  it("emits the no-deltas placeholder when both sides match across every bucket", () => {
+    const same = payloadA();
+    const block = formatSnapshotDiffBlock(
+      { snapshotId: "x", payload: same },
+      { snapshotId: "y", payload: same },
+    );
+    // Each bucket still gets a headline (count → count, +0/-0) so the
+    // model sees positive evidence of "nothing changed in rooms" rather
+    // than ambiguous absence. Walls are count-only so they show 20 → 20.
+    expect(block).toMatch(/Rooms: 3 → 3 \(\+0\/-0\)/);
+    expect(block).toMatch(/Sheets: 2 → 2 \(\+0\/-0\)/);
+    expect(block).toMatch(/Walls: 20 → 20 \(\+0\)/);
+    expect(block).not.toMatch(/added:/);
+    expect(block).not.toMatch(/removed:/);
+  });
+});
+
+describe("formatSnapshotDiffBlocks: consecutive-pair sequencing (Task #54)", () => {
+  it("returns [] for fewer than two payloads (single-snapshot turn has nothing to diff against)", () => {
+    expect(formatSnapshotDiffBlocks([])).toEqual([]);
+    expect(
+      formatSnapshotDiffBlocks([{ snapshotId: "only", payload: {} }]),
+    ).toEqual([]);
+  });
+
+  it("emits N-1 blocks for N payloads, in input order, each pair base→head", () => {
+    // Three snapshots A→B→C means two diff blocks: A→B and B→C.
+    // Star-diff against A would have produced A→B, A→C and lost the
+    // incremental story — this test locks the consecutive-pair contract.
+    const blocks = formatSnapshotDiffBlocks([
+      { snapshotId: "snap-A", payload: { rooms: [{ number: "1" }] } },
+      { snapshotId: "snap-B", payload: { rooms: [{ number: "1" }, { number: "2" }] } },
+      { snapshotId: "snap-C", payload: { rooms: [{ number: "2" }, { number: "3" }] } },
+    ]);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toContain('base="snap-A"');
+    expect(blocks[0]).toContain('head="snap-B"');
+    expect(blocks[1]).toContain('base="snap-B"');
+    expect(blocks[1]).toContain('head="snap-C"');
+  });
+});
+
+describe("buildChatPrompt: snapshot diff wiring (Task #54)", () => {
+  it("does NOT emit a `<snapshot_diff>` block or instruction when only one focus snapshot is present", () => {
+    // Single-snapshot focus mode is the original Task #39 path; no
+    // diff makes sense. The Task #54 wiring must not regress it.
+    const { systemPrompt } = buildChatPrompt({
+      engagement: { name: "x", address: null, jurisdiction: null },
+      latestSnapshot: {
+        receivedAt: new Date("2026-04-01T12:00:00Z"),
+        focusPayloads: [{ snapshotId: "lone", payload: { rooms: [] } }],
+      },
+      allAtoms: [],
+      attachedSheets: [],
+      question: "what changed?",
+      now: () => new Date("2026-04-01T12:00:30Z"),
+    });
+    expect(systemPrompt).not.toContain("<snapshot_diff");
+    expect(systemPrompt).not.toMatch(/snapshot_diff/);
+  });
+
+  it("emits one `<snapshot_diff>` per consecutive pair AND mentions the diff-block instruction when 2+ focus snapshots are present", () => {
+    const { systemPrompt } = buildChatPrompt({
+      engagement: { name: "x", address: null, jurisdiction: null },
+      latestSnapshot: {
+        receivedAt: new Date("2026-04-01T12:00:00Z"),
+        focusPayloads: [
+          { snapshotId: "snap-1", payload: { rooms: [{ number: "1" }] } },
+          { snapshotId: "snap-2", payload: { rooms: [{ number: "1" }, { number: "2" }] } },
+          { snapshotId: "snap-3", payload: { rooms: [{ number: "2" }] } },
+        ],
+      },
+      allAtoms: [],
+      attachedSheets: [],
+      question: "compare",
+      now: () => new Date("2026-04-01T12:00:30Z"),
+    });
+    // Two diff blocks for three snapshots, in order.
+    const matches = systemPrompt.match(/<snapshot_diff [^>]*>/g) ?? [];
+    expect(matches).toHaveLength(2);
+    expect(matches[0]).toBe('<snapshot_diff base="snap-1" head="snap-2">');
+    expect(matches[1]).toBe('<snapshot_diff base="snap-2" head="snap-3">');
+    // Instruction line names the diff block so the model is steered
+    // toward it rather than re-deriving deltas from the raw payloads.
+    expect(systemPrompt).toMatch(/`<snapshot_diff>` block is also included/);
+  });
+});

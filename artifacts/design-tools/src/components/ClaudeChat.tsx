@@ -23,6 +23,59 @@ import "./claude-markdown.css";
 // constructs the model might emit.
 const ATOM_TOKEN_RE = /\[\[CODE:([0-9a-fA-F-]{8,})\]\]/g;
 const CODE_LIBRARY_BASE = `${import.meta.env.BASE_URL}code-library`;
+const ENGAGEMENT_BASE = `${import.meta.env.BASE_URL}engagements`;
+
+/**
+ * Per-assistant-message comparison context (Task #54). When a user turn was
+ * sent with 2+ snapshots picked in the comparison picker, the assistant's
+ * `{{atom:snapshot:<id>:focus}}` chips should deep-link to a compare view
+ * for the cited snapshot vs. another snapshot in the picked set, rather
+ * than to the snapshot's static detail page.
+ *
+ * We carry the engagement id alongside the picked id set so the chip can
+ * build the URL without reading from any global. Single-snapshot turns
+ * (or assistants whose chips cite ids outside the picked set) get
+ * `comparePartnerIds.length < 2` and the chip falls back to the
+ * engagement detail link.
+ */
+interface SnapshotChipCompareContext {
+  engagementId: string;
+  comparePartnerIds: ReadonlyArray<string>;
+}
+
+/**
+ * Given the chip's own snapshot id and the per-turn comparison context,
+ * pick the URL the chip should link to. Returns `null` when there's no
+ * useful destination (e.g. no engagement context plumbed through, which
+ * shouldn't happen in production but is the safe fallback for tests
+ * that exercise the chip helper in isolation).
+ *
+ * Two-snapshot picker: `a=<chip-id>&b=<other-id>`. The chip's own id is
+ * always pinned to `a` so users always see "I clicked snap-X → compare
+ * lands with snap-X on the left", which matches the principle of
+ * least surprise. For 3+ picks we still use the chip as `a` and pick
+ * the *first non-chip* id from the picker order as `b` — a reasonable
+ * default that respects the order the user staged the snapshots in.
+ */
+export function buildSnapshotChipHref(
+  snapshotId: string,
+  ctx: SnapshotChipCompareContext | null,
+): string {
+  if (!ctx) return `${ENGAGEMENT_BASE}`;
+  const { engagementId, comparePartnerIds } = ctx;
+  const partners = comparePartnerIds.filter((id) => id !== snapshotId);
+  if (
+    comparePartnerIds.length >= 2 &&
+    comparePartnerIds.includes(snapshotId) &&
+    partners.length >= 1
+  ) {
+    const other = partners[0];
+    return `${ENGAGEMENT_BASE}/${engagementId}/compare?a=${encodeURIComponent(
+      snapshotId,
+    )}&b=${encodeURIComponent(other)}`;
+  }
+  return `${ENGAGEMENT_BASE}/${engagementId}`;
+}
 
 // `{{atom:snapshot:<uuid>:focus}}` markers in assistant messages render as
 // snapshot attribution chips (Task #48). The model is instructed by the
@@ -81,17 +134,26 @@ function CodeAtomChip({ atomId }: { atomId: string }) {
 function SnapshotFocusChip({
   snapshotId,
   snapshotLookup,
+  compareContext,
 }: {
   snapshotId: string;
   snapshotLookup?: ReadonlyMap<string, SnapshotSummary>;
+  compareContext?: SnapshotChipCompareContext | null;
 }) {
   const short = snapshotId.slice(0, 8);
   const meta = snapshotLookup?.get(snapshotId);
+  const ctx = compareContext ?? null;
+  const href = buildSnapshotChipHref(snapshotId, ctx);
+  const isCompareLink =
+    ctx !== null &&
+    ctx.comparePartnerIds.length >= 2 &&
+    ctx.comparePartnerIds.includes(snapshotId);
   const tooltip = meta
-    ? `Snapshot ${short} — captured ${relativeTime(meta.receivedAt)}`
-    : `Snapshot ${snapshotId}`;
+    ? `Snapshot ${short} — captured ${relativeTime(meta.receivedAt)}${isCompareLink ? " · compare snapshots" : ""}`
+    : `Snapshot ${snapshotId}${isCompareLink ? " · compare snapshots" : ""}`;
   return (
-    <span
+    <a
+      href={href}
       data-testid={`snapshot-citation-${snapshotId}`}
       title={tooltip}
       style={{
@@ -105,13 +167,14 @@ function SnapshotFocusChip({
         padding: "1px 6px",
         borderRadius: 3,
         textTransform: "uppercase",
+        textDecoration: "none",
         verticalAlign: "baseline",
         marginInline: 2,
       }}
     >
       <Camera size={9} />
       SNAP·{short}
-    </span>
+    </a>
   );
 }
 
@@ -129,6 +192,7 @@ function SnapshotFocusChip({
 function renderWithAtomChips(
   children: ReactNode,
   snapshotLookup?: ReadonlyMap<string, SnapshotSummary>,
+  compareContext?: SnapshotChipCompareContext | null,
 ): ReactNode {
   if (typeof children === "string") {
     const text = children;
@@ -158,6 +222,7 @@ function renderWithAtomChips(
             key={`snap-${key++}`}
             snapshotId={m[1]}
             snapshotLookup={snapshotLookup}
+            compareContext={compareContext}
           />
         ),
       });
@@ -178,7 +243,9 @@ function renderWithAtomChips(
   }
   if (Array.isArray(children)) {
     return children.map((c, i) => (
-      <span key={`mc-${i}`}>{renderWithAtomChips(c, snapshotLookup)}</span>
+      <span key={`mc-${i}`}>
+        {renderWithAtomChips(c, snapshotLookup, compareContext)}
+      </span>
     ));
   }
   return children;
@@ -456,6 +523,26 @@ export function ClaudeChat({
             );
           }
 
+          // Walk back to find this assistant message's preceding user
+          // turn so we can read the snapshot ids the user staged for
+          // comparison on that turn (Task #54). The store's send flow
+          // always inserts a user msg followed by an assistant msg
+          // sequentially, so messages[i-1] is the right turn — but be
+          // defensive in case the message list shape ever changes.
+          const priorUser = (() => {
+            for (let j = i - 1; j >= 0; j--) {
+              if (messages[j]?.role === "user") return messages[j];
+            }
+            return undefined;
+          })();
+          const compareContext: SnapshotChipCompareContext | null =
+            priorUser?.snapshotFocusIds && priorUser.snapshotFocusIds.length > 0
+              ? {
+                  engagementId,
+                  comparePartnerIds: priorUser.snapshotFocusIds,
+                }
+              : { engagementId, comparePartnerIds: [] };
+
           return (
             <div key={i} className="self-start max-w-[90%]">
               <div className="sc-card sc-accent-cyan px-3.5 py-2.5">
@@ -466,12 +553,20 @@ export function ClaudeChat({
                     components={{
                       p: ({ children }) => (
                         <p>
-                          {renderWithAtomChips(children, snapshotLookup)}
+                          {renderWithAtomChips(
+                            children,
+                            snapshotLookup,
+                            compareContext,
+                          )}
                         </p>
                       ),
                       li: ({ children }) => (
                         <li>
-                          {renderWithAtomChips(children, snapshotLookup)}
+                          {renderWithAtomChips(
+                            children,
+                            snapshotLookup,
+                            compareContext,
+                          )}
                         </li>
                       ),
                     }}

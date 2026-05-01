@@ -990,6 +990,253 @@ export function formatSnapshotFocusBlocks(
 }
 
 /**
+ * Hard cap on how many entity labels (added or removed) we list inline
+ * inside a `<snapshot_diff>` block per entity bucket (Task #54). Anything
+ * beyond this gets summarised as `+N more` so the count is still
+ * accurate. Comparison answers usually only need a handful of named
+ * deltas; we cap to keep the diff block from balooning when a snapshot
+ * adds/removes hundreds of rooms in one push (e.g. a new floor on a
+ * residential tower).
+ */
+export const SNAPSHOT_DIFF_NAME_LIMIT = 10;
+
+/**
+ * Per-label cap inside a `<snapshot_diff>` listing. Mirrors the snapshot
+ * atom's prose cap (`SHEET_LABEL_MAX_CHARS`) so a degenerate room name
+ * (user-pasted-essay) cannot blow the block budget.
+ */
+export const SNAPSHOT_DIFF_LABEL_MAX_CHARS = 60;
+
+/**
+ * Entity buckets the snapshot-diff block knows how to identity-key. For
+ * each bucket we list the candidate fields used to derive a stable key
+ * (first non-empty wins) and a separate set used to produce a
+ * human-friendly label after the key. Order in `keyFields` matters —
+ * Revit pushes vary slightly across project templates, and a missing
+ * `number` should fall back to `id` rather than turn the whole entry
+ * into a no-key skip.
+ *
+ * `walls` is intentionally absent from this list because real Revit
+ * walls don't carry a stable user-facing identifier the way rooms /
+ * sheets / levels do; the diff renders walls as a count-only delta
+ * instead. Areas mirror rooms (number + name).
+ */
+const SNAPSHOT_DIFF_ENTITY_SPECS: ReadonlyArray<{
+  payloadKey: string;
+  label: string;
+  keyFields: ReadonlyArray<string>;
+  nameFields: ReadonlyArray<string>;
+}> = [
+  {
+    payloadKey: "rooms",
+    label: "Rooms",
+    keyFields: ["number", "id", "uniqueId", "name"],
+    nameFields: ["name"],
+  },
+  {
+    payloadKey: "sheets",
+    label: "Sheets",
+    keyFields: ["sheetNumber", "number", "id", "uniqueId"],
+    nameFields: ["sheetName", "name"],
+  },
+  {
+    payloadKey: "levels",
+    label: "Levels",
+    keyFields: ["name", "id", "uniqueId"],
+    nameFields: ["name"],
+  },
+  {
+    payloadKey: "areas",
+    label: "Areas",
+    keyFields: ["number", "id", "uniqueId", "name"],
+    nameFields: ["name"],
+  },
+];
+
+/**
+ * Pick the first non-empty value from `item` whose key appears in
+ * `fields`. Strings are trimmed; numbers are stringified. Returns `null`
+ * when no candidate field carries a usable value, signalling "no stable
+ * identity available" — such items are skipped during diffing rather
+ * than collapsed onto the same anonymous bucket (which would mis-attribute
+ * adds/removes).
+ */
+function pickFirstStringy(
+  item: unknown,
+  fields: ReadonlyArray<string>,
+): string | null {
+  if (!item || typeof item !== "object") return null;
+  const obj = item as Record<string, unknown>;
+  for (const f of fields) {
+    const v = obj[f];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  return null;
+}
+
+function clipLabel(label: string): string {
+  return label.length > SNAPSHOT_DIFF_LABEL_MAX_CHARS
+    ? label.slice(0, SNAPSHOT_DIFF_LABEL_MAX_CHARS - 1) + "…"
+    : label;
+}
+
+function entityLabel(
+  item: unknown,
+  keyFields: ReadonlyArray<string>,
+  nameFields: ReadonlyArray<string>,
+): string {
+  const key = pickFirstStringy(item, keyFields) ?? "?";
+  const name = pickFirstStringy(item, nameFields);
+  // Avoid duplicating the key when name and key share a value (e.g.
+  // levels keyed by name — `Level 1 Level 1` would be silly).
+  return name && name !== key ? clipLabel(`${key} ${name}`) : clipLabel(key);
+}
+
+function getArrayField(payload: unknown, key: string): unknown[] | null {
+  if (!payload || typeof payload !== "object") return null;
+  const v = (payload as Record<string, unknown>)[key];
+  return Array.isArray(v) ? v : null;
+}
+
+function countWalls(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const walls = (payload as Record<string, unknown>)["walls"];
+  if (Array.isArray(walls)) return walls.length;
+  if (walls && typeof walls === "object") {
+    const wObj = walls as Record<string, unknown>;
+    if (typeof wObj["count"] === "number") return wObj["count"] as number;
+    if (Array.isArray(wObj["items"])) return (wObj["items"] as unknown[]).length;
+  }
+  return null;
+}
+
+function formatLabelList(labels: string[]): string {
+  if (labels.length <= SNAPSHOT_DIFF_NAME_LIMIT) return labels.join("; ");
+  const visible = labels.slice(0, SNAPSHOT_DIFF_NAME_LIMIT);
+  const remainder = labels.length - visible.length;
+  return `${visible.join("; ")}; +${remainder} more`;
+}
+
+/**
+ * Pure pairwise diff between two snapshot payloads (Task #54).
+ *
+ * Renders a `<snapshot_diff base="…" head="…">` block summarising what
+ * changed for every entity bucket the formatter knows how to identity-key
+ * (rooms, sheets, levels, areas, walls). Labels are clipped and capped so
+ * the block stays bounded even on very wide snapshots; counts are always
+ * shown so the model can answer "how many rooms changed?" even when the
+ * named-entry list got truncated.
+ *
+ * The two snapshots are referred to as "base" and "head" deliberately
+ * (matching git terminology) so the model has an unambiguous frame —
+ * "added" means present in head but missing from base; "removed" means
+ * present in base but missing from head. The `snapshot_id` attributes
+ * line up with the corresponding `<snapshot_focus>` blocks so a model
+ * citation like `{{atom:snapshot:<id>:focus}}` resolves to the same
+ * snapshot the diff describes.
+ *
+ * Pure: no DB, no network, no logger. Caller decides which pairs to
+ * diff (see {@link formatSnapshotDiffBlocks}).
+ */
+export function formatSnapshotDiffBlock(
+  base: { snapshotId: string; payload: unknown },
+  head: { snapshotId: string; payload: unknown },
+): string {
+  const lines: string[] = [];
+
+  for (const spec of SNAPSHOT_DIFF_ENTITY_SPECS) {
+    const baseArr = getArrayField(base.payload, spec.payloadKey);
+    const headArr = getArrayField(head.payload, spec.payloadKey);
+    if (baseArr === null && headArr === null) continue;
+    const a = baseArr ?? [];
+    const b = headArr ?? [];
+
+    const aMap = new Map<string, string>();
+    for (const item of a) {
+      const key = pickFirstStringy(item, spec.keyFields);
+      if (key !== null) {
+        aMap.set(key, entityLabel(item, spec.keyFields, spec.nameFields));
+      }
+    }
+    const bMap = new Map<string, string>();
+    for (const item of b) {
+      const key = pickFirstStringy(item, spec.keyFields);
+      if (key !== null) {
+        bMap.set(key, entityLabel(item, spec.keyFields, spec.nameFields));
+      }
+    }
+
+    const added: string[] = [];
+    const removed: string[] = [];
+    for (const [key, label] of bMap) if (!aMap.has(key)) added.push(label);
+    for (const [key, label] of aMap) if (!bMap.has(key)) removed.push(label);
+
+    const headline = `${spec.label}: ${a.length} → ${b.length} (+${added.length}/-${removed.length})`;
+    lines.push(headline);
+    if (added.length > 0) lines.push(`  added: ${formatLabelList(added)}`);
+    if (removed.length > 0) {
+      lines.push(`  removed: ${formatLabelList(removed)}`);
+    }
+  }
+
+  // Walls: count-only — Revit walls don't carry a stable user-facing
+  // identifier the way rooms/sheets do, so a name-list diff would be
+  // noise. The chat prompt cares about the magnitude of change, not the
+  // wall instance ids.
+  const aWalls = countWalls(base.payload);
+  const bWalls = countWalls(head.payload);
+  if (aWalls !== null || bWalls !== null) {
+    const ac = aWalls ?? 0;
+    const bc = bWalls ?? 0;
+    const delta = bc - ac;
+    // Always show an explicit sign on the delta so the line scans the
+    // same as the named-entity buckets above ("+15", "-3", "+0"). A
+    // bare "0" reads ambiguously next to "+15" further up the block.
+    const sign = delta >= 0 ? "+" : "";
+    lines.push(`Walls: ${ac} → ${bc} (${sign}${delta})`);
+  }
+
+  const body =
+    lines.length > 0
+      ? lines.join("\n")
+      : "No structural deltas detected between these snapshots.";
+  return `<snapshot_diff base="${base.snapshotId}" head="${head.snapshotId}">\n${body}\n</snapshot_diff>`;
+}
+
+/**
+ * Build the per-pair `<snapshot_diff>` blocks for a focus-mode turn
+ * (Task #54). Returns `[]` when there are fewer than two focus payloads
+ * (a single-snapshot turn has nothing to diff against).
+ *
+ * Diffing is **consecutive-pair** rather than star-diff against the
+ * first entry: for `[A, B, C]` we emit `A→B` and `B→C`. This matches
+ * how Revit pushes evolve over time (each push is the previous one
+ * plus changes) and keeps the per-block size bounded by the largest
+ * single push delta rather than by an O(n²) cross-product. The model
+ * can still answer "what changed between A and C" by chaining the two
+ * blocks; the blocks themselves stay compact.
+ *
+ * Order matches the input order — the chat route assembles
+ * `focusPayloads` in the same order it resolved the requested ids
+ * (explicit-body → inline-reference → latest-fallback), so the diff
+ * sequence matches the order the user picked snapshots in the
+ * comparison picker.
+ */
+export function formatSnapshotDiffBlocks(
+  focusPayloads: ReadonlyArray<{ snapshotId: string; payload: unknown }>,
+): string[] {
+  if (focusPayloads.length < 2) return [];
+  const blocks: string[] = [];
+  for (let i = 1; i < focusPayloads.length; i++) {
+    blocks.push(
+      formatSnapshotDiffBlock(focusPayloads[i - 1], focusPayloads[i]),
+    );
+  }
+  return blocks;
+}
+
+/**
  * Human-friendly age string for the snapshot timestamp. Round-trips through
  * second/minute/hour/day buckets. Exported for direct testing.
  */
@@ -1117,6 +1364,24 @@ export function buildChatPrompt(
     focusFormatted.blocks.length > 0
       ? "\n\n" + focusFormatted.blocks.join("\n\n")
       : "";
+
+  // Per-pair `<snapshot_diff>` summaries (Task #54). Only emitted when
+  // the user staged 2+ snapshots for comparison this turn — a single
+  // focus snapshot has nothing to diff against. The diff is a sibling
+  // of the raw `<snapshot_focus>` blocks above; it does NOT replace
+  // them, because the model still needs the raw payload to answer
+  // fine-grained "what's the area of room 204 on the head snapshot?"
+  // questions. The diff block is the comparison-question shortcut: it
+  // pre-computes added/removed entities so the model doesn't have to
+  // rederive them by walking two large JSON blobs in its head, which
+  // it does poorly at any scale.
+  const snapshotDiffBlocks =
+    focusPayloads.length >= 2 ? formatSnapshotDiffBlocks(focusPayloads) : [];
+  const snapshotDiffBlock =
+    snapshotDiffBlocks.length > 0
+      ? "\n\n" + snapshotDiffBlocks.join("\n\n")
+      : "";
+
   const snapshotFocusInstruction =
     focusPayloads.length > 0
       ? "\n\n" +
@@ -1127,7 +1392,10 @@ export function buildChatPrompt(
         focusPayloads
           .map((fp) => `\`{{atom:snapshot:${fp.snapshotId}:focus}}\``)
           .join(" or ") +
-        " so the answer stays attributable to the right snapshot."
+        " so the answer stays attributable to the right snapshot." +
+        (snapshotDiffBlocks.length > 0
+          ? ` A pre-computed \`<snapshot_diff>\` block is also included for each consecutive pair (base→head) summarising rooms, sheets, levels, areas, and walls added or removed — prefer those summaries over re-deriving deltas from the raw payloads, and cite the head snapshot when you reference a delta.`
+          : "")
       : "";
 
   // The legacy *always-on* `<snapshot received_at='…'>{full JSON}</snapshot>`
@@ -1144,7 +1412,8 @@ export function buildChatPrompt(
     atomBlock +
     frameworkAtomBlock +
     atomVocabularyBlock +
-    snapshotFocusBlock;
+    snapshotFocusBlock +
+    snapshotDiffBlock;
 
   const userBlocks: PromptContentBlock[] = [];
   if (attachedSheets.length > 0) {
