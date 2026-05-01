@@ -9,8 +9,10 @@ import {
   getGetSessionQueryKey,
 } from "@workspace/api-client-react";
 import {
+  BRIEFING_PDF_FOOTER_TOKENS,
   BRIEFING_PDF_HEADER_TOKENS,
   DEFAULT_BRIEFING_PDF_HEADER,
+  DEFAULT_FOOTER_WATERMARK,
 } from "@workspace/briefing-pdf-tokens";
 
 /**
@@ -50,6 +52,16 @@ import {
  * Both forms read the same `users` row through `useGetUser`, so a
  * successful save on either form refreshes the cached profile and the
  * other form will pick up any changes on its next render.
+ *
+ * A third, read-only preview card (`FooterWatermarkPreview`, Task
+ * #404) sits next to the header preview and renders the PDF footer
+ * watermark exactly as the renderer prints it into the
+ * `@page @bottom-center` margin box. The watermark text + typography
+ * are not architect-editable today (they carry a platform-wide
+ * confidentiality / freshness disclaimer), so the card has no input
+ * — it exists purely so the architect can see the disclaimer that
+ * will appear on every page of their export without round-tripping
+ * through a real PDF.
  */
 
 export function Settings() {
@@ -114,6 +126,7 @@ export function Settings() {
         userLoading={userLoading}
         userError={userError}
       />
+      <FooterWatermarkPreview />
     </div>
   );
 }
@@ -515,6 +528,84 @@ function ArchitectPdfHeaderForm({
         ) : null}
       </div>
     </form>
+  );
+}
+
+/**
+ * Read-only mini-preview of the PDF footer watermark — Task #404.
+ *
+ * The renderer in `briefingHtml.ts` paints the watermark into the
+ * `@page @bottom-center` margin box on every printed page, with the
+ * wording + typography sourced from `DEFAULT_FOOTER_WATERMARK` and
+ * `BRIEFING_PDF_FOOTER_TOKENS` in `@workspace/briefing-pdf-tokens`.
+ * This card consumes the same exports as inline styles, so the
+ * preview stays in lockstep with the printed footer by construction
+ * — a unit test in `Settings.test.tsx` pins the rendered preview's
+ * typography to the shared token values, mirroring the renderer-side
+ * pin in `briefing-export-pdf.test.ts`.
+ *
+ * The footer watermark is platform-wide (no per-architect override
+ * exists today), so the card is intentionally inputless — it sits
+ * alongside the editable header preview as a "what stakeholders see
+ * on every page" affordance, framed like the bottom edge of a
+ * printed page (dotted top rule) to mirror the header preview's
+ * top-edge framing.
+ */
+function FooterWatermarkPreview() {
+  return (
+    <div className="sc-card p-6 flex flex-col gap-4">
+      <div>
+        <div className="sc-label">Stakeholder briefing PDF footer</div>
+        <div className="sc-body mt-1">
+          The confidentiality &amp; freshness disclaimer stamped onto
+          every page of the briefing PDF you export. Not editable —
+          this wording is platform-wide so stakeholders see a
+          consistent disclaimer across architects.
+        </div>
+      </div>
+
+      {/*
+        Live mini-preview of the PDF footer watermark. The font
+        family / size / colour come from `BRIEFING_PDF_FOOTER_TOKENS`
+        in `@workspace/briefing-pdf-tokens` — the same tokens the
+        renderer interpolates into its `@page @bottom-center` margin
+        box, so the two surfaces stay in lockstep by construction
+        (a unit test in `briefing-export-pdf.test.ts` pins the
+        renderer's printed CSS to the same values, and a unit test
+        in `Settings.test.tsx` pins this preview to them too).
+        Wrapped in a card-like frame with a dotted top rule so it
+        reads as "the bottom edge of a printed page" — mirroring
+        the header preview's dotted bottom rule.
+      */}
+      <div>
+        <div className="sc-meta mb-1">Live preview</div>
+        <div
+          aria-label="PDF footer watermark live preview"
+          style={{
+            background: "#ffffff",
+            border: "1px solid #ddd",
+            borderRadius: 3,
+            padding: "8px 14px 10px",
+          }}
+        >
+          <div
+            data-testid="settings-footer-watermark-preview"
+            style={{
+              fontFamily: BRIEFING_PDF_FOOTER_TOKENS.fontFamily,
+              fontSize: BRIEFING_PDF_FOOTER_TOKENS.fontSize,
+              fontWeight: 400,
+              color: BRIEFING_PDF_FOOTER_TOKENS.color,
+              borderTop: "1px dotted #ccc",
+              paddingTop: 6,
+              lineHeight: 1.3,
+              textAlign: "center",
+            }}
+          >
+            {DEFAULT_FOOTER_WATERMARK}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

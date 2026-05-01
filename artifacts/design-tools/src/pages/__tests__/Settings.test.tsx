@@ -35,8 +35,10 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
+  BRIEFING_PDF_FOOTER_TOKENS,
   BRIEFING_PDF_HEADER_TOKENS,
   DEFAULT_BRIEFING_PDF_HEADER,
+  DEFAULT_FOOTER_WATERMARK,
 } from "@workspace/briefing-pdf-tokens";
 
 type Session =
@@ -474,6 +476,51 @@ describe("Settings — live PDF header preview (Task #365)", () => {
       expect(preview.textContent).toBe(DEFAULT_BRIEFING_PDF_HEADER),
     );
     expect(preview.getAttribute("data-preview-fallback")).toBe("true");
+  });
+});
+
+describe("Settings — footer watermark preview (Task #404)", () => {
+  it("renders the platform default watermark and pins typography to the shared tokens", async () => {
+    // The renderer in `briefingHtml.ts` paints the watermark into
+    // the `@page @bottom-center` margin box, sourcing the wording
+    // from `DEFAULT_FOOTER_WATERMARK` and the typography from
+    // `BRIEFING_PDF_FOOTER_TOKENS`. The preview must read from the
+    // same shared exports so the two surfaces can't drift — a
+    // designer tweaking the renderer's footer colour or wording
+    // would otherwise silently desync this card. Mirrors the
+    // renderer-side pin in `briefing-export-pdf.test.ts`.
+    renderPage();
+
+    const preview = (await screen.findByTestId(
+      "settings-footer-watermark-preview",
+    )) as HTMLElement;
+
+    expect(preview.textContent).toBe(DEFAULT_FOOTER_WATERMARK);
+    expect(preview.style.fontFamily).toBe(
+      BRIEFING_PDF_FOOTER_TOKENS.fontFamily,
+    );
+    expect(preview.style.fontSize).toBe(BRIEFING_PDF_FOOTER_TOKENS.fontSize);
+    expect(preview.style.color).toBe(BRIEFING_PDF_FOOTER_TOKENS.color);
+  });
+
+  it("renders the same watermark regardless of the architect's header override (footer is platform-wide)", async () => {
+    // The footer is not architect-editable today — overriding the
+    // header has no effect on the footer card. This test pins that
+    // contract so a future "per-architect footer" feature has to
+    // explicitly opt-in rather than accidentally branching off the
+    // header field.
+    hoisted.user = {
+      ...hoisted.user!,
+      architectPdfHeader: "Studio Foo — Pre-Design Briefing",
+    };
+    renderPage();
+
+    const preview = (await screen.findByTestId(
+      "settings-footer-watermark-preview",
+    )) as HTMLElement;
+    await waitFor(() =>
+      expect(preview.textContent).toBe(DEFAULT_FOOTER_WATERMARK),
+    );
   });
 });
 
