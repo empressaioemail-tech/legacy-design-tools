@@ -34,6 +34,10 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import {
+  BRIEFING_PDF_HEADER_TOKENS,
+  DEFAULT_BRIEFING_PDF_HEADER,
+} from "@workspace/briefing-pdf-tokens";
 
 type Session =
   | { audience: "user"; requestor: { kind: "user"; id: string }; permissions: string[] }
@@ -378,14 +382,13 @@ describe("Settings — live PDF header preview (Task #365)", () => {
       "settings-architect-pdf-header-preview",
     )) as HTMLElement;
 
-    expect(preview.textContent).toBe(
-      "SmartCity Design Tools — Pre-Design Briefing",
-    );
+    expect(preview.textContent).toBe(DEFAULT_BRIEFING_PDF_HEADER);
     expect(preview.getAttribute("data-preview-fallback")).toBe("true");
     // Muted-style contract: italic + lighter colour than the live
-    // value. Inline styles are the source of truth for the preview's
-    // typography (mirrors the renderer's CSS literals), so we read
-    // them directly off the DOM rather than asserting on class names.
+    // value. The muted #888 is preview-only ("this is the platform
+    // default" affordance) and intentionally not in the shared
+    // token lib — only the live-value styling has to stay in
+    // lockstep with the printed header.
     expect(preview.style.fontStyle).toBe("italic");
     expect(preview.style.color).toBe("#888");
   });
@@ -406,12 +409,16 @@ describe("Settings — live PDF header preview (Task #365)", () => {
     );
     expect(preview.getAttribute("data-preview-fallback")).toBe("false");
     expect(preview.style.fontStyle).toBe("normal");
-    // Live value uses the same #555 the PDF renderer's @top-left
-    // margin box does — the contract this test pins is "preview
-    // typography stays in lockstep with the rendered header".
-    expect(preview.style.color).toBe("#555");
-    expect(preview.style.fontSize).toBe("9pt");
-    expect(preview.style.fontFamily).toContain("system-ui");
+    // Live value reads its typography from the shared
+    // `@workspace/briefing-pdf-tokens` lib — the same source the
+    // renderer's `@page @top-left` margin box interpolates from.
+    // The contract this test pins is "preview stays in lockstep
+    // with the rendered header by construction".
+    expect(preview.style.color).toBe(BRIEFING_PDF_HEADER_TOKENS.color);
+    expect(preview.style.fontSize).toBe(BRIEFING_PDF_HEADER_TOKENS.fontSize);
+    expect(preview.style.fontFamily).toBe(
+      BRIEFING_PDF_HEADER_TOKENS.fontFamily,
+    );
   });
 
   it("updates live as the architect types and snaps back to the fallback when the input is cleared", async () => {
@@ -437,9 +444,7 @@ describe("Settings — live PDF header preview (Task #365)", () => {
     // time — no Save round-trip required.
     fireEvent.change(input, { target: { value: "" } });
     await waitFor(() =>
-      expect(preview.textContent).toBe(
-        "SmartCity Design Tools — Pre-Design Briefing",
-      ),
+      expect(preview.textContent).toBe(DEFAULT_BRIEFING_PDF_HEADER),
     );
     expect(preview.getAttribute("data-preview-fallback")).toBe("true");
   });
@@ -466,9 +471,7 @@ describe("Settings — live PDF header preview (Task #365)", () => {
 
     fireEvent.change(input, { target: { value: "   " } });
     await waitFor(() =>
-      expect(preview.textContent).toBe(
-        "SmartCity Design Tools — Pre-Design Briefing",
-      ),
+      expect(preview.textContent).toBe(DEFAULT_BRIEFING_PDF_HEADER),
     );
     expect(preview.getAttribute("data-preview-fallback")).toBe("true");
   });

@@ -40,6 +40,9 @@
       "path": "./lib/briefing-diff"
     },
     {
+      "path": "./lib/briefing-pdf-tokens"
+    },
+    {
       "path": "./lib/briefing-prior-snapshot"
     },
     {

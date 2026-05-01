@@ -8,6 +8,10 @@ import {
   getGetUserQueryKey,
   getGetSessionQueryKey,
 } from "@workspace/api-client-react";
+import {
+  BRIEFING_PDF_HEADER_TOKENS,
+  DEFAULT_BRIEFING_PDF_HEADER,
+} from "@workspace/briefing-pdf-tokens";
 
 /**
  * Architect-facing Settings.
@@ -24,8 +28,10 @@ import {
  *
  *   2. Stakeholder briefing PDF header (`PATCH /me/architect-pdf-header`)
  *      — DA-PI-6 / Task #322. Empty / whitespace-only input clears the
- *      override server-side, so the PDF route falls back to
- *      "SmartCity Design Tools — Pre-Design Briefing".
+ *      override server-side, so the PDF route falls back to the
+ *      `DEFAULT_BRIEFING_PDF_HEADER` exported by
+ *      `@workspace/briefing-pdf-tokens` (Task #393 — single source of
+ *      truth shared between the renderer and this preview).
  *
  *      The form intentionally has a single Save button — submitting
  *      an empty / whitespace-only value clears the override server-
@@ -45,20 +51,6 @@ import {
  * successful save on either form refreshes the cached profile and the
  * other form will pick up any changes on its next render.
  */
-
-/**
- * Mirrors `DEFAULT_BRIEFING_PDF_HEADER` in
- * `artifacts/api-server/src/lib/briefingHtml.ts` — the renderer's
- * source of truth for the empty-override fallback. Inlined here
- * because the design-tools artifact can't import from api-server, and
- * this string is small enough that the duplicate-with-pointer is
- * cheaper than spinning up a shared lib for a single constant. If the
- * default ever changes, update both locations together — the
- * Settings unit test pins the preview text so the duplicate can't
- * silently drift.
- */
-const DEFAULT_BRIEFING_PDF_HEADER =
-  "SmartCity Design Tools — Pre-Design Briefing";
 
 export function Settings() {
   const { data: session, isLoading: sessionLoading } = useGetSession({
@@ -319,6 +311,12 @@ function ProfileForm({
  * default (in a muted/italic style) when the input is empty or
  * whitespace-only, so the architect can iterate on wording without
  * round-tripping through a real export.
+ *
+ * Task #393 — The default header string and the preview's typography
+ * tokens come from the shared `@workspace/briefing-pdf-tokens` lib,
+ * the same source the renderer in `briefingHtml.ts` interpolates
+ * into its `@page @top-left` margin box, so the two surfaces stay
+ * in lockstep by construction.
  */
 function ArchitectPdfHeaderForm({
   user,
@@ -398,9 +396,8 @@ function ArchitectPdfHeaderForm({
         <div className="sc-label">Stakeholder briefing PDF header</div>
         <div className="sc-body mt-1">
           Shown at the top of every page of the briefing PDF you export.
-          Leave blank to use the platform default
-          (&ldquo;SmartCity Design Tools&nbsp;&mdash; Pre-Design
-          Briefing&rdquo;).
+          Leave blank to use the platform default (&ldquo;
+          {DEFAULT_BRIEFING_PDF_HEADER}&rdquo;).
         </div>
       </div>
 
@@ -426,23 +423,23 @@ function ArchitectPdfHeaderForm({
               setDraft(e.target.value);
               setSavedNote(null);
             }}
-            placeholder="SmartCity Design Tools — Pre-Design Briefing"
+            placeholder={DEFAULT_BRIEFING_PDF_HEADER}
             data-testid="settings-architect-pdf-header-input"
             maxLength={200}
             aria-label="Stakeholder briefing PDF header"
           />
 
           {/*
-            Live mini-preview of the PDF header. Inline styles
-            intentionally — the PDF renderer prints its header from
-            CSS literal tokens (font-family / font-size / color in
-            `briefingHtml.ts`'s `@page @top-left` margin box) rather
-            than from any shared design-token, so mirroring those
-            same literals here is the most direct way to keep the
-            two surfaces visually in sync. Wrapped in a card-like
-            frame with a dotted bottom rule so it reads as "the top
-            edge of a printed page" rather than just another text
-            line on the form.
+            Live mini-preview of the PDF header. The font family /
+            size / colour come from `BRIEFING_PDF_HEADER_TOKENS` in
+            `@workspace/briefing-pdf-tokens` — the same tokens the
+            renderer interpolates into its `@page @top-left` margin
+            box, so the two surfaces stay in lockstep by
+            construction (a unit test in `briefing-export-pdf.test.ts`
+            pins the renderer's printed CSS to the same values).
+            Wrapped in a card-like frame with a dotted bottom rule
+            so it reads as "the top edge of a printed page" rather
+            than just another text line on the form.
           */}
           <div className="mt-1">
             <div className="sc-meta mb-1">Live preview</div>
@@ -461,11 +458,12 @@ function ArchitectPdfHeaderForm({
                   isPreviewFallback ? "true" : "false"
                 }
                 style={{
-                  fontFamily:
-                    '-apple-system, system-ui, "Helvetica Neue", Arial, sans-serif',
-                  fontSize: "9pt",
+                  fontFamily: BRIEFING_PDF_HEADER_TOKENS.fontFamily,
+                  fontSize: BRIEFING_PDF_HEADER_TOKENS.fontSize,
                   fontWeight: 400,
-                  color: isPreviewFallback ? "#888" : "#555",
+                  color: isPreviewFallback
+                    ? "#888"
+                    : BRIEFING_PDF_HEADER_TOKENS.color,
                   fontStyle: isPreviewFallback ? "italic" : "normal",
                   borderBottom: "1px dotted #ccc",
                   paddingBottom: 6,

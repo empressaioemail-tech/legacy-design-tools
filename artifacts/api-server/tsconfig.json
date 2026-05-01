@@ -27,6 +27,9 @@
     },
     {
       "path": "../../lib/briefing-engine"
+    },
+    {
+      "path": "../../lib/briefing-pdf-tokens"
     }
   ]
 }

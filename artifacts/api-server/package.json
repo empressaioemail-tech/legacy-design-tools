@@ -15,6 +15,7 @@
     "@workspace/adapters": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/briefing-engine": "workspace:*",
+    "@workspace/briefing-pdf-tokens": "workspace:*",
     "@workspace/codes": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/empressa-atom": "workspace:*",

@@ -46,10 +46,16 @@ import {
   SECTION_LABELS,
   type BriefingSections,
 } from "@workspace/briefing-engine";
+import {
+  BRIEFING_PDF_HEADER_TOKENS,
+  DEFAULT_BRIEFING_PDF_HEADER,
+} from "@workspace/briefing-pdf-tokens";
 
-/** Default header text when no per-architect override is configured. */
-export const DEFAULT_BRIEFING_PDF_HEADER =
-  "SmartCity Design Tools — Pre-Design Briefing";
+// Re-exported for the route + tests that already import the constant
+// from this module. The single source of truth lives in
+// `@workspace/briefing-pdf-tokens` so the Settings live preview
+// can't drift from what an export actually prints.
+export { DEFAULT_BRIEFING_PDF_HEADER };
 
 /**
  * Footer watermark stamped on every printed page. The wording carries
@@ -307,7 +313,7 @@ function renderHead(input: RenderBriefingHtmlInput, header: string): string {
   @page {
     size: Letter;
     margin: 0.85in 0.7in 0.95in 0.7in;
-    @top-left { content: "${esc(header)}"; font-family: -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif; font-size: 9pt; color: #555; }
+    @top-left { content: "${esc(header)}"; font-family: ${BRIEFING_PDF_HEADER_TOKENS.fontFamily}; font-size: ${BRIEFING_PDF_HEADER_TOKENS.fontSize}; color: ${BRIEFING_PDF_HEADER_TOKENS.color}; }
     @bottom-center { content: "${esc(FOOTER_WATERMARK)}"; font-family: -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif; font-size: 7.5pt; color: #555; }
     @bottom-right { content: "Page " counter(page) " of " counter(pages); font-family: -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif; font-size: 7.5pt; color: #888; }
   }

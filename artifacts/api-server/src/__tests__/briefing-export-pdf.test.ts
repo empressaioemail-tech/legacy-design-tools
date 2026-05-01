@@ -60,6 +60,9 @@ const {
   DEFAULT_BRIEFING_PDF_HEADER,
   FOOTER_WATERMARK,
 } = await import("../lib/briefingHtml");
+const { BRIEFING_PDF_HEADER_TOKENS } = await import(
+  "@workspace/briefing-pdf-tokens"
+);
 const { closeBrowserForTests } = await import("../lib/briefingPdf");
 
 let getApp: () => Express;
@@ -462,6 +465,28 @@ describe("renderBriefingHtml (template contract)", () => {
       "No briefing sources are attached to this engagement.",
     );
     expect(html).toContain("No briefing sources to render.");
+  });
+
+  it("prints the @top-left header CSS using the shared briefing-pdf-tokens values (Task #393)", () => {
+    // Contract test for the no-drift guarantee: the live header
+    // preview in `artifacts/design-tools/src/pages/Settings.tsx`
+    // applies `BRIEFING_PDF_HEADER_TOKENS` as inline styles. The
+    // renderer must interpolate the same token values into its
+    // `@page @top-left` margin box, otherwise the on-screen preview
+    // would silently diverge from what the export actually prints.
+    const html = renderBriefingHtml(baseInput);
+    const topLeftMatch = html.match(/@top-left\s*\{[^}]*\}/);
+    expect(topLeftMatch, "renderer must emit an @top-left rule").not.toBeNull();
+    const topLeftCss = topLeftMatch![0];
+    expect(topLeftCss).toContain(
+      `font-family: ${BRIEFING_PDF_HEADER_TOKENS.fontFamily}`,
+    );
+    expect(topLeftCss).toContain(
+      `font-size: ${BRIEFING_PDF_HEADER_TOKENS.fontSize}`,
+    );
+    expect(topLeftCss).toContain(
+      `color: ${BRIEFING_PDF_HEADER_TOKENS.color}`,
+    );
   });
 });
 
