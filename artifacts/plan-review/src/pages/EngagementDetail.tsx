@@ -33,6 +33,7 @@ import { relativeTime } from "../lib/relativeTime";
  * acceptance only required read-side parity inside plan-review.
  */
 export default function EngagementDetail() {
+  const navGroups = useNavGroups();
   const params = useParams();
   const id = params.id as string;
   const navGroups = useNavGroups();

@@ -474,6 +474,32 @@ export interface UpdateUserBody {
   avatarUrl?: string | null;
 }
 
+/**
+ * File metadata sent to obtain a presigned PUT URL. The file bytes
+themselves are NOT sent to this endpoint — they are PUT directly
+to the returned `uploadURL` (which targets GCS).
+
+ */
+export interface RequestUploadUrlBody {
+  /** @minLength 1 */
+  name: string;
+  /** @minimum 0 */
+  size: number;
+  /** @minLength 1 */
+  contentType: string;
+}
+
+export interface RequestUploadUrlResponse {
+  /** Short-lived presigned PUT URL (uploads go directly to GCS). */
+  uploadURL: string;
+  /** Canonical `/objects/<id>` path to persist on the owning
+record. Serve the asset by prepending the storage mount
+(`/api/storage` + `objectPath`).
+ */
+  objectPath: string;
+  metadata: RequestUploadUrlBody;
+}
+
 export type SessionRequestorKind =
   (typeof SessionRequestorKind)[keyof typeof SessionRequestorKind];
 
@@ -516,32 +542,6 @@ export interface Session {
   audience: SessionAudience;
   requestor?: SessionRequestor;
   permissions: string[];
-}
-
-/**
- * File metadata sent to obtain a presigned PUT URL. The file bytes
-themselves are NOT sent to this endpoint — they are PUT directly
-to the returned `uploadURL` (which targets GCS).
-
- */
-export interface RequestUploadUrlBody {
-  /** @minLength 1 */
-  name: string;
-  /** @minimum 0 */
-  size: number;
-  /** @minLength 1 */
-  contentType: string;
-}
-
-export interface RequestUploadUrlResponse {
-  /** Short-lived presigned PUT URL (uploads go directly to GCS). */
-  uploadURL: string;
-  /** Canonical `/objects/<id>` path to persist on the owning
-record. Serve the asset by prepending the storage mount
-(`/api/storage` + `objectPath`).
- */
-  objectPath: string;
-  metadata: RequestUploadUrlBody;
 }
 
 /**

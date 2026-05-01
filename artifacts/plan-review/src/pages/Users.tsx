@@ -11,6 +11,7 @@ import {
 } from "@workspace/api-client-react";
 import { useUpload } from "@workspace/object-storage-web";
 import { useNavGroups } from "../components/NavGroups";
+import { resizeAvatar } from "../lib/resizeAvatar";
 
 /**
  * Admin "Users & Roles" view — manages the `users` profile table that
@@ -485,7 +486,10 @@ function AvatarField({
             e.target.value = "";
             if (file) {
               setPreviewBroken(false);
-              void uploadFile(file);
+              // Downscale + re-encode in the browser so we don't push a
+              // multi-megabyte phone photo through the presigned upload
+              // for something rendered at 14–36px in timelines.
+              void resizeAvatar(file).then((resized) => uploadFile(resized));
             }
           }}
         />
