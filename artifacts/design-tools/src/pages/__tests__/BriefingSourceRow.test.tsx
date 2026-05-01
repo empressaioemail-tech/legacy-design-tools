@@ -1158,6 +1158,221 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     ).toBeInTheDocument();
   });
 
+  it("reveals the prior + current values for a USGS elevation rerun (Task #224)", () => {
+    // USGS NED rerun: snapshotDate stays put but the elevation
+    // reading moved by one foot. The payload-only path must still
+    // produce a hint and a populated "Payload changes" subsection
+    // so a panel-level wiring regression (wrong test-id key, missing
+    // label, dropped chip text) is caught here even though the
+    // metadata table above the subsection is empty.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "usgs-ned-elevation",
+      sourceKind: "federal-adapter",
+      provider: "usgs:epqs (USGS EPQS)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload: {
+        kind: "elevation-point",
+        elevationFeet: 4034,
+        units: "Feet",
+      },
+    });
+    const prior = mkSource({
+      id: "src-prior-usgs",
+      layerKind: "usgs-ned-elevation",
+      sourceKind: "federal-adapter",
+      provider: "usgs:epqs (USGS EPQS)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload: {
+        kind: "elevation-point",
+        elevationFeet: 4033,
+        units: "Feet",
+      },
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    // snapshotDate matches → only the payload label appears in the
+    // hint. This pins the hintParts wiring for a payload-only diff
+    // (no metadata field leaked in, no other USGS labels appeared).
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    expect(hint.textContent).toMatch(/Changed:\s*Elevation\s*$/);
+    expect(hint.textContent).not.toContain("snapshotDate");
+
+    fireEvent.click(hint);
+
+    const subsection = screen.getByTestId(
+      `briefing-source-history-row-payload-changes-${prior.id}`,
+    );
+    expect(within(subsection).getByText(/Payload changes/i)).toBeInTheDocument();
+    // Per-key test-id uses the payload key (`elevationFeet`) and the
+    // before/after values mirror the inline summary chip's units +
+    // thousands grouping so the auditor sees the same formatting
+    // they read on the row above.
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-elevationFeet-${prior.id}`,
+      ).textContent,
+    ).toBe("4,033 ft");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-elevationFeet-${prior.id}`,
+      ).textContent,
+    ).toBe("4,034 ft");
+  });
+
+  it("reveals the prior + current values for an EJScreen percentile rerun (Task #224)", () => {
+    // EPA EJScreen rerun: the demographic-index percentile moved
+    // from the 65th to the 71st pctile while PM2.5 stayed put. The
+    // reveal must surface only the moved key and format both sides
+    // with the chip's ordinal suffix.
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "epa-ejscreen-blockgroup",
+      sourceKind: "federal-adapter",
+      provider: "epa:ejscreen (EPA EJScreen)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload: {
+        kind: "ejscreen-blockgroup",
+        demographicIndexPercentile: 71,
+        pm25Percentile: 72,
+      },
+    });
+    const prior = mkSource({
+      id: "src-prior-ejscreen",
+      layerKind: "epa-ejscreen-blockgroup",
+      sourceKind: "federal-adapter",
+      provider: "epa:ejscreen (EPA EJScreen)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload: {
+        kind: "ejscreen-blockgroup",
+        demographicIndexPercentile: 65,
+        pm25Percentile: 72,
+      },
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    // Only EJ Index moved — PM2.5 must not leak into the hint copy.
+    expect(hint.textContent).toMatch(/Changed:\s*EJ Index\s*$/);
+    expect(hint.textContent).not.toContain("PM2.5");
+    expect(hint.textContent).not.toContain("snapshotDate");
+
+    fireEvent.click(hint);
+
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-demographicIndexPercentile-${prior.id}`,
+      ).textContent,
+    ).toBe("65th pctile");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-demographicIndexPercentile-${prior.id}`,
+      ).textContent,
+    ).toBe("71st pctile");
+    // PM2.5 didn't move, so its row must be absent from the reveal —
+    // a regression that emitted unchanged keys would surface here.
+    expect(
+      screen.queryByTestId(
+        `briefing-source-history-row-payload-before-pm25Percentile-${prior.id}`,
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reveals the prior + current values for an FCC broadband tier rerun (Task #224)", () => {
+    // FCC broadband rerun: provider count went from 1 → 2 and the
+    // fastest tier crossed the gigabit boundary (100 Mbps → 1 Gbps).
+    // Both keys moved, so the reveal must list both rows in the
+    // adapter's declared order (providerCount before
+    // fastestDownstreamMbps) and format each side the same way the
+    // inline chip does (Mbps for sub-gigabit, Gbps at/above 1000).
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fcc-broadband-availability",
+      sourceKind: "federal-adapter",
+      provider: "fcc:broadband (FCC Broadband)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload: {
+        kind: "broadband-availability",
+        providerCount: 2,
+        fastestDownstreamMbps: 1000,
+      },
+    });
+    const prior = mkSource({
+      id: "src-prior-fcc",
+      layerKind: "fcc-broadband-availability",
+      sourceKind: "federal-adapter",
+      provider: "fcc:broadband (FCC Broadband)",
+      note: "Auto-fetched by Generate Layers.",
+      snapshotDate: "2026-04-15T00:00:00.000Z",
+      payload: {
+        kind: "broadband-availability",
+        providerCount: 1,
+        fastestDownstreamMbps: 100,
+      },
+      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, prior];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    const hint = screen.getByTestId(
+      `briefing-source-history-row-changed-${prior.id}`,
+    );
+    // Both labels are present, joined by ", " in the adapter's order.
+    expect(hint.textContent).toMatch(/Changed:\s*Providers, Fastest\s*$/);
+    expect(hint.textContent).not.toContain("snapshotDate");
+
+    fireEvent.click(hint);
+
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-providerCount-${prior.id}`,
+      ).textContent,
+    ).toBe("1");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-providerCount-${prior.id}`,
+      ).textContent,
+    ).toBe("2");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-before-fastestDownstreamMbps-${prior.id}`,
+      ).textContent,
+    ).toBe("100 Mbps");
+    expect(
+      screen.getByTestId(
+        `briefing-source-history-row-payload-after-fastestDownstreamMbps-${prior.id}`,
+      ).textContent,
+    ).toBe("1 Gbps");
+  });
+
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {
     const current = mkSource({
       id: "src-only",
