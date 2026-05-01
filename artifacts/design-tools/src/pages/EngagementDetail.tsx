@@ -2981,9 +2981,17 @@ function BriefingRunStateBadge({
  * which the parent (`BriefingNarrativePanel`) wires up on
  * generation kickoff and on the pending → terminal transition.
  */
+type RecentRunsFilter = "all" | "failed" | "invalid";
+
 function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
   const [open, setOpen] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  // Task #262 — auditors comparing the failed-then-rerun pattern on a
+  // noisy engagement need a way to slice the retained list down to the
+  // suspicious rows. The filter is purely client-side (the route
+  // contract is unchanged) and "All" is the default so the disclosure
+  // still opens onto the full history.
+  const [filter, setFilter] = useState<RecentRunsFilter>("all");
   // Only fetch when the disclosure is open. The status poll above
   // already drives the at-a-glance "what is the latest run doing?"
   // story — this list is the deeper comparison view, so it can stay
@@ -2999,6 +3007,17 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
   });
   const runs = runsQuery.data?.runs ?? [];
   const count = runs.length;
+  type RecentRun = (typeof runs)[number];
+  const visibleRuns = runs.filter((run: RecentRun) => {
+    if (filter === "failed") return run.state === "failed";
+    if (filter === "invalid") {
+      return (
+        run.state === "completed" && (run.invalidCitationCount ?? 0) > 0
+      );
+    }
+    return true;
+  });
+  const visibleCount = visibleRuns.length;
 
   return (
     <div
@@ -3075,7 +3094,67 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
               No briefing generations have run yet for this engagement.
             </div>
           )}
-          {count > 0 && (
+          {!runsQuery.isLoading && !runsQuery.isError && count > 0 && (
+            <div
+              role="group"
+              aria-label="Filter recent runs"
+              data-testid="briefing-recent-runs-filter"
+              style={{
+                display: "flex",
+                gap: 4,
+                paddingBottom: 4,
+              }}
+            >
+              {(
+                [
+                  { key: "all", label: "All" },
+                  { key: "failed", label: "Failed" },
+                  { key: "invalid", label: "Has invalid citations" },
+                ] as const
+              ).map((opt) => {
+                const active = filter === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    aria-pressed={active}
+                    data-testid={`briefing-recent-runs-filter-${opt.key}`}
+                    onClick={() => {
+                      setFilter(opt.key);
+                      // Collapse any expanded row that the new filter
+                      // would hide so the disclosure doesn't keep an
+                      // off-screen detail block "open" in state.
+                      setExpandedRunId(null);
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border-subtle)",
+                      background: active
+                        ? "var(--surface-2, var(--accent-subtle, #eef))"
+                        : "transparent",
+                      color: active
+                        ? "var(--text-default)"
+                        : "var(--text-muted)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {count > 0 && visibleCount === 0 && (
+            <div
+              data-testid="briefing-recent-runs-filter-empty"
+              style={{ fontSize: 12, color: "var(--text-muted)" }}
+            >
+              No runs match this filter.
+            </div>
+          )}
+          {visibleCount > 0 && (
             <ul
               data-testid="briefing-recent-runs-list"
               style={{
@@ -3087,7 +3166,7 @@ function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
                 gap: 4,
               }}
             >
-              {runs.map((run) => {
+              {visibleRuns.map((run) => {
                 const isExpanded = expandedRunId === run.generationId;
                 const startedLabel = new Date(run.startedAt).toLocaleString();
                 const detailAvailable =

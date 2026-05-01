@@ -694,4 +694,153 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
       screen.queryByTestId("briefing-recent-runs-list"),
     ).not.toBeInTheDocument();
   });
+
+  // Task #262 — auditors comparing the failed-then-rerun pattern on a
+  // noisy engagement need a way to slice the retained list down to
+  // the suspicious rows. This pins three behaviors:
+  //
+  //   1. The Failed filter narrows the list to just the failed row,
+  //      hiding the otherwise-most-recent completed and pending rows.
+  //   2. The "Has invalid citations" filter is distinct from Failed
+  //      — a completed-with-invalid run is suspicious (the briefing
+  //      cited things the engine couldn't validate) even though the
+  //      job itself succeeded — so it surfaces only the completed row
+  //      whose `invalidCitationCount > 0`.
+  //   3. When a filter narrows the list to zero, the empty-state copy
+  //      switches from the "no runs yet" message to a distinct "no
+  //      runs match this filter" message so the auditor knows the
+  //      list wasn't reset out from under them.
+  it("filters the list and switches the empty-state copy when the filter matches nothing", async () => {
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-pending",
+        state: "pending",
+        startedAt: "2026-04-04T10:00:00.000Z",
+        completedAt: null,
+      }),
+      makeRun({
+        generationId: "gen-completed-clean",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+      makeRun({
+        generationId: "gen-completed-invalid",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:05.000Z",
+        invalidCitationCount: 2,
+      }),
+      makeRun({
+        generationId: "gen-failed",
+        state: "failed",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        completedAt: "2026-04-01T10:00:03.000Z",
+        error: "OpenAI 503 — upstream unavailable",
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+
+    // Default filter is "All" — every retained row is visible.
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(4);
+    expect(
+      screen.getByTestId("briefing-recent-runs-filter-all"),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    // Switch to "Failed" — only the failed row should remain visible.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-failed"));
+    const failedList = screen.getByTestId("briefing-recent-runs-list");
+    const failedItems = within(failedList).getAllByRole("listitem");
+    expect(failedItems).toHaveLength(1);
+    expect(failedItems[0]).toHaveAttribute(
+      "data-testid",
+      "briefing-run-gen-failed",
+    );
+    expect(
+      screen.getByTestId("briefing-recent-runs-filter-failed"),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    // Switch to "Has invalid citations" — only the completed row whose
+    // invalid-count is > 0 should remain. The "clean" completed row
+    // and the failed row both drop out of the list.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-invalid"));
+    const invalidList = screen.getByTestId("briefing-recent-runs-list");
+    const invalidItems = within(invalidList).getAllByRole("listitem");
+    expect(invalidItems).toHaveLength(1);
+    expect(invalidItems[0]).toHaveAttribute(
+      "data-testid",
+      "briefing-run-gen-completed-invalid",
+    );
+
+    // Back to "All" so the disclosure rests on the full list before
+    // the next assertion. The next test re-mounts the page with a
+    // dataset that contains no failed rows so the empty-state copy
+    // switch can be verified in isolation.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-all"));
+    expect(
+      within(screen.getByTestId("briefing-recent-runs-list")).getAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(4);
+  });
+
+  it("switches the empty-state copy to 'No runs match this filter' when the active filter narrows the list to zero", async () => {
+    // A single completed-with-no-invalid-citations row — neither the
+    // Failed nor the Has-invalid-citations filter will match it, so
+    // either filter is enough to drive the empty-state branch. We
+    // pick Failed because it's the more common auditor flow.
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-clean",
+        state: "completed",
+        startedAt: "2026-04-05T10:00:00.000Z",
+        completedAt: "2026-04-05T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+
+    // Sanity: with the All filter the single row paints normally and
+    // the original "no runs yet" copy is NOT mounted.
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(
+      screen.queryByTestId("briefing-recent-runs-empty"),
+    ).not.toBeInTheDocument();
+
+    // Switching to the Failed filter narrows the list to zero — the
+    // distinct filter-empty copy must replace the list, NOT the
+    // "no briefing generations have run yet" copy (the runs are
+    // still there, they just don't match).
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-failed"));
+    const filterEmpty = await screen.findByTestId(
+      "briefing-recent-runs-filter-empty",
+    );
+    expect(filterEmpty).toHaveTextContent(/No runs match this filter/i);
+    expect(
+      screen.queryByTestId("briefing-recent-runs-empty"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("briefing-recent-runs-list"),
+    ).not.toBeInTheDocument();
+
+    // Returning to All re-mounts the row — the empty state flips
+    // back off so a stuck filter doesn't leave the disclosure
+    // permanently empty.
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-filter-all"));
+    expect(
+      within(screen.getByTestId("briefing-recent-runs-list")).getAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(1);
+    expect(
+      screen.queryByTestId("briefing-recent-runs-filter-empty"),
+    ).not.toBeInTheDocument();
+  });
 });
