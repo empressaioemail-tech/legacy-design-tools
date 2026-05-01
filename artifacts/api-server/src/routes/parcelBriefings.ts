@@ -45,6 +45,7 @@ import {
   GenerateEngagementBriefingParams,
   GetEngagementBriefingGenerationStatusParams,
   GetEngagementBriefingParams,
+  ListEngagementBriefingGenerationRunsParams,
   ListEngagementBriefingSourcesParams,
   ListEngagementBriefingSourcesQueryParams,
   RestoreEngagementBriefingSourceParams,
@@ -81,6 +82,7 @@ import {
   getBriefingLlmClient,
   getBriefingLlmMode,
 } from "../lib/briefingLlmClient";
+import { resolveKeepPerEngagement } from "../lib/briefingGenerationJobsSweep";
 import { ObjectStorageService } from "../lib/objectStorage";
 
 /**
@@ -1799,6 +1801,89 @@ router.get(
         "get briefing generation status failed",
       );
       res.status(500).json({ error: "Failed to read briefing status" });
+    }
+  },
+);
+
+/**
+ * GET /engagements/:id/briefing/runs — Task #230.
+ *
+ * Surface the recent briefing-generation attempts the
+ * `briefingGenerationJobs` sweep already retains. The sister
+ * `/briefing/status` endpoint deliberately collapses to one row (the
+ * UI poll wants "what is the latest run doing right now?"), but
+ * auditors investigating "the run before the bad one" need the
+ * prior attempts visible without SSHing into the database — that's
+ * the comparison window Task #201 carved out at the storage layer
+ * but never exposed at the API layer.
+ *
+ * Cap mirrors the sweep's `keepPerEngagement` (default 5,
+ * overridable via `BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT`)
+ * via the shared `resolveKeepPerEngagement` helper. If the API
+ * returned more rows than the sweep keeps, the extras would silently
+ * vanish on the next prune tick — keeping the two in lock-step
+ * means a deploy-time env override applies to both at once.
+ *
+ * Pending rows are included (a freshly-kicked-off run IS one of the
+ * recent attempts from the auditor's perspective, and the sweep
+ * already counts pending toward its keep cap).
+ */
+router.get(
+  "/engagements/:id/briefing/runs",
+  async (req: Request, res: Response) => {
+    const paramsParse = ListEngagementBriefingGenerationRunsParams.safeParse(
+      req.params,
+    );
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_engagement_id" });
+      return;
+    }
+    const engagementId = paramsParse.data.id;
+
+    try {
+      const eng = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      if (eng.length === 0) {
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+      const limit = resolveKeepPerEngagement();
+      // Newest first so the UI's "Recent runs" disclosure renders
+      // top-to-bottom in chronological reverse order without an
+      // additional sort. Bounded by the sweep's keep cap so the
+      // wire shape cannot accidentally grow unbounded if a future
+      // change loosens the prune retention.
+      const rows = await db
+        .select()
+        .from(briefingGenerationJobs)
+        .where(eq(briefingGenerationJobs.engagementId, engagementId))
+        .orderBy(desc(briefingGenerationJobs.startedAt))
+        .limit(limit);
+      res.json({
+        runs: rows.map((job) => ({
+          generationId: job.id,
+          // `state` in the DB is `text`; same narrowing the status
+          // route does — a value outside the closed wire union here
+          // would be a schema violation we want to surface, not
+          // paper over.
+          state: job.state as BriefingGenerationJobState,
+          startedAt: job.startedAt.toISOString(),
+          completedAt: job.completedAt
+            ? job.completedAt.toISOString()
+            : null,
+          error: job.error,
+          invalidCitationCount: job.invalidCitationCount,
+        })),
+      });
+    } catch (err) {
+      logger.error(
+        { err, engagementId },
+        "list briefing generation runs failed",
+      );
+      res.status(500).json({ error: "Failed to read briefing runs" });
     }
   },
 );

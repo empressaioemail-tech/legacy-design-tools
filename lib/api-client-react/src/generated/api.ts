@@ -21,6 +21,7 @@ import type {
   AtomSummary,
   BimModelDivergenceResponse,
   BimModelRefreshResponse,
+  BriefingGenerationRunsResponse,
   BriefingGenerationStatusResponse,
   ChatErrorResponse,
   ChatRequest,
@@ -1751,6 +1752,118 @@ export const useGenerateEngagementBriefing = <
 > => {
   return useMutation(getGenerateEngagementBriefingMutationOptions(options));
 };
+
+/**
+ * Returns the most recent briefing-generation job rows for the
+engagement, ordered by `startedAt` DESC. The response is
+capped at the same per-engagement keep value the sweep uses
+(default 5, overridable via
+`BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT`) so the API and
+the sweep cannot drift — every row the sweep keeps is exactly
+the set the auditor sees here.
+
+Surfaces what `GET /briefing/status` deliberately collapses
+to a single row: an auditor investigating "the run before
+the bad one" needs the prior attempts' outcomes (state,
+timestamps, error, invalidCitationCount) without SSHing into
+the database. Returns an empty array when no generation has
+ever been kicked off for the engagement.
+
+ * @summary List the most recent briefing-generation attempts
+ */
+export const getListEngagementBriefingGenerationRunsUrl = (id: string) => {
+  return `/api/engagements/${id}/briefing/runs`;
+};
+
+export const listEngagementBriefingGenerationRuns = async (
+  id: string,
+  options?: RequestInit,
+): Promise<BriefingGenerationRunsResponse> => {
+  return customFetch<BriefingGenerationRunsResponse>(
+    getListEngagementBriefingGenerationRunsUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementBriefingGenerationRunsQueryKey = (id: string) => {
+  return [`/api/engagements/${id}/briefing/runs`] as const;
+};
+
+export const getListEngagementBriefingGenerationRunsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementBriefingGenerationRuns>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementBriefingGenerationRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListEngagementBriefingGenerationRunsQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementBriefingGenerationRuns>>
+  > = ({ signal }) =>
+    listEngagementBriefingGenerationRuns(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementBriefingGenerationRuns>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementBriefingGenerationRunsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementBriefingGenerationRuns>>
+>;
+export type ListEngagementBriefingGenerationRunsQueryError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the most recent briefing-generation attempts
+ */
+
+export function useListEngagementBriefingGenerationRuns<
+  TData = Awaited<ReturnType<typeof listEngagementBriefingGenerationRuns>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementBriefingGenerationRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementBriefingGenerationRunsQueryOptions(
+    id,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Returns the in-process generation job state for the engagement.

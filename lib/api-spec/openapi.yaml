@@ -799,6 +799,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{id}/briefing/runs:
+    get:
+      operationId: listEngagementBriefingGenerationRuns
+      tags: [engagements]
+      summary: List the most recent briefing-generation attempts
+      description: |
+        Returns the most recent briefing-generation job rows for the
+        engagement, ordered by `startedAt` DESC. The response is
+        capped at the same per-engagement keep value the sweep uses
+        (default 5, overridable via
+        `BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT`) so the API and
+        the sweep cannot drift — every row the sweep keeps is exactly
+        the set the auditor sees here.
+
+        Surfaces what `GET /briefing/status` deliberately collapses
+        to a single row: an auditor investigating "the run before
+        the bad one" needs the prior attempts' outcomes (state,
+        timestamps, error, invalidCitationCount) without SSHing into
+        the database. Returns an empty array when no generation has
+        ever been kicked off for the engagement.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: |
+            Recent generation attempts for the engagement, newest
+            first. The array length is bounded by the sweep's
+            keep-per-engagement cap (default 5).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BriefingGenerationRunsResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /engagements/{id}/briefing/status:
     get:
       operationId: getEngagementBriefingGenerationStatus
@@ -2993,6 +3036,74 @@ components:
         - error
         - invalidCitationCount
         - invalidCitations
+
+    BriefingGenerationRun:
+      type: object
+      description: |
+        One historical briefing-generation attempt for an engagement.
+        Mirrors the column subset auditors need on the "Recent runs"
+        disclosure (no full narrative — that lives on the briefing
+        row itself). Same field shapes as `BriefingGenerationStatusResponse`
+        for the corresponding fields, just packaged for list iteration.
+      properties:
+        generationId:
+          type: string
+          description: |
+            The job row's id. Doubles as the public `generationId`
+            returned by `POST /briefing/generate`, so a stale poll
+            with the old id can still be matched against this list.
+        state:
+          type: string
+          enum: [pending, completed, failed]
+          description: |
+            `pending` while the engine is in flight; `completed` after
+            the row's `section_a..g` columns were written; `failed`
+            when the engine errored. Note: unlike
+            `BriefingGenerationStatusResponse`, `idle` is not in the
+            enum — `idle` represents the absence of a row, which the
+            list represents by omission.
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null while the job is still pending.
+        error:
+          type: string
+          nullable: true
+          description: Short, human-readable error reason on `failed`.
+        invalidCitationCount:
+          type: integer
+          nullable: true
+          description: |
+            Number of citation tokens stripped because they pointed at
+            unknown ids. A non-zero value is a model-quality
+            regression auditors specifically want to spot when
+            comparing recent runs. Null while pending.
+      required:
+        - generationId
+        - state
+        - startedAt
+        - completedAt
+        - error
+        - invalidCitationCount
+
+    BriefingGenerationRunsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /engagements/{id}/briefing/runs`.
+        `runs` is the most recent attempts (newest first), capped by
+        the sweep's per-engagement keep value so what the API
+        surfaces and what the sweep keeps cannot drift.
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/BriefingGenerationRun"
+      required:
+        - runs
 
     EngagementBriefingResponse:
       type: object

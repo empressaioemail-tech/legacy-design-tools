@@ -11,6 +11,7 @@ import {
   useGetEngagementBriefingGenerationStatus,
   useGetSnapshot,
   useListBimModelDivergences,
+  useListEngagementBriefingGenerationRuns,
   useListEngagementBriefingSources,
   useListEngagementSubmissions,
   usePushEngagementBimModel,
@@ -25,10 +26,12 @@ import {
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
   getListBimModelDivergencesQueryKey,
+  getListEngagementBriefingGenerationRunsQueryKey,
   getListEngagementBriefingSourcesQueryKey,
   getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
   type BimModelDivergenceListEntry,
+  type BriefingGenerationRun,
   type EngagementBriefingNarrative,
   type EngagementBriefingSource,
   type EngagementDetail as EngagementDetailType,
@@ -2582,6 +2585,15 @@ function BriefingNarrativePanel({
       void queryClient.invalidateQueries({
         queryKey: getGetEngagementBriefingQueryKey(engagementId),
       });
+      // Pull the new terminal row into the "Recent runs" disclosure
+      // (Task #230) — the kickoff onSuccess invalidated this same
+      // query so the pending row appeared at the top, but the row's
+      // state, completedAt, error, and invalidCitationCount fields
+      // only settle here on the terminal transition.
+      void queryClient.invalidateQueries({
+        queryKey:
+          getListEngagementBriefingGenerationRunsQueryKey(engagementId),
+      });
       setWatching(false);
     }
     if (statusState !== "pending" && watching && prev !== "pending") {
@@ -2600,6 +2612,14 @@ function BriefingNarrativePanel({
         void queryClient.invalidateQueries({
           queryKey:
             getGetEngagementBriefingGenerationStatusQueryKey(engagementId),
+        });
+        // Surface the freshly-inserted pending row in the "Recent
+        // runs" disclosure (Task #230) so the auditor can see the
+        // attempt enter the list immediately, not only on the next
+        // terminal-state transition.
+        void queryClient.invalidateQueries({
+          queryKey:
+            getListEngagementBriefingGenerationRunsQueryKey(engagementId),
         });
       },
     },
@@ -2789,6 +2809,8 @@ function BriefingNarrativePanel({
         </div>
       )}
 
+      <BriefingRecentRunsPanel engagementId={engagementId} />
+
       {hasNarrative && (
         <div
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
@@ -2877,6 +2899,304 @@ function BriefingNarrativePanel({
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Human-readable label for one {@link BriefingGenerationRun}'s state.
+ * Pinned to the wire enum so a forward-compat value falls back to the
+ * raw slug rather than rendering blank — same defensive shape the
+ * SubmissionStatusBadge in plan-review uses.
+ */
+const BRIEFING_RUN_STATE_LABELS: Record<
+  BriefingGenerationRun["state"],
+  string
+> = {
+  pending: "Running",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+const BRIEFING_RUN_STATE_COLORS: Record<
+  BriefingGenerationRun["state"],
+  { bg: string; fg: string }
+> = {
+  pending: { bg: "var(--info-dim)", fg: "var(--info-text)" },
+  completed: { bg: "var(--success-dim)", fg: "var(--success-text)" },
+  failed: { bg: "var(--danger-dim)", fg: "var(--danger-text)" },
+};
+
+function BriefingRunStateBadge({
+  state,
+}: {
+  state: BriefingGenerationRun["state"];
+}) {
+  const label = BRIEFING_RUN_STATE_LABELS[state] ?? state;
+  const palette =
+    BRIEFING_RUN_STATE_COLORS[state] ?? BRIEFING_RUN_STATE_COLORS.pending;
+  return (
+    <span
+      data-testid={`briefing-run-state-badge-${state}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "1px 6px",
+        borderRadius: 4,
+        background: palette.bg,
+        color: palette.fg,
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: 0.2,
+        textTransform: "uppercase",
+        lineHeight: 1.4,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Recent runs disclosure for the briefing tab — Task #230.
+ *
+ * Surfaces the most recent N briefing-generation attempts the
+ * sweep retains (default 5, see
+ * `briefingGenerationJobsSweep#DEFAULT_KEEP_PER_ENGAGEMENT`) so
+ * an auditor can compare "the run before the bad one" without
+ * SSHing into the database. Collapsed by default — the running
+ * narrative above is what the auditor lands on, and the prior
+ * attempts are an investigation aid, not a primary read.
+ *
+ * Each row renders the attempt's outcome (state + timestamp). The
+ * row expands to surface its `error` (failed branch) or
+ * `invalidCitationCount` (completed branch) inline so the
+ * comparison window is one click away — clicking a past run
+ * doesn't open a modal or navigate away from the briefing the
+ * auditor is currently inspecting.
+ *
+ * The list re-fetches when the parent invalidates its query key,
+ * which the parent (`BriefingNarrativePanel`) wires up on
+ * generation kickoff and on the pending → terminal transition.
+ */
+function BriefingRecentRunsPanel({ engagementId }: { engagementId: string }) {
+  const [open, setOpen] = useState(false);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  // Only fetch when the disclosure is open. The status poll above
+  // already drives the at-a-glance "what is the latest run doing?"
+  // story — this list is the deeper comparison view, so it can stay
+  // dormant until the auditor explicitly asks for it. Saves one
+  // extra round trip on every page load for a feature most users
+  // will not open every visit.
+  const runsQuery = useListEngagementBriefingGenerationRuns(engagementId, {
+    query: {
+      queryKey: getListEngagementBriefingGenerationRunsQueryKey(engagementId),
+      enabled: open,
+      refetchOnWindowFocus: false,
+    },
+  });
+  const runs = runsQuery.data?.runs ?? [];
+  const count = runs.length;
+
+  return (
+    <div
+      data-testid="briefing-recent-runs"
+      style={{
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        background: "var(--surface-1, transparent)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls="briefing-recent-runs-body"
+        data-testid="briefing-recent-runs-toggle"
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "8px 12px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 600 }}>Recent runs</span>
+        <span
+          aria-hidden
+          style={{
+            fontSize: 12,
+            color: "var(--text-muted)",
+            marginLeft: 12,
+          }}
+        >
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open && (
+        <div
+          id="briefing-recent-runs-body"
+          data-testid="briefing-recent-runs-body"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            padding: "0 12px 12px 12px",
+          }}
+        >
+          {runsQuery.isLoading && (
+            <div
+              data-testid="briefing-recent-runs-loading"
+              style={{ fontSize: 12, color: "var(--text-muted)" }}
+            >
+              Loading recent runs…
+            </div>
+          )}
+          {runsQuery.isError && !runsQuery.isLoading && (
+            <div
+              role="alert"
+              data-testid="briefing-recent-runs-error"
+              style={{ fontSize: 12, color: "var(--danger-text)" }}
+            >
+              Couldn't load recent runs. Try again.
+            </div>
+          )}
+          {!runsQuery.isLoading && !runsQuery.isError && count === 0 && (
+            <div
+              data-testid="briefing-recent-runs-empty"
+              style={{ fontSize: 12, color: "var(--text-muted)" }}
+            >
+              No briefing generations have run yet for this engagement.
+            </div>
+          )}
+          {count > 0 && (
+            <ul
+              data-testid="briefing-recent-runs-list"
+              style={{
+                listStyle: "none",
+                margin: 0,
+                padding: 0,
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+              }}
+            >
+              {runs.map((run) => {
+                const isExpanded = expandedRunId === run.generationId;
+                const startedLabel = new Date(run.startedAt).toLocaleString();
+                const detailAvailable =
+                  (run.state === "failed" && !!run.error) ||
+                  (run.state === "completed" &&
+                    (run.invalidCitationCount ?? 0) > 0);
+                return (
+                  <li
+                    key={run.generationId}
+                    data-testid={`briefing-run-${run.generationId}`}
+                    style={{
+                      border: "1px solid var(--border-subtle)",
+                      borderRadius: 4,
+                      background: "transparent",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedRunId((prev) =>
+                          prev === run.generationId ? null : run.generationId,
+                        )
+                      }
+                      aria-expanded={isExpanded}
+                      data-testid={`briefing-run-toggle-${run.generationId}`}
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "6px 8px",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        fontSize: 12,
+                      }}
+                    >
+                      <BriefingRunStateBadge state={run.state} />
+                      <span style={{ flex: 1, color: "var(--text-default)" }}>
+                        {startedLabel}
+                      </span>
+                      {run.state === "completed" &&
+                        (run.invalidCitationCount ?? 0) > 0 && (
+                          <span
+                            data-testid={`briefing-run-invalid-count-${run.generationId}`}
+                            style={{
+                              fontSize: 11,
+                              color: "var(--warning-text)",
+                            }}
+                          >
+                            {run.invalidCitationCount} invalid citation
+                            {run.invalidCitationCount === 1 ? "" : "s"}
+                          </span>
+                        )}
+                      <span
+                        aria-hidden
+                        style={{ fontSize: 11, color: "var(--text-muted)" }}
+                      >
+                        {isExpanded ? "▾" : "▸"}
+                      </span>
+                    </button>
+                    {isExpanded && (
+                      <div
+                        data-testid={`briefing-run-details-${run.generationId}`}
+                        style={{
+                          padding: "0 8px 8px 8px",
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                        }}
+                      >
+                        <div>
+                          Started: {new Date(run.startedAt).toLocaleString()}
+                        </div>
+                        <div>
+                          Completed:{" "}
+                          {run.completedAt
+                            ? new Date(run.completedAt).toLocaleString()
+                            : "—"}
+                        </div>
+                        {run.state === "failed" && (
+                          <div
+                            data-testid={`briefing-run-error-${run.generationId}`}
+                            style={{ color: "var(--danger-text)" }}
+                          >
+                            Error: {run.error ?? "Unknown error"}
+                          </div>
+                        )}
+                        {run.state === "completed" && (
+                          <div
+                            data-testid={`briefing-run-invalid-detail-${run.generationId}`}
+                          >
+                            Invalid citations:{" "}
+                            {run.invalidCitationCount ?? 0}
+                          </div>
+                        )}
+                        {!detailAvailable && run.state === "pending" && (
+                          <div>Generation in progress…</div>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
     </div>

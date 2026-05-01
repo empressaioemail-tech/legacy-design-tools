@@ -1560,6 +1560,68 @@ export const GenerateEngagementBriefingBody = zod
   );
 
 /**
+ * Returns the most recent briefing-generation job rows for the
+engagement, ordered by `startedAt` DESC. The response is
+capped at the same per-engagement keep value the sweep uses
+(default 5, overridable via
+`BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT`) so the API and
+the sweep cannot drift — every row the sweep keeps is exactly
+the set the auditor sees here.
+
+Surfaces what `GET /briefing/status` deliberately collapses
+to a single row: an auditor investigating "the run before
+the bad one" needs the prior attempts' outcomes (state,
+timestamps, error, invalidCitationCount) without SSHing into
+the database. Returns an empty array when no generation has
+ever been kicked off for the engagement.
+
+ * @summary List the most recent briefing-generation attempts
+ */
+export const ListEngagementBriefingGenerationRunsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ListEngagementBriefingGenerationRunsResponse = zod
+  .object({
+    runs: zod.array(
+      zod
+        .object({
+          generationId: zod
+            .string()
+            .describe(
+              "The job row's id. Doubles as the public `generationId`\nreturned by `POST \/briefing\/generate`, so a stale poll\nwith the old id can still be matched against this list.\n",
+            ),
+          state: zod
+            .enum(["pending", "completed", "failed"])
+            .describe(
+              "`pending` while the engine is in flight; `completed` after\nthe row's `section_a..g` columns were written; `failed`\nwhen the engine errored. Note: unlike\n`BriefingGenerationStatusResponse`, `idle` is not in the\nenum — `idle` represents the absence of a row, which the\nlist represents by omission.\n",
+            ),
+          startedAt: zod.coerce.date(),
+          completedAt: zod.coerce
+            .date()
+            .nullable()
+            .describe("Null while the job is still pending."),
+          error: zod
+            .string()
+            .nullable()
+            .describe("Short, human-readable error reason on `failed`."),
+          invalidCitationCount: zod
+            .number()
+            .nullable()
+            .describe(
+              "Number of citation tokens stripped because they pointed at\nunknown ids. A non-zero value is a model-quality\nregression auditors specifically want to spot when\ncomparing recent runs. Null while pending.\n",
+            ),
+        })
+        .describe(
+          'One historical briefing-generation attempt for an engagement.\nMirrors the column subset auditors need on the \"Recent runs\"\ndisclosure (no full narrative — that lives on the briefing\nrow itself). Same field shapes as `BriefingGenerationStatusResponse`\nfor the corresponding fields, just packaged for list iteration.\n',
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/engagements\/{id}\/briefing\/runs`.\n`runs` is the most recent attempts (newest first), capped by\nthe sweep's per-engagement keep value so what the API\nsurfaces and what the sweep keeps cannot drift.\n",
+  );
+
+/**
  * Returns the in-process generation job state for the engagement.
 `state` is `idle` when no generation has ever run on this
 process (the persisted briefing may still have a narrative

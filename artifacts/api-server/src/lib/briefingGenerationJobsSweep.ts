@@ -71,8 +71,36 @@ const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
  * engagement are protected regardless of age. Auditors comparing a
  * regression want a short window of recent attempts, not just the
  * single latest one. Overridable via env at boot.
+ *
+ * Exported (Task #230) so the `GET /briefing/runs` endpoint and the
+ * sweep agree on how many recent attempts an auditor can see — if
+ * the API returned more rows than the sweep keeps, the extras would
+ * vanish on the next prune tick and the page count would silently
+ * shrink. Read by `parcelBriefings.ts` via the same env override.
  */
-const DEFAULT_KEEP_PER_ENGAGEMENT = 5;
+export const DEFAULT_KEEP_PER_ENGAGEMENT = 5;
+
+/**
+ * Resolve the effective per-engagement keep cap, mirroring the
+ * `BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT` parsing the sweep
+ * does at boot. Used by the `GET /briefing/runs` endpoint so the
+ * API surface and the sweep stay in lock-step (a deploy-time env
+ * override applies to both at once instead of needing two restarts).
+ *
+ * Mirrors the clamp in `pruneOldBriefingGenerationJobs`: NaN /
+ * negative / sub-1 values fall through to the default rather than
+ * truncating the response to zero rows.
+ */
+export function resolveKeepPerEngagement(): number {
+  const raw = Number(
+    process.env["BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT"] ??
+      DEFAULT_KEEP_PER_ENGAGEMENT,
+  );
+  return Number.isFinite(raw) && raw >= 1
+    ? Math.floor(raw)
+    : DEFAULT_KEEP_PER_ENGAGEMENT;
+}
+
 /**
  * Default boot delay: 60s. Lets the api-server settle (atom-registry
  * bootstrap, schema validation, first request) before the sweep's

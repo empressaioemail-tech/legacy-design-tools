@@ -530,6 +530,70 @@ equals the array length when both are present.
 }
 
 /**
+ * `pending` while the engine is in flight; `completed` after
+the row's `section_a..g` columns were written; `failed`
+when the engine errored. Note: unlike
+`BriefingGenerationStatusResponse`, `idle` is not in the
+enum — `idle` represents the absence of a row, which the
+list represents by omission.
+
+ */
+export type BriefingGenerationRunState =
+  (typeof BriefingGenerationRunState)[keyof typeof BriefingGenerationRunState];
+
+export const BriefingGenerationRunState = {
+  pending: "pending",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+/**
+ * One historical briefing-generation attempt for an engagement.
+Mirrors the column subset auditors need on the "Recent runs"
+disclosure (no full narrative — that lives on the briefing
+row itself). Same field shapes as `BriefingGenerationStatusResponse`
+for the corresponding fields, just packaged for list iteration.
+
+ */
+export interface BriefingGenerationRun {
+  /** The job row's id. Doubles as the public `generationId`
+returned by `POST /briefing/generate`, so a stale poll
+with the old id can still be matched against this list.
+ */
+  generationId: string;
+  /** `pending` while the engine is in flight; `completed` after
+the row's `section_a..g` columns were written; `failed`
+when the engine errored. Note: unlike
+`BriefingGenerationStatusResponse`, `idle` is not in the
+enum — `idle` represents the absence of a row, which the
+list represents by omission.
+ */
+  state: BriefingGenerationRunState;
+  startedAt: string;
+  /** Null while the job is still pending. */
+  completedAt: string | null;
+  /** Short, human-readable error reason on `failed`. */
+  error: string | null;
+  /** Number of citation tokens stripped because they pointed at
+unknown ids. A non-zero value is a model-quality
+regression auditors specifically want to spot when
+comparing recent runs. Null while pending.
+ */
+  invalidCitationCount: number | null;
+}
+
+/**
+ * Wire envelope for `GET /engagements/{id}/briefing/runs`.
+`runs` is the most recent attempts (newest first), capped by
+the sweep's per-engagement keep value so what the API
+surfaces and what the sweep keeps cannot drift.
+
+ */
+export interface BriefingGenerationRunsResponse {
+  runs: BriefingGenerationRun[];
+}
+
+/**
  * Wire envelope for the briefing read/write routes. `briefing` is
 `null` when no briefing has been created yet for the engagement
 — the first call to `POST /engagements/{id}/briefing/sources`

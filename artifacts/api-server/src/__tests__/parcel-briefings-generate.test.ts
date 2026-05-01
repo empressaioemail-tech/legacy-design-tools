@@ -525,3 +525,183 @@ describe("briefing_generation_jobs persistence (DA-PI-3 durability)", () => {
     expect(rows[0]!.invalidCitationCount).toBe(0);
   });
 });
+
+/**
+ * GET /api/engagements/:id/briefing/runs — Task #230. The status
+ * endpoint deliberately collapses to one row; this endpoint is the
+ * comparison-window auditors actually need to see prior attempts
+ * without SSHing into the database.
+ *
+ * Pinned behaviors:
+ *   - 404 when the engagement does not exist (mirrors /status).
+ *   - empty `runs: []` when no kickoff has ever happened.
+ *   - rows are returned newest-first.
+ *   - the response is capped at the sweep's keep-per-engagement
+ *     value so the API surface and the prune contract cannot drift.
+ *   - the field shape matches what the UI's "Recent runs" disclosure
+ *     reads (id, state, timestamps, error, invalidCitationCount).
+ */
+describe("GET /api/engagements/:id/briefing/runs", () => {
+  it("404s when the engagement does not exist", async () => {
+    const res = await request(getApp()).get(
+      `/api/engagements/00000000-0000-0000-0000-000000000000/briefing/runs`,
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("engagement_not_found");
+  });
+
+  it("returns an empty runs list when no generation has ever been kicked off", async () => {
+    const eng = await seedEngagement();
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing/runs`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ runs: [] });
+  });
+
+  it("returns recent runs newest-first with the auditor-facing field shape", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+
+    // Three terminal rows, deliberately seeded out-of-order so the
+    // assertion proves the route's `ORDER BY started_at DESC` and
+    // not the insertion order is what drives the wire shape.
+    const oldStart = new Date("2026-04-01T10:00:00Z");
+    const oldComplete = new Date("2026-04-01T10:00:30Z");
+    const midStart = new Date("2026-04-01T11:00:00Z");
+    const midComplete = new Date("2026-04-01T11:00:05Z");
+    const newStart = new Date("2026-04-01T12:00:00Z");
+    const newComplete = new Date("2026-04-01T12:00:45Z");
+    await ctx.schema.db.insert(briefingGenerationJobs).values({
+      engagementId: eng.id,
+      state: "completed",
+      startedAt: midStart,
+      completedAt: midComplete,
+      error: null,
+      invalidCitationCount: 2,
+      invalidCitations: ["sourceA", "sourceB"],
+    });
+    await ctx.schema.db.insert(briefingGenerationJobs).values({
+      engagementId: eng.id,
+      state: "completed",
+      startedAt: oldStart,
+      completedAt: oldComplete,
+      error: null,
+      invalidCitationCount: 0,
+      invalidCitations: [],
+    });
+    await ctx.schema.db.insert(briefingGenerationJobs).values({
+      engagementId: eng.id,
+      state: "failed",
+      startedAt: newStart,
+      completedAt: newComplete,
+      error: "engine timeout",
+      invalidCitationCount: null,
+    });
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing/runs`,
+    );
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.runs)).toBe(true);
+    expect(res.body.runs).toHaveLength(3);
+    // Newest-first ordering — failed run leads, then mid completed,
+    // then oldest completed at the bottom.
+    expect(res.body.runs[0]).toMatchObject({
+      state: "failed",
+      startedAt: newStart.toISOString(),
+      completedAt: newComplete.toISOString(),
+      error: "engine timeout",
+      invalidCitationCount: null,
+    });
+    expect(typeof res.body.runs[0].generationId).toBe("string");
+    expect(res.body.runs[1]).toMatchObject({
+      state: "completed",
+      startedAt: midStart.toISOString(),
+      completedAt: midComplete.toISOString(),
+      error: null,
+      invalidCitationCount: 2,
+    });
+    expect(res.body.runs[2]).toMatchObject({
+      state: "completed",
+      startedAt: oldStart.toISOString(),
+      completedAt: oldComplete.toISOString(),
+      error: null,
+      invalidCitationCount: 0,
+    });
+    // Wire shape stays narrow — the runs payload deliberately does
+    // NOT include the full `invalidCitations` array (that's a
+    // /status concern for the in-flight banner; the recent-runs
+    // disclosure renders a per-row count and lets the user click
+    // through for detail).
+    expect(res.body.runs[0]).not.toHaveProperty("invalidCitations");
+  });
+
+  it("caps the response at the sweep's keep-per-engagement value", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+
+    // Seed eight rows — well above the env-overridden keep cap of 3
+    // we set for this test below — so we can prove the slice is
+    // exactly `keepPerEngagement`, not a static 5/10/etc.
+    const KEEP = 3;
+    const prev = process.env["BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT"];
+    process.env["BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT"] = String(KEEP);
+    try {
+      for (let i = 0; i < 8; i++) {
+        await ctx.schema.db.insert(briefingGenerationJobs).values({
+          engagementId: eng.id,
+          state: "completed",
+          // Distinct startedAt per row so the LIMIT slice is
+          // deterministic and `desc(startedAt)` picks the i=7..5
+          // window.
+          startedAt: new Date(`2026-04-01T${10 + i}:00:00Z`),
+          completedAt: new Date(`2026-04-01T${10 + i}:00:30Z`),
+          invalidCitationCount: 0,
+        });
+      }
+      const res = await request(getApp()).get(
+        `/api/engagements/${eng.id}/briefing/runs`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.runs).toHaveLength(KEEP);
+      // Top of the slice is the most recent (i=7 → 17:00:00Z).
+      expect(res.body.runs[0].startedAt).toBe("2026-04-01T17:00:00.000Z");
+      // Bottom of the KEEP=3 slice is i=5 → 15:00:00Z.
+      expect(res.body.runs[KEEP - 1].startedAt).toBe(
+        "2026-04-01T15:00:00.000Z",
+      );
+    } finally {
+      if (prev === undefined)
+        delete process.env["BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT"];
+      else process.env["BRIEFING_GENERATION_JOB_KEEP_PER_ENGAGEMENT"] = prev;
+    }
+  });
+
+  it("scopes results to the requested engagement", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const a = await seedEngagement("Engagement A");
+    const b = await seedEngagement("Engagement B");
+    await ctx.schema.db.insert(briefingGenerationJobs).values({
+      engagementId: a.id,
+      state: "completed",
+      startedAt: new Date("2026-04-01T10:00:00Z"),
+      completedAt: new Date("2026-04-01T10:00:30Z"),
+      invalidCitationCount: 0,
+    });
+    await ctx.schema.db.insert(briefingGenerationJobs).values({
+      engagementId: b.id,
+      state: "completed",
+      startedAt: new Date("2026-04-01T11:00:00Z"),
+      completedAt: new Date("2026-04-01T11:00:30Z"),
+      invalidCitationCount: 0,
+    });
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${a.id}/briefing/runs`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.runs).toHaveLength(1);
+    expect(res.body.runs[0].startedAt).toBe("2026-04-01T10:00:00.000Z");
+  });
+});

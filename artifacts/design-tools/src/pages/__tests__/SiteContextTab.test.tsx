@@ -307,6 +307,29 @@ vi.mock("@workspace/api-client-react", async () => {
       mutate: vi.fn(),
       isPending: false,
     }),
+    // Task #230 — BriefingNarrativePanel mounts the Recent runs
+    // disclosure unconditionally. The disclosure only fetches when
+    // the auditor opens it, but the hook is still consulted on
+    // every render to register the `enabled: false` query, so
+    // an inert stub is required to keep the panel from blowing up
+    // on this test surface (which never opens the disclosure).
+    getListEngagementBriefingGenerationRunsQueryKey: (id: string) => [
+      "listEngagementBriefingGenerationRuns",
+      id,
+    ],
+    useListEngagementBriefingGenerationRuns: (
+      id: string,
+      opts?: {
+        query?: { queryKey?: readonly unknown[]; enabled?: boolean };
+      },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          (["listEngagementBriefingGenerationRuns", id] as const),
+        queryFn: async () => ({ runs: [] }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
     // The upload-modal subtree uses this hook even though no submit
     // happens during the test — without a stub the modal blows up
     // with "No 'useCreateEngagementBriefingSource' export defined" the
