@@ -51,6 +51,14 @@
  *      writes; a parallel `briefing-divergence.recorded` is emitted
  *      against the divergence row itself so both the bim-model
  *      timeline and the per-element timeline pick it up.
+ *   - `bim-model.divergence-resolved` — fan-in event mirroring the
+ *      operator's acknowledgement of an override. Emitted alongside
+ *      `briefing-divergence.resolved` (which lands on the divergence
+ *      row itself) so the engagement-level timeline can render
+ *      "operator X acknowledged the override at 3pm" without walking
+ *      each per-divergence chain. Single-emit: gated on the same
+ *      first-resolve-only flag as the per-divergence event so an
+ *      idempotent re-resolve never double-emits.
  *
  * VDA wrapping (`wrapForStorage`) intentionally not invoked — matches
  * snapshot/engagement convention.
@@ -95,6 +103,7 @@ export const BIM_MODEL_EVENT_TYPES = [
   "bim-model.materialized",
   "bim-model.refreshed",
   "bim-model.diverged",
+  "bim-model.divergence-resolved",
 ] as const;
 
 export type BimModelEventType = (typeof BIM_MODEL_EVENT_TYPES)[number];

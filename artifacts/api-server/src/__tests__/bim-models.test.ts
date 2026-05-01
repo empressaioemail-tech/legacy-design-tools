@@ -22,7 +22,11 @@
  *   - POST /bim-models/:id/divergences/:divergenceId/resolve emits a
  *     `briefing-divergence.resolved` atom event on the *first*
  *     resolve (and only the first — an idempotent re-resolve does
- *     not double-emit).
+ *     not double-emit), and *also* fans the resolve into the parent
+ *     bim-model timeline as `bim-model.divergence-resolved` so the
+ *     engagement-level view picks the acknowledgement up without
+ *     walking per-divergence chains (Task #267) — also single-emit
+ *     across an idempotent re-resolve.
  *   - 404 paths for unknown bim-model id, unknown element, and
  *     element belonging to a non-active briefing.
  */
@@ -808,6 +812,98 @@ describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
     expect(resolvedEventsAfterSecond).toHaveLength(1);
     // And the surviving event keeps the original acknowledger.
     expect(resolvedEventsAfterSecond[0].id).toBe(evt.id);
+  });
+
+  it("fans the resolve into the parent bim-model timeline (single-emit across re-resolve)", async () => {
+    // Closes Task #267: the resolve path needs the same two-event
+    // fan-out the record path uses — a per-divergence event so the
+    // divergence's own timeline picks it up, AND a per-bim-model
+    // fan-in event so the engagement-level timeline picks the
+    // acknowledgement up without walking per-divergence chains.
+    // Both must be single-emit across an idempotent re-resolve so
+    // the engagement view stays aligned with the per-divergence
+    // view (a single resolve marker on each timeline).
+    const { bimModelId, divergenceId } = await setupOpenDivergence();
+
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    // Baseline: the seed insert above goes straight to drizzle, so
+    // neither the per-divergence nor the per-bim-model timeline has
+    // any resolve-shaped events yet.
+    const bimModelBaseline = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityId, bimModelId));
+    expect(
+      bimModelBaseline.filter(
+        (e) => e.eventType === "bim-model.divergence-resolved",
+      ),
+    ).toHaveLength(0);
+
+    const first = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:operator-1");
+    expect(first.status).toBe(200);
+
+    // Both events must land after the first resolve: the per-
+    // divergence event on the divergence row's timeline, and the
+    // per-bim-model fan-in on the parent bim-model's timeline.
+    const divergenceEventsAfterFirst = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityId, divergenceId));
+    const perDivergenceResolved = divergenceEventsAfterFirst.filter(
+      (e) =>
+        e.entityType === "briefing-divergence" &&
+        e.eventType === "briefing-divergence.resolved",
+    );
+    expect(perDivergenceResolved).toHaveLength(1);
+
+    const bimModelEventsAfterFirst = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityId, bimModelId));
+    const perBimModelResolved = bimModelEventsAfterFirst.filter(
+      (e) =>
+        e.entityType === "bim-model" &&
+        e.eventType === "bim-model.divergence-resolved",
+    );
+    expect(perBimModelResolved).toHaveLength(1);
+    // Attribution rides through to the fan-in event too — the two
+    // timelines must agree on *who* acknowledged the override.
+    const fanInEvt = perBimModelResolved[0];
+    expect(fanInEvt.actor).toMatchObject({
+      kind: "user",
+      id: "operator-1",
+    });
+    expect(fanInEvt.payload).toMatchObject({
+      divergenceId,
+      resolvedByRequestor: { kind: "user", id: "operator-1" },
+    });
+
+    // Re-resolve by a different operator: the row update is a no-op
+    // (idempotent), and so is *both* emits — exactly one fan-in
+    // event must still exist on the bim-model timeline, with the
+    // original acknowledger preserved.
+    const second = await asArchitect(
+      request(getApp()).post(
+        `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
+      ),
+    ).set("x-requestor", "user:second-operator");
+    expect(second.status).toBe(200);
+
+    const bimModelEventsAfterSecond = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityId, bimModelId));
+    const perBimModelResolvedAfterSecond = bimModelEventsAfterSecond.filter(
+      (e) =>
+        e.entityType === "bim-model" &&
+        e.eventType === "bim-model.divergence-resolved",
+    );
+    expect(perBimModelResolvedAfterSecond).toHaveLength(1);
+    expect(perBimModelResolvedAfterSecond[0].id).toBe(fanInEvt.id);
   });
 });
 

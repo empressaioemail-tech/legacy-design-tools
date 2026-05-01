@@ -91,6 +91,8 @@ const BIM_MODEL_REFRESHED_EVENT_TYPE: BimModelEventType =
   BIM_MODEL_EVENT_TYPES[1];
 const BIM_MODEL_DIVERGED_EVENT_TYPE: BimModelEventType =
   BIM_MODEL_EVENT_TYPES[2];
+const BIM_MODEL_DIVERGENCE_RESOLVED_EVENT_TYPE: BimModelEventType =
+  BIM_MODEL_EVENT_TYPES[3];
 
 const BRIEFING_DIVERGENCE_RECORDED_EVENT_TYPE: BriefingDivergenceEventType =
   BRIEFING_DIVERGENCE_EVENT_TYPES[0];
@@ -615,6 +617,31 @@ async function emitDivergenceRecordedEvent(
 }
 
 /**
+ * Build the (actor, attributedActor) pair the two resolve-fan-out
+ * emits share. `attributedActor` is the session-bound requestor when
+ * the resolve was attributed; otherwise null. `actor` falls back to
+ * a stable system actor so the timeline still gets a marker for the
+ * acknowledgement when attribution was unavailable.
+ */
+function resolveDivergenceActor(divergence: BriefingDivergence): {
+  actor: { kind: "user" | "agent" | "system"; id: string };
+  attributedActor: { kind: "user" | "agent"; id: string } | null;
+} {
+  const requestorKind = divergence.resolvedByRequestorKind;
+  const requestorId = divergence.resolvedByRequestorId;
+  const attributedActor:
+    | { kind: "user" | "agent"; id: string }
+    | null =
+    (requestorKind === "user" || requestorKind === "agent") && requestorId
+      ? { kind: requestorKind, id: requestorId }
+      : null;
+  return {
+    actor: attributedActor ?? BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR,
+    attributedActor,
+  };
+}
+
+/**
  * Emit `briefing-divergence.resolved` for the engagement timeline.
  *
  * Called only after a *fresh* resolve transaction (the row's
@@ -628,15 +655,7 @@ async function emitDivergenceResolvedEvent(
   divergence: BriefingDivergence,
   reqLog: typeof logger,
 ): Promise<void> {
-  const requestorKind = divergence.resolvedByRequestorKind;
-  const requestorId = divergence.resolvedByRequestorId;
-  const attributedActor:
-    | { kind: "user" | "agent"; id: string }
-    | null =
-    (requestorKind === "user" || requestorKind === "agent") && requestorId
-      ? { kind: requestorKind, id: requestorId }
-      : null;
-  const actor = attributedActor ?? BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR;
+  const { actor, attributedActor } = resolveDivergenceActor(divergence);
   try {
     const event = await history.appendEvent({
       entityType: "briefing-divergence",
@@ -670,6 +689,69 @@ async function emitDivergenceResolvedEvent(
         bimModelId: divergence.bimModelId,
       },
       "briefing-divergence.resolved event append failed — row update kept",
+    );
+  }
+}
+
+/**
+ * Emit `bim-model.divergence-resolved` for the engagement-level
+ * timeline (Task #267). The per-divergence
+ * `briefing-divergence.resolved` event lands on the divergence row
+ * itself; this fan-in mirror lands on the *parent* bim-model so the
+ * engagement view picks the acknowledgement up without walking each
+ * divergence chain — the same fan-out contract the record path uses
+ * (`briefing-divergence.recorded` + `bim-model.diverged`).
+ *
+ * Called only after a *fresh* resolve transaction (gated on the same
+ * `freshlyResolved` flag as the per-divergence emit) so an
+ * idempotent re-resolve never double-emits on either timeline. Actor
+ * attribution mirrors the per-divergence event so the two timelines
+ * agree on *who* acknowledged the override.
+ */
+async function emitBimModelDivergenceResolvedEvent(
+  history: EventAnchoringService,
+  bm: BimModel,
+  divergence: BriefingDivergence,
+  reqLog: typeof logger,
+): Promise<void> {
+  const { actor, attributedActor } = resolveDivergenceActor(divergence);
+  try {
+    const event = await history.appendEvent({
+      entityType: "bim-model",
+      entityId: bm.id,
+      eventType: BIM_MODEL_DIVERGENCE_RESOLVED_EVENT_TYPE,
+      actor,
+      payload: {
+        divergenceId: divergence.id,
+        materializableElementId: divergence.materializableElementId,
+        briefingId: divergence.briefingId,
+        reason: divergence.reason,
+        resolvedAt: divergence.resolvedAt
+          ? divergence.resolvedAt.toISOString()
+          : null,
+        resolvedByRequestor: attributedActor,
+      },
+    });
+    reqLog.info(
+      {
+        bimModelId: bm.id,
+        engagementId: bm.engagementId,
+        divergenceId: divergence.id,
+        eventType: BIM_MODEL_DIVERGENCE_RESOLVED_EVENT_TYPE,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "bim-model.divergence-resolved event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        bimModelId: bm.id,
+        engagementId: bm.engagementId,
+        divergenceId: divergence.id,
+      },
+      "bim-model.divergence-resolved event append failed — row update kept",
     );
   }
 }
@@ -1065,25 +1147,32 @@ router.post(
 
     let resolved: {
       divergence: BriefingDivergence;
+      bimModel: BimModel;
       elementKind: string | null;
       elementLabel: string | null;
       /**
        * True only when this transaction flipped the row from Open
        * to Resolved. The post-transaction timeline emit gates on
-       * this flag so an idempotent re-resolve never double-emits.
+       * this flag so an idempotent re-resolve never double-emits
+       * (on either the per-divergence or the per-bim-model timeline).
        */
       freshlyResolved: boolean;
     };
     try {
       resolved = await db.transaction(async (tx) => {
+        // Select the full bim-model row, not just the id — the
+        // post-transaction fan-in emit (Task #267) needs
+        // `engagementId` for log-context parity with the recorded
+        // path's `bim-model.diverged` emit.
         const bmRows = await tx
-          .select({ id: bimModels.id })
+          .select()
           .from(bimModels)
           .where(eq(bimModels.id, bimModelId))
           .limit(1);
         if (bmRows.length === 0) {
           throw new BimModelNotFoundError(bimModelId);
         }
+        const bm = bmRows[0];
 
         const existingRows = await tx
           .select()
@@ -1161,6 +1250,7 @@ router.post(
         const elem = elemRows[0];
         return {
           divergence: row,
+          bimModel: bm,
           elementKind: elem?.elementKind ?? null,
           elementLabel: elem?.elementLabel ?? null,
           freshlyResolved,
@@ -1186,9 +1276,23 @@ router.post(
     // Only the *first* resolve emits the timeline event — an
     // idempotent re-resolve must not double-emit (a single
     // acknowledgement marker is the audit-trail intent).
+    //
+    // Two-event fan-out (Task #267): the per-divergence event lands
+    // on the divergence row's own timeline; the per-bim-model
+    // fan-in event lands on the parent bim-model so the engagement
+    // view picks the acknowledgement up without walking each
+    // divergence chain. Mirrors the record path's
+    // `briefing-divergence.recorded` + `bim-model.diverged` pair.
     if (resolved.freshlyResolved) {
+      const history = getHistoryService();
       await emitDivergenceResolvedEvent(
-        getHistoryService(),
+        history,
+        resolved.divergence,
+        reqLog,
+      );
+      await emitBimModelDivergenceResolvedEvent(
+        history,
+        resolved.bimModel,
         resolved.divergence,
         reqLog,
       );
