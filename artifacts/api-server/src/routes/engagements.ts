@@ -759,6 +759,23 @@ router.post(
         });
         return;
       }
+      // Symmetric lower bound: a reply cannot pre-date the submission
+      // row's own `submittedAt`. Without this guard a backfilled or
+      // scripted call could record a jurisdiction reply timestamped
+      // weeks before the package was actually sent, which corrupts the
+      // engagement timeline ordering just as silently as the
+      // future-date case did. The omitted-value branch is unaffected —
+      // the server stamp is `now`, which is by construction >= the
+      // existing row's `submittedAt`.
+      if (
+        providedRespondedAt &&
+        providedRespondedAt.getTime() < existing.submittedAt.getTime()
+      ) {
+        res.status(400).json({
+          error: "respondedAt cannot be earlier than the submission's submittedAt",
+        });
+        return;
+      }
       const respondedAt = providedRespondedAt ?? now;
       const status = bodyParse.data.status;
 

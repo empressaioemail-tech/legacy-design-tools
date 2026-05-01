@@ -793,6 +793,51 @@ describe("POST /api/engagements/:id/submissions/:submissionId/response — submi
     expect(events).toHaveLength(0);
   });
 
+  it("rejects a respondedAt earlier than the submission's submittedAt with a 400 (symmetric lower-bound guard)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const { submissions: subTable } = await import("@workspace/db");
+    const eng = await seedEngagement();
+    const sub = await seedSubmissionFor(eng.id);
+
+    // Pin the submission's `submittedAt` to a known instant so we can
+    // construct a `respondedAt` that is unambiguously earlier than it
+    // without relying on the seed's wall-clock default.
+    const submittedAt = new Date("2025-06-15T12:00:00Z");
+    await ctx.schema.db
+      .update(subTable)
+      .set({ submittedAt })
+      .where(eq(subTable.id, sub.id));
+
+    // One day before the submission was sent — well outside any
+    // plausible clock skew.
+    const earlier = new Date(submittedAt.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({
+        status: "approved",
+        reviewerComment: "Backfill before the package was sent",
+        respondedAt: earlier,
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/earlier|submittedAt/i);
+
+    // The row must remain in its pre-call state — pending / no
+    // comment / no respondedAt — proving the rejection happened
+    // before the UPDATE ran.
+    const after = await ctx.schema.db
+      .select()
+      .from(submissions)
+      .where(eq(submissions.id, sub.id))
+      .limit(1);
+    expect(after[0]!.status).toBe("pending");
+    expect(after[0]!.reviewerComment).toBeNull();
+    expect(after[0]!.respondedAt).toBeNull();
+
+    // And no submission-scoped event was appended for the rejected call.
+    const events = await readSubmissionEvents(sub.id);
+    expect(events).toHaveLength(0);
+  });
+
   it("allows overwriting the response (each call appends a new event)", async () => {
     const eng = await seedEngagement();
     const sub = await seedSubmissionFor(eng.id);
