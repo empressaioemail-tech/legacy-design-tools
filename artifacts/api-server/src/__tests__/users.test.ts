@@ -19,7 +19,7 @@
  * proxy both would hit the production singleton pool.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -44,6 +44,28 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
+/**
+ * Mock the object-storage service so the route's avatar-cleanup branch
+ * doesn't actually try to reach the Replit object-storage sidecar (which
+ * isn't running in the unit-test container). The mock exposes a real
+ * `vi.fn` on every instance so individual tests can assert on call
+ * arguments and inject error paths.
+ *
+ * `deleteObjectIfStored` returns `true` by default (matching the route's
+ * happy path where we own the underlying `/objects/...` file). Tests
+ * that need to simulate "not ours" or a failure override the mock per
+ * case.
+ */
+const deleteObjectIfStoredMock = vi.fn(async () => true);
+vi.mock("../lib/objectStorage", () => {
+  return {
+    ObjectStorageService: vi.fn().mockImplementation(() => ({
+      deleteObjectIfStored: deleteObjectIfStoredMock,
+    })),
+    ObjectNotFoundError: class ObjectNotFoundError extends Error {},
+  };
+});
+
 const { setupRouteTests } = await import("./setup");
 const { users } = await import("@workspace/db");
 const { eq } = await import("drizzle-orm");
@@ -51,6 +73,14 @@ const { eq } = await import("drizzle-orm");
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;
+});
+
+beforeEach(() => {
+  // Reset call history + restore the default success implementation so
+  // tests that customize the mock (e.g. simulate a GCS failure) don't
+  // leak that override into subsequent cases.
+  deleteObjectIfStoredMock.mockReset();
+  deleteObjectIfStoredMock.mockResolvedValue(true);
 });
 
 describe("GET /api/users", () => {
@@ -258,6 +288,155 @@ describe("PATCH /api/users/:id", () => {
       .send({ displayName: "Ghost" });
     expect(res.status).toBe(404);
   });
+
+  // ---- avatar object cleanup ---------------------------------------
+  // The route is responsible for deleting the prior avatar object out
+  // of GCS when an admin uploads a new one or clears the field, so the
+  // bucket doesn't slowly accumulate orphaned `/objects/uploads/<uuid>`
+  // files. The mock at the top of the file lets us assert *which* path
+  // the route asked storage to delete (or that it didn't ask at all).
+
+  it("deletes the previous avatar object when avatarUrl is replaced", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-replace-avatar",
+      displayName: "Replace Avatar",
+      avatarUrl: "/objects/uploads/old-uuid",
+    });
+
+    const res = await request(getApp())
+      .patch("/api/users/u-replace-avatar")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/new-uuid" });
+    expect(res.status).toBe(200);
+    expect(res.body.avatarUrl).toBe("/objects/uploads/new-uuid");
+
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledTimes(1);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/old-uuid",
+    );
+  });
+
+  it("deletes the previous avatar object when avatarUrl is cleared", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-clear-avatar",
+      displayName: "Clear Avatar",
+      avatarUrl: "/objects/uploads/about-to-go",
+    });
+
+    const res = await request(getApp())
+      .patch("/api/users/u-clear-avatar")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: null });
+    expect(res.status).toBe(200);
+    expect(res.body.avatarUrl).toBeNull();
+
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledTimes(1);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/about-to-go",
+    );
+  });
+
+  it("does not call storage when the patch leaves avatarUrl alone", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-untouched-avatar",
+      displayName: "Old",
+      avatarUrl: "/objects/uploads/keep-me",
+    });
+
+    const res = await request(getApp())
+      .patch("/api/users/u-untouched-avatar")
+      .set(ADMIN_HEADERS)
+      .send({ displayName: "New" });
+    expect(res.status).toBe(200);
+    expect(deleteObjectIfStoredMock).not.toHaveBeenCalled();
+  });
+
+  it("does not call storage when the patch sets avatarUrl to its current value", async () => {
+    // The PATCH treats `avatarUrl: "x"` as a write even when the value
+    // matches what's already there (the FE shouldn't send it, but the
+    // route still needs to be defensive). Cleanup should be skipped
+    // since the previous and new URLs are identical — deleting the
+    // file would yank the avatar that's still pointed at.
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-same-avatar",
+      displayName: "Same",
+      avatarUrl: "/objects/uploads/same-uuid",
+    });
+
+    const res = await request(getApp())
+      .patch("/api/users/u-same-avatar")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/same-uuid" });
+    expect(res.status).toBe(200);
+    expect(deleteObjectIfStoredMock).not.toHaveBeenCalled();
+  });
+
+  it("still calls cleanup when the previous URL was external (delegate filtering to storage)", async () => {
+    // The route doesn't try to second-guess what is and isn't a
+    // storage-served URL — that classification lives in
+    // `deleteObjectIfStored`, which silently no-ops for external
+    // values. So we assert the route DOES call into storage with the
+    // raw previous value; the mock returning `true` here just stands
+    // in for whatever decision the real implementation would make.
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-external-avatar",
+      displayName: "External",
+      avatarUrl: "https://example.com/me.png",
+    });
+
+    const res = await request(getApp())
+      .patch("/api/users/u-external-avatar")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/new-uuid" });
+    expect(res.status).toBe(200);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "https://example.com/me.png",
+    );
+  });
+
+  it("does not call cleanup when the previous avatar was already null", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db
+      .insert(users)
+      .values({ id: "u-no-prev-avatar", displayName: "No Prev" });
+
+    const res = await request(getApp())
+      .patch("/api/users/u-no-prev-avatar")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/first-upload" });
+    expect(res.status).toBe(200);
+    expect(deleteObjectIfStoredMock).not.toHaveBeenCalled();
+  });
+
+  it("still returns 200 (and persists the row change) when storage cleanup fails", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-cleanup-fails",
+      displayName: "Cleanup Fails",
+      avatarUrl: "/objects/uploads/wont-delete",
+    });
+    deleteObjectIfStoredMock.mockRejectedValueOnce(new Error("GCS down"));
+
+    const res = await request(getApp())
+      .patch("/api/users/u-cleanup-fails")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/new-uuid" });
+    // The DB row is the source of truth; a failed best-effort cleanup
+    // must not bubble up as a 500 to the admin's edit.
+    expect(res.status).toBe(200);
+    expect(res.body.avatarUrl).toBe("/objects/uploads/new-uuid");
+
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-cleanup-fails"));
+    expect(rows[0]?.avatarUrl).toBe("/objects/uploads/new-uuid");
+  });
 });
 
 describe("DELETE /api/users/:id", () => {
@@ -284,6 +463,62 @@ describe("DELETE /api/users/:id", () => {
       .delete("/api/users/u-ghost")
       .set(ADMIN_HEADERS);
     expect(res.status).toBe(404);
+  });
+
+  it("also deletes the avatar object when the row had one", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-del-with-avatar",
+      displayName: "Has Avatar",
+      avatarUrl: "/objects/uploads/del-uuid",
+    });
+
+    const res = await request(getApp())
+      .delete("/api/users/u-del-with-avatar")
+      .set(ADMIN_HEADERS);
+    expect(res.status).toBe(204);
+
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledTimes(1);
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/del-uuid",
+    );
+  });
+
+  it("does not call storage when the deleted row had no avatar", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db
+      .insert(users)
+      .values({ id: "u-del-no-avatar", displayName: "No Avatar" });
+
+    const res = await request(getApp())
+      .delete("/api/users/u-del-no-avatar")
+      .set(ADMIN_HEADERS);
+    expect(res.status).toBe(204);
+    expect(deleteObjectIfStoredMock).not.toHaveBeenCalled();
+  });
+
+  it("still returns 204 when storage cleanup fails (row is gone, object leaks)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-del-cleanup-fails",
+      displayName: "Cleanup Fails",
+      avatarUrl: "/objects/uploads/wont-delete",
+    });
+    deleteObjectIfStoredMock.mockRejectedValueOnce(new Error("GCS down"));
+
+    const res = await request(getApp())
+      .delete("/api/users/u-del-cleanup-fails")
+      .set(ADMIN_HEADERS);
+    // The row delete already succeeded; a failed best-effort object
+    // delete must not turn into a 500 the FE has no way to recover
+    // from. The orphan is logged and moves on.
+    expect(res.status).toBe(204);
+
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-del-cleanup-fails"));
+    expect(rows).toHaveLength(0);
   });
 });
 

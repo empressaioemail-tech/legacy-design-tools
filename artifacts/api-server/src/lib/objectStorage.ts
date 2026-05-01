@@ -128,6 +128,60 @@ export class ObjectStorageService {
     });
   }
 
+  /**
+   * Best-effort delete for an avatar / attachment URL stored against a
+   * domain row. The caller passes whatever they have on hand — the raw
+   * value off `users.avatar_url`, etc. — and we figure out whether it
+   * maps to one of *our* private object entities.
+   *
+   * Returns `true` if a delete was attempted (even if the object turned
+   * out to be already gone), and `false` if the input isn't something we
+   * own (empty, external URL, malformed `/objects/` path).
+   *
+   * "Already gone" (GCS 404) is collapsed into a successful no-op so
+   * cleaning up the same row twice — or after a previously-failed
+   * cleanup — doesn't surface as an error. Other GCS errors (permission
+   * denied, transient 5xx) are re-thrown so the caller can decide
+   * whether to log-and-ignore (right answer for admin profile edits —
+   * the DB row is the source of truth and an orphaned object is exactly
+   * the problem we're trying to mitigate, so a transient GCS blip
+   * shouldn't 500 the surrounding admin write) or surface to the user.
+   */
+  async deleteObjectIfStored(rawPath: string | null | undefined): Promise<boolean> {
+    if (!rawPath) return false;
+    const normalized = this.normalizeObjectEntityPath(rawPath);
+    if (!normalized.startsWith("/objects/")) {
+      // Pasted external URL (e.g. https://example.com/me.png) — not ours
+      // to delete. Same for `/storage/public-objects/...` style paths.
+      return false;
+    }
+
+    const parts = normalized.slice(1).split("/");
+    if (parts.length < 2) return false;
+
+    // Guard the empty-entity-id edge case (e.g. a literal `/objects/`
+    // input or a trailing slash) — without this we'd hand GCS a path
+    // that resolves to the private-dir prefix itself, which is at best
+    // a wasted 404 and at worst a foot-gun if the prefix ever maps to
+    // a real object placeholder. Treat it as "not ours to delete".
+    const entityId = parts.slice(1).join("/");
+    if (!entityId) return false;
+    let entityDir = this.getPrivateObjectDir();
+    if (!entityDir.endsWith("/")) {
+      entityDir = `${entityDir}/`;
+    }
+    const objectEntityPath = `${entityDir}${entityId}`;
+    const { bucketName, objectName } = parseObjectPath(objectEntityPath);
+    const bucket = objectStorageClient.bucket(bucketName);
+    const objectFile = bucket.file(objectName);
+
+    // `ignoreNotFound` collapses the "already gone" case (404 from GCS)
+    // into a successful no-op. Other GCS errors propagate per the
+    // contract above.
+    await objectFile.delete({ ignoreNotFound: true });
+    return true;
+  }
+
   async getObjectEntityFile(objectPath: string): Promise<File> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();

@@ -27,6 +27,19 @@
  * specially — `null` clears the column, an absent key leaves it
  * unchanged. `displayName` is non-nullable, so `null` would be a 400
  * (the zod schema enforces `.optional()`, not `.nullish()`).
+ *
+ * Avatar object cleanup
+ * ---------------------
+ * Both PATCH (when `avatarUrl` is replaced or cleared) and DELETE
+ * best-effort delete the previous avatar's underlying object in GCS so
+ * orphaned `/objects/uploads/<uuid>` files don't accumulate forever.
+ * The cleanup is gated by `ObjectStorageService.deleteObjectIfStored`,
+ * which silently no-ops for empty / external / already-gone URLs and
+ * only ever touches paths under our private object dir. Cleanup
+ * failures log a warning and the request still succeeds — the DB row
+ * is the source of truth and an orphaned object is the very problem
+ * this code is trying to *reduce*, so a transient GCS blip should
+ * never turn into a 500 on a profile edit.
  */
 
 import {
@@ -47,8 +60,14 @@ import {
   DeleteUserParams,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
+import { ObjectStorageService } from "../lib/objectStorage";
 
 const router: IRouter = Router();
+// One instance is enough — the service is stateless beyond the env-var
+// reads it does on demand, and `objectStorageClient` is already a module
+// singleton. Constructed lazily-by-import so test files that mock
+// `../lib/objectStorage` get their stub here too.
+const objectStorage = new ObjectStorageService();
 
 /**
  * Permission name required by every write to the `users` profile
@@ -255,6 +274,32 @@ router.patch("/users/:id", requireUsersManage, async (req: Request, res: Respons
       res.status(404).json({ error: "User not found" });
       return;
     }
+
+    // Once the row update has committed, garbage-collect the prior
+    // avatar object if the patch is replacing or clearing it. We only
+    // act when the patch actually touches `avatarUrl` (otherwise an
+    // email-only patch would re-evaluate the field unnecessarily) and
+    // when the previous value is non-null and different from the new
+    // one. `deleteObjectIfStored` itself filters out external URLs and
+    // collapses 404s, so we don't need to special-case those here.
+    if (
+      body.avatarUrl !== undefined &&
+      existing.avatarUrl &&
+      existing.avatarUrl !== row.avatarUrl
+    ) {
+      try {
+        await objectStorage.deleteObjectIfStored(existing.avatarUrl);
+      } catch (cleanupErr) {
+        // The DB row already changed; an orphaned object is the
+        // pre-existing failure mode this whole feature is mitigating,
+        // so log and move on rather than 500'ing the admin's edit.
+        logger.warn(
+          { err: cleanupErr, id: existing.id, prevAvatarUrl: existing.avatarUrl },
+          "failed to delete previous avatar object",
+        );
+      }
+    }
+
     res.json(toUserResponse(row));
   } catch (err) {
     logger.error({ err, id: params.data.id }, "update user failed");
@@ -269,14 +314,34 @@ router.delete("/users/:id", requireUsersManage, async (req: Request, res: Respon
     return;
   }
   try {
+    // Use `.returning(...)` to grab the prior `avatarUrl` in the same
+    // round-trip as the delete itself. Doing it this way (rather than a
+    // SELECT-then-DELETE) means we never race a concurrent admin write
+    // and end up trying to delete the wrong file.
     const deleted = await db
       .delete(users)
       .where(eq(users.id, params.data.id))
-      .returning({ id: users.id });
+      .returning({ id: users.id, avatarUrl: users.avatarUrl });
     if (deleted.length === 0) {
       res.status(404).json({ error: "User not found" });
       return;
     }
+
+    const prevAvatarUrl = deleted[0]?.avatarUrl ?? null;
+    if (prevAvatarUrl) {
+      try {
+        await objectStorage.deleteObjectIfStored(prevAvatarUrl);
+      } catch (cleanupErr) {
+        // Same posture as PATCH: the row is already gone, so a failed
+        // object cleanup downgrades to a logged warning rather than a
+        // 500 the FE has no way to recover from.
+        logger.warn(
+          { err: cleanupErr, id: params.data.id, prevAvatarUrl },
+          "failed to delete avatar object after user delete",
+        );
+      }
+    }
+
     res.status(204).end();
   } catch (err) {
     logger.error({ err, id: params.data.id }, "delete user failed");
