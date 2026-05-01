@@ -1,0 +1,325 @@
+/**
+ * End-to-end regression test for the Site Context tab's "Generate
+ * Layers" button (Task #171, closing the FE coverage gap left by
+ * DA-PI-4).
+ *
+ * Why this test exists: DA-PI-4 already has solid lower-level
+ * coverage —
+ *
+ *   - per-adapter unit tests in `lib/adapters/src/__tests__/*` exercise
+ *     the upstream HTTP shapes, the `appliesTo` jurisdiction gate, and
+ *     the `AdapterRunError` translation;
+ *   - `artifacts/api-server/src/__tests__/generate-layers.test.ts`
+ *     exercises the route end-to-end with a mocked `@workspace/adapters`
+ *     module, asserting the run → persist → supersede → emit-event
+ *     contract;
+ *
+ * but nothing covers the FE/BE handshake the architect actually drives:
+ *
+ *     button click
+ *        → `useGenerateEngagementLayers` mutation
+ *        → POST /api/engagements/:id/generate-layers
+ *        → onSuccess sets `lastOutcomes` + invalidates the briefing key
+ *        → useGetEngagementBriefing refetches
+ *        → SiteContextTab re-renders the per-adapter outcome panel
+ *           and the tier-grouped briefing-source rows.
+ *
+ * Any one of those seams could regress silently — for example a future
+ * refactor that drops `setLastOutcomes`, or that forgets to invalidate
+ * the briefing query key after the mutation, would still pass every
+ * existing test today. This spec pins the round-trip so a CI failure
+ * lands instead of a quiet UX regression.
+ *
+ * Strategy:
+ *
+ *   1. Insert a clean Moab UT engagement directly via `@workspace/db`
+ *      (the same seeding pattern used by `submission-detail.spec.ts`
+ *      and `dxf-upload-3d-render.spec.ts`). Moab is one of the three
+ *      DA-PI-4 pilot jurisdictions, so the FE wiring this test
+ *      exercises is the same one production traffic will hit. The
+ *      seed is removed in `afterAll`, FK-cascading any briefing /
+ *      briefing-source rows the test produced.
+ *
+ *   2. Stub the two endpoints the SiteContextTab depends on with
+ *      `page.route`:
+ *
+ *        - `POST /api/engagements/:id/generate-layers` returns a
+ *          deterministic `GenerateLayersResponse` carrying one OK
+ *          state-adapter outcome (utah:ugrc-parcels), one OK local-
+ *          adapter outcome (grand-county-ut:zoning), and one
+ *          no-coverage outcome (utah:tax-parcels) so the per-adapter
+ *          panel renders all three status branches.
+ *        - `GET /api/engagements/:id/briefing` returns
+ *          `{ briefing: null }` until the POST is observed, and the
+ *          populated briefing afterwards. The state flip happens
+ *          inside the POST handler so the order of operations is
+ *          deterministic regardless of how React Query schedules the
+ *          refetch.
+ *
+ *      Why stubs (and not the real adapters): the production adapters
+ *      hit county/state GIS endpoints. Letting them run from the
+ *      Replit pre-merge validation budget would (a) be flaky against
+ *      county uptime, (b) add network latency to the e2e timeout, and
+ *      (c) make the assertions data-dependent on whatever the
+ *      jurisdiction returns today. The task explicitly allows
+ *      stubbing the upstream adapter HTTP calls so the test stays
+ *      deterministic. The route's real persistence + atom-event path
+ *      is already covered by the integration test referenced above.
+ *
+ *   3. Drive the UI through Playwright: open the engagement on the
+ *      Site Context tab, assert that no tier groups render initially
+ *      (briefing is null), click the "Generate Layers" button, then
+ *      assert that
+ *        - the per-adapter outcome panel renders one row per outcome
+ *          with the correct status text,
+ *        - the cache-invalidation refetch lands and the
+ *          tier-grouped briefing-source rows render under the
+ *          state and local tier headers,
+ *        - the per-source rows carry the testids the rest of the
+ *          page wires off of (`briefing-source-<id>`).
+ *
+ *      A final check confirms the POST was invoked exactly once —
+ *      a future regression that double-fires the mutation (e.g. by
+ *      removing `disabled={isPending}`) would otherwise slip past.
+ */
+
+import { test, expect } from "@playwright/test";
+import { eq } from "drizzle-orm";
+import { db, engagements } from "@workspace/db";
+
+const RUN_TAG = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const TEST_PROJECT_NAME = `e2e Generate Layers ${RUN_TAG}`;
+
+let engagementId = "";
+
+test.beforeAll(async () => {
+  const [eng] = await db
+    .insert(engagements)
+    .values({
+      name: TEST_PROJECT_NAME,
+      nameLower: TEST_PROJECT_NAME.toLowerCase(),
+      // Moab UT — one of the three DA-PI-4 pilot jurisdictions
+      // (Bastrop TX, Moab UT, Salmon ID). The route uses the
+      // `jurisdictionState`/`jurisdictionCity` columns + the
+      // lat/lng to resolve the jurisdiction; we stamp coordinates
+      // alongside so the FE briefingQuery shape matches what
+      // production sees, even though every server-side response is
+      // stubbed via `page.route`.
+      jurisdiction: "Moab, UT",
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+      jurisdictionFips: "49019",
+      address: "789 E2E Generate St, Moab, UT 84532",
+      latitude: "38.573000",
+      longitude: "-109.549400",
+      status: "active",
+    })
+    .returning();
+  if (!eng) throw new Error("seed: engagement insert returned no row");
+  engagementId = eng.id;
+});
+
+test.afterAll(async () => {
+  if (engagementId) {
+    // FK cascade removes parcel_briefings + briefing_sources, which
+    // matters here only because a future variant of this test that
+    // exercises the real (non-stubbed) route would land rows.
+    await db.delete(engagements).where(eq(engagements.id, engagementId));
+  }
+});
+
+test("Generate Layers: POST → outcome panel + cache-invalidation re-renders the tier-grouped sources", async ({
+  page,
+}) => {
+  // Stable ids so the per-source testid assertions can target them.
+  // Real UUIDs are not required — `briefing-source-<id>` is a string
+  // interpolation on `source.id` and the briefing wire never round-
+  // trips through Zod here (we are the producer).
+  const utahSourceId = "11111111-1111-1111-1111-111111111111";
+  const grandSourceId = "22222222-2222-2222-2222-222222222222";
+  const briefingId = "33333333-3333-3333-3333-333333333333";
+
+  // Wire shapes mirror `EngagementBriefingSource` and
+  // `EngagementBriefing` from `@workspace/api-client-react` — kept
+  // inline rather than imported because the e2e tsconfig pulls a
+  // stripped-down workspace surface and we do not want this spec to
+  // depend on a new generated-types import path.
+  const baseSource = {
+    note: null,
+    uploadObjectPath: null,
+    uploadOriginalFilename: null,
+    uploadContentType: null,
+    uploadByteSize: null,
+    dxfObjectPath: null,
+    glbObjectPath: null,
+    conversionStatus: null,
+    conversionError: null,
+    supersededAt: null,
+    supersededById: null,
+    snapshotDate: "2026-01-15T00:00:00.000Z",
+    createdAt: "2026-01-15T00:00:00.000Z",
+  } as const;
+  const utahSource = {
+    ...baseSource,
+    id: utahSourceId,
+    layerKind: "ugrc-parcels",
+    sourceKind: "state-adapter",
+    provider: "utah:ugrc-parcels (Utah Geospatial Resource Center)",
+  };
+  const grandSource = {
+    ...baseSource,
+    id: grandSourceId,
+    layerKind: "grand-county-zoning",
+    sourceKind: "local-adapter",
+    provider: "grand-county-ut:zoning (Grand County GIS)",
+  };
+  const populatedBriefing = {
+    id: briefingId,
+    engagementId,
+    createdAt: "2026-01-15T00:00:00.000Z",
+    updatedAt: "2026-01-15T00:00:00.000Z",
+    sources: [utahSource, grandSource],
+  };
+
+  // Mutable state the two route handlers share. The briefing GET
+  // returns the empty envelope until the POST has fired — that's how
+  // we prove the cache-invalidation refetch is what populates the
+  // tier-grouped rows (vs. an unrelated render trigger).
+  let briefingState: "empty" | "populated" = "empty";
+  let postCount = 0;
+
+  await page.route(
+    `**/api/engagements/${engagementId}/briefing`,
+    async (route) => {
+      // Be defensive — the same path could in theory carry a method
+      // we don't want to stub (e.g. CORS preflights in the future).
+      // Only intercept the GET; everything else falls through to the
+      // real API.
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          briefingState === "empty"
+            ? { briefing: null }
+            : { briefing: populatedBriefing },
+        ),
+      });
+    },
+  );
+
+  await page.route(
+    `**/api/engagements/${engagementId}/generate-layers`,
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      postCount += 1;
+      // Flip the GET stub *before* fulfilling the POST: the
+      // mutation's `onSuccess` immediately invalidates the briefing
+      // key, which kicks off the refetch in the same microtask. If
+      // we flipped after `fulfill()` resolved we would race the
+      // refetch handler.
+      briefingState = "populated";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          briefing: populatedBriefing,
+          outcomes: [
+            {
+              adapterKey: "utah:ugrc-parcels",
+              tier: "state",
+              sourceKind: "state-adapter",
+              layerKind: "ugrc-parcels",
+              status: "ok",
+              error: null,
+              sourceId: utahSourceId,
+            },
+            {
+              adapterKey: "grand-county-ut:zoning",
+              tier: "local",
+              sourceKind: "local-adapter",
+              layerKind: "grand-county-zoning",
+              status: "ok",
+              error: null,
+              sourceId: grandSourceId,
+            },
+            {
+              // A no-coverage outcome so the per-adapter panel
+              // renders the third status branch the wire enum
+              // permits — proves the FE doesn't filter out
+              // non-OK rows from the outcomes array.
+              adapterKey: "utah:tax-parcels",
+              tier: "state",
+              sourceKind: "state-adapter",
+              layerKind: "ut-tax-parcels",
+              status: "no-coverage",
+              error: {
+                code: "no-coverage",
+                message: "parcel outside coverage",
+              },
+              sourceId: null,
+            },
+          ],
+        }),
+      });
+    },
+  );
+
+  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+
+  // Pre-condition: the briefing read returned `{ briefing: null }`,
+  // so neither tier group should be rendered. Asserting the absence
+  // up-front means the post-click assertion is unambiguous about
+  // *why* the tier groups appeared.
+  await expect(page.getByTestId("briefing-sources-tier-state")).toHaveCount(0);
+  await expect(page.getByTestId("briefing-sources-tier-local")).toHaveCount(0);
+  await expect(page.getByTestId("generate-layers-outcomes")).toHaveCount(0);
+
+  const button = page.getByTestId("generate-layers-button");
+  await expect(button).toBeVisible();
+  await expect(button).toHaveText("Generate Layers");
+
+  await button.click();
+
+  // Per-adapter outcome panel renders one row per wire outcome with
+  // the correct status text. We scope each assertion to its own
+  // testid so a re-ordering of the `outcomes` array (the FE preserves
+  // wire order) cannot satisfy the wrong row.
+  const outcomes = page.getByTestId("generate-layers-outcomes");
+  await expect(outcomes).toBeVisible();
+  await expect(
+    page.getByTestId("generate-layers-outcome-utah:ugrc-parcels"),
+  ).toContainText("ok");
+  await expect(
+    page.getByTestId("generate-layers-outcome-grand-county-ut:zoning"),
+  ).toContainText("ok");
+  await expect(
+    page.getByTestId("generate-layers-outcome-utah:tax-parcels"),
+  ).toContainText("no-coverage");
+
+  // Cache-invalidation refetch landed: tier-grouped rows render under
+  // the state + local headers (the `state-adapter` source bucketed
+  // into `state`, the `local-adapter` source into `local`), and each
+  // per-source row exposes its own testid.
+  await expect(page.getByTestId("briefing-sources-tier-state")).toBeVisible();
+  await expect(page.getByTestId("briefing-sources-tier-local")).toBeVisible();
+  await expect(
+    page.getByTestId(`briefing-source-${utahSourceId}`),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId(`briefing-source-${grandSourceId}`),
+  ).toBeVisible();
+
+  // Sanity: the mutation fired exactly once. A regression that
+  // dropped `disabled={generateMutation.isPending}` (or that wired
+  // the click handler twice) would otherwise slip past the
+  // assertions above because both POSTs would still produce the
+  // same final UI.
+  expect(postCount).toBe(1);
+});
