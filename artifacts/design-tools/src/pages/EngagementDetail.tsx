@@ -2915,6 +2915,7 @@ function BriefingNarrativePanel({
       <BriefingRecentRunsPanel
         engagementId={engagementId}
         narrativeGenerationId={narrative?.generationId ?? null}
+        narrativeIsLoaded={narrative !== null}
       />
 
       {hasNarrative && (
@@ -3090,6 +3091,7 @@ function BriefingRunStateBadge({
 function BriefingRecentRunsPanel({
   engagementId,
   narrativeGenerationId,
+  narrativeIsLoaded,
 }: {
   engagementId: string;
   /**
@@ -3110,6 +3112,24 @@ function BriefingRecentRunsPanel({
    * misleading "Current" pill on an unrelated row.
    */
   narrativeGenerationId: string | null;
+  /**
+   * Task #301 — `true` when the briefing query has resolved a
+   * non-null `narrative` payload (i.e. there are A–G section
+   * bodies on screen above the disclosure), independent of whether
+   * the producing job's id is still on file. Combined with a null
+   * `narrativeGenerationId` this means: the auditor is looking at
+   * a real narrative whose producing run has aged out of the
+   * keep-N retention window (or pre-dates the `generation_id`
+   * column and the post-merge backfill couldn't attribute it).
+   * In that combination the panel renders a one-line caption
+   * explaining why no row is marked Current, so the missing pill
+   * doesn't read as "the disclosure is broken." When the
+   * narrative itself is null (engine has never run for this
+   * engagement, or the very first generation is still pending)
+   * no caption renders — the absence of a Current pill is
+   * already self-explanatory.
+   */
+  narrativeIsLoaded: boolean;
 }) {
   // Task #275 — both the open/closed state of the disclosure and the
   // active filter are mirrored to the URL so an auditor who finds a
@@ -3303,6 +3323,32 @@ function BriefingRecentRunsPanel({
             padding: "0 12px 12px 12px",
           }}
         >
+          {/*
+            Task #301 — when the narrative is on screen but the
+            producing job's id is no longer on file (the run aged
+            out of the keep-N sweep window, or the row pre-dates
+            the `generation_id` column), no row in the list below
+            can carry the "Current" pill. Without a signal, the
+            missing pill reads as "the disclosure is broken." A
+            one-line caption above the list closes that loop
+            without changing any other behavior. Suppressed when
+            the narrative itself is null (no producing run has
+            ever been stamped) — the absence of a Current pill is
+            already self-explanatory in that case.
+          */}
+          {narrativeIsLoaded && narrativeGenerationId === null && (
+            <div
+              data-testid="briefing-recent-runs-pruned-caption"
+              style={{
+                fontSize: 12,
+                color: "var(--text-muted)",
+                paddingBottom: 4,
+              }}
+            >
+              The run that produced this narrative is no longer in
+              the retained window.
+            </div>
+          )}
           {runsQuery.isLoading && (
             <div
               data-testid="briefing-recent-runs-loading"

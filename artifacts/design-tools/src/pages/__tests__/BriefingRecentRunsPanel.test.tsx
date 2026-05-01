@@ -1451,6 +1451,114 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     ).not.toBeInTheDocument();
   });
 
+  // ── Task #301 ──────────────────────────────────────────────────────
+  // Task #281 made the Current pill exact by matching on
+  // `narrative.generationId`. When that id is null but the narrative
+  // itself is on screen (legacy unbackfilled row, or the producing
+  // job has aged out of the keep-N sweep window) no row in the list
+  // can be marked Current — correct, but with no signal an auditor
+  // reads the missing pill as "the disclosure is broken." A small
+  // caption above the runs list closes that loop. The caption is
+  // suppressed when `narrative` itself is null (no producing run was
+  // ever stamped) since the absence of a Current pill is already
+  // self-explanatory in that case. Both branches are pinned here.
+  it("renders a 'producing run was pruned' caption when the narrative is loaded but its generationId is null (Task #301)", async () => {
+    // Narrative is on screen (the parent's BriefingNarrativePanel
+    // is rendering the seven A–G section bodies above the
+    // disclosure) but its `generationId` is null — the FK is
+    // `ON DELETE SET NULL`, so the producing job aging out of
+    // the keep window nulls out the column on the briefing row.
+    hoisted.briefing = {
+      narrative: { generationId: null },
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-survivor",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+
+    // The caption renders inside the open body, above the list,
+    // explaining why no row can be marked Current.
+    expect(
+      screen.getByTestId("briefing-recent-runs-pruned-caption"),
+    ).toHaveTextContent(
+      /run that produced this narrative is no longer in the retained window/i,
+    );
+    // The retained row still renders normally — but with no
+    // Current pill and no `aria-current`, since
+    // `narrative.generationId` is null. The caption is the only
+    // signal, and that's exactly the point.
+    const row = within(list).getByTestId("briefing-run-gen-survivor");
+    expect(row).not.toHaveAttribute("aria-current");
+    expect(
+      screen.queryByTestId("briefing-run-current-pill-gen-survivor"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not render the 'producing run was pruned' caption when the narrative itself is null (Task #301)", async () => {
+    // No narrative on screen — the engine has never run for this
+    // engagement (or the very first generation is still pending).
+    // The absence of a Current pill below is already
+    // self-explanatory; no caption should appear.
+    hoisted.briefing = { narrative: null };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-orphaned",
+        state: "completed",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        completedAt: "2026-04-01T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    await screen.findByTestId("briefing-recent-runs-list");
+
+    expect(
+      screen.queryByTestId("briefing-recent-runs-pruned-caption"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not render the 'producing run was pruned' caption when the narrative's generationId is on file (Task #301)", async () => {
+    // Healthy state: the narrative is on screen and its
+    // producing run is still in the retained list. The Current
+    // pill is the signal here — the caption must not double up
+    // and tell the auditor a perfectly attributed narrative was
+    // pruned.
+    hoisted.briefing = {
+      narrative: { generationId: "gen-current" },
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-current",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:04.000Z",
+        invalidCitationCount: 0,
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+
+    expect(
+      within(list).getByTestId("briefing-run-current-pill-gen-current"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("briefing-recent-runs-pruned-caption"),
+    ).not.toBeInTheDocument();
+  });
+
   // Task #275 — the active recent-runs filter (and the open/closed
   // state of the disclosure) are mirrored to the URL so an auditor
   // who notices a suspicious failed-then-rerun pattern can drop a
