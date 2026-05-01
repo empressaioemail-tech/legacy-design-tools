@@ -1598,6 +1598,134 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
       screen.getByTestId("briefing-divergence-detail-dialog"),
     ).toBeInTheDocument();
   });
+
+  // Task #358 — defensive coverage for the dialog's
+  // `extractDetailViews` fallback. The C# Revit recorder writes a
+  // free-shape `detail` blob and the dialog deliberately falls back
+  // to the flat-attributes table when `before` / `after` is present
+  // but is not a plain object pair (a scalar, an array, or only one
+  // half of the envelope). Without these tests, a future refactor
+  // that tightened the typing or threw on the malformed shape would
+  // regress the user-facing dialog from "shows the recorded fields
+  // as a key/value table" to "crashes the panel".
+  //
+  // For each malformed shape we assert: the dialog mounts, the
+  // 3-column diff section is *not* rendered (since the envelope
+  // wasn't a usable pair), and the `before` / `after` keys land in
+  // the flat-attributes table with their values stringified — for
+  // arrays and objects that's the JSON-pretty-printed form
+  // `stringifyValue` produces.
+  describe("malformed before/after payloads (Task #358)", () => {
+    function openDetailDialogWithDetail(detail: Record<string, unknown>) {
+      hoisted.divergences = [
+        {
+          id: "div-malformed",
+          bimModelId: "bim-1",
+          materializableElementId: "elem-A",
+          briefingId: "brief-1",
+          reason: "geometry-edited",
+          note: null,
+          detail,
+          createdAt: "2025-01-05T12:00:00.000Z",
+          elementKind: "buildable-envelope",
+          elementLabel: "Envelope (lot 12)",
+        },
+      ];
+      renderPanel();
+      fireEvent.click(
+        screen.getByTestId("briefing-divergences-view-details-button"),
+      );
+      return screen.getByTestId("briefing-divergence-detail-dialog");
+    }
+
+    it("renders the flat-attributes table for a scalar before/after pair without crashing", () => {
+      const dialog = openDetailDialogWithDetail({ before: 5, after: 6 });
+
+      // No diff section — the envelope wasn't a plain-object pair.
+      expect(
+        within(dialog).queryByTestId("briefing-divergence-detail-diff"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(dialog).queryAllByTestId("briefing-divergence-detail-diff-row"),
+      ).toHaveLength(0);
+
+      // The flat-attributes table renders both halves as scalar
+      // strings, so the operator still sees what was recorded.
+      const rowsByField = new Map(
+        within(dialog)
+          .getAllByTestId("briefing-divergence-detail-attribute-row")
+          .map((r) => [r.getAttribute("data-field"), r] as const),
+      );
+      expect(rowsByField.get("before")).toBeDefined();
+      expect(rowsByField.get("after")).toBeDefined();
+      expect(rowsByField.get("before")).toHaveTextContent("5");
+      expect(rowsByField.get("after")).toHaveTextContent("6");
+    });
+
+    it("renders the flat-attributes table for an array before/after pair without crashing", () => {
+      const dialog = openDetailDialogWithDetail({
+        before: [1, 2],
+        after: [3, 4],
+      });
+
+      // Arrays aren't plain objects — the diff branch must stay
+      // dormant so the dialog doesn't try to key into array indices
+      // as a 3-column field/before/after diff.
+      expect(
+        within(dialog).queryByTestId("briefing-divergence-detail-diff"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(dialog).queryAllByTestId("briefing-divergence-detail-diff-row"),
+      ).toHaveLength(0);
+
+      const rowsByField = new Map(
+        within(dialog)
+          .getAllByTestId("briefing-divergence-detail-attribute-row")
+          .map((r) => [r.getAttribute("data-field"), r] as const),
+      );
+      // The raw envelope is JSON-serialized into the value cell so
+      // the operator can still inspect what the recorder wrote.
+      // We assert on the array contents (whitespace-tolerant)
+      // rather than the exact pretty-printed string so a future
+      // tweak to `stringifyValue`'s indentation doesn't break the
+      // test for the wrong reason.
+      const beforeText = rowsByField.get("before")?.textContent ?? "";
+      const afterText = rowsByField.get("after")?.textContent ?? "";
+      expect(beforeText).toContain("1");
+      expect(beforeText).toContain("2");
+      expect(afterText).toContain("3");
+      expect(afterText).toContain("4");
+    });
+
+    it("renders the flat-attributes table when only one half of the before/after pair is present", () => {
+      const dialog = openDetailDialogWithDetail({ before: { x: 1 } });
+
+      // Only `before` is present — the diff branch only fires when
+      // both halves are plain objects, so it must stay dormant and
+      // the lone half must surface in the flat-attributes table
+      // rather than being hidden as if it were already represented.
+      expect(
+        within(dialog).queryByTestId("briefing-divergence-detail-diff"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(dialog).queryAllByTestId("briefing-divergence-detail-diff-row"),
+      ).toHaveLength(0);
+
+      const rowsByField = new Map(
+        within(dialog)
+          .getAllByTestId("briefing-divergence-detail-attribute-row")
+          .map((r) => [r.getAttribute("data-field"), r] as const),
+      );
+      expect(rowsByField.get("before")).toBeDefined();
+      // No `after` key was on the envelope so it must not appear
+      // as an attribute row — the dialog only surfaces what the
+      // recorder actually wrote.
+      expect(rowsByField.has("after")).toBe(false);
+      const beforeText = rowsByField.get("before")?.textContent ?? "";
+      expect(beforeText).toContain("x");
+      expect(beforeText).toContain("1");
+    });
+  });
 });
 
 describe("PushToRevitAffordance → divergences invalidation (Task #172)", () => {
