@@ -1379,6 +1379,157 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
     ).toHaveTextContent("Prior Section A from run 2.");
   });
 
+  it("attaches the prior body to the most recent completed pre-current run when only the actor is recorded (Task #313)", async () => {
+    // Legacy backups can carry `generatedBy` without a
+    // `generatedAt` (per-row provenance was added after the
+    // section_* backup columns on some installs). The interval
+    // matcher can't decide which row owns the prior body in
+    // that case, so before #313 the entire prior block was
+    // suppressed even though we had the actor on file. The
+    // fallback now picks the most recent completed run that
+    // pre-dates the current narrative so the auditor still
+    // sees who regenerated the briefing last; the meta line
+    // gracefully shows just the "by …" half (no fabricated
+    // date).
+    hoisted.briefing = {
+      narrative: { generationId: "gen-current" },
+    };
+    hoisted.priorNarrative = {
+      sectionA: "Legacy prior body — actor on file but no timestamp.",
+      sectionB: null,
+      sectionC: null,
+      sectionD: null,
+      sectionE: null,
+      sectionF: null,
+      sectionG: "Legacy prior G body.",
+      // The legacy half: no `generatedAt`, but `generatedBy`
+      // survived. This is the exact wire shape the fallback
+      // exists to cover.
+      generatedAt: null,
+      generatedBy: "user:alice@example.com",
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-current",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:05.000Z",
+      }),
+      // Most recent completed run that pre-dates the current
+      // narrative — this is the row the fallback should attach
+      // the prior body to.
+      makeRun({
+        generationId: "gen-prior",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:04.000Z",
+      }),
+      // An even older completed run — the fallback must pick
+      // the *most recent* eligible row, not just any pre-current
+      // one, so this row should NOT carry the Prior pill.
+      makeRun({
+        generationId: "gen-older",
+        state: "completed",
+        startedAt: "2026-04-01T10:00:00.000Z",
+        completedAt: "2026-04-01T10:00:03.000Z",
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+
+    // The most recent pre-current completed row carries the Prior
+    // pill — proves the fallback picked a sensible row instead of
+    // suppressing the whole block.
+    expect(
+      within(list).getByTestId("briefing-run-prior-pill-gen-prior"),
+    ).toBeInTheDocument();
+    // The Current row does not double up as Prior, and the older
+    // pre-current row is not mislabelled either — the fallback
+    // is row-specific.
+    expect(
+      screen.queryByTestId("briefing-run-prior-pill-gen-current"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("briefing-run-prior-pill-gen-older"),
+    ).not.toBeInTheDocument();
+
+    // Expanding the prior row surfaces the legacy body and the
+    // meta line, and the meta line shows just the "by …" half —
+    // no fabricated "Generated …" timestamp.
+    fireEvent.click(screen.getByTestId("briefing-run-toggle-gen-prior"));
+    const priorBlock = await screen.findByTestId(
+      "briefing-run-prior-narrative-gen-prior",
+    );
+    expect(
+      within(priorBlock).getByTestId("briefing-run-prior-section-a-gen-prior"),
+    ).toHaveTextContent("Legacy prior body — actor on file but no timestamp.");
+    const meta = within(priorBlock).getByTestId(
+      "briefing-run-prior-narrative-meta-gen-prior",
+    );
+    expect(
+      within(meta).getByTestId(
+        "briefing-run-prior-narrative-generated-by-gen-prior",
+      ),
+    ).toHaveTextContent(/by user:alice@example\.com/);
+    // The "Generated …" half stays absent — the fallback never
+    // invents a date for legacy backups.
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-generated-at-gen-prior",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT engage the legacy-actor fallback when both generatedAt and generatedBy are null (Task #313)", async () => {
+    // Symmetric guard: when neither half of the provenance is on
+    // file, there's nothing useful to surface, so the fallback
+    // must stay dormant — picking a row purely to render an
+    // empty meta line would be exactly the noise the interval
+    // matcher exists to avoid.
+    hoisted.briefing = {
+      narrative: { generationId: "gen-current" },
+    };
+    hoisted.priorNarrative = {
+      sectionA: "Body present, provenance entirely missing.",
+      sectionB: null,
+      sectionC: null,
+      sectionD: null,
+      sectionE: null,
+      sectionF: null,
+      sectionG: null,
+      generatedAt: null,
+      generatedBy: null,
+    };
+    hoisted.runs = [
+      makeRun({
+        generationId: "gen-current",
+        state: "completed",
+        startedAt: "2026-04-03T10:00:00.000Z",
+        completedAt: "2026-04-03T10:00:05.000Z",
+      }),
+      makeRun({
+        generationId: "gen-eligible",
+        state: "completed",
+        startedAt: "2026-04-02T10:00:00.000Z",
+        completedAt: "2026-04-02T10:00:04.000Z",
+      }),
+    ];
+
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    const list = await screen.findByTestId("briefing-recent-runs-list");
+
+    // No row anywhere in the list carries the Prior pill — the
+    // fallback stayed dormant because there was no actor to
+    // surface.
+    expect(within(list).queryByText(/Prior/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("briefing-run-prior-pill-gen-eligible"),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders no Prior pill anywhere when the briefing has never been regenerated (Task #280)", async () => {
     // First-generation-only state: the briefing row exists with
     // a current narrative on screen, but `prior_section_*` are

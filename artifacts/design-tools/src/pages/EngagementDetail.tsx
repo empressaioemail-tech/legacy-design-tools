@@ -3406,28 +3406,80 @@ function BriefingRecentRunsPanel({
   // existing details branch with no prior body to render. A
   // missing or unparseable timestamp resolves to null so we
   // never pick an arbitrary row.
+  //
+  // Task #313 — legacy backups can carry `generatedBy` without a
+  // `generatedAt` (per-row provenance was added after the section
+  // backup columns on some installs). Without a fallback, the
+  // entire prior block is suppressed even though we have the
+  // actor on file, costing auditors useful "who regenerated this
+  // last" provenance on older engagements. When `generatedAt` is
+  // null but `generatedBy` is set, attach the prior body to the
+  // most recent completed run that pre-dates the current
+  // narrative — the meta line will gracefully render just the
+  // "by …" half (the existing presence check on each half
+  // already handles that, so we never fabricate a date).
   const priorGenerationId = useMemo<string | null>(() => {
-    if (!priorNarrative || priorNarrative.generatedAt === null) return null;
-    // The orval/zod codegen coerces `generatedAt` to `Date`, but
-    // tests + the runtime queryFn pass through ISO strings, so
-    // normalize via `new Date(...)` which accepts both shapes
-    // and yields `NaN` on garbage.
-    const stampedMs = new Date(
-      priorNarrative.generatedAt as Date | string,
-    ).getTime();
-    if (Number.isNaN(stampedMs)) return null;
-    for (const run of runs as RecentRun[]) {
-      if (run.state !== "completed") continue;
-      if (run.completedAt === null) continue;
-      const startedMs = Date.parse(String(run.startedAt));
-      const completedMs = Date.parse(String(run.completedAt));
-      if (Number.isNaN(startedMs) || Number.isNaN(completedMs)) continue;
-      if (stampedMs >= startedMs && stampedMs <= completedMs) {
-        return run.generationId;
+    if (!priorNarrative) return null;
+    if (priorNarrative.generatedAt !== null) {
+      // The orval/zod codegen coerces `generatedAt` to `Date`, but
+      // tests + the runtime queryFn pass through ISO strings, so
+      // normalize via `new Date(...)` which accepts both shapes
+      // and yields `NaN` on garbage.
+      const stampedMs = new Date(
+        priorNarrative.generatedAt as Date | string,
+      ).getTime();
+      if (Number.isNaN(stampedMs)) return null;
+      for (const run of runs as RecentRun[]) {
+        if (run.state !== "completed") continue;
+        if (run.completedAt === null) continue;
+        const startedMs = Date.parse(String(run.startedAt));
+        const completedMs = Date.parse(String(run.completedAt));
+        if (Number.isNaN(startedMs) || Number.isNaN(completedMs)) continue;
+        if (stampedMs >= startedMs && stampedMs <= completedMs) {
+          return run.generationId;
+        }
+      }
+      return null;
+    }
+    // Fallback path — `generatedAt` is null. Only attempt the
+    // actor-only fallback when we actually have an actor to
+    // surface; otherwise we'd be picking a row purely to render
+    // an empty meta line, which is exactly the noise the
+    // interval matcher exists to avoid.
+    if (priorNarrative.generatedBy === null) return null;
+    // Bound the search to runs that pre-date whatever produced the
+    // current narrative. When the current run is in the retained
+    // window we can use its `startedAt` as a hard boundary; when
+    // it isn't (pruned by the keep-N sweep) we fall back to "most
+    // recent completed run on file", since the prior body is by
+    // definition not the current narrative and any earlier
+    // completed run is a better answer than suppressing the
+    // block entirely.
+    let boundaryMs: number | null = null;
+    if (currentGenerationId !== null) {
+      for (const run of runs as RecentRun[]) {
+        if (run.generationId === currentGenerationId) {
+          const startedMs = Date.parse(String(run.startedAt));
+          if (!Number.isNaN(startedMs)) boundaryMs = startedMs;
+          break;
+        }
       }
     }
+    // The runs list arrives newest-first, so the first eligible
+    // completed row is the most recent one that pre-dates the
+    // current narrative.
+    for (const run of runs as RecentRun[]) {
+      if (run.state !== "completed") continue;
+      if (run.generationId === currentGenerationId) continue;
+      if (boundaryMs !== null) {
+        const startedMs = Date.parse(String(run.startedAt));
+        if (Number.isNaN(startedMs)) continue;
+        if (startedMs >= boundaryMs) continue;
+      }
+      return run.generationId;
+    }
     return null;
-  }, [priorNarrative, runs]);
+  }, [priorNarrative, runs, currentGenerationId]);
 
   return (
     <div
