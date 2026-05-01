@@ -33,6 +33,7 @@ export interface NavGroup {
 const ALL_NAV_GROUPS: NavGroup[] = [
   { label: "SUBMITTALS", items: [
       { label: "Inbox", href: "/" },
+      { label: "Engagements", href: "/engagements" },
       { label: "In Review", href: "/in-review" },
       { label: "Approved", href: "/approved" },
       { label: "Rejected", href: "/rejected" },

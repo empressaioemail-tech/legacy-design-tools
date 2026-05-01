@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReviewConsole from "./pages/ReviewConsole";
 import SubmittalDetail from "./pages/SubmittalDetail";
 import EngagementDetail from "./pages/EngagementDetail";
+import EngagementsList from "./pages/EngagementsList";
 import FindingsLibrary from "./pages/FindingsLibrary";
 import CodeLibrary from "./pages/CodeLibrary";
 import StyleProbe from "./pages/StyleProbe";
@@ -17,6 +18,7 @@ function Router() {
     <Switch>
       <Route path="/" component={ReviewConsole} />
       <Route path="/submittals/:id" component={SubmittalDetail} />
+      <Route path="/engagements" component={EngagementsList} />
       <Route path="/engagements/:id" component={EngagementDetail} />
       <Route path="/findings" component={FindingsLibrary} />
       <Route path="/code" component={CodeLibrary} />
