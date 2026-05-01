@@ -40,27 +40,55 @@
  */
 
 import { sql } from "drizzle-orm";
-import { db, pool, sheets } from "@workspace/db";
-import { PostgresEventAnchoringService } from "@workspace/empressa-atom";
+import { db as defaultDb, pool, sheets } from "@workspace/db";
+import {
+  PostgresEventAnchoringService,
+  type EventAnchoringService,
+} from "@workspace/empressa-atom";
 
-interface CliOptions {
+export interface CliOptions {
   dryRun: boolean;
 }
 
-function parseArgs(argv: string[]): CliOptions {
+/**
+ * Parse the script's argv. Mirrors the strict policy used by the
+ * `parcel_briefings.generation_id` backfill (Task #303 B.7): unknown
+ * flags throw rather than silently no-oping, because both scripts are
+ * candidates for the post-merge deploy path and a typo like `--dryrun`
+ * must not look like a clean real run that mutated production.
+ */
+export function parseArgs(argv: string[]): CliOptions {
+  const known = new Set(["--dry-run"]);
+  const unknown = argv.filter((a) => !known.has(a));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown argument(s): ${unknown.join(", ")}. ` +
+        `Usage: backfill:sheet-created [--dry-run]`,
+    );
+  }
   return {
     dryRun: argv.includes("--dry-run"),
   };
 }
 
-interface BackfillSummary {
+export interface BackfillSummary {
   totalSheets: number;
   alreadyHasCreated: number;
   backfilled: number;
   failed: number;
 }
 
-async function fetchSheetIdsWithCreatedEvent(): Promise<Set<string>> {
+/**
+ * Drizzle db surface this script needs. Spelled as the concrete
+ * `defaultDb` type so it stays in sync with `@workspace/db` (which
+ * also backs `withTestSchema`'s `ctx.db`) without re-stating every
+ * query-builder method we happen to use here.
+ */
+export type BackfillDb = typeof defaultDb;
+
+async function fetchSheetIdsWithCreatedEvent(
+  db: BackfillDb,
+): Promise<Set<string>> {
   // One round trip: every sheet entity that already has a
   // `sheet.created` row in atom_events. The filter is event-type
   // specific because a sheet may legitimately have only later events
@@ -79,7 +107,19 @@ async function fetchSheetIdsWithCreatedEvent(): Promise<Set<string>> {
   return out;
 }
 
-async function backfill(opts: CliOptions): Promise<BackfillSummary> {
+/**
+ * Run the backfill against the supplied `db` (defaults to the
+ * production singleton). The optional `history` argument lets tests
+ * inject a fake `EventAnchoringService` if they want to assert on the
+ * append calls without touching `atom_events`; in production we
+ * construct a `PostgresEventAnchoringService` over the same `db` so
+ * the synthetic events land in the chain alongside real ones.
+ */
+export async function backfill(
+  opts: CliOptions,
+  db: BackfillDb = defaultDb,
+  history?: EventAnchoringService,
+): Promise<BackfillSummary> {
   const summary: BackfillSummary = {
     totalSheets: 0,
     alreadyHasCreated: 0,
@@ -87,7 +127,7 @@ async function backfill(opts: CliOptions): Promise<BackfillSummary> {
     failed: 0,
   };
 
-  const hasCreated = await fetchSheetIdsWithCreatedEvent();
+  const hasCreated = await fetchSheetIdsWithCreatedEvent(db);
 
   // Pull every sheet row. The columns we need fit comfortably in memory
   // for the snapshot sizes this app handles; if the table grows beyond
@@ -108,11 +148,13 @@ async function backfill(opts: CliOptions): Promise<BackfillSummary> {
 
   summary.totalSheets = rows.length;
 
-  const history = new PostgresEventAnchoringService(
-    db as unknown as ConstructorParameters<
-      typeof PostgresEventAnchoringService
-    >[0],
-  );
+  const anchoring: EventAnchoringService =
+    history ??
+    new PostgresEventAnchoringService(
+      db as unknown as ConstructorParameters<
+        typeof PostgresEventAnchoringService
+      >[0],
+    );
 
   for (const row of rows) {
     if (hasCreated.has(row.id)) {
@@ -129,7 +171,7 @@ async function backfill(opts: CliOptions): Promise<BackfillSummary> {
       continue;
     }
     try {
-      const event = await history.appendEvent({
+      const event = await anchoring.appendEvent({
         entityType: "sheet",
         entityId: row.id,
         eventType: "sheet.created",
@@ -188,4 +230,14 @@ async function main(): Promise<void> {
   process.exit(exitCode);
 }
 
-void main();
+// Only invoke `main()` when the file is executed directly (i.e. via
+// `tsx ./src/backfillSheetCreatedEvents.ts`). Tests `import` this
+// module to call `backfill()` against a `withTestSchema` db and must
+// NOT trigger the production singleton's `pool.end()` / `process.exit`
+// side effects on import.
+const isDirectInvocation =
+  process.argv[1] !== undefined &&
+  import.meta.url === `file://${process.argv[1]}`;
+if (isDirectInvocation) {
+  void main();
+}
