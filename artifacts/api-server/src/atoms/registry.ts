@@ -108,7 +108,11 @@ export function getHistoryService(): EventAnchoringService {
  *   - `materializable-element` (DA-PI-5) — one piece of geometry
  *     (terrain, setback plane, buildable envelope, …) the C# Revit
  *     add-in materializes; composes `parcel-briefing`,
- *     `briefing-source`, and `briefing-divergence`.
+ *     `briefing-source`, and `briefing-divergence`. The
+ *     briefing-generate route also emits one
+ *     `materializable-element.identified` event per requirement
+ *     extracted from the C/D/F sections of every generation
+ *     (Task #175).
  *   - `briefing-divergence` (DA-PI-5) — audit-trail row for an
  *     architect override against a locked materializable element;
  *     composes `bim-model`, `materializable-element`,
@@ -136,7 +140,10 @@ export function getAtomRegistry(): AtomRegistry {
   // DA-PI-5 Revit sensor materialization atoms. Registered after
   // their child types (parcel-briefing, briefing-source, engagement)
   // so the boot-log tail surfaces the dependency order naturally;
-  // `register()` itself does not care about order.
+  // `register()` itself does not care about order. Task #175 also
+  // turns on per-requirement `materializable-element.identified`
+  // emission from the briefing-generate route — those events anchor
+  // against this same `materializable-element` registration.
   registry.register(makeMaterializableElementAtom({ db, history }));
   registry.register(makeBriefingDivergenceAtom({ db, history }));
   registry.register(makeBimModelAtom({ db, history }));

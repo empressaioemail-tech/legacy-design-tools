@@ -67,10 +67,19 @@ export type MaterializableElementSupportedModes =
 
 /**
  * Single source of truth for materializable-element-domain event
- * types per Spec 51a §2.4. The briefing engine in DA-PI-3 imports
- * this constant when it emits per-element events.
+ * types. The briefing engine in DA-PI-3 / Task #175 imports this
+ * constant when it emits per-element events from the
+ * briefing-generate route, and the design-tools materialization
+ * pipeline (DA-PI-5 / Spec 51a §2.4) appends to the same atom.
+ *
+ * `*.identified` is kept at index 0 because the briefing-generate
+ * route resolves the emit eventType via
+ * `MATERIALIZABLE_ELEMENT_EVENT_TYPES[0]` — reordering here would
+ * silently change what that route emits.
  */
 export const MATERIALIZABLE_ELEMENT_EVENT_TYPES = [
+  "materializable-element.identified",
+  "materializable-element.materialized",
   "materializable-element.emitted",
   "materializable-element.refreshed",
 ] as const;

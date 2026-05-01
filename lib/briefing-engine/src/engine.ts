@@ -21,6 +21,7 @@ import {
   type CitationResolvers,
 } from "./citationValidator";
 import { generateMockBriefing } from "./mockGenerator";
+import { extractMaterializableElements } from "./materializableElements";
 import {
   HEAVY_SECTIONS,
   type BriefingLlmMode,
@@ -135,9 +136,11 @@ export async function generateBriefing(
     }
   }
 
+  const finalSections = cleaned as BriefingSections;
   return {
-    sections: cleaned as BriefingSections,
+    sections: finalSections,
     invalidCitations: invalid,
+    materializableElements: extractMaterializableElements(finalSections),
     generatedAt: now(),
     generatedBy: input.generatedBy,
     producer: mode,

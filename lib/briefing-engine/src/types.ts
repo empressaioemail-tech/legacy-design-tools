@@ -94,6 +94,15 @@ export interface GenerateBriefingResult {
    * (see `citationValidator.ts`).
    */
   invalidCitations: ReadonlyArray<string>;
+  /**
+   * Per-requirement materializable elements extracted from sections
+   * C / D / F (Spec 51 §6 — the Regulatory Gates, Site Infrastructure,
+   * and Neighboring Context sections are the ones a downstream BIM /
+   * design tool can hand back specific code citations against). One
+   * entry per discrete claim sentence, in document order. See
+   * {@link extractMaterializableElements}.
+   */
+  materializableElements: ReadonlyArray<MaterializableElement>;
   /** When the narrative was generated. */
   generatedAt: Date;
   /** Pass-through of the input value. */
@@ -104,6 +113,34 @@ export interface GenerateBriefingResult {
    */
   producer: BriefingLlmMode;
 }
+
+/**
+ * One discrete requirement extracted from a generated briefing section.
+ *
+ * Per Spec 51 §6, sections C (Regulatory Gates), D (Site Infrastructure)
+ * and F (Neighboring Context) carry the design constraints that a
+ * downstream BIM / design tool can materialize back into model
+ * geometry + code citations. The api-server emits one
+ * `materializable-element.identified` event per element so the
+ * design surface can subscribe and react.
+ *
+ * The `text` field carries the trimmed claim sentence with citation
+ * tokens (`{{atom|briefing-source|...}}`, `[[CODE:...]]`) preserved
+ * — downstream consumers re-use the same citation grammar to render
+ * source links.
+ */
+export interface MaterializableElement {
+  /** Section letter the element was extracted from. */
+  section: MaterializableSection;
+  /** 0-based index within the source section, in document order. */
+  index: number;
+  /** The trimmed requirement sentence text (citation tokens preserved). */
+  text: string;
+}
+
+/** Sections that surface materializable elements (Spec 51 §6). */
+export const MATERIALIZABLE_SECTIONS = ["c", "d", "f"] as const;
+export type MaterializableSection = (typeof MATERIALIZABLE_SECTIONS)[number];
 
 /** LLM provider modes selected by `BRIEFING_LLM_MODE`. */
 export type BriefingLlmMode = "mock" | "anthropic";

@@ -25,10 +25,18 @@ export {
   type CodeSectionInput,
   type GenerateBriefingInput,
   type GenerateBriefingResult,
+  type MaterializableElement,
+  type MaterializableSection,
   HEAVY_SECTIONS,
   LIGHT_SECTIONS,
+  MATERIALIZABLE_SECTIONS,
   SECTION_LABELS,
 } from "./types";
+
+export {
+  extractMaterializableElements,
+  splitSectionClaims,
+} from "./materializableElements";
 
 export {
   BRIEFING_ANTHROPIC_MODEL,

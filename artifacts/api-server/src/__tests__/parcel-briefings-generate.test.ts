@@ -218,6 +218,94 @@ describe("POST /api/engagements/:id/briefing/generate (mock mode)", () => {
     expect(briefingRead.body.briefing.narrative.generatedAt).toBeTruthy();
   });
 
+  it("emits one materializable-element.identified event per requirement extracted from sections C/D/F", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement(
+      "Materializable Element Generation Engagement",
+    );
+    // Seed three sources whose `layerKind` slugs are categorized into
+    // sections C, D, and F respectively. The mock generator emits one
+    // sentence per source in each of those sections (plus the gap-note
+    // sentence for sections without a source — but here all three
+    // target sections have one), so the engine extracts exactly three
+    // materializable elements and the route emits exactly three
+    // `materializable-element.identified` events.
+    const [briefing] = await ctx.schema.db
+      .insert(parcelBriefings)
+      .values({ engagementId: eng.id })
+      .returning();
+    const sourceSeeds: Array<{
+      layerKind: string;
+      provider: string;
+    }> = [
+      { layerKind: "qgis-zoning", provider: "City of Boulder QGIS" }, // → c
+      { layerKind: "city-water", provider: "City of Boulder Utilities" }, // → d
+      { layerKind: "neighbor-massing", provider: "City of Boulder GIS" }, // → f
+    ];
+    for (const seed of sourceSeeds) {
+      await ctx.schema.db.insert(briefingSources).values({
+        briefingId: briefing.id,
+        layerKind: seed.layerKind,
+        sourceKind: "manual-upload",
+        provider: seed.provider,
+        note: "test seed",
+        uploadObjectPath: `/objects/${seed.layerKind}`,
+        uploadOriginalFilename: `${seed.layerKind}.geojson`,
+        uploadContentType: "application/geo+json",
+        uploadByteSize: 1024,
+        snapshotDate: new Date("2026-01-01T00:00:00Z"),
+      });
+    }
+
+    const kickoff = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/generate`)
+      .send({});
+    expect(kickoff.status).toBe(202);
+    await waitForStatus(eng.id, "completed");
+
+    // Pull every materializable-element.identified event for this
+    // briefing. The atom's entityId is content-addressed within the
+    // briefing — `materializable-element:{briefingId}:{section}:{index}`
+    // — so we filter by entityType and then by the briefingId payload
+    // field rather than by entityId equality.
+    const allMatEvents = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(eq(atomEvents.entityType, "materializable-element"));
+    const events = allMatEvents.filter(
+      (e) =>
+        (e.payload as { briefingId?: string } | null)?.briefingId ===
+        briefing.id,
+    );
+    // Mock generator emits exactly one sentence per source in sections
+    // C/D/F when each section has one source attached; the three-source
+    // seed above wires one element per section.
+    expect(events).toHaveLength(3);
+    for (const event of events) {
+      expect(event.eventType).toBe("materializable-element.identified");
+      const payload = event.payload as {
+        briefingId: string;
+        engagementId: string;
+        section: string;
+        index: number;
+        text: string;
+      };
+      expect(payload.briefingId).toBe(briefing.id);
+      expect(payload.engagementId).toBe(eng.id);
+      expect(["c", "d", "f"]).toContain(payload.section);
+      expect(payload.index).toBe(0);
+      expect(payload.text.length).toBeGreaterThan(0);
+      expect(event.entityId).toBe(
+        `materializable-element:${briefing.id}:${payload.section}:${payload.index}`,
+      );
+    }
+    // Each section appears exactly once across the three events.
+    const sections = events
+      .map((e) => (e.payload as { section: string }).section)
+      .sort();
+    expect(sections).toEqual(["c", "d", "f"]);
+  });
+
   it("409s when a generation is already in flight for the engagement", async () => {
     const eng = await seedEngagement();
     await seedBriefingWithSource(eng.id);

@@ -67,6 +67,10 @@ import {
   type ParcelBriefingEventType,
 } from "../atoms/parcel-briefing.atom";
 import {
+  MATERIALIZABLE_ELEMENT_EVENT_TYPES,
+  type MaterializableElementEventType,
+} from "../atoms/materializable-element.atom";
+import {
   ConverterError,
   DXF_LAYER_KINDS,
   getConverterClient,
@@ -1219,6 +1223,8 @@ const PARCEL_BRIEFING_GENERATED_EVENT_TYPE: ParcelBriefingEventType =
   PARCEL_BRIEFING_EVENT_TYPES[1];
 const PARCEL_BRIEFING_REGENERATED_EVENT_TYPE: ParcelBriefingEventType =
   PARCEL_BRIEFING_EVENT_TYPES[3];
+const MATERIALIZABLE_ELEMENT_IDENTIFIED_EVENT_TYPE: MaterializableElementEventType =
+  MATERIALIZABLE_ELEMENT_EVENT_TYPES[0];
 
 /** Stable system actor for engine-driven generation events. */
 const BRIEFING_ENGINE_ACTOR = {
@@ -1372,33 +1378,80 @@ async function emitParcelBriefingGeneratedEvent(
       "parcel-briefing generation event append failed — row update kept",
     );
   }
-  // DA-PI-5 hook: emit a `materializable-element` atom event when the
-  // feature flag is on. The atom is not yet registered (DA-PI-5 not
-  // landed), so by default we skip emission entirely. When the flag
-  // is on we attempt the append best-effort; a registry rejection is
-  // logged but does not bubble up.
-  if (process.env.BRIEFING_EMIT_MATERIALIZABLE === "true") {
+  // DA-PI-5: emit one `materializable-element.identified` event per
+  // requirement extracted from sections C/D/F. The atom is registered
+  // in `atoms/registry.ts`, so the previous `BRIEFING_EMIT_MATERIALIZABLE`
+  // env-flag gate is no longer needed — events flow on every successful
+  // generation. Emission is best-effort per element so a single
+  // history outage cannot fail the in-flight generation.
+  await emitMaterializableElementIdentifiedEvents(
+    history,
+    briefing,
+    result,
+    reqLog,
+  );
+}
+
+/**
+ * Append one `materializable-element.identified` event per requirement
+ * the engine extracted from sections C/D/F. Per-element entityId is
+ * content-addressed within the briefing — `materializable-element:
+ * {briefingId}:{section}:{index}` — so re-running generation against
+ * the same input deterministically lands on the same atom ids and
+ * downstream design-tooling subscribers can dedupe across runs.
+ *
+ * Failures are caught + logged per element so a single bad append
+ * cannot prevent the rest of the requirements from being emitted.
+ * The parent `parcel-briefing.generated` event is the durable
+ * source-of-truth; `materializable-element.identified` is the
+ * downstream-subscription convenience.
+ */
+async function emitMaterializableElementIdentifiedEvents(
+  history: EventAnchoringService,
+  briefing: ParcelBriefing,
+  result: GenerateBriefingResult,
+  reqLog: typeof logger,
+): Promise<void> {
+  for (const element of result.materializableElements) {
+    const entityId = `materializable-element:${briefing.id}:${element.section}:${element.index}`;
     try {
-      await history.appendEvent({
+      const event = await history.appendEvent({
         entityType: "materializable-element",
-        entityId: briefing.engagementId,
-        eventType: "materializable-element.derived",
+        entityId,
+        eventType: MATERIALIZABLE_ELEMENT_IDENTIFIED_EVENT_TYPE,
         actor: BRIEFING_ENGINE_ACTOR,
         payload: {
           briefingId: briefing.id,
           engagementId: briefing.engagementId,
+          section: element.section,
+          index: element.index,
+          text: element.text,
           producer: result.producer,
           generatedAt: result.generatedAt.toISOString(),
         },
       });
       reqLog.info(
-        { briefingId: briefing.id },
-        "materializable-element event emitted (BRIEFING_EMIT_MATERIALIZABLE=true)",
+        {
+          briefingId: briefing.id,
+          engagementId: briefing.engagementId,
+          materializableElementId: entityId,
+          section: element.section,
+          index: element.index,
+          eventId: event.id,
+        },
+        "materializable-element.identified event appended",
       );
     } catch (err) {
-      reqLog.warn(
-        { err, briefingId: briefing.id },
-        "materializable-element event emission failed (atom likely not yet registered)",
+      reqLog.error(
+        {
+          err,
+          briefingId: briefing.id,
+          engagementId: briefing.engagementId,
+          materializableElementId: entityId,
+          section: element.section,
+          index: element.index,
+        },
+        "materializable-element.identified event append failed — continuing",
       );
     }
   }
