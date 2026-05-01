@@ -10,9 +10,13 @@
  * Producer flavor for a `briefing_sources` row. `manual-upload` is
 the DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`
 ships in DA-PI-2 when the federal-data adapters write into the
-same table. The two share the supersession contract so a
-consumer renders either kind without a producer-specific code
-path.
+same table; `state-adapter` and `local-adapter` (DA-PI-4) tag
+rows produced by the state-tier (UGRC / INSIDE Idaho / TCEQ)
+and local-tier (county GIS) adapters respectively. All four
+share the supersession contract so a consumer renders any kind
+without a producer-specific code path; the discriminator is
+purely informational and powers UI tier-grouping in the Site
+Context tab (federal / state / local).
 
  */
 export type BriefingSourceKind =
@@ -21,4 +25,6 @@ export type BriefingSourceKind =
 export const BriefingSourceKind = {
   "manual-upload": "manual-upload",
   "federal-adapter": "federal-adapter",
+  "state-adapter": "state-adapter",
+  "local-adapter": "local-adapter",
 } as const;

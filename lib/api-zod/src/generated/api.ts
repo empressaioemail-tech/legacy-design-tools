@@ -579,9 +579,14 @@ export const GetEngagementBriefingResponse = zod
               id: zod.string(),
               layerKind: zod.string(),
               sourceKind: zod
-                .enum(["manual-upload", "federal-adapter"])
+                .enum([
+                  "manual-upload",
+                  "federal-adapter",
+                  "state-adapter",
+                  "local-adapter",
+                ])
                 .describe(
-                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table. The two share the supersession contract so a\nconsumer renders either kind without a producer-specific code\npath.\n",
+                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table; `state-adapter` and `local-adapter` (DA-PI-4) tag\nrows produced by the state-tier (UGRC \/ INSIDE Idaho \/ TCEQ)\nand local-tier (county GIS) adapters respectively. All four\nshare the supersession contract so a consumer renders any kind\nwithout a producer-specific code path; the discriminator is\npurely informational and powers UI tier-grouping in the Site\nContext tab (federal \/ state \/ local).\n",
                 ),
               provider: zod.string().nullable(),
               snapshotDate: zod.coerce.date(),
@@ -692,9 +697,14 @@ export const ListEngagementBriefingSourcesResponse = zod
           id: zod.string(),
           layerKind: zod.string(),
           sourceKind: zod
-            .enum(["manual-upload", "federal-adapter"])
+            .enum([
+              "manual-upload",
+              "federal-adapter",
+              "state-adapter",
+              "local-adapter",
+            ])
             .describe(
-              "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table. The two share the supersession contract so a\nconsumer renders either kind without a producer-specific code\npath.\n",
+              "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table; `state-adapter` and `local-adapter` (DA-PI-4) tag\nrows produced by the state-tier (UGRC \/ INSIDE Idaho \/ TCEQ)\nand local-tier (county GIS) adapters respectively. All four\nshare the supersession contract so a consumer renders any kind\nwithout a producer-specific code path; the discriminator is\npurely informational and powers UI tier-grouping in the Site\nContext tab (federal \/ state \/ local).\n",
             ),
           provider: zod.string().nullable(),
           snapshotDate: zod.coerce.date(),
@@ -896,9 +906,14 @@ export const RestoreEngagementBriefingSourceResponse = zod
               id: zod.string(),
               layerKind: zod.string(),
               sourceKind: zod
-                .enum(["manual-upload", "federal-adapter"])
+                .enum([
+                  "manual-upload",
+                  "federal-adapter",
+                  "state-adapter",
+                  "local-adapter",
+                ])
                 .describe(
-                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table. The two share the supersession contract so a\nconsumer renders either kind without a producer-specific code\npath.\n",
+                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table; `state-adapter` and `local-adapter` (DA-PI-4) tag\nrows produced by the state-tier (UGRC \/ INSIDE Idaho \/ TCEQ)\nand local-tier (county GIS) adapters respectively. All four\nshare the supersession contract so a consumer renders any kind\nwithout a producer-specific code path; the discriminator is\npurely informational and powers UI tier-grouping in the Site\nContext tab (federal \/ state \/ local).\n",
                 ),
               provider: zod.string().nullable(),
               snapshotDate: zod.coerce.date(),
@@ -997,9 +1012,14 @@ export const RetryBriefingSourceConversionResponse = zod
               id: zod.string(),
               layerKind: zod.string(),
               sourceKind: zod
-                .enum(["manual-upload", "federal-adapter"])
+                .enum([
+                  "manual-upload",
+                  "federal-adapter",
+                  "state-adapter",
+                  "local-adapter",
+                ])
                 .describe(
-                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table. The two share the supersession contract so a\nconsumer renders either kind without a producer-specific code\npath.\n",
+                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table; `state-adapter` and `local-adapter` (DA-PI-4) tag\nrows produced by the state-tier (UGRC \/ INSIDE Idaho \/ TCEQ)\nand local-tier (county GIS) adapters respectively. All four\nshare the supersession contract so a consumer renders any kind\nwithout a producer-specific code path; the discriminator is\npurely informational and powers UI tier-grouping in the Site\nContext tab (federal \/ state \/ local).\n",
                 ),
               provider: zod.string().nullable(),
               snapshotDate: zod.coerce.date(),
@@ -1061,6 +1081,170 @@ export const RetryBriefingSourceConversionResponse = zod
   })
   .describe(
     "Wire envelope for the briefing read\/write routes. `briefing` is\n`null` when no briefing has been created yet for the engagement\n— the first call to `POST \/engagements\/{id}\/briefing\/sources`\nis what creates it. The envelope exists because OpenAPI 3.0's\n`nullable` modifier on a `$ref` to an object schema does not\ngenerate a clean `T | null` in our codegen toolchain.\n",
+  );
+
+/**
+ * Runs every adapter that applies to the engagement's resolved
+jurisdiction (federal / state / local tiers — DA-PI-2 + DA-PI-4)
+in parallel, then persists each successful adapter result as a
+`briefing_sources` row using the same supersession contract the
+manual-upload route uses (`layer_kind` partial-unique index;
+prior current row is stamped `superseded_by_id` ← new row's id
+and stays readable for history replay). Per locked decision #4
+("re-runs always supersede"), a fresh call always writes a new
+row per layer even when the upstream payload is byte-identical
+— the prior row remains queryable through the existing
+`?includeSuperseded=true` history path.
+
+The endpoint is best-effort at the adapter level: a single
+adapter failure (network blip, no-coverage at this lat/lng,
+upstream parse error) is surfaced in `outcomes[].status` /
+`outcomes[].error` rather than failing the whole batch. Only a
+request that resolves to a jurisdiction with zero applicable
+adapters returns 422.
+
+The first call creates the engagement's `parcel_briefings` row
+on demand (first-fetch-creates-briefing, mirroring the
+manual-upload route). Emits one
+`briefing-source.fetched` event per persisted row through the
+event-anchoring service; transient history outages cannot fail
+the HTTP request — the rows are the source of truth.
+
+ * @summary Run all applicable adapters and persist briefing-source rows
+ */
+export const GenerateEngagementLayersParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GenerateEngagementLayersResponse = zod
+  .object({
+    briefing: zod
+      .object({
+        id: zod.string(),
+        engagementId: zod.string(),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+        sources: zod.array(
+          zod
+            .object({
+              id: zod.string(),
+              layerKind: zod.string(),
+              sourceKind: zod
+                .enum([
+                  "manual-upload",
+                  "federal-adapter",
+                  "state-adapter",
+                  "local-adapter",
+                ])
+                .describe(
+                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table; `state-adapter` and `local-adapter` (DA-PI-4) tag\nrows produced by the state-tier (UGRC \/ INSIDE Idaho \/ TCEQ)\nand local-tier (county GIS) adapters respectively. All four\nshare the supersession contract so a consumer renders any kind\nwithout a producer-specific code path; the discriminator is\npurely informational and powers UI tier-grouping in the Site\nContext tab (federal \/ state \/ local).\n",
+                ),
+              provider: zod.string().nullable(),
+              snapshotDate: zod.coerce.date(),
+              note: zod.string().nullable(),
+              uploadObjectPath: zod.string().nullable(),
+              uploadOriginalFilename: zod.string().nullable(),
+              uploadContentType: zod.string().nullable(),
+              uploadByteSize: zod.number().nullable(),
+              dxfObjectPath: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — canonical `\/objects\/<id>` pointer of the original\nDXF when the row took the DXF→glb branch. Mirrors\n`uploadObjectPath` for the DXF case; null on the QGIS branch\nand on adapter rows. The viewer never reads this directly —\nit is the input the converter retry route re-runs against.\n",
+                ),
+              glbObjectPath: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — canonical `\/objects\/<id>` pointer of the converted\nglb when conversion has succeeded (`conversionStatus =\nready`). The viewer fetches the bytes via\n`GET \/briefing-sources\/{id}\/glb` rather than this path\ndirectly so the response can carry the right\n`Content-Type` + caching headers.\n",
+                ),
+              conversionStatus: zod
+                .enum(["pending", "converting", "ready", "failed", "dxf-only"])
+                .describe(
+                  "Lifecycle marker for the DXF→glb conversion pipeline (DA-MV-1).\n`pending` (queued \/ never attempted), `converting` (request in\nflight to the converter service), `ready` (glb available — the\nviewer can fetch bytes), `failed` (converter rejected — the UI\nsurfaces a retry action), `dxf-only` (DXF stored but no\nconversion attempted, e.g. a legacy\/imported row). Only set on\nthe DXF branch — QGIS uploads and federal-adapter rows leave\nthis field null.\n",
+                )
+                .nullable()
+                .describe(
+                  "DA-MV-1 — DXF→glb conversion lifecycle marker. Null on QGIS\nand adapter rows; populated on the DXF branch.\n",
+                ),
+              conversionError: zod
+                .string()
+                .nullable()
+                .describe(
+                  "DA-MV-1 — short human-readable error blurb stamped when\nconversion fails. Surfaced verbatim in the per-source\nstatus pill so the architect can decide whether to retry\nor re-export the DXF. Null on success and on non-DXF rows.\n",
+                ),
+              supersededAt: zod.coerce
+                .date()
+                .nullable()
+                .describe(
+                  "Stamped when the row is no longer the current source for its\n`(briefing_id, layer_kind)` slot — null while the row is\ncurrent. Surfaced on the wire so the history view can\ndistinguish current from superseded entries without an\nextra round-trip.\n",
+                ),
+              supersededById: zod
+                .string()
+                .nullable()
+                .describe(
+                  "Pointer to the briefing-source row that superseded this one,\nor null when this row is still current. Lets the UI\nreconstruct the per-layer chain (`prior → current`) without\nasking the server.\n",
+                ),
+              createdAt: zod.coerce.date(),
+            })
+            .describe(
+              "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+            ),
+        ),
+      })
+      .describe(
+        "The engagement's parcel briefing row plus its current sources.\n",
+      )
+      .nullable(),
+    outcomes: zod.array(
+      zod
+        .object({
+          adapterKey: zod
+            .string()
+            .describe(
+              "Stable adapter identifier in `<jurisdiction>:<source>` form\n(e.g. `bastrop-tx:floodplain`, `ugrc:parcels`). Same value\nthe persisted row carries in `provider`.\n",
+            ),
+          tier: zod.enum(["federal", "state", "local"]),
+          sourceKind: zod
+            .enum([
+              "manual-upload",
+              "federal-adapter",
+              "state-adapter",
+              "local-adapter",
+            ])
+            .describe(
+              "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table; `state-adapter` and `local-adapter` (DA-PI-4) tag\nrows produced by the state-tier (UGRC \/ INSIDE Idaho \/ TCEQ)\nand local-tier (county GIS) adapters respectively. All four\nshare the supersession contract so a consumer renders any kind\nwithout a producer-specific code path; the discriminator is\npurely informational and powers UI tier-grouping in the Site\nContext tab (federal \/ state \/ local).\n",
+            ),
+          layerKind: zod.string(),
+          status: zod.enum(["ok", "no-coverage", "failed"]),
+          error: zod
+            .object({
+              code: zod.enum([
+                "no-coverage",
+                "timeout",
+                "network-error",
+                "upstream-error",
+                "parse-error",
+                "unknown",
+              ]),
+              message: zod.string(),
+            })
+            .nullish()
+            .describe("Set only when `status=failed` (or `no-coverage`)."),
+          sourceId: zod
+            .string()
+            .nullish()
+            .describe(
+              "The id of the persisted `briefing_sources` row, set only on\n`status=ok` outcomes. The row itself is also embedded in\n`briefing.sources` on the same response so clients usually\ndon't need to follow up.\n",
+            ),
+        })
+        .describe(
+          "Per-adapter outcome for one `POST \/engagements\/{id}\/generate-layers`\ninvocation. `status=ok` means the adapter ran and a row was\npersisted (the row is included in `briefing.sources`); `status=\nno-coverage` means the adapter ran (or was skipped because its\njurisdiction gate did not match) and there is nothing to\npersist; `status=failed` means the adapter ran and threw — the\n`error` discriminates the reason so the UI can render an\nactionable message.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `POST \/engagements\/{id}\/generate-layers`.\nCarries the post-run briefing (with the freshly-persisted rows\nalready in `sources`) plus a per-adapter `outcomes` array so\nthe UI can render success \/ failure state alongside the data.\n",
   );
 
 /**

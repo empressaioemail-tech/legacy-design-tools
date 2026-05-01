@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
+    "@workspace/adapters": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/codes": "workspace:*",
     "@workspace/db": "workspace:*",

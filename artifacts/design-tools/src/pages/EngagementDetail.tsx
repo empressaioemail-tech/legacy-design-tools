@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  useGenerateEngagementLayers,
   useGetEngagement,
   useGetEngagementBriefing,
   useGetSnapshot,
@@ -19,6 +20,7 @@ import {
   type EngagementBriefingSource,
   type EngagementDetail as EngagementDetailType,
   type EngagementSubmissionSummary,
+  type GenerateLayersOutcome,
   type SubmissionReceipt,
   type SubmissionResponse,
   type SubmissionStatus,
@@ -974,15 +976,118 @@ function BriefingSourceHistoryPanel({
  * upload UI so federal-data adapters (DA-PI-2) and the briefing
  * engine (DA-PI-3) plug into a tab that is already shipping.
  */
+/**
+ * Tier of a briefing source for the Site Context group headings (DA-PI-4).
+ * Derived from `sourceKind`:
+ *   - `manual-upload` → grouped under `manual` (architect-uploaded
+ *     overlay, the DA-PI-1B path).
+ *   - `federal-adapter` → `federal` (DA-PI-2 placeholder).
+ *   - `state-adapter`   → `state`   (UGRC, INSIDE Idaho, TCEQ).
+ *   - `local-adapter`   → `local`   (county GIS).
+ *
+ * The function returns `manual` for any unrecognized kind so a
+ * future enum value can ship without crashing the UI before this
+ * map is updated.
+ */
+function tierForSource(
+  kind: EngagementBriefingSource["sourceKind"],
+): "federal" | "state" | "local" | "manual" {
+  if (kind === "federal-adapter") return "federal";
+  if (kind === "state-adapter") return "state";
+  if (kind === "local-adapter") return "local";
+  return "manual";
+}
+
+const TIER_LABELS: Record<
+  "federal" | "state" | "local" | "manual",
+  string
+> = {
+  federal: "Federal layers",
+  state: "State layers",
+  local: "Local layers",
+  manual: "Manually uploaded",
+};
+
+const TIER_DESCRIPTIONS: Record<
+  "federal" | "state" | "local" | "manual",
+  string
+> = {
+  federal:
+    "FEMA / USGS / EPA / FCC overlays (DA-PI-2 — federal adapters land in the next sprint).",
+  state:
+    "State-tier sources (UGRC for Utah, INSIDE Idaho for Idaho, TCEQ for Texas).",
+  local:
+    "County / city GIS sources (parcels, zoning, roads, floodplain) for the parcel's local jurisdiction.",
+  manual:
+    "Architect-uploaded QGIS overlays. Re-uploading a layer supersedes the prior source while keeping it on the timeline.",
+};
+
+const TIER_ORDER: Array<"federal" | "state" | "local" | "manual"> = [
+  "federal",
+  "state",
+  "local",
+  "manual",
+];
+
 function SiteContextTab({ engagementId }: { engagementId: string }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const briefingQuery = useGetEngagementBriefing(engagementId);
+  const queryClient = useQueryClient();
+
+  // DA-PI-4 — unified Generate Layers run. Successful outcomes are
+  // committed as fresh `briefing_sources` rows on the server, so
+  // after the mutation resolves we refetch the briefing to pick
+  // them up (the mutation also returns the post-run briefing inline,
+  // but the cached query is what every other surface in this page
+  // reads from). Per-adapter outcomes are kept in local state so the
+  // UI can render OK / failed / no-coverage badges next to each
+  // adapter row until the next run.
+  const generateMutation = useGenerateEngagementLayers({
+    mutation: {
+      onSuccess: async (data) => {
+        setLastOutcomes(data.outcomes);
+        setLastGenerateError(null);
+        await queryClient.invalidateQueries({
+          queryKey: getGetEngagementBriefingQueryKey(engagementId),
+        });
+      },
+      onError: (err) => {
+        // The hook's error type is the OpenAPI `ErrorResponse`
+        // envelope — surface its `error` slug verbatim if present
+        // so the operator gets the same human-readable string the
+        // server logged.
+        const message =
+          (err as { error?: string; message?: string } | undefined)?.message ??
+          (err as { error?: string } | undefined)?.error ??
+          "Failed to generate layers.";
+        setLastOutcomes([]);
+        setLastGenerateError(message);
+      },
+    },
+  });
+  const [lastOutcomes, setLastOutcomes] = useState<GenerateLayersOutcome[]>([]);
+  const [lastGenerateError, setLastGenerateError] = useState<string | null>(
+    null,
+  );
 
   const sources = briefingQuery.data?.briefing?.sources ?? [];
   const existingLayerKinds = useMemo(
     () => sources.map((s) => s.layerKind),
     [sources],
   );
+
+  // Bucket sources by tier (DA-PI-4). Manual-upload rows land in
+  // their own tier so the "manually uploaded" set stays distinct
+  // from the auto-fetched federal/state/local rows. Each bucket
+  // preserves the newest-first order from the briefing read.
+  const sourcesByTier = useMemo(() => {
+    const acc: Record<
+      "federal" | "state" | "local" | "manual",
+      EngagementBriefingSource[]
+    > = { federal: [], state: [], local: [], manual: [] };
+    for (const s of sources) acc[tierForSource(s.sourceKind)].push(s);
+    return acc;
+  }, [sources]);
 
   // Sub-tab toggle (DA-MV-1, Spec 52 §2). The viewer is the primary
   // surface for an engagement that already has converted DXF
@@ -1026,20 +1131,96 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
               marginTop: 2,
             }}
           >
-            Manually-uploaded QGIS layers and (soon) federal-data overlays
-            cited by the engagement's parcel briefing. Re-uploading a layer
-            supersedes the prior source while keeping it on the timeline.
+            Federal, state, and local overlays cited by the engagement's
+            parcel briefing — fetched automatically by the Generate Layers
+            run, plus any architect-uploaded QGIS overlays. Re-running or
+            re-uploading a layer supersedes the prior source while keeping
+            it on the timeline.
           </div>
         </div>
-        <button
-          type="button"
-          className="sc-btn sc-btn-primary"
-          onClick={() => setUploadOpen(true)}
-          data-testid="briefing-source-upload-button"
-        >
-          Upload site context source
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="sc-btn"
+            onClick={() => generateMutation.mutate({ id: engagementId })}
+            disabled={generateMutation.isPending}
+            data-testid="generate-layers-button"
+            title="Run every applicable federal/state/local adapter and persist the results as briefing sources."
+          >
+            {generateMutation.isPending ? "Generating…" : "Generate Layers"}
+          </button>
+          <button
+            type="button"
+            className="sc-btn sc-btn-primary"
+            onClick={() => setUploadOpen(true)}
+            data-testid="briefing-source-upload-button"
+          >
+            Upload site context source
+          </button>
+        </div>
       </div>
+
+      {lastGenerateError && (
+        <div
+          role="alert"
+          data-testid="generate-layers-error"
+          style={{
+            fontSize: 12,
+            color: "var(--danger-text)",
+            background: "var(--danger-dim)",
+            padding: 8,
+            borderRadius: 4,
+          }}
+        >
+          {lastGenerateError}
+        </div>
+      )}
+
+      {lastOutcomes.length > 0 && (
+        <div
+          data-testid="generate-layers-outcomes"
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            background: "var(--surface-2, var(--info-dim))",
+            padding: 8,
+            borderRadius: 4,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <div style={{ fontWeight: 600 }}>Last Generate Layers run</div>
+          {lastOutcomes.map((o) => (
+            <div
+              key={o.adapterKey}
+              data-testid={`generate-layers-outcome-${o.adapterKey}`}
+              style={{ display: "flex", gap: 8, alignItems: "baseline" }}
+            >
+              <span style={{ fontFamily: "monospace" }}>{o.adapterKey}</span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color:
+                    o.status === "ok"
+                      ? "var(--success-text)"
+                      : o.status === "no-coverage"
+                        ? "var(--text-muted)"
+                        : "var(--danger-text)",
+                }}
+              >
+                {o.status}
+              </span>
+              {o.error && (
+                <span style={{ color: "var(--text-muted)" }}>
+                  — {o.error.message}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div
         style={{
@@ -1197,17 +1378,57 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: 8,
+            gap: 16,
           }}
           data-testid="briefing-sources-list"
         >
-          {sources.map((source) => (
-            <BriefingSourceRow
-              key={source.id}
-              engagementId={engagementId}
-              source={source}
-            />
-          ))}
+          {TIER_ORDER.filter((tier) => sourcesByTier[tier].length > 0).map(
+            (tier) => (
+              <div
+                key={tier}
+                data-testid={`briefing-sources-tier-${tier}`}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div>
+                  <div
+                    className="sc-medium"
+                    style={{ fontSize: 13 }}
+                  >
+                    {TIER_LABELS[tier]}{" "}
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        fontWeight: 400,
+                      }}
+                    >
+                      ({sourcesByTier[tier].length})
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-muted)",
+                      marginTop: 2,
+                    }}
+                  >
+                    {TIER_DESCRIPTIONS[tier]}
+                  </div>
+                </div>
+                {sourcesByTier[tier].map((source) => (
+                  <BriefingSourceRow
+                    key={source.id}
+                    engagementId={engagementId}
+                    source={source}
+                  />
+                ))}
+              </div>
+            ),
+          )}
         </div>
       )}
 

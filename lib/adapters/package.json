@@ -1,0 +1,30 @@
+{
+  "name": "@workspace/adapters",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./registry": "./src/registry.ts",
+    "./runner": "./src/runner.ts",
+    "./state/utah": "./src/state/utah.ts",
+    "./state/idaho": "./src/state/idaho.ts",
+    "./state/texas": "./src/state/texas.ts",
+    "./local/grand-county-ut": "./src/local/grand-county-ut.ts",
+    "./local/lemhi-county-id": "./src/local/lemhi-county-id.ts",
+    "./local/bastrop-tx": "./src/local/bastrop-tx.ts",
+    "./setbacks": "./src/local/setbacks/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "~5.9.2",
+    "vitest": "catalog:"
+  }
+}

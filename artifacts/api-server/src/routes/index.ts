@@ -15,6 +15,7 @@ import storageRouter from "./storage";
 import sessionRouter from "./session";
 import parcelBriefingsRouter from "./parcelBriefings";
 import briefingSourcesRouter from "./briefingSources";
+import generateLayersRouter from "./generateLayers";
 
 const router: IRouter = Router();
 
@@ -26,6 +27,12 @@ router.use(matchRouter);
 // before engagementsRouter so its more-specific paths match first (mirrors
 // the matchRouter ordering note above).
 router.use(parcelBriefingsRouter);
+// generateLayersRouter mounts under /engagements/:id/generate-layers — a
+// distinct path from parcelBriefingsRouter (which owns the /briefing
+// subtree) so ordering relative to engagementsRouter is indifferent;
+// kept adjacent to its sibling so the briefing-related routes stay
+// grouped.
+router.use(generateLayersRouter);
 // briefingSourcesRouter exposes top-level `/briefing-sources/:id/glb`
 // for the DA-MV-1 viewer; ordering relative to engagementsRouter is
 // indifferent (no path overlap) but kept adjacent to its sibling so

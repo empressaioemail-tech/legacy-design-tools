@@ -1,0 +1,524 @@
+/**
+ * /api/engagements/:id/generate-layers — DA-PI-4 unified adapter run.
+ *
+ * One endpoint that:
+ *   1. Resolves the engagement's jurisdiction (state + local key) from
+ *      the existing site-context columns (`jurisdiction_city`,
+ *      `jurisdiction_state`, the freeform `jurisdiction`, and the
+ *      address line as a last-resort scan).
+ *   2. Filters {@link ALL_ADAPTERS} down to the ones whose
+ *      `appliesTo(ctx)` returns true.
+ *   3. Runs them in parallel through the `@workspace/adapters` runner
+ *      with per-adapter failure isolation + a 15s soft timeout.
+ *   4. Persists every successful result as a `briefing_sources` row,
+ *      reusing the same supersession contract the manual-upload route
+ *      uses (Spec 51 §4 / parcelBriefings.ts):
+ *         - `layer_kind` is the per-layer key the partial unique index
+ *           gates on.
+ *         - The prior current row's `superseded_at` is stamped, then
+ *           the new row is inserted, then the prior row's
+ *           `superseded_by_id` is backfilled with the new id.
+ *         - Per locked decision #4 ("re-runs always supersede"), a
+ *           re-run always writes a new row even if the upstream
+ *           payload is byte-identical.
+ *   5. Returns a single envelope carrying the post-run briefing (with
+ *      `sources` re-projected from the canonical "current" view) +
+ *      a per-adapter outcomes array so the UI can render OK / failed
+ *      / no-coverage state alongside the data.
+ *
+ * Best-effort `briefing-source.fetched` event emission per persisted
+ * row, mirroring the contract used by parcelBriefings.ts: a transient
+ * history outage cannot fail the HTTP request — the row is the source
+ * of truth, the event chain is observability.
+ */
+
+import { Router, type IRouter, type Request, type Response } from "express";
+import {
+  db,
+  engagements,
+  parcelBriefings,
+  briefingSources,
+  type ParcelBriefing,
+  type BriefingSource,
+} from "@workspace/db";
+import {
+  ALL_ADAPTERS,
+  resolveJurisdiction,
+  runAdapters,
+  type AdapterContext,
+  type AdapterRunOutcome,
+} from "@workspace/adapters";
+import { GenerateEngagementLayersParams } from "@workspace/api-zod";
+import { and, desc, eq, isNull } from "drizzle-orm";
+import type { EventAnchoringService } from "@workspace/empressa-atom";
+import { logger } from "../lib/logger";
+import { getHistoryService } from "../atoms/registry";
+import {
+  BRIEFING_SOURCE_EVENT_TYPES,
+  type BriefingSourceEventType,
+} from "../atoms/briefing-source.atom";
+
+/**
+ * Pinned to the briefing-source atom's event-type union so a rename
+ * in the atom registration breaks compilation here rather than
+ * silently emitting a stale event name.
+ */
+const BRIEFING_SOURCE_FETCHED_EVENT_TYPE: BriefingSourceEventType =
+  BRIEFING_SOURCE_EVENT_TYPES[0];
+
+/** Distinct system actor for adapter-driven inserts. */
+const BRIEFING_ADAPTER_ACTOR = {
+  kind: "system" as const,
+  id: "briefing-generate-layers",
+};
+
+/**
+ * Wire shape mirrors `BriefingSourceWire` in parcelBriefings.ts. Kept
+ * as a sibling rather than imported so a cosmetic refactor of one
+ * route's projection cannot accidentally break the other.
+ */
+interface BriefingSourceWire {
+  id: string;
+  layerKind: string;
+  sourceKind:
+    | "manual-upload"
+    | "federal-adapter"
+    | "state-adapter"
+    | "local-adapter";
+  provider: string | null;
+  snapshotDate: string;
+  note: string | null;
+  uploadObjectPath: string | null;
+  uploadOriginalFilename: string | null;
+  uploadContentType: string | null;
+  uploadByteSize: number | null;
+  dxfObjectPath: string | null;
+  glbObjectPath: string | null;
+  conversionStatus:
+    | "pending"
+    | "converting"
+    | "ready"
+    | "failed"
+    | "dxf-only"
+    | null;
+  conversionError: string | null;
+  supersededAt: string | null;
+  supersededById: string | null;
+  createdAt: string;
+}
+
+interface BriefingWire {
+  id: string;
+  engagementId: string;
+  createdAt: string;
+  updatedAt: string;
+  sources: BriefingSourceWire[];
+}
+
+function toBriefingSourceWire(s: BriefingSource): BriefingSourceWire {
+  return {
+    id: s.id,
+    layerKind: s.layerKind,
+    // Cast to the closed wire enum: the column is `text` so the
+    // database technically allows any value, but the writers in this
+    // codebase are this route + parcelBriefings.ts which all stamp
+    // one of the four enum values. Anything else would be a schema-
+    // violation we want to surface as a TS error here rather than
+    // silently round-trip.
+    sourceKind: s.sourceKind as BriefingSourceWire["sourceKind"],
+    provider: s.provider,
+    snapshotDate: s.snapshotDate.toISOString(),
+    note: s.note,
+    uploadObjectPath: s.uploadObjectPath,
+    uploadOriginalFilename: s.uploadOriginalFilename,
+    uploadContentType: s.uploadContentType,
+    uploadByteSize: s.uploadByteSize,
+    dxfObjectPath: s.dxfObjectPath,
+    glbObjectPath: s.glbObjectPath,
+    conversionStatus: s.conversionStatus as BriefingSourceWire["conversionStatus"],
+    conversionError: s.conversionError,
+    supersededAt: s.supersededAt ? s.supersededAt.toISOString() : null,
+    supersededById: s.supersededById,
+    createdAt: s.createdAt.toISOString(),
+  };
+}
+
+function toBriefingWire(
+  briefing: ParcelBriefing,
+  sources: BriefingSource[],
+): BriefingWire {
+  return {
+    id: briefing.id,
+    engagementId: briefing.engagementId,
+    createdAt: briefing.createdAt.toISOString(),
+    updatedAt: briefing.updatedAt.toISOString(),
+    sources: sources.map(toBriefingSourceWire),
+  };
+}
+
+async function loadCurrentSources(
+  briefingId: string,
+): Promise<BriefingSource[]> {
+  return db
+    .select()
+    .from(briefingSources)
+    .where(
+      and(
+        eq(briefingSources.briefingId, briefingId),
+        isNull(briefingSources.supersededAt),
+      ),
+    )
+    .orderBy(desc(briefingSources.createdAt));
+}
+
+/**
+ * Mirror of parcelBriefings.ts's helper, with the source-actor swapped
+ * for the adapter-driven actor so audit-trail readers can tell apart
+ * a manual upload from an automatic adapter fetch.
+ */
+async function emitBriefingSourceFetchedEvent(
+  history: EventAnchoringService,
+  source: BriefingSource,
+  engagementId: string,
+  supersededSourceId: string | null,
+  adapterKey: string,
+  reqLog: typeof logger,
+): Promise<void> {
+  try {
+    const event = await history.appendEvent({
+      entityType: "briefing-source",
+      entityId: source.id,
+      eventType: BRIEFING_SOURCE_FETCHED_EVENT_TYPE,
+      actor: BRIEFING_ADAPTER_ACTOR,
+      payload: {
+        briefingId: source.briefingId,
+        engagementId,
+        layerKind: source.layerKind,
+        sourceKind: source.sourceKind,
+        adapterKey,
+        supersededSourceId,
+      },
+    });
+    reqLog.info(
+      {
+        briefingSourceId: source.id,
+        briefingId: source.briefingId,
+        engagementId,
+        layerKind: source.layerKind,
+        adapterKey,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "briefing-source.fetched event appended (adapter-driven)",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        briefingSourceId: source.id,
+        briefingId: source.briefingId,
+        engagementId,
+        layerKind: source.layerKind,
+        adapterKey,
+      },
+      "briefing-source.fetched event append failed — row insert kept",
+    );
+  }
+}
+
+/**
+ * Wire shape for one entry in the response `outcomes` array — pinned
+ * to the OpenAPI `GenerateLayersOutcome` schema. Kept as a structural
+ * type rather than importing the generated type so a generated-code
+ * regeneration cycle that hasn't run yet can't break this file's
+ * typecheck.
+ */
+interface GenerateLayersOutcomeWire {
+  adapterKey: string;
+  tier: "federal" | "state" | "local";
+  sourceKind: "manual-upload" | "federal-adapter" | "state-adapter" | "local-adapter";
+  layerKind: string;
+  status: "ok" | "no-coverage" | "failed";
+  error: { code: string; message: string } | null;
+  sourceId: string | null;
+}
+
+const router: IRouter = Router();
+
+router.post(
+  "/engagements/:id/generate-layers",
+  async (req: Request, res: Response) => {
+    const paramsParse = GenerateEngagementLayersParams.safeParse(req.params);
+    if (!paramsParse.success) {
+      res.status(400).json({ error: "invalid_engagement_id" });
+      return;
+    }
+    const engagementId = paramsParse.data.id;
+    const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
+
+    let engRow:
+      | {
+          id: string;
+          jurisdiction: string | null;
+          jurisdictionCity: string | null;
+          jurisdictionState: string | null;
+          address: string | null;
+          latitude: string | null;
+          longitude: string | null;
+        }
+      | undefined;
+    try {
+      const rows = await db
+        .select({
+          id: engagements.id,
+          jurisdiction: engagements.jurisdiction,
+          jurisdictionCity: engagements.jurisdictionCity,
+          jurisdictionState: engagements.jurisdictionState,
+          address: engagements.address,
+          latitude: engagements.latitude,
+          longitude: engagements.longitude,
+        })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      engRow = rows[0];
+    } catch (err) {
+      reqLog.error({ err, engagementId }, "generate-layers: load engagement failed");
+      res.status(500).json({ error: "Failed to load engagement" });
+      return;
+    }
+    if (!engRow) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+
+    // Resolve the jurisdiction from whatever site-context fields the
+    // engagement happens to have populated. The resolver is permissive
+    // — it accepts city + state, the freeform jurisdiction string, or
+    // an address scan. A miss returns `{ stateKey: null, localKey: null }`,
+    // in which case `appliesTo` will reject every adapter and we 422.
+    const jurisdiction = resolveJurisdiction({
+      jurisdictionCity: engRow.jurisdictionCity,
+      jurisdictionState: engRow.jurisdictionState,
+      jurisdiction: engRow.jurisdiction,
+      address: engRow.address,
+    });
+
+    // Adapters that do their work over a lat/lng (every spatial query
+    // adapter in this sprint) cannot run without coordinates. We do
+    // not 422 here: a non-spatial adapter could still apply (none in
+    // P0, but the contract should accommodate them). The runner
+    // surfaces the per-adapter no-coverage outcome on its own.
+    const lat = engRow.latitude ? Number(engRow.latitude) : NaN;
+    const lng = engRow.longitude ? Number(engRow.longitude) : NaN;
+    const haveCoords = Number.isFinite(lat) && Number.isFinite(lng);
+
+    const ctx: AdapterContext = {
+      parcel: haveCoords
+        ? { latitude: lat, longitude: lng }
+        : // Pass NaN through deliberately — adapters that need coords
+          // call `appliesTo` first and return no-coverage, so the
+          // runner's outcome is still deterministic. We log the gap
+          // so an operator can correlate "all adapters reported no-
+          // coverage" with "engagement was missing a geocode".
+          { latitude: NaN, longitude: NaN },
+      jurisdiction,
+      timeoutMs: 15_000,
+    };
+
+    if (!haveCoords) {
+      reqLog.warn(
+        { engagementId },
+        "generate-layers: engagement has no geocode — every adapter will report no-coverage",
+      );
+    }
+
+    // Apply the jurisdiction gate eagerly so an out-of-pilot
+    // engagement can be 422'd without spinning up a no-op runner.
+    const applicable = ALL_ADAPTERS.filter((a) => {
+      try {
+        return a.appliesTo(ctx);
+      } catch {
+        return false;
+      }
+    });
+    if (applicable.length === 0) {
+      res.status(422).json({
+        error: "no_applicable_adapters",
+        message: jurisdiction.stateKey
+          ? `No adapters configured for jurisdiction "${jurisdiction.stateKey}"${jurisdiction.localKey ? ` / ${jurisdiction.localKey}` : ""}.`
+          : "Could not resolve a pilot jurisdiction from this engagement's site context (city/state/address). Add a city + state and try again.",
+      });
+      return;
+    }
+
+    let outcomes: AdapterRunOutcome[];
+    try {
+      outcomes = await runAdapters({ adapters: applicable, context: ctx });
+    } catch (err) {
+      // The runner contract is "never throws" — a thrown error here
+      // is a programming bug rather than a runtime upstream failure.
+      reqLog.error({ err, engagementId }, "generate-layers: runner threw unexpectedly");
+      res.status(500).json({ error: "Failed to run adapters" });
+      return;
+    }
+
+    // Persist every OK outcome inside one transaction so a partial
+    // commit cannot leave the briefing in a half-updated state. We
+    // collect (outcome, persisted source row) pairs so the post-
+    // commit event emission has the row id for each.
+    interface PersistedRow {
+      outcome: AdapterRunOutcome;
+      newSource: BriefingSource;
+      supersededSourceId: string | null;
+    }
+    let persisted: PersistedRow[] = [];
+    let briefingRow: ParcelBriefing | null = null;
+    try {
+      ({ briefingRow, persisted } = await db.transaction(async (tx) => {
+        // First-fetch-creates-briefing: same upsert pattern the
+        // manual-upload route uses (engagement_id is unique on
+        // parcel_briefings).
+        const [briefing] = await tx
+          .insert(parcelBriefings)
+          .values({ engagementId })
+          .onConflictDoUpdate({
+            target: parcelBriefings.engagementId,
+            set: { updatedAt: new Date() },
+          })
+          .returning();
+
+        const persistedLocal: PersistedRow[] = [];
+        const supersededAt = new Date();
+        for (const outcome of outcomes) {
+          if (outcome.status !== "ok" || !outcome.result) continue;
+          const result = outcome.result;
+          // Per-layer supersession: stamp the prior current row,
+          // insert the new one, then backfill superseded_by_id —
+          // matching the strict order parcelBriefings.ts uses.
+          const priorRows = await tx
+            .select({ id: briefingSources.id })
+            .from(briefingSources)
+            .where(
+              and(
+                eq(briefingSources.briefingId, briefing.id),
+                eq(briefingSources.layerKind, result.layerKind),
+                isNull(briefingSources.supersededAt),
+              ),
+            )
+            .limit(1);
+          const priorId = priorRows[0]?.id ?? null;
+          if (priorId) {
+            await tx
+              .update(briefingSources)
+              .set({ supersededAt })
+              .where(eq(briefingSources.id, priorId));
+          }
+          const [newSource] = await tx
+            .insert(briefingSources)
+            .values({
+              briefingId: briefing.id,
+              layerKind: result.layerKind,
+              // The wire enum was extended in DA-PI-4 to admit
+              // `state-adapter` / `local-adapter` — the adapter
+              // contract's `sourceKind` carries the chosen value.
+              sourceKind: result.sourceKind,
+              // Pack `<jurisdiction-key>:<source-name>` (the adapter
+              // key) into `provider` so the UI can render it as a
+              // stable identifier without a schema migration. The
+              // human-readable provider name is folded into the
+              // adapter result's `provider` field too — we prefer
+              // adapterKey because it round-trips to the adapter
+              // module unambiguously.
+              provider: `${result.adapterKey} (${result.provider})`,
+              snapshotDate: new Date(result.snapshotDate),
+              note: result.note ?? null,
+              // Adapter rows do not carry an upload — every upload
+              // field stays null so the wire shape's discriminated
+              // union reads cleanly.
+              uploadObjectPath: null,
+              uploadOriginalFilename: null,
+              uploadContentType: null,
+              uploadByteSize: null,
+              dxfObjectPath: null,
+              glbObjectPath: null,
+              conversionStatus: null,
+              conversionError: null,
+            })
+            .returning();
+          if (priorId) {
+            await tx
+              .update(briefingSources)
+              .set({ supersededById: newSource.id })
+              .where(eq(briefingSources.id, priorId));
+          }
+          persistedLocal.push({
+            outcome,
+            newSource,
+            supersededSourceId: priorId,
+          });
+        }
+        return { briefingRow: briefing, persisted: persistedLocal };
+      }));
+    } catch (err) {
+      reqLog.error(
+        { err, engagementId },
+        "generate-layers: persist transaction failed",
+      );
+      res.status(500).json({ error: "Failed to persist adapter results" });
+      return;
+    }
+
+    // Best-effort event emission per persisted row, awaited but never
+    // throws (see emitBriefingSourceFetchedEvent above).
+    const history = getHistoryService();
+    for (const row of persisted) {
+      await emitBriefingSourceFetchedEvent(
+        history,
+        row.newSource,
+        engagementId,
+        row.supersededSourceId,
+        row.outcome.adapterKey,
+        reqLog,
+      );
+    }
+
+    const persistedByAdapterKey = new Map<string, string>(
+      persisted.map((p) => [p.outcome.adapterKey, p.newSource.id]),
+    );
+    const outcomesWire: GenerateLayersOutcomeWire[] = outcomes.map((o) => ({
+      adapterKey: o.adapterKey,
+      tier: o.tier,
+      // Either the runner's hint, or fall back to the adapter's tier-
+      // derived sourceKind for no-coverage outcomes.
+      sourceKind:
+        (o.result?.sourceKind as GenerateLayersOutcomeWire["sourceKind"]) ??
+        (o.tier === "state"
+          ? "state-adapter"
+          : o.tier === "local"
+            ? "local-adapter"
+            : "federal-adapter"),
+      layerKind: o.layerKind,
+      status: o.status,
+      error: o.error
+        ? { code: o.error.code, message: o.error.message }
+        : null,
+      sourceId: persistedByAdapterKey.get(o.adapterKey) ?? null,
+    }));
+
+    if (!briefingRow) {
+      // Defensive: the transaction above always returns a briefing,
+      // but TS doesn't know that. Surface a 500 rather than a
+      // misleading null briefing on the wire.
+      res.status(500).json({ error: "Failed to project briefing" });
+      return;
+    }
+    const sources = await loadCurrentSources(briefingRow.id);
+    res.json({
+      briefing: toBriefingWire(briefingRow, sources),
+      outcomes: outcomesWire,
+    });
+  },
+);
+
+export default router;

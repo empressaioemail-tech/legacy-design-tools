@@ -194,9 +194,13 @@ server clock on every response update.
  * Producer flavor for a `briefing_sources` row. `manual-upload` is
 the DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`
 ships in DA-PI-2 when the federal-data adapters write into the
-same table. The two share the supersession contract so a
-consumer renders either kind without a producer-specific code
-path.
+same table; `state-adapter` and `local-adapter` (DA-PI-4) tag
+rows produced by the state-tier (UGRC / INSIDE Idaho / TCEQ)
+and local-tier (county GIS) adapters respectively. All four
+share the supersession contract so a consumer renders any kind
+without a producer-specific code path; the discriminator is
+purely informational and powers UI tier-grouping in the Site
+Context tab (federal / state / local).
 
  */
 export type BriefingSourceKind =
@@ -205,6 +209,8 @@ export type BriefingSourceKind =
 export const BriefingSourceKind = {
   "manual-upload": "manual-upload",
   "federal-adapter": "federal-adapter",
+  "state-adapter": "state-adapter",
+  "local-adapter": "local-adapter",
 } as const;
 
 /**
@@ -329,6 +335,87 @@ generate a clean `T | null` in our codegen toolchain.
  */
 export interface EngagementBriefingResponse {
   briefing: EngagementBriefing | null;
+}
+
+export type GenerateLayersOutcomeTier =
+  (typeof GenerateLayersOutcomeTier)[keyof typeof GenerateLayersOutcomeTier];
+
+export const GenerateLayersOutcomeTier = {
+  federal: "federal",
+  state: "state",
+  local: "local",
+} as const;
+
+export type GenerateLayersOutcomeStatus =
+  (typeof GenerateLayersOutcomeStatus)[keyof typeof GenerateLayersOutcomeStatus];
+
+export const GenerateLayersOutcomeStatus = {
+  ok: "ok",
+  "no-coverage": "no-coverage",
+  failed: "failed",
+} as const;
+
+export type GenerateLayersOutcomeErrorCode =
+  (typeof GenerateLayersOutcomeErrorCode)[keyof typeof GenerateLayersOutcomeErrorCode];
+
+export const GenerateLayersOutcomeErrorCode = {
+  "no-coverage": "no-coverage",
+  timeout: "timeout",
+  "network-error": "network-error",
+  "upstream-error": "upstream-error",
+  "parse-error": "parse-error",
+  unknown: "unknown",
+} as const;
+
+/**
+ * Set only when `status=failed` (or `no-coverage`).
+ */
+export type GenerateLayersOutcomeError = {
+  code: GenerateLayersOutcomeErrorCode;
+  message: string;
+} | null;
+
+/**
+ * Per-adapter outcome for one `POST /engagements/{id}/generate-layers`
+invocation. `status=ok` means the adapter ran and a row was
+persisted (the row is included in `briefing.sources`); `status=
+no-coverage` means the adapter ran (or was skipped because its
+jurisdiction gate did not match) and there is nothing to
+persist; `status=failed` means the adapter ran and threw — the
+`error` discriminates the reason so the UI can render an
+actionable message.
+
+ */
+export interface GenerateLayersOutcome {
+  /** Stable adapter identifier in `<jurisdiction>:<source>` form
+(e.g. `bastrop-tx:floodplain`, `ugrc:parcels`). Same value
+the persisted row carries in `provider`.
+ */
+  adapterKey: string;
+  tier: GenerateLayersOutcomeTier;
+  sourceKind: BriefingSourceKind;
+  layerKind: string;
+  status: GenerateLayersOutcomeStatus;
+  /** Set only when `status=failed` (or `no-coverage`). */
+  error?: GenerateLayersOutcomeError;
+  /** The id of the persisted `briefing_sources` row, set only on
+`status=ok` outcomes. The row itself is also embedded in
+`briefing.sources` on the same response so clients usually
+don't need to follow up.
+ */
+  sourceId?: string | null;
+}
+
+/**
+ * Wire envelope for `POST /engagements/{id}/generate-layers`.
+Carries the post-run briefing (with the freshly-persisted rows
+already in `sources`) plus a per-adapter `outcomes` array so
+the UI can render success / failure state alongside the data.
+
+ */
+export interface GenerateLayersResponse {
+  briefing: EngagementBriefing | null;
+  outcomes: GenerateLayersOutcome[];
 }
 
 /**

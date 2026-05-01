@@ -33,6 +33,7 @@ import type {
   EngagementSubmissionSummary,
   EngagementSummary,
   ErrorResponse,
+  GenerateLayersResponse,
   GetAtomHistoryParams,
   GetAtomSummaryParams,
   GetSnapshotSheetHistoryParams,
@@ -1501,6 +1502,119 @@ export const useRetryBriefingSourceConversion = <
   TContext
 > => {
   return useMutation(getRetryBriefingSourceConversionMutationOptions(options));
+};
+
+/**
+ * Runs every adapter that applies to the engagement's resolved
+jurisdiction (federal / state / local tiers — DA-PI-2 + DA-PI-4)
+in parallel, then persists each successful adapter result as a
+`briefing_sources` row using the same supersession contract the
+manual-upload route uses (`layer_kind` partial-unique index;
+prior current row is stamped `superseded_by_id` ← new row's id
+and stays readable for history replay). Per locked decision #4
+("re-runs always supersede"), a fresh call always writes a new
+row per layer even when the upstream payload is byte-identical
+— the prior row remains queryable through the existing
+`?includeSuperseded=true` history path.
+
+The endpoint is best-effort at the adapter level: a single
+adapter failure (network blip, no-coverage at this lat/lng,
+upstream parse error) is surfaced in `outcomes[].status` /
+`outcomes[].error` rather than failing the whole batch. Only a
+request that resolves to a jurisdiction with zero applicable
+adapters returns 422.
+
+The first call creates the engagement's `parcel_briefings` row
+on demand (first-fetch-creates-briefing, mirroring the
+manual-upload route). Emits one
+`briefing-source.fetched` event per persisted row through the
+event-anchoring service; transient history outages cannot fail
+the HTTP request — the rows are the source of truth.
+
+ * @summary Run all applicable adapters and persist briefing-source rows
+ */
+export const getGenerateEngagementLayersUrl = (id: string) => {
+  return `/api/engagements/${id}/generate-layers`;
+};
+
+export const generateEngagementLayers = async (
+  id: string,
+  options?: RequestInit,
+): Promise<GenerateLayersResponse> => {
+  return customFetch<GenerateLayersResponse>(
+    getGenerateEngagementLayersUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getGenerateEngagementLayersMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateEngagementLayers>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateEngagementLayers>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["generateEngagementLayers"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateEngagementLayers>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return generateEngagementLayers(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateEngagementLayersMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateEngagementLayers>>
+>;
+
+export type GenerateEngagementLayersMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Run all applicable adapters and persist briefing-source rows
+ */
+export const useGenerateEngagementLayers = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateEngagementLayers>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateEngagementLayers>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getGenerateEngagementLayersMutationOptions(options));
 };
 
 /**

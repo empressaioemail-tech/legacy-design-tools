@@ -98,7 +98,11 @@ const BRIEFING_MANUAL_UPLOAD_ACTOR = {
 interface BriefingSourceWire {
   id: string;
   layerKind: string;
-  sourceKind: "manual-upload" | "federal-adapter";
+  sourceKind:
+    | "manual-upload"
+    | "federal-adapter"
+    | "state-adapter"
+    | "local-adapter";
   provider: string | null;
   snapshotDate: string;
   note: string | null;
@@ -141,11 +145,13 @@ function toBriefingSourceWire(s: BriefingSource): BriefingSourceWire {
     id: s.id,
     layerKind: s.layerKind,
     // Cast to the closed wire enum: the column is `text` so the
-    // database technically allows any value, but the only writers in
-    // the codebase are this route (`manual-upload`) and the future
-    // federal-adapter (`federal-adapter`). Anything else would be a
-    // schema-violation we want to surface, not silently round-trip.
-    sourceKind: s.sourceKind as "manual-upload" | "federal-adapter",
+    // database technically allows any value, but the writers in the
+    // codebase are this route (`manual-upload`), the future federal
+    // adapter (`federal-adapter`), and the DA-PI-4 state/local
+    // adapters (`state-adapter` / `local-adapter`). Anything else
+    // would be a schema-violation we want to surface, not silently
+    // round-trip.
+    sourceKind: s.sourceKind as BriefingSourceWire["sourceKind"],
     provider: s.provider,
     snapshotDate: s.snapshotDate.toISOString(),
     note: s.note,

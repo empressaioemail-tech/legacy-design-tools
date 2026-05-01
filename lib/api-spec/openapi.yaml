@@ -638,6 +638,67 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{id}/generate-layers:
+    post:
+      operationId: generateEngagementLayers
+      tags: [engagements]
+      summary: Run all applicable adapters and persist briefing-source rows
+      description: |
+        Runs every adapter that applies to the engagement's resolved
+        jurisdiction (federal / state / local tiers — DA-PI-2 + DA-PI-4)
+        in parallel, then persists each successful adapter result as a
+        `briefing_sources` row using the same supersession contract the
+        manual-upload route uses (`layer_kind` partial-unique index;
+        prior current row is stamped `superseded_by_id` ← new row's id
+        and stays readable for history replay). Per locked decision #4
+        ("re-runs always supersede"), a fresh call always writes a new
+        row per layer even when the upstream payload is byte-identical
+        — the prior row remains queryable through the existing
+        `?includeSuperseded=true` history path.
+
+        The endpoint is best-effort at the adapter level: a single
+        adapter failure (network blip, no-coverage at this lat/lng,
+        upstream parse error) is surfaced in `outcomes[].status` /
+        `outcomes[].error` rather than failing the whole batch. Only a
+        request that resolves to a jurisdiction with zero applicable
+        adapters returns 422.
+
+        The first call creates the engagement's `parcel_briefings` row
+        on demand (first-fetch-creates-briefing, mirroring the
+        manual-upload route). Emits one
+        `briefing-source.fetched` event per persisted row through the
+        event-anchoring service; transient history outages cannot fail
+        the HTTP request — the rows are the source of truth.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Adapters dispatched; per-adapter outcomes + updated briefing returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateLayersResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: |
+            The engagement's jurisdiction did not resolve to any
+            applicable adapter (e.g. an out-of-pilot state). The
+            response body still uses the standard error envelope so
+            clients can render the message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /briefing-sources/{id}/glb:
     get:
       operationId: getBriefingSourceGlb
@@ -2010,12 +2071,18 @@ components:
         Producer flavor for a `briefing_sources` row. `manual-upload` is
         the DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`
         ships in DA-PI-2 when the federal-data adapters write into the
-        same table. The two share the supersession contract so a
-        consumer renders either kind without a producer-specific code
-        path.
+        same table; `state-adapter` and `local-adapter` (DA-PI-4) tag
+        rows produced by the state-tier (UGRC / INSIDE Idaho / TCEQ)
+        and local-tier (county GIS) adapters respectively. All four
+        share the supersession contract so a consumer renders any kind
+        without a producer-specific code path; the discriminator is
+        purely informational and powers UI tier-grouping in the Site
+        Context tab (federal / state / local).
       enum:
         - manual-upload
         - federal-adapter
+        - state-adapter
+        - local-adapter
 
     BriefingSourceConversionStatus:
       type: string
@@ -2200,6 +2267,79 @@ components:
           nullable: true
       required:
         - briefing
+
+    GenerateLayersOutcome:
+      type: object
+      description: |
+        Per-adapter outcome for one `POST /engagements/{id}/generate-layers`
+        invocation. `status=ok` means the adapter ran and a row was
+        persisted (the row is included in `briefing.sources`); `status=
+        no-coverage` means the adapter ran (or was skipped because its
+        jurisdiction gate did not match) and there is nothing to
+        persist; `status=failed` means the adapter ran and threw — the
+        `error` discriminates the reason so the UI can render an
+        actionable message.
+      properties:
+        adapterKey:
+          type: string
+          description: |
+            Stable adapter identifier in `<jurisdiction>:<source>` form
+            (e.g. `bastrop-tx:floodplain`, `ugrc:parcels`). Same value
+            the persisted row carries in `provider`.
+        tier:
+          type: string
+          enum: [federal, state, local]
+        sourceKind:
+          $ref: "#/components/schemas/BriefingSourceKind"
+        layerKind:
+          type: string
+        status:
+          type: string
+          enum: [ok, no-coverage, failed]
+        error:
+          type: object
+          nullable: true
+          description: Set only when `status=failed` (or `no-coverage`).
+          properties:
+            code:
+              type: string
+              enum:
+                - no-coverage
+                - timeout
+                - network-error
+                - upstream-error
+                - parse-error
+                - unknown
+            message:
+              type: string
+          required: [code, message]
+        sourceId:
+          type: string
+          nullable: true
+          description: |
+            The id of the persisted `briefing_sources` row, set only on
+            `status=ok` outcomes. The row itself is also embedded in
+            `briefing.sources` on the same response so clients usually
+            don't need to follow up.
+      required: [adapterKey, tier, sourceKind, layerKind, status]
+
+    GenerateLayersResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /engagements/{id}/generate-layers`.
+        Carries the post-run briefing (with the freshly-persisted rows
+        already in `sources`) plus a per-adapter `outcomes` array so
+        the UI can render success / failure state alongside the data.
+      properties:
+        briefing:
+          allOf:
+            - $ref: "#/components/schemas/EngagementBriefing"
+          nullable: true
+        outcomes:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenerateLayersOutcome"
+      required: [briefing, outcomes]
 
     EngagementBriefingSourcesResponse:
       type: object
