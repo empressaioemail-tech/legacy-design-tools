@@ -3167,6 +3167,52 @@ export const SendChatMessageBody = zod.object({
 });
 
 /**
+ * Lets the session's current `user`-kind requestor edit the
+`users.architect_pdf_header` column on their own profile row.
+Self-edit only — there is no `users:manage` admin gate, but
+the request must carry a `user`-kind requestor (anonymous /
+agent sessions get a 401).
+
+The header text feeds the briefing-export PDF
+(`GET /engagements/:id/briefing/export.pdf`); a null / empty
+/ whitespace-only value clears the override and the PDF route
+falls back to the default header
+("SmartCity Design Tools — Pre-Design Briefing").
+
+The user's profile row is upserted on the way in (mirroring the
+session-middleware backfill) so a freshly-seen architect editing
+their header on their first visit doesn't 404.
+
+ * @summary Update the current architect's PDF-export header override
+ */
+export const UpdateMyArchitectPdfHeaderBody = zod
+  .object({
+    architectPdfHeader: zod.string().nullable(),
+  })
+  .describe(
+    "Body for `PATCH \/me\/architect-pdf-header`. The string is trimmed\nserver-side; an empty \/ whitespace-only value (or explicit\n`null`) clears the override and the PDF route falls back to the\ndefault header. There is no length cap today — the briefing PDF\nlayout truncates visually if the architect picks something\nabsurdly long.\n",
+  );
+
+export const UpdateMyArchitectPdfHeaderResponse = zod
+  .object({
+    id: zod.string(),
+    displayName: zod.string(),
+    email: zod.string().nullable(),
+    avatarUrl: zod.string().nullable(),
+    architectPdfHeader: zod
+      .string()
+      .nullable()
+      .describe(
+        "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .describe(
+    'A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK\'d from `atom_events.actor.id`.\n\n`architectPdfHeader` is the per-architect override for the header\ntext printed on the stakeholder-briefing PDF export. Null falls\nback to the default (\"SmartCity Design Tools — Pre-Design\nBriefing\"). Architects edit their own value via\n`PATCH \/me\/architect-pdf-header`; the admin `PATCH \/users\/{id}`\nroute does not write the column today (the field is read-only on\nthe admin \"Users & Roles\" surface).\n',
+  );
+
+/**
  * Returns whatever `req.session` the server has attached for the
 caller. Today this is derived from the dev `pr_session` cookie
 / `x-requestor` / `x-permissions` header overrides outside
@@ -3209,11 +3255,17 @@ export const ListUsersResponseItem = zod
     displayName: zod.string(),
     email: zod.string().nullable(),
     avatarUrl: zod.string().nullable(),
+    architectPdfHeader: zod
+      .string()
+      .nullable()
+      .describe(
+        "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
   })
   .describe(
-    "A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK'd from `atom_events.actor.id`.\n",
+    'A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK\'d from `atom_events.actor.id`.\n\n`architectPdfHeader` is the per-architect override for the header\ntext printed on the stakeholder-briefing PDF export. Null falls\nback to the default (\"SmartCity Design Tools — Pre-Design\nBriefing\"). Architects edit their own value via\n`PATCH \/me\/architect-pdf-header`; the admin `PATCH \/users\/{id}`\nroute does not write the column today (the field is read-only on\nthe admin \"Users & Roles\" surface).\n',
   );
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
 
@@ -3260,11 +3312,17 @@ export const GetUserResponse = zod
     displayName: zod.string(),
     email: zod.string().nullable(),
     avatarUrl: zod.string().nullable(),
+    architectPdfHeader: zod
+      .string()
+      .nullable()
+      .describe(
+        "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
   })
   .describe(
-    "A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK'd from `atom_events.actor.id`.\n",
+    'A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK\'d from `atom_events.actor.id`.\n\n`architectPdfHeader` is the per-architect override for the header\ntext printed on the stakeholder-briefing PDF export. Null falls\nback to the default (\"SmartCity Design Tools — Pre-Design\nBriefing\"). Architects edit their own value via\n`PATCH \/me\/architect-pdf-header`; the admin `PATCH \/users\/{id}`\nroute does not write the column today (the field is read-only on\nthe admin \"Users & Roles\" surface).\n',
   );
 
 /**
@@ -3305,11 +3363,17 @@ export const UpdateUserResponse = zod
     displayName: zod.string(),
     email: zod.string().nullable(),
     avatarUrl: zod.string().nullable(),
+    architectPdfHeader: zod
+      .string()
+      .nullable()
+      .describe(
+        "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
   })
   .describe(
-    "A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK'd from `atom_events.actor.id`.\n",
+    'A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK\'d from `atom_events.actor.id`.\n\n`architectPdfHeader` is the per-architect override for the header\ntext printed on the stakeholder-briefing PDF export. Null falls\nback to the default (\"SmartCity Design Tools — Pre-Design\nBriefing\"). Architects edit their own value via\n`PATCH \/me\/architect-pdf-header`; the admin `PATCH \/users\/{id}`\nroute does not write the column today (the field is read-only on\nthe admin \"Users & Roles\" surface).\n',
   );
 
 /**

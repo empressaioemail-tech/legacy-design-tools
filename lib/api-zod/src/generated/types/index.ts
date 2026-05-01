@@ -146,6 +146,7 @@ export * from "./submissionReceipt";
 export * from "./submissionResponse";
 export * from "./submissionStatus";
 export * from "./updateEngagementBody";
+export * from "./updateMyArchitectPdfHeaderBody";
 export * from "./updateReviewerAnnotationBody";
 export * from "./updateUserBody";
 export * from "./uploadSnapshotSheetsBody";

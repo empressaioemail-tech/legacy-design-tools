@@ -80,6 +80,7 @@ import type {
   SubmissionReceipt,
   SubmissionResponse,
   UpdateEngagementBody,
+  UpdateMyArchitectPdfHeaderBody,
   UpdateReviewerAnnotationBody,
   UpdateUserBody,
   UploadSnapshotSheetsBody,
@@ -4740,6 +4741,109 @@ export const useSendChatMessage = <
   TContext
 > => {
   return useMutation(getSendChatMessageMutationOptions(options));
+};
+
+/**
+ * Lets the session's current `user`-kind requestor edit the
+`users.architect_pdf_header` column on their own profile row.
+Self-edit only — there is no `users:manage` admin gate, but
+the request must carry a `user`-kind requestor (anonymous /
+agent sessions get a 401).
+
+The header text feeds the briefing-export PDF
+(`GET /engagements/:id/briefing/export.pdf`); a null / empty
+/ whitespace-only value clears the override and the PDF route
+falls back to the default header
+("SmartCity Design Tools — Pre-Design Briefing").
+
+The user's profile row is upserted on the way in (mirroring the
+session-middleware backfill) so a freshly-seen architect editing
+their header on their first visit doesn't 404.
+
+ * @summary Update the current architect's PDF-export header override
+ */
+export const getUpdateMyArchitectPdfHeaderUrl = () => {
+  return `/api/me/architect-pdf-header`;
+};
+
+export const updateMyArchitectPdfHeader = async (
+  updateMyArchitectPdfHeaderBody: UpdateMyArchitectPdfHeaderBody,
+  options?: RequestInit,
+): Promise<User> => {
+  return customFetch<User>(getUpdateMyArchitectPdfHeaderUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateMyArchitectPdfHeaderBody),
+  });
+};
+
+export const getUpdateMyArchitectPdfHeaderMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyArchitectPdfHeader>>,
+    TError,
+    { data: BodyType<UpdateMyArchitectPdfHeaderBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyArchitectPdfHeader>>,
+  TError,
+  { data: BodyType<UpdateMyArchitectPdfHeaderBody> },
+  TContext
+> => {
+  const mutationKey = ["updateMyArchitectPdfHeader"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyArchitectPdfHeader>>,
+    { data: BodyType<UpdateMyArchitectPdfHeaderBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateMyArchitectPdfHeader(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyArchitectPdfHeaderMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyArchitectPdfHeader>>
+>;
+export type UpdateMyArchitectPdfHeaderMutationBody =
+  BodyType<UpdateMyArchitectPdfHeaderBody>;
+export type UpdateMyArchitectPdfHeaderMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update the current architect's PDF-export header override
+ */
+export const useUpdateMyArchitectPdfHeader = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyArchitectPdfHeader>>,
+    TError,
+    { data: BodyType<UpdateMyArchitectPdfHeaderBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyArchitectPdfHeader>>,
+  TError,
+  { data: BodyType<UpdateMyArchitectPdfHeaderBody> },
+  TContext
+> => {
+  return useMutation(getUpdateMyArchitectPdfHeaderMutationOptions(options));
 };
 
 /**

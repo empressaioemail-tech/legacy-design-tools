@@ -2050,6 +2050,55 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /me/architect-pdf-header:
+    patch:
+      operationId: updateMyArchitectPdfHeader
+      tags: [users]
+      summary: Update the current architect's PDF-export header override
+      description: |
+        Lets the session's current `user`-kind requestor edit the
+        `users.architect_pdf_header` column on their own profile row.
+        Self-edit only — there is no `users:manage` admin gate, but
+        the request must carry a `user`-kind requestor (anonymous /
+        agent sessions get a 401).
+
+        The header text feeds the briefing-export PDF
+        (`GET /engagements/:id/briefing/export.pdf`); a null / empty
+        / whitespace-only value clears the override and the PDF route
+        falls back to the default header
+        ("SmartCity Design Tools — Pre-Design Briefing").
+
+        The user's profile row is upserted on the way in (mirroring the
+        session-middleware backfill) so a freshly-seen architect editing
+        their header on their first visit doesn't 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMyArchitectPdfHeaderBody"
+      responses:
+        "200":
+          description: Updated user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: |
+            No `user`-kind requestor on the session — anonymous and
+            agent callers cannot self-edit a profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /session:
     get:
       operationId: getSession
@@ -4149,6 +4198,14 @@ components:
         `u1`; once real auth lands: the verified subject id from the auth
         provider). See `lib/db/src/schema/users.ts` for the rationale on
         why this is intentionally NOT FK'd from `atom_events.actor.id`.
+
+        `architectPdfHeader` is the per-architect override for the header
+        text printed on the stakeholder-briefing PDF export. Null falls
+        back to the default ("SmartCity Design Tools — Pre-Design
+        Briefing"). Architects edit their own value via
+        `PATCH /me/architect-pdf-header`; the admin `PATCH /users/{id}`
+        route does not write the column today (the field is read-only on
+        the admin "Users & Roles" surface).
       type: object
       properties:
         id:
@@ -4161,6 +4218,13 @@ components:
         avatarUrl:
           type: string
           nullable: true
+        architectPdfHeader:
+          type: string
+          nullable: true
+          description: |
+            Per-architect override for the briefing-export PDF header.
+            Null → fall back to the default header. Trimmed empty
+            strings are normalized to null on write.
         createdAt:
           type: string
           format: date-time
@@ -4172,6 +4236,7 @@ components:
         - displayName
         - email
         - avatarUrl
+        - architectPdfHeader
         - createdAt
         - updatedAt
 
@@ -4215,6 +4280,22 @@ components:
         avatarUrl:
           type: string
           nullable: true
+
+    UpdateMyArchitectPdfHeaderBody:
+      type: object
+      description: |
+        Body for `PATCH /me/architect-pdf-header`. The string is trimmed
+        server-side; an empty / whitespace-only value (or explicit
+        `null`) clears the override and the PDF route falls back to the
+        default header. There is no length cap today — the briefing PDF
+        layout truncates visually if the architect picks something
+        absurdly long.
+      properties:
+        architectPdfHeader:
+          type: string
+          nullable: true
+      required:
+        - architectPdfHeader
 
     RequestUploadUrlBody:
       type: object

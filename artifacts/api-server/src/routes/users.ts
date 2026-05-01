@@ -301,16 +301,22 @@ interface UserResponse {
   displayName: string;
   email: string | null;
   avatarUrl: string | null;
+  architectPdfHeader: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-function toUserResponse(row: UserRow): UserResponse {
+export function toUserResponse(row: UserRow): UserResponse {
   return {
     id: row.id,
     displayName: row.displayName,
     email: row.email,
     avatarUrl: row.avatarUrl,
+    // DA-PI-6 — exposed so the design-tools "Settings" page can read
+    // the current override without a separate fetch. The admin
+    // PATCH /users/{id} route does not write the column today; the
+    // architect updates it via PATCH /me/architect-pdf-header.
+    architectPdfHeader: row.architectPdfHeader,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

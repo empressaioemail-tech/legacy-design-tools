@@ -13,6 +13,7 @@ import reviewersRouter from "./reviewers";
 import settingsRouter from "./settings";
 import storageRouter from "./storage";
 import sessionRouter from "./session";
+import meRouter from "./me";
 import parcelBriefingsRouter from "./parcelBriefings";
 import briefingSourcesRouter from "./briefingSources";
 import bimModelsRouter from "./bimModels";
@@ -63,6 +64,10 @@ router.use(reviewersRouter);
 router.use(settingsRouter);
 router.use(storageRouter);
 router.use(sessionRouter);
+// `/me/*` self-edit surface (currently just the architect PDF header).
+// Distinct path subtree from `/users/*` (admin CRUD) so ordering is
+// indifferent.
+router.use(meRouter);
 // adapterCacheRouter mounts under `/admin/adapter-cache` — distinct
 // path subtree from everything else so ordering is indifferent.
 router.use(adapterCacheRouter);

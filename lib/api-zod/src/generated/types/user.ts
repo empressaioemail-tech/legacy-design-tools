@@ -14,12 +14,25 @@ identifier the session layer carries (today: dev cookie ids like
 provider). See `lib/db/src/schema/users.ts` for the rationale on
 why this is intentionally NOT FK'd from `atom_events.actor.id`.
 
+`architectPdfHeader` is the per-architect override for the header
+text printed on the stakeholder-briefing PDF export. Null falls
+back to the default ("SmartCity Design Tools — Pre-Design
+Briefing"). Architects edit their own value via
+`PATCH /me/architect-pdf-header`; the admin `PATCH /users/{id}`
+route does not write the column today (the field is read-only on
+the admin "Users & Roles" surface).
+
  */
 export interface User {
   id: string;
   displayName: string;
   email: string | null;
   avatarUrl: string | null;
+  /** Per-architect override for the briefing-export PDF header.
+Null → fall back to the default header. Trimmed empty
+strings are normalized to null on write.
+ */
+  architectPdfHeader: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   Palette,
   Search,
+  Settings as SettingsIcon,
 } from "lucide-react";
 
 interface AppShellProps {
@@ -61,6 +62,11 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
           label: "Style Probe",
           href: "/style-probe",
           icon: <Palette size={14} />,
+        },
+        {
+          label: "Settings",
+          href: "/settings",
+          icon: <SettingsIcon size={14} />,
         },
       ],
     },

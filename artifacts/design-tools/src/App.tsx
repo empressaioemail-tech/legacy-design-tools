@@ -8,6 +8,7 @@ import { Health } from "./pages/Health";
 import { CodeLibrary } from "./pages/CodeLibrary";
 import { DevAtoms } from "./pages/DevAtoms";
 import { DevAtomsProbe } from "./pages/DevAtomsProbe";
+import { Settings } from "./pages/Settings";
 import { AppShell } from "./components/AppShell";
 
 const queryClient = new QueryClient();
@@ -37,6 +38,11 @@ function Router() {
       <Route path="/health">
         <AppShell title="API Health">
           <Health />
+        </AppShell>
+      </Route>
+      <Route path="/settings">
+        <AppShell title="Settings">
+          <Settings />
         </AppShell>
       </Route>
       <Route path="/dev/atoms">

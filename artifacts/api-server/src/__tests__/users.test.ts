@@ -153,6 +153,10 @@ describe("GET /api/users", () => {
       displayName: "Alex",
       email: null,
       avatarUrl: null,
+      // DA-PI-6 — pinned in the spec / response shape so the
+      // design-tools Settings page can read the current override
+      // without a separate fetch.
+      architectPdfHeader: null,
       createdAt: expect.any(String),
       updatedAt: expect.any(String),
     });
