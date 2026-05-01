@@ -19,10 +19,16 @@
     "react": ">=18"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
     "@vitest/coverage-v8": "catalog:",
+    "happy-dom": "catalog:",
     "react": "catalog:",
+    "react-dom": "catalog:",
     "typescript": "~5.9.2",
     "vitest": "catalog:"
   }
