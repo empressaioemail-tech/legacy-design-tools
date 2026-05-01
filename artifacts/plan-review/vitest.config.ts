@@ -11,7 +11,8 @@ import path from "path";
  * stay in lock-step on test infra (the design-tools side already has a
  * companion SubmitToJurisdictionDialog test suite — this config lets the
  * plan-review side gain the same regression coverage for its post-submit
- * confirmation banner without diverging tooling).
+ * confirmation banner and other component-level e2e checks without
+ * diverging tooling).
  */
 export default defineConfig({
   plugins: [react()],
