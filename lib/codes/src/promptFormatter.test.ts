@@ -16,9 +16,11 @@ import { describe, it, expect } from "vitest";
 import {
   buildChatPrompt,
   formatSnapshotFocus,
+  formatSnapshotFocusBlocks,
   relativeTime,
   MAX_ATOM_BODY_CHARS,
   MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS,
+  MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
   type BuildChatPromptInput,
 } from "./promptFormatter";
 import type { RetrievedAtom } from "./retrieval";
@@ -482,7 +484,7 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
     );
   });
 
-  it("formatSnapshotFocus emits valid JSON when payload fits under the cap", () => {
+  it("formatSnapshotFocus emits valid JSON when payload fits under the per-block cap", () => {
     // Round-trip sanity: under the cap we should ship parseable JSON
     // so a human reading the prompt (or a future tool that parses it)
     // can rely on the contents. Above the cap we explicitly do NOT
@@ -494,5 +496,163 @@ describe("buildChatPrompt: snapshot focus mode (Task #39)", () => {
       .replace("\n</snapshot_focus>", "");
     expect(() => JSON.parse(inner)).not.toThrow();
     expect(JSON.parse(inner)).toEqual(payload);
+  });
+});
+
+describe("formatSnapshotFocusBlocks: cumulative cap (Task #47)", () => {
+  // Helper that produces a payload whose JSON-serialized form is at
+  // least `chars` characters long. We ship a single string field full
+  // of `x`s; the JSON encoding adds a few bytes of overhead (field
+  // name + quotes + braces + indentation) so the resulting block is
+  // always strictly larger than the requested `chars` value.
+  function payloadOfRoughSize(
+    chars: number,
+  ): { canary: string; blob: string } {
+    return { canary: "CANARY", blob: "x".repeat(chars) };
+  }
+
+  it("single block under the per-block cap is emitted intact (no cumulative-cap marker)", () => {
+    // Smoke test for the fits-fine path: one focus payload, comfortably
+    // under both caps. The combined-cap downgrade markers must not
+    // appear — they're reserved for the cumulative-cap path.
+    const blocks = formatSnapshotFocusBlocks([
+      { snapshotId: "snap-only-1", payload: payloadOfRoughSize(1_000) },
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toContain(`<snapshot_focus snapshot_id="snap-only-1">`);
+    expect(blocks[0]).toContain("</snapshot_focus>");
+    expect(blocks[0]).not.toContain("[truncated:");
+    // Cumulative size stays under both caps.
+    expect(blocks[0].length).toBeLessThan(MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS);
+    expect(blocks[0].length).toBeLessThan(
+      MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
+    );
+  });
+
+  it("multiple blocks whose combined size fits under the cumulative cap are all intact", () => {
+    // Four moderate payloads that together stay well under the
+    // cumulative cap. None should be truncated and the canary string
+    // should appear once per block (proving raw payloads were
+    // preserved end-to-end).
+    const each = 5_000;
+    const blocks = formatSnapshotFocusBlocks([
+      { snapshotId: "snap-a", payload: payloadOfRoughSize(each) },
+      { snapshotId: "snap-b", payload: payloadOfRoughSize(each) },
+      { snapshotId: "snap-c", payload: payloadOfRoughSize(each) },
+      { snapshotId: "snap-d", payload: payloadOfRoughSize(each) },
+    ]);
+    expect(blocks).toHaveLength(4);
+    for (const b of blocks) {
+      expect(b).not.toContain("[truncated:");
+      expect(b).toContain("CANARY");
+    }
+    const combined = blocks.reduce((sum, b) => sum + b.length, 0);
+    expect(combined).toBeLessThan(MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS);
+  });
+
+  it("combined cap fires: first block stays intact, later blocks are progressively trimmed with the cumulative-cap marker", () => {
+    // Each payload's JSON form is just over the per-block cap, so each
+    // individual block lands at ~per-block-cap chars after the existing
+    // per-block truncation. With 4 of them, the worst-case combined
+    // size would be ~240 KB — well above the 120 KB cumulative cap.
+    const oversized = MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 5_000;
+    const blocks = formatSnapshotFocusBlocks([
+      { snapshotId: "snap-1st", payload: payloadOfRoughSize(oversized) },
+      { snapshotId: "snap-2nd", payload: payloadOfRoughSize(oversized) },
+      { snapshotId: "snap-3rd", payload: payloadOfRoughSize(oversized) },
+      { snapshotId: "snap-4th", payload: payloadOfRoughSize(oversized) },
+    ]);
+    expect(blocks).toHaveLength(4);
+
+    // First block: intact (subject to the per-block cap, which fires
+    // here too — but NOT the cumulative-cap marker, which is reserved
+    // for downgrades caused by the combined budget).
+    expect(blocks[0]).toContain(`<snapshot_focus snapshot_id="snap-1st">`);
+    expect(blocks[0]).toContain(
+      "[truncated: payload exceeded the focus-mode size cap]",
+    );
+    expect(blocks[0]).not.toContain(
+      "[truncated: combined snapshot focus payloads exceeded the cumulative size cap",
+    );
+    // Per-block cap bounds the first block.
+    expect(blocks[0].length).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 200,
+    );
+
+    // At least one subsequent block must carry the combined-cap
+    // marker — that's the whole point of the cumulative cap firing.
+    const downgraded = blocks
+      .slice(1)
+      .filter((b) =>
+        b.includes(
+          "[truncated: combined snapshot focus payloads exceeded the cumulative size cap",
+        ),
+      );
+    expect(downgraded.length).toBeGreaterThan(0);
+
+    // Every block, including the last, retains its `<snapshot_focus
+    // snapshot_id="…">` shell so the snapshot ids stay citable in the
+    // instruction line above.
+    expect(blocks[1]).toContain(`<snapshot_focus snapshot_id="snap-2nd">`);
+    expect(blocks[2]).toContain(`<snapshot_focus snapshot_id="snap-3rd">`);
+    expect(blocks[3]).toContain(`<snapshot_focus snapshot_id="snap-4th">`);
+    for (const b of blocks) {
+      expect(b).toContain("</snapshot_focus>");
+    }
+
+    // The cumulative size of the emitted blocks must respect the
+    // cumulative cap (with a small allowance for the marker and the
+    // first block, which is always kept intact). The first block can
+    // be up to MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS, and the rest must
+    // collectively stay under the remaining cumulative budget.
+    const combined = blocks.reduce((sum, b) => sum + b.length, 0);
+    expect(combined).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS + 500,
+    );
+  });
+
+  it("buildChatPrompt wires the cumulative cap through so the system prompt stays bounded", () => {
+    // End-to-end check: the buildChatPrompt path (the one chat.ts
+    // actually calls) must use formatSnapshotFocusBlocks, not the
+    // raw per-block helper. Without the wiring fix from Task #47 the
+    // emitted system prompt would carry ~240 KB of payload bytes for
+    // 4 oversized snapshots; we assert the actual cumulative size of
+    // the snapshot focus blocks inside the system prompt is bounded.
+    const oversized = MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS + 5_000;
+    const { systemPrompt } = buildChatPrompt({
+      engagement: {
+        name: "Cap Test",
+        address: null,
+        jurisdiction: null,
+      },
+      latestSnapshot: {
+        receivedAt: new Date("2026-04-01T12:00:00Z"),
+        focusPayloads: [
+          { snapshotId: "snap-cap-1", payload: payloadOfRoughSize(oversized) },
+          { snapshotId: "snap-cap-2", payload: payloadOfRoughSize(oversized) },
+          { snapshotId: "snap-cap-3", payload: payloadOfRoughSize(oversized) },
+          { snapshotId: "snap-cap-4", payload: payloadOfRoughSize(oversized) },
+        ],
+      },
+      allAtoms: [],
+      attachedSheets: [],
+      question: "compare these snapshots",
+      now: () => new Date("2026-04-01T12:00:30Z"),
+    });
+
+    // Sum the total bytes inside `<snapshot_focus …>…</snapshot_focus>`
+    // wrappers in the emitted prompt and verify it respects the cap.
+    const re = /<snapshot_focus [^>]*>[\s\S]*?<\/snapshot_focus>/g;
+    const matches: string[] = systemPrompt.match(re) ?? [];
+    expect(matches).toHaveLength(4);
+    const combined = matches.reduce((sum, m) => sum + m.length, 0);
+    expect(combined).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS + 500,
+    );
+    // And the cumulative-cap marker must appear at least once,
+    // proving the cap actually fired (not just coincidentally fit).
+    expect(systemPrompt).toContain(
+      "combined snapshot focus payloads exceeded the cumulative size cap",
+    );
   });
 });

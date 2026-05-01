@@ -127,6 +127,24 @@ export interface PromptSnapshot {
  */
 export const MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS = 60_000;
 
+/**
+ * Cumulative cap across ALL `<snapshot_focus>` blocks emitted in a
+ * single chat turn (Task #47). The chat route allows up to
+ * `MAX_FOCUS_SNAPSHOTS` (currently 4) snapshots in focus mode at once;
+ * with the per-block cap of {@link MAX_SNAPSHOT_FOCUS_PAYLOAD_CHARS},
+ * the worst-case combined payload is ~240 KB, which can crowd out the
+ * rest of the prompt (engagement framing, framework atoms, retrieved
+ * code atoms) on Claude Sonnet's context budget.
+ *
+ * 120 KB = 2 × per-block cap leaves the first focus block fully intact
+ * even at its individual worst case while still capping the combined
+ * total at half of the previous worst case. When this cap fires, later
+ * blocks (in declaration order) are progressively trimmed — the first
+ * block stays untouched (subject to its own per-block cap) so
+ * comparison questions still have a stable anchor.
+ */
+export const MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS = 120_000;
+
 export interface PromptAttachedSheet {
   id: string;
   sheetNumber: string;
@@ -290,6 +308,115 @@ export function formatSnapshotFocus(
 }
 
 /**
+ * Marker emitted inside a `<snapshot_focus>` block when the *cumulative*
+ * cap (across blocks in the same turn — see
+ * {@link MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS}) forces a downgrade of
+ * a later block. Distinct from the per-block truncation marker used by
+ * {@link formatSnapshotFocus} so the model (and a human reading the
+ * prompt) can tell the two failure modes apart.
+ */
+const COMBINED_CAP_TRUNC_MARKER =
+  "\n[truncated: combined snapshot focus payloads exceeded the cumulative size cap]";
+
+/**
+ * Marker emitted in lieu of any payload bytes when the cumulative cap
+ * has already been spent before this block could fit anything. Keeps
+ * the `<snapshot_focus snapshot_id="…">` shell so the snapshot id stays
+ * citable even though the payload is gone.
+ */
+const COMBINED_CAP_OMITTED_MARKER =
+  "[truncated: combined snapshot focus payloads exceeded the cumulative size cap; full payload omitted]";
+
+/**
+ * Format every `<snapshot_focus>` block for a turn, enforcing both the
+ * per-block cap (via {@link formatSnapshotFocus}) and the cumulative
+ * cap {@link MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS} across the set.
+ *
+ * Contract:
+ *  - The first block is always emitted intact (subject to its own
+ *    per-block cap) so comparison questions retain a stable anchor
+ *    even when the rest of the set has to be clipped.
+ *  - Subsequent blocks fit only as long as cumulative size stays under
+ *    the budget. Once a block would push past the budget, its body is
+ *    truncated to the remaining room and tagged with
+ *    {@link COMBINED_CAP_TRUNC_MARKER}.
+ *  - If a later block has zero remaining budget, the block is still
+ *    emitted but carries only {@link COMBINED_CAP_OMITTED_MARKER} so
+ *    the snapshot id stays present (and citable) in the prompt.
+ *
+ * Note: the cumulative cap is intentionally **soft-bounded** — we
+ * always preserve a `<snapshot_focus snapshot_id="…">` shell + closing
+ * tag for every requested snapshot id (so the instruction line's
+ * citation hints stay valid), and the wrapper bytes themselves are
+ * accounted for after the cap is checked. Worst-case overshoot is the
+ * size of one shell + one omitted marker per remaining snapshot —
+ * roughly tens of bytes per entry, which is negligible vs. the cap. If
+ * the snapshot-count limit (`MAX_FOCUS_SNAPSHOTS` in the chat route)
+ * grows materially, revisit this trade-off — either lower the cap to
+ * keep the strict total bounded, or have callers drop trailing shells
+ * when no room remains.
+ *
+ * Returns one string per input entry, in input order.
+ */
+export function formatSnapshotFocusBlocks(
+  focusPayloads: ReadonlyArray<{ snapshotId: string; payload: unknown }>,
+): string[] {
+  const blocks: string[] = [];
+  let cumulative = 0;
+  for (let i = 0; i < focusPayloads.length; i++) {
+    const fp = focusPayloads[i];
+    const fullBlock = formatSnapshotFocus(fp.snapshotId, fp.payload);
+
+    // Always keep the first block intact (per-block cap already
+    // enforced by formatSnapshotFocus). The cumulative cap exists to
+    // protect the rest of the prompt; sacrificing the anchor block
+    // would defeat the point of focus mode for comparison questions.
+    if (i === 0) {
+      blocks.push(fullBlock);
+      cumulative += fullBlock.length;
+      continue;
+    }
+
+    const remaining = MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS - cumulative;
+    if (fullBlock.length <= remaining) {
+      blocks.push(fullBlock);
+      cumulative += fullBlock.length;
+      continue;
+    }
+
+    // Need to downgrade this block. Compute how much room is left for
+    // a payload body after accounting for the wrapper tags + the
+    // combined-cap truncation marker.
+    const header = `<snapshot_focus snapshot_id="${fp.snapshotId}">\n`;
+    const footer = "\n</snapshot_focus>";
+    const overhead = header.length + footer.length;
+
+    // First-pass try: emit the wrapper + a partial body + truncation
+    // marker. If that whole shape is already too big for the
+    // remaining budget, fall through to the payload-omitted shape.
+    const bodyRoom =
+      remaining - overhead - COMBINED_CAP_TRUNC_MARKER.length - 1; // -1 for the leading "…"
+    if (bodyRoom > 0) {
+      const json = JSON.stringify(fp.payload, null, 2);
+      const partial =
+        json.length > bodyRoom ? json.slice(0, bodyRoom) : json;
+      const body = partial + "…" + COMBINED_CAP_TRUNC_MARKER;
+      const block = header + body + footer;
+      blocks.push(block);
+      cumulative += block.length;
+      continue;
+    }
+
+    // Zero (or negative) bytes left for any payload — emit a marker-
+    // only block so the snapshot id stays present and citable.
+    const placeholder = header + COMBINED_CAP_OMITTED_MARKER + footer;
+    blocks.push(placeholder);
+    cumulative += placeholder.length;
+  }
+  return blocks;
+}
+
+/**
  * Human-friendly age string for the snapshot timestamp. Round-trips through
  * second/minute/hour/day buckets. Exported for direct testing.
  */
@@ -403,10 +530,7 @@ export function buildChatPrompt(
   const focusPayloads = latestSnapshot.focusPayloads ?? [];
   const snapshotFocusBlock =
     focusPayloads.length > 0
-      ? "\n\n" +
-        focusPayloads
-          .map((fp) => formatSnapshotFocus(fp.snapshotId, fp.payload))
-          .join("\n\n")
+      ? "\n\n" + formatSnapshotFocusBlocks(focusPayloads).join("\n\n")
       : "";
   const snapshotFocusInstruction =
     focusPayloads.length > 0
