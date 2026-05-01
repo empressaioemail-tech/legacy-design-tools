@@ -764,56 +764,26 @@ export function BriefingRecentRunsPanel({
                                   Narrative on screen before this run was
                                   overwritten
                                 </div>
-                                {/* Task #337 — meta line. The wire
-                                    envelope's `priorNarrative.generatedAt`
-                                    and `generatedBy` may be null for
-                                    legacy rows where the backup column
-                                    pre-dates per-row provenance; render
-                                    only the half that's present so we
-                                    never show "by null" or "at —".
-                                    Mirrors the design-tools Task #303
-                                    B.3 block byte-for-byte (same
-                                    testids, same "Briefing engine
-                                    (mock)" rewrite for the system
-                                    actor) so a future shared-lib
-                                    lift is a no-op. */}
-                                {(priorNarrative.generatedAt ||
-                                  priorNarrative.generatedBy) && (
-                                  <div
-                                    data-testid={`briefing-run-prior-narrative-meta-${run.generationId}`}
-                                    style={{
-                                      fontSize: 11,
-                                      color: "var(--text-muted)",
-                                    }}
-                                  >
-                                    {priorNarrative.generatedAt && (
-                                      <span
-                                        data-testid={`briefing-run-prior-narrative-generated-at-${run.generationId}`}
-                                      >
-                                        Generated{" "}
-                                        {new Date(
-                                          priorNarrative.generatedAt as
-                                            | Date
-                                            | string,
-                                        ).toLocaleString()}
-                                      </span>
-                                    )}
-                                    {priorNarrative.generatedBy && (
-                                      <>
-                                        {priorNarrative.generatedAt ? " " : ""}
-                                        <span
-                                          data-testid={`briefing-run-prior-narrative-generated-by-${run.generationId}`}
-                                        >
-                                          by{" "}
-                                          {priorNarrative.generatedBy ===
-                                          "system:briefing-engine"
-                                            ? "Briefing engine (mock)"
-                                            : priorNarrative.generatedBy}
-                                        </span>
-                                      </>
-                                    )}
-                                  </div>
-                                )}
+                                {/* Task #344 — the meta line itself
+                                    lives below the title/Copy-button
+                                    flex row (see the
+                                    `formatBriefingActor`-driven block
+                                    further down). An earlier mirror
+                                    pass also rendered it inside this
+                                    column with a hardcoded
+                                    "system:briefing-engine" ternary,
+                                    which (a) duplicated the
+                                    `briefing-run-prior-narrative-meta-…`
+                                    testid (every test that called
+                                    `findByTestId` on it threw on the
+                                    duplicate) and (b) re-introduced
+                                    the per-surface friendly-label
+                                    drift the shared
+                                    `@workspace/briefing-diff`
+                                    `formatBriefingActor` helper was
+                                    extracted to prevent. The single
+                                    rendering site below is the
+                                    canonical one. */}
                               </div>
                               {/* Task #333 — "Copy plain text" button.
                                   Concatenates the seven A–G bodies as
