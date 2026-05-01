@@ -136,23 +136,6 @@ export interface SubmissionReceipt {
 }
 
 /**
- * One past plan-review submission for an engagement, as returned
-by `GET /engagements/{id}/submissions`. The `jurisdiction`
-label is the denormalized snapshot captured at submission time
-(so a later jurisdiction change on the parent engagement does
-not retroactively rewrite the audit trail). `note` is the
-optional free-text note from the submission body, surfaced
-verbatim (capped to 2 KB by the create route's contract).
-
- */
-export interface EngagementSubmissionSummary {
-  id: string;
-  submittedAt: string;
-  jurisdiction: string | null;
-  note: string | null;
-}
-
-/**
  * Canonical jurisdiction-response status for a submission.
 `pending` is the default at insert (no response recorded yet);
 the other three are review outcomes the response route may
@@ -168,6 +151,35 @@ export const SubmissionStatus = {
   corrections_requested: "corrections_requested",
   rejected: "rejected",
 } as const;
+
+/**
+ * One past plan-review submission for an engagement, as returned
+by `GET /engagements/{id}/submissions`. The `jurisdiction`
+label is the denormalized snapshot captured at submission time
+(so a later jurisdiction change on the parent engagement does
+not retroactively rewrite the audit trail). `note` is the
+optional free-text note from the submission body, surfaced
+verbatim (capped to 2 KB by the create route's contract).
+
+`status`, `reviewerComment`, and `respondedAt` reflect the
+jurisdiction's recorded reply. `status` is always present and
+defaults to `pending` until a reviewer records a response via
+`POST /engagements/{id}/submissions/{submissionId}/response`,
+at which point `respondedAt` is set and `reviewerComment` may
+be populated. The fields stay null while the submission is
+still pending so consumers can drive a "no response yet" UI
+off `status === "pending"` without a presence check.
+
+ */
+export interface EngagementSubmissionSummary {
+  id: string;
+  submittedAt: string;
+  jurisdiction: string | null;
+  note: string | null;
+  status: SubmissionStatus;
+  reviewerComment: string | null;
+  respondedAt: string | null;
+}
 
 /**
  * Jurisdiction's review outcome for the submission.

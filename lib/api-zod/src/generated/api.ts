@@ -409,9 +409,16 @@ export const ListEngagementSubmissionsResponseItem = zod
     submittedAt: zod.coerce.date(),
     jurisdiction: zod.string().nullable(),
     note: zod.string().nullable(),
+    status: zod
+      .enum(["pending", "approved", "corrections_requested", "rejected"])
+      .describe(
+        "Canonical jurisdiction-response status for a submission.\n`pending` is the default at insert (no response recorded yet);\nthe other three are review outcomes the response route may\ntransition the row into.\n",
+      ),
+    reviewerComment: zod.string().nullable(),
+    respondedAt: zod.coerce.date().nullable(),
   })
   .describe(
-    "One past plan-review submission for an engagement, as returned\nby `GET \/engagements\/{id}\/submissions`. The `jurisdiction`\nlabel is the denormalized snapshot captured at submission time\n(so a later jurisdiction change on the parent engagement does\nnot retroactively rewrite the audit trail). `note` is the\noptional free-text note from the submission body, surfaced\nverbatim (capped to 2 KB by the create route's contract).\n",
+    'One past plan-review submission for an engagement, as returned\nby `GET \/engagements\/{id}\/submissions`. The `jurisdiction`\nlabel is the denormalized snapshot captured at submission time\n(so a later jurisdiction change on the parent engagement does\nnot retroactively rewrite the audit trail). `note` is the\noptional free-text note from the submission body, surfaced\nverbatim (capped to 2 KB by the create route\'s contract).\n\n`status`, `reviewerComment`, and `respondedAt` reflect the\njurisdiction\'s recorded reply. `status` is always present and\ndefaults to `pending` until a reviewer records a response via\n`POST \/engagements\/{id}\/submissions\/{submissionId}\/response`,\nat which point `respondedAt` is set and `reviewerComment` may\nbe populated. The fields stay null while the submission is\nstill pending so consumers can drive a \"no response yet\" UI\noff `status === \"pending\"` without a presence check.\n',
   );
 export const ListEngagementSubmissionsResponse = zod.array(
   ListEngagementSubmissionsResponseItem,

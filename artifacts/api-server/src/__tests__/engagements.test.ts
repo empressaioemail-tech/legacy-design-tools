@@ -532,17 +532,62 @@ describe("GET /api/engagements/:id/submissions — list past submissions", () =>
     expect(res.body).toHaveLength(2);
 
     // Newest-first: the later submission should be at index 0.
+    // Both rows are still pending (no response recorded), so
+    // status defaults to "pending" and the response fields are null.
     expect(res.body[0]).toEqual({
       id: second!.id,
       submittedAt: later.toISOString(),
       jurisdiction: "Moab, UT",
       note: null,
+      status: "pending",
+      reviewerComment: null,
+      respondedAt: null,
     });
     expect(res.body[1]).toEqual({
       id: first!.id,
       submittedAt: earlier.toISOString(),
       jurisdiction: "Moab, UT",
       note: "First package",
+      status: "pending",
+      reviewerComment: null,
+      respondedAt: null,
+    });
+  });
+
+  it("surfaces the recorded jurisdiction response (status, reviewer comment, responded-at) for submissions that have been replied to", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const eng = await seedEngagement({
+      address: "1 Response Way",
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+      jurisdictionFips: "4950150",
+    });
+    const respondedAt = new Date("2025-03-01T15:30:00Z");
+    const [row] = await ctx.schema.db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "Moab, UT",
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        jurisdictionFips: "4950150",
+        note: null,
+        status: "corrections_requested",
+        reviewerComment: "Please update the egress sheet.",
+        respondedAt,
+      })
+      .returning();
+
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/submissions`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({
+      id: row!.id,
+      status: "corrections_requested",
+      reviewerComment: "Please update the egress sheet.",
+      respondedAt: respondedAt.toISOString(),
     });
   });
 

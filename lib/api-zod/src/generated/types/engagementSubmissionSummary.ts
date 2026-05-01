@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { SubmissionStatus } from "./submissionStatus";
 
 /**
  * One past plan-review submission for an engagement, as returned
@@ -15,10 +16,22 @@ not retroactively rewrite the audit trail). `note` is the
 optional free-text note from the submission body, surfaced
 verbatim (capped to 2 KB by the create route's contract).
 
+`status`, `reviewerComment`, and `respondedAt` reflect the
+jurisdiction's recorded reply. `status` is always present and
+defaults to `pending` until a reviewer records a response via
+`POST /engagements/{id}/submissions/{submissionId}/response`,
+at which point `respondedAt` is set and `reviewerComment` may
+be populated. The fields stay null while the submission is
+still pending so consumers can drive a "no response yet" UI
+off `status === "pending"` without a presence check.
+
  */
 export interface EngagementSubmissionSummary {
   id: string;
   submittedAt: Date;
   jurisdiction: string | null;
   note: string | null;
+  status: SubmissionStatus;
+  reviewerComment: string | null;
+  respondedAt: Date | null;
 }

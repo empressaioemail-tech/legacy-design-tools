@@ -542,6 +542,9 @@ router.get(
           submittedAt: submissions.submittedAt,
           jurisdiction: submissions.jurisdiction,
           note: submissions.note,
+          status: submissions.status,
+          reviewerComment: submissions.reviewerComment,
+          respondedAt: submissions.respondedAt,
         })
         .from(submissions)
         .where(eq(submissions.engagementId, params.data.id))
@@ -553,6 +556,9 @@ router.get(
           submittedAt: r.submittedAt.toISOString(),
           jurisdiction: r.jurisdiction,
           note: r.note,
+          status: r.status,
+          reviewerComment: r.reviewerComment,
+          respondedAt: r.respondedAt ? r.respondedAt.toISOString() : null,
         })),
       );
     } catch (err) {
