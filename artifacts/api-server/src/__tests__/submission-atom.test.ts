@@ -365,6 +365,151 @@ describe("submission atom (behavior)", () => {
     },
   );
 
+  it(
+    "statusHistory seeds a synthetic 'pending' entry from the row's submittedAt " +
+      "and appends each submission.status-changed event in chronological order",
+    async () => {
+      if (!ctx.schema) throw new Error("ctx.schema not set");
+      const db = ctx.schema.db;
+      const [eng] = await db
+        .insert(engagements)
+        .values({
+          name: "Status Timeline",
+          nameLower: "status-timeline",
+          jurisdiction: "Moab, UT",
+          address: "1 Timeline Way",
+        })
+        .returning({ id: engagements.id });
+      const [sub] = await db
+        .insert(submissions)
+        .values({
+          engagementId: eng.id,
+          jurisdiction: "Moab, UT",
+          jurisdictionCity: "Moab",
+          jurisdictionState: "UT",
+          note: "Permit set v1.",
+        })
+        .returning();
+
+      const history = createInMemoryEventService();
+      // Seed the parent engagement.submitted event so the seed entry's
+      // actor gets promoted from the ingest fallback to the matching
+      // event's actor.
+      await history.appendEvent({
+        entityType: "engagement",
+        entityId: eng.id,
+        eventType: "engagement.submitted",
+        actor: { kind: "user", id: "u_send" },
+        payload: { submissionId: sub!.id, jurisdiction: "Moab, UT" },
+      });
+      // Two status transitions, in chronological order.
+      const t1 = await history.appendEvent({
+        entityType: "submission",
+        entityId: sub!.id,
+        eventType: "submission.status-changed",
+        actor: { kind: "user", id: "u_reviewer1" },
+        payload: {
+          engagementId: eng.id,
+          fromStatus: "pending",
+          toStatus: "corrections_requested",
+          note: "Need updated egress diagrams.",
+        },
+      });
+      const t2 = await history.appendEvent({
+        entityType: "submission",
+        entityId: sub!.id,
+        eventType: "submission.status-changed",
+        actor: { kind: "user", id: "u_reviewer2" },
+        payload: {
+          engagementId: eng.id,
+          fromStatus: "corrections_requested",
+          toStatus: "approved",
+          note: null,
+        },
+      });
+      // An unrelated response-recorded event the timeline must skip.
+      await history.appendEvent({
+        entityType: "submission",
+        entityId: sub!.id,
+        eventType: "submission.response-recorded",
+        actor: { kind: "system", id: "submission-response" },
+        payload: { engagementId: eng.id, status: "approved" },
+      });
+
+      const atom = makeSubmissionAtom({ db: lazyDb, history });
+      const summary = await atom.contextSummary(sub!.id, defaultScope());
+      const statusHistory = (
+        summary.typed as { statusHistory?: Array<Record<string, unknown>> }
+      ).statusHistory;
+      expect(Array.isArray(statusHistory)).toBe(true);
+      expect(statusHistory).toHaveLength(3);
+      // Seed entry — pending, attributed to the engagement.submitted actor.
+      expect(statusHistory![0]).toMatchObject({
+        status: "pending",
+        actor: { kind: "user", id: "u_send" },
+        eventId: null,
+        note: "Permit set v1.",
+      });
+      expect(statusHistory![0]?.["occurredAt"]).toBe(
+        sub!.submittedAt.toISOString(),
+      );
+      // First transition.
+      expect(statusHistory![1]).toMatchObject({
+        status: "corrections_requested",
+        actor: { kind: "user", id: "u_reviewer1" },
+        eventId: t1.id,
+        note: "Need updated egress diagrams.",
+      });
+      // Second transition.
+      expect(statusHistory![2]).toMatchObject({
+        status: "approved",
+        actor: { kind: "user", id: "u_reviewer2" },
+        eventId: t2.id,
+        note: null,
+      });
+    },
+  );
+
+  it(
+    "statusHistory falls back to a single 'pending' seed entry with the " +
+      "submission-ingest system actor when no engagement.submitted event exists",
+    async () => {
+      if (!ctx.schema) throw new Error("ctx.schema not set");
+      const db = ctx.schema.db;
+      const [eng] = await db
+        .insert(engagements)
+        .values({
+          name: "Seed Only",
+          nameLower: "seed-only",
+          jurisdiction: "Moab, UT",
+          address: "1 Seed Way",
+        })
+        .returning({ id: engagements.id });
+      const [sub] = await db
+        .insert(submissions)
+        .values({
+          engagementId: eng.id,
+          jurisdiction: "Moab, UT",
+          note: null,
+        })
+        .returning();
+
+      const history = createInMemoryEventService();
+      const atom = makeSubmissionAtom({ db: lazyDb, history });
+      const summary = await atom.contextSummary(sub!.id, defaultScope());
+      const statusHistory = (
+        summary.typed as { statusHistory?: Array<Record<string, unknown>> }
+      ).statusHistory;
+      expect(statusHistory).toHaveLength(1);
+      expect(statusHistory![0]).toMatchObject({
+        status: "pending",
+        actor: { kind: "system", id: "submission-ingest" },
+        eventId: null,
+        note: null,
+      });
+    },
+  );
+
   it("not-found returns the structural shape with typed.found=false", async () => {
     const atom = makeSubmissionAtom({ db: lazyDb });
     const summary = await atom.contextSummary(

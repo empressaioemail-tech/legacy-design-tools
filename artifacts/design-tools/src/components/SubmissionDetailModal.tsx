@@ -7,9 +7,64 @@ import {
   type AtomEventActor,
   type AtomHistoryEvent,
   type AtomSummary,
+  type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { relativeTime } from "../lib/relativeTime";
 import { backfillAnnotation } from "../lib/submissionBackfill";
+
+/**
+ * Status the submission's atom-event chain may surface in
+ * `statusHistory` entries. Re-uses the generated `SubmissionStatus`
+ * enum from the API client so the modal reads from the same
+ * source-of-truth values the row badge / record-response dialog do.
+ */
+type StatusHistoryStatus = SubmissionStatus;
+
+/**
+ * One entry in `submission` atom's `typed.statusHistory` array
+ * (added in Task #93). Mirror of the server-side
+ * `SubmissionStatusHistoryEntry` interface in
+ * `artifacts/api-server/src/atoms/submission.atom.ts` — kept narrow
+ * here so the modal's typed-payload local cast stays self-contained
+ * (the AtomSummary's `typed` field is open-shaped on the wire). When
+ * the server contract grows fields the modal doesn't render, those
+ * fields are silently ignored — adding them later is non-breaking.
+ */
+interface SubmissionStatusHistoryEntry {
+  status: StatusHistoryStatus;
+  occurredAt: string;
+  actor: AtomEventActor;
+  note: string | null;
+  eventId: string | null;
+}
+
+/**
+ * Human-readable label for each status surfaced in the timeline.
+ * Mirrors the same map in
+ * `artifacts/design-tools/src/pages/EngagementDetail.tsx` so the
+ * detail modal and the row badge read the same way.
+ */
+const STATUS_LABELS: Record<StatusHistoryStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
+  corrections_requested: "Corrections requested",
+  rejected: "Rejected",
+};
+
+/**
+ * Per-status palette for the timeline dot. Reuses the same
+ * SmartCity theme tokens the row-level badge uses (see
+ * `SUBMISSION_STATUS_COLORS` in `EngagementDetail.tsx`) so the two
+ * surfaces stay visually consistent. The "pending" seed entry uses
+ * the same info palette as the row badge — it represents "package
+ * sent, awaiting reply" rather than a transitional state.
+ */
+const STATUS_DOT: Record<StatusHistoryStatus, string> = {
+  pending: "var(--info-text)",
+  approved: "var(--success-text)",
+  corrections_requested: "var(--warning-text)",
+  rejected: "var(--danger-text)",
+};
 
 export interface SubmissionDetailModalProps {
   /**
@@ -118,6 +173,7 @@ export function SubmissionDetailModal(props: SubmissionDetailModalProps) {
     respondedAt?: string | null;
     responseRecordedAt?: string | null;
     found?: boolean;
+    statusHistory?: SubmissionStatusHistoryEntry[];
   };
 
   const submittedAt = typed.submittedAt;
@@ -312,6 +368,13 @@ export function SubmissionDetailModal(props: SubmissionDetailModalProps) {
                   summary={summary}
                   matched={matchedEvent}
                   loading={historyQuery.isLoading}
+                />
+              </Section>
+
+              <Section label="STATUS HISTORY">
+                <StatusHistoryBlock
+                  entries={typed.statusHistory ?? []}
+                  loading={summaryQuery.isLoading}
                 />
               </Section>
             </>
@@ -510,4 +573,187 @@ function actorLabel(actor: AtomEventActor): string {
     return actor.displayName ?? "Unknown user";
   }
   return `${actor.kind}:${actor.id}`;
+}
+
+/**
+ * Vertical status timeline (Task #93) rendered below the modal's
+ * "Related event" panel. Reads from the submission atom's
+ * `typed.statusHistory` array, which the server builds by walking
+ * the submission's atom-event chain (`submission.status-changed`
+ * events plus a synthetic "Submitted" seed entry for the row's
+ * `submittedAt`).
+ *
+ * Layout is a left-rail dotted timeline — a colored dot per entry
+ * (color keyed off the status palette) connected by a faint vertical
+ * line — with status label, relative time, actor attribution, and
+ * an optional note row per entry. Mirrors the visual treatment of
+ * other audit-trail timelines in design-tools so the surface feels
+ * consistent.
+ *
+ * Empty / loading states:
+ *   - While the summary query is loading, render a placeholder so
+ *     the section doesn't pop in under the related-event panel.
+ *   - An empty `entries` array (best-effort fallback when the
+ *     server omits the field — older atom server versions, history
+ *     outage) renders a hint rather than an empty box, so the
+ *     section is never completely blank for a real submission.
+ */
+function StatusHistoryBlock({
+  entries,
+  loading,
+}: {
+  entries: SubmissionStatusHistoryEntry[];
+  loading: boolean;
+}) {
+  if (loading && entries.length === 0) {
+    return (
+      <div
+        className="sc-body opacity-60"
+        data-testid="submission-status-history-loading"
+        style={{ fontSize: 12 }}
+      >
+        Loading status history…
+      </div>
+    );
+  }
+  if (entries.length === 0) {
+    return (
+      <div
+        className="sc-body opacity-60"
+        data-testid="submission-status-history-empty"
+        style={{ fontSize: 12 }}
+      >
+        No status history is available for this submission yet.
+      </div>
+    );
+  }
+  return (
+    <div
+      data-testid="submission-status-history"
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
+      {entries.map((entry, idx) => {
+        const label = STATUS_LABELS[entry.status] ?? entry.status;
+        const dotColor = STATUS_DOT[entry.status] ?? "var(--text-secondary)";
+        const isLast = idx === entries.length - 1;
+        // React key: prefer the originating event id when present,
+        // fall back to status+timestamp for the synthetic seed entry
+        // (whose `eventId` is null by contract).
+        const key = entry.eventId ?? `${entry.status}-${entry.occurredAt}`;
+        return (
+          <div
+            key={key}
+            data-testid={`submission-status-history-entry-${idx}`}
+            style={{ display: "flex", gap: 10, alignItems: "stretch" }}
+          >
+            {/* Left rail: colored dot + connector line. The connector
+                is omitted on the final row so the timeline ends at
+                the dot rather than trailing a stub line. */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                paddingTop: 4,
+                width: 12,
+              }}
+            >
+              <div
+                aria-hidden
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  background: dotColor,
+                  flex: "none",
+                }}
+              />
+              {!isLast && (
+                <div
+                  aria-hidden
+                  style={{
+                    flex: 1,
+                    width: 2,
+                    background: "var(--border-default)",
+                    marginTop: 4,
+                  }}
+                />
+              )}
+            </div>
+            {/* Right column: status label + relative timestamp on the
+                top row, actor attribution on the second row, the
+                optional note last (rendered with the same border-left
+                accent the row-level reviewer comment uses so the two
+                surfaces feel of-a-piece). */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <span
+                  data-testid={`submission-status-history-status-${idx}`}
+                  style={{
+                    color: "var(--text-primary)",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                  }}
+                >
+                  {label}
+                </span>
+                <span
+                  className="sc-meta"
+                  title={new Date(entry.occurredAt).toLocaleString()}
+                  style={{ color: "var(--text-secondary)", fontSize: 11 }}
+                >
+                  {relativeTime(entry.occurredAt)}
+                </span>
+              </div>
+              <div
+                style={{
+                  color: "var(--text-secondary)",
+                  fontSize: 11,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span>by</span>
+                <span data-testid={`submission-status-history-actor-${idx}`}>
+                  {actorLabel(entry.actor)}
+                </span>
+              </div>
+              {entry.note && (
+                <div
+                  className="sc-body"
+                  data-testid={`submission-status-history-note-${idx}`}
+                  style={{
+                    color: "var(--text-primary)",
+                    fontSize: 12,
+                    whiteSpace: "pre-wrap",
+                    borderLeft: "2px solid var(--border-active)",
+                    paddingLeft: 8,
+                    marginTop: 2,
+                  }}
+                >
+                  {entry.note}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }

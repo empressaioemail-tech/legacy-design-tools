@@ -711,9 +711,14 @@ describe("POST /api/engagements/:id/submissions/:submissionId/response — submi
       new Date(res.body.responseRecordedAt).getTime(),
     ).toBeGreaterThanOrEqual(new Date(res.body.respondedAt).getTime());
 
-    // Submission-scoped event row was appended (not on the engagement).
+    // Submission-scoped event rows were appended (not on the
+    // engagement). Two events per recording: the
+    // `submission.response-recorded` event carries the reviewer
+    // comment + reply semantics; the `submission.status-changed`
+    // companion event (Task #93) carries the explicit
+    // `from`/`to` status transition the timeline UI reads.
     const submissionEvents = await readSubmissionEvents(sub.id);
-    expect(submissionEvents).toHaveLength(1);
+    expect(submissionEvents).toHaveLength(2);
     expect(submissionEvents[0]!.eventType).toBe("submission.response-recorded");
     expect(submissionEvents[0]!.actor).toEqual({
       kind: "system",
@@ -724,13 +729,26 @@ describe("POST /api/engagements/:id/submissions/:submissionId/response — submi
       status: "corrections_requested",
       reviewerComment: "Please clarify wall assemblies on A-101.",
     });
+    expect(submissionEvents[1]!.eventType).toBe("submission.status-changed");
+    expect(submissionEvents[1]!.actor).toEqual({
+      kind: "system",
+      id: "submission-response",
+    });
+    expect(submissionEvents[1]!.payload).toMatchObject({
+      engagementId: eng.id,
+      fromStatus: "pending",
+      toStatus: "corrections_requested",
+      note: "Please clarify wall assemblies on A-101.",
+    });
 
-    // The engagement timeline should NOT carry the submission-scoped
-    // event — that's the whole point of scoping it to the submission.
+    // The engagement timeline should NOT carry either submission-scoped
+    // event — that's the whole point of scoping them to the submission.
     const engagementEvents = await readEngagementEvents(eng.id);
     expect(
       engagementEvents.some(
-        (e) => e.eventType === "submission.response-recorded",
+        (e) =>
+          e.eventType === "submission.response-recorded" ||
+          e.eventType === "submission.status-changed",
       ),
     ).toBe(false);
   });
@@ -913,13 +931,58 @@ describe("POST /api/engagements/:id/submissions/:submissionId/response — submi
     expect(res2.body.status).toBe("approved");
     expect(res2.body.reviewerComment).toBe("Round 2");
 
+    // Each call appends the response-recorded event AND its
+    // companion status-changed event (Task #93), so two recordings
+    // produce four submission-scoped events. The interleaved order
+    // (response → status-changed → response → status-changed)
+    // mirrors the route's emit order.
     const events = await readSubmissionEvents(sub.id);
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(4);
     expect(events.map((e) => e.eventType)).toEqual([
       "submission.response-recorded",
+      "submission.status-changed",
       "submission.response-recorded",
+      "submission.status-changed",
     ]);
-    expect(events[1]!.payload).toMatchObject({ status: "approved" });
+    expect(events[2]!.payload).toMatchObject({ status: "approved" });
+    // The second status-changed event records the actual transition
+    // (`corrections_requested` → `approved`), not a no-op.
+    expect(events[3]!.payload).toMatchObject({
+      fromStatus: "corrections_requested",
+      toStatus: "approved",
+      note: "Round 2",
+    });
+  });
+
+  it("anchors emitted submission events to respondedAt (not append wall-clock)", async () => {
+    // Task #93 follow-up: the event's top-level `occurredAt` column
+    // must reflect the (route-stamped) `respondedAt` value, not the
+    // wall-clock time of the append. The Status History timeline
+    // sorts by `occurredAt`, so getting this wrong means
+    // back-dated recordings would appear in the wrong order.
+    const eng = await seedEngagement();
+    const sub = await seedSubmissionFor(eng.id);
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions/${sub.id}/response`)
+      .send({ status: "approved", reviewerComment: "ok" });
+    expect(res.status).toBe(200);
+
+    const respondedAtIso = res.body.respondedAt as string;
+    const respondedAtMs = new Date(respondedAtIso).getTime();
+
+    const events = await readSubmissionEvents(sub.id);
+    expect(events).toHaveLength(2);
+
+    // Both events should be anchored to the same respondedAt and
+    // emitted within a tight window of one another (single
+    // request lifecycle).
+    for (const ev of events) {
+      const occurredAtMs = new Date(
+        ev.occurredAt as Date | string,
+      ).getTime();
+      expect(occurredAtMs).toBe(respondedAtMs);
+    }
   });
 });
 

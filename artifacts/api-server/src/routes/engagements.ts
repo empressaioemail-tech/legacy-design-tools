@@ -1,5 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, engagements, snapshots, submissions } from "@workspace/db";
+import {
+  db,
+  engagements,
+  snapshots,
+  submissions,
+  type SubmissionStatus,
+} from "@workspace/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   CreateEngagementSubmissionBody,
@@ -19,6 +25,7 @@ import {
   emitEngagementJurisdictionResolvedEvent,
   emitEngagementSubmittedEvent,
   emitSubmissionResponseRecordedEvent,
+  emitSubmissionStatusChangedEvent,
   type EngagementEventActor,
 } from "../lib/engagementEvents";
 
@@ -831,6 +838,39 @@ router.post(
           status,
           reviewerComment,
           respondedAt,
+          actor,
+        },
+        reqLog,
+      );
+      // Companion `submission.status-changed` event (Task #93). The
+      // response-recorded event above carries the *reply* semantics
+      // (reviewer comment + respondedAt); this one carries the
+      // *status transition* the FE timeline reads. We emit it
+      // unconditionally on a successful row update — including when
+      // the prior status equals the new status (e.g. re-recording the
+      // same `approved` reply with a corrected comment) — so the
+      // timeline preserves an audit entry per recording. The
+      // companion event uses the same actor and the resolved
+      // `respondedAt` timestamp so the two events read as a single
+      // moment in the chain.
+      await emitSubmissionStatusChangedEvent(
+        getHistoryService(),
+        {
+          submissionId: updated.id,
+          engagementId: updated.engagementId,
+          // `existing.status` is the value the row carried *before*
+          // the UPDATE above. The schema narrows this to a known
+          // enum at write-time, so the cast is safe; we still go
+          // through `as` rather than tightening the column's TS type
+          // to keep the row's text-typed status forward-compatible.
+          fromStatus: existing.status as SubmissionStatus,
+          toStatus: status,
+          // The reviewer comment doubles as the status-change note
+          // for the timeline. Stays `null` when the producer didn't
+          // supply one (the comment is already normalized to null
+          // for blank/whitespace inputs above).
+          note: reviewerComment,
+          occurredAt: respondedAt,
           actor,
         },
         reqLog,

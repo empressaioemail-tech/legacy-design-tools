@@ -84,6 +84,11 @@ vi.mock("@workspace/api-client-react", () => ({
     scope,
     id,
   ],
+  getGetAtomSummaryQueryKey: (scope: string, id: string) => [
+    "getAtomSummary",
+    scope,
+    id,
+  ],
   getListEngagementSubmissionsQueryKey: (id: string) => [
     "listEngagementSubmissions",
     id,
@@ -404,7 +409,7 @@ describe("RecordSubmissionResponseDialog", () => {
     expect(hoisted.mutateMock).not.toHaveBeenCalled();
   });
 
-  it("invalidates the engagement, atom-history, and submissions caches and closes on success", async () => {
+  it("invalidates the engagement, atom-history, atom-summary, and submissions caches and closes on success", async () => {
     const onClose = vi.fn();
     const onRecorded = vi.fn();
     const client = makeQueryClient();
@@ -445,6 +450,13 @@ describe("RecordSubmissionResponseDialog", () => {
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["getAtomHistory", "submission", "sub-77"],
+    });
+    // Task #93: the SubmissionDetailModal's status-history timeline
+    // is keyed off the submission atom's contextSummary, so the
+    // dialog must bust that cache too — otherwise the timeline shows
+    // stale data when the modal is reopened after a recording.
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["getAtomSummary", "submission", "sub-77"],
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["listEngagementSubmissions", "eng-99"],

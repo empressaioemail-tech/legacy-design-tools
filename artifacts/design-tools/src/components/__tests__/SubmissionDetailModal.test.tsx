@@ -362,6 +362,147 @@ describe("SubmissionDetailModal", () => {
     },
   );
 
+  it(
+    "renders the STATUS HISTORY timeline (Task #93) with one row per " +
+      "entry, attribution, and an optional note",
+    () => {
+      // Three-entry timeline: synthetic Pending seed, then a
+      // corrections-requested transition with a note, then an
+      // approved transition with no note. Mirrors what the server
+      // builds in `submission.atom.ts`.
+      setSummary({
+        data: {
+          prose: "x",
+          typed: {
+            id: "sub-1",
+            found: true,
+            submittedAt: "2026-04-30T12:00:00.000Z",
+            statusHistory: [
+              {
+                status: "pending",
+                occurredAt: "2026-04-30T12:00:00.000Z",
+                actor: { kind: "user", id: "u_send", displayName: undefined },
+                note: null,
+                eventId: null,
+              },
+              {
+                status: "corrections_requested",
+                occurredAt: "2026-04-30T13:00:00.000Z",
+                actor: {
+                  kind: "user",
+                  id: "u_reviewer",
+                  displayName: "Jane Reviewer",
+                },
+                note: "Please clarify wall assemblies on A-101.",
+                eventId: "01HZZZZ0000000000000000777",
+              },
+              {
+                status: "approved",
+                occurredAt: "2026-04-30T14:00:00.000Z",
+                actor: { kind: "system", id: "submission-response" },
+                note: null,
+                eventId: "01HZZZZ0000000000000000778",
+              },
+            ],
+          },
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: {
+            latestEventId: "",
+            latestEventAt: "2026-04-30T14:00:00.000Z",
+          },
+          scopeFiltered: false,
+        },
+      });
+      setHistory({ data: { events: [] } });
+
+      renderModal(
+        <SubmissionDetailModal
+          submissionId="sub-1"
+          engagementId="eng-1"
+          onClose={() => {}}
+        />,
+      );
+
+      const timeline = screen.getByTestId("submission-status-history");
+      expect(timeline).toBeDefined();
+
+      // Three entries, in the order the server provided.
+      expect(
+        screen.getByTestId("submission-status-history-entry-0"),
+      ).toBeDefined();
+      expect(
+        screen.getByTestId("submission-status-history-entry-1"),
+      ).toBeDefined();
+      expect(
+        screen.getByTestId("submission-status-history-entry-2"),
+      ).toBeDefined();
+
+      // Status labels per entry mirror the row badge palette.
+      expect(
+        screen.getByTestId("submission-status-history-status-0").textContent,
+      ).toBe("Pending");
+      expect(
+        screen.getByTestId("submission-status-history-status-1").textContent,
+      ).toBe("Corrections requested");
+      expect(
+        screen.getByTestId("submission-status-history-status-2").textContent,
+      ).toBe("Approved");
+
+      // Note row is only rendered when present.
+      expect(
+        screen.getByTestId("submission-status-history-note-1").textContent,
+      ).toContain("Please clarify wall assemblies");
+      expect(
+        screen.queryByTestId("submission-status-history-note-0"),
+      ).toBeNull();
+      expect(
+        screen.queryByTestId("submission-status-history-note-2"),
+      ).toBeNull();
+    },
+  );
+
+  it(
+    "STATUS HISTORY shows the empty-state copy when statusHistory is " +
+      "absent on the typed payload",
+    () => {
+      setSummary({
+        data: {
+          prose: "x",
+          typed: {
+            id: "sub-1",
+            found: true,
+            submittedAt: "2026-04-30T12:00:00.000Z",
+            // No statusHistory at all — older atom server, history
+            // outage, etc. Modal must not crash and must show a
+            // hint instead of an empty container.
+          },
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: {
+            latestEventId: "",
+            latestEventAt: "2026-04-30T12:00:00.000Z",
+          },
+          scopeFiltered: false,
+        },
+      });
+      setHistory({ data: { events: [] } });
+
+      renderModal(
+        <SubmissionDetailModal
+          submissionId="sub-1"
+          engagementId="eng-1"
+          onClose={() => {}}
+        />,
+      );
+
+      expect(
+        screen.getByTestId("submission-status-history-empty"),
+      ).toBeDefined();
+      expect(screen.queryByTestId("submission-status-history")).toBeNull();
+    },
+  );
+
   it("calls onClose when the close button is pressed", () => {
     setSummary({
       data: {

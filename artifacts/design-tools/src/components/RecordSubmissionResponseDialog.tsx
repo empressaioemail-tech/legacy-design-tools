@@ -4,6 +4,7 @@ import {
   useRecordSubmissionResponse,
   getGetEngagementQueryKey,
   getGetAtomHistoryQueryKey,
+  getGetAtomSummaryQueryKey,
   getListEngagementSubmissionsQueryKey,
   RecordSubmissionResponseBodyStatus,
   type RecordSubmissionResponseBodyStatus as StatusValue,
@@ -123,6 +124,16 @@ export function RecordSubmissionResponseDialog({
           }),
           qc.invalidateQueries({
             queryKey: getGetAtomHistoryQueryKey("submission", submissionId),
+          }),
+          // The SubmissionDetailModal renders the Status History
+          // timeline (Task #93) from the submission atom's contextSummary
+          // (`typed.statusHistory`), which is server-built off the same
+          // atom-event chain. Bust every variant of the summary key for
+          // this submission (params-stripped prefix) so the modal — if
+          // it's open or reopened mid-flight — refetches and the new
+          // status entry shows up immediately.
+          qc.invalidateQueries({
+            queryKey: getGetAtomSummaryQueryKey("submission", submissionId),
           }),
           // The past-submissions list is what the SubmissionsTab renders;
           // invalidate it so the row reflects the recorded response as

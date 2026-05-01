@@ -65,9 +65,20 @@ export type SubmissionSupportedModes = typeof SUBMISSION_SUPPORTED_MODES;
  *     when the jurisdiction's reply is recorded against a submission.
  *     Scoped to the submission entity (not the parent engagement) so
  *     the back-and-forth lives on the submission's own history chain.
+ *   - `submission.status-changed` — emitted alongside
+ *     `submission.response-recorded` whenever a flow updates the
+ *     submission's `status` column. Distinct from
+ *     `response-recorded` so the timeline UI can read a clean stream
+ *     of status transitions (`{fromStatus, toStatus, note}`) without
+ *     having to derive transitions from the heterogeneous
+ *     `response-recorded` payload. Today the only producer is the
+ *     response-recording route (Task #93); a future "admin manually
+ *     overrides status" producer would emit this same event without
+ *     needing to also emit `response-recorded`.
  */
 export const SUBMISSION_EVENT_TYPES = [
   "submission.response-recorded",
+  "submission.status-changed",
 ] as const;
 
 export type SubmissionEventType = (typeof SUBMISSION_EVENT_TYPES)[number];
@@ -88,6 +99,46 @@ export const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
 };
 
 /**
+ * Single entry in {@link SubmissionTypedPayload.statusHistory} — the
+ * status-timeline series the FE renders below the per-submission
+ * "Related event" panel (Task #93). Each entry corresponds to one
+ * status transition emitted on the submission's atom-event chain
+ * (event type `submission.status-changed`), plus a synthetic
+ * "Submitted" seed entry the atom prepends from the row's
+ * `submittedAt` column so a brand-new pending submission still
+ * surfaces a timeline without requiring an explicit status-changed
+ * event for the initial pending state.
+ *
+ * Fields:
+ *   - `status` — the canonical status the submission transitioned
+ *     INTO at this point. Always present; for the seed entry this is
+ *     always `"pending"`.
+ *   - `occurredAt` — ISO timestamp the transition happened. For the
+ *     seed entry this is the row's `submittedAt`; for transition
+ *     events this is the event's `occurredAt` (which the response
+ *     route stamps with the resolved `respondedAt`).
+ *   - `actor` — the recorded actor of the transition (system /
+ *     agent / user kind + id). The seed entry uses the actor of the
+ *     matching `engagement.submitted` event when one is available,
+ *     and falls back to the dedicated `submission-ingest` system
+ *     actor otherwise so the FE always has *something* to show.
+ *   - `note` — the optional reviewer-comment / status-change note
+ *     copied off the event payload. `null` when the producer didn't
+ *     supply one (the schema treats blank/whitespace as `null`).
+ *   - `eventId` — the originating atom-event id when the entry came
+ *     from a real `submission.status-changed` event. `null` for the
+ *     synthetic "Submitted" seed entry. Lets the FE/key off a stable
+ *     id when iterating the timeline.
+ */
+export interface SubmissionStatusHistoryEntry {
+  status: SubmissionStatus;
+  occurredAt: string;
+  actor: { kind: "user" | "agent" | "system"; id: string };
+  note: string | null;
+  eventId: string | null;
+}
+
+/**
  * Typed payload returned by `submission`'s `contextSummary.typed`.
  * Nullable jurisdiction labels are emitted as `null` (not omitted) so
  * the FE can distinguish "we have no jurisdiction snapshot for this
@@ -99,6 +150,15 @@ export const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
  * than omitted. `status` is always present (defaulted to `"pending"`
  * by the row schema), so the FE can rely on it to drive the response
  * UI without a presence check.
+ *
+ * `statusHistory` (Task #93) is the status-transition timeline the
+ * FE renders below the modal's "Related event" panel. Always set
+ * (never omitted) on a found row so consumers can iterate without a
+ * presence check; for a brand-new pending submission this is a
+ * single-entry array carrying the synthetic "Submitted" seed entry.
+ * Order is oldest → newest so the FE can render a vertical timeline
+ * top-to-bottom without re-sorting. Omitted entirely on the
+ * not-found shape — there's no row to derive a timeline from.
  */
 export interface SubmissionTypedPayload {
   id: string;
@@ -115,6 +175,7 @@ export interface SubmissionTypedPayload {
   respondedAt?: string | null;
   responseRecordedAt?: string | null;
   createdAt?: string;
+  statusHistory?: SubmissionStatusHistoryEntry[];
 }
 
 /**
@@ -290,19 +351,93 @@ export function makeSubmissionAtom(
       // endpoint, so we never touch an unbounded slice of the chain.
       let latestEventId = "";
       let latestEventAt = row.submittedAt.toISOString();
+      // Status timeline (Task #93). Always seeded with the synthetic
+      // "Submitted" entry from the row's `submittedAt` so a brand-new
+      // pending submission still has a single-entry timeline; real
+      // `submission.status-changed` events get appended in
+      // chronological order below. Actor for the seed entry is best-
+      // effort: we prefer the actor of the matching
+      // `engagement.submitted` event when one is found (so the seed
+      // attributes the send-off to *who* submitted it), and fall back
+      // to the dedicated `submission-ingest` system actor otherwise.
+      // Note semantics for the seed entry are intentional and worth
+      // calling out: it carries the submission's own `row.note`
+      // (the plan-review package note recorded at submit time),
+      // *not* a reviewer/status comment — those don't exist yet
+      // for a brand-new submission. Subsequent status-changed
+      // entries in the timeline carry their own
+      // (reviewer-supplied) `note` from the response payload. The
+      // FE renders both the same way; the contextual difference
+      // is naturally read from each row's status label.
+      const seedEntry: SubmissionStatusHistoryEntry = {
+        status: "pending",
+        occurredAt: row.submittedAt.toISOString(),
+        actor: { kind: "system", id: "submission-ingest" },
+        note: row.note,
+        eventId: null,
+      };
+      const statusHistory: SubmissionStatusHistoryEntry[] = [seedEntry];
+
       if (deps.history) {
+        // Read the submission's own history once and use it for both
+        // (a) `latestEvent` provenance and (b) building the
+        // status-changed timeline. Going through `readHistory` instead
+        // of `latestEvent` lets us pull the event payloads in a single
+        // round trip — `latestEvent` returns just the metadata.
+        let submissionEvents: Awaited<
+          ReturnType<EventAnchoringService["readHistory"]>
+        > = [];
         try {
-          const latest = await deps.history.latestEvent({
-            kind: "atom",
-            entityType: "submission",
-            entityId,
-          });
-          if (latest) {
-            latestEventId = latest.id;
-            latestEventAt = latest.occurredAt.toISOString();
-          }
+          submissionEvents = await deps.history.readHistory(
+            { kind: "atom", entityType: "submission", entityId },
+            { limit: 50, reverse: true },
+          );
         } catch {
           // History is best-effort here — fallback already populated.
+        }
+        if (submissionEvents.length > 0) {
+          const newest = submissionEvents[0];
+          if (newest) {
+            latestEventId = newest.id;
+            latestEventAt = newest.occurredAt.toISOString();
+          }
+          // Append every `submission.status-changed` event in
+          // chronological order (oldest → newest). `readHistory` returns
+          // newest-first because of `reverse: true`, so we walk the
+          // slice backwards to flip the order for the FE timeline.
+          //
+          // History is intentionally bounded at the 50-event read above
+          // — the same cap the `latestEvent`-style consumers use. For
+          // typical plan-review submissions a handful of status
+          // transitions is the norm, so 50 is comfortably more than
+          // enough; if a future product surface needs the full,
+          // unbounded audit trail (e.g. compliance export), it should
+          // page through `readHistory` directly rather than promote
+          // this surface to unbounded reads.
+          for (let i = submissionEvents.length - 1; i >= 0; i--) {
+            const ev = submissionEvents[i];
+            if (!ev) continue;
+            if (ev.eventType !== "submission.status-changed") continue;
+            const toRaw = ev.payload?.["toStatus"];
+            const toStatus =
+              typeof toRaw === "string" &&
+              (SUBMISSION_STATUS_LABELS as Record<string, string>)[toRaw]
+                ? (toRaw as SubmissionStatus)
+                : null;
+            if (!toStatus) continue;
+            const noteRaw = ev.payload?.["note"];
+            const noteValue =
+              typeof noteRaw === "string" && noteRaw.length > 0
+                ? noteRaw
+                : null;
+            statusHistory.push({
+              status: toStatus,
+              occurredAt: ev.occurredAt.toISOString(),
+              actor: { kind: ev.actor.kind, id: ev.actor.id },
+              note: noteValue,
+              eventId: ev.id,
+            });
+          }
         }
         if (!latestEventId) {
           try {
@@ -323,9 +458,42 @@ export function makeSubmissionAtom(
             if (match) {
               latestEventId = match.id;
               latestEventAt = match.occurredAt.toISOString();
+              // Promote the matched event's actor onto the seed entry
+              // so the timeline attributes the initial "Submitted"
+              // step to the human / system that recorded the send-off
+              // instead of the generic ingest fallback. Mutating the
+              // already-pushed seed entry in place keeps a single
+              // source of truth for the array order.
+              seedEntry.actor = { kind: match.actor.kind, id: match.actor.id };
             }
           } catch {
             // Best-effort — fallback already populated above.
+          }
+        } else {
+          // The submission has its own events — still try to attribute
+          // the seed entry to the matching `engagement.submitted`
+          // actor for a richer timeline. Failure here is silently
+          // ignored: the seed entry already has the ingest fallback.
+          try {
+            const engagementEvents = await deps.history.readHistory(
+              {
+                kind: "atom",
+                entityType: "engagement",
+                entityId: row.engagementId,
+              },
+              { limit: 50, reverse: true },
+            );
+            const match = engagementEvents.find(
+              (e) =>
+                e.eventType === "engagement.submitted" &&
+                typeof e.payload?.["submissionId"] === "string" &&
+                e.payload["submissionId"] === entityId,
+            );
+            if (match) {
+              seedEntry.actor = { kind: match.actor.kind, id: match.actor.id };
+            }
+          } catch {
+            // Seed actor stays as the ingest fallback.
           }
         }
       }
@@ -347,6 +515,7 @@ export function makeSubmissionAtom(
           ? row.responseRecordedAt.toISOString()
           : null,
         createdAt: row.createdAt.toISOString(),
+        statusHistory,
       };
 
       return {

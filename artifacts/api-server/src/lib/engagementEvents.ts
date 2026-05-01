@@ -47,6 +47,8 @@ const ENGAGEMENT_SUBMITTED_EVENT_TYPE: EngagementEventType =
   "engagement.submitted";
 const SUBMISSION_RESPONSE_RECORDED_EVENT_TYPE: SubmissionEventType =
   "submission.response-recorded";
+const SUBMISSION_STATUS_CHANGED_EVENT_TYPE: SubmissionEventType =
+  "submission.status-changed";
 
 /**
  * Stable system actor for engagement lifecycle events emitted from the
@@ -342,6 +344,11 @@ export async function emitSubmissionResponseRecordedEvent(
       entityId: params.submissionId,
       eventType: SUBMISSION_RESPONSE_RECORDED_EVENT_TYPE,
       actor: params.actor,
+      // Anchor the event to the reviewer-supplied (or route-stamped)
+      // `respondedAt` rather than the append wall-clock so that
+      // back-dated recordings and the submission status timeline
+      // line up exactly.
+      occurredAt: params.respondedAt,
       payload: {
         engagementId: params.engagementId,
         status: params.status,
@@ -368,6 +375,89 @@ export async function emitSubmissionResponseRecordedEvent(
         status: params.status,
       },
       "submission.response-recorded event append failed — row update kept",
+    );
+  }
+}
+
+/**
+ * Append a `submission.status-changed` event scoped to a submission
+ * entity. Producer is the response-recording route in
+ * `routes/engagements.ts` — emitted alongside (and after) the
+ * `submission.response-recorded` event whenever the submission's
+ * `status` column moves to a new value.
+ *
+ * Distinct from `submission.response-recorded` so the per-submission
+ * timeline UI (Task #93) can read a clean stream of status
+ * transitions (`{fromStatus, toStatus, note}`) without having to
+ * derive transitions from the heterogeneous `response-recorded`
+ * payload. Both events live on the same submission-scoped chain;
+ * consumers that only care about the status timeline can filter on
+ * `eventType === "submission.status-changed"` and ignore the
+ * companion `response-recorded` rows entirely.
+ *
+ * Best-effort by the same contract as the sibling helpers — a
+ * transient history outage cannot fail the response HTTP request.
+ * The caller is expected to invoke this helper *only* when the
+ * status genuinely changed (e.g. the route's update changed
+ * `pending` → `approved`); a no-op transition (`approved` →
+ * `approved` on a re-record) should still emit the event so the
+ * timeline preserves the second-record audit entry — that decision
+ * is the caller's, not this helper's.
+ */
+export async function emitSubmissionStatusChangedEvent(
+  history: EventAnchoringService,
+  params: {
+    submissionId: string;
+    engagementId: string;
+    fromStatus: SubmissionStatus;
+    toStatus: SubmissionStatus;
+    note: string | null;
+    occurredAt: Date;
+    actor: EngagementEventActor;
+  },
+  reqLog: Logger,
+): Promise<void> {
+  try {
+    const event = await history.appendEvent({
+      entityType: "submission",
+      entityId: params.submissionId,
+      eventType: SUBMISSION_STATUS_CHANGED_EVENT_TYPE,
+      actor: params.actor,
+      // Anchor the event to the caller-supplied transition time
+      // (the route passes `respondedAt`) rather than the append
+      // wall-clock so the Status History timeline sorts correctly
+      // for back-dated recordings and matches the row's
+      // `respondedAt` exactly.
+      occurredAt: params.occurredAt,
+      payload: {
+        engagementId: params.engagementId,
+        fromStatus: params.fromStatus,
+        toStatus: params.toStatus,
+        note: params.note,
+        occurredAt: params.occurredAt.toISOString(),
+      },
+    });
+    reqLog.info(
+      {
+        submissionId: params.submissionId,
+        engagementId: params.engagementId,
+        fromStatus: params.fromStatus,
+        toStatus: params.toStatus,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "submission.status-changed event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        submissionId: params.submissionId,
+        engagementId: params.engagementId,
+        fromStatus: params.fromStatus,
+        toStatus: params.toStatus,
+      },
+      "submission.status-changed event append failed — row update kept",
     );
   }
 }
