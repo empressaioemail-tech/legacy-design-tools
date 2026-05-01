@@ -62,6 +62,7 @@
     "@workspace/api-client-react": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/briefing-diff": "workspace:*",
+    "@workspace/briefing-prior-snapshot": "workspace:*",
     "@workspace/object-storage-web": "workspace:*",
     "@workspace/portal-ui": "workspace:*",
     "class-variance-authority": "catalog:",

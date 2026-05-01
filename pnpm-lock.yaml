@@ -468,6 +468,9 @@ importers:
       '@workspace/briefing-diff':
         specifier: workspace:*
         version: link:../../lib/briefing-diff
+      '@workspace/briefing-prior-snapshot':
+        specifier: workspace:*
+        version: link:../../lib/briefing-prior-snapshot
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
@@ -928,6 +931,9 @@ importers:
       '@workspace/briefing-diff':
         specifier: workspace:*
         version: link:../../lib/briefing-diff
+      '@workspace/briefing-prior-snapshot':
+        specifier: workspace:*
+        version: link:../../lib/briefing-prior-snapshot
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
@@ -1082,6 +1088,34 @@ importers:
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+
+  lib/briefing-prior-snapshot:
+    dependencies:
+      '@workspace/briefing-diff':
+        specifier: workspace:*
+        version: link:../briefing-diff
+      '@workspace/portal-ui':
+        specifier: workspace:*
+        version: link:../portal-ui
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.3.5
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.14
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      react:
+        specifier: 'catalog:'
+        version: 19.1.0
       typescript:
         specifier: ~5.9.2
         version: 5.9.3

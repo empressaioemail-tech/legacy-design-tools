@@ -40,6 +40,9 @@
       "path": "./lib/briefing-diff"
     },
     {
+      "path": "./lib/briefing-prior-snapshot"
+    },
+    {
       "path": "./lib/integrations-anthropic-ai"
     },
     {

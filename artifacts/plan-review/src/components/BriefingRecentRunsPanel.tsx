@@ -8,14 +8,6 @@ import {
   type BriefingGenerationRun,
   type EngagementBriefingNarrative,
 } from "@workspace/api-client-react";
-// Task #350 — the "Copy plain text" button + its success/failure
-// pills + ~2 s revert timer used to live inline on both this file
-// and `artifacts/design-tools/src/pages/EngagementDetail.tsx` as
-// byte-identical copies (Tasks #333 / #338 / #345). Lifting the
-// pattern into `@workspace/portal-ui` collapses the surface area
-// and removes the drift risk the per-surface mirror tests existed
-// to catch — every future tweak now lives in one place.
-import { CopyPlainTextButton } from "@workspace/portal-ui";
 // Task #314 — the per-section word-level diff that powers the
 // prior-narrative panel was extracted into `@workspace/briefing-diff`
 // (originally lifted from `artifacts/design-tools/src/pages/
@@ -23,7 +15,17 @@ import { CopyPlainTextButton } from "@workspace/portal-ui";
 // view can render the same diff without copy-pasting the LCS
 // routine. Both artifacts cannot import each other, so the helper
 // has to live in a shared lib if both are to use it.
-import { diffWords, formatBriefingActor } from "@workspace/briefing-diff";
+import { diffWords } from "@workspace/briefing-diff";
+// Task #355 — the prior-narrative title row, "Generated <when> by
+// <actor>" meta line, and "Copy plain text" button (with its 2 s
+// "Copied!" confirmation) live in this shared lib so the testids,
+// copy payload shape, and revert timing stay byte-identical with
+// the design-tools surface without copy-pasting two parallel JSX
+// subtrees. Plan Review still owns its `relativeTime`-vs-
+// `.toLocaleString()` formatting choice via the `formatGeneratedAt`
+// prop the component takes, so the existing Task #332 test contract
+// ("5 min ago" with absolute tooltip) still holds.
+import { BriefingPriorSnapshotHeader } from "@workspace/briefing-prior-snapshot";
 // Task #332 — the prior-narrative meta line renders the snapshot's
 // `generatedAt` as a relative-time string ("5 min ago", "3d ago",
 // etc.) instead of a raw locale stamp so an auditor scanning the
@@ -286,11 +288,16 @@ export function BriefingRecentRunsPanel({
     setOpenState((prev) => (prev === next ? prev : next));
   }, [search]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
-  // Task #350 — the discriminated copyResult state, ~2 s revert
-  // timer, unmount cleanup useEffect, and per-row pill JSX that
-  // used to live inline here (Tasks #333 / #338 / #345) now live in
-  // `@workspace/portal-ui`'s shared `<CopyPlainTextButton />` so
-  // both surfaces consume one implementation.
+  // Task #355 — the title row, the meta line, and the
+  // "Copy plain text" button (the latter delegating to the
+  // Task #350 `<CopyPlainTextButton />` in `@workspace/portal-ui`
+  // for the discriminated success / error pill state, the ~2 s
+  // revert timer, the unmount cleanup, and the
+  // `briefing-run-prior-narrative-copy-*` testids) now live in
+  // the shared `<BriefingPriorSnapshotHeader />` from
+  // `@workspace/briefing-prior-snapshot`. The two surfaces
+  // consume one implementation so the JSX, testids, friendly
+  // actor rewrite, and copy-button timing can never drift.
   const [filter, setFilterState] = useState<RecentRunsFilter>(() =>
     readRecentRunsFilterFromUrl(),
   );
@@ -698,19 +705,21 @@ export function BriefingRecentRunsPanel({
                           // don't get a misleading "this is the
                           // prior body" block. Mirrors the
                           // design-tools Task #303 B.5 block.
-                          // Task #333 — also mirrors the design-tools
-                          // Task #303 B.4 "Copy plain text" button so
-                          // an auditor on Plan Review can drop the
-                          // pre-regeneration snapshot into a Slack
-                          // thread or ticket without hand-selecting
-                          // each A–G section.
-                          // Task #337 — mirrors the design-tools Task
-                          // #303 B.3 "Generated [time] by [author]"
-                          // meta line so the auditor sees the
-                          // snapshot's provenance in-place rather
-                          // than having to read it off the producing
-                          // run row above. Closes the last remaining
-                          // parity gap on the prior-narrative block.
+                          //
+                          // Task #355 — the title row, "Generated
+                          // <when> by <actor>" meta line, and "Copy
+                          // plain text" button (with its 2 s
+                          // "Copied!" confirmation) live in
+                          // `@workspace/briefing-prior-snapshot` so
+                          // the testids, copy payload shape, and
+                          // revert timing stay byte-identical with
+                          // the design-tools surface without copy-
+                          // pasting two parallel JSX subtrees. Plan
+                          // Review still owns its `relativeTime`-vs-
+                          // `.toLocaleString()` formatting choice
+                          // via the `formatGeneratedAt` prop so the
+                          // existing Task #332 test contract ("5 min
+                          // ago" with absolute tooltip) still holds.
                           <div
                             data-testid={`briefing-run-prior-narrative-${run.generationId}`}
                             style={{
@@ -722,145 +731,14 @@ export function BriefingRecentRunsPanel({
                               paddingTop: 6,
                             }}
                           >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "flex-start",
-                                justifyContent: "space-between",
-                                gap: 12,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: 2,
-                                  minWidth: 0,
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    color: "var(--text-default)",
-                                    textTransform: "uppercase",
-                                    letterSpacing: 0.3,
-                                  }}
-                                >
-                                  Narrative on screen before this run was
-                                  overwritten
-                                </div>
-                                {/* Task #344 — the meta line itself
-                                    lives below the title/Copy-button
-                                    flex row (see the
-                                    `formatBriefingActor`-driven block
-                                    further down). An earlier mirror
-                                    pass also rendered it inside this
-                                    column with a hardcoded
-                                    "system:briefing-engine" ternary,
-                                    which (a) duplicated the
-                                    `briefing-run-prior-narrative-meta-…`
-                                    testid (every test that called
-                                    `findByTestId` on it threw on the
-                                    duplicate) and (b) re-introduced
-                                    the per-surface friendly-label
-                                    drift the shared
-                                    `@workspace/briefing-diff`
-                                    `formatBriefingActor` helper was
-                                    extracted to prevent. The single
-                                    rendering site below is the
-                                    canonical one. */}
-                              </div>
-                              {/* Task #350 — shared
-                                  `<CopyPlainTextButton />` from
-                                  `@workspace/portal-ui` owns the
-                                  discriminated success/error pill
-                                  state, the ~2 s revert timer, the
-                                  unmount cleanup, and the
-                                  `briefing-run-prior-narrative-copy-*`
-                                  testids the existing tests pin.
-                                  The payload shape (the seven A–G
-                                  bodies as `Label\n\nbody` blocks
-                                  separated by blank lines, with
-                                  empty sections rendered as "—" so
-                                  the pasted snapshot keeps visible
-                                  structure) stays computed here,
-                                  alongside the data that knows how
-                                  to render each section. */}
-                              <CopyPlainTextButton
-                                generationId={run.generationId}
-                                text={SECTION_ORDER.map(
-                                  ({ key, label }) => {
-                                    const body =
-                                      pickSection(priorNarrative, key) ?? "";
-                                    return `${label}\n\n${body.trim() || "—"}`;
-                                  },
-                                ).join("\n\n")}
-                              />
-                            </div>
-                            {/* Task #332 — mirror the design-tools Task #303
-                                B.3 meta line onto the Plan Review surface
-                                so an external auditor sees who/when produced
-                                the prior snapshot in-place, instead of
-                                bouncing back to design-tools to investigate
-                                the producing actor. The wire envelope's
-                                `priorNarrative.generatedAt` and
-                                `generatedBy` may be null for legacy backups
-                                where the per-row provenance post-dates the
-                                section_* columns; render only the half
-                                that's set so we never show "by null". The
-                                "system:briefing-engine" actor is rewritten
-                                to the same friendly "Briefing engine (mock)"
-                                label design-tools uses so the two surfaces
-                                read identically. */}
-                            {(priorNarrative.generatedAt ||
-                              priorNarrative.generatedBy) && (
-                              <div
-                                data-testid={`briefing-run-prior-narrative-meta-${run.generationId}`}
-                                style={{
-                                  fontSize: 11,
-                                  color: "var(--text-muted)",
-                                }}
-                              >
-                                {priorNarrative.generatedAt && (
-                                  <span
-                                    data-testid={`briefing-run-prior-narrative-generated-at-${run.generationId}`}
-                                    // Task #332 — absolute timestamp
-                                    // lives in the tooltip so a hover
-                                    // still reveals the precise
-                                    // instant. The visible text is the
-                                    // relative-time string so the
-                                    // auditor can tell at a glance how
-                                    // recent the prior body is.
-                                    title={new Date(
-                                      priorNarrative.generatedAt as
-                                        | Date
-                                        | string,
-                                    ).toLocaleString()}
-                                  >
-                                    Generated{" "}
-                                    {relativeTime(
-                                      priorNarrative.generatedAt as
-                                        | Date
-                                        | string,
-                                    )}
-                                  </span>
-                                )}
-                                {priorNarrative.generatedBy && (
-                                  <>
-                                    {priorNarrative.generatedAt ? " " : ""}
-                                    <span
-                                      data-testid={`briefing-run-prior-narrative-generated-by-${run.generationId}`}
-                                    >
-                                      by{" "}
-                                      {formatBriefingActor(
-                                        priorNarrative.generatedBy,
-                                      ) ?? priorNarrative.generatedBy}
-                                    </span>
-                                  </>
-                                )}
-                              </div>
-                            )}
+                            <BriefingPriorSnapshotHeader
+                              runGenerationId={run.generationId}
+                              priorNarrative={priorNarrative}
+                              formatGeneratedAt={(raw) => ({
+                                text: relativeTime(raw),
+                                title: new Date(raw).toLocaleString(),
+                              })}
+                            />
                             {SECTION_ORDER.map(({ key, label }) => {
                               const priorBody = pickSection(
                                 priorNarrative,

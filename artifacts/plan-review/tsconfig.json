@@ -18,6 +18,7 @@
     { "path": "../../lib/adapters" },
     { "path": "../../lib/api-client-react" },
     { "path": "../../lib/briefing-diff" },
+    { "path": "../../lib/briefing-prior-snapshot" },
     { "path": "../../lib/object-storage-web" },
     { "path": "../../lib/portal-ui" }
   ]

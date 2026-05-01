@@ -49,6 +49,13 @@ import { SiteMap } from "@workspace/site-context/client";
 // artifacts cannot import each other, so the helper has to live in
 // a shared lib if both are to use it.
 import { diffWords, formatBriefingActor } from "@workspace/briefing-diff";
+// Task #355 — the prior-narrative title row, "Generated <when> by
+// <actor>" meta line, and "Copy plain text" button (with its 2 s
+// "Copied!" confirmation) live in this shared lib so the testids,
+// copy payload shape, and revert timing stay byte-identical with
+// the Plan Review surface without copy-pasting two parallel JSX
+// subtrees.
+import { BriefingPriorSnapshotHeader } from "@workspace/briefing-prior-snapshot";
 import {
   diffFederalPayload,
   summarizeFederalPayload,
@@ -86,13 +93,6 @@ import {
   BriefingDivergenceDetailDialog,
   BriefingDivergenceRow as PortalBriefingDivergenceRow,
   BriefingDivergencesPanel as PortalBriefingDivergencesPanel,
-  // Task #350 — shared "Copy plain text" button used by the prior-
-  // narrative block on both this surface and the Plan Review one.
-  // Lifted out of EngagementDetail so the discriminated success/
-  // failure pill state, ~2 s feedback timer, unmount cleanup, and
-  // `briefing-run-prior-narrative-copy-*` testids can't drift
-  // between the two consumers.
-  CopyPlainTextButton,
   ReviewerComment,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
@@ -3283,11 +3283,16 @@ function BriefingRecentRunsPanel({
     writeRecentRunsOpenToUrl(next);
   };
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
-  // Task #350 — the discriminated copyResult state, ~2 s revert
-  // timer, unmount cleanup useEffect, and per-row pill JSX that
-  // used to live inline here (Tasks #303 B.4 / #338 / #345) now
-  // live in `@workspace/portal-ui`'s shared `<CopyPlainTextButton />`
-  // so both surfaces consume one implementation.
+  // Task #355 — the title row, the meta line, and the
+  // "Copy plain text" button (the latter delegating to the
+  // Task #350 `<CopyPlainTextButton />` in `@workspace/portal-ui`
+  // for the discriminated success / error pill state, the ~2 s
+  // revert timer, the unmount cleanup, and the
+  // `briefing-run-prior-narrative-copy-*` testids) now live in
+  // the shared `<BriefingPriorSnapshotHeader />` from
+  // `@workspace/briefing-prior-snapshot`. The two surfaces
+  // consume one implementation so the JSX, testids, friendly
+  // actor rewrite, and copy-button timing can never drift.
   // Task #262 — auditors comparing the failed-then-rerun pattern on a
   // noisy engagement need a way to slice the retained list down to the
   // suspicious rows. The filter is purely client-side (the route
@@ -3847,26 +3852,27 @@ function BriefingRecentRunsPanel({
                           // rendered above the disclosure, so
                           // duplicating it here would be noise.
                           //
-                          // Task #303 B.3 / B.4 / B.5 layered on top:
-                          //   B.3 — surface the prior narrative's
-                          //     `generatedAt` + `generatedBy` in the
-                          //     header so the auditor sees who/when
-                          //     produced the snapshot, not just
-                          //     "the previous body".
-                          //   B.4 — "Copy plain text" button that
-                          //     concatenates the seven section bodies
-                          //     and writes them to the clipboard so
-                          //     the auditor can paste the snapshot
-                          //     into a Slack thread or ticket.
-                          //   B.5 — per-section word-level diff vs
-                          //     the current narrative, rendered with
-                          //     strikethrough for tokens the new
-                          //     run dropped and underline for tokens
-                          //     it inserted. When the section is
-                          //     identical the renderer falls through
-                          //     to a "(unchanged)" pill so the
-                          //     auditor isn't asked to re-read
-                          //     identical paragraphs.
+                          // Task #355 — the title row, "Generated
+                          // <when> by <actor>" meta line, and "Copy
+                          // plain text" button (with its 2 s
+                          // "Copied!" confirmation) live in
+                          // `@workspace/briefing-prior-snapshot` so
+                          // the testids, copy payload shape, and
+                          // revert timing stay byte-identical with
+                          // the Plan Review surface without copy-
+                          // pasting two parallel JSX subtrees. The
+                          // per-section diff below is panel-render-
+                          // specific and stays inline.
+                          //
+                          // Task #303 B.5 — per-section word-level
+                          // diff vs the current narrative, rendered
+                          // with strikethrough for tokens the new
+                          // run dropped and underline for tokens
+                          // it inserted. When the section is
+                          // identical the renderer falls through
+                          // to a "(unchanged)" pill so the
+                          // auditor isn't asked to re-read
+                          // identical paragraphs.
                           <div
                             data-testid={`briefing-run-prior-narrative-${run.generationId}`}
                             style={{
@@ -3878,105 +3884,10 @@ function BriefingRecentRunsPanel({
                               paddingTop: 6,
                             }}
                           >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "flex-start",
-                                justifyContent: "space-between",
-                                gap: 12,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: 2,
-                                  minWidth: 0,
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    color: "var(--text-default)",
-                                    textTransform: "uppercase",
-                                    letterSpacing: 0.3,
-                                  }}
-                                >
-                                  Narrative on screen before this run was
-                                  overwritten
-                                </div>
-                                {/* Task #303 B.3 — meta line. The wire
-                                    envelope's `priorNarrative.generatedAt`
-                                    and `generatedBy` may be null for
-                                    legacy rows where the backup column
-                                    pre-dates per-row provenance; render
-                                    only the half that's present so we
-                                    never show "by null" or "at —". */}
-                                {(priorNarrative.generatedAt ||
-                                  priorNarrative.generatedBy) && (
-                                  <div
-                                    data-testid={`briefing-run-prior-narrative-meta-${run.generationId}`}
-                                    style={{
-                                      fontSize: 11,
-                                      color: "var(--text-muted)",
-                                    }}
-                                  >
-                                    {priorNarrative.generatedAt && (
-                                      <span
-                                        data-testid={`briefing-run-prior-narrative-generated-at-${run.generationId}`}
-                                      >
-                                        Generated{" "}
-                                        {new Date(
-                                          priorNarrative.generatedAt as
-                                            | Date
-                                            | string,
-                                        ).toLocaleString()}
-                                      </span>
-                                    )}
-                                    {priorNarrative.generatedBy && (
-                                      <>
-                                        {priorNarrative.generatedAt ? " " : ""}
-                                        <span
-                                          data-testid={`briefing-run-prior-narrative-generated-by-${run.generationId}`}
-                                        >
-                                          by{" "}
-                                          {formatBriefingActor(
-                                            priorNarrative.generatedBy,
-                                          ) ?? priorNarrative.generatedBy}
-                                        </span>
-                                      </>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              {/* Task #350 — shared
-                                  `<CopyPlainTextButton />` from
-                                  `@workspace/portal-ui` owns the
-                                  discriminated success/error pill
-                                  state, the ~2 s revert timer, the
-                                  unmount cleanup, and the
-                                  `briefing-run-prior-narrative-copy-*`
-                                  testids the existing tests pin.
-                                  The payload shape (the seven A–G
-                                  bodies as `Label\n\nbody` blocks
-                                  separated by blank lines, with
-                                  empty sections rendered as "—" so
-                                  the pasted snapshot keeps visible
-                                  structure) stays computed here,
-                                  alongside the data that knows how
-                                  to render each section. */}
-                              <CopyPlainTextButton
-                                generationId={run.generationId}
-                                text={SECTION_ORDER.map(
-                                  ({ key, label }) => {
-                                    const body =
-                                      pickSection(priorNarrative, key) ?? "";
-                                    return `${label}\n\n${body.trim() || "—"}`;
-                                  },
-                                ).join("\n\n")}
-                              />
-                            </div>
+                            <BriefingPriorSnapshotHeader
+                              runGenerationId={run.generationId}
+                              priorNarrative={priorNarrative}
+                            />
                             {SECTION_ORDER.map(({ key, label }) => {
                               const priorBody = pickSection(
                                 priorNarrative,
