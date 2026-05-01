@@ -242,6 +242,20 @@ export function getAdapterCacheSweepBatchSize(
 }
 
 /**
+ * Namespace for the cluster-wide Postgres advisory lock that
+ * serializes sweep ticks across api-server instances. We append
+ * `current_schema()` inside the SQL so the lock key is automatically
+ * scoped to whichever schema the cache table lives in — that keeps
+ * concurrent test schemas from contending on the same key while
+ * still giving a single shared key to all production instances
+ * (which all read/write the `public` schema).
+ *
+ * Exposed so tests can compute the same hash and simulate a peer
+ * instance holding the lock.
+ */
+export const ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE = "adapter_cache_sweep";
+
+/**
  * Delete up to `batchSize` rows whose `expires_at` is older than
  * `now() - graceMs`. Returns the number of rows actually removed
  * (0 when there's nothing to do). Never throws — DB failures are
@@ -252,6 +266,14 @@ export function getAdapterCacheSweepBatchSize(
  * row count is bounded regardless of how much expired backlog has
  * accumulated, and the inner SELECT is served by the
  * `adapter_response_cache_expires_idx` index (per the schema note).
+ *
+ * Multi-instance safety (Task #218): the whole tick runs inside a
+ * transaction that first tries to acquire a transaction-scoped
+ * Postgres advisory lock. If a peer api-server instance already
+ * holds the lock for this tick, this call short-circuits and
+ * returns `0` without scanning the index or contending on rows.
+ * The lock auto-releases at COMMIT/ROLLBACK so a crashed sweeper
+ * can't strand the lock.
  */
 export async function sweepExpiredAdapterCacheRows(opts?: {
   graceMs?: number;
@@ -263,16 +285,42 @@ export async function sweepExpiredAdapterCacheRows(opts?: {
   const log = opts?.log ?? defaultLogger;
   const cutoff = new Date(Date.now() - graceMs);
   try {
-    const victims = db
-      .select({ id: adapterResponseCache.id })
-      .from(adapterResponseCache)
-      .where(lt(adapterResponseCache.expiresAt, cutoff))
-      .limit(batchSize);
-    const deleted = await db
-      .delete(adapterResponseCache)
-      .where(inArray(adapterResponseCache.id, victims))
-      .returning({ id: adapterResponseCache.id });
-    return deleted.length;
+    return await db.transaction(async (tx) => {
+      // pg_try_advisory_xact_lock returns true if it acquired the
+      // lock, false if any other session is already holding it. The
+      // hash key is derived in-DB from the namespace + current schema
+      // so production instances (all on `public`) share one key while
+      // concurrent test schemas stay isolated from each other.
+      const lockResult = (await tx.execute(
+        sql`SELECT pg_try_advisory_xact_lock(
+              hashtextextended(
+                ${ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE} || '|' || current_schema(),
+                0
+              )
+            ) AS locked`,
+      )) as unknown as { rows: Array<{ locked?: unknown }> };
+      const locked = lockResult.rows?.[0]?.locked === true;
+      if (!locked) {
+        // Another instance is already sweeping this tick. Logging at
+        // debug because in a multi-instance deploy this is the steady
+        // state for every instance except the lucky one each tick.
+        log.debug(
+          {},
+          "adapterCache sweep: peer holds advisory lock, skipping tick",
+        );
+        return 0;
+      }
+      const victims = tx
+        .select({ id: adapterResponseCache.id })
+        .from(adapterResponseCache)
+        .where(lt(adapterResponseCache.expiresAt, cutoff))
+        .limit(batchSize);
+      const deleted = await tx
+        .delete(adapterResponseCache)
+        .where(inArray(adapterResponseCache.id, victims))
+        .returning({ id: adapterResponseCache.id });
+      return deleted.length;
+    });
   } catch (err) {
     log.warn(
       { err, graceMs, batchSize },

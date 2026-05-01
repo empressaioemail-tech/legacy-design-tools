@@ -39,6 +39,7 @@ const {
   DEFAULT_ADAPTER_CACHE_SWEEP_INTERVAL_MS,
   DEFAULT_ADAPTER_CACHE_SWEEP_GRACE_MS,
   DEFAULT_ADAPTER_CACHE_SWEEP_BATCH_SIZE,
+  ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE,
 } = await import("../lib/adapterCache");
 import type { AdapterResult } from "@workspace/adapters";
 
@@ -321,6 +322,182 @@ describe("sweepExpiredAdapterCacheRows", () => {
       batchSize: 2,
     });
     expect(thirdSweep).toBe(1);
+    const remaining = await ctx.schema!.db
+      .select()
+      .from(adapterResponseCache);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("skips work when a peer instance already holds the sweep advisory lock (Task #218)", async () => {
+    // Simulates two api-server instances ticking simultaneously: a
+    // peer holds the cluster-wide sweep lock on its own connection,
+    // so this instance's tick must short-circuit and delete nothing.
+    // We then release the peer lock and re-run the sweep to prove the
+    // rows are only swept once total — never twice.
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    for (let i = 0; i < 4; i++) {
+      const k = toCacheKey(
+        "fema:nfhl-flood-zone",
+        38.5 + i * 0.001,
+        -109.5,
+      );
+      await cache!.put(k!, sampleResult);
+    }
+    await ctx.schema!.db
+      .update(adapterResponseCache)
+      .set({ expiresAt: new Date(Date.now() - 10 * 60 * 1000) });
+
+    // Borrow a dedicated client and acquire a SESSION-scoped lock on
+    // the same key the production sweeper uses. Session and xact
+    // advisory locks share one keyspace, so this blocks the sweeper's
+    // pg_try_advisory_xact_lock from acquiring.
+    const peer = await ctx.schema!.pool.connect();
+    try {
+      await peer.query(
+        `SELECT pg_advisory_lock(
+           hashtextextended($1 || '|' || current_schema(), 0)
+         )`,
+        [ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE],
+      );
+
+      const skipped = await sweepExpiredAdapterCacheRows({
+        graceMs: 0,
+        batchSize: 100,
+      });
+      expect(skipped).toBe(0);
+      const stillThere = await ctx.schema!.db
+        .select()
+        .from(adapterResponseCache);
+      expect(stillThere).toHaveLength(4);
+
+      // Release the peer's lock and re-run: this tick should now do
+      // the work the first one would have done.
+      await peer.query(
+        `SELECT pg_advisory_unlock(
+           hashtextextended($1 || '|' || current_schema(), 0)
+         )`,
+        [ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE],
+      );
+    } finally {
+      peer.release();
+    }
+
+    const swept = await sweepExpiredAdapterCacheRows({
+      graceMs: 0,
+      batchSize: 100,
+    });
+    expect(swept).toBe(4);
+    const remaining = await ctx.schema!.db
+      .select()
+      .from(adapterResponseCache);
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("two concurrent ticks together delete each row at most once (Task #218)", async () => {
+    // Fires two sweepExpiredAdapterCacheRows() calls in parallel.
+    // Each runs in its own transaction on its own pool connection,
+    // and both try to acquire the same advisory lock. Only one wins;
+    // the other returns 0 immediately. The total work performed
+    // across both must equal the row count — never double it.
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    for (let i = 0; i < 6; i++) {
+      const k = toCacheKey(
+        "fema:nfhl-flood-zone",
+        38.5 + i * 0.001,
+        -109.5,
+      );
+      await cache!.put(k!, sampleResult);
+    }
+    await ctx.schema!.db
+      .update(adapterResponseCache)
+      .set({ expiresAt: new Date(Date.now() - 10 * 60 * 1000) });
+
+    // Hold the lock first to guarantee both ticks find it taken when
+    // they race in. Without this, one tick could win the lock, finish
+    // the DELETE, and release before the second one arrives — at
+    // which point the second would also acquire the lock but find no
+    // rows to delete (also returning 0). That outcome is *correct*
+    // but not what this test wants to prove. By pre-holding the lock,
+    // we guarantee both ticks observe contention, then we release and
+    // wait for them to settle.
+    const peer = await ctx.schema!.pool.connect();
+    let firstResult: number;
+    let secondResult: number;
+    try {
+      await peer.query(
+        `SELECT pg_advisory_lock(
+           hashtextextended($1 || '|' || current_schema(), 0)
+         )`,
+        [ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE],
+      );
+      const ticks = Promise.all([
+        sweepExpiredAdapterCacheRows({ graceMs: 0, batchSize: 100 }),
+        sweepExpiredAdapterCacheRows({ graceMs: 0, batchSize: 100 }),
+      ]);
+      // Give both ticks a moment to BEGIN and try the lock so they
+      // are guaranteed to observe it as taken by `peer`.
+      await new Promise((r) => setTimeout(r, 50));
+      await peer.query(
+        `SELECT pg_advisory_unlock(
+           hashtextextended($1 || '|' || current_schema(), 0)
+         )`,
+        [ADAPTER_CACHE_SWEEP_LOCK_NAMESPACE],
+      );
+      [firstResult, secondResult] = await ticks;
+    } finally {
+      peer.release();
+    }
+
+    // Neither tick deleted the rows twice. Each tick saw the lock as
+    // held by the peer and short-circuited to 0.
+    expect(firstResult).toBe(0);
+    expect(secondResult).toBe(0);
+    const stillThere = await ctx.schema!.db
+      .select()
+      .from(adapterResponseCache);
+    expect(stillThere).toHaveLength(6);
+
+    // A follow-up tick (peer no longer holding the lock) does the
+    // actual cleanup, proving the worker isn't permanently wedged.
+    const cleanup = await sweepExpiredAdapterCacheRows({
+      graceMs: 0,
+      batchSize: 100,
+    });
+    expect(cleanup).toBe(6);
+  });
+
+  it("racing ticks elect exactly one winner — one returns the full count, the other returns 0 (Task #218)", async () => {
+    // Natural-race variant: no pre-held peer lock. Both ticks fire
+    // simultaneously and contend on the cluster-wide advisory lock
+    // directly. The invariant we assert is the strong one a multi-
+    // instance deploy depends on — across the two contenders the
+    // table is swept exactly once, never zero times and never twice.
+    //
+    // Concretely: one caller returns ROW_COUNT and the other returns
+    // 0 (or, if the winner finishes and releases before the second
+    // ever attempts the lock, the second tick acquires cleanly but
+    // finds the table empty — also returning 0). Either way: the
+    // sum is ROW_COUNT and the product is 0.
+    const ROW_COUNT = 5;
+    const cache = createAdapterResponseCache({ ttlMs: 60_000 });
+    for (let i = 0; i < ROW_COUNT; i++) {
+      const k = toCacheKey(
+        "fema:nfhl-flood-zone",
+        38.5 + i * 0.001,
+        -109.5,
+      );
+      await cache!.put(k!, sampleResult);
+    }
+    await ctx.schema!.db
+      .update(adapterResponseCache)
+      .set({ expiresAt: new Date(Date.now() - 10 * 60 * 1000) });
+
+    const [a, b] = await Promise.all([
+      sweepExpiredAdapterCacheRows({ graceMs: 0, batchSize: 100 }),
+      sweepExpiredAdapterCacheRows({ graceMs: 0, batchSize: 100 }),
+    ]);
+    expect(a + b).toBe(ROW_COUNT);
+    expect(a * b).toBe(0);
     const remaining = await ctx.schema!.db
       .select()
       .from(adapterResponseCache);
