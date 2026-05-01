@@ -230,14 +230,25 @@ async function main(): Promise<void> {
   process.exit(exitCode);
 }
 
-// Only invoke `main()` when the file is executed directly (i.e. via
-// `tsx ./src/backfillSheetCreatedEvents.ts`). Tests `import` this
-// module to call `backfill()` against a `withTestSchema` db and must
-// NOT trigger the production singleton's `pool.end()` / `process.exit`
-// side effects on import.
-const isDirectInvocation =
+// Only invoke `main()` when this module is executed as the script's
+// entrypoint (i.e. `tsx backfillSheetCreatedEvents.ts`). Without
+// this guard, merely `import`-ing the module — as the unit and
+// integration tests do to reach the exported `backfill()` — would
+// run the CLI, hit `process.exit()` inside Vitest, and abort the
+// test runner.
+//
+// Mirrors the regex check in `sweepOrphanAvatars.ts` rather than the
+// `import.meta.url === \`file://${process.argv[1]}\`` style so all
+// three one-shot scripts (`sweepOrphanAvatars`, this one, and
+// `smokeConverter`) share one pattern. The regex form also tolerates
+// path normalisation differences (symlinks, trailing query strings)
+// that the strict URL-equality form can trip over.
+const invokedAsEntrypoint =
+  typeof process !== "undefined" &&
+  Array.isArray(process.argv) &&
   process.argv[1] !== undefined &&
-  import.meta.url === `file://${process.argv[1]}`;
-if (isDirectInvocation) {
+  /backfillSheetCreatedEvents\.(ts|js|mjs|cjs)$/.test(process.argv[1]);
+
+if (invokedAsEntrypoint) {
   void main();
 }

@@ -315,7 +315,7 @@ async function smokeOne(args: {
   };
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   const url = process.env.CONVERTER_URL;
   const sharedSecret = process.env.CONVERTER_SHARED_SECRET;
@@ -373,7 +373,25 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error("smoke-converter: unhandled error", err);
-  process.exit(1);
-});
+// Only invoke `main()` when this module is executed as the script's
+// entrypoint (i.e. `tsx smokeConverter.ts`). Without this guard,
+// merely `import`-ing the module — as a fixture-led test would do
+// to reach `validateGlb` / `parseArgs` / `main` by name — would run
+// the CLI, hit `process.exit()` inside Vitest (e.g. on the missing
+// `CONVERTER_URL` env-var path), and abort the test runner.
+//
+// Mirrors the regex check used in `sweepOrphanAvatars.ts` and
+// `backfillSheetCreatedEvents.ts` so all three one-shot scripts
+// share one pattern.
+const invokedAsEntrypoint =
+  typeof process !== "undefined" &&
+  Array.isArray(process.argv) &&
+  process.argv[1] !== undefined &&
+  /smokeConverter\.(ts|js|mjs|cjs)$/.test(process.argv[1]);
+
+if (invokedAsEntrypoint) {
+  main().catch((err) => {
+    console.error("smoke-converter: unhandled error", err);
+    process.exit(1);
+  });
+}
