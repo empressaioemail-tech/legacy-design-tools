@@ -26,6 +26,9 @@
     },
     {
       "path": "./lib/empressa-atom"
+    },
+    {
+      "path": "./lib/object-storage-web"
     }
   ]
 }

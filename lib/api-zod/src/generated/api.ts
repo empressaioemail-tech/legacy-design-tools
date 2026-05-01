@@ -1400,3 +1400,48 @@ profile from then on. This matches the contract documented on
 export const DeleteUserParams = zod.object({
   id: zod.coerce.string(),
 });
+
+/**
+ * Returns a short-lived presigned PUT URL the client uploads the
+file bytes to (directly to GCS — the file does NOT go through
+this server). The response also includes the canonical
+`objectPath` (`/objects/<id>`) the client should persist on the
+owning record once the PUT succeeds. Used by the admin Users
+screen to upload avatar images instead of pasting URLs.
+
+ * @summary Request a presigned upload URL
+ */
+
+export const requestUploadUrlBodySizeMin = 0;
+
+export const RequestUploadUrlBody = zod
+  .object({
+    name: zod.string().min(1),
+    size: zod.number().min(requestUploadUrlBodySizeMin),
+    contentType: zod.string().min(1),
+  })
+  .describe(
+    "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n",
+  );
+
+export const requestUploadUrlResponseMetadataSizeMin = 0;
+
+export const RequestUploadUrlResponse = zod.object({
+  uploadURL: zod
+    .string()
+    .describe("Short-lived presigned PUT URL (uploads go directly to GCS)."),
+  objectPath: zod
+    .string()
+    .describe(
+      "Canonical `\/objects\/<id>` path to persist on the owning\nrecord. Serve the asset by prepending the storage mount\n(`\/api\/storage` + `objectPath`).\n",
+    ),
+  metadata: zod
+    .object({
+      name: zod.string().min(1),
+      size: zod.number().min(requestUploadUrlResponseMetadataSizeMin),
+      contentType: zod.string().min(1),
+    })
+    .describe(
+      "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n",
+    ),
+});

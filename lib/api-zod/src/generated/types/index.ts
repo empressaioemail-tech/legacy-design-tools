@@ -54,6 +54,8 @@ export * from "./matchEngagementResponse";
 export * from "./projectType";
 export * from "./recordSubmissionResponseBody";
 export * from "./recordSubmissionResponseBodyStatus";
+export * from "./requestUploadUrlBody";
+export * from "./requestUploadUrlResponse";
 export * from "./retrievalProbeBody";
 export * from "./retrievalProbeResponse";
 export * from "./retrievalProbeResponseQueryEmbedding";

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@workspace/portal-ui";
 import {
@@ -9,6 +9,7 @@ import {
   getListUsersQueryKey,
   type User,
 } from "@workspace/api-client-react";
+import { useUpload } from "@workspace/object-storage-web";
 import { navGroups } from "../components/NavGroups";
 
 /**
@@ -261,14 +262,11 @@ function CreateProfileModal({ onClose }: CreateProfileModalProps) {
             data-testid="user-form-email"
           />
         </Field>
-        <Field label="Avatar URL" hint="Optional">
-          <input
-            style={INPUT_STYLE}
-            value={avatarUrl}
-            onChange={(e) => setAvatarUrl(e.target.value)}
-            data-testid="user-form-avatar"
-          />
-        </Field>
+        <AvatarField
+          value={avatarUrl}
+          onChange={setAvatarUrl}
+          testIdPrefix="user-form"
+        />
         {serverError ? (
           <div className="sc-body text-[var(--danger)]">{serverError}</div>
         ) : null}
@@ -369,14 +367,12 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
             data-testid="user-edit-email"
           />
         </Field>
-        <Field label="Avatar URL" hint="Leave blank to clear">
-          <input
-            style={INPUT_STYLE}
-            value={avatarUrl}
-            onChange={(e) => setAvatarUrl(e.target.value)}
-            data-testid="user-edit-avatar"
-          />
-        </Field>
+        <AvatarField
+          value={avatarUrl}
+          onChange={setAvatarUrl}
+          testIdPrefix="user-edit"
+          clearableHint
+        />
         {serverError ? (
           <div className="sc-body text-[var(--danger)]">{serverError}</div>
         ) : null}
@@ -387,6 +383,128 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
         />
       </form>
     </ModalShell>
+  );
+}
+
+interface AvatarFieldProps {
+  value: string;
+  onChange: (next: string) => void;
+  testIdPrefix: string;
+  clearableHint?: boolean;
+}
+
+/**
+ * Avatar input — supports two flows in one control:
+ *
+ *  1. Upload a local image file (drag-pick via the hidden `<input type=file>`),
+ *     which goes through the presigned-URL flow in `useUpload`. The returned
+ *     canonical `objectPath` (e.g. `/objects/uploads/<uuid>`) is rewritten to
+ *     the server's serving URL (`/api/storage<objectPath>`) and dropped into
+ *     the same `value` the URL-paste path uses, so `users.avatar_url` is
+ *     written exactly the same way the timeline already consumes it.
+ *  2. Paste any URL — fallback for external avatars (Gravatar, etc).
+ *
+ * The preview thumbnail uses an `onError` reset so a broken URL collapses
+ * back to the upload affordance instead of leaving a phantom checkbox.
+ */
+function AvatarField({
+  value,
+  onChange,
+  testIdPrefix,
+  clearableHint,
+}: AvatarFieldProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [previewBroken, setPreviewBroken] = useState(false);
+  const { uploadFile, isUploading, error, progress } = useUpload({
+    onSuccess: (response) => {
+      // Persist the serving URL (storage mount + objectPath), which is what
+      // <img src> can resolve from the browser. The raw `objectPath` alone
+      // would not — it is only the canonical key.
+      const servingUrl = `/api/storage${response.objectPath}`;
+      setPreviewBroken(false);
+      onChange(servingUrl);
+    },
+  });
+
+  return (
+    <Field
+      label="Avatar"
+      hint={
+        clearableHint
+          ? "Upload an image, paste a URL, or leave blank to clear."
+          : "Upload an image or paste a URL. Optional."
+      }
+    >
+      <div className="flex items-center gap-3">
+        {value && !previewBroken ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={value}
+            alt=""
+            onError={() => setPreviewBroken(true)}
+            onLoad={() => setPreviewBroken(false)}
+            className="w-10 h-10 rounded-full object-cover shrink-0 border border-[var(--border-default)]"
+            data-testid={`${testIdPrefix}-avatar-preview`}
+          />
+        ) : (
+          <div
+            className="sc-avatar-mark shrink-0"
+            style={{
+              background: "var(--bg-input)",
+              color: "var(--text-secondary)",
+              border: "1px dashed var(--border-default)",
+              width: 40,
+              height: 40,
+              fontSize: 14,
+            }}
+            aria-hidden
+          >
+            {value && previewBroken ? "!" : "+"}
+          </div>
+        )}
+        <button
+          type="button"
+          className="sc-pill sc-pill-muted cursor-pointer disabled:opacity-50"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          data-testid={`${testIdPrefix}-avatar-upload`}
+        >
+          {isUploading ? `Uploading… ${progress}%` : "Upload image"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          data-testid={`${testIdPrefix}-avatar-file`}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            // Reset the input value so re-picking the same file still
+            // fires `onChange` (browser dedupes identical selections).
+            e.target.value = "";
+            if (file) {
+              setPreviewBroken(false);
+              void uploadFile(file);
+            }
+          }}
+        />
+      </div>
+      <input
+        style={INPUT_STYLE}
+        value={value}
+        onChange={(e) => {
+          setPreviewBroken(false);
+          onChange(e.target.value);
+        }}
+        placeholder="https://… (or upload above)"
+        data-testid={`${testIdPrefix}-avatar`}
+      />
+      {error ? (
+        <span className="sc-body text-[var(--danger)]">
+          Upload failed: {error.message}
+        </span>
+      ) : null}
+    </Field>
   );
 }
 

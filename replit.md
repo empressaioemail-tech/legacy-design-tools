@@ -25,6 +25,9 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
   - `POST /api/snapshots` — guarded by `X-Snapshot-Secret`. Returns `{id, receivedAt, engagementId, engagementName, autoCreated}`. Handles `walls.count` or `walls[]` shapes.
   - `POST /api/chat` — SSE stream. Body: `{engagementId, question, history}`. Looks up engagement + latest snapshot; returns 400 `{error:"no_snapshots"}` if none. Model `claude-sonnet-4-5` via `@workspace/integrations-anthropic-ai`.
   - `GET  /api/atoms/:slug/:id/summary` — empressa-atom `contextSummary` for a single atom. Returns `{prose, typed, keyMetrics, relatedAtoms, historyProvenance:{latestEventId, latestEventAt}, scopeFiltered}`. `latestEventId === ""` is the "no events yet" sentinel.
+  - `POST /api/storage/uploads/request-url` — returns `{uploadURL, objectPath, metadata}` for the presigned-PUT flow (avatar uploads). Bytes go directly to GCS.
+  - `GET  /api/storage/objects/*` — serves uploaded object entities (avatar images, etc.).
+  - `GET  /api/storage/public-objects/*` — serves public assets from `PUBLIC_OBJECT_SEARCH_PATHS`.
 - **artifacts/mockup-sandbox** — design exploration sandbox.
 
 ## Shared Libraries
@@ -35,6 +38,7 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
 - `lib/api-zod` — generated Zod schemas.
 - `lib/db` (`@workspace/db`) — Drizzle schema (`engagements`, `snapshots`), `drizzle-orm/node-postgres` with TCP `pg.Pool`. Scripts: `push`, `seed` (idempotent, onConflictDoNothing on `nameLower`).
 - `lib/integrations-anthropic-ai`, `lib/integrations-base`.
+- `lib/object-storage-web` (`@workspace/object-storage-web`) — browser upload helpers (`useUpload` hook, `ObjectUploader` Uppy modal). Wraps the presigned-URL flow against `/api/storage/uploads/request-url`.
 
 ## Stack
 
