@@ -35,4 +35,13 @@ value is a model-quality regression and is logged
 server-side.
  */
   invalidCitationCount: number | null;
+  /** On `completed`, the exact citation token strings the engine
+stripped because they pointed at unknown ids. Used by the
+UI's invalid-citation warning to render each stripped
+token as a "broken" pill (Spec 51 traceability) so the
+architect can see which sources were referenced but no
+longer exist. Mirrors `invalidCitationCount` — the count
+equals the array length when both are present.
+ */
+  invalidCitations: string[] | null;
 }

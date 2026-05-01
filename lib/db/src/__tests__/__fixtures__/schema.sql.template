@@ -62,7 +62,8 @@ CREATE TABLE @@SCHEMA@@.briefing_generation_jobs (
     started_at timestamp with time zone DEFAULT now() NOT NULL,
     completed_at timestamp with time zone,
     error text,
-    invalid_citation_count integer
+    invalid_citation_count integer,
+    invalid_citations text[]
 );
 
 

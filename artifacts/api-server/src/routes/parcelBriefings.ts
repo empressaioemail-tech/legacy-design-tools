@@ -1418,6 +1418,15 @@ async function finalizeJob(
     state: Extract<BriefingGenerationJobState, "completed" | "failed">;
     error: string | null;
     invalidCitationCount: number | null;
+    /**
+     * Verbatim citation token strings the engine stripped because they
+     * pointed at unknown ids (Task #176). Mirrors `invalidCitations`
+     * on the engine result; the status endpoint surfaces this back to
+     * the UI so it can render each one as a "broken" pill in the
+     * invalid-citation warning. Null on the failed branch and on
+     * legacy rows written before Task #176 landed.
+     */
+    invalidCitations: string[] | null;
   },
   reqLog: typeof logger,
 ): Promise<void> {
@@ -1428,6 +1437,7 @@ async function finalizeJob(
         state: patch.state,
         error: patch.error,
         invalidCitationCount: patch.invalidCitationCount,
+        invalidCitations: patch.invalidCitations,
         completedAt: new Date(),
       })
       .where(eq(briefingGenerationJobs.id, generationId))
@@ -1510,6 +1520,11 @@ async function runBriefingGeneration(args: {
         state: "completed",
         error: null,
         invalidCitationCount: result.invalidCitations.length,
+        // Surface the exact stripped tokens so the UI can render each
+        // one as a "broken" pill in the invalid-citation warning
+        // (Task #176). The engine returns `ReadonlyArray<string>`;
+        // copy into a mutable array for the DB writer's shape.
+        invalidCitations: [...result.invalidCitations],
       },
       reqLog,
     );
@@ -1527,7 +1542,12 @@ async function runBriefingGeneration(args: {
     const message = (err as Error).message ?? "unknown engine failure";
     await finalizeJob(
       generationId,
-      { state: "failed", error: message, invalidCitationCount: null },
+      {
+        state: "failed",
+        error: message,
+        invalidCitationCount: null,
+        invalidCitations: null,
+      },
       reqLog,
     );
     reqLog.error(
@@ -1704,6 +1724,7 @@ router.get(
           completedAt: null,
           error: null,
           invalidCitationCount: null,
+          invalidCitations: null,
         });
         return;
       }
@@ -1717,6 +1738,7 @@ router.get(
         completedAt: job.completedAt ? job.completedAt.toISOString() : null,
         error: job.error,
         invalidCitationCount: job.invalidCitationCount,
+        invalidCitations: job.invalidCitations,
       });
     } catch (err) {
       logger.error(

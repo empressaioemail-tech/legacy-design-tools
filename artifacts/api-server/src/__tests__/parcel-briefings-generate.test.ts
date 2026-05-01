@@ -168,6 +168,7 @@ describe("POST /api/engagements/:id/briefing/generate (mock mode)", () => {
     const completed = await waitForStatus(eng.id, "completed");
     expect(completed.body.generationId).toBe(generationId);
     expect(completed.body.invalidCitationCount).toBe(0);
+    expect(completed.body.invalidCitations).toEqual([]);
     expect(completed.body.error).toBeNull();
 
     const rows = await ctx.schema.db
@@ -321,6 +322,7 @@ describe("GET /api/engagements/:id/briefing/status idle path", () => {
       completedAt: null,
       error: null,
       invalidCitationCount: null,
+      invalidCitations: null,
     });
   });
 

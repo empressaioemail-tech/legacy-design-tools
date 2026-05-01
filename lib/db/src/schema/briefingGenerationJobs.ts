@@ -78,6 +78,15 @@ export const briefingGenerationJobs = pgTable(
      * loading the full briefing payload. Null until the run completes.
      */
     invalidCitationCount: integer("invalid_citation_count"),
+    /**
+     * Verbatim citation token strings the engine stripped because they
+     * pointed at unknown ids (Task #176). The UI renders each one as a
+     * "broken" pill in the invalid-citation warning so the architect
+     * can audit which sources were referenced but no longer exist.
+     * Length always equals {@link invalidCitationCount} when both are
+     * set. Null while pending and on the failed branch.
+     */
+    invalidCitations: text("invalid_citations").array(),
   },
   (t) => ({
     /**

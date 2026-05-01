@@ -1552,6 +1552,12 @@ export const GetEngagementBriefingGenerationStatusResponse = zod
       .describe(
         "On `completed`, the number of citation tokens the engine\nstripped because they pointed at unknown ids. A non-zero\nvalue is a model-quality regression and is logged\nserver-side.\n",
       ),
+    invalidCitations: zod
+      .array(zod.string())
+      .nullable()
+      .describe(
+        'On `completed`, the exact citation token strings the engine\nstripped because they pointed at unknown ids. Used by the\nUI\'s invalid-citation warning to render each stripped\ntoken as a \"broken\" pill (Spec 51 traceability) so the\narchitect can see which sources were referenced but no\nlonger exist. Mirrors `invalidCitationCount` — the count\nequals the array length when both are present.\n',
+      ),
   })
   .describe(
     "Wire envelope for `GET \/engagements\/{id}\/briefing\/status`. Job\nstate is process-local and best-effort; the persisted briefing\nnarrative on `GET \/briefing` is the source of truth.\n",

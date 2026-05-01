@@ -64,6 +64,11 @@ import {
   summarizeBackfillTallies,
   type BackfillFilter,
 } from "../lib/submissionBackfill";
+import {
+  BriefingInvalidCitationPill,
+  renderBriefingBody,
+  scrollToBriefingSource,
+} from "../components/briefingCitations";
 
 const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
   active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },
@@ -628,9 +633,17 @@ function isAdapterSourceKind(
 export function BriefingSourceRow({
   engagementId,
   source,
+  isHighlighted = false,
 }: {
   engagementId: string;
   source: EngagementBriefingSource;
+  /**
+   * When true, render the row with a flashed border so the user can
+   * see which source a clicked narrative citation pill landed them
+   * on (Task #176). The parent (`SiteContextTab`) owns the timer
+   * that toggles this back to false after ~1.6s.
+   */
+  isHighlighted?: boolean;
 }) {
   const isManual = source.sourceKind === "manual-upload";
   const isAdapter = isAdapterSourceKind(source.sourceKind);
@@ -665,8 +678,20 @@ export function BriefingSourceRow({
         display: "flex",
         flexDirection: "column",
         gap: 4,
+        // Flashed outline driven by `isHighlighted` (Task #176). We
+        // use `outline` (not `border`) so the row's existing card
+        // border isn't shifted by the highlight — outline draws
+        // outside the box and never reflows the layout. A short CSS
+        // transition smooths the appearance/disappearance.
+        outline: isHighlighted ? "2px solid var(--cyan)" : "2px solid transparent",
+        outlineOffset: 2,
+        boxShadow: isHighlighted
+          ? "0 0 0 4px rgba(0, 180, 216, 0.18)"
+          : undefined,
+        transition: "outline-color 200ms ease, box-shadow 200ms ease",
       }}
       data-testid={`briefing-source-${source.id}`}
+      data-highlighted={isHighlighted ? "true" : undefined}
     >
       <div
         style={{
@@ -1257,11 +1282,21 @@ function BriefingNarrativePanel({
   narrative,
   sourceCount,
   sources,
+  onJumpToSource,
 }: {
   engagementId: string;
   narrative: EngagementBriefingNarrative | null;
   sourceCount: number;
   sources: EngagementBriefingSource[];
+  /**
+   * Invoked when an inline citation pill in any A–G section card is
+   * clicked. The parent (`SiteContextTab`) is responsible for
+   * scrolling the matching `BriefingSourceRow` into view + flashing
+   * a temporary highlight on it; we route through the parent rather
+   * than mutating DOM here so the highlight is React state and not
+   * an imperative class toggle (Task #176).
+   */
+  onJumpToSource: (sourceId: string) => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -1365,8 +1400,28 @@ function BriefingNarrativePanel({
     statusQuery.data?.state === "completed"
       ? (statusQuery.data.invalidCitationCount ?? 0)
       : 0;
+  // Verbatim stripped tokens (Task #176) — the warning banner
+  // renders each one as a "broken" pill so the architect can see
+  // which sources were referenced but no longer exist. Older job
+  // entries (or older API servers, until the next deploy) won't
+  // have this field; fall back to an empty list rather than the
+  // count so the renderer doesn't fabricate placeholder pills.
+  const invalidTokens =
+    statusQuery.data?.state === "completed"
+      ? (statusQuery.data.invalidCitations ?? [])
+      : [];
   const failureMessage =
     statusQuery.data?.state === "failed" ? statusQuery.data.error : null;
+
+  // Set of currently-known source ids — drives the citation pill
+  // renderer's "render as clickable pill vs. fall back to plain
+  // label" decision. Recomputed only when the sources list
+  // identity changes so re-renders during card toggle don't
+  // re-allocate the set.
+  const knownSourceIds = useMemo(
+    () => new Set(sources.map((s) => s.id)),
+    [sources],
+  );
 
   return (
     <div
@@ -1468,10 +1523,33 @@ function BriefingNarrativePanel({
             background: "var(--warning-dim)",
             padding: 8,
             borderRadius: 4,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
           }}
         >
-          {invalidCount} citation{invalidCount === 1 ? "" : "s"} pointed at
-          unknown sources and were stripped from the narrative.
+          <div>
+            {invalidCount} citation{invalidCount === 1 ? "" : "s"} pointed at
+            unknown sources and were stripped from the narrative.
+          </div>
+          {invalidTokens.length > 0 && (
+            <div
+              data-testid="briefing-invalid-citations-list"
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              {invalidTokens.map((token, idx) => (
+                <BriefingInvalidCitationPill
+                  key={`invalid-${idx}-${token}`}
+                  token={token}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1553,7 +1631,11 @@ function BriefingNarrativePanel({
                   >
                     {isEmpty
                       ? "No content in this section."
-                      : body}
+                      : renderBriefingBody(
+                          body!,
+                          knownSourceIds,
+                          onJumpToSource,
+                        )}
                   </div>
                 )}
               </div>
@@ -1648,6 +1730,39 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
       setSubTab("3d");
     }
   }, [hasReadyDxf, subTab]);
+
+  // Citation-pill jump target highlight state (Task #176). When a
+  // user clicks an inline citation pill in the narrative, we scroll
+  // the matching `BriefingSourceRow` into view and flash the row's
+  // border for ~1.6s so the architect's eye lands on the right card.
+  // The highlight is React state (not DOM mutation) so it survives
+  // re-renders and tests can assert on it.
+  const [highlightedSourceId, setHighlightedSourceId] = useState<
+    string | null
+  >(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
+  const handleJumpToSource = (sourceId: string) => {
+    setHighlightedSourceId(sourceId);
+    // Defer the scroll one frame so React commits the highlight
+    // first — the row's style change is what we want the user to
+    // see *as* the page snaps to it.
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        scrollToBriefingSource(sourceId);
+      });
+    } else {
+      scrollToBriefingSource(sourceId);
+    }
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedSourceId((curr) => (curr === sourceId ? null : curr));
+    }, 1600);
+  };
 
   return (
     <div className="sc-card p-6 flex flex-col gap-4 flex-1">
@@ -1961,6 +2076,7 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
                     key={source.id}
                     engagementId={engagementId}
                     source={source}
+                    isHighlighted={highlightedSourceId === source.id}
                   />
                 ))}
               </div>
@@ -1974,6 +2090,7 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
         narrative={narrative}
         sourceCount={sources.length}
         sources={sources}
+        onJumpToSource={handleJumpToSource}
       />
 
       <PushToRevitAffordance
