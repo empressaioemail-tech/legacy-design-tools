@@ -3235,6 +3235,31 @@ function BriefingRecentRunsPanel({
     writeRecentRunsOpenToUrl(next);
   };
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  // Task #338 — closes the loop on the "Copy plain text" button
+  // (Task #303 B.4). Clipboard writes are silent on success, so an
+  // auditor who clicks the button can't tell whether the copy
+  // landed without pasting somewhere else to verify. Tracking the
+  // generationId of the row whose copy just resolved lets the
+  // button swap its label to "Copied!" for ~2s and then revert,
+  // without any modal or toast infrastructure. Only one row can be
+  // in the confirmation state at a time — clicking the button on a
+  // second row resets the timer and re-points the confirmation at
+  // that row, so a fast double-copy doesn't leave the first row's
+  // pill stuck on screen.
+  const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Clear the pending revert on unmount so a click that races the
+  // disclosure being collapsed (or the page being navigated away
+  // from) doesn't leak a setTimeout that fires against an
+  // already-unmounted tree.
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = null;
+      }
+    };
+  }, []);
   // Task #262 — auditors comparing the failed-then-rerun pattern on a
   // noisy engagement need a way to slice the retained list down to the
   // suspicious rows. The filter is purely client-side (the route
@@ -3910,40 +3935,101 @@ function BriefingRecentRunsPanel({
                                   `navigator.clipboard.writeText`).
                                   Falls back silently when the API
                                   is unavailable so we never throw
-                                  inside an event handler. */}
-                              <button
-                                type="button"
-                                data-testid={`briefing-run-prior-narrative-copy-${run.generationId}`}
-                                onClick={() => {
-                                  const text = SECTION_ORDER.map(
-                                    ({ key, label }) => {
-                                      const body =
-                                        pickSection(priorNarrative, key) ?? "";
-                                      return `${label}\n\n${body.trim() || "—"}`;
-                                    },
-                                  ).join("\n\n");
-                                  if (
-                                    typeof navigator !== "undefined" &&
-                                    navigator.clipboard &&
-                                    typeof navigator.clipboard.writeText ===
-                                      "function"
-                                  ) {
-                                    void navigator.clipboard.writeText(text);
-                                  }
-                                }}
-                                style={{
-                                  fontSize: 11,
-                                  padding: "2px 8px",
-                                  background: "transparent",
-                                  border: "1px solid var(--border-subtle)",
-                                  borderRadius: 4,
-                                  cursor: "pointer",
-                                  color: "var(--text-default)",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Copy plain text
-                              </button>
+                                  inside an event handler.
+                                  Task #338 — on a successful write
+                                  the button label flips to
+                                  "Copied!" for ~2s so the auditor
+                                  sees the copy landed. The flip
+                                  only happens once `writeText`
+                                  resolves — an unavailable API or a
+                                  rejected promise never shows the
+                                  confirmation, so the indicator
+                                  can't false-positive. The 2000 ms
+                                  duration is held in a local const
+                                  alongside the matching plan-review
+                                  copy so any future tweak stays in
+                                  lock-step. */}
+                              {(() => {
+                                const COPIED_CONFIRMATION_MS = 2000;
+                                const isCopied =
+                                  copiedRunId === run.generationId;
+                                return (
+                                  <button
+                                    type="button"
+                                    data-testid={`briefing-run-prior-narrative-copy-${run.generationId}`}
+                                    onClick={() => {
+                                      const text = SECTION_ORDER.map(
+                                        ({ key, label }) => {
+                                          const body =
+                                            pickSection(priorNarrative, key) ??
+                                            "";
+                                          return `${label}\n\n${body.trim() || "—"}`;
+                                        },
+                                      ).join("\n\n");
+                                      if (
+                                        typeof navigator === "undefined" ||
+                                        !navigator.clipboard ||
+                                        typeof navigator.clipboard
+                                          .writeText !== "function"
+                                      ) {
+                                        return;
+                                      }
+                                      // Capture the id at click time
+                                      // so a fast row-swap doesn't
+                                      // confirm the wrong row.
+                                      const generationId = run.generationId;
+                                      navigator.clipboard
+                                        .writeText(text)
+                                        .then(() => {
+                                          if (copiedTimerRef.current !== null) {
+                                            clearTimeout(
+                                              copiedTimerRef.current,
+                                            );
+                                          }
+                                          setCopiedRunId(generationId);
+                                          copiedTimerRef.current = setTimeout(
+                                            () => {
+                                              setCopiedRunId(null);
+                                              copiedTimerRef.current = null;
+                                            },
+                                            COPIED_CONFIRMATION_MS,
+                                          );
+                                        })
+                                        .catch(() => {
+                                          // Swallow — the button
+                                          // intentionally falls back
+                                          // silently when the
+                                          // Clipboard API is
+                                          // unavailable or rejects,
+                                          // so the auditor never
+                                          // sees a false-positive
+                                          // confirmation.
+                                        });
+                                    }}
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "2px 8px",
+                                      background: "transparent",
+                                      border: "1px solid var(--border-subtle)",
+                                      borderRadius: 4,
+                                      cursor: "pointer",
+                                      color: "var(--text-default)",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {isCopied ? (
+                                      <span
+                                        data-testid={`briefing-run-prior-narrative-copy-confirm-${run.generationId}`}
+                                        aria-live="polite"
+                                      >
+                                        Copied!
+                                      </span>
+                                    ) : (
+                                      "Copy plain text"
+                                    )}
+                                  </button>
+                                );
+                              })()}
                             </div>
                             {SECTION_ORDER.map(({ key, label }) => {
                               const priorBody = pickSection(

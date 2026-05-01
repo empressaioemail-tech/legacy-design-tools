@@ -2058,6 +2058,129 @@ describe("BriefingRecentRunsPanel — prior-narrative polish (Task #303 B.3/B.4/
     expect(payload).toMatch(/—/);
   });
 
+  // Task #338 — closes the loop on the Task #303 B.4 copy button.
+  // Clipboard writes are silent on success, so without a visible
+  // indicator an auditor has to paste somewhere else just to
+  // confirm the copy happened. The button now flips its label to
+  // "Copied!" for ~2s on a successful write and reverts on its
+  // own. The mirroring plan-review test
+  // (`artifacts/plan-review/src/components/__tests__/BriefingRecentRunsPanel.test.tsx`)
+  // pins the same testid + timing so an auditor moving between
+  // the two surfaces sees the same feedback.
+  it("B.4 — flips the Copy plain text button to 'Copied!' for ~2s on a successful write", async () => {
+    seedPriorRow({
+      priorSectionA: "Prior A body.",
+      currentSectionA: "Current A body.",
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    // Intentionally NOT using fake timers here — the disclosure
+    // and queries lean on react-query's internal timing, and
+    // hijacking `setTimeout` globally was observed to deadlock
+    // those queries (the test would time out before the runs
+    // list ever rendered). Real timers + `waitFor` keep the
+    // assertions tight (the revert is gated at 2 s, so the
+    // 2.5 s waitFor budget gives a small safety margin).
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const button = await screen.findByTestId(
+      "briefing-run-prior-narrative-copy-gen-prior",
+    );
+    // Default state: original label, no confirmation node in
+    // the tree — proves the flip is gated on click + resolve.
+    expect(button).toHaveTextContent("Copy plain text");
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-copy-confirm-gen-prior",
+      ),
+    ).not.toBeInTheDocument();
+    fireEvent.click(button);
+    // The confirmation pill mounts once the writeText promise
+    // resolves — `findByTestId` polls until React flushes the
+    // resulting state update.
+    expect(
+      await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-confirm-gen-prior",
+      ),
+    ).toHaveTextContent(/copied/i);
+    // After ~2s the label reverts so the disclosure doesn't
+    // stay frozen on a stale "Copied!" indicator. waitFor's
+    // default 1 s budget is too tight for the 2 s revert, so
+    // bump it just enough to cover the revert plus a small
+    // scheduler-jitter margin.
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByTestId(
+            "briefing-run-prior-narrative-copy-confirm-gen-prior",
+          ),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 2500 },
+    );
+    expect(
+      screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
+    ).toHaveTextContent("Copy plain text");
+  });
+
+  // Task #338 — explicit no-false-positive coverage. When the
+  // Clipboard API isn't available (older browsers, locked-down
+  // contexts, or test environments that don't polyfill it) the
+  // button must NOT show the "Copied!" indicator, because the
+  // copy didn't actually happen.
+  it("B.4 — does not show the 'Copied!' confirmation when navigator.clipboard is unavailable", async () => {
+    seedPriorRow({
+      priorSectionA: "Prior A body.",
+      currentSectionA: "Current A body.",
+    });
+    // Restore the descriptor in `finally` so the override doesn't
+    // leak into sibling tests.
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      renderPage();
+      fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+      fireEvent.click(
+        await screen.findByTestId("briefing-run-toggle-gen-prior"),
+      );
+      const button = await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-gen-prior",
+      );
+      fireEvent.click(button);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByTestId(
+          "briefing-run-prior-narrative-copy-confirm-gen-prior",
+        ),
+      ).not.toBeInTheDocument();
+      expect(button).toHaveTextContent("Copy plain text");
+    } finally {
+      if (originalClipboardDescriptor) {
+        Object.defineProperty(
+          navigator,
+          "clipboard",
+          originalClipboardDescriptor,
+        );
+      } else {
+        delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+      }
+    }
+  });
+
   it("B.5 — renders an inline word diff when prior and current sections differ", async () => {
     seedPriorRow({
       priorSectionA: "The buildable area is 4500 square feet.",

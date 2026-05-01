@@ -38,6 +38,8 @@ import {
   screen,
   fireEvent,
   cleanup,
+  act,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -792,6 +794,142 @@ describe("BriefingRecentRunsPanel — prior-narrative diff (Task #314)", () => {
     // so the pasted output has visible structure — matches the
     // design-tools payload shape exactly.
     expect(payload).toMatch(/—/);
+  });
+
+  // Task #338 — closes the loop on the Task #333 copy button by
+  // surfacing a short-lived "Copied!" confirmation when the
+  // clipboard write resolves. The two surfaces (Plan Review and
+  // design-tools) must stay in lock-step on:
+  //   - the `briefing-run-prior-narrative-copy-confirm-${id}`
+  //     testid (so a future shared-lib lift is a no-op), and
+  //   - the ~2s revert window (so an auditor moving between the
+  //     two surfaces sees the same timing).
+  // If either side drifts this mirror test will fail and surface
+  // the divergence before auditors notice the inconsistent
+  // feedback.
+  it("flips the Copy plain text button to 'Copied!' for ~2s on a successful write", async () => {
+    seedPriorRow({
+      priorSectionA: "Prior A body.",
+      currentSectionA: "Current A body.",
+    });
+    // Resolve immediately so the .then() that flips the button
+    // label fires on the next microtask flush. Real promise (not
+    // a synchronous shim) so the production code's `.then(...)`
+    // chain runs as it would in a browser.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    // Intentionally NOT using fake timers here — the disclosure
+    // and queries lean on react-query's internal timing, and
+    // hijacking `setTimeout` globally was observed to deadlock
+    // those queries (the test would time out before the runs
+    // list ever rendered). Real timers + `waitFor` keep the
+    // assertions tight (the revert is gated at 2 s, so the
+    // 2.5 s waitFor budget gives a small safety margin).
+    renderPage();
+    fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+    fireEvent.click(
+      await screen.findByTestId("briefing-run-toggle-gen-prior"),
+    );
+    const button = await screen.findByTestId(
+      "briefing-run-prior-narrative-copy-gen-prior",
+    );
+    // Sanity check: the default label is "Copy plain text" and
+    // the confirmation testid is NOT in the tree — proves the
+    // flip is gated on the click + write resolving.
+    expect(button).toHaveTextContent("Copy plain text");
+    expect(
+      screen.queryByTestId(
+        "briefing-run-prior-narrative-copy-confirm-gen-prior",
+      ),
+    ).not.toBeInTheDocument();
+    fireEvent.click(button);
+    // The confirmation pill mounts once the writeText promise
+    // resolves — `findByTestId` polls until React flushes the
+    // resulting state update.
+    expect(
+      await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-confirm-gen-prior",
+      ),
+    ).toHaveTextContent(/copied/i);
+    // After ~2s the label reverts so the disclosure doesn't
+    // stay frozen on a stale "Copied!" indicator. waitFor's
+    // default 1 s budget is too tight for the 2 s revert, so
+    // bump it just enough to cover the revert plus a small
+    // scheduler-jitter margin.
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByTestId(
+            "briefing-run-prior-narrative-copy-confirm-gen-prior",
+          ),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 2500 },
+    );
+    expect(
+      screen.getByTestId("briefing-run-prior-narrative-copy-gen-prior"),
+    ).toHaveTextContent("Copy plain text");
+  });
+
+  // Task #338 — explicit no-false-positive coverage. When the
+  // Clipboard API isn't available (older browsers, locked-down
+  // contexts, or test environments that don't polyfill it) the
+  // button must NOT show the "Copied!" indicator, because the
+  // copy didn't actually happen. The production code guards this
+  // by only flipping the label inside the `writeText().then(...)`
+  // success branch.
+  it("does not show the 'Copied!' confirmation when navigator.clipboard is unavailable", async () => {
+    seedPriorRow({
+      priorSectionA: "Prior A body.",
+      currentSectionA: "Current A body.",
+    });
+    // Force the Clipboard API to look unavailable so the button's
+    // early-return branch fires and the .then(...) never runs.
+    // Clean up after this test to avoid leaking the override into
+    // sibling tests (the (unchanged) pill test below was observed
+    // to flake when this property was left undefined).
+    const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      renderPage();
+      fireEvent.click(screen.getByTestId("briefing-recent-runs-toggle"));
+      fireEvent.click(
+        await screen.findByTestId("briefing-run-toggle-gen-prior"),
+      );
+      const button = await screen.findByTestId(
+        "briefing-run-prior-narrative-copy-gen-prior",
+      );
+      fireEvent.click(button);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByTestId(
+          "briefing-run-prior-narrative-copy-confirm-gen-prior",
+        ),
+      ).not.toBeInTheDocument();
+      expect(button).toHaveTextContent("Copy plain text");
+    } finally {
+      if (originalClipboardDescriptor) {
+        Object.defineProperty(
+          navigator,
+          "clipboard",
+          originalClipboardDescriptor,
+        );
+      } else {
+        // The property didn't exist before — best-effort delete.
+        delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+      }
+    }
   });
 
   it("surfaces an (unchanged) pill when a section is byte-identical", async () => {
