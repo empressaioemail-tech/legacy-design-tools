@@ -432,6 +432,93 @@ describe("BriefingSourceHistoryPanel — adapter-driven history rows (Task #178)
     expect(meta.textContent).not.toContain(BRIEFING_GENERATE_LAYERS_ACTOR_LABEL);
   });
 
+  it("filters the prior-version list to a single tier and adjusts the empty-state copy when the filter matches nothing (Task #184)", () => {
+    const current = mkSource({
+      id: "src-current",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+    });
+    const priorAdapter = mkSource({
+      id: "src-prior-adapter",
+      layerKind: "fema-flood",
+      sourceKind: "federal-adapter",
+      provider: "fema:fema-flood (FEMA NFHL)",
+      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    });
+    const priorManual = mkSource({
+      id: "src-prior-manual",
+      layerKind: "fema-flood",
+      sourceKind: "manual-upload",
+      uploadOriginalFilename: "manual-override.dxf",
+      uploadByteSize: 4_321,
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      supersededAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    });
+    hoisted.historySources = [current, priorAdapter, priorManual];
+
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+
+    // Default "all" tier shows both prior rows.
+    expect(
+      screen.getByTestId(`briefing-source-history-row-${priorAdapter.id}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId(`briefing-source-history-row-${priorManual.id}`),
+    ).toBeInTheDocument();
+
+    // Switch to Generate Layers — only adapter rows remain.
+    fireEvent.click(
+      screen.getByTestId(
+        `briefing-source-history-filter-adapter-${current.id}`,
+      ),
+    );
+    expect(
+      screen.getByTestId(`briefing-source-history-row-${priorAdapter.id}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(`briefing-source-history-row-${priorManual.id}`),
+    ).not.toBeInTheDocument();
+
+    // Switch to Manual uploads — only manual rows remain.
+    fireEvent.click(
+      screen.getByTestId(
+        `briefing-source-history-filter-manual-${current.id}`,
+      ),
+    );
+    expect(
+      screen.queryByTestId(`briefing-source-history-row-${priorAdapter.id}`),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId(`briefing-source-history-row-${priorManual.id}`),
+    ).toBeInTheDocument();
+
+    // With only manual + adapter prior rows in the fixture above,
+    // dropping the manual row from history and re-filtering to manual
+    // surfaces the tier-specific empty-state copy so a filtered-empty
+    // result isn't confused with a layer that has never been re-run.
+    hoisted.historySources = [current, priorAdapter];
+    cleanup();
+    renderPanel({
+      currentSourceId: current.id,
+      layerKind: current.layerKind,
+    });
+    fireEvent.click(
+      screen.getByTestId(
+        `briefing-source-history-filter-manual-${current.id}`,
+      ),
+    );
+    expect(
+      screen.getByText(/No prior manual uploads of this layer\./),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No prior versions of this layer\./),
+    ).not.toBeInTheDocument();
+  });
+
   it("opens via the row's history toggle and renders the empty state when there are no prior versions", () => {
     const current = mkSource({
       id: "src-only",

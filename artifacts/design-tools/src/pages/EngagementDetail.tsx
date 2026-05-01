@@ -951,13 +951,37 @@ export function BriefingSourceHistoryPanel({
     },
   });
 
-  const priorVersions = useMemo(
+  // Tier filter — purely client-side over the rows the existing
+  // `useListEngagementBriefingSources` query already returns.
+  // Architects investigating "what did the adapter change" vs "when
+  // did the manual override happen" can narrow the chronological
+  // list to one tier at a time without changing the API contract.
+  const [tierFilter, setTierFilter] = useState<
+    "all" | "adapter" | "manual"
+  >("all");
+
+  const allPriorVersions = useMemo(
     () =>
       (historyQuery.data?.sources ?? []).filter(
         (s) => s.id !== currentSourceId,
       ),
     [historyQuery.data, currentSourceId],
   );
+
+  const priorVersions = useMemo(() => {
+    if (tierFilter === "all") return allPriorVersions;
+    if (tierFilter === "adapter") {
+      return allPriorVersions.filter((s) => isAdapterSourceKind(s.sourceKind));
+    }
+    return allPriorVersions.filter((s) => s.sourceKind === "manual-upload");
+  }, [allPriorVersions, tierFilter]);
+
+  const emptyMessage =
+    tierFilter === "adapter"
+      ? "No prior Generate Layers runs of this layer."
+      : tierFilter === "manual"
+        ? "No prior manual uploads of this layer."
+        : "No prior versions of this layer.";
 
   return (
     <div
@@ -972,6 +996,56 @@ export function BriefingSourceHistoryPanel({
         gap: 6,
       }}
     >
+      {!historyQuery.isLoading && !historyQuery.isError && (
+        <div
+          role="radiogroup"
+          aria-label="Filter prior versions by source"
+          data-testid={`briefing-source-history-filter-${currentSourceId}`}
+          style={{
+            display: "flex",
+            gap: 4,
+            alignItems: "center",
+            fontSize: 11,
+            color: "var(--text-muted)",
+          }}
+        >
+          <span>Show:</span>
+          {(
+            [
+              { value: "all", label: "All" },
+              { value: "adapter", label: "Generate Layers" },
+              { value: "manual", label: "Manual uploads" },
+            ] as const
+          ).map((opt) => {
+            const active = tierFilter === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-testid={`briefing-source-history-filter-${opt.value}-${currentSourceId}`}
+                onClick={() => setTierFilter(opt.value)}
+                style={{
+                  background: active
+                    ? "var(--info-dim)"
+                    : "transparent",
+                  color: active
+                    ? "var(--info-text)"
+                    : "var(--text-secondary)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 999,
+                  padding: "1px 8px",
+                  cursor: "pointer",
+                  fontSize: 11,
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {historyQuery.isLoading && (
         <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
           Loading prior versions…
@@ -995,7 +1069,7 @@ export function BriefingSourceHistoryPanel({
         !historyQuery.isError &&
         priorVersions.length === 0 && (
           <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            No prior versions of this layer.
+            {emptyMessage}
           </div>
         )}
       {priorVersions.map((prior) => {
