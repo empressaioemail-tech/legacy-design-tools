@@ -4935,6 +4935,48 @@ function ResolvedByChip({
 }
 
 /**
+ * Operator-facing copy for the timeline entry that mirrors the
+ * `briefing-divergence.resolved` atom event (Task #213 / Task #268).
+ * The same display-name / raw-id / system fallback the inline
+ * "Resolved {time} by {who}" badge uses applies here so the two
+ * surfaces stay in lock-step — only the verb wording differs.
+ *
+ * Returned shape is "<operator> acknowledged the override" which
+ * matches the audit-trail vocabulary the task brief locked. The
+ * relative-time prefix is rendered as a separate sibling so it can
+ * carry its own `title` for absolute-precision hover, mirroring the
+ * pattern the rest of the divergences panel uses.
+ */
+function formatResolvedAcknowledgement(
+  resolvedByRequestor: { kind: string; id: string; displayName?: string } | null,
+): string {
+  // Reuse the same {@link formatActorLabel} helper that
+  // `formatResolvedAttribution` uses so the display-name / raw-id /
+  // friendly-agent-label / "system" fallback chain stays in lock-step
+  // across both the inline "Resolved {time} by {who}" badge and this
+  // timeline entry. A regression in any branch must surface on both
+  // surfaces at once, not just one.
+  const who = resolvedByRequestor
+    ? formatActorLabel(resolvedByRequestor)
+    : "system";
+  return `${who} acknowledged the override`;
+}
+
+/**
+ * Stable in-page DOM id for a divergence row, used as the link
+ * target the `briefing-divergence.resolved` timeline entry
+ * navigates to (Task #268). Mirrors the recorded row's "deep-link"
+ * semantics — the recorded row carries this id, and the
+ * acknowledgement entry's anchor `href` resolves to it — so an
+ * operator scrolling the resolved section can click an
+ * acknowledgement and land on the originating recorded-divergence
+ * row card.
+ */
+function briefingDivergenceRowDomId(divergenceId: string): string {
+  return `briefing-divergence-${divergenceId}`;
+}
+
+/**
  * Human-readable label for each {@link MaterializableElementKind}
  * the C# Revit add-in can materialize. Mirrors the kinds defined in
  * the OpenAPI spec at `MaterializableElementKind`.
@@ -5373,6 +5415,12 @@ function BriefingDivergenceRow({
   });
   return (
     <div
+      // Stable in-page id so the matching `briefing-divergence.resolved`
+      // timeline entry's `<a href="#…">` anchor (Task #268) can deep-
+      // link straight to the originating recorded-divergence row.
+      // The id is the row's "link target" the task brief calls out;
+      // the acknowledgement entry below mirrors it via `href`.
+      id={briefingDivergenceRowDomId(row.id)}
       data-testid="briefing-divergences-row"
       data-divergence-id={row.id}
       data-divergence-reason={row.reason}
@@ -5504,6 +5552,59 @@ function BriefingDivergenceRow({
         >
           {row.note}
         </div>
+      )}
+      {isResolved && (
+        // Timeline entry mirroring the `briefing-divergence.resolved`
+        // atom event (Task #213 / Task #268). Sits beneath the
+        // header badge row as a distinct line so the operator reads
+        // a true two-sided audit trail — the recorded override
+        // above, the acknowledgement below — rather than collapsing
+        // both into a single attribution badge.
+        //
+        // Rendered as a real `<a href="#…">` anchor that deep-links
+        // to the parent row's `id` (set above via
+        // `briefingDivergenceRowDomId`). This is the row's "link
+        // target" the task brief calls out: the recorded row is the
+        // divergence detail surface today, and the anchor focuses /
+        // scrolls to it without any client-side routing — the same
+        // hash-link semantics the rest of the page uses for
+        // section anchors. `data-divergence-id` is also exposed for
+        // tests and any future detail-panel hand-off.
+        <a
+          href={`#${briefingDivergenceRowDomId(row.id)}`}
+          data-testid="briefing-divergences-acknowledged-entry"
+          data-divergence-id={row.id}
+          aria-label={`${formatResolvedAcknowledgement(row.resolvedByRequestor)} — open divergence detail`}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            color: "var(--text-muted)",
+            textDecoration: "none",
+            paddingTop: 2,
+            borderTop: "1px dashed var(--border-subtle)",
+            marginTop: 2,
+          }}
+        >
+          <span aria-hidden style={{ color: "var(--success-text)" }}>
+            ✓
+          </span>
+          <span data-testid="briefing-divergences-acknowledged-text">
+            {formatResolvedAcknowledgement(row.resolvedByRequestor)}
+          </span>
+          {row.resolvedAt && (
+            <>
+              <span aria-hidden>·</span>
+              <span
+                title={new Date(row.resolvedAt).toISOString()}
+                data-testid="briefing-divergences-acknowledged-time"
+              >
+                {formatRelativeMaterializedAt(row.resolvedAt)}
+              </span>
+            </>
+          )}
+        </a>
       )}
       {resolveMutation.isError && (
         <div

@@ -118,6 +118,25 @@ const hoisted = vi.hoisted(() => {
     pushMutate: vi.fn(),
     pushIsPending: false,
     pushIsError: false,
+    // Resolve-mutation capture for the Task #268 resolve-action-flow
+    // test. The hook's `mutate` is a spy so the test can assert the
+    // call shape, and `capturedResolveOptions` exposes the
+    // `onSuccess` the row registers so the test can fire the
+    // post-mutation invalidation chain by hand — same pattern the
+    // push-affordance test uses for `useCreateEngagementSubmission`
+    // and `usePushEngagementBimModel` above.
+    capturedResolveOptions: null as null | {
+      mutation?: {
+        onSuccess?: (
+          data: unknown,
+          variables: unknown,
+          context: unknown,
+        ) => Promise<void> | void;
+      };
+    },
+    resolveMutate: vi.fn(),
+    resolveIsPending: false,
+    resolveIsError: false,
   };
 });
 
@@ -234,6 +253,16 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
         isError: hoisted.pushIsError,
       };
     },
+    useResolveBimModelDivergence: (
+      options: typeof hoisted.capturedResolveOptions,
+    ) => {
+      hoisted.capturedResolveOptions = options;
+      return {
+        mutate: hoisted.resolveMutate,
+        isPending: hoisted.resolveIsPending,
+        isError: hoisted.resolveIsError,
+      };
+    },
   };
 });
 
@@ -339,6 +368,10 @@ beforeEach(() => {
   hoisted.pushMutate.mockReset();
   hoisted.pushIsPending = false;
   hoisted.pushIsError = false;
+  hoisted.capturedResolveOptions = null;
+  hoisted.resolveMutate.mockReset();
+  hoisted.resolveIsPending = false;
+  hoisted.resolveIsError = false;
 });
 
 afterEach(() => {
@@ -1060,6 +1093,322 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
     expect(
       within(systemRow!).queryByRole("img", { hidden: true }),
     ).toBeNull();
+  });
+
+  it("renders an '<operator> acknowledged the override' timeline entry for each Resolved divergence (Task #268)", () => {
+    // Task #268: the design-tools panel must surface the
+    // `briefing-divergence.resolved` atom event Task #213 added
+    // server-side as a distinct timeline entry — separate from the
+    // inline "Resolved {time} by {who}" badge — so the two-sided
+    // audit trail (recorded override + acknowledgement) reads
+    // top-to-bottom on the row card.
+    //
+    // Three resolved rows pin the three attribution shapes the
+    // server can hand the FE: hydrated user (friendly displayName),
+    // un-hydrated user (raw id fallback), and a system-attributed
+    // resolve (null requestor → "system"). Each acknowledgement
+    // entry must carry the same `data-divergence-id` the recorded
+    // row exposes so it links into the divergence detail panel
+    // exactly the way the existing `briefing-divergence.recorded`
+    // row does.
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    hoisted.divergences = [
+      {
+        id: "div-friendly",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: {
+          kind: "user",
+          id: "user-7",
+          displayName: "Alex Architect",
+        },
+      },
+      {
+        id: "div-raw-id",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-B",
+        briefingId: "brief-1",
+        reason: "unpinned",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T11:00:00.000Z",
+        elementKind: "property-line",
+        elementLabel: "South property line",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: { kind: "user", id: "user-22" },
+      },
+      {
+        id: "div-system",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-C",
+        briefingId: "brief-1",
+        reason: "deleted",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T10:00:00.000Z",
+        elementKind: "terrain",
+        elementLabel: "Site terrain",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: null,
+      },
+    ];
+    renderPanel();
+
+    // The Resolved section is collapsed by default — toggle it open
+    // so the acknowledgement entries are in the document tree.
+    fireEvent.click(
+      screen.getByTestId("briefing-divergences-resolved-toggle"),
+    );
+
+    const entries = screen.getAllByTestId(
+      "briefing-divergences-acknowledged-entry",
+    );
+    // One entry per resolved row — matches the
+    // `briefing-divergence.resolved` event the server emits per
+    // resolve. Open rows must NOT carry the entry; only resolved
+    // ones do (the conditional renders inside `isResolved`).
+    expect(entries).toHaveLength(3);
+
+    // Each entry must mirror its row's `data-divergence-id` so the
+    // acknowledgement entry links into the same divergence detail
+    // panel target the recorded row does.
+    const friendlyEntry = entries.find(
+      (e) => e.getAttribute("data-divergence-id") === "div-friendly",
+    );
+    expect(friendlyEntry).toBeDefined();
+    // Attribution copy: the friendly displayName takes precedence
+    // over the raw id when the API hydrated the requestor profile.
+    expect(
+      within(friendlyEntry!).getByTestId(
+        "briefing-divergences-acknowledged-text",
+      ),
+    ).toHaveTextContent("Alex Architect acknowledged the override");
+    // Real `<a href="#…">` link target — the entry deep-links to the
+    // parent divergence row card via the same DOM id the row carries
+    // (Task #268, "links into the divergence detail panel mirroring
+    // the existing `briefing-divergence.recorded` row's link
+    // target"). The recorded row is the divergence detail surface
+    // today, so the anchor focuses / scrolls to it without any
+    // client-side routing.
+    expect(friendlyEntry!.tagName).toBe("A");
+    expect(friendlyEntry).toHaveAttribute(
+      "href",
+      "#briefing-divergence-div-friendly",
+    );
+    // The matching row carries that exact id so the anchor resolves
+    // — without this the "link" would point at nothing.
+    const friendlyRow = screen
+      .getAllByTestId("briefing-divergences-row")
+      .find((r) => r.getAttribute("data-divergence-id") === "div-friendly");
+    expect(friendlyRow).toBeDefined();
+    expect(friendlyRow).toHaveAttribute("id", "briefing-divergence-div-friendly");
+    // Relative-time prefix renders inline alongside the copy with
+    // the absolute ISO tucked into the `title` for hover precision.
+    const friendlyTime = within(friendlyEntry!).getByTestId(
+      "briefing-divergences-acknowledged-time",
+    );
+    expect(friendlyTime).toHaveTextContent("1 h ago");
+    expect(friendlyTime).toHaveAttribute("title", oneHourAgo);
+
+    // Un-hydrated user falls back to the raw id rather than blanking
+    // the attribution — same posture the inline badge uses.
+    const rawEntry = entries.find(
+      (e) => e.getAttribute("data-divergence-id") === "div-raw-id",
+    );
+    expect(rawEntry).toBeDefined();
+    expect(
+      within(rawEntry!).getByTestId(
+        "briefing-divergences-acknowledged-text",
+      ),
+    ).toHaveTextContent("user-22 acknowledged the override");
+
+    // Null requestor → "system" so an unattributed resolve still
+    // reads as a real audit-trail entry instead of a blank line.
+    const systemEntry = entries.find(
+      (e) => e.getAttribute("data-divergence-id") === "div-system",
+    );
+    expect(systemEntry).toBeDefined();
+    expect(
+      within(systemEntry!).getByTestId(
+        "briefing-divergences-acknowledged-text",
+      ),
+    ).toHaveTextContent("system acknowledged the override");
+  });
+
+  it("renders the acknowledgement entry attributed to the resolving requestor after the resolve mutation succeeds (Task #268)", async () => {
+    // End-to-end-ish coverage of the actual resolve action flow,
+    // not just static fixtures: start with an Open divergence row
+    // (no acknowledgement entry yet), click the "Resolve" button,
+    // simulate the server returning a resolved row, fire the
+    // captured `onSuccess` so the page-level invalidation chain
+    // kicks in, and assert the acknowledgement entry now appears
+    // attributed to the resolving requestor. This is the regression
+    // path that protects the user-visible promise of Task #268:
+    // resolving a divergence in design-tools must surface the
+    // "<operator> acknowledged the override" entry.
+    const openCreatedAt = "2025-01-05T12:00:00.000Z";
+    hoisted.divergences = [
+      {
+        id: "div-to-resolve",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {},
+        createdAt: openCreatedAt,
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+        // Open: no `resolvedAt` / `resolvedByRequestor`.
+      },
+    ];
+    const { client } = renderPanel();
+
+    // Pre-condition: the row is in the Open partition and the
+    // acknowledgement entry is NOT in the document yet.
+    const initialRow = screen.getByTestId("briefing-divergences-row");
+    expect(initialRow.getAttribute("data-divergence-resolved")).toBe("false");
+    expect(
+      screen.queryByTestId("briefing-divergences-acknowledged-entry"),
+    ).not.toBeInTheDocument();
+
+    // Click the in-row Resolve button to fire the mutation. The
+    // mocked `useResolveBimModelDivergence` captures the row's
+    // registered `onSuccess` so we can drive the post-mutation
+    // invalidation chain by hand without racing a real network
+    // round-trip.
+    fireEvent.click(screen.getByTestId("briefing-divergences-resolve-button"));
+    expect(hoisted.resolveMutate).toHaveBeenCalledTimes(1);
+    expect(hoisted.resolveMutate).toHaveBeenCalledWith({
+      id: "bim-1",
+      divergenceId: "div-to-resolve",
+    });
+    expect(hoisted.capturedResolveOptions?.mutation?.onSuccess).toBeDefined();
+
+    // The api-server's resolve handler stamps `resolvedAt` and
+    // `resolvedByRequestor` on the row and re-emits it via the
+    // list endpoint after the row's `onSuccess` invalidation
+    // triggers a refetch. Simulate that end-state by writing the
+    // resolved shape directly into the query cache via
+    // `setQueryData` — this is the same observable result the real
+    // refetch would produce, with deterministic ordering that
+    // doesn't race the mocked `useQuery`'s internal scheduler.
+    // `onSuccess` still fires so the page-level invalidation is
+    // exercised; `setQueryData` then replaces the cached payload
+    // the next render reads from.
+    const resolvedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const resolvedRowFixture = {
+      ...hoisted.divergences[0],
+      resolvedAt,
+      resolvedByRequestor: {
+        kind: "user" as const,
+        id: "user-resolver",
+        displayName: "Riley Resolver",
+      },
+    };
+    hoisted.divergences = [resolvedRowFixture];
+    await act(async () => {
+      await hoisted.capturedResolveOptions!.mutation!.onSuccess!(
+        undefined,
+        { id: "bim-1", divergenceId: "div-to-resolve" },
+        undefined,
+      );
+    });
+    // Mirror the post-invalidation refetch result so the panel
+    // re-renders with the resolved row in place. Performed outside
+    // the previous `act` block so React Query's cache notifier
+    // delivers the update on a clean tick — pairing it with the
+    // onSuccess inside the same act sometimes leaves the observer
+    // queued behind the invalidation that just ran.
+    await act(async () => {
+      client.setQueryData(["listBimModelDivergences", "bim-1"], {
+        divergences: [resolvedRowFixture],
+      });
+    });
+
+    // The row should have moved to the Resolved partition. Its
+    // `data-divergence-resolved` attribute flips to "true", and
+    // because the Resolved section is collapsed by default we need
+    // to expand it before the acknowledgement entry is in the
+    // document tree. Use `findBy*` so the assertion polls until the
+    // cache propagation lands rather than racing the next paint.
+    const resolvedToggle = await screen.findByTestId(
+      "briefing-divergences-resolved-toggle",
+    );
+    fireEvent.click(resolvedToggle);
+
+    const ackEntry = await screen.findByTestId(
+      "briefing-divergences-acknowledged-entry",
+    );
+    // Attribution must point at the resolving requestor — the
+    // user's task brief explicitly requires "attributed to the
+    // resolving requestor". Display-name takes precedence over the
+    // raw id when the API hydrated it.
+    expect(
+      within(ackEntry).getByTestId("briefing-divergences-acknowledged-text"),
+    ).toHaveTextContent("Riley Resolver acknowledged the override");
+    // Same `data-divergence-id` the row carries, so the entry can
+    // be correlated with its originating divergence.
+    expect(ackEntry.getAttribute("data-divergence-id")).toBe("div-to-resolve");
+    // And the actual `<a href>` link target must resolve to the
+    // recorded row's DOM id — the deep-link the task brief calls
+    // out. Without this the entry would be a label, not a link.
+    expect(ackEntry.tagName).toBe("A");
+    expect(ackEntry).toHaveAttribute(
+      "href",
+      "#briefing-divergence-div-to-resolve",
+    );
+    const resolvedRow = screen
+      .getAllByTestId("briefing-divergences-row")
+      .find((r) => r.getAttribute("data-divergence-id") === "div-to-resolve");
+    expect(resolvedRow).toBeDefined();
+    expect(resolvedRow).toHaveAttribute(
+      "id",
+      "briefing-divergence-div-to-resolve",
+    );
+    expect(resolvedRow!.getAttribute("data-divergence-resolved")).toBe("true");
+  });
+
+  it("does not render an acknowledgement entry on Open (un-resolved) divergence rows (Task #268)", () => {
+    // The acknowledgement entry mirrors the
+    // `briefing-divergence.resolved` event, which the server only
+    // emits when an operator marks a divergence resolved. An Open
+    // row has no resolve event yet, so it must NOT render the
+    // entry — otherwise the operator would read an audit trail for
+    // an action that never happened.
+    hoisted.divergences = [
+      {
+        id: "div-open",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-open",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+        // No `resolvedAt` / `resolvedByRequestor` — the row stays
+        // in the Open partition.
+      },
+    ];
+    renderPanel();
+
+    // The row itself renders, but the acknowledgement entry must
+    // be absent.
+    const row = screen.getByTestId("briefing-divergences-row");
+    expect(row.getAttribute("data-divergence-resolved")).toBe("false");
+    expect(
+      screen.queryByTestId("briefing-divergences-acknowledged-entry"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders the loading-state copy while the divergences query is loading", () => {
