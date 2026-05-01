@@ -61,7 +61,10 @@ import {
   EngagementContextPanel,
   ReviewerComment,
 } from "@workspace/portal-ui";
-import { BriefingPriorSnapshotHeader } from "@workspace/briefing-prior-snapshot";
+import {
+  BriefingPriorNarrativeDiff,
+  BriefingPriorSnapshotHeader,
+} from "@workspace/briefing-prior-snapshot";
 import type {
   EngagementSubmissionSummary,
   SubmissionStatus,
@@ -296,6 +299,17 @@ export function SubmissionDetailModal({
                       text: relativeTime(raw),
                       title: new Date(raw).toLocaleString(),
                     })}
+                  />
+                )}
+                renderPriorNarrativeDiff={({
+                  runGenerationId,
+                  priorNarrative,
+                  currentNarrative,
+                }) => (
+                  <BriefingPriorNarrativeDiff
+                    runGenerationId={runGenerationId}
+                    priorNarrative={priorNarrative}
+                    currentNarrative={currentNarrative}
                   />
                 )}
               />

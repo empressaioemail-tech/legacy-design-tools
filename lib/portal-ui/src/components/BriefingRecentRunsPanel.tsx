@@ -8,14 +8,19 @@ import {
   type BriefingGenerationRun,
   type EngagementBriefingNarrative,
 } from "@workspace/api-client-react";
-// Task #314 — the per-section word-level diff that powers the
-// prior-narrative panel was extracted into `@workspace/briefing-diff`
-// (originally lifted from `artifacts/design-tools/src/pages/
-// EngagementDetail.tsx`, Task #303 B.5) so the Plan Review reviewer
-// view can render the same diff without copy-pasting the LCS
-// routine. Both artifacts cannot import each other, so the helper
-// has to live in a shared lib if both are to use it.
-import { diffWords } from "@workspace/briefing-diff";
+// Task #374 — the per-section word-level diff that used to live
+// inline below the prior-snapshot header now ships from
+// `@workspace/briefing-prior-snapshot` as
+// `<BriefingPriorNarrativeDiff />`. We accept it via the optional
+// `renderPriorNarrativeDiff` render-prop instead of importing it
+// directly here for the same reason as `renderPriorSnapshotHeader`
+// below: `briefing-prior-snapshot` already imports `CopyPlainTextButton`
+// from this package, so a direct import would create a workspace-level
+// dependency cycle (portal-ui ↔ briefing-prior-snapshot). Artifact-
+// level consumers (plan-review's EngagementDetail) supply the diff
+// component from the lib they already depend on. When omitted (e.g.
+// in unit tests that don't exercise the prior-narrative branch), no
+// per-section rows render below the header.
 // Task #355 — the prior-narrative title row, "Generated <when> by
 // <actor>" meta line, and "Copy plain text" button (with its 2 s
 // "Copied!" confirmation) live in `@workspace/briefing-prior-snapshot`
@@ -262,6 +267,24 @@ export interface BriefingRecentRunsPanelProps {
     runGenerationId: string;
     priorNarrative: EngagementBriefingNarrative;
   }) => ReactNode;
+  /**
+   * Optional render-prop for the Task #374 per-section word-level
+   * prior-narrative diff (the seven A–G rows that walk
+   * `SECTION_ORDER`, call `diffWords(prior, current)`, and render
+   * the strikethrough/underline tokens with their
+   * `briefing-run-prior-section-*` testids). Accepted as a render-
+   * prop instead of an inline import for the same workspace-cycle
+   * reason as `renderPriorSnapshotHeader` above. Consumers that
+   * already depend on `briefing-prior-snapshot` (plan-review)
+   * pass `BriefingPriorNarrativeDiff` here. When omitted (e.g. in
+   * unit tests that don't exercise the prior-narrative branch),
+   * no per-section diff rows render below the header.
+   */
+  renderPriorNarrativeDiff?: (args: {
+    runGenerationId: string;
+    priorNarrative: EngagementBriefingNarrative;
+    currentNarrative: EngagementBriefingNarrative | null;
+  }) => ReactNode;
 }
 
 /**
@@ -312,6 +335,7 @@ export function BriefingRecentRunsPanel({
   currentGenerationId,
   producingGenerationId,
   renderPriorSnapshotHeader,
+  renderPriorNarrativeDiff,
 }: BriefingRecentRunsPanelProps) {
   // Task #303 B.6 — both the open/closed state of the disclosure and
   // the active filter are mirrored to the URL on every change so an
@@ -846,148 +870,10 @@ export function BriefingRecentRunsPanel({
                               runGenerationId: run.generationId,
                               priorNarrative,
                             })}
-                            {SECTION_ORDER.map(({ key, label }) => {
-                              const priorBody = pickSection(
-                                priorNarrative,
-                                key,
-                              );
-                              const currentBody = pickSection(
-                                currentNarrative,
-                                key,
-                              );
-                              const priorIsEmpty =
-                                !priorBody || priorBody.trim().length === 0;
-                              // pickSection returns the raw column
-                              // value, which can be `null` (column
-                              // is NULL) OR `undefined` (the wire
-                              // schema marks the field optional and
-                              // the test fixture omitted it). Treat
-                              // both as "no current body to diff
-                              // against" — comparing a string to
-                              // undefined would otherwise propagate
-                              // through to `diffWords` and crash on
-                              // `undefined.split(...)`.
-                              const currentBodyStr =
-                                typeof currentBody === "string"
-                                  ? currentBody
-                                  : null;
-                              const sameAsCurrent =
-                                !priorIsEmpty &&
-                                currentBodyStr !== null &&
-                                priorBody === currentBodyStr;
-                              const shouldDiff =
-                                !priorIsEmpty &&
-                                currentBodyStr !== null &&
-                                !sameAsCurrent;
-                              return (
-                                <div
-                                  key={key}
-                                  data-testid={`briefing-run-prior-section-${key}-${run.generationId}`}
-                                  style={{
-                                    fontSize: 12,
-                                    color: priorIsEmpty
-                                      ? "var(--text-muted)"
-                                      : "var(--text-default)",
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      fontWeight: 600,
-                                      marginRight: 6,
-                                    }}
-                                  >
-                                    {label}
-                                  </span>
-                                  {sameAsCurrent && (
-                                    <span
-                                      data-testid={`briefing-run-prior-section-unchanged-${key}-${run.generationId}`}
-                                      style={{
-                                        fontSize: 10,
-                                        padding: "1px 6px",
-                                        borderRadius: 4,
-                                        background:
-                                          "var(--surface-2, transparent)",
-                                        color: "var(--text-muted)",
-                                        marginRight: 6,
-                                        textTransform: "uppercase",
-                                        letterSpacing: 0.3,
-                                      }}
-                                    >
-                                      unchanged
-                                    </span>
-                                  )}
-                                  <span
-                                    style={{
-                                      whiteSpace: "pre-wrap",
-                                      lineHeight: 1.5,
-                                    }}
-                                  >
-                                    {priorIsEmpty ? (
-                                      "—"
-                                    ) : shouldDiff ? (
-                                      // Word-level diff: render
-                                      // surviving tokens plain,
-                                      // dropped tokens
-                                      // strikethrough/red, and
-                                      // inserted tokens
-                                      // underlined/green so the
-                                      // auditor sees both sides
-                                      // of the edit inline. The
-                                      // diff is wrapped in a
-                                      // single span so the
-                                      // white-space rule above
-                                      // still applies.
-                                      <span
-                                        data-testid={`briefing-run-prior-section-diff-${key}-${run.generationId}`}
-                                      >
-                                        {diffWords(
-                                          priorBody,
-                                          currentBodyStr as string,
-                                        ).map((op, idx) => {
-                                          if (op.type === "equal") {
-                                            return (
-                                              <span key={idx}>{op.text}</span>
-                                            );
-                                          }
-                                          if (op.type === "removed") {
-                                            return (
-                                              <span
-                                                key={idx}
-                                                data-testid={`briefing-run-prior-section-diff-removed-${key}-${run.generationId}`}
-                                                style={{
-                                                  textDecoration:
-                                                    "line-through",
-                                                  color: "var(--danger-text)",
-                                                  background:
-                                                    "var(--danger-dim)",
-                                                }}
-                                              >
-                                                {op.text}
-                                              </span>
-                                            );
-                                          }
-                                          return (
-                                            <span
-                                              key={idx}
-                                              data-testid={`briefing-run-prior-section-diff-added-${key}-${run.generationId}`}
-                                              style={{
-                                                textDecoration: "underline",
-                                                color: "var(--success-text)",
-                                                background:
-                                                  "var(--success-dim)",
-                                              }}
-                                            >
-                                              {op.text}
-                                            </span>
-                                          );
-                                        })}
-                                      </span>
-                                    ) : (
-                                      priorBody
-                                    )}
-                                  </span>
-                                </div>
-                              );
+                            {renderPriorNarrativeDiff?.({
+                              runGenerationId: run.generationId,
+                              priorNarrative,
+                              currentNarrative,
                             })}
                           </div>
                         )}

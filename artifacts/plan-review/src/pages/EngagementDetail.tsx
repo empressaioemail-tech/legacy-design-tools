@@ -21,7 +21,10 @@ import {
 } from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
 import { BriefingRecentRunsPanel } from "@workspace/portal-ui";
-import { BriefingPriorSnapshotHeader } from "@workspace/briefing-prior-snapshot";
+import {
+  BriefingPriorNarrativeDiff,
+  BriefingPriorSnapshotHeader,
+} from "@workspace/briefing-prior-snapshot";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
 import { relativeTime } from "../lib/relativeTime";
 import {
@@ -494,6 +497,17 @@ export default function EngagementDetail() {
                     text: relativeTime(raw),
                     title: new Date(raw).toLocaleString(),
                   })}
+                />
+              )}
+              renderPriorNarrativeDiff={({
+                runGenerationId,
+                priorNarrative,
+                currentNarrative,
+              }) => (
+                <BriefingPriorNarrativeDiff
+                  runGenerationId={runGenerationId}
+                  priorNarrative={priorNarrative}
+                  currentNarrative={currentNarrative}
                 />
               )}
             />

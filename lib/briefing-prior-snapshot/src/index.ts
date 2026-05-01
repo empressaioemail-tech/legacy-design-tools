@@ -31,3 +31,5 @@ export {
   type FormatGeneratedAt,
   type FormattedTimestamp,
 } from "./BriefingPriorSnapshotHeader";
+
+export { BriefingPriorNarrativeDiff } from "./BriefingPriorNarrativeDiff";

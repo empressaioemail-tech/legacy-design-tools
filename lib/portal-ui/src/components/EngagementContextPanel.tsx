@@ -84,6 +84,23 @@ export interface EngagementContextPanelProps {
     runGenerationId: string;
     priorNarrative: EngagementBriefingNarrative;
   }) => ReactNode;
+  /**
+   * Optional render-prop forwarded to {@link BriefingRecentRunsPanel}
+   * for the Task #374 per-section word-level prior-narrative diff
+   * (the seven A–G rows below the snapshot header). Forwarded as a
+   * render-prop for the same workspace-cycle reason as
+   * `renderPriorSnapshotHeader` above. Plan Review's
+   * SubmissionDetailModal passes `BriefingPriorNarrativeDiff` here so
+   * the modal's Engagement Context tab keeps rendering the diff rows
+   * after the lift; surfaces that don't pass it (e.g. unit tests
+   * that don't exercise the prior-narrative branch) get the header
+   * alone, which matches the pre-Task-#374 fallback.
+   */
+  renderPriorNarrativeDiff?: (args: {
+    runGenerationId: string;
+    priorNarrative: EngagementBriefingNarrative;
+    currentNarrative: EngagementBriefingNarrative | null;
+  }) => ReactNode;
 }
 
 const SECTION_LABELS: Record<
@@ -130,6 +147,7 @@ export function EngagementContextPanel({
   engagementId,
   producingGenerationId,
   renderPriorSnapshotHeader,
+  renderPriorNarrativeDiff,
 }: EngagementContextPanelProps) {
   const briefingQuery = useGetEngagementBriefing(engagementId, {
     query: {
@@ -191,6 +209,7 @@ export function EngagementContextPanel({
           engagementId={engagementId}
           producingGenerationId={producingGenerationId ?? undefined}
           renderPriorSnapshotHeader={renderPriorSnapshotHeader}
+          renderPriorNarrativeDiff={renderPriorNarrativeDiff}
         />
       </div>
     );
@@ -219,6 +238,7 @@ export function EngagementContextPanel({
         currentGenerationId={currentGenerationId}
         producingGenerationId={producingGenerationId ?? undefined}
         renderPriorSnapshotHeader={renderPriorSnapshotHeader}
+        renderPriorNarrativeDiff={renderPriorNarrativeDiff}
       />
       <SiteContextSection sources={briefing.sources} />
     </div>
