@@ -140,6 +140,25 @@ export function EngagementList() {
     return m;
   }, [engagements]);
 
+  // Sort in-pilot rows ahead of out-of-pilot ones (Task #277). When
+  // the list grows long, even with the "No adapters" pill visible
+  // the actionable rows are interleaved with the unactionable ones,
+  // so triaging "what can I run Generate Layers on right now" still
+  // takes a scan. Sorting on the same `eligibilityById` map the
+  // pill and the "Show only in-pilot" filter both read from keeps
+  // the pill, the filter, and the order from drifting. `Array#sort`
+  // is stable in modern JS, so the API's `updatedAt desc` ordering
+  // is preserved *within* each group — most-recently-touched
+  // in-pilot row first, then most-recently-touched out-of-pilot row
+  // first below that.
+  const sortedEngagements = useMemo(() => {
+    return [...engagements].sort((a, b) => {
+      const aRank = eligibilityById.get(a.id)?.isInPilot ? 0 : 1;
+      const bRank = eligibilityById.get(b.id)?.isInPilot ? 0 : 1;
+      return aRank - bRank;
+    });
+  }, [engagements, eligibilityById]);
+
   // Optional list-level filter (Task #235 stretch goal). Defaults
   // off so the existing "show everything" behaviour is preserved on
   // first load; flipping it on hides every row whose jurisdiction
@@ -149,9 +168,9 @@ export function EngagementList() {
   const visibleEngagements = useMemo(
     () =>
       hideOutOfPilot
-        ? engagements.filter((e) => eligibilityById.get(e.id)?.isInPilot)
-        : engagements,
-    [engagements, eligibilityById, hideOutOfPilot],
+        ? sortedEngagements.filter((e) => eligibilityById.get(e.id)?.isInPilot)
+        : sortedEngagements,
+    [sortedEngagements, eligibilityById, hideOutOfPilot],
   );
   const outOfPilotCount = engagements.length - visibleEngagementsInPilotCount(
     engagements,

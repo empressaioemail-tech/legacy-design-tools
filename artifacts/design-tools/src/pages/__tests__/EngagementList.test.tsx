@@ -35,24 +35,23 @@ import { memoryLocation } from "wouter/memory-location";
 import type { EngagementSummary } from "@workspace/api-client-react";
 import { noApplicableAdaptersMessage } from "@workspace/adapters";
 
+/**
+ * The fixture deliberately interleaves in-pilot and out-of-pilot
+ * rows in *the same shape the API returns them*: `updatedAt desc`,
+ * with no awareness of pilot status. The Boulder row is the most
+ * recently updated, then Moab, then the unaddressed row. This lets
+ * the Task #277 sort test prove the component re-orders the
+ * out-of-pilot rows below the in-pilot one without losing the
+ * within-group `updatedAt desc` order — Boulder must still appear
+ * above the unaddressed row in the out-of-pilot tail.
+ */
 const ENGAGEMENTS: EngagementSummary[] = [
-  mkEngagement({
-    id: "eng-moab",
-    name: "Moab Pilot Project",
-    jurisdiction: "Moab, UT",
-    address: "100 Main St, Moab, UT",
-    geocode: {
-      latitude: 38.573,
-      longitude: -109.5494,
-      jurisdictionCity: "Moab",
-      jurisdictionState: "UT",
-    },
-  }),
   mkEngagement({
     id: "eng-boulder",
     name: "Boulder Renovation",
     jurisdiction: "Boulder, CO",
     address: "200 Pearl St, Boulder, CO",
+    updatedAt: "2026-04-20T00:00:00.000Z",
     geocode: {
       latitude: 40.015,
       longitude: -105.2705,
@@ -61,10 +60,24 @@ const ENGAGEMENTS: EngagementSummary[] = [
     },
   }),
   mkEngagement({
+    id: "eng-moab",
+    name: "Moab Pilot Project",
+    jurisdiction: "Moab, UT",
+    address: "100 Main St, Moab, UT",
+    updatedAt: "2026-04-15T00:00:00.000Z",
+    geocode: {
+      latitude: 38.573,
+      longitude: -109.5494,
+      jurisdictionCity: "Moab",
+      jurisdictionState: "UT",
+    },
+  }),
+  mkEngagement({
     id: "eng-unresolved",
     name: "Unaddressed Project",
     jurisdiction: null,
     address: null,
+    updatedAt: "2026-04-10T00:00:00.000Z",
     geocode: null,
   }),
 ];
@@ -94,6 +107,7 @@ interface MakeOpts {
   name: string;
   jurisdiction: string | null;
   address: string | null;
+  updatedAt?: string;
   geocode: {
     latitude: number;
     longitude: number;
@@ -110,7 +124,7 @@ function mkEngagement(o: MakeOpts): EngagementSummary {
     address: o.address,
     status: "active",
     createdAt: "2026-04-01T00:00:00.000Z",
-    updatedAt: "2026-04-15T00:00:00.000Z",
+    updatedAt: o.updatedAt ?? "2026-04-15T00:00:00.000Z",
     snapshotCount: 1,
     latestSnapshot: null,
     site: {
@@ -199,6 +213,27 @@ describe("EngagementList — empty-pilot pill", () => {
     const tally = screen.getByTestId("engagements-out-of-pilot-tally");
     // Boulder + unaddressed → 2 of the 3 fixture rows.
     expect(tally.textContent).toBe("2 out of pilot");
+  });
+
+  it("sorts in-pilot rows ahead of out-of-pilot rows while preserving 'updatedAt desc' within each group (Task #277)", () => {
+    renderList();
+
+    // The fixture is delivered in API order (`updatedAt desc`):
+    // Boulder (out-of-pilot, newest), then Moab (in-pilot), then
+    // the unaddressed row (out-of-pilot, oldest). After the sort
+    // the actionable Moab row must float to the top so an architect
+    // can run Generate Layers on the in-pilot subset without a
+    // scan, and Boulder must still appear above the unaddressed row
+    // in the out-of-pilot tail because the sort is stable.
+    const cards = document.querySelectorAll(
+      "[data-testid^='engagement-card-eng-']",
+    );
+    const order = Array.from(cards).map((c) => c.getAttribute("data-testid"));
+    expect(order).toEqual([
+      "engagement-card-eng-moab",
+      "engagement-card-eng-boulder",
+      "engagement-card-eng-unresolved",
+    ]);
   });
 
   it("filters out-of-pilot rows when 'Show only in-pilot' is toggled on", () => {
