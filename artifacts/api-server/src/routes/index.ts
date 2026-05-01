@@ -18,6 +18,7 @@ import briefingSourcesRouter from "./briefingSources";
 import bimModelsRouter from "./bimModels";
 import generateLayersRouter from "./generateLayers";
 import localSetbacksRouter from "./localSetbacks";
+import adapterCacheRouter from "./adapterCache";
 
 const router: IRouter = Router();
 
@@ -61,5 +62,8 @@ router.use(reviewersRouter);
 router.use(settingsRouter);
 router.use(storageRouter);
 router.use(sessionRouter);
+// adapterCacheRouter mounts under `/admin/adapter-cache` — distinct
+// path subtree from everything else so ordering is indifferent.
+router.use(adapterCacheRouter);
 
 export default router;
