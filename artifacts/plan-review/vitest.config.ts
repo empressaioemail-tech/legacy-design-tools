@@ -7,8 +7,11 @@ import path from "path";
  * which requires PORT/BASE_PATH env vars from the dev workflow. Tests just
  * need React JSX transform + happy-dom + setupFiles.
  *
- * Mirrors `artifacts/design-tools/vitest.config.ts` so both apps share the
- * same fast component-test setup.
+ * Mirrors `artifacts/design-tools/vitest.config.ts` so the two artifacts
+ * stay in lock-step on test infra (the design-tools side already has a
+ * companion SubmitToJurisdictionDialog test suite — this config lets the
+ * plan-review side gain the same regression coverage for its post-submit
+ * confirmation banner without diverging tooling).
  */
 export default defineConfig({
   plugins: [react()],
