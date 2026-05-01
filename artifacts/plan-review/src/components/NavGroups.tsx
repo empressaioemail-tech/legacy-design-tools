@@ -1,7 +1,4 @@
-import {
-  getGetSessionQueryKey,
-  useGetSession,
-} from "@workspace/api-client-react";
+import { useSessionPermissions } from "../lib/session";
 
 /**
  * Sidebar group definitions, paired with the optional permission claim
@@ -89,16 +86,6 @@ export function filterNavGroups(
  * render than to briefly hide them from a real admin.
  */
 export function useNavGroups(): NavGroup[] {
-  const { data } = useGetSession({
-    query: {
-      queryKey: getGetSessionQueryKey(),
-      // Cache the session so every page render does not re-fetch it.
-      // The server response is cheap (no DB), but the FE only needs
-      // it once per app load — permissions cannot change without a
-      // full reload today.
-      staleTime: Number.POSITIVE_INFINITY,
-      gcTime: Number.POSITIVE_INFINITY,
-    },
-  });
-  return filterNavGroups(data?.permissions ?? []);
+  const { permissions } = useSessionPermissions();
+  return filterNavGroups(permissions);
 }

@@ -10,6 +10,7 @@ import StyleProbe from "./pages/StyleProbe";
 import Sheets from "./pages/Sheets";
 import Users from "./pages/Users";
 import ComingSoon from "./pages/ComingSoon";
+import { RequirePermission } from "./components/permissions";
 
 const queryClient = new QueryClient();
 
@@ -33,7 +34,16 @@ function Router() {
       <Route path="/firms" component={ComingSoon} />
       <Route path="/projects" component={ComingSoon} />
       <Route path="/integrations" component={ComingSoon} />
-      <Route path="/users" component={Users} />
+      <Route path="/users">
+        {/* Gate the admin-only Users & Roles page on the same `users:manage`
+            claim the sidebar uses to hide the link. Without this guard a
+            non-admin pasting the URL directly would see the page chrome and
+            then watch every action 403 from the server — `RequirePermission`
+            renders a clear access-denied screen instead. */}
+        <RequirePermission permission="users:manage">
+          <Users />
+        </RequirePermission>
+      </Route>
       <Route path="/reviewers" component={ComingSoon} />
       <Route path="/settings" component={ComingSoon} />
 
