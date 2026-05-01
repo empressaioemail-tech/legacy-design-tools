@@ -9,6 +9,7 @@ import {
   type AtomSummary,
 } from "@workspace/api-client-react";
 import { relativeTime } from "../lib/relativeTime";
+import { backfillAnnotation } from "../lib/submissionBackfill";
 
 export interface SubmissionDetailModalProps {
   /**
@@ -114,6 +115,8 @@ export function SubmissionDetailModal(props: SubmissionDetailModalProps) {
     jurisdictionState?: string | null;
     jurisdictionFips?: string | null;
     submittedAt?: string;
+    respondedAt?: string | null;
+    responseRecordedAt?: string | null;
     found?: boolean;
   };
 
@@ -127,6 +130,16 @@ export function SubmissionDetailModal(props: SubmissionDetailModalProps) {
       .filter((s): s is string => typeof s === "string" && s.length > 0)
       .join(", ") ||
     null;
+  // Mirror the engagement timeline (Task #106): when the user-picked
+  // `respondedAt` is meaningfully earlier than the server-stamped
+  // `responseRecordedAt`, surface the same "backfilled on <date>" cue
+  // here too so a row click into a backfilled reply doesn't lose the
+  // context. Reuses the shared helper so the threshold and copy stay
+  // pinned in one place.
+  const backfillNote = backfillAnnotation(
+    typed.respondedAt,
+    typed.responseRecordedAt,
+  );
 
   return (
     <div
@@ -184,6 +197,24 @@ export function SubmissionDetailModal(props: SubmissionDetailModalProps) {
                 : "Jurisdiction not recorded"}
               {submittedAbsolute ? ` · ${submittedAbsolute}` : ""}
             </span>
+            {backfillNote && (
+              <span
+                className="sc-meta"
+                data-testid="submission-detail-backfill"
+                title={
+                  typed.responseRecordedAt
+                    ? new Date(typed.responseRecordedAt).toLocaleString()
+                    : undefined
+                }
+                style={{
+                  color: "var(--text-secondary)",
+                  fontSize: 11,
+                  fontStyle: "italic",
+                }}
+              >
+                {backfillNote}
+              </span>
+            )}
           </div>
           <button
             type="button"

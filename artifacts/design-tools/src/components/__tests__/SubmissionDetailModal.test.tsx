@@ -255,6 +255,113 @@ describe("SubmissionDetailModal", () => {
     expect(screen.queryByTestId("submission-detail-event")).toBeNull();
   });
 
+  it(
+    "renders the backfill annotation when responseRecordedAt is " +
+      "meaningfully later than respondedAt (Task #123)",
+    () => {
+      // Reply landed on 4/10, recorded into the system on 4/15 — well
+      // beyond the 1-hour threshold pinned in submissionBackfill.ts, so
+      // the modal should surface the same "backfilled on <date>" cue
+      // the engagement timeline already shows on the row itself.
+      const respondedAt = "2026-04-10T14:30:00.000Z";
+      const responseRecordedAt = "2026-04-15T09:00:00.000Z";
+      setSummary({
+        data: {
+          prose: "Plan-review submission to Moab, UT…",
+          typed: {
+            id: "sub-1",
+            found: true,
+            engagementId: "eng-1",
+            jurisdiction: "Moab, UT",
+            jurisdictionCity: "Moab",
+            jurisdictionState: "UT",
+            jurisdictionFips: "4950150",
+            note: "n",
+            submittedAt: "2026-04-09T12:00:00.000Z",
+            status: "approved",
+            reviewerComment: null,
+            respondedAt,
+            responseRecordedAt,
+          },
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: {
+            latestEventId: "",
+            latestEventAt: "2026-04-09T12:00:00.000Z",
+          },
+          scopeFiltered: false,
+        },
+      });
+      setHistory({ data: { events: [] } });
+
+      renderModal(
+        <SubmissionDetailModal
+          submissionId="sub-1"
+          engagementId="eng-1"
+          onClose={() => {}}
+        />,
+      );
+
+      // Pin both the testid hook (so the timeline + modal stay in
+      // sync as one shared annotation surface) and the rendered copy
+      // — the date is locale-formatted via `toLocaleDateString()` so
+      // we assert the prefix and the recorded date string for a
+      // timezone-independent check.
+      const annotation = screen.getByTestId("submission-detail-backfill");
+      const expectedDate = new Date(responseRecordedAt).toLocaleDateString();
+      expect(annotation.textContent).toBe(`backfilled on ${expectedDate}`);
+    },
+  );
+
+  it(
+    "does not render the backfill annotation for a live recording " +
+      "(responseRecordedAt within the threshold)",
+    () => {
+      // 30 minutes between reply and recording — below the 1-hour
+      // threshold, so the modal should NOT surface the annotation.
+      // Pinning the absence here guards against a future helper tweak
+      // accidentally flipping live rows to backfilled.
+      setSummary({
+        data: {
+          prose: "Plan-review submission to Moab, UT…",
+          typed: {
+            id: "sub-1",
+            found: true,
+            engagementId: "eng-1",
+            jurisdiction: "Moab, UT",
+            jurisdictionCity: "Moab",
+            jurisdictionState: "UT",
+            jurisdictionFips: "4950150",
+            note: "n",
+            submittedAt: "2026-04-15T09:00:00.000Z",
+            status: "approved",
+            reviewerComment: null,
+            respondedAt: "2026-04-15T10:00:00.000Z",
+            responseRecordedAt: "2026-04-15T10:30:00.000Z",
+          },
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: {
+            latestEventId: "",
+            latestEventAt: "2026-04-15T09:00:00.000Z",
+          },
+          scopeFiltered: false,
+        },
+      });
+      setHistory({ data: { events: [] } });
+
+      renderModal(
+        <SubmissionDetailModal
+          submissionId="sub-1"
+          engagementId="eng-1"
+          onClose={() => {}}
+        />,
+      );
+
+      expect(screen.queryByTestId("submission-detail-backfill")).toBeNull();
+    },
+  );
+
   it("calls onClose when the close button is pressed", () => {
     setSummary({
       data: {
