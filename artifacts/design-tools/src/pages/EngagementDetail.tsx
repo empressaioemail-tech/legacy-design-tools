@@ -5,10 +5,14 @@ import {
   useGetEngagement,
   useGetEngagementBriefing,
   useGetSnapshot,
+  useListEngagementBriefingSources,
   useListEngagementSubmissions,
+  useRestoreEngagementBriefingSource,
   useUpdateEngagement,
+  getGetEngagementBriefingQueryKey,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
+  getListEngagementBriefingSourcesQueryKey,
   getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
   type EngagementBriefingSource,
@@ -579,13 +583,22 @@ function formatByteSize(bytes: number | null): string {
  * is intentionally producer-agnostic — both `manual-upload` and
  * `federal-adapter` rows route through this component, with the
  * `sourceKind` badge being the only visible difference.
+ *
+ * The "View history" affordance lazily fetches the per-layer history
+ * via `GET /briefing/sources?layerKind=...&includeSuperseded=true` so
+ * the briefing read is not bloated with superseded rows by default,
+ * and so reading history is a discoverable, opt-in interaction. The
+ * fetch is gated on `expanded` so unrelated rows do not pay for it.
  */
 function BriefingSourceRow({
+  engagementId,
   source,
 }: {
+  engagementId: string;
   source: EngagementBriefingSource;
 }) {
   const isManual = source.sourceKind === "manual-upload";
+  const [expanded, setExpanded] = useState(false);
   return (
     <div
       className="sc-card"
@@ -656,10 +669,226 @@ function BriefingSourceRow({
           {source.note}
         </div>
       )}
-      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
-        Snapshot {new Date(source.snapshotDate).toLocaleDateString()} · added{" "}
-        {relativeTime(source.createdAt)}
+      <div
+        style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <span>
+          Snapshot {new Date(source.snapshotDate).toLocaleDateString()} ·
+          added {relativeTime(source.createdAt)}
+        </span>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-controls={`briefing-source-history-${source.id}`}
+          data-testid={`briefing-source-history-toggle-${source.id}`}
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            fontSize: 11,
+            color: "var(--info-text)",
+            textDecoration: "underline",
+          }}
+        >
+          {expanded ? "Hide history" : "View history"}
+        </button>
       </div>
+      {expanded && (
+        <BriefingSourceHistoryPanel
+          engagementId={engagementId}
+          layerKind={source.layerKind}
+          currentSourceId={source.id}
+          panelId={`briefing-source-history-${source.id}`}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Lazily-loaded per-layer history list rendered beneath a current
+ * source row. Fetches with `includeSuperseded=true` and filters the
+ * current row out client-side so only prior versions show in the
+ * collapsible panel. Each prior version exposes a "Restore this
+ * version" action that POSTs to the restore endpoint and invalidates
+ * both the briefing read (so the SiteContextTab re-renders the new
+ * current row) and the history list (so the panel reflects the new
+ * supersession state without a full page reload).
+ */
+function BriefingSourceHistoryPanel({
+  engagementId,
+  layerKind,
+  currentSourceId,
+  panelId,
+}: {
+  engagementId: string;
+  layerKind: string;
+  currentSourceId: string;
+  panelId: string;
+}) {
+  const queryClient = useQueryClient();
+  const historyQuery = useListEngagementBriefingSources(engagementId, {
+    layerKind,
+    includeSuperseded: true,
+  });
+  const restoreMutation = useRestoreEngagementBriefingSource({
+    mutation: {
+      onSuccess: async () => {
+        // Refresh both surfaces: the briefing read (which drives the
+        // current-source list above) and the per-layer history (this
+        // panel) so the next tick reflects the new supersession state
+        // without an extra reload.
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: getGetEngagementBriefingQueryKey(engagementId),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: getListEngagementBriefingSourcesQueryKey(
+              engagementId,
+              { layerKind, includeSuperseded: true },
+            ),
+          }),
+        ]);
+      },
+    },
+  });
+
+  const priorVersions = useMemo(
+    () =>
+      (historyQuery.data?.sources ?? []).filter(
+        (s) => s.id !== currentSourceId,
+      ),
+    [historyQuery.data, currentSourceId],
+  );
+
+  return (
+    <div
+      id={panelId}
+      data-testid={`briefing-source-history-${currentSourceId}`}
+      style={{
+        marginTop: 8,
+        paddingTop: 8,
+        borderTop: "1px dashed var(--border-subtle)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      {historyQuery.isLoading && (
+        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          Loading prior versions…
+        </div>
+      )}
+      {historyQuery.isError && (
+        <div
+          role="alert"
+          style={{
+            fontSize: 11,
+            color: "var(--danger-text)",
+            background: "var(--danger-dim)",
+            padding: 6,
+            borderRadius: 4,
+          }}
+        >
+          Failed to load history.
+        </div>
+      )}
+      {!historyQuery.isLoading &&
+        !historyQuery.isError &&
+        priorVersions.length === 0 && (
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            No prior versions of this layer.
+          </div>
+        )}
+      {priorVersions.map((prior) => (
+        <div
+          key={prior.id}
+          data-testid={`briefing-source-history-row-${prior.id}`}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            padding: 8,
+            background: "var(--bg-subtle)",
+            borderRadius: 4,
+          }}
+        >
+          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {prior.uploadOriginalFilename ?? "(no filename)"}
+            {prior.uploadByteSize !== null && (
+              <span style={{ color: "var(--text-muted)" }}>
+                {" · "}
+                {formatByteSize(prior.uploadByteSize)}
+              </span>
+            )}
+          </div>
+          {prior.note && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {prior.note}
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+            Snapshot{" "}
+            {new Date(prior.snapshotDate).toLocaleDateString()} · added{" "}
+            {relativeTime(prior.createdAt)}
+            {prior.supersededAt && (
+              <>
+                {" · superseded "}
+                {relativeTime(prior.supersededAt)}
+              </>
+            )}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="sc-btn sc-btn-secondary"
+              style={{ fontSize: 11, padding: "2px 8px" }}
+              disabled={restoreMutation.isPending}
+              onClick={() =>
+                restoreMutation.mutate({
+                  id: engagementId,
+                  sourceId: prior.id,
+                })
+              }
+              data-testid={`briefing-source-restore-${prior.id}`}
+            >
+              {restoreMutation.isPending &&
+              restoreMutation.variables?.sourceId === prior.id
+                ? "Restoring…"
+                : "Restore this version"}
+            </button>
+          </div>
+        </div>
+      ))}
+      {restoreMutation.isError && (
+        <div
+          role="alert"
+          style={{
+            fontSize: 11,
+            color: "var(--danger-text)",
+            background: "var(--danger-dim)",
+            padding: 6,
+            borderRadius: 4,
+          }}
+        >
+          Failed to restore the selected version.
+        </div>
+      )}
     </div>
   );
 }
@@ -773,7 +1002,11 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
           data-testid="briefing-sources-list"
         >
           {sources.map((source) => (
-            <BriefingSourceRow key={source.id} source={source} />
+            <BriefingSourceRow
+              key={source.id}
+              engagementId={engagementId}
+              source={source}
+            />
           ))}
         </div>
       )}

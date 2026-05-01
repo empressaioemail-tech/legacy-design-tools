@@ -414,6 +414,68 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   /engagements/{id}/briefing/sources:
+    get:
+      operationId: listEngagementBriefingSources
+      tags: [engagements]
+      summary: List briefing sources for one layer (history-aware)
+      description: |
+        Returns the briefing sources attached to an engagement for one
+        `layerKind`, newest-first by `createdAt`. By default only the
+        current (non-superseded) row is returned; pass
+        `includeSuperseded=true` to also receive the prior history so
+        the UI can render a per-layer "View history" panel and offer a
+        "Restore this version" rollback action.
+
+        Returns `{ sources: [] }` when the engagement has no briefing
+        yet (the briefing row is created lazily on first upload). The
+        endpoint requires the engagement to exist; a missing engagement
+        is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: layerKind
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: |
+            The layer slug to scope the listing by. Required because
+            history is meaningful per layer (the partial unique index
+            on `briefing_sources` is keyed on `layer_kind`).
+        - name: includeSuperseded
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: |
+            When true the response includes superseded rows in addition
+            to the current one. Defaults to false so callers that only
+            want the current source do not need to filter client-side.
+      responses:
+        "200":
+          description: Sources for the layer, newest-first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementBriefingSourcesResponse"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     post:
       operationId: createEngagementBriefingSource
       tags: [engagements]
@@ -465,6 +527,60 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{id}/briefing/sources/{sourceId}/restore:
+    post:
+      operationId: restoreEngagementBriefingSource
+      tags: [engagements]
+      summary: Roll back to a previously-superseded briefing source
+      description: |
+        Restores a previously-superseded briefing source to be the
+        current source for its `(briefing_id, layer_kind)` slot. The
+        prior current row is stamped as superseded by the restored
+        target (so its `supersededAt` is set and `supersededById`
+        points at the restored row), and the restored row's
+        `supersededAt` / `supersededById` are cleared so it owns the
+        partial-unique "current per layer" slot again.
+
+        Idempotent: when the target row is already current the
+        endpoint returns the briefing unchanged. The endpoint never
+        deletes data — every prior version remains in the table for
+        replay through `GET /engagements/{id}/briefing/sources?layerKind=...&includeSuperseded=true`.
+
+        Refuses to restore across engagements (the target must belong
+        to the engagement's briefing) and refuses to restore a layer
+        that has no current row (a defensive check; the supersession
+        contract guarantees a row exists once any upload has happened).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Briefing source restored; updated briefing returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngagementBriefingResponse"
+        "400":
+          description: Invalid request (e.g. source belongs to a different engagement)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement or briefing source not found
           content:
             application/json:
               schema:
@@ -1829,6 +1945,24 @@ components:
         uploadByteSize:
           type: integer
           nullable: true
+        supersededAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Stamped when the row is no longer the current source for its
+            `(briefing_id, layer_kind)` slot — null while the row is
+            current. Surfaced on the wire so the history view can
+            distinguish current from superseded entries without an
+            extra round-trip.
+        supersededById:
+          type: string
+          nullable: true
+          description: |
+            Pointer to the briefing-source row that superseded this one,
+            or null when this row is still current. Lets the UI
+            reconstruct the per-layer chain (`prior → current`) without
+            asking the server.
         createdAt:
           type: string
           format: date-time
@@ -1843,6 +1977,8 @@ components:
         - uploadOriginalFilename
         - uploadContentType
         - uploadByteSize
+        - supersededAt
+        - supersededById
         - createdAt
 
     EngagementBriefing:
@@ -1887,6 +2023,21 @@ components:
           nullable: true
       required:
         - briefing
+
+    EngagementBriefingSourcesResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /engagements/{id}/briefing/sources`. The
+        list is scoped to one `layerKind` and ordered newest-first by
+        `createdAt`. When the engagement has no briefing yet (no
+        upload has happened) `sources` is an empty array, never null.
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/EngagementBriefingSource"
+      required:
+        - sources
 
     CreateBriefingSourceBody:
       type: object

@@ -28,6 +28,7 @@ import type {
   CreateEngagementSubmissionBody,
   CreateUserBody,
   EngagementBriefingResponse,
+  EngagementBriefingSourcesResponse,
   EngagementDetail,
   EngagementSubmissionSummary,
   EngagementSummary,
@@ -38,6 +39,7 @@ import type {
   HealthStatus,
   JurisdictionSummary,
   ListCodeAtomsParams,
+  ListEngagementBriefingSourcesParams,
   ListJurisdictionAtomsParams,
   MatchEngagementBody,
   MatchEngagementResponse,
@@ -1040,6 +1042,139 @@ export function useGetEngagementBriefing<
 }
 
 /**
+ * Returns the briefing sources attached to an engagement for one
+`layerKind`, newest-first by `createdAt`. By default only the
+current (non-superseded) row is returned; pass
+`includeSuperseded=true` to also receive the prior history so
+the UI can render a per-layer "View history" panel and offer a
+"Restore this version" rollback action.
+
+Returns `{ sources: [] }` when the engagement has no briefing
+yet (the briefing row is created lazily on first upload). The
+endpoint requires the engagement to exist; a missing engagement
+is a 404.
+
+ * @summary List briefing sources for one layer (history-aware)
+ */
+export const getListEngagementBriefingSourcesUrl = (
+  id: string,
+  params: ListEngagementBriefingSourcesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${id}/briefing/sources?${stringifiedParams}`
+    : `/api/engagements/${id}/briefing/sources`;
+};
+
+export const listEngagementBriefingSources = async (
+  id: string,
+  params: ListEngagementBriefingSourcesParams,
+  options?: RequestInit,
+): Promise<EngagementBriefingSourcesResponse> => {
+  return customFetch<EngagementBriefingSourcesResponse>(
+    getListEngagementBriefingSourcesUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementBriefingSourcesQueryKey = (
+  id: string,
+  params?: ListEngagementBriefingSourcesParams,
+) => {
+  return [
+    `/api/engagements/${id}/briefing/sources`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListEngagementBriefingSourcesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementBriefingSources>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params: ListEngagementBriefingSourcesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementBriefingSources>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListEngagementBriefingSourcesQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementBriefingSources>>
+  > = ({ signal }) =>
+    listEngagementBriefingSources(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementBriefingSources>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementBriefingSourcesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementBriefingSources>>
+>;
+export type ListEngagementBriefingSourcesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List briefing sources for one layer (history-aware)
+ */
+
+export function useListEngagementBriefingSources<
+  TData = Awaited<ReturnType<typeof listEngagementBriefingSources>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params: ListEngagementBriefingSourcesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementBriefingSources>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementBriefingSourcesQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * Records that a manually-exported QGIS overlay (or any other
 manually-uploaded layer file) has been attached to the
 engagement's parcel briefing. The first call creates the
@@ -1149,6 +1284,118 @@ export const useCreateEngagementBriefingSource = <
   TContext
 > => {
   return useMutation(getCreateEngagementBriefingSourceMutationOptions(options));
+};
+
+/**
+ * Restores a previously-superseded briefing source to be the
+current source for its `(briefing_id, layer_kind)` slot. The
+prior current row is stamped as superseded by the restored
+target (so its `supersededAt` is set and `supersededById`
+points at the restored row), and the restored row's
+`supersededAt` / `supersededById` are cleared so it owns the
+partial-unique "current per layer" slot again.
+
+Idempotent: when the target row is already current the
+endpoint returns the briefing unchanged. The endpoint never
+deletes data — every prior version remains in the table for
+replay through `GET /engagements/{id}/briefing/sources?layerKind=...&includeSuperseded=true`.
+
+Refuses to restore across engagements (the target must belong
+to the engagement's briefing) and refuses to restore a layer
+that has no current row (a defensive check; the supersession
+contract guarantees a row exists once any upload has happened).
+
+ * @summary Roll back to a previously-superseded briefing source
+ */
+export const getRestoreEngagementBriefingSourceUrl = (
+  id: string,
+  sourceId: string,
+) => {
+  return `/api/engagements/${id}/briefing/sources/${sourceId}/restore`;
+};
+
+export const restoreEngagementBriefingSource = async (
+  id: string,
+  sourceId: string,
+  options?: RequestInit,
+): Promise<EngagementBriefingResponse> => {
+  return customFetch<EngagementBriefingResponse>(
+    getRestoreEngagementBriefingSourceUrl(id, sourceId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getRestoreEngagementBriefingSourceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreEngagementBriefingSource>>,
+    TError,
+    { id: string; sourceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreEngagementBriefingSource>>,
+  TError,
+  { id: string; sourceId: string },
+  TContext
+> => {
+  const mutationKey = ["restoreEngagementBriefingSource"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreEngagementBriefingSource>>,
+    { id: string; sourceId: string }
+  > = (props) => {
+    const { id, sourceId } = props ?? {};
+
+    return restoreEngagementBriefingSource(id, sourceId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreEngagementBriefingSourceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof restoreEngagementBriefingSource>>
+>;
+
+export type RestoreEngagementBriefingSourceMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Roll back to a previously-superseded briefing source
+ */
+export const useRestoreEngagementBriefingSource = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreEngagementBriefingSource>>,
+    TError,
+    { id: string; sourceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof restoreEngagementBriefingSource>>,
+  TError,
+  { id: string; sourceId: string },
+  TContext
+> => {
+  return useMutation(
+    getRestoreEngagementBriefingSourceMutationOptions(options),
+  );
 };
 
 /**

@@ -26,5 +26,18 @@ export interface EngagementBriefingSource {
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;
   uploadByteSize: number | null;
+  /** Stamped when the row is no longer the current source for its
+`(briefing_id, layer_kind)` slot — null while the row is
+current. Surfaced on the wire so the history view can
+distinguish current from superseded entries without an
+extra round-trip.
+ */
+  supersededAt: Date | null;
+  /** Pointer to the briefing-source row that superseded this one,
+or null when this row is still current. Lets the UI
+reconstruct the per-layer chain (`prior → current`) without
+asking the server.
+ */
+  supersededById: string | null;
   createdAt: Date;
 }

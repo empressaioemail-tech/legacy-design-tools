@@ -226,6 +226,19 @@ export interface EngagementBriefingSource {
   uploadOriginalFilename: string | null;
   uploadContentType: string | null;
   uploadByteSize: number | null;
+  /** Stamped when the row is no longer the current source for its
+`(briefing_id, layer_kind)` slot — null while the row is
+current. Surfaced on the wire so the history view can
+distinguish current from superseded entries without an
+extra round-trip.
+ */
+  supersededAt: string | null;
+  /** Pointer to the briefing-source row that superseded this one,
+or null when this row is still current. Lets the UI
+reconstruct the per-layer chain (`prior → current`) without
+asking the server.
+ */
+  supersededById: string | null;
   createdAt: string;
 }
 
@@ -252,6 +265,17 @@ generate a clean `T | null` in our codegen toolchain.
  */
 export interface EngagementBriefingResponse {
   briefing: EngagementBriefing | null;
+}
+
+/**
+ * Wire envelope for `GET /engagements/{id}/briefing/sources`. The
+list is scoped to one `layerKind` and ordered newest-first by
+`createdAt`. When the engagement has no briefing yet (no
+upload has happened) `sources` is an empty array, never null.
+
+ */
+export interface EngagementBriefingSourcesResponse {
+  sources: EngagementBriefingSource[];
 }
 
 /**
@@ -1075,6 +1099,25 @@ export type UpdateEngagementBody = {
   projectType?: ProjectType;
   zoningCode?: string;
   lotAreaSqft?: number | null;
+};
+
+export type ListEngagementBriefingSourcesParams = {
+  /**
+ * The layer slug to scope the listing by. Required because
+history is meaningful per layer (the partial unique index
+on `briefing_sources` is keyed on `layer_kind`).
+
+ * @minLength 1
+ * @maxLength 64
+ */
+  layerKind: string;
+  /**
+ * When true the response includes superseded rows in addition
+to the current one. Defaults to false so callers that only
+want the current source do not need to filter client-side.
+
+ */
+  includeSuperseded?: boolean;
 };
 
 export type UploadSnapshotSheetsBody = {

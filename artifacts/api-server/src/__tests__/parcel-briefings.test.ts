@@ -330,5 +330,231 @@ describe("POST /api/engagements/:id/briefing/sources", () => {
     expect(res.body.briefing.engagementId).toBe(eng.id);
     expect(res.body.briefing.sources).toHaveLength(1);
     expect(res.body.briefing.sources[0].layerKind).toBe("qgis-zoning");
+    // The history-aware wire shape exposes supersededAt/By; the
+    // current-source projection populates them with null.
+    expect(res.body.briefing.sources[0].supersededAt).toBeNull();
+    expect(res.body.briefing.sources[0].supersededById).toBeNull();
+  });
+});
+
+describe("GET /api/engagements/:id/briefing/sources (history-aware)", () => {
+  it("404 when the engagement does not exist", async () => {
+    const res = await request(getApp())
+      .get(`/api/engagements/00000000-0000-0000-0000-000000000000/briefing/sources`)
+      .query({ layerKind: "qgis-zoning" });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("engagement_not_found");
+  });
+
+  it("400 when layerKind is missing", async () => {
+    const eng = await seedEngagement();
+    const res = await request(getApp()).get(
+      `/api/engagements/${eng.id}/briefing/sources`,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_query_parameters");
+  });
+
+  it("returns empty sources when the briefing does not exist yet", async () => {
+    const eng = await seedEngagement();
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}/briefing/sources`)
+      .query({ layerKind: "qgis-zoning" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sources: [] });
+  });
+
+  it("default lists only current source for the layer", async () => {
+    const eng = await seedEngagement();
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning-v1.geojson", 1000) });
+    const second = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning-v2.geojson", 2000) });
+    expect(second.status).toBe(201);
+
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}/briefing/sources`)
+      .query({ layerKind: "qgis-zoning" });
+    expect(res.status).toBe(200);
+    expect(res.body.sources).toHaveLength(1);
+    expect(res.body.sources[0].uploadByteSize).toBe(2000);
+    expect(res.body.sources[0].supersededAt).toBeNull();
+  });
+
+  it("includeSuperseded=true returns prior + current rows newest-first", async () => {
+    const eng = await seedEngagement();
+    const first = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning-v1.geojson", 1000) });
+    const firstSourceId = first.body.briefing.sources[0].id;
+
+    const second = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning-v2.geojson", 2000) });
+    const secondSourceId = second.body.briefing.sources[0].id;
+
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}/briefing/sources`)
+      .query({ layerKind: "qgis-zoning", includeSuperseded: "true" });
+    expect(res.status).toBe(200);
+    expect(res.body.sources).toHaveLength(2);
+    // Newest first: the current source leads, the superseded prior follows.
+    expect(res.body.sources[0].id).toBe(secondSourceId);
+    expect(res.body.sources[0].supersededAt).toBeNull();
+    expect(res.body.sources[1].id).toBe(firstSourceId);
+    expect(res.body.sources[1].supersededAt).not.toBeNull();
+    expect(res.body.sources[1].supersededById).toBe(secondSourceId);
+  });
+
+  it("includeSuperseded=false returns only the current row", async () => {
+    const eng = await seedEngagement();
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning-v1.geojson", 1000) });
+    const second = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning-v2.geojson", 2000) });
+    const currentId = second.body.briefing.sources[0].id;
+
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}/briefing/sources`)
+      .query({ layerKind: "qgis-zoning", includeSuperseded: "false" });
+    expect(res.status).toBe(200);
+    expect(res.body.sources).toHaveLength(1);
+    expect(res.body.sources[0].id).toBe(currentId);
+    expect(res.body.sources[0].supersededAt).toBeNull();
+  });
+
+  it("400 when includeSuperseded is not 'true' or 'false'", async () => {
+    const eng = await seedEngagement();
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}/briefing/sources`)
+      .query({ layerKind: "qgis-zoning", includeSuperseded: "yes" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_query_parameters");
+  });
+
+  it("scopes results to the requested layer", async () => {
+    const eng = await seedEngagement();
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning.geojson") });
+    await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-parcel", upload: uploadFor("parcel.geojson") });
+
+    const res = await request(getApp())
+      .get(`/api/engagements/${eng.id}/briefing/sources`)
+      .query({ layerKind: "qgis-parcel", includeSuperseded: "true" });
+    expect(res.status).toBe(200);
+    expect(res.body.sources).toHaveLength(1);
+    expect(res.body.sources[0].layerKind).toBe("qgis-parcel");
+  });
+});
+
+describe("POST /api/engagements/:id/briefing/sources/:sourceId/restore", () => {
+  it("404 when engagement does not exist", async () => {
+    const res = await request(getApp()).post(
+      `/api/engagements/00000000-0000-0000-0000-000000000000/briefing/sources/00000000-0000-0000-0000-000000000001/restore`,
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("engagement_not_found");
+  });
+
+  it("404 when source does not exist", async () => {
+    const eng = await seedEngagement();
+    // Engagement exists but no briefing yet — surface as not-found
+    // because the source can't possibly belong to a non-existent
+    // briefing.
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/briefing/sources/00000000-0000-0000-0000-000000000001/restore`,
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("briefing_source_not_found");
+  });
+
+  it("restores a superseded row and demotes the current row", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const eng = await seedEngagement();
+    const first = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning-v1.geojson", 1000) });
+    const firstSourceId = first.body.briefing.sources[0].id;
+
+    const second = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning-v2.geojson", 2000) });
+    const secondSourceId = second.body.briefing.sources[0].id;
+
+    const restore = await request(getApp()).post(
+      `/api/engagements/${eng.id}/briefing/sources/${firstSourceId}/restore`,
+    );
+    expect(restore.status).toBe(200);
+    expect(restore.body.briefing.sources).toHaveLength(1);
+    expect(restore.body.briefing.sources[0].id).toBe(firstSourceId);
+    expect(restore.body.briefing.sources[0].uploadByteSize).toBe(1000);
+
+    // Row state in the database: target is current, prior current is superseded by target.
+    const all = await ctx.schema.db
+      .select()
+      .from(briefingSources)
+      .where(eq(briefingSources.briefingId, restore.body.briefing.id));
+    const target = all.find((r) => r.id === firstSourceId)!;
+    const prior = all.find((r) => r.id === secondSourceId)!;
+    expect(target.supersededAt).toBeNull();
+    expect(target.supersededById).toBeNull();
+    expect(prior.supersededAt).toBeInstanceOf(Date);
+    expect(prior.supersededById).toBe(firstSourceId);
+
+    // Partial-unique slot holds exactly the restored row.
+    const current = await ctx.schema.db
+      .select()
+      .from(briefingSources)
+      .where(
+        and(
+          eq(briefingSources.briefingId, restore.body.briefing.id),
+          isNull(briefingSources.supersededAt),
+        ),
+      );
+    expect(current).toHaveLength(1);
+    expect(current[0]!.id).toBe(firstSourceId);
+  });
+
+  it("is idempotent on a row that is already current", async () => {
+    const eng = await seedEngagement();
+    const first = await request(getApp())
+      .post(`/api/engagements/${eng.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("zoning.geojson") });
+    const sourceId = first.body.briefing.sources[0].id;
+
+    const restore = await request(getApp()).post(
+      `/api/engagements/${eng.id}/briefing/sources/${sourceId}/restore`,
+    );
+    expect(restore.status).toBe(200);
+    expect(restore.body.briefing.sources).toHaveLength(1);
+    expect(restore.body.briefing.sources[0].id).toBe(sourceId);
+  });
+
+  it("400 when the source belongs to a different engagement", async () => {
+    const engA = await seedEngagement("Engagement A");
+    const engB = await seedEngagement("Engagement B");
+    const a = await request(getApp())
+      .post(`/api/engagements/${engA.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("a.geojson") });
+    const sourceFromA = a.body.briefing.sources[0].id;
+
+    // Seed a briefing on B as well so the engagement-has-briefing
+    // guard does not short-circuit before the mismatch check.
+    await request(getApp())
+      .post(`/api/engagements/${engB.id}/briefing/sources`)
+      .send({ layerKind: "qgis-zoning", upload: uploadFor("b.geojson") });
+
+    const res = await request(getApp()).post(
+      `/api/engagements/${engB.id}/briefing/sources/${sourceFromA}/restore`,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("briefing_source_engagement_mismatch");
   });
 });

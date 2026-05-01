@@ -590,6 +590,18 @@ export const GetEngagementBriefingResponse = zod
               uploadOriginalFilename: zod.string().nullable(),
               uploadContentType: zod.string().nullable(),
               uploadByteSize: zod.number().nullable(),
+              supersededAt: zod.coerce
+                .date()
+                .nullable()
+                .describe(
+                  "Stamped when the row is no longer the current source for its\n`(briefing_id, layer_kind)` slot — null while the row is\ncurrent. Surfaced on the wire so the history view can\ndistinguish current from superseded entries without an\nextra round-trip.\n",
+                ),
+              supersededById: zod
+                .string()
+                .nullable()
+                .describe(
+                  "Pointer to the briefing-source row that superseded this one,\nor null when this row is still current. Lets the UI\nreconstruct the per-layer chain (`prior → current`) without\nasking the server.\n",
+                ),
               createdAt: zod.coerce.date(),
             })
             .describe(
@@ -604,6 +616,87 @@ export const GetEngagementBriefingResponse = zod
   })
   .describe(
     "Wire envelope for the briefing read\/write routes. `briefing` is\n`null` when no briefing has been created yet for the engagement\n— the first call to `POST \/engagements\/{id}\/briefing\/sources`\nis what creates it. The envelope exists because OpenAPI 3.0's\n`nullable` modifier on a `$ref` to an object schema does not\ngenerate a clean `T | null` in our codegen toolchain.\n",
+  );
+
+/**
+ * Returns the briefing sources attached to an engagement for one
+`layerKind`, newest-first by `createdAt`. By default only the
+current (non-superseded) row is returned; pass
+`includeSuperseded=true` to also receive the prior history so
+the UI can render a per-layer "View history" panel and offer a
+"Restore this version" rollback action.
+
+Returns `{ sources: [] }` when the engagement has no briefing
+yet (the briefing row is created lazily on first upload). The
+endpoint requires the engagement to exist; a missing engagement
+is a 404.
+
+ * @summary List briefing sources for one layer (history-aware)
+ */
+export const ListEngagementBriefingSourcesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const listEngagementBriefingSourcesQueryLayerKindMax = 64;
+
+export const listEngagementBriefingSourcesQueryIncludeSupersededDefault = false;
+
+export const ListEngagementBriefingSourcesQueryParams = zod.object({
+  layerKind: zod.coerce
+    .string()
+    .min(1)
+    .max(listEngagementBriefingSourcesQueryLayerKindMax)
+    .describe(
+      "The layer slug to scope the listing by. Required because\nhistory is meaningful per layer (the partial unique index\non `briefing_sources` is keyed on `layer_kind`).\n",
+    ),
+  includeSuperseded: zod.coerce
+    .boolean()
+    .default(listEngagementBriefingSourcesQueryIncludeSupersededDefault)
+    .describe(
+      "When true the response includes superseded rows in addition\nto the current one. Defaults to false so callers that only\nwant the current source do not need to filter client-side.\n",
+    ),
+});
+
+export const ListEngagementBriefingSourcesResponse = zod
+  .object({
+    sources: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          layerKind: zod.string(),
+          sourceKind: zod
+            .enum(["manual-upload", "federal-adapter"])
+            .describe(
+              "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table. The two share the supersession contract so a\nconsumer renders either kind without a producer-specific code\npath.\n",
+            ),
+          provider: zod.string().nullable(),
+          snapshotDate: zod.coerce.date(),
+          note: zod.string().nullable(),
+          uploadObjectPath: zod.string().nullable(),
+          uploadOriginalFilename: zod.string().nullable(),
+          uploadContentType: zod.string().nullable(),
+          uploadByteSize: zod.number().nullable(),
+          supersededAt: zod.coerce
+            .date()
+            .nullable()
+            .describe(
+              "Stamped when the row is no longer the current source for its\n`(briefing_id, layer_kind)` slot — null while the row is\ncurrent. Surfaced on the wire so the history view can\ndistinguish current from superseded entries without an\nextra round-trip.\n",
+            ),
+          supersededById: zod
+            .string()
+            .nullable()
+            .describe(
+              "Pointer to the briefing-source row that superseded this one,\nor null when this row is still current. Lets the UI\nreconstruct the per-layer chain (`prior → current`) without\nasking the server.\n",
+            ),
+          createdAt: zod.coerce.date(),
+        })
+        .describe(
+          "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/engagements\/{id}\/briefing\/sources`. The\nlist is scoped to one `layerKind` and ordered newest-first by\n`createdAt`. When the engagement has no briefing yet (no\nupload has happened) `sources` is an empty array, never null.\n",
   );
 
 /**
@@ -698,6 +791,85 @@ export const CreateEngagementBriefingSourceBody = zod
   })
   .describe(
     "Request body for `POST \/engagements\/{id}\/briefing\/sources`. The\nbytes are uploaded to object storage out-of-band via the\npresigned-URL flow; this body only carries the metadata + the\ncanonical `\/objects\/...` path the bytes landed at. `layerKind`\nis the supersession key — a second upload with the same value\nmarks the prior row superseded.\n",
+  );
+
+/**
+ * Restores a previously-superseded briefing source to be the
+current source for its `(briefing_id, layer_kind)` slot. The
+prior current row is stamped as superseded by the restored
+target (so its `supersededAt` is set and `supersededById`
+points at the restored row), and the restored row's
+`supersededAt` / `supersededById` are cleared so it owns the
+partial-unique "current per layer" slot again.
+
+Idempotent: when the target row is already current the
+endpoint returns the briefing unchanged. The endpoint never
+deletes data — every prior version remains in the table for
+replay through `GET /engagements/{id}/briefing/sources?layerKind=...&includeSuperseded=true`.
+
+Refuses to restore across engagements (the target must belong
+to the engagement's briefing) and refuses to restore a layer
+that has no current row (a defensive check; the supersession
+contract guarantees a row exists once any upload has happened).
+
+ * @summary Roll back to a previously-superseded briefing source
+ */
+export const RestoreEngagementBriefingSourceParams = zod.object({
+  id: zod.coerce.string(),
+  sourceId: zod.coerce.string(),
+});
+
+export const RestoreEngagementBriefingSourceResponse = zod
+  .object({
+    briefing: zod
+      .object({
+        id: zod.string(),
+        engagementId: zod.string(),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+        sources: zod.array(
+          zod
+            .object({
+              id: zod.string(),
+              layerKind: zod.string(),
+              sourceKind: zod
+                .enum(["manual-upload", "federal-adapter"])
+                .describe(
+                  "Producer flavor for a `briefing_sources` row. `manual-upload` is\nthe DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`\nships in DA-PI-2 when the federal-data adapters write into the\nsame table. The two share the supersession contract so a\nconsumer renders either kind without a producer-specific code\npath.\n",
+                ),
+              provider: zod.string().nullable(),
+              snapshotDate: zod.coerce.date(),
+              note: zod.string().nullable(),
+              uploadObjectPath: zod.string().nullable(),
+              uploadOriginalFilename: zod.string().nullable(),
+              uploadContentType: zod.string().nullable(),
+              uploadByteSize: zod.number().nullable(),
+              supersededAt: zod.coerce
+                .date()
+                .nullable()
+                .describe(
+                  "Stamped when the row is no longer the current source for its\n`(briefing_id, layer_kind)` slot — null while the row is\ncurrent. Surfaced on the wire so the history view can\ndistinguish current from superseded entries without an\nextra round-trip.\n",
+                ),
+              supersededById: zod
+                .string()
+                .nullable()
+                .describe(
+                  "Pointer to the briefing-source row that superseded this one,\nor null when this row is still current. Lets the UI\nreconstruct the per-layer chain (`prior → current`) without\nasking the server.\n",
+                ),
+              createdAt: zod.coerce.date(),
+            })
+            .describe(
+              "One current (non-superseded) source attached to an engagement's\nparcel briefing. The `upload\*` fields are populated only on\n`manual-upload` rows and describe the file the architect picked.\n`payload` is the structured data the briefing engine will read\nwhen DA-PI-3 ships; producers may store an empty object today.\n",
+            ),
+        ),
+      })
+      .describe(
+        "The engagement's parcel briefing row plus its current sources.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the briefing read\/write routes. `briefing` is\n`null` when no briefing has been created yet for the engagement\n— the first call to `POST \/engagements\/{id}\/briefing\/sources`\nis what creates it. The envelope exists because OpenAPI 3.0's\n`nullable` modifier on a `$ref` to an object schema does not\ngenerate a clean `T | null` in our codegen toolchain.\n",
   );
 
 /**
