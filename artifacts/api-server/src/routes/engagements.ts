@@ -9,7 +9,28 @@ import {
   ENGAGEMENT_EDIT_ACTOR,
   emitEngagementAddressUpdatedEvent,
   emitEngagementJurisdictionResolvedEvent,
+  type EngagementEventActor,
 } from "../lib/engagementEvents";
+
+/**
+ * Resolve the actor to attribute an engagement-edit lifecycle event to.
+ *
+ * When the request carries a session-bound user identity (set by
+ * `sessionMiddleware` from a verified cookie in production, or the
+ * `pr_session` cookie / `x-requestor` header in dev/test), the event is
+ * attributed to that user/agent so the engagement timeline shows
+ * *which* teammate made the edit. Falls back to the route-level system
+ * actor (`ENGAGEMENT_EDIT_ACTOR`) for unauthenticated requests so the
+ * audit trail still records *that* an edit happened — matching the
+ * pre-session behavior.
+ */
+function actorFromRequest(req: Request): EngagementEventActor {
+  const requestor = req.session?.requestor;
+  if (requestor && requestor.id) {
+    return { kind: requestor.kind, id: requestor.id };
+  }
+  return ENGAGEMENT_EDIT_ACTOR;
+}
 
 const router: IRouter = Router();
 
@@ -298,13 +319,17 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
     const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
     if (addressChanged) {
       const history = getHistoryService();
+      // Attribute the edit to the session-bound user when one is
+      // attached (so the timeline shows *which* teammate edited the
+      // engagement); falls back to the system actor otherwise.
+      const actor = actorFromRequest(req);
       await emitEngagementAddressUpdatedEvent(
         history,
         {
           engagementId: existing.id,
           fromAddress: priorAddress,
           toAddress: nextAddress,
-          actor: ENGAGEMENT_EDIT_ACTOR,
+          actor,
         },
         reqLog,
       );
@@ -318,7 +343,7 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
             jurisdictionFips: resolvedJurisdictionFips,
             previousJurisdictionCity: existing.jurisdictionCity,
             previousJurisdictionState: existing.jurisdictionState,
-            actor: ENGAGEMENT_EDIT_ACTOR,
+            actor,
           },
           reqLog,
         );
@@ -417,7 +442,7 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
           jurisdictionFips: resolvedGeo.jurisdictionFips,
           previousJurisdictionCity: existing.jurisdictionCity,
           previousJurisdictionState: existing.jurisdictionState,
-          actor: ENGAGEMENT_EDIT_ACTOR,
+          actor: actorFromRequest(req),
         },
         reqLog,
       );

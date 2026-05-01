@@ -143,6 +143,35 @@ describe("PATCH /api/engagements/:id — lifecycle events", () => {
     });
   });
 
+  it("attributes the event to the session user when one is attached (x-requestor)", async () => {
+    // The PATCH/regeocode handlers used to hard-code the system actor
+    // `engagement-edit` because there was no session-bound user identity
+    // wired through. Now that `sessionMiddleware` runs for every
+    // request, route handlers should pull `req.session.requestor` and
+    // attribute the audit event to that user — falling back to the
+    // system actor only when no session user is attached. The
+    // `x-requestor` dev override is the same opt-in used by the chat
+    // route tests; in production this will be replaced by a verified
+    // cookie/JWT, but the route handler reads from `req.session`
+    // either way so the contract is identical.
+    mockedGeocodeAddress.mockResolvedValueOnce(null);
+    const eng = await seedEngagement({ address: "100 Original St" });
+
+    const res = await request(getApp())
+      .patch(`/api/engagements/${eng.id}`)
+      .set("x-requestor", "user:teammate-42")
+      .send({ address: "200 New Ave" });
+    expect(res.status).toBe(200);
+
+    const events = await readEngagementEvents(eng.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.eventType).toBe("engagement.address-updated");
+    expect(events[0]!.actor).toEqual({
+      kind: "user",
+      id: "teammate-42",
+    });
+  });
+
   it("does NOT emit when the same address is PATCHed (no-op)", async () => {
     const eng = await seedEngagement({ address: "300 Same St" });
 
@@ -311,6 +340,40 @@ describe("POST /api/engagements/:id/geocode — lifecycle events", () => {
       previousJurisdictionKey: null,
       previousJurisdictionCity: null,
       previousJurisdictionState: null,
+    });
+  });
+
+  it("attributes the regeocode jurisdiction event to the session user when one is attached (x-requestor)", async () => {
+    // Mirror of the PATCH-handler attribution test against the
+    // separate regeocode entry point. Keeps the user-actor flow
+    // covered for both engagement-edit producers so a future refactor
+    // that drops `actorFromRequest` from one route only fails loudly.
+    mockedGeocodeAddress.mockResolvedValueOnce({
+      latitude: 40.7,
+      longitude: -111.9,
+      jurisdictionCity: "Salt Lake City",
+      jurisdictionState: "UT",
+      jurisdictionFips: "4967000",
+      source: "nominatim",
+      geocodedAt: new Date().toISOString(),
+    });
+    const eng = await seedEngagement({
+      address: "1 Existing Ave",
+      jurisdictionCity: null,
+      jurisdictionState: null,
+    });
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/geocode`)
+      .set("x-requestor", "user:teammate-7");
+    expect(res.status).toBe(200);
+
+    const events = await readEngagementEvents(eng.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.eventType).toBe("engagement.jurisdiction-resolved");
+    expect(events[0]!.actor).toEqual({
+      kind: "user",
+      id: "teammate-7",
     });
   });
 
