@@ -9,6 +9,7 @@ import {
   getGetSnapshotQueryKey,
   getListEngagementsQueryKey,
   type EngagementDetail as EngagementDetailType,
+  type SubmissionReceipt,
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
 import type { SheetSummary } from "@workspace/api-client-react";
@@ -53,6 +54,65 @@ function StatusPill({ status }: { status: string }) {
     >
       {status.replace("_", " ")}
     </span>
+  );
+}
+
+/**
+ * Non-blocking confirmation banner shown above the engagement header
+ * after a successful "Submit to jurisdiction" action. The dialog itself
+ * already closes on success, so this banner is the visible receipt that
+ * something was recorded — it pairs the human-friendly relative time
+ * (e.g. "just now") with the absolute timestamp on hover so a teammate
+ * can verify exactly when the submission landed without opening the
+ * (not-yet-shipped) submissions list. Auto-dismiss and the close button
+ * are wired up by the parent so the banner stays presentational.
+ */
+function SubmissionRecordedBanner({
+  submittedAt,
+  onDismiss,
+}: {
+  submittedAt: string;
+  onDismiss: () => void;
+}) {
+  const absolute = useMemo(() => {
+    const d = new Date(submittedAt);
+    return Number.isNaN(d.getTime()) ? submittedAt : d.toLocaleString();
+  }, [submittedAt]);
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="submit-jurisdiction-success-banner"
+      className="sc-card flex items-center justify-between flex-shrink-0"
+      style={{
+        padding: "10px 14px",
+        background: "rgba(0,180,216,0.10)",
+        borderColor: "rgba(0,180,216,0.45)",
+        color: "var(--text-primary)",
+      }}
+    >
+      <div className="flex items-center gap-2" style={{ fontSize: 13 }}>
+        <span aria-hidden style={{ color: "var(--cyan)", fontWeight: 600 }}>
+          ✓
+        </span>
+        <span>
+          Submission recorded ·{" "}
+          <span title={absolute} style={{ color: "var(--text-secondary)" }}>
+            {relativeTime(submittedAt)}
+          </span>
+        </span>
+      </div>
+      <button
+        type="button"
+        className="sc-btn-ghost"
+        onClick={onDismiss}
+        aria-label="Dismiss submission confirmation"
+        data-testid="submit-jurisdiction-success-dismiss"
+        style={{ padding: "2px 8px", fontSize: 12 }}
+      >
+        Dismiss
+      </button>
+    </div>
   );
 }
 
@@ -486,6 +546,26 @@ export function EngagementDetail() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"intake" | "edit">("edit");
   const [submitOpen, setSubmitOpen] = useState(false);
+  // Last successful jurisdiction submission, surfaced as a non-blocking
+  // confirmation banner above the engagement header. We keep the full
+  // receipt (not just `submittedAt`) so a future "View on timeline"
+  // affordance can deep-link by `submissionId` without another round trip.
+  const [lastSubmission, setLastSubmission] =
+    useState<SubmissionReceipt | null>(null);
+  // Auto-dismiss the banner after 8s so it stays out of the way once
+  // the user has seen it. The dialog itself already closed on success,
+  // so the banner is the only remaining post-submit affordance. Within
+  // an 8s window the relative-time label is always "just now", so no
+  // tick interval is needed to keep it fresh.
+  useEffect(() => {
+    if (!lastSubmission) return;
+    const dismiss = window.setTimeout(() => {
+      setLastSubmission(null);
+    }, 8_000);
+    return () => {
+      window.clearTimeout(dismiss);
+    };
+  }, [lastSubmission]);
 
   const { data: engagement } = useGetEngagement(id, {
     query: {
@@ -621,6 +701,12 @@ export function EngagementDetail() {
       }
     >
       <div className="flex flex-col gap-5 h-full">
+        {lastSubmission && (
+          <SubmissionRecordedBanner
+            submittedAt={lastSubmission.submittedAt}
+            onDismiss={() => setLastSubmission(null)}
+          />
+        )}
         <div className="flex items-center justify-between flex-shrink-0">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
@@ -801,6 +887,7 @@ export function EngagementDetail() {
         jurisdiction={engagement.jurisdiction}
         isOpen={submitOpen}
         onClose={() => setSubmitOpen(false)}
+        onSubmitted={(receipt) => setLastSubmission(receipt)}
       />
     </AppShell>
   );

@@ -4,6 +4,7 @@ import {
   useCreateEngagementSubmission,
   getGetEngagementQueryKey,
   getGetAtomHistoryQueryKey,
+  type SubmissionReceipt,
 } from "@workspace/api-client-react";
 import { createEngagementSubmissionBodyNoteMax } from "@workspace/api-zod";
 import { ApiError } from "@workspace/api-client-react";
@@ -14,6 +15,15 @@ export interface SubmitToJurisdictionDialogProps {
   jurisdiction: string | null;
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Fires after a successful submission, just before `onClose` runs.
+   * The parent uses this to surface a non-blocking confirmation
+   * (e.g. inline banner above the engagement header) that includes
+   * the recorded `submittedAt` timestamp from the server. Errors
+   * still surface inside the dialog via the existing `onError`
+   * branch and never reach this callback.
+   */
+  onSubmitted?: (receipt: SubmissionReceipt) => void;
 }
 
 export function SubmitToJurisdictionDialog({
@@ -22,6 +32,7 @@ export function SubmitToJurisdictionDialog({
   jurisdiction,
   isOpen,
   onClose,
+  onSubmitted,
 }: SubmitToJurisdictionDialogProps) {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
@@ -36,7 +47,7 @@ export function SubmitToJurisdictionDialog({
 
   const mutation = useCreateEngagementSubmission({
     mutation: {
-      onSuccess: async () => {
+      onSuccess: async (receipt) => {
         await Promise.all([
           qc.invalidateQueries({
             queryKey: getGetEngagementQueryKey(engagementId),
@@ -45,6 +56,7 @@ export function SubmitToJurisdictionDialog({
             queryKey: getGetAtomHistoryQueryKey("engagement", engagementId),
           }),
         ]);
+        onSubmitted?.(receipt);
         onClose();
       },
       onError: (err) => {
