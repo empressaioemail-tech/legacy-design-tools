@@ -7,15 +7,28 @@ import path from "node:path";
  *
  * The specs in `./e2e` exercise the running design-tools UI against the
  * shared workspace proxy at `localhost:80` (which already routes `/api/*`
- * to the API server and `/*` to design-tools). They do *not* spin their
- * own servers — the Replit workflows for `api-server` and `design-tools`
- * must be running. `pnpm run test:e2e` is intentionally separate from
- * `pnpm run test` (vitest) so CI/local can opt into the heavier suite
- * without paying its cost on every component-test run.
+ * to the API server and `/*` to design-tools). The proxy itself is
+ * provided by the surrounding Replit environment and is up regardless of
+ * which workflows are running.
+ *
+ * The `webServer` block below makes the suite self-orchestrating for CI
+ * (Task #134): if either upstream is not already responding via the
+ * proxy, Playwright spawns the dev command for it and waits for the
+ * health-check URL to come up before running any test. When the
+ * Replit-managed workflows for `api-server` / `design-tools` are
+ * already running (the normal local-dev case), `reuseExistingServer`
+ * makes Playwright skip the spawn and reuse them — so this block costs
+ * nothing in day-to-day work but unblocks an unattended CI invocation.
+ *
+ * `pnpm run test:e2e` is intentionally separate from `pnpm run test`
+ * (vitest) so CI/local can opt into the heavier suite without paying
+ * its cost on every component-test run.
  *
  * `E2E_BASE_URL` lets a dev override the proxy origin (for example, to
  * run against a deployed environment); the default matches the in-repo
- * convention documented in the pnpm-workspace skill.
+ * convention documented in the pnpm-workspace skill. When it is set,
+ * the `webServer` spawning is suppressed — the assumption is that the
+ * remote target is already up.
  */
 
 /**
@@ -33,6 +46,45 @@ import path from "node:path";
  */
 ensureChromiumLibrariesOnLoaderPath();
 
+const proxyBaseUrl = process.env["E2E_BASE_URL"] ?? "http://localhost:80";
+
+/**
+ * Spawn the workspace dev servers when the suite is invoked outside of
+ * a Replit-managed workflow context (i.e. in CI). When `E2E_BASE_URL`
+ * points at an external target, or when the developer is already
+ * running the workflows locally, `reuseExistingServer: true` makes
+ * Playwright skip spawning entirely and just verify the URL responds.
+ *
+ * Both processes inherit the parent env (so `DATABASE_URL` and the
+ * Replit secrets reach the API server / Vite). We pin the ports here
+ * because the proxy on `localhost:80` routes by the well-known port
+ * mapping declared in each artifact's `artifact.toml` — drift between
+ * the two would route the test browser at the wrong upstream.
+ */
+const webServer =
+  process.env["E2E_BASE_URL"] === undefined
+    ? [
+        {
+          command: "pnpm --filter @workspace/api-server run dev",
+          url: `${proxyBaseUrl}/api/healthz`,
+          reuseExistingServer: true,
+          stdout: "pipe" as const,
+          stderr: "pipe" as const,
+          timeout: 180_000,
+          env: { PORT: "8080" },
+        },
+        {
+          command: "pnpm --filter @workspace/design-tools run dev",
+          url: `${proxyBaseUrl}/`,
+          reuseExistingServer: true,
+          stdout: "pipe" as const,
+          stderr: "pipe" as const,
+          timeout: 120_000,
+          env: { PORT: "20295", BASE_PATH: "/" },
+        },
+      ]
+    : undefined;
+
 export default defineConfig({
   testDir: "./e2e",
   testMatch: /.*\.spec\.ts$/,
@@ -43,7 +95,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   reporter: [["list"]],
   use: {
-    baseURL: process.env["E2E_BASE_URL"] ?? "http://localhost:80",
+    baseURL: proxyBaseUrl,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -53,6 +105,7 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
+  ...(webServer ? { webServer } : {}),
 });
 
 /**

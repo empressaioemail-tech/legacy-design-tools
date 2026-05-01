@@ -61,7 +61,12 @@ pnpm workspace monorepo with two React+Vite apps that share a common design syst
 - `artifacts/design-tools` ships a Playwright suite under `e2e/` (config: `playwright.config.ts`). Run with `pnpm --filter @workspace/design-tools run test:e2e`. The suite is excluded from Vitest (`vitest.config` only matches `src/**/*.test.{ts,tsx}`).
 - `e2e/submission-detail.spec.ts` pins the submission-detail modal flow: seeds an isolated engagement via `@workspace/db`, ingests a submission via `POST /api/engagements/:id/submissions` (which fires `engagement.submitted`), navigates to `/engagements/<id>?tab=submissions`, opens the row, asserts the modal note, the "Submitted to <jurisdiction>" header, and the `engagement.submitted` event panel; closes and re-opens to verify idempotency. The engagement is deleted in `afterAll` (FK cascades to submissions).
 - The config auto-discovers `mesa-libgbm-*` in `/nix/store` and prepends its `lib/` dir to `LD_LIBRARY_PATH` so the bundled `chrome-headless-shell` can resolve `libgbm.so.1` on Replit's NixOS image without per-developer setup. Other store paths that ship the same soname are deliberately ignored (some bundle older `libstdc++.so.6` and would shadow the system one and break Node).
-- The suite assumes the `API Server` and `web` workflows are running (it talks to `localhost:80`). Override with `E2E_BASE_URL` to point at a different environment.
+- The suite is self-orchestrating: `playwright.config.ts` declares a `webServer` block that spawns the API Server (`PORT=8080`) and design-tools (`PORT=20295`, `BASE_PATH=/`) when they are not already responding through `localhost:80`. With `reuseExistingServer: true`, an active workflow is reused and nothing is spawned. Override with `E2E_BASE_URL` to point at a different environment (this also suppresses the spawn).
+- `pnpm --filter @workspace/design-tools run test:e2e` runs `playwright install chromium` first (idempotent), so the suite is a one-command invocation in a fresh sandbox.
+
+## CI / Pre-merge validation
+
+- Pre-merge gating runs through Replit's validation mechanism, not GitHub Actions. Three named commands are registered: `typecheck` (`pnpm run typecheck`), `test` (`pnpm run test`), `e2e` (`pnpm --filter @workspace/design-tools run test:e2e`). They run together on every `mark_task_complete`; a failure in any one blocks the merge. See `TESTING.md` § "CI — Replit pre-merge validation" for details, including the wall-clock budget (~2 min total, run in parallel).
 
 ## Testing (Sprint H01 Part 1)
 

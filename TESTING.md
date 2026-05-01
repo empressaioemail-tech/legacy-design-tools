@@ -249,86 +249,48 @@ add that package to this list **and** declare it as a `devDependency` of
 the package whose tests do the mocking — vite needs to be able to resolve
 `vi.importActual` against an installed copy.
 
-## CI — ready-to-enable GitHub Actions workflow
+## CI — Replit pre-merge validation
 
-Intentionally **not committed** for Sprint H01 — solo-dev workflow runs
-the suite locally before each push and the CI minutes were not yet worth
-the maintenance overhead. Drop the block below into
-`.github/workflows/test.yml` to enable it:
+The pre-merge gate is wired through Replit's **validation** mechanism,
+not GitHub Actions. Three named validation commands are registered with
+the workspace and run together on every `mark_task_complete` (and can
+also be triggered manually). A failure in any one of them blocks the
+merge.
 
-```yaml
-name: test
+| Name        | Command                                                 | What it covers                                            |
+|-------------|---------------------------------------------------------|-----------------------------------------------------------|
+| `typecheck` | `pnpm run typecheck`                                    | Composite-lib build + every leaf workspace `tsc --noEmit` |
+| `test`      | `pnpm run test`                                         | All workspace Vitest suites                               |
+| `e2e`       | `pnpm --filter @workspace/design-tools run test:e2e`    | Playwright suite under `artifacts/design-tools/e2e`       |
 
-on:
-  push:
-    branches: [main]
-  pull_request:
+The `e2e` step is fully self-orchestrating:
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
+- `playwright install chromium` (idempotent — fast no-op when the
+  browser cache is warm) is baked into the `test:e2e` script.
+- `playwright.config.ts` declares a `webServer` block that boots both
+  the API Server (`PORT=8080`) and design-tools (`PORT=20295`,
+  `BASE_PATH=/`) when they are not already responding through the
+  shared proxy on `localhost:80`. `reuseExistingServer: true` means a
+  developer who already has the workflows running pays no extra
+  startup cost — it only spawns in CI.
+- The Replit Nix sandbox does not put `libgbm.so.1` on the default
+  loader path, so `playwright.config.ts` discovers the canonical
+  `mesa-libgbm-*` store dir at config load and prepends it to
+  `LD_LIBRARY_PATH` before Chromium launches. There is nothing to
+  configure on the CI side.
+- `DATABASE_URL` is taken from the Replit-managed environment; the
+  test seeds and tears down its own engagement row directly through
+  `@workspace/db`, so there is no other database setup step.
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: app
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+Wall-clock budget for a full validation run on a fresh sandbox:
+typecheck ~30s, test ~60s, e2e ~35s (commands run in parallel, total
+~2 min). The longest individual step in `e2e` is the API Server
+`pnpm run dev` build; subsequent runs reuse the on-disk esbuild output
+when it is already current.
 
-    env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/app
-      # Intentionally not set: OPENAI_API_KEY. Tests cover the
-      # "no-key → embedding=null" branch via fetcher injection.
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Push schema (so the fixture-drift test has a live DB to dump)
-        run: pnpm --filter @workspace/db run push
-
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      - name: Test
-        run: pnpm -r run test
-
-      # Optional: enforce a coverage floor on the high-leverage libs.
-      # - name: Coverage
-      #   run: |
-      #     pnpm --filter @workspace/codes run test -- --coverage
-      #     pnpm --filter @workspace/codes-sources run test -- --coverage
-```
-
-Notes on the workflow:
-
-- `pgvector/pgvector:pg16` provides the `vector` extension preinstalled.
-  Plain `postgres:16` would require a `CREATE EXTENSION` step.
-- `pnpm --filter @workspace/db run push` is what gives the fixture-drift
-  test something to compare the committed template against. Without it
-  the test would skip (no `DATABASE_URL` schema), which would defeat its
-  whole purpose in CI.
-- Coverage enforcement is left commented out so this can be enabled
-  without immediately failing — uncomment once the floor is set.
+To inspect the registered commands or trigger a manual run, use the
+`validation` skill from the agent. They are *not* defined in
+`.github/workflows/`; this repository has no GitHub Actions wiring.
 
 ## Test counts (Sprint H01 Part 2 baseline)
 
