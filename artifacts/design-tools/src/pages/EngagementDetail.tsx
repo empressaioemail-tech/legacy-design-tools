@@ -2623,7 +2623,7 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
  * server refuses the push without an active briefing — surfacing
  * the disabled state up front avoids the round-trip).
  */
-function PushToRevitAffordance({
+export function PushToRevitAffordance({
   engagementId,
   hasBriefing,
 }: {
@@ -2936,7 +2936,7 @@ const BRIEFING_DIVERGENCE_REASON_COLORS: Record<
  * the C# add-in recorded between the prior poll and now), and the
  * 60s `staleTime` keeps the read cheap during normal browsing.
  */
-function BriefingDivergencesPanel({
+export function BriefingDivergencesPanel({
   engagementId,
 }: {
   engagementId: string;

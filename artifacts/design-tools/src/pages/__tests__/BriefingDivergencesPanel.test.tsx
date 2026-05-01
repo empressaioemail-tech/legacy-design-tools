@@ -1,0 +1,572 @@
+/**
+ * BriefingDivergencesPanel + PushToRevitAffordance — frontend
+ * regression coverage for the "Architect overrides in Revit" panel
+ * shipped by Task #172 on the Site Context tab of the design-tools
+ * EngagementDetail page.
+ *
+ * The api-server side is already covered by
+ * `artifacts/api-server/src/__tests__/bim-models.test.ts` (4 cases).
+ * This file mirrors that shape on the UI side so the four behaviors
+ * the panel owns can't regress quietly:
+ *
+ *   1. Empty list → renders the "No overrides recorded yet…" empty
+ *      state copy.
+ *   2. Multiple divergences for the same materializable element
+ *      collapse into one group, with rows in newest-first order
+ *      (matches the server's order; the panel must not re-sort).
+ *   3. Reason badge palette: deleted → danger, unpinned and
+ *      geometry-edited → warning, other → info. Asserted via the
+ *      `data-divergence-reason` attribute the row exposes for tests.
+ *   4. After a successful Push-to-Revit mutation the divergences
+ *      query is invalidated. We capture the mutation hook's options
+ *      so the test can fire `onSuccess` directly and spy on the
+ *      `QueryClient.invalidateQueries` call — same pattern the
+ *      Task #126 banner test uses for `useCreateEngagementSubmission`.
+ *
+ * The test mounts the two components directly rather than the full
+ * `EngagementDetail` page so we avoid wiring 10+ unrelated query
+ * hooks (briefing sources, atom history, snapshots, …) just to
+ * exercise the divergences panel. The two components are
+ * intentionally exported for this purpose alongside the existing
+ * `BriefingSourceRow` / `BriefingSourceHistoryPanel` testing exports.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  act,
+  within,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+
+// ── Hoisted mock state ──────────────────────────────────────────────────
+//
+// Single-object reset target shared between the `vi.mock` factories
+// and individual test bodies, mirroring the convention in
+// EngagementDetail.test.tsx so the two surfaces stay easy to read
+// side-by-side.
+const hoisted = vi.hoisted(() => {
+  return {
+    bimModel: {
+      id: "bim-1",
+      engagementId: "eng-1",
+      activeBriefingId: "brief-1",
+      briefingVersion: 3,
+      materializedAt: "2025-01-02T00:00:00.000Z",
+      revitDocumentPath: null as string | null,
+      refreshStatus: "current" as
+        | "current"
+        | "stale"
+        | "not-pushed",
+      elements: [] as unknown[],
+      createdAt: "2025-01-02T00:00:00.000Z",
+      updatedAt: "2025-01-02T00:00:00.000Z",
+    },
+    divergences: [] as Array<{
+      id: string;
+      bimModelId: string;
+      materializableElementId: string;
+      briefingId: string;
+      reason: "unpinned" | "geometry-edited" | "deleted" | "other";
+      note: string | null;
+      detail: Record<string, unknown>;
+      createdAt: string;
+      elementKind: string | null;
+      elementLabel: string | null;
+    }>,
+    divergencesQueryState: {
+      isLoading: false,
+      isError: false,
+    },
+    refresh: {
+      bimModelId: "bim-1",
+      briefingId: "brief-1",
+      briefingVersion: 3,
+      materializedAt: "2025-01-02T00:00:00.000Z",
+      refreshStatus: "current" as "current" | "stale" | "not-pushed",
+      diff: {
+        addedCount: 0,
+        modifiedCount: 0,
+        unchangedCount: 0,
+        elements: [] as unknown[],
+      },
+    } as unknown,
+    capturedPushOptions: null as null | {
+      mutation?: {
+        onSuccess?: (
+          data: unknown,
+          variables: unknown,
+          context: unknown,
+        ) => Promise<void> | void;
+      };
+    },
+    pushMutate: vi.fn(),
+    pushIsPending: false,
+  };
+});
+
+// Stub `SiteMap` so leaflet's CSS + image asset side effects don't
+// have to load under happy-dom. The component is never mounted by
+// these tests (we render the divergences / push affordance
+// directly), but the symbol is pulled in transitively by
+// `EngagementDetail.tsx` when we import the panel from it.
+vi.mock("@workspace/site-context/client", () => ({
+  SiteMap: () => null,
+}));
+
+vi.mock("@workspace/api-client-react", async (importOriginal) => {
+  // Import the real module and override only the four hooks the
+  // panel + push affordance touch. Keeping the rest of the surface
+  // intact avoids redefining the dozens of unrelated symbols
+  // EngagementDetail.tsx and its components transitively pull in
+  // (e.g. `RecordSubmissionResponseBodyStatus`,
+  // `getGetEngagementBriefingQueryKey`, generated request helpers).
+  const actual =
+    await importOriginal<typeof import("@workspace/api-client-react")>();
+  const { useQuery } = await import("@tanstack/react-query");
+  return {
+    ...actual,
+    // Override the query-key helpers with stable arrays so the
+    // panel's `invalidateQueries` calls match what we seed into
+    // the QueryClient cache below — the real helpers prepend the
+    // generated `/api/...` request URL which would force the test
+    // to mirror the URL surface for no extra coverage.
+    getGetEngagementBimModelQueryKey: (id: string) => [
+      "getEngagementBimModel",
+      id,
+    ],
+    getGetBimModelRefreshQueryKey: (id: string) => [
+      "getBimModelRefresh",
+      id,
+    ],
+    getListBimModelDivergencesQueryKey: (id: string) => [
+      "listBimModelDivergences",
+      id,
+    ],
+    useGetEngagementBimModel: (
+      id: string,
+      opts?: { query?: { queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["getEngagementBimModel", id] as const),
+        queryFn: async () => ({ bimModel: { ...hoisted.bimModel } }),
+      }),
+    useGetBimModelRefresh: (
+      id: string,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["getBimModelRefresh", id] as const),
+        queryFn: async () => hoisted.refresh,
+        enabled: opts?.query?.enabled ?? true,
+      }),
+    useListBimModelDivergences: (
+      id: string,
+      opts?: {
+        query?: {
+          enabled?: boolean;
+          queryKey?: readonly unknown[];
+          staleTime?: number;
+        };
+      },
+    ) => {
+      // Drive the query through real `useQuery` so the panel
+      // receives the same data / loading / error shape it would
+      // in production.
+      const q = useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["listBimModelDivergences", id] as const),
+        queryFn: async () => {
+          if (hoisted.divergencesQueryState.isError) {
+            throw new Error("simulated divergences error");
+          }
+          return { divergences: hoisted.divergences.map((d) => ({ ...d })) };
+        },
+        enabled: opts?.query?.enabled ?? true,
+        staleTime: opts?.query?.staleTime,
+      });
+      // Honor the simulated loading flag so the loading-state
+      // branch can be exercised without racing the real query.
+      if (hoisted.divergencesQueryState.isLoading) {
+        return { ...q, isLoading: true, data: undefined };
+      }
+      return q;
+    },
+    usePushEngagementBimModel: (
+      options: typeof hoisted.capturedPushOptions,
+    ) => {
+      hoisted.capturedPushOptions = options;
+      return {
+        mutate: hoisted.pushMutate,
+        isPending: hoisted.pushIsPending,
+        isError: false,
+      };
+    },
+  };
+});
+
+const { BriefingDivergencesPanel, PushToRevitAffordance } = await import(
+  "../EngagementDetail"
+);
+
+function makeQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
+
+/**
+ * Mount the divergences panel under a real QueryClient and pre-seed
+ * the bim-model + divergences caches so the panel renders fully on
+ * first paint — no async `findBy*` polling required, mirroring the
+ * EngagementDetail.test.tsx pattern.
+ */
+function renderPanel() {
+  const client = makeQueryClient();
+  client.setQueryData(["getEngagementBimModel", hoisted.bimModel.engagementId], {
+    bimModel: { ...hoisted.bimModel },
+  });
+  client.setQueryData(
+    ["listBimModelDivergences", hoisted.bimModel.id],
+    { divergences: hoisted.divergences.map((d) => ({ ...d })) },
+  );
+  const node: ReactNode = (
+    <QueryClientProvider client={client}>
+      <BriefingDivergencesPanel engagementId={hoisted.bimModel.engagementId} />
+    </QueryClientProvider>
+  );
+  const utils = render(node);
+  return { ...utils, client };
+}
+
+/**
+ * Mount the Push-to-Revit affordance alongside a real QueryClient
+ * so the captured `onSuccess` can be fired against an
+ * `invalidateQueries` spy — same shape as the Task #126 banner test
+ * does for `useCreateEngagementSubmission`.
+ */
+function renderPushAffordance() {
+  const client = makeQueryClient();
+  client.setQueryData(["getEngagementBimModel", hoisted.bimModel.engagementId], {
+    bimModel: { ...hoisted.bimModel },
+  });
+  client.setQueryData(
+    ["getBimModelRefresh", hoisted.bimModel.id],
+    hoisted.refresh,
+  );
+  client.setQueryData(
+    ["listBimModelDivergences", hoisted.bimModel.id],
+    { divergences: [] },
+  );
+  const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+  const node: ReactNode = (
+    <QueryClientProvider client={client}>
+      <PushToRevitAffordance
+        engagementId={hoisted.bimModel.engagementId}
+        hasBriefing
+      />
+    </QueryClientProvider>
+  );
+  const utils = render(node);
+  return { ...utils, client, invalidateSpy };
+}
+
+beforeEach(() => {
+  hoisted.bimModel = {
+    id: "bim-1",
+    engagementId: "eng-1",
+    activeBriefingId: "brief-1",
+    briefingVersion: 3,
+    materializedAt: "2025-01-02T00:00:00.000Z",
+    revitDocumentPath: null,
+    refreshStatus: "current",
+    elements: [],
+    createdAt: "2025-01-02T00:00:00.000Z",
+    updatedAt: "2025-01-02T00:00:00.000Z",
+  };
+  hoisted.divergences = [];
+  hoisted.divergencesQueryState = { isLoading: false, isError: false };
+  hoisted.refresh = {
+    bimModelId: "bim-1",
+    briefingId: "brief-1",
+    briefingVersion: 3,
+    materializedAt: "2025-01-02T00:00:00.000Z",
+    refreshStatus: "current",
+    diff: {
+      addedCount: 0,
+      modifiedCount: 0,
+      unchangedCount: 0,
+      elements: [],
+    },
+  };
+  hoisted.capturedPushOptions = null;
+  hoisted.pushMutate.mockReset();
+  hoisted.pushIsPending = false;
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+describe("BriefingDivergencesPanel (Task #172)", () => {
+  it("renders the empty-state copy when no divergences have been recorded", () => {
+    // Default beforeEach state: bim-model exists, zero divergences.
+    renderPanel();
+
+    const empty = screen.getByTestId("briefing-divergences-empty");
+    expect(empty).toBeInTheDocument();
+    expect(empty).toHaveTextContent(
+      "No overrides recorded yet — the briefing matches what's in Revit.",
+    );
+    // Sanity: no group / row markers should be in the DOM at all.
+    expect(
+      screen.queryByTestId("briefing-divergences-list"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryAllByTestId("briefing-divergences-group"),
+    ).toHaveLength(0);
+  });
+
+  it("collapses multiple divergences for the same element into one group, newest-first", () => {
+    // Two rows for the same element, plus one for a different
+    // element — the panel must merge the same-element rows into a
+    // single group while preserving the server's newest-first order
+    // and leave the other-element row in its own group.
+    hoisted.divergences = [
+      {
+        id: "div-newer",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: "Pulled the envelope south by 2ft",
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+      },
+      {
+        id: "div-older",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "unpinned",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-04T08:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+      },
+      {
+        id: "div-other",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-B",
+        briefingId: "brief-1",
+        reason: "deleted",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-03T08:00:00.000Z",
+        elementKind: "property-line",
+        elementLabel: "North property line",
+      },
+    ];
+    renderPanel();
+
+    // Two distinct elements ⇒ two groups.
+    const groups = screen.getAllByTestId("briefing-divergences-group");
+    expect(groups).toHaveLength(2);
+
+    // The same-element group contains both rows, in the original
+    // (newest-first) order.
+    const groupA = groups.find(
+      (g) => g.getAttribute("data-element-id") === "elem-A",
+    );
+    expect(groupA).toBeDefined();
+    const groupARows = within(groupA!).getAllByTestId(
+      "briefing-divergences-row",
+    );
+    expect(groupARows.map((r) => r.getAttribute("data-divergence-id"))).toEqual(
+      ["div-newer", "div-older"],
+    );
+
+    // The other-element group has just the one deleted row.
+    const groupB = groups.find(
+      (g) => g.getAttribute("data-element-id") === "elem-B",
+    );
+    expect(groupB).toBeDefined();
+    const groupBRows = within(groupB!).getAllByTestId(
+      "briefing-divergences-row",
+    );
+    expect(groupBRows.map((r) => r.getAttribute("data-divergence-id"))).toEqual(
+      ["div-other"],
+    );
+
+    // The empty-state branch must be torn down once any divergence
+    // is present.
+    expect(
+      screen.queryByTestId("briefing-divergences-empty"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the correct reason badge palette for each reason bucket", () => {
+    // One row per reason so we can assert all four palette branches
+    // in a single mount. Each row exposes its reason via the
+    // `data-divergence-reason` attribute — the badge color choice
+    // is keyed off the same value, so a regression in the palette
+    // map would have to come with a renamed reason or a swapped
+    // lookup branch (both of which we'd notice).
+    hoisted.divergences = [
+      {
+        id: "div-deleted",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-deleted",
+        briefingId: "brief-1",
+        reason: "deleted",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: null,
+        elementLabel: null,
+      },
+      {
+        id: "div-unpinned",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-unpinned",
+        briefingId: "brief-1",
+        reason: "unpinned",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T11:00:00.000Z",
+        elementKind: "terrain",
+        elementLabel: null,
+      },
+      {
+        id: "div-geometry",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-geometry",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T10:00:00.000Z",
+        elementKind: "setback-plane",
+        elementLabel: null,
+      },
+      {
+        id: "div-other",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-other",
+        briefingId: "brief-1",
+        reason: "other",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T09:00:00.000Z",
+        elementKind: "neighbor-mass",
+        elementLabel: null,
+      },
+    ];
+    renderPanel();
+
+    function rowFor(reason: string): HTMLElement {
+      const rows = screen
+        .getAllByTestId("briefing-divergences-row")
+        .filter((r) => r.getAttribute("data-divergence-reason") === reason);
+      expect(rows).toHaveLength(1);
+      return rows[0];
+    }
+    function badgeBg(row: HTMLElement): string {
+      const badge = within(row).getByTestId("briefing-divergences-reason-badge");
+      // happy-dom serializes inline `style.background` as the CSS
+      // var token we wrote — that's exactly what we want to assert
+      // because it pins the *intended* palette without coupling
+      // the test to resolved colors.
+      return (badge as HTMLElement).style.background;
+    }
+    function badgeFg(row: HTMLElement): string {
+      const badge = within(row).getByTestId("briefing-divergences-reason-badge");
+      return (badge as HTMLElement).style.color;
+    }
+
+    // deleted → danger palette (loudest signal — the operator most
+    // needs to chase a deleted locked element).
+    const deletedRow = rowFor("deleted");
+    expect(badgeBg(deletedRow)).toBe("var(--danger-dim)");
+    expect(badgeFg(deletedRow)).toBe("var(--danger-text)");
+    expect(
+      within(deletedRow).getByTestId("briefing-divergences-reason-badge"),
+    ).toHaveTextContent("Deleted");
+
+    // unpinned → warning.
+    const unpinnedRow = rowFor("unpinned");
+    expect(badgeBg(unpinnedRow)).toBe("var(--warning-dim)");
+    expect(badgeFg(unpinnedRow)).toBe("var(--warning-text)");
+    expect(
+      within(unpinnedRow).getByTestId("briefing-divergences-reason-badge"),
+    ).toHaveTextContent("Unpinned");
+
+    // geometry-edited → warning (same palette as unpinned; both are
+    // "noticed, not blocking").
+    const geomRow = rowFor("geometry-edited");
+    expect(badgeBg(geomRow)).toBe("var(--warning-dim)");
+    expect(badgeFg(geomRow)).toBe("var(--warning-text)");
+    expect(
+      within(geomRow).getByTestId("briefing-divergences-reason-badge"),
+    ).toHaveTextContent("Geometry edited");
+
+    // other → info.
+    const otherRow = rowFor("other");
+    expect(badgeBg(otherRow)).toBe("var(--info-dim)");
+    expect(badgeFg(otherRow)).toBe("var(--info-text)");
+    expect(
+      within(otherRow).getByTestId("briefing-divergences-reason-badge"),
+    ).toHaveTextContent("Other override");
+  });
+});
+
+describe("PushToRevitAffordance → divergences invalidation (Task #172)", () => {
+  it("invalidates the divergences query after a successful Push-to-Revit", async () => {
+    const { invalidateSpy } = renderPushAffordance();
+
+    // Click the affordance's CTA so the page records a `mutate`
+    // call. The mutate spy is a no-op (so the promise never
+    // resolves on its own) — we manually fire `onSuccess` below to
+    // exercise the page-level invalidation chain, mirroring the
+    // Task #126 banner test pattern.
+    fireEvent.click(screen.getByTestId("push-to-revit-button"));
+    expect(hoisted.pushMutate).toHaveBeenCalledTimes(1);
+    expect(hoisted.capturedPushOptions?.mutation?.onSuccess).toBeDefined();
+
+    invalidateSpy.mockClear();
+    await act(async () => {
+      await hoisted.capturedPushOptions!.mutation!.onSuccess!(
+        { bimModel: { ...hoisted.bimModel } },
+        { id: hoisted.bimModel.engagementId, data: {} },
+        undefined,
+      );
+    });
+
+    // Three independent invalidations must run after a successful
+    // push: the bim-model row (status pill flips), the refresh
+    // payload (diff counters reset), and the divergences list (the
+    // panel directly above us). The third one is the new behavior
+    // Task #172 introduced and the bug this test guards against.
+    const calledKeys = invalidateSpy.mock.calls.map(
+      (call) => (call[0] as { queryKey?: unknown[] } | undefined)?.queryKey,
+    );
+    expect(calledKeys).toEqual(
+      expect.arrayContaining([
+        ["getEngagementBimModel", hoisted.bimModel.engagementId],
+        ["getBimModelRefresh", hoisted.bimModel.id],
+        ["listBimModelDivergences", hoisted.bimModel.id],
+      ]),
+    );
+  });
+});
