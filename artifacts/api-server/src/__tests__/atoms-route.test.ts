@@ -41,6 +41,16 @@ const { resetAtomRegistryForTests, getHistoryService } = await import(
 const { SHEET_EVENT_TYPES } = await import("../atoms/sheet.atom");
 const { SNAPSHOT_EVENT_TYPES } = await import("../atoms/snapshot.atom");
 const { ENGAGEMENT_EVENT_TYPES } = await import("../atoms/engagement.atom");
+const { PARCEL_BRIEFING_EVENT_TYPES } = await import(
+  "../atoms/parcel-briefing.atom"
+);
+const { INTENT_EVENT_TYPES } = await import("../atoms/intent.atom");
+const { BRIEFING_SOURCE_EVENT_TYPES } = await import(
+  "../atoms/briefing-source.atom"
+);
+const { NEIGHBORING_CONTEXT_EVENT_TYPES } = await import(
+  "../atoms/neighboring-context.atom"
+);
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -360,5 +370,95 @@ describe("GET /api/atoms/catalog", () => {
     const engagement = byType.get("engagement");
     expect(engagement).toBeDefined();
     expect(engagement?.eventTypes).toEqual([...ENGAGEMENT_EVENT_TYPES]);
+    // After DA-PI-1, engagement composes the new `parcel-briefing` atom
+    // alongside its existing `snapshot` and forward-ref `submission`
+    // edges. `composes` reflects the raw `childEntityType` order from the
+    // composition array (forward-ref edges are NOT filtered — see
+    // `describeForPrompt` in the framework registry).
+    expect(engagement?.composes).toEqual([
+      "snapshot",
+      "submission",
+      "parcel-briefing",
+    ]);
+
+    // DA-PI-1 parcel-intelligence atoms — assert the full registration
+    // surface (eventTypes + composes order) so a registration drift
+    // (e.g. accidentally swapping forwardRef on `parcel`) surfaces here
+    // rather than being caught by an integration test downstream.
+
+    const parcelBriefing = byType.get("parcel-briefing");
+    expect(parcelBriefing).toBeDefined();
+    expect(parcelBriefing?.eventTypes).toEqual([
+      ...PARCEL_BRIEFING_EVENT_TYPES,
+    ]);
+    expect(parcelBriefing?.defaultMode).toBe("card");
+    // Spec 51 wins on the 4th-child discrepancy — `code-section`,
+    // forwardRef:true (Code Library catalog atom not yet shimmed).
+    // Order matches the composition array: parcel, intent,
+    // briefing-source, code-section.
+    expect(parcelBriefing?.composes).toEqual([
+      "parcel",
+      "intent",
+      "briefing-source",
+      "code-section",
+    ]);
+
+    const intent = byType.get("intent");
+    expect(intent).toBeDefined();
+    expect(intent?.eventTypes).toEqual([...INTENT_EVENT_TYPES]);
+    expect(intent?.defaultMode).toBe("card");
+    expect(intent?.composes).toEqual(["parcel"]);
+
+    const briefingSource = byType.get("briefing-source");
+    expect(briefingSource).toBeDefined();
+    expect(briefingSource?.eventTypes).toEqual([
+      ...BRIEFING_SOURCE_EVENT_TYPES,
+    ]);
+    // briefing-source surfaces in lists — defaultMode is compact per
+    // Spec 51a §2.12's "compact (in briefing source list)" guidance.
+    expect(briefingSource?.defaultMode).toBe("compact");
+    expect(briefingSource?.composes).toEqual(["parcel-briefing", "parcel"]);
+
+    const neighboringContext = byType.get("neighboring-context");
+    expect(neighboringContext).toBeDefined();
+    expect(neighboringContext?.eventTypes).toEqual([
+      ...NEIGHBORING_CONTEXT_EVENT_TYPES,
+    ]);
+    // neighboring-context surfaces inline — defaultMode is compact per
+    // Spec 51a §2.13's "compact (line in briefing)" guidance.
+    expect(neighboringContext?.defaultMode).toBe("compact");
+    expect(neighboringContext?.composes).toEqual(["parcel", "briefing-source"]);
+  });
+
+  // The atoms route is fully dynamic (resolves through the registry),
+  // so registering the four DA-PI-1 atoms automatically exposes their
+  // /summary endpoints. These cases prove the new registrations flow
+  // through the route without any route-level change, and that the
+  // not-found envelope DA-PI-1 ships (data engine deferred to DA-PI-3
+  // for parcel-briefing) is well-formed.
+  describe("DA-PI-1 atoms surface through /api/atoms/:slug/:id/summary", () => {
+    it.each([
+      ["parcel-briefing"],
+      ["intent"],
+      ["briefing-source"],
+      ["neighboring-context"],
+    ] as const)(
+      "%s: returns the four-layer not-found envelope (data engine pending)",
+      async (slug) => {
+        const opaqueId = `${slug}:test-fixture-id`;
+        const res = await request(getApp()).get(
+          `/api/atoms/${slug}/${encodeURIComponent(opaqueId)}/summary`,
+        );
+        expect(res.status).toBe(200);
+        expect(res.body.typed).toEqual({ id: opaqueId, found: false });
+        expect(res.body.relatedAtoms).toEqual([]);
+        expect(res.body.keyMetrics).toEqual([]);
+        expect(typeof res.body.prose).toBe("string");
+        expect(res.body.prose.length).toBeGreaterThan(0);
+        expect(typeof res.body.historyProvenance.latestEventId).toBe("string");
+        expect(typeof res.body.historyProvenance.latestEventAt).toBe("string");
+        expect(res.body.scopeFiltered).toBe(false);
+      },
+    );
   });
 });

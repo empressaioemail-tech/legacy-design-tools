@@ -176,6 +176,16 @@ export function makeEngagementAtom(
   //     on the missing child registration. The lookup-time resolver
   //     silently produces zero children for `submissions` until the
   //     submission catalog atom registers.
+  //   - parcel-briefing (DA-PI-1): the engagement's currently-active
+  //     parcel briefing, per Spec 51a §2.10's "composed by:
+  //     engagement.activeBriefing(1)" relation. Concrete (not forward-
+  //     ref) because the parcel-briefing atom registers in the same
+  //     sprint as this edge. The data lookup that populates
+  //     `parentData["activeBriefing"]` ships in DA-PI-3 with the
+  //     briefing engine; until then `parentData` does not carry that
+  //     key, so `resolveComposition` naturally produces zero
+  //     parcel-briefing children — the same lazy pattern the
+  //     `submissions` edge uses today.
   const composition: ReadonlyArray<AtomComposition> = [
     {
       childEntityType: "snapshot",
@@ -187,6 +197,11 @@ export function makeEngagementAtom(
       childMode: "compact",
       dataKey: "submissions",
       forwardRef: true,
+    },
+    {
+      childEntityType: "parcel-briefing",
+      childMode: "card",
+      dataKey: "activeBriefing",
     },
   ];
 

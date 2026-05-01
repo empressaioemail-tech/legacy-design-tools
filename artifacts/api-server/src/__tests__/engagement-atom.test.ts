@@ -61,6 +61,13 @@ const { createAtomRegistry, defaultScope } = await import(
 const { makeEngagementAtom } = await import("../atoms/engagement.atom");
 const { makeSnapshotAtom } = await import("../atoms/snapshot.atom");
 const { makeSheetAtom } = await import("../atoms/sheet.atom");
+const { makeParcelBriefingAtom } = await import(
+  "../atoms/parcel-briefing.atom"
+);
+const { makeIntentAtom } = await import("../atoms/intent.atom");
+const { makeBriefingSourceAtom } = await import(
+  "../atoms/briefing-source.atom"
+);
 
 // Lazy `db` proxy: same trick as `sheet-atom.test.ts`. The mock above
 // throws at property-access time when `ctx.schema` is null, so building
@@ -110,15 +117,27 @@ describe("engagement atom (contract)", () => {
   });
 
   // The contract suite's `composition references resolve in the registry`
-  // step needs the `snapshot` child registered — and `snapshot` itself
-  // composes `sheet`, so we register both. The forward-ref `submission`
-  // edge on `engagement` does not need a stub: the framework's
-  // `validate()` skips forward-ref edges by design.
+  // step needs every non-forward-ref child registered. Engagement's
+  // composition (post-DA-PI-1) is:
+  //   - snapshot (concrete) → snapshot in turn composes sheet
+  //   - submission (forwardRef:true) → skipped by validate()
+  //   - parcel-briefing (concrete, DA-PI-1) → parcel-briefing in turn
+  //     composes intent + briefing-source as concrete children, plus
+  //     forward-refs to parcel and code-section
+  //
+  // So the `alsoRegister` set has to be:
+  //   sheet, snapshot, intent, briefing-source, parcel-briefing.
+  // The forward-ref edges on parcel-briefing (parcel, code-section) and
+  // briefing-source (parcel) are skipped by validate() — no stubs
+  // needed for those.
   runAtomContractTests(engagementAtom, {
     withFixture: { entityId: ENGAGEMENT_ID },
     alsoRegister: [
       makeSheetAtom({ db: lazyDb }),
       makeSnapshotAtom({ db: lazyDb }),
+      makeIntentAtom(),
+      makeBriefingSourceAtom(),
+      makeParcelBriefingAtom(),
     ],
   });
 });
@@ -165,16 +184,22 @@ describe("engagement atom (behavior)", () => {
       });
     }
 
-    // Build a real registry containing the `snapshot` child so the
-    // engagement atom's `resolveComposition` step finds it at lookup
-    // time. The `submission` composition edge on engagement is declared
-    // `forwardRef: true`, so we deliberately do NOT register a
-    // submission stub here — the resolver must produce zero submission
-    // children (because `parentData` has no `submissions` key) without
-    // the boot validator complaining either.
+    // Build a real registry containing every non-forward-ref child the
+    // engagement atom (post-DA-PI-1) and its transitive children
+    // declare. The `submission` composition edge is `forwardRef: true`
+    // and is deliberately left absent — the resolver must produce zero
+    // submission children (because `parentData` has no `submissions`
+    // key) without the boot validator complaining either. The
+    // `parcel-briefing` edge (DA-PI-1, concrete) similarly produces
+    // zero children at lookup time because `parentData` has no
+    // `activeBriefing` key — the data engine that populates it ships
+    // in DA-PI-3.
     const registry = createAtomRegistry();
     registry.register(makeSheetAtom({ db: lazyDb }));
     registry.register(makeSnapshotAtom({ db: lazyDb }));
+    registry.register(makeIntentAtom());
+    registry.register(makeBriefingSourceAtom());
+    registry.register(makeParcelBriefingAtom());
     const atom = makeEngagementAtom({ db: lazyDb, registry });
     registry.register(atom);
     // Sanity: validate must succeed with the forward-ref `submission`

@@ -73,7 +73,62 @@ function KpiTile({
   );
 }
 
-type TabId = "snapshots" | "sheets" | "site" | "settings";
+type TabId =
+  | "snapshots"
+  | "sheets"
+  | "site"
+  | "site-context"
+  | "settings";
+
+/**
+ * Read the active tab from `?tab=…` on the current URL. Mirrors the
+ * URL-state convention DevAtoms.tsx and DevAtomsProbe.tsx already use:
+ * `URLSearchParams` over `window.location.search`, with a strict
+ * allow-list so a stale or hand-edited link can't push the page into
+ * an unknown tab. SSR-safe: returns the default when `window` is
+ * undefined.
+ *
+ * The default is `snapshots` (the page's "home" tab); a missing or
+ * unknown `tab` param resolves to that, so a bookmark of the bare
+ * engagement URL keeps working.
+ */
+function readTabFromUrl(): TabId {
+  if (typeof window === "undefined") return "snapshots";
+  const raw = new URLSearchParams(window.location.search).get("tab");
+  if (
+    raw === "snapshots" ||
+    raw === "sheets" ||
+    raw === "site" ||
+    raw === "site-context" ||
+    raw === "settings"
+  ) {
+    return raw;
+  }
+  return "snapshots";
+}
+
+/**
+ * Write the active tab back to the URL using `replaceState`. Matches
+ * the convention DevAtoms.tsx documents at length: tab switches are
+ * navigation-cheap (no real route change), so polluting the
+ * back-button history with one entry per click is the wrong shape —
+ * `replaceState` keeps the URL deep-linkable without making "back"
+ * cycle through every tab the user touched.
+ *
+ * The default tab (`snapshots`) is encoded by *removing* `?tab=…`
+ * rather than writing `?tab=snapshots`, so the canonical URL stays
+ * the bare engagement URL when the user is on the default view.
+ */
+function writeTabToUrl(next: TabId): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (next === "snapshots") {
+    url.searchParams.delete("tab");
+  } else {
+    url.searchParams.set("tab", next);
+  }
+  window.history.replaceState(null, "", url.toString());
+}
 
 function TabBar({
   active,
@@ -86,6 +141,7 @@ function TabBar({
     { id: "snapshots", label: "Snapshots" },
     { id: "sheets", label: "Sheets" },
     { id: "site", label: "Site" },
+    { id: "site-context", label: "Site context" },
     { id: "settings", label: "Settings" },
   ];
   return (
@@ -380,11 +436,52 @@ function SettingsTab({
   );
 }
 
+/**
+ * Site context tab — DA-PI-1 sprint scaffolding.
+ *
+ * The four parcel-intelligence atoms (parcel-briefing, intent,
+ * briefing-source, neighboring-context) register shape-only this
+ * sprint; the briefing engine that resolves them ships in DA-PI-3
+ * (per Spec 51 §7's sprint table). This tab exists now so the IA is
+ * stable, deep links work (`?tab=site-context`), and a follow-up
+ * sprint can drop the briefing/intent/source list cards in without
+ * having to plumb routing or tab state.
+ *
+ * Until the engine ships, the body is a deliberate empty state — no
+ * hidden `useEffect` calls, no probe of unfinished endpoints — so
+ * loading the tab has no side effects.
+ */
+function SiteContextTab() {
+  return (
+    <div className="sc-card p-6 flex items-center justify-center flex-1">
+      <div className="sc-prose text-center opacity-70" style={{ maxWidth: 480 }}>
+        <div className="sc-medium mb-2">Site context</div>
+        <div>
+          Parcel briefing, intent, neighboring context, and cited briefing
+          sources will surface here once the briefing engine ships. The atom
+          shapes are registered so deep links (<code>?tab=site-context</code>)
+          and the chat inline-reference resolver already recognize this view.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function EngagementDetail() {
   const params = useParams();
   const id = params.id as string;
   const [jsonExpanded, setJsonExpanded] = useState(true);
-  const [tab, setTab] = useState<TabId>("snapshots");
+  // Initialize tab from `?tab=…` so deep links land on the right tab
+  // without a flicker. Sync on every change via `setTabAndSyncUrl`
+  // (defined below) — we deliberately do NOT subscribe to `popstate`,
+  // matching DevAtoms.tsx's exploratory-page convention. If a future
+  // sprint needs back-button-aware tabs, it can wrap this state in a
+  // `useSyncExternalStore` against `popstate`.
+  const [tab, setTabState] = useState<TabId>(() => readTabFromUrl());
+  const setTab = (next: TabId): void => {
+    setTabState(next);
+    writeTabToUrl(next);
+  };
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"intake" | "edit">("edit");
 
@@ -672,6 +769,8 @@ export function EngagementDetail() {
         {tab === "site" && (
           <SiteTab engagement={engagement} onAddAddress={openEdit} />
         )}
+
+        {tab === "site-context" && <SiteContextTab />}
 
         {tab === "settings" && (
           <SettingsTab engagement={engagement} onEdit={openEdit} />
