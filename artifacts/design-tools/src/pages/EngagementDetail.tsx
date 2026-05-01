@@ -71,15 +71,25 @@ function StatusPill({ status }: { status: string }) {
  * already closes on success, so this banner is the visible receipt that
  * something was recorded — it pairs the human-friendly relative time
  * (e.g. "just now") with the absolute timestamp on hover so a teammate
- * can verify exactly when the submission landed without opening the
- * (not-yet-shipped) submissions list. Auto-dismiss and the close button
- * are wired up by the parent so the banner stays presentational.
+ * can verify exactly when the submission landed.
+ *
+ * The jurisdiction string is captured at submit time (snapshotted into
+ * `lastSubmission` by the parent) and surfaced verbatim here so the
+ * banner copy mirrors the Plan Review side
+ * (`artifacts/plan-review/src/pages/EngagementDetail.tsx`) — both
+ * surfaces read "Submitted to <jurisdiction> · <relative time>" so a
+ * designer who flips between the two artifacts sees the same wording.
+ *
+ * Auto-dismiss and the close button are wired up by the parent so the
+ * banner stays presentational.
  */
 function SubmissionRecordedBanner({
   submittedAt,
+  jurisdiction,
   onDismiss,
 }: {
   submittedAt: string;
+  jurisdiction: string | null;
   onDismiss: () => void;
 }) {
   const absolute = useMemo(() => {
@@ -104,7 +114,7 @@ function SubmissionRecordedBanner({
           ✓
         </span>
         <span>
-          Submission recorded ·{" "}
+          Submitted to <strong>{jurisdiction ?? "jurisdiction"}</strong> ·{" "}
           <span title={absolute} style={{ color: "var(--text-secondary)" }}>
             {relativeTime(submittedAt)}
           </span>
@@ -974,8 +984,14 @@ export function EngagementDetail() {
   // confirmation banner above the engagement header. We keep the full
   // receipt (not just `submittedAt`) so a future "View on timeline"
   // affordance can deep-link by `submissionId` without another round trip.
-  const [lastSubmission, setLastSubmission] =
-    useState<SubmissionReceipt | null>(null);
+  // The jurisdiction string is snapshotted alongside the receipt so the
+  // banner copy reflects what the user actually submitted to even if a
+  // background refetch updates `engagement.jurisdiction` between submit
+  // and dismiss — mirroring the pattern Plan Review uses.
+  const [lastSubmission, setLastSubmission] = useState<{
+    receipt: SubmissionReceipt;
+    jurisdiction: string | null;
+  } | null>(null);
   // Currently-open submission detail modal (Task #84). `null` ==
   // closed; a string is the submission id whose ContextSummary the
   // modal should fetch. Lifted to the page so the same modal instance
@@ -1136,7 +1152,8 @@ export function EngagementDetail() {
       <div className="flex flex-col gap-5 h-full">
         {lastSubmission && (
           <SubmissionRecordedBanner
-            submittedAt={lastSubmission.submittedAt}
+            submittedAt={lastSubmission.receipt.submittedAt}
+            jurisdiction={lastSubmission.jurisdiction}
             onDismiss={() => setLastSubmission(null)}
           />
         )}
@@ -1162,7 +1179,7 @@ export function EngagementDetail() {
               type="button"
               className="sc-btn-primary"
               onClick={() => setSubmitOpen(true)}
-              data-testid="submit-jurisdiction-open"
+              data-testid="submit-jurisdiction-trigger"
             >
               Submit to jurisdiction
             </button>
@@ -1327,7 +1344,12 @@ export function EngagementDetail() {
         jurisdiction={engagement.jurisdiction}
         isOpen={submitOpen}
         onClose={() => setSubmitOpen(false)}
-        onSubmitted={(receipt) => setLastSubmission(receipt)}
+        onSubmitted={(receipt) =>
+          setLastSubmission({
+            receipt,
+            jurisdiction: engagement.jurisdiction,
+          })
+        }
       />
 
       <SubmissionDetailModal
