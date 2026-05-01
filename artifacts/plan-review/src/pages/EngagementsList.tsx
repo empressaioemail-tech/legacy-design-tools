@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { ChevronRight } from "lucide-react";
 import { DashboardLayout } from "@workspace/portal-ui";
 import {
@@ -129,6 +129,22 @@ const FILTER_EMPTY: Record<StatusFilter, string> = {
   all: "No engagements yet. They'll appear here once a snapshot is ingested from Revit.",
 };
 
+const VALID_FILTERS = new Set<StatusFilter>([
+  "active",
+  "on_hold",
+  "archived",
+  "all",
+]);
+
+function parseFilterFromSearch(search: string): StatusFilter {
+  const params = new URLSearchParams(search);
+  const raw = params.get("status");
+  if (raw && VALID_FILTERS.has(raw as StatusFilter)) {
+    return raw as StatusFilter;
+  }
+  return "active";
+}
+
 export default function EngagementsList() {
   const navGroups = useNavGroups();
   const { data, isLoading, isError, refetch, isFetching } = useListEngagements({
@@ -137,7 +153,21 @@ export default function EngagementsList() {
     },
   });
   const engagements = data ?? [];
-  const [filter, setFilter] = useState<StatusFilter>("active");
+
+  const search = useSearch();
+  const [location, setLocation] = useLocation();
+  const filter = parseFilterFromSearch(search);
+
+  const setFilter = (next: StatusFilter) => {
+    const params = new URLSearchParams(search);
+    if (next === "active") {
+      params.delete("status");
+    } else {
+      params.set("status", next);
+    }
+    const qs = params.toString();
+    setLocation(qs ? `${location}?${qs}` : location, { replace: true });
+  };
 
   const counts = useMemo(() => {
     const c: Record<EngagementStatus, number> = {
