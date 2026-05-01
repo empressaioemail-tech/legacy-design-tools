@@ -48,11 +48,6 @@ export default function FindingsLibrary() {
           <button className="sc-btn-sm text-[var(--text-secondary)] border-[var(--border-default)]">Blocking</button>
           <button className="sc-btn-sm text-[var(--text-secondary)] border-[var(--border-default)]">AI-only</button>
           <button className="sc-btn-sm text-[var(--text-secondary)] border-[var(--border-default)]">Open</button>
-          <input 
-            type="text" 
-            placeholder="Filter..." 
-            className="ml-auto h-6 bg-[var(--bg-input)] border border-[var(--border-default)] rounded px-2 text-[11px] font-['Inter'] text-[var(--text-primary)] w-48 outline-none focus:border-[var(--border-focus)]"
-          />
         </div>
 
         <div className="sc-card overflow-x-auto">
