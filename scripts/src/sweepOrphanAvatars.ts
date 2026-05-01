@@ -71,7 +71,7 @@
 
 import { Storage } from "@google-cloud/storage";
 import { isNotNull } from "drizzle-orm";
-import { db, pool, users } from "@workspace/db";
+import { db as defaultDb, pool, users } from "@workspace/db";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
@@ -93,11 +93,59 @@ const objectStorageClient = new Storage({
   projectId: "",
 });
 
-interface CliOptions {
+export interface CliOptions {
   dryRun: boolean;
 }
 
-function parseArgs(argv: string[]): CliOptions {
+/**
+ * Minimal storage surface the sweep actually uses. Defined as a
+ * standalone interface (rather than typing against `@google-cloud/
+ * storage`'s `Storage` directly) so the integration test can inject
+ * an in-memory fake without having to satisfy the entire GCS client
+ * type. The real `Storage` class structurally satisfies this — it
+ * has a `bucket()` method that returns a `Bucket` whose `getFiles()`
+ * resolves to `[File[], ...]`, and each `File` has `name: string`
+ * and a `delete(opts)` method — so the production caller passes its
+ * real client in untouched (with one cast at the boundary).
+ *
+ * Kept narrow on purpose: any expansion forces the test fake to grow
+ * too, which is the point — a future refactor that starts calling,
+ * say, `bucket.deleteFiles()` directly will fail to typecheck against
+ * this interface and force whoever wrote it to update both prod and
+ * the test.
+ */
+export interface SweepFile {
+  name: string;
+  delete(opts?: { ignoreNotFound?: boolean }): Promise<unknown>;
+}
+export interface SweepBucket {
+  getFiles(opts: { prefix: string }): Promise<[SweepFile[]]>;
+}
+export interface SweepStorage {
+  bucket(name: string): SweepBucket;
+}
+
+/**
+ * Drizzle surface the sweep needs — narrowed to just `.select()` so
+ * tests can pass the `withTestSchema` db in without satisfying the
+ * full Drizzle type surface. The production `db` from `@workspace/db`
+ * structurally satisfies this.
+ */
+export type SweepDb = Pick<typeof defaultDb, "select">;
+
+export interface SweepDeps {
+  storage?: SweepStorage;
+  db?: SweepDb;
+  /**
+   * `/<bucket>/<sub-dir>` path the sweep should scan. Defaults to
+   * the `PRIVATE_OBJECT_DIR` env var when omitted (which is what the
+   * production CLI does); tests pass an explicit value so they don't
+   * have to mutate process env.
+   */
+  privateDir?: string;
+}
+
+export function parseArgs(argv: string[]): CliOptions {
   // Apply-mode is opt-in; anything else (including no flags) keeps the
   // sweep in dry-run mode. `--no-dry-run` is accepted as a more verbose
   // alias for symmetry with other scripts.
@@ -185,7 +233,7 @@ function avatarUrlToObjectName(
   return parsed.objectName;
 }
 
-interface SweepSummary {
+export interface SweepSummary {
   privateDir: string;
   bucketName: string;
   uploadsPrefix: string;
@@ -201,6 +249,7 @@ interface SweepSummary {
 async function loadReferencedObjectNames(
   privateDir: string,
   bucketName: string,
+  db: SweepDb,
 ): Promise<Set<string>> {
   const rows = await db
     .select({ avatarUrl: users.avatarUrl })
@@ -219,8 +268,14 @@ async function loadReferencedObjectNames(
   return out;
 }
 
-async function sweep(opts: CliOptions): Promise<SweepSummary> {
-  const privateDir = getPrivateObjectDir();
+export async function sweep(
+  opts: CliOptions,
+  deps: SweepDeps = {},
+): Promise<SweepSummary> {
+  const storage =
+    deps.storage ?? (objectStorageClient as unknown as SweepStorage);
+  const db = deps.db ?? (defaultDb as SweepDb);
+  const privateDir = deps.privateDir ?? getPrivateObjectDir();
   const { bucketName, objectName: privateDirObjectName } =
     parseObjectPath(privateDir);
 
@@ -238,7 +293,11 @@ async function sweep(opts: CliOptions): Promise<SweepSummary> {
 
   // Snapshot DB state BEFORE listing the bucket so a row written
   // between snapshot and listing isn't a candidate for deletion.
-  const referenced = await loadReferencedObjectNames(privateDir, bucketName);
+  const referenced = await loadReferencedObjectNames(
+    privateDir,
+    bucketName,
+    db,
+  );
 
   const liveRowCount = await db
     .select({ avatarUrl: users.avatarUrl })
@@ -246,7 +305,7 @@ async function sweep(opts: CliOptions): Promise<SweepSummary> {
     .where(isNotNull(users.avatarUrl))
     .then((rows) => rows.length);
 
-  const bucket = objectStorageClient.bucket(bucketName);
+  const bucket = storage.bucket(bucketName);
   const [files] = await bucket.getFiles({ prefix: uploadsObjectPrefix });
 
   const summary: SweepSummary = {
@@ -308,4 +367,17 @@ async function main(): Promise<void> {
   process.exit(exitCode);
 }
 
-void main();
+// Only invoke main() when this module is executed as the script's
+// entrypoint (i.e. `tsx sweepOrphanAvatars.ts`). Without this guard,
+// merely `import`-ing the module — as the integration test does to
+// reach the exported `sweep()` — would run the CLI, hit
+// `process.exit()` inside Vitest, and abort the test runner.
+const invokedAsEntrypoint =
+  typeof process !== "undefined" &&
+  Array.isArray(process.argv) &&
+  process.argv[1] !== undefined &&
+  /sweepOrphanAvatars\.(ts|js|mjs|cjs)$/.test(process.argv[1]);
+
+if (invokedAsEntrypoint) {
+  void main();
+}
