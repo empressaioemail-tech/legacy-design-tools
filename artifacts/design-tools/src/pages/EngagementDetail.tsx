@@ -83,6 +83,7 @@ import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
 import {
+  BriefingDivergenceDetailDialog,
   BriefingDivergenceRow as PortalBriefingDivergenceRow,
   BriefingDivergencesPanel as PortalBriefingDivergencesPanel,
   ReviewerComment,
@@ -5466,18 +5467,26 @@ export function PushToRevitAffordance({
   /**
    * Architect-side wrapper around the presentational
    * {@link PortalBriefingDivergenceRow} from portal-ui. Supplies the
-   * Resolve button (when the row is still Open) and the resolve-error
-   * toast — the two pieces that diverge from the read-only reviewer
-   * surface in plan-review.
+   * Resolve button (when the row is still Open), a "View details"
+   * button that opens the per-divergence drill-in dialog (Task #320),
+   * and the resolve-error toast — the three pieces that diverge from
+   * the read-only reviewer surface in plan-review.
    *
    * Uses `row.bimModelId` directly for the mutation + cache key so
    * the wrapper stays pure (no engagement-id prop drilling) and a
    * row's bim-model scope is always the source of truth.
+   *
+   * `onViewDetails` is hoisted to the parent panel so a single
+   * dialog can be rendered alongside the list (mirrors the plan-
+   * review pattern in `BimModelTab.tsx`) instead of mounting one
+   * dialog per row.
    */
   function ArchitectBriefingDivergenceRow({
     row,
+    onViewDetails,
   }: {
     row: BimModelDivergenceListEntry;
+    onViewDetails: (row: BimModelDivergenceListEntry) => void;
   }) {
     const queryClient = useQueryClient();
     const isResolved = row.resolvedAt != null;
@@ -5492,37 +5501,61 @@ export function PushToRevitAffordance({
         },
       },
     });
+    const viewDetailsButton = (
+      <button
+        type="button"
+        data-testid="briefing-divergences-view-details-button"
+        data-divergence-id={row.id}
+        onClick={() => onViewDetails(row)}
+        style={{
+          all: "unset",
+          cursor: "pointer",
+          padding: "3px 10px",
+          borderRadius: 4,
+          fontSize: 11,
+          fontWeight: 600,
+          background: "var(--bg-default)",
+          color: "var(--text-default)",
+          border: "1px solid var(--border-default)",
+        }}
+      >
+        View details
+      </button>
+    );
     return (
       <PortalBriefingDivergenceRow
         row={row}
         rightSlot={
-          isResolved ? null : (
-            <button
-              type="button"
-              data-testid="briefing-divergences-resolve-button"
-              disabled={resolveMutation.isPending}
-              onClick={() =>
-                resolveMutation.mutate({
-                  id: row.bimModelId,
-                  divergenceId: row.id,
-                })
-              }
-              style={{
-                all: "unset",
-                cursor: resolveMutation.isPending ? "wait" : "pointer",
-                padding: "3px 10px",
-                borderRadius: 4,
-                fontSize: 11,
-                fontWeight: 600,
-                background: "var(--bg-default)",
-                color: "var(--text-default)",
-                border: "1px solid var(--border-default)",
-                opacity: resolveMutation.isPending ? 0.6 : 1,
-              }}
-            >
-              {resolveMutation.isPending ? "Resolving…" : "Resolve"}
-            </button>
-          )
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {viewDetailsButton}
+            {!isResolved && (
+              <button
+                type="button"
+                data-testid="briefing-divergences-resolve-button"
+                disabled={resolveMutation.isPending}
+                onClick={() =>
+                  resolveMutation.mutate({
+                    id: row.bimModelId,
+                    divergenceId: row.id,
+                  })
+                }
+                style={{
+                  all: "unset",
+                  cursor: resolveMutation.isPending ? "wait" : "pointer",
+                  padding: "3px 10px",
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  background: "var(--bg-default)",
+                  color: "var(--text-default)",
+                  border: "1px solid var(--border-default)",
+                  opacity: resolveMutation.isPending ? 0.6 : 1,
+                }}
+              >
+                {resolveMutation.isPending ? "Resolving…" : "Resolve"}
+              </button>
+            )}
+          </div>
         }
         errorSlot={
           resolveMutation.isError ? (
@@ -5546,7 +5579,11 @@ export function PushToRevitAffordance({
    * Architect-flavored wrapper around the shared
    * {@link PortalBriefingDivergencesPanel} from portal-ui. Wires the
    * panel's per-row render slot to {@link ArchitectBriefingDivergenceRow}
-   * so each Open row gets a Resolve button. Keeps the architect-facing
+   * so each Open row gets a Resolve button, and owns the
+   * `activeDivergence` state that drives the shared
+   * {@link BriefingDivergenceDetailDialog} drill-in (Task #320) so
+   * architects can inspect a recorded override before resolving
+   * without leaving the engagement page. Keeps the architect-facing
    * panel header copy unchanged. Re-exported so existing tests
    * (`artifacts/design-tools/src/pages/__tests__/BriefingDivergencesPanel.test.tsx`)
    * keep importing `BriefingDivergencesPanel` from this module.
@@ -5556,13 +5593,25 @@ export function PushToRevitAffordance({
   }: {
     engagementId: string;
   }) {
+    const [activeDivergence, setActiveDivergence] =
+      useState<BimModelDivergenceListEntry | null>(null);
     return (
-      <PortalBriefingDivergencesPanel
-        engagementId={engagementId}
-        renderRow={(row) => (
-          <ArchitectBriefingDivergenceRow key={row.id} row={row} />
-        )}
-      />
+      <>
+        <PortalBriefingDivergencesPanel
+          engagementId={engagementId}
+          renderRow={(row) => (
+            <ArchitectBriefingDivergenceRow
+              key={row.id}
+              row={row}
+              onViewDetails={setActiveDivergence}
+            />
+          )}
+        />
+        <BriefingDivergenceDetailDialog
+          divergence={activeDivergence}
+          onClose={() => setActiveDivergence(null)}
+        />
+      </>
     );
   }
   

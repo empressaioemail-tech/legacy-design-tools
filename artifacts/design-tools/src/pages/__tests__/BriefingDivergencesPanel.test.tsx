@@ -1455,6 +1455,149 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
       screen.queryByTestId("briefing-divergences-loading"),
     ).not.toBeInTheDocument();
   });
+
+  it("renders a 'View details' button next to Resolve on each Open architect row (Task #320)", () => {
+    // Task #320: the architect surface gains the same per-divergence
+    // drill-in the reviewer side already has. The button must
+    // co-exist with Resolve on Open rows so an architect can inspect
+    // an override before deciding to acknowledge it.
+    hoisted.divergences = [
+      {
+        id: "div-open",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {},
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+      },
+    ];
+    renderPanel();
+
+    const viewBtn = screen.getByTestId(
+      "briefing-divergences-view-details-button",
+    );
+    expect(viewBtn).toHaveAttribute("data-divergence-id", "div-open");
+    // Resolve still rendered on the Open row alongside the new
+    // affordance — the architect-side write action must not regress.
+    expect(
+      screen.getByTestId("briefing-divergences-resolve-button"),
+    ).toBeInTheDocument();
+    // Dialog stays closed until the button is clicked.
+    expect(
+      screen.queryByTestId("briefing-divergence-detail-dialog"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the BriefingDivergenceDetailDialog with the row's diff when 'View details' is clicked (Task #320)", () => {
+    // Click-through: a 'geometry-edited' row carries a
+    // before/after envelope plus a forward-compat `revitElementId`
+    // attribute. Both surfaces should land inside the dialog (the
+    // 3-column diff for the envelope, the flat-attributes table
+    // for the side-channel field) so the architect sees the same
+    // payload the reviewer would.
+    hoisted.divergences = [
+      {
+        id: "div-1",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: {
+          before: { area: 100, height: 12 },
+          after: { area: 110, height: 14 },
+          revitElementId: 9876,
+        },
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+      },
+    ];
+    renderPanel();
+
+    fireEvent.click(
+      screen.getByTestId("briefing-divergences-view-details-button"),
+    );
+
+    const dialog = screen.getByTestId("briefing-divergence-detail-dialog");
+    expect(dialog).toBeInTheDocument();
+
+    const diffRows = within(dialog).getAllByTestId(
+      "briefing-divergence-detail-diff-row",
+    );
+    expect(
+      diffRows.map((r) => r.getAttribute("data-field")).sort(),
+    ).toEqual(["area", "height"]);
+
+    const attrFields = within(dialog)
+      .getAllByTestId("briefing-divergence-detail-attribute-row")
+      .map((r) => r.getAttribute("data-field"));
+    expect(attrFields).toContain("revitElementId");
+
+    // Element label flows through into the dialog header so the
+    // architect can confirm which envelope the diff belongs to.
+    expect(within(dialog).getByText("Envelope (lot 12)")).toBeInTheDocument();
+
+    // Closing the dialog tears it back out of the document — the
+    // architect can re-open it on demand.
+    fireEvent.click(screen.getByTestId("briefing-divergence-detail-close"));
+    expect(
+      screen.queryByTestId("briefing-divergence-detail-dialog"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the 'View details' button on Resolved architect rows even when the Resolve button is gone (Task #320)", () => {
+    // Resolved rows drop the Resolve action (the row is already
+    // acknowledged) but still carry the recorded override payload
+    // an architect may want to inspect after the fact. The drill-in
+    // affordance must therefore stay rendered on resolved rows too.
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    hoisted.divergences = [
+      {
+        id: "div-resolved",
+        bimModelId: "bim-1",
+        materializableElementId: "elem-A",
+        briefingId: "brief-1",
+        reason: "geometry-edited",
+        note: null,
+        detail: { before: { area: 1 }, after: { area: 2 } },
+        createdAt: "2025-01-05T12:00:00.000Z",
+        elementKind: "buildable-envelope",
+        elementLabel: "Envelope (lot 12)",
+        resolvedAt: oneHourAgo,
+        resolvedByRequestor: {
+          kind: "user",
+          id: "user-7",
+          displayName: "Alex Architect",
+        },
+      },
+    ];
+    renderPanel();
+
+    // Resolved partition is collapsed by default — expand it so the
+    // resolved row is in the document tree.
+    fireEvent.click(
+      screen.getByTestId("briefing-divergences-resolved-toggle"),
+    );
+
+    const viewBtn = screen.getByTestId(
+      "briefing-divergences-view-details-button",
+    );
+    expect(viewBtn).toHaveAttribute("data-divergence-id", "div-resolved");
+    // No Resolve button on a resolved row.
+    expect(
+      screen.queryByTestId("briefing-divergences-resolve-button"),
+    ).toBeNull();
+
+    fireEvent.click(viewBtn);
+    expect(
+      screen.getByTestId("briefing-divergence-detail-dialog"),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("PushToRevitAffordance → divergences invalidation (Task #172)", () => {
