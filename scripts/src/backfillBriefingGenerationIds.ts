@@ -48,7 +48,24 @@ export interface CliOptions {
   dryRun: boolean;
 }
 
+/**
+ * Parse the script's argv. We deliberately reject anything we don't
+ * recognise rather than silently ignoring it: this script is wired
+ * into post-merge (`scripts/post-merge.sh`), so a typo like
+ * `--dryrun` would otherwise look like a successful real run and
+ * mutate the production DB. The CLI surface is tiny on purpose
+ * (just `--dry-run`); enumerating known flags here keeps the contract
+ * obvious for the next person to extend it.
+ */
 export function parseArgs(argv: string[]): CliOptions {
+  const known = new Set(["--dry-run"]);
+  const unknown = argv.filter((a) => !known.has(a));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown argument(s): ${unknown.join(", ")}. ` +
+        `Usage: backfill:briefing-generation-ids [--dry-run]`,
+    );
+  }
   return {
     dryRun: argv.includes("--dry-run"),
   };

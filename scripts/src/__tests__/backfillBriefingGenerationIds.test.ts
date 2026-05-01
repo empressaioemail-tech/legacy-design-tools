@@ -126,6 +126,15 @@ describe("backfillBriefingGenerationIds — Task #303 B.7", () => {
     it("defaults to a real run when --dry-run is absent", () => {
       expect(parseArgs([]).dryRun).toBe(false);
     });
+    // Post-merge wires this script into every deploy, so a silent
+    // accept of `--dryrun` (typo) would mutate production. We pin the
+    // reject so a refactor that loosens the parser fails loudly.
+    it("throws on an unknown flag rather than silently ignoring it", () => {
+      expect(() => parseArgs(["--dryrun"])).toThrow(/Unknown argument/);
+      expect(() => parseArgs(["--dry-run", "--bogus"])).toThrow(
+        /Unknown argument/,
+      );
+    });
   });
 
   it("matches a briefing to its producing job and writes generation_id", async () => {
