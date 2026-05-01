@@ -539,6 +539,21 @@ describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () =>
     expect(tab).toHaveAttribute("data-engagement-id", "eng-1");
   });
 
+  // The shadcn Dialog primitive renders the X-icon close affordance
+  // inside `DialogContent` with an `sr-only` "Close" label. Clicking
+  // it fires `onOpenChange(false)`, which the modal routes through
+  // its `onClose` callback so the parent can clear its selection
+  // state. This is the user's only built-in chrome dismissal — the
+  // task spec calls it out explicitly.
+  it("fires onClose when the dialog's built-in close (X) button is clicked", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderModal({ onClose });
+    await screen.findByTestId("submission-detail-modal");
+    await user.click(screen.getByRole("button", { name: /close/i }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("surfaces the jurisdiction + relative-time subtitle in the modal header", async () => {
     renderModal();
     const subtitle = await screen.findByTestId(
