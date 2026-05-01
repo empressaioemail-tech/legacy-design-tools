@@ -63,6 +63,7 @@ vi.mock("@workspace/integrations-anthropic-ai", () => ({
 
 const { setupRouteTests } = await import("./setup");
 const { engagements, snapshots } = await import("@workspace/db");
+const { logger } = await import("../lib/logger");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -927,6 +928,218 @@ describe("POST /api/chat", () => {
     expect(system).toMatch(/The most recent snapshot was captured /);
     expect(system).toContain('entity_type="snapshot"');
     expect(system).toContain("Canary Project");
+  });
+
+  it("snapshot focus mode (Task #51): warn fires end-to-end when cumulative cap downgrades focus payloads", async () => {
+    // Task #51 wired a `req.log.warn("snapshot focus payloads downgraded
+    // by cumulative cap")` whenever the cumulative
+    // `MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS` (120K) cap forces any
+    // `<snapshot_focus>` block to be truncated or omitted. The unit
+    // tests in `lib/codes/src/promptFormatter.test.ts` cover the stats
+    // computation in isolation, but the chat route's branch that
+    // actually composes + emits the warn payload is not exercised
+    // there. We seed 4 snapshots with oversized payloads that
+    // collectively blow past the cap, fire a chat with all 4 ids in
+    // `snapshotFocusIds`, and assert the warn-level log carries the
+    // expected operational fields.
+    //
+    // The chat route resolves `req.log` first and falls back to the
+    // singleton `logger` when pino-http isn't wired (which is the
+    // case for this in-process test harness — see setup.ts: no
+    // pino-http middleware), so spying on the singleton is the right
+    // observation point.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const warnSpy = vi.spyOn(logger, "warn");
+    try {
+      const [eng] = await ctx.schema.db
+        .insert(engagements)
+        .values({
+          name: "Focus Cap Warn",
+          nameLower: `focus-cap-warn-${Math.random().toString(36).slice(2)}`,
+          jurisdiction: "Moab, UT",
+          address: "123 Main St",
+        })
+        .returning({ id: engagements.id });
+
+      // Each payload's JSON.stringify(_, null, 2) form is ~50 KB so
+      // the cumulative tally crosses 120 KB during block #3:
+      //   block 1 (~50K, intact, cumulative=50K)
+      //   block 2 (~50K, intact, cumulative=100K)
+      //   block 3 (~50K wanted, only ~20K room → truncated)
+      //   block 4 (no room left → omitted)
+      // That guarantees BOTH downgrade buckets are non-zero so a
+      // regression that drops one of the two counters still trips
+      // this test.
+      //
+      // We use a top-level array payload here on purpose: the smart
+      // `shapeSnapshotPayloadForBudget` helper (Task #52) only knows
+      // how to prune object keys — for a top-level array it returns
+      // `fitsBudget: false` and the route falls through to the
+      // tail-truncation branch in `formatSnapshotFocusBlocks`, which
+      // is the branch that increments the cumulative-cap stats
+      // counters that this warn test asserts on. (A shapeable object
+      // payload may take the smart-trim branch instead and produce
+      // structurally-valid blocks that don't currently update the
+      // stats — that's a separate, observable concern outside this
+      // test's scope.)
+      const FILLER = "x".repeat(50_000);
+      const seedSnap = async (
+        marker: string,
+      ): Promise<{ id: string }> => {
+        const [row] = await ctx.schema!.db
+          .insert(snapshots)
+          .values({
+            engagementId: eng.id,
+            projectName: `Focus Project ${marker}`,
+            payload: [marker, FILLER],
+            sheetCount: 0,
+            roomCount: 0,
+            levelCount: 0,
+            wallCount: 0,
+          })
+          .returning({ id: snapshots.id });
+        return row;
+      };
+      const s1 = await seedSnap("S1");
+      const s2 = await seedSnap("S2");
+      const s3 = await seedSnap("S3");
+      const s4 = await seedSnap("S4");
+
+      anthropicMocks.events = [
+        {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "ok" },
+        },
+      ];
+      // Reset spy state so we only capture warns from THIS request
+      // (seeding above can run logger.warn paths in other code).
+      warnSpy.mockClear();
+
+      const res = await request(getApp())
+        .post("/api/chat")
+        .send({
+          engagementId: eng.id,
+          question: "compare all four",
+          snapshotFocusIds: [s1.id, s2.id, s3.id, s4.id],
+        });
+      expect(res.status).toBe(200);
+
+      // Find the downgrade warn by its message. The route also fires
+      // an `info` log with most of the same fields under the message
+      // "chat with snapshot focus payload" — assertion targets the
+      // warn specifically so a regression that drops the warn but
+      // keeps the info still fails.
+      const downgradeWarn = warnSpy.mock.calls.find(
+        ([, msg]) =>
+          typeof msg === "string" &&
+          msg === "snapshot focus payloads downgraded by cumulative cap",
+      );
+      expect(downgradeWarn).toBeTruthy();
+      const payload = downgradeWarn![0] as {
+        engagementId?: string;
+        snapshotIds?: string[];
+        focusCount?: number;
+        downgradedCount?: number;
+        combinedCapTruncatedCount?: number;
+        combinedCapOmittedCount?: number;
+        // Cap is char-counted (not byte-counted) — see chat.ts
+        // comment near the warn site for why the field is named
+        // "Chars" and not "Bytes" despite the task description.
+        cumulativeCapChars?: number;
+      };
+      expect(payload.engagementId).toBe(eng.id);
+      expect(payload.snapshotIds).toEqual([s1.id, s2.id, s3.id, s4.id]);
+      expect(payload.focusCount).toBe(4);
+      // Both downgrade buckets fired with the chosen payload sizing.
+      expect(payload.combinedCapTruncatedCount).toBeGreaterThan(0);
+      expect(payload.combinedCapOmittedCount).toBeGreaterThan(0);
+      // downgradedCount == truncated + omitted (chat.ts derives it
+      // from the two stats fields).
+      expect(payload.downgradedCount).toBe(
+        (payload.combinedCapTruncatedCount ?? 0) +
+          (payload.combinedCapOmittedCount ?? 0),
+      );
+      expect(payload.downgradedCount).toBeGreaterThan(0);
+      // Operators tuning the cap need to see what value was active
+      // at the time of the warn — pin the wired-in constant so a
+      // future cap change requires touching this assertion too.
+      expect(payload.cumulativeCapChars).toBe(120_000);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("snapshot focus mode (Task #51): warn does NOT fire when cumulative cap was not exceeded", async () => {
+    // Complementary half of the previous test: focus mode is on but
+    // every payload comfortably fits inside the cumulative cap, so
+    // the route's `downgradedCount > 0` guard short-circuits and no
+    // warn-level log should be emitted. A regression that fires the
+    // warn unconditionally (e.g. dropping the `if (downgradedCount >
+    // 0)` guard) would trip this test.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const warnSpy = vi.spyOn(logger, "warn");
+    try {
+      const [eng] = await ctx.schema.db
+        .insert(engagements)
+        .values({
+          name: "Focus Cap No Warn",
+          nameLower: `focus-cap-no-warn-${Math.random()
+            .toString(36)
+            .slice(2)}`,
+          jurisdiction: "Moab, UT",
+          address: "123 Main St",
+        })
+        .returning({ id: engagements.id });
+      const [snap] = await ctx.schema.db
+        .insert(snapshots)
+        .values({
+          engagementId: eng.id,
+          projectName: "Tiny Project",
+          // Tiny payload — JSON-stringified form is well under 1KB,
+          // so a single focus block can never approach the 120K cap.
+          payload: { rooms: [{ number: "101", areaSqft: 120 }] },
+          sheetCount: 0,
+          roomCount: 1,
+          levelCount: 0,
+          wallCount: 0,
+        })
+        .returning({ id: snapshots.id });
+
+      anthropicMocks.events = [
+        {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: "ok" },
+        },
+      ];
+      warnSpy.mockClear();
+
+      const res = await request(getApp())
+        .post("/api/chat")
+        .send({
+          engagementId: eng.id,
+          question: "what's in the room schedule?",
+          snapshotFocus: true,
+          snapshotFocusIds: [snap.id],
+        });
+      expect(res.status).toBe(200);
+
+      // Sanity: focus mode actually fired (the prompt carries the
+      // focus block) — without this the no-warn assertion below
+      // could trivially pass for the wrong reason (focus mode
+      // skipped entirely).
+      const system = String(anthropicMocks.lastArgs.system);
+      expect(system).toContain(`<snapshot_focus snapshot_id="${snap.id}">`);
+
+      // No downgrade warn from the chat route.
+      const downgradeWarn = warnSpy.mock.calls.find(
+        ([, msg]) =>
+          typeof msg === "string" &&
+          msg === "snapshot focus payloads downgraded by cumulative cap",
+      );
+      expect(downgradeWarn).toBeUndefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("error path: when the SDK throws, emits {error:'stream_failed'} then [DONE]", async () => {
