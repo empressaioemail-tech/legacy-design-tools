@@ -3,6 +3,7 @@ import { Readable } from "stream";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
+  requestUploadUrlBodySizeMax,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { ObjectPermission } from "../lib/objectAcl";
@@ -16,8 +17,26 @@ const objectStorageService = new ObjectStorageService();
  * Request a presigned URL for file upload.
  * The client sends JSON metadata (name, size, contentType) — NOT the file.
  * Then uploads the file directly to the returned presigned URL.
+ *
+ * The endpoint refuses requests above {@link requestUploadUrlBodySizeMax} (the
+ * `RequestUploadUrlBody.size` cap from the OpenAPI spec, currently 2 MiB).
+ * Avatar uploads from the Plan Review UI are client-side-resized to ~20 KB
+ * before they get here, so this cap is well above any legitimate request —
+ * its purpose is to keep a non-browser client (mobile, curl, integration)
+ * from asking for a URL for an arbitrarily large object and bloating
+ * storage.  We do the size check explicitly before the schema parse so the
+ * caller gets a clear `413` ("Asset too large") instead of being lumped in
+ * with generic `400` schema errors.
  */
 router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
+  const rawSize = req.body?.size;
+  if (typeof rawSize === "number" && rawSize > requestUploadUrlBodySizeMax) {
+    res.status(413).json({
+      error: `Upload too large: ${rawSize} bytes exceeds the ${requestUploadUrlBodySizeMax}-byte cap for this endpoint.`,
+    });
+    return;
+  }
+
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Missing or invalid required fields" });

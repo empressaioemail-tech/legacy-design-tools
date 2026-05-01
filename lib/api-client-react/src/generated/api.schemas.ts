@@ -493,11 +493,22 @@ export interface UpdateUserBody {
 themselves are NOT sent to this endpoint — they are PUT directly
 to the returned `uploadURL` (which targets GCS).
 
+`size` is capped at 2 MiB. The only consumer today is avatar
+uploads, and the Plan Review web UI client-side-resizes those to
+~20 KB before requesting a URL. The server-side cap exists so a
+non-browser client (mobile app, curl, integration) can't ask for
+a URL for an arbitrarily large object and bloat storage. Requests
+that exceed the cap get a clear `413` from the route handler
+before the schema validation runs.
+
  */
 export interface RequestUploadUrlBody {
   /** @minLength 1 */
   name: string;
-  /** @minimum 0 */
+  /**
+   * @minimum 0
+   * @maximum 2097152
+   */
   size: number;
   /** @minLength 1 */
   contentType: string;

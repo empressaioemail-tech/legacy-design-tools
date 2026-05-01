@@ -1123,6 +1123,14 @@ paths:
         an existing profile instead. Requires the `users:manage`
         permission claim on the caller's session; anything else is
         rejected with 403.
+
+        When `avatarUrl` references one of our `/objects/<id>` paths,
+        the server inspects the actual stored object before the row is
+        inserted: oversized blobs (above the
+        `RequestUploadUrlBody.size` cap) get a 413, and a path that
+        looks like ours but isn't actually present in the bucket gets
+        a 400. External avatar URLs (pasted by the admin) skip the
+        check.
       requestBody:
         required: true
         content:
@@ -1137,7 +1145,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/User"
         "400":
-          description: Invalid request body
+          description: |
+            Invalid request body — including the case where
+            `avatarUrl` references an internal `/objects/...` path that
+            doesn't exist in storage.
           content:
             application/json:
               schema:
@@ -1150,6 +1161,15 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: A profile with this id already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: |
+            `avatarUrl` references a stored object whose actual byte
+            size exceeds the per-asset cap. The orphan is best-effort
+            cleaned up server-side.
           content:
             application/json:
               schema:
@@ -1189,6 +1209,15 @@ paths:
         `displayName` is non-nullable: omit it to leave it unchanged.
         Requires the `users:manage` permission claim; non-admin callers
         get 403.
+
+        When `avatarUrl` is set to one of our `/objects/<id>` paths, the
+        server inspects the actual stored object before the row update
+        commits: oversized blobs (above the
+        `RequestUploadUrlBody.size` cap) get a 413, and a path that
+        looks like ours but isn't actually present in the bucket gets a
+        400. The previous avatar on the row is left untouched on
+        rejection. Clearing the avatar (`null`) and external URLs both
+        skip the check.
       parameters:
         - name: id
           in: path
@@ -1209,7 +1238,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/User"
         "400":
-          description: Invalid request body
+          description: |
+            Invalid request body — including the case where
+            `avatarUrl` references an internal `/objects/...` path that
+            doesn't exist in storage.
           content:
             application/json:
               schema:
@@ -1222,6 +1254,15 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: |
+            `avatarUrl` references a stored object whose actual byte
+            size exceeds the per-asset cap. The orphan is best-effort
+            cleaned up server-side and the row is left unchanged.
           content:
             application/json:
               schema:
@@ -1286,6 +1327,14 @@ paths:
                 $ref: "#/components/schemas/RequestUploadUrlResponse"
         "400":
           description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: |
+            Requested upload exceeds the per-asset byte cap (see
+            `RequestUploadUrlBody.size`).
           content:
             application/json:
               schema:
@@ -2129,6 +2178,14 @@ components:
         File metadata sent to obtain a presigned PUT URL. The file bytes
         themselves are NOT sent to this endpoint — they are PUT directly
         to the returned `uploadURL` (which targets GCS).
+
+        `size` is capped at 2 MiB. The only consumer today is avatar
+        uploads, and the Plan Review web UI client-side-resizes those to
+        ~20 KB before requesting a URL. The server-side cap exists so a
+        non-browser client (mobile app, curl, integration) can't ask for
+        a URL for an arbitrarily large object and bloat storage. Requests
+        that exceed the cap get a clear `413` from the route handler
+        before the schema validation runs.
       properties:
         name:
           type: string
@@ -2136,6 +2193,7 @@ components:
         size:
           type: integer
           minimum: 0
+          maximum: 2097152
         contentType:
           type: string
           minLength: 1

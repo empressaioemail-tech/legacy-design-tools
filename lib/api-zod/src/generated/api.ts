@@ -1366,6 +1366,14 @@ an existing profile instead. Requires the `users:manage`
 permission claim on the caller's session; anything else is
 rejected with 403.
 
+When `avatarUrl` references one of our `/objects/<id>` paths,
+the server inspects the actual stored object before the row is
+inserted: oversized blobs (above the
+`RequestUploadUrlBody.size` cap) get a 413, and a path that
+looks like ours but isn't actually present in the bucket gets
+a 400. External avatar URLs (pasted by the admin) skip the
+check.
+
  * @summary Create a user profile
  */
 
@@ -1407,6 +1415,15 @@ changed. Pass `null` for `email` or `avatarUrl` to clear them.
 `displayName` is non-nullable: omit it to leave it unchanged.
 Requires the `users:manage` permission claim; non-admin callers
 get 403.
+
+When `avatarUrl` is set to one of our `/objects/<id>` paths, the
+server inspects the actual stored object before the row update
+commits: oversized blobs (above the
+`RequestUploadUrlBody.size` cap) get a 413, and a path that
+looks like ours but isn't actually present in the bucket gets a
+400. The previous avatar on the row is left untouched on
+rejection. Clearing the avatar (`null`) and external URLs both
+skip the check.
 
  * @summary Update a user profile
  */
@@ -1463,18 +1480,23 @@ screen to upload avatar images instead of pasting URLs.
  */
 
 export const requestUploadUrlBodySizeMin = 0;
+export const requestUploadUrlBodySizeMax = 2097152;
 
 export const RequestUploadUrlBody = zod
   .object({
     name: zod.string().min(1),
-    size: zod.number().min(requestUploadUrlBodySizeMin),
+    size: zod
+      .number()
+      .min(requestUploadUrlBodySizeMin)
+      .max(requestUploadUrlBodySizeMax),
     contentType: zod.string().min(1),
   })
   .describe(
-    "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n",
+    "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n\n`size` is capped at 2 MiB. The only consumer today is avatar\nuploads, and the Plan Review web UI client-side-resizes those to\n~20 KB before requesting a URL. The server-side cap exists so a\nnon-browser client (mobile app, curl, integration) can't ask for\na URL for an arbitrarily large object and bloat storage. Requests\nthat exceed the cap get a clear `413` from the route handler\nbefore the schema validation runs.\n",
   );
 
 export const requestUploadUrlResponseMetadataSizeMin = 0;
+export const requestUploadUrlResponseMetadataSizeMax = 2097152;
 
 export const RequestUploadUrlResponse = zod.object({
   uploadURL: zod
@@ -1488,10 +1510,13 @@ export const RequestUploadUrlResponse = zod.object({
   metadata: zod
     .object({
       name: zod.string().min(1),
-      size: zod.number().min(requestUploadUrlResponseMetadataSizeMin),
+      size: zod
+        .number()
+        .min(requestUploadUrlResponseMetadataSizeMin)
+        .max(requestUploadUrlResponseMetadataSizeMax),
       contentType: zod.string().min(1),
     })
     .describe(
-      "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n",
+      "File metadata sent to obtain a presigned PUT URL. The file bytes\nthemselves are NOT sent to this endpoint — they are PUT directly\nto the returned `uploadURL` (which targets GCS).\n\n`size` is capped at 2 MiB. The only consumer today is avatar\nuploads, and the Plan Review web UI client-side-resizes those to\n~20 KB before requesting a URL. The server-side cap exists so a\nnon-browser client (mobile app, curl, integration) can't ask for\na URL for an arbitrarily large object and bloat storage. Requests\nthat exceed the cap get a clear `413` from the route handler\nbefore the schema validation runs.\n",
     ),
 });

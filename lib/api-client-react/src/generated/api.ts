@@ -2861,6 +2861,14 @@ an existing profile instead. Requires the `users:manage`
 permission claim on the caller's session; anything else is
 rejected with 403.
 
+When `avatarUrl` references one of our `/objects/<id>` paths,
+the server inspects the actual stored object before the row is
+inserted: oversized blobs (above the
+`RequestUploadUrlBody.size` cap) get a 413, and a path that
+looks like ours but isn't actually present in the bucket gets
+a 400. External avatar URLs (pasted by the admin) skip the
+check.
+
  * @summary Create a user profile
  */
 export const getCreateUserUrl = () => {
@@ -3029,6 +3037,15 @@ changed. Pass `null` for `email` or `avatarUrl` to clear them.
 `displayName` is non-nullable: omit it to leave it unchanged.
 Requires the `users:manage` permission claim; non-admin callers
 get 403.
+
+When `avatarUrl` is set to one of our `/objects/<id>` paths, the
+server inspects the actual stored object before the row update
+commits: oversized blobs (above the
+`RequestUploadUrlBody.size` cap) get a 413, and a path that
+looks like ours but isn't actually present in the bucket gets a
+400. The previous avatar on the row is left untouched on
+rejection. Clearing the avatar (`null`) and external URLs both
+skip the check.
 
  * @summary Update a user profile
  */

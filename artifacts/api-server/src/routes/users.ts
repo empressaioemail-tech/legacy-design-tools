@@ -70,7 +70,8 @@ import {
   DeleteUserParams,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
+import { requestUploadUrlBodySizeMax } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 // One instance is enough — the service is stateless beyond the env-var
@@ -78,6 +79,65 @@ const router: IRouter = Router();
 // singleton. Constructed lazily-by-import so test files that mock
 // `../lib/objectStorage` get their stub here too.
 const objectStorage = new ObjectStorageService();
+
+/**
+ * Outcome of {@link enforceAvatarSizeCap}. The handler maps these onto
+ * HTTP responses; the helper itself stays response-agnostic so it can be
+ * reused unchanged from POST and PATCH (and any future write surface).
+ */
+type AvatarSizeCheck =
+  | { kind: "ok" }
+  | { kind: "external" } // Caller supplied a URL we don't host (skip).
+  | { kind: "missing" } // Path looks like ours but the object isn't in the bucket.
+  | { kind: "too_large"; actualSize: number };
+
+/**
+ * Enforce the per-asset byte cap on a client-supplied avatar URL by
+ * inspecting the *actual* stored object size.
+ *
+ * The presigned-URL handler caps `RequestUploadUrlBody.size` (client-
+ * declared metadata), but a malicious or buggy non-browser client can
+ * lie about that number and still PUT a much larger file. Validating
+ * the real size here, before `users.avatar_url` is allowed to point at
+ * the object, closes that loop: the row never references an oversized
+ * blob, even if the bytes briefly landed in the bucket.
+ *
+ * On `too_large` we also best-effort delete the offending object so the
+ * rejected upload doesn't leave an orphan in storage. The cleanup is
+ * inside its own try/catch — a delete failure must not mask the real
+ * 413 we owe the caller. (The orphan-sweep follow-up will mop up
+ * anything we still miss here.)
+ */
+async function enforceAvatarSizeCap(
+  rawAvatarUrl: string,
+): Promise<AvatarSizeCheck> {
+  let actualSize: number | null;
+  try {
+    actualSize = await objectStorage.getObjectEntitySize(rawAvatarUrl);
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      return { kind: "missing" };
+    }
+    throw err;
+  }
+  if (actualSize === null) {
+    // Not one of ours — pasted external URL, public-objects path, etc.
+    // The cap only applies to objects we host.
+    return { kind: "external" };
+  }
+  if (actualSize > requestUploadUrlBodySizeMax) {
+    try {
+      await objectStorage.deleteObjectIfStored(rawAvatarUrl);
+    } catch (cleanupErr) {
+      logger.warn(
+        { err: cleanupErr, avatarUrl: rawAvatarUrl, actualSize },
+        "failed to delete oversized avatar after rejection",
+      );
+    }
+    return { kind: "too_large", actualSize };
+  }
+  return { kind: "ok" };
+}
 
 /**
  * Permission name required by every write to the `users` profile
@@ -218,6 +278,24 @@ router.post("/users", requireUsersManage, async (req: Request, res: Response) =>
       return;
     }
 
+    // Validate the *actual* stored size of the avatar object before we
+    // let the row reference it. See enforceAvatarSizeCap doc for the
+    // threat model — covers the "non-browser client lies about size in
+    // the presigned-URL request and PUTs a huge file anyway" path.
+    if (body.avatarUrl) {
+      const check = await enforceAvatarSizeCap(body.avatarUrl);
+      if (check.kind === "too_large") {
+        res.status(413).json({
+          error: `Avatar too large: ${check.actualSize} bytes exceeds the ${requestUploadUrlBodySizeMax}-byte cap.`,
+        });
+        return;
+      }
+      if (check.kind === "missing") {
+        res.status(400).json({ error: "Avatar object not found in storage" });
+        return;
+      }
+    }
+
     let row;
     try {
       [row] = await db
@@ -346,6 +424,24 @@ router.patch("/users/:id", requireUsersManage, async (req: Request, res: Respons
     }
     existingAvatar = existing.avatarUrl;
     existingFetched = true;
+
+    // Same actual-size enforcement as POST. Only run when the patch
+    // actually sets a new non-null `avatarUrl` — clearing the column
+    // (`null`) and leaving it unchanged (`undefined`) both skip the
+    // GCS metadata round-trip.
+    if (body.avatarUrl) {
+      const check = await enforceAvatarSizeCap(body.avatarUrl);
+      if (check.kind === "too_large") {
+        res.status(413).json({
+          error: `Avatar too large: ${check.actualSize} bytes exceeds the ${requestUploadUrlBodySizeMax}-byte cap.`,
+        });
+        return;
+      }
+      if (check.kind === "missing") {
+        res.status(400).json({ error: "Avatar object not found in storage" });
+        return;
+      }
+    }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (body.displayName !== undefined) update["displayName"] = body.displayName;

@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
+import { requestUploadUrlBodySizeMax } from "@workspace/api-zod";
 import { ctx } from "./test-context";
 
 /**
@@ -57,12 +58,26 @@ vi.mock("@workspace/db", async () => {
  * case.
  */
 const deleteObjectIfStoredMock = vi.fn(async () => true);
+// Default to "not one of ours" so existing tests that don't seed an
+// avatar object still pass the actual-size enforcement step the route
+// runs before persisting `users.avatar_url`. Tests that exercise the
+// 413 / missing-object branches override this per case.
+const getObjectEntitySizeMock = vi.fn<(rawPath: string) => Promise<number | null>>(
+  async () => null,
+);
+class ObjectNotFoundErrorClass extends Error {
+  constructor() {
+    super("Object not found");
+    this.name = "ObjectNotFoundError";
+  }
+}
 vi.mock("../lib/objectStorage", () => {
   return {
     ObjectStorageService: vi.fn().mockImplementation(() => ({
       deleteObjectIfStored: deleteObjectIfStoredMock,
+      getObjectEntitySize: getObjectEntitySizeMock,
     })),
-    ObjectNotFoundError: class ObjectNotFoundError extends Error {},
+    ObjectNotFoundError: ObjectNotFoundErrorClass,
   };
 });
 
@@ -81,6 +96,8 @@ beforeEach(() => {
   // leak that override into subsequent cases.
   deleteObjectIfStoredMock.mockReset();
   deleteObjectIfStoredMock.mockResolvedValue(true);
+  getObjectEntitySizeMock.mockReset();
+  getObjectEntitySizeMock.mockResolvedValue(null);
 });
 
 describe("GET /api/users", () => {
@@ -172,6 +189,78 @@ describe("POST /api/users", () => {
       .set(ADMIN_HEADERS)
       .send({ id: "u-empty", displayName: "" });
     expect(r3.status).toBe(400);
+  });
+
+  it("rejects a create whose avatar object exceeds the per-asset cap with 413", async () => {
+    // The presigned-URL handler caps client-declared metadata, but a
+    // non-browser client could lie about size and PUT a much larger
+    // file. The actual stored size is what gates `users.avatar_url`,
+    // so the row never references an oversized blob — this test pins
+    // that promise on the create path.
+    const oversized = requestUploadUrlBodySizeMax + 1;
+    getObjectEntitySizeMock.mockResolvedValueOnce(oversized);
+
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-too-big",
+        displayName: "Too Big",
+        avatarUrl: "/objects/uploads/oversized-uuid",
+      });
+
+    expect(res.status).toBe(413);
+    expect(res.body.error).toContain(String(oversized));
+    expect(res.body.error).toContain(String(requestUploadUrlBodySizeMax));
+    // The orphan in storage gets best-effort cleaned up so the rejected
+    // upload doesn't leak bytes.
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/oversized-uuid",
+    );
+    // The row itself must NOT have been inserted.
+    if (!ctx.schema) throw new Error("schema not ready");
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-too-big"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects a create whose avatar object is missing from storage with 400", async () => {
+    // If the client claims an `/objects/...` URL but never PUT the
+    // bytes (or PUT failed), the size check raises ObjectNotFoundError
+    // and the route surfaces it as a clear 400 instead of letting the
+    // row reference a phantom object.
+    getObjectEntitySizeMock.mockRejectedValueOnce(new ObjectNotFoundErrorClass());
+
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-phantom",
+        displayName: "Phantom",
+        avatarUrl: "/objects/uploads/never-uploaded",
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Avatar object not found in storage");
+  });
+
+  it("accepts a create whose avatar object is at or under the cap", async () => {
+    // Exactly-at-cap is fine: the rejection branch is `> max`, not `>=`.
+    getObjectEntitySizeMock.mockResolvedValueOnce(requestUploadUrlBodySizeMax);
+
+    const res = await request(getApp())
+      .post("/api/users")
+      .set(ADMIN_HEADERS)
+      .send({
+        id: "u-at-cap",
+        displayName: "At Cap",
+        avatarUrl: "/objects/uploads/just-fits",
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.avatarUrl).toBe("/objects/uploads/just-fits");
   });
 
   it("returns 409 when the id already exists", async () => {
@@ -648,6 +737,85 @@ describe("PATCH /api/users/:id", () => {
     expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
       "/objects/uploads/will-stay-orphaned",
     );
+  });
+
+  it("rejects a patch whose new avatar object exceeds the per-asset cap with 413", async () => {
+    // Mirror of the POST 413 test on the patch path. This is the
+    // primary surface for an attacker who lied to the presigned-URL
+    // endpoint about size and PUT a huge file: the existing user row
+    // wouldn't change to point at it, and the orphan gets cleaned up.
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-patch-too-big",
+      displayName: "Patch Too Big",
+      avatarUrl: "/objects/uploads/old-but-fine",
+    });
+    const oversized = requestUploadUrlBodySizeMax + 1;
+    getObjectEntitySizeMock.mockResolvedValueOnce(oversized);
+
+    const res = await request(getApp())
+      .patch("/api/users/u-patch-too-big")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "/objects/uploads/oversized-uuid" });
+
+    expect(res.status).toBe(413);
+    expect(res.body.error).toContain(String(oversized));
+
+    // The oversized blob gets cleaned up; the previous (valid) avatar
+    // is left intact because the row never changed.
+    expect(deleteObjectIfStoredMock).toHaveBeenCalledWith(
+      "/objects/uploads/oversized-uuid",
+    );
+    expect(deleteObjectIfStoredMock).not.toHaveBeenCalledWith(
+      "/objects/uploads/old-but-fine",
+    );
+    const rows = await ctx.schema.db
+      .select()
+      .from(users)
+      .where(eq(users.id, "u-patch-too-big"));
+    expect(rows[0]?.avatarUrl).toBe("/objects/uploads/old-but-fine");
+  });
+
+  it("skips the size check (and accepts) when the new avatar URL is external", async () => {
+    // External URLs (pasted by the admin in the picker) aren't ours to
+    // measure, so getObjectEntitySize returns null and the row gets
+    // updated normally. This keeps the legacy "paste a URL" path
+    // working unchanged.
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-external-avatar",
+      displayName: "External Avatar",
+    });
+    // Default mock already returns null, but state it explicitly so
+    // the intent is obvious to the next reader.
+    getObjectEntitySizeMock.mockResolvedValueOnce(null);
+
+    const res = await request(getApp())
+      .patch("/api/users/u-external-avatar")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: "https://example.com/avatar.png" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.avatarUrl).toBe("https://example.com/avatar.png");
+  });
+
+  it("does not consult storage size when the patch only clears the avatar", async () => {
+    // Clearing (`avatarUrl: null`) shouldn't pay for a GCS metadata
+    // round-trip. The check is gated on a truthy new value.
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values({
+      id: "u-clear-skip-check",
+      displayName: "Clear",
+      avatarUrl: "/objects/uploads/about-to-clear",
+    });
+
+    const res = await request(getApp())
+      .patch("/api/users/u-clear-skip-check")
+      .set(ADMIN_HEADERS)
+      .send({ avatarUrl: null });
+
+    expect(res.status).toBe(200);
+    expect(getObjectEntitySizeMock).not.toHaveBeenCalled();
   });
 });
 

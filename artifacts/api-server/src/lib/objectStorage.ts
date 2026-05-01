@@ -182,6 +182,41 @@ export class ObjectStorageService {
     return true;
   }
 
+  /**
+   * Look up the byte size of a stored object entity by its
+   * `/objects/<id>` path.
+   *
+   * Used by write paths that accept a client-supplied avatar URL (e.g.
+   * `PATCH /users/:id`, `POST /users`) so we can validate the *actual*
+   * stored object size against a cap, rather than trusting the size the
+   * client claimed when it requested the presigned URL. Without this
+   * second check, a non-browser client could request a URL with
+   * `size: 1024` and then PUT a 50 MiB file — the request-URL handler's
+   * cap is on metadata, not bytes-on-disk, so it can't catch that on
+   * its own.
+   *
+   * Returns `null` when the path isn't one of ours (external URL,
+   * malformed path) — the caller should treat that as "skip the size
+   * check, this is an external resource we don't host". Throws
+   * `ObjectNotFoundError` if the object existed at the path conceptually
+   * but isn't present in the bucket (e.g. presigned URL was issued but
+   * the PUT never happened).
+   */
+  async getObjectEntitySize(rawPath: string): Promise<number | null> {
+    const normalized = this.normalizeObjectEntityPath(rawPath);
+    if (!normalized.startsWith("/objects/")) return null;
+
+    const objectFile = await this.getObjectEntityFile(normalized);
+    const [metadata] = await objectFile.getMetadata();
+    const raw = metadata.size;
+    if (raw === undefined || raw === null) return null;
+    // GCS returns size as a string in some SDK paths and a number in
+    // others; normalize to number so callers can compare against a
+    // numeric cap without re-encoding the type discriminator.
+    const asNumber = typeof raw === "number" ? raw : Number(raw);
+    return Number.isFinite(asNumber) ? asNumber : null;
+  }
+
   async getObjectEntityFile(objectPath: string): Promise<File> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();
