@@ -589,7 +589,43 @@ const CONVERSION_STATUS_STYLE: Record<
   },
 };
 
-function BriefingSourceRow({
+/**
+ * Visible label for the source-kind pill on a briefing source row.
+ * The four enum values map 1:1 to the sourceKind discriminator the
+ * adapter / manual-upload writers stamp; falling back to a humanised
+ * version of the raw value lets a future enum extension ship without
+ * crashing the UI before this map is updated.
+ */
+const SOURCE_KIND_BADGE_LABEL: Record<
+  EngagementBriefingSource["sourceKind"],
+  string
+> = {
+  "manual-upload": "Manual upload",
+  "federal-adapter": "Federal adapter",
+  "state-adapter": "State adapter",
+  "local-adapter": "Local adapter",
+};
+
+/**
+ * The system actor id `generateLayers.ts` stamps on every adapter-
+ * driven `briefing-source.fetched` event. Pinned here so the UI's
+ * "by Generate Layers" attribution line matches the audit trail's
+ * actor id verbatim — if the route ever renames the actor, the test
+ * assertions below pin both surfaces together.
+ */
+export const BRIEFING_GENERATE_LAYERS_ACTOR_LABEL = "Generate Layers";
+
+function isAdapterSourceKind(
+  kind: EngagementBriefingSource["sourceKind"],
+): boolean {
+  return (
+    kind === "federal-adapter" ||
+    kind === "state-adapter" ||
+    kind === "local-adapter"
+  );
+}
+
+export function BriefingSourceRow({
   engagementId,
   source,
 }: {
@@ -597,21 +633,7 @@ function BriefingSourceRow({
   source: EngagementBriefingSource;
 }) {
   const isManual = source.sourceKind === "manual-upload";
-  // Adapter-tier pill label. The row used to read either "Manual
-  // upload" or "Federal adapter", but state-tier and local-tier
-  // adapters now flow through the same surface — and the new layer-
-  // details panel exposes adapter-tier-specific content (e.g. a
-  // matched setback row from `grand-county-ut:zoning`). Showing the
-  // wrong tier here would make the row contradict the panel below it,
-  // so map every `sourceKind` to its own label.
-  const sourceKindLabel =
-    source.sourceKind === "manual-upload"
-      ? "Manual upload"
-      : source.sourceKind === "federal-adapter"
-        ? "Federal adapter"
-        : source.sourceKind === "state-adapter"
-          ? "State adapter"
-          : "Local adapter";
+  const isAdapter = isAdapterSourceKind(source.sourceKind);
   const [expanded, setExpanded] = useState(false);
   // Layer-details panel is independent of the history panel; the
   // architect should be able to keep "what does this layer say about
@@ -685,6 +707,7 @@ function BriefingSourceRow({
           )}
           <span
             className="sc-pill"
+            data-testid={`briefing-source-kind-badge-${source.id}`}
             style={{
               fontSize: 10,
               padding: "2px 8px",
@@ -695,7 +718,7 @@ function BriefingSourceRow({
               letterSpacing: 0.3,
             }}
           >
-            {sourceKindLabel}
+            {SOURCE_KIND_BADGE_LABEL[source.sourceKind] ?? source.sourceKind}
           </span>
         </div>
       </div>
@@ -827,6 +850,19 @@ function BriefingSourceRow({
       {detailsExpanded && !isManual && (
         <BriefingSourceDetails source={source} />
       )}
+      {isAdapter && (
+        <div
+          data-testid={`briefing-source-last-refreshed-${source.id}`}
+          style={{
+            fontSize: 10,
+            color: "var(--text-muted)",
+            fontStyle: "italic",
+          }}
+        >
+          Last refreshed {relativeTime(source.createdAt)} by{" "}
+          {BRIEFING_GENERATE_LAYERS_ACTOR_LABEL}
+        </div>
+      )}
       {expanded && (
         <BriefingSourceHistoryPanel
           engagementId={engagementId}
@@ -849,7 +885,7 @@ function BriefingSourceRow({
  * current row) and the history list (so the panel reflects the new
  * supersession state without a full page reload).
  */
-function BriefingSourceHistoryPanel({
+export function BriefingSourceHistoryPanel({
   engagementId,
   layerKind,
   currentSourceId,
@@ -934,7 +970,14 @@ function BriefingSourceHistoryPanel({
             No prior versions of this layer.
           </div>
         )}
-      {priorVersions.map((prior) => (
+      {priorVersions.map((prior) => {
+        const priorIsAdapter = isAdapterSourceKind(prior.sourceKind);
+        // Adapter-driven prior rows do not carry an upload filename
+        // (every upload field is null on insert per generateLayers.ts).
+        // Show the per-layer key + provider as the headline and stamp
+        // the actor line so an architect can see at a glance whether
+        // a prior version came from an adapter run or a manual upload.
+        return (
         <div
           key={prior.id}
           data-testid={`briefing-source-history-row-${prior.id}`}
@@ -948,14 +991,46 @@ function BriefingSourceHistoryPanel({
           }}
         >
           <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-            {prior.uploadOriginalFilename ?? "(no filename)"}
-            {prior.uploadByteSize !== null && (
+            {priorIsAdapter
+              ? prior.layerKind
+              : (prior.uploadOriginalFilename ?? "(no filename)")}
+            {!priorIsAdapter && prior.uploadByteSize !== null && (
               <span style={{ color: "var(--text-muted)" }}>
                 {" · "}
                 {formatByteSize(prior.uploadByteSize)}
               </span>
             )}
+            <span
+              style={{
+                marginLeft: 6,
+                fontSize: 10,
+                padding: "1px 6px",
+                borderRadius: 999,
+                background: priorIsAdapter
+                  ? "var(--success-dim)"
+                  : "var(--info-dim)",
+                color: priorIsAdapter
+                  ? "var(--success-text)"
+                  : "var(--info-text)",
+                textTransform: "uppercase",
+                letterSpacing: 0.3,
+                verticalAlign: "middle",
+              }}
+              data-testid={`briefing-source-history-row-kind-${prior.id}`}
+            >
+              {SOURCE_KIND_BADGE_LABEL[prior.sourceKind] ?? prior.sourceKind}
+            </span>
           </div>
+          {priorIsAdapter && prior.provider && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+              }}
+            >
+              Provider: {prior.provider}
+            </div>
+          )}
           {prior.note && (
             <div
               style={{
@@ -967,7 +1042,10 @@ function BriefingSourceHistoryPanel({
               {prior.note}
             </div>
           )}
-          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+          <div
+            style={{ fontSize: 10, color: "var(--text-muted)" }}
+            data-testid={`briefing-source-history-row-meta-${prior.id}`}
+          >
             Snapshot{" "}
             {new Date(prior.snapshotDate).toLocaleDateString()} · added{" "}
             {relativeTime(prior.createdAt)}
@@ -975,6 +1053,12 @@ function BriefingSourceHistoryPanel({
               <>
                 {" · superseded "}
                 {relativeTime(prior.supersededAt)}
+              </>
+            )}
+            {priorIsAdapter && (
+              <>
+                {" · by "}
+                {BRIEFING_GENERATE_LAYERS_ACTOR_LABEL}
               </>
             )}
           </div>
@@ -999,7 +1083,8 @@ function BriefingSourceHistoryPanel({
             </button>
           </div>
         </div>
-      ))}
+        );
+      })}
       {restoreMutation.isError && (
         <div
           role="alert"
