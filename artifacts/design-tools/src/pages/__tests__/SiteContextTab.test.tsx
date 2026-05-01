@@ -362,7 +362,9 @@ vi.mock("@workspace/api-client-react", async () => {
   };
 });
 
-const { EngagementDetail } = await import("../EngagementDetail");
+const { EngagementDetail, GenerateLayersSummaryBanner } = await import(
+  "../EngagementDetail"
+);
 
 /**
  * Build the minimum-viable shape `SiteContextTab#onError` reads from.
@@ -592,5 +594,267 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     expect(
       screen.queryByTestId("generate-layers-no-adapters-banner"),
     ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Task #229 — fixture rows for the GenerateLayersSummaryBanner unit
+ * tests. Builds a `GenerateLayersOutcome` with sensible defaults so
+ * each test can override only the keys it cares about (status,
+ * fromCache). The shape mirrors the OpenAPI contract — the route
+ * always sets `fromCache: false` and `cachedAt: null` for non-`ok`
+ * outcomes, so the helper enforces that invariant by clamping
+ * those keys whenever `status !== "ok"`.
+ */
+function makeOutcome(
+  overrides: Partial<{
+    adapterKey: string;
+    status: "ok" | "no-coverage" | "failed";
+    fromCache: boolean;
+    cachedAt: string | null;
+  }> = {},
+) {
+  const status = overrides.status ?? "ok";
+  const isOk = status === "ok";
+  return {
+    adapterKey: overrides.adapterKey ?? "fixture:layer",
+    tier: "federal" as const,
+    sourceKind: "federal-adapter" as const,
+    layerKind: "fixture-layer",
+    status,
+    sourceId: isOk ? "src-fixture" : null,
+    fromCache: isOk ? (overrides.fromCache ?? false) : false,
+    cachedAt: isOk ? (overrides.cachedAt ?? null) : null,
+  } as unknown as Parameters<typeof GenerateLayersSummaryBanner>[0]["outcomes"][number];
+}
+
+describe("GenerateLayersSummaryBanner (Task #229)", () => {
+  // Stable reference clock for the relative-time assertions below.
+  // happy-dom's `Date.now()` reads from the real system clock by
+  // default; pinning it lets the "12 minutes ago" / "just now"
+  // text be asserted exactly instead of with a tolerance window.
+  const now = new Date("2026-05-01T12:00:00.000Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("hides itself entirely when no Generate Layers run has resolved yet", () => {
+    // Initial page-load shape: `lastRunAt` is still null (no
+    // mutation has succeeded) and the outcomes array is empty.
+    // The banner must not render at all so first-time visitors
+    // don't see a "Last run never" placeholder.
+    const { container } = render(
+      <GenerateLayersSummaryBanner
+        outcomes={[]}
+        lastRunAt={null}
+        isRefreshing={false}
+        onForceRefresh={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByTestId("generate-layers-summary-banner"),
+    ).not.toBeInTheDocument();
+    // Defense-in-depth: nothing at all rendered, not even a
+    // wrapper element. A future refactor that renders an empty
+    // `<div role="status" />` would still violate the "hide
+    // entirely" contract; this catches that.
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("hides when lastRunAt is set but the outcomes array is empty", () => {
+    // Defense-in-depth for the second hide guard: even if state
+    // got hydrated such that `lastRunAt` exists without
+    // outcomes, the banner has nothing meaningful to summarize
+    // and must stay hidden.
+    render(
+      <GenerateLayersSummaryBanner
+        outcomes={[]}
+        lastRunAt={now}
+        isRefreshing={false}
+        onForceRefresh={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByTestId("generate-layers-summary-banner"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the freshness label, cache ratio, and Force refresh CTA against a fixture", () => {
+    // Mixed-fixture: 5 outcomes, 4 ok layers, 3 of those served
+    // from cache, plus one no-coverage and one failed that must
+    // be excluded from the ratio. Pinning `lastRunAt` 12
+    // minutes before `now` exercises the long-form
+    // `formatRunAgeLabel` minute branch ("12 minutes ago").
+    const lastRunAt = new Date(now.getTime() - 12 * 60_000);
+    render(
+      <GenerateLayersSummaryBanner
+        outcomes={[
+          makeOutcome({ adapterKey: "fed:flood", fromCache: true }),
+          makeOutcome({ adapterKey: "fed:wetlands", fromCache: true }),
+          makeOutcome({ adapterKey: "state:zoning", fromCache: true }),
+          makeOutcome({ adapterKey: "local:setbacks", fromCache: false }),
+          makeOutcome({ adapterKey: "fed:fault", status: "no-coverage" }),
+          makeOutcome({ adapterKey: "state:water", status: "failed" }),
+        ]}
+        lastRunAt={lastRunAt}
+        isRefreshing={false}
+        onForceRefresh={() => {}}
+      />,
+    );
+
+    const banner = screen.getByTestId("generate-layers-summary-banner");
+    expect(banner).toBeInTheDocument();
+    // role=status keeps the banner in the polite live region so
+    // screen readers announce the freshness change after a run
+    // without trapping focus.
+    expect(banner).toHaveAttribute("role", "status");
+    // Full sentence assertion — "Last run 12 minutes ago — 3 of
+    // 4 layers served from cache." — pins both the relative-time
+    // helper output and the cache-ratio (only ok outcomes count
+    // toward the denominator; failed/no-coverage are excluded).
+    expect(banner).toHaveTextContent(
+      /Last run 12 minutes ago.*3 of 4 layers served from cache\./,
+    );
+    expect(
+      screen.getByTestId("generate-layers-summary-banner-force-refresh"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders 'just now' for sub-minute runs and 'hours ago' for older ones", () => {
+    // Sub-minute (just-resolved) reads "Last run just now".
+    const { rerender } = render(
+      <GenerateLayersSummaryBanner
+        outcomes={[makeOutcome({ fromCache: false })]}
+        lastRunAt={new Date(now.getTime() - 5_000)}
+        isRefreshing={false}
+        onForceRefresh={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId("generate-layers-summary-banner"),
+    ).toHaveTextContent(/Last run just now/);
+    // 1-of-1 wording is singular ("1 layer", not "1 layers").
+    expect(
+      screen.getByTestId("generate-layers-summary-banner"),
+    ).toHaveTextContent(/0 of 1 layer served from cache\./);
+
+    // Same component, swap to a 3-hour-old run; the long-form
+    // "hours ago" branch (>=60min, <48h) renders.
+    rerender(
+      <GenerateLayersSummaryBanner
+        outcomes={[makeOutcome({ fromCache: true })]}
+        lastRunAt={new Date(now.getTime() - 3 * 60 * 60_000)}
+        isRefreshing={false}
+        onForceRefresh={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId("generate-layers-summary-banner"),
+    ).toHaveTextContent(/Last run 3 hours ago/);
+  });
+
+  it("omits the cache-ratio sentence when no outcome reached status=ok", () => {
+    // All outcomes failed or had no coverage — there are no
+    // "layers" to count, so the cache-count sub-span must be
+    // suppressed. The freshness label still renders so the user
+    // knows a run happened, but adding "0 of 0 layers served
+    // from cache" would read as a confusing zero-divisor stat.
+    render(
+      <GenerateLayersSummaryBanner
+        outcomes={[
+          makeOutcome({ adapterKey: "fed:flood", status: "failed" }),
+          makeOutcome({ adapterKey: "state:zoning", status: "no-coverage" }),
+        ]}
+        lastRunAt={new Date(now.getTime() - 60_000)}
+        isRefreshing={false}
+        onForceRefresh={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId("generate-layers-summary-banner"),
+    ).toHaveTextContent(/Last run 1 minute ago/);
+    expect(
+      screen.queryByTestId("generate-layers-summary-banner-cache-count"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("invokes onForceRefresh when the banner CTA is clicked, and disables it while refreshing", () => {
+    // Wiring check: the CTA must call the same forceRefresh
+    // mutation the controls header already exposes (Task #204).
+    // The test asserts the banner's onForceRefresh callback
+    // fires exactly once per click — equivalent to the
+    // `generateMutation.mutate({ params: { forceRefresh: true } })`
+    // call the SiteContextTab passes in.
+    const onForceRefresh = vi.fn();
+    const { rerender } = render(
+      <GenerateLayersSummaryBanner
+        outcomes={[makeOutcome({ fromCache: true })]}
+        lastRunAt={now}
+        isRefreshing={false}
+        onForceRefresh={onForceRefresh}
+      />,
+    );
+    const cta = screen.getByTestId(
+      "generate-layers-summary-banner-force-refresh",
+    );
+    expect(cta).not.toBeDisabled();
+    fireEvent.click(cta);
+    expect(onForceRefresh).toHaveBeenCalledTimes(1);
+
+    // While the mutation is in flight the CTA must disable
+    // itself so a double-click cannot kick off a second
+    // overlapping run.
+    rerender(
+      <GenerateLayersSummaryBanner
+        outcomes={[makeOutcome({ fromCache: true })]}
+        lastRunAt={now}
+        isRefreshing={true}
+        onForceRefresh={onForceRefresh}
+      />,
+    );
+    expect(
+      screen.getByTestId("generate-layers-summary-banner-force-refresh"),
+    ).toBeDisabled();
+  });
+
+  it("appears in the SiteContextTab after a successful Generate Layers run resolves", async () => {
+    // Integration check: the banner is wired into the page's
+    // mutation onSuccess callback, so firing onSuccess with a
+    // fixture response should mount it. This verifies the
+    // SiteContextTab passes the right `lastRunAt` / `outcomes`
+    // through, not just that the standalone component works.
+    renderPage();
+
+    // Sanity: nothing rendered yet before any run.
+    expect(
+      screen.queryByTestId("generate-layers-summary-banner"),
+    ).not.toBeInTheDocument();
+
+    expect(hoisted.capturedGenerateOptions?.mutation?.onSuccess).toBeDefined();
+    await act(async () => {
+      await hoisted.capturedGenerateOptions!.mutation!.onSuccess!(
+        {
+          briefing: null,
+          outcomes: [
+            makeOutcome({ adapterKey: "fed:flood", fromCache: true }),
+            makeOutcome({ adapterKey: "fed:wetlands", fromCache: false }),
+          ],
+        },
+        { id: hoisted.engagement.id },
+        undefined,
+      );
+    });
+
+    const banner = screen.getByTestId("generate-layers-summary-banner");
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveTextContent(
+      /Last run just now.*1 of 2 layers served from cache\./,
+    );
   });
 });

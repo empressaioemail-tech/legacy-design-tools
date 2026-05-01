@@ -584,6 +584,139 @@ function formatCacheAgeLabel(cachedAt: string | null): string {
 }
 
 /**
+ * Task #229 — render the freshness label for the Generate Layers
+ * summary banner. Mirrors `formatCacheAgeLabel`'s clamping rules
+ * (future timestamps collapse to "just now" so client/server clock
+ * skew never reads as a confusing negative) but uses long-form
+ * units ("12 minutes ago", "2 hours ago") because the banner sits
+ * in a sentence — "Last run 12 minutes ago — …" — instead of the
+ * tight pill the row-level helper feeds.
+ */
+function formatRunAgeLabel(at: Date): string {
+  const diffMs = Date.now() - at.getTime();
+  if (diffMs < 60_000) return "just now";
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) {
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) {
+    return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
+}
+
+/**
+ * Task #229 — top-of-list summary banner for the most recent
+ * Generate Layers run. Task #204 attached a per-row `cached`
+ * pill, but reading "was this run mostly fresh, or mostly
+ * cached?" required scanning every row. This banner surfaces
+ * three things in one line so an architect can answer at a
+ * glance:
+ *
+ *   - When the last run resolved on the client ("Last run
+ *     12 minutes ago" via `formatRunAgeLabel`).
+ *   - How many of the run's persisted layers came from the
+ *     federal-adapter response cache vs. a live upstream
+ *     fetch ("4 of 5 layers served from cache"). Only
+ *     `status=ok` outcomes count as "layers" — `failed` and
+ *     `no-coverage` are excluded from both numerator and
+ *     denominator so the ratio always reads against actual
+ *     persisted rows.
+ *   - A "Force refresh" CTA wired to the same forceRefresh
+ *     mutation the controls header already exposes; surfacing
+ *     it in-context here means an architect who notices a
+ *     mostly-cached run can act on it without scrolling back
+ *     up to the controls.
+ *
+ * The banner hides itself entirely when there are no outcomes
+ * yet (initial page load, before any Generate Layers run has
+ * resolved) so a first-time visitor isn't confused by an
+ * empty "Last run never" placeholder. Exported so the
+ * SiteContextTab unit test can render it in isolation against
+ * a fixture outcomes array.
+ */
+export function GenerateLayersSummaryBanner({
+  outcomes,
+  lastRunAt,
+  isRefreshing,
+  onForceRefresh,
+}: {
+  outcomes: GenerateLayersOutcome[];
+  lastRunAt: Date | null;
+  isRefreshing: boolean;
+  onForceRefresh: () => void;
+}) {
+  // Hide on the initial page load (no run has resolved yet) so
+  // first-time visitors don't see a "Last run never" placeholder.
+  // Both guards matter — `lastRunAt` could in principle be set
+  // without outcomes if the runner ever returned an empty array,
+  // and `outcomes.length === 0` could in principle exist without
+  // a `lastRunAt` if state was hydrated from elsewhere. Either
+  // empty signal hides the banner.
+  if (lastRunAt === null || outcomes.length === 0) return null;
+
+  const layerCount = outcomes.filter((o) => o.status === "ok").length;
+  const cachedCount = outcomes.filter(
+    (o) => o.status === "ok" && o.fromCache,
+  ).length;
+  const ageLabel = formatRunAgeLabel(lastRunAt);
+
+  return (
+    <div
+      data-testid="generate-layers-summary-banner"
+      role="status"
+      style={{
+        fontSize: 12,
+        color: "var(--text-secondary)",
+        background: "var(--info-dim)",
+        padding: "8px 12px",
+        borderRadius: 4,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+      }}
+    >
+      <div
+        data-testid="generate-layers-summary-banner-text"
+        style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+      >
+        <span style={{ fontWeight: 600 }}>Last run {ageLabel}</span>
+        {layerCount > 0 && (
+          <span data-testid="generate-layers-summary-banner-cache-count">
+            — {cachedCount} of {layerCount}{" "}
+            {layerCount === 1 ? "layer" : "layers"} served from cache.
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        className="sc-btn-link"
+        onClick={onForceRefresh}
+        disabled={isRefreshing}
+        data-testid="generate-layers-summary-banner-force-refresh"
+        title="Re-run every adapter live, bypassing the federal-adapter response cache for this one run."
+        style={{
+          fontSize: 12,
+          color: "var(--text-link, var(--cyan, #06b6d4))",
+          background: "transparent",
+          border: "none",
+          padding: "2px 4px",
+          cursor: isRefreshing ? "not-allowed" : "pointer",
+          textDecoration: "underline",
+          opacity: isRefreshing ? 0.5 : 1,
+          flexShrink: 0,
+        }}
+      >
+        Force refresh
+      </button>
+    </div>
+  );
+}
+
+/**
  * Render one current briefing source as a card row. The presentation
  * is intentionally producer-agnostic — both `manual-upload` and
  * `federal-adapter` rows route through this component, with the
@@ -2587,6 +2720,15 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
     mutation: {
       onSuccess: async (data) => {
         setLastOutcomes(data.outcomes);
+        // Task #229 — capture the wall-clock instant the run
+        // resolved so the summary banner can render "Last run X
+        // ago". The runner doesn't return a server-side
+        // completion timestamp on the response envelope, so we
+        // pin the moment the client observed the success
+        // instead. Re-set on every success (including a
+        // Force-refresh re-run) so the banner always reflects
+        // the *most recent* run rather than the first.
+        setLastRunAt(new Date());
         setLastGenerateError(null);
         setLastGenerateErrorSlug(null);
         await queryClient.invalidateQueries({
@@ -2633,6 +2775,12 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
     },
   });
   const [lastOutcomes, setLastOutcomes] = useState<GenerateLayersOutcome[]>([]);
+  // Task #229 — wall-clock instant the most recent Generate Layers
+  // run resolved on the client. `null` until the first successful
+  // run, which is what `GenerateLayersSummaryBanner` keys off of to
+  // hide itself on the initial page load (per the task's "no
+  // outcomes yet" hide rule).
+  const [lastRunAt, setLastRunAt] = useState<Date | null>(null);
   const [lastGenerateError, setLastGenerateError] = useState<string | null>(
     null,
   );
@@ -2945,6 +3093,18 @@ function SiteContextTab({ engagementId }: { engagementId: string }) {
           </div>
         )
       )}
+
+      <GenerateLayersSummaryBanner
+        outcomes={lastOutcomes}
+        lastRunAt={lastRunAt}
+        isRefreshing={generateMutation.isPending}
+        onForceRefresh={() =>
+          generateMutation.mutate({
+            id: engagementId,
+            params: { forceRefresh: true },
+          })
+        }
+      />
 
       {lastOutcomes.length > 0 && (
         <div
