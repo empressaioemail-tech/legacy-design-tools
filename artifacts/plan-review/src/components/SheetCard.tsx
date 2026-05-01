@@ -432,7 +432,11 @@ function ExpandedTimelineRow({ event }: { event: AtomHistoryEvent }) {
  * Render an actor for a timeline row. The history endpoints hydrate
  * `kind: "user"` actors with a `displayName` from the `users` profile
  * table; if the lookup didn't find a row (deleted user, ad-hoc dev id,
- * etc.) we degrade to "Unknown user" rather than leaking a raw id.
+ * profile not yet upserted, etc.) we fall back to the raw user id so
+ * the row is still attributable — surfacing the id is more useful for
+ * triage than a generic "Unknown user" placeholder, and matches the
+ * "fall back gracefully to the ID" contract the BE hydration helper
+ * upholds.
  *
  * Non-user kinds (`agent`, `system`) keep the historical `kind:id`
  * format because those identifiers are stable code-side labels and
@@ -440,7 +444,7 @@ function ExpandedTimelineRow({ event }: { event: AtomHistoryEvent }) {
  */
 function actorLabel(actor: AtomEventActor): string {
   if (actor.kind === "user") {
-    return actor.displayName ?? "Unknown user";
+    return actor.displayName ?? actor.id;
   }
   return `${actor.kind}:${actor.id}`;
 }
@@ -479,7 +483,10 @@ function ActorBadge({
   if (actor.kind !== "user") {
     return <span>{actorLabel(actor)}</span>;
   }
-  const name = actor.displayName ?? "Unknown user";
+  // Fall back to the raw id when no profile row exists yet — see
+  // `actorLabel` for rationale. Initials degrade to "?" via
+  // `actorInitials` when the id has no usable letters.
+  const name = actor.displayName ?? actor.id;
   const sizeStyle = { height: avatarSize, width: avatarSize };
   return (
     <span

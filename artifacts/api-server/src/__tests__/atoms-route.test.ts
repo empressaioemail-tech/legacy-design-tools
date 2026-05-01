@@ -322,7 +322,7 @@ describe("GET /api/atoms/:slug/:id/history", () => {
     if (!ctx.schema) throw new Error("schema not ready");
     // Two known profiles: u-known (Jane Doe) and u-no-email (no email/avatar).
     // A third event uses u-ghost which has no row — must come back without
-    // a displayName so the FE can render "Unknown user".
+    // a displayName so the FE can fall back to the raw id.
     await ctx.schema.db.insert(users).values([
       {
         id: "u-known",
@@ -409,6 +409,75 @@ describe("GET /api/atoms/:slug/:id/history", () => {
     expect(byOccurred.get(t0.toISOString())).toEqual({
       kind: "system",
       id: "test",
+    });
+  });
+
+  it("hydrates user-kind actors on the engagement timeline (slug=engagement); falls back to the raw id when no profile row exists", async () => {
+    // Smoke-test the same hydration contract as the sheet-slug case
+    // above, but against the `engagement` slug — the route is
+    // atom-agnostic, so this is the integration anchor for the
+    // "engagement timeline shows real names" requirement (Task #82).
+    // Without this case, a future refactor that special-cases hydration
+    // on the slug would silently regress engagement timelines while the
+    // sheet test stayed green.
+    const { engagementId } = await seedSheet();
+    if (!ctx.schema) throw new Error("schema not ready");
+    await ctx.schema.db.insert(users).values([
+      {
+        id: "u-eng-known",
+        displayName: "Riley Reviewer",
+        email: "riley@example.com",
+        avatarUrl: "https://example.com/riley.png",
+      },
+    ]);
+
+    const history = getHistoryService();
+    const tKnown = new Date("2026-04-10T10:00:00Z");
+    const tGhost = new Date("2026-04-11T10:00:00Z");
+    await history.appendEvent({
+      entityType: "engagement",
+      entityId: engagementId,
+      eventType: "engagement.address-updated",
+      actor: { kind: "user", id: "u-eng-known" },
+      payload: { fromAddress: null, toAddress: "1 Atom St" },
+      occurredAt: tKnown,
+    });
+    await history.appendEvent({
+      entityType: "engagement",
+      entityId: engagementId,
+      eventType: "engagement.address-updated",
+      actor: { kind: "user", id: "u-eng-ghost" },
+      payload: { fromAddress: "1 Atom St", toAddress: "2 Atom St" },
+      occurredAt: tGhost,
+    });
+
+    const res = await request(getApp()).get(
+      `/api/atoms/engagement/${engagementId}/history`,
+    );
+    expect(res.status).toBe(200);
+    const events = res.body.events as Array<{
+      occurredAt: string;
+      actor: {
+        kind: string;
+        id: string;
+        displayName?: string;
+        email?: string;
+        avatarUrl?: string;
+      };
+    }>;
+    const byOccurred = new Map(events.map((e) => [e.occurredAt, e.actor]));
+    expect(byOccurred.get(tKnown.toISOString())).toEqual({
+      kind: "user",
+      id: "u-eng-known",
+      displayName: "Riley Reviewer",
+      email: "riley@example.com",
+      avatarUrl: "https://example.com/riley.png",
+    });
+    // No profile row → actor is returned as-is so the FE can fall back
+    // to the raw id rather than silently dropping the attribution.
+    expect(byOccurred.get(tGhost.toISOString())).toEqual({
+      kind: "user",
+      id: "u-eng-ghost",
     });
   });
 
