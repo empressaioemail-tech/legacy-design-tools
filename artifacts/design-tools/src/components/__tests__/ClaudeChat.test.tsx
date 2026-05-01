@@ -3,15 +3,18 @@
  * collapsed-pane render branch.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 const sendMessage = vi.hoisted(() => vi.fn());
 const toggleRight = vi.hoisted(() => vi.fn());
+const toggleFocusSnapshot = vi.hoisted(() => vi.fn());
+const clearFocusSnapshots = vi.hoisted(() => vi.fn());
 const stores = vi.hoisted(() => ({
-  messagesByEngagement: {} as Record<string, Array<{ role: string; content: string }>>,
+  messagesByEngagement: {} as Record<string, Array<{ role: string; content: string; snapshotFocusIds?: string[] }>>,
   attachedSheetsByEngagement: {} as Record<string, unknown[]>,
   pendingChatInputByEngagement: {} as Record<string, string>,
+  focusSnapshotIdsByEngagement: {} as Record<string, string[]>,
   streaming: false,
   rightCollapsed: false,
 }));
@@ -24,10 +27,13 @@ vi.mock("../../store/engagements", () => ({
       messagesByEngagement: stores.messagesByEngagement,
       attachedSheetsByEngagement: stores.attachedSheetsByEngagement,
       pendingChatInputByEngagement: stores.pendingChatInputByEngagement,
+      focusSnapshotIdsByEngagement: stores.focusSnapshotIdsByEngagement,
       streaming: stores.streaming,
       sendMessage,
       detachSheet: vi.fn(),
       clearAttachedSheets: vi.fn(),
+      toggleFocusSnapshot,
+      clearFocusSnapshots,
       consumePendingChatInput: () => null,
     }),
 }));
@@ -40,16 +46,21 @@ vi.mock("@workspace/portal-ui", () => ({
 const { ClaudeChat } = await import("../ClaudeChat");
 
 describe("ClaudeChat", () => {
-  it("calls sendMessage with the typed input when Send is clicked (snapshot present)", () => {
+  beforeEach(() => {
     sendMessage.mockClear();
+    toggleFocusSnapshot.mockClear();
+    clearFocusSnapshots.mockClear();
     stores.streaming = false;
     stores.rightCollapsed = false;
     stores.messagesByEngagement = {};
+    stores.focusSnapshotIdsByEngagement = {};
+  });
 
+  it("calls sendMessage with the typed input when Send is clicked (snapshot present)", () => {
     render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
     const textarea = screen.getByPlaceholderText(/Ask a question/i);
     fireEvent.change(textarea, { target: { value: "what is the IBC?" } });
-    fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/i }));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(sendMessage).toHaveBeenCalledWith("eng-1", "what is the IBC?", {
@@ -155,7 +166,181 @@ describe("ClaudeChat", () => {
     render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
     const textarea = screen.getByPlaceholderText(/Ask a question/i);
     fireEvent.change(textarea, { target: { value: "   " } });
-    fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/i }));
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  // ── Snapshot comparison picker ──────────────────────────────────────────
+
+  // Build minimal SnapshotSummary fixtures. Field shape mirrors
+  // lib/snapshots-types so the lookup map / display logic exercises the same
+  // surface in tests as in production.
+  const mkSnap = (id: string, secondsAgo: number) => ({
+    id,
+    engagementId: "eng-1",
+    engagementName: "Test Engagement",
+    projectName: "Test Project",
+    sheetCount: 4,
+    roomCount: 12,
+    levelCount: 2,
+    wallCount: 30,
+    receivedAt: new Date(Date.now() - secondsAgo * 1000).toISOString(),
+  });
+
+  const SNAP_A = "aaaaaaaaaaaa1111aaaaaaaaaaaa1111";
+  const SNAP_B = "bbbbbbbbbbbb2222bbbbbbbbbbbb2222";
+  const SNAP_C = "cccccccccccc3333cccccccccccc3333";
+
+  it("toggles the comparison picker open and lists every available snapshot", () => {
+    const snapshots = [mkSnap(SNAP_A, 60), mkSnap(SNAP_B, 600), mkSnap(SNAP_C, 6000)];
+    render(
+      <ClaudeChat
+        engagementId="eng-1"
+        hasSnapshots={true}
+        snapshots={snapshots}
+      />,
+    );
+    // Closed by default — no picker region rendered.
+    expect(screen.queryByRole("region", { name: /Compare snapshots/i })).toBeNull();
+
+    const compareBtn = screen.getByRole("button", { name: /Compare past snapshots/i });
+    fireEvent.click(compareBtn);
+
+    expect(
+      screen.getByRole("region", { name: /Compare snapshots/i }),
+    ).toBeInTheDocument();
+    // One row per snapshot.
+    expect(screen.getByTestId(`snapshot-picker-row-${SNAP_A}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`snapshot-picker-row-${SNAP_B}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`snapshot-picker-row-${SNAP_C}`)).toBeInTheDocument();
+  });
+
+  it("disables the Compare button when there are no snapshots to pick from", () => {
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} snapshots={[]} />);
+    expect(
+      screen.getByRole("button", { name: /Compare past snapshots/i }),
+    ).toBeDisabled();
+  });
+
+  it("delegates checkbox ticks to the store via toggleFocusSnapshot", () => {
+    const snapshots = [mkSnap(SNAP_A, 60), mkSnap(SNAP_B, 600)];
+    render(
+      <ClaudeChat
+        engagementId="eng-1"
+        hasSnapshots={true}
+        snapshots={snapshots}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Compare past snapshots/i }));
+
+    const row = screen.getByTestId(`snapshot-picker-row-${SNAP_A}`);
+    const checkbox = row.querySelector("input[type=checkbox]") as HTMLInputElement;
+    fireEvent.click(checkbox);
+    expect(toggleFocusSnapshot).toHaveBeenCalledWith("eng-1", SNAP_A);
+  });
+
+  it("forwards staged snapshotFocusIds on send and clears them after dispatch", () => {
+    stores.focusSnapshotIdsByEngagement = { "eng-1": [SNAP_A, SNAP_B] };
+    render(
+      <ClaudeChat
+        engagementId="eng-1"
+        hasSnapshots={true}
+        snapshots={[mkSnap(SNAP_A, 60), mkSnap(SNAP_B, 600)]}
+      />,
+    );
+
+    // Compare button surfaces a count badge whenever ids are staged.
+    expect(
+      screen.getByRole("button", { name: /Compare past snapshots/i }),
+    ).toHaveTextContent(/Compare\s*\(2\)/i);
+
+    const textarea = screen.getByPlaceholderText(/Ask a question/i);
+    fireEvent.change(textarea, { target: { value: "what changed?" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/i }));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith("eng-1", "what changed?", {
+      snapshotFocus: false,
+      snapshotFocusIds: [SNAP_A, SNAP_B],
+    });
+    // Clearing the staged ids is part of the same UI turn so the next
+    // follow-up doesn't accidentally re-compare.
+    expect(clearFocusSnapshots).toHaveBeenCalledWith("eng-1");
+  });
+
+  it("renders a Comparing N pushes chip on user messages that staged snapshotFocusIds", () => {
+    stores.messagesByEngagement = {
+      "eng-1": [
+        {
+          role: "user",
+          content: "diff please",
+          snapshotFocusIds: [SNAP_A, SNAP_B],
+        },
+        { role: "assistant", content: "ok" },
+        { role: "user", content: "no compare" },
+      ] as Array<{ role: string; content: string; snapshotFocusIds?: string[] }>,
+    };
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+    expect(screen.getByText(/Comparing 2 pushes/i)).toBeInTheDocument();
+  });
+
+  it("renders snapshot citation chips across multiple paragraphs (regex lastIndex regression)", () => {
+    // Repro for a stateful-regex bug: the module-scoped /g regexes used to
+    // be precheck-tested with `.test`, which advances `lastIndex` and made
+    // the *second* (and later) paragraphs randomly miss their snapshot
+    // token. Using two paragraphs forces ReactMarkdown to invoke
+    // renderWithAtomChips multiple times in a single render pass.
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "compare" },
+        {
+          role: "assistant",
+          content: `First paragraph cites {{atom:snapshot:${SNAP_A}:focus}}.\n\nSecond paragraph cites {{atom:snapshot:${SNAP_B}:focus}} too.\n\nThird paragraph cites {{atom:snapshot:${SNAP_C}:focus}} as well.`,
+        },
+      ] as Array<{ role: string; content: string }>,
+    };
+    render(
+      <ClaudeChat
+        engagementId="eng-1"
+        hasSnapshots={true}
+        snapshots={[
+          mkSnap(SNAP_A, 60),
+          mkSnap(SNAP_B, 600),
+          mkSnap(SNAP_C, 6000),
+        ]}
+      />,
+    );
+    // Every snapshot marker, regardless of paragraph order, must render
+    // as a chip — none should leak through as raw text.
+    expect(screen.getByTestId(`snapshot-citation-${SNAP_A}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`snapshot-citation-${SNAP_B}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`snapshot-citation-${SNAP_C}`)).toBeInTheDocument();
+    expect(screen.queryByText(/\{\{atom:snapshot:/)).toBeNull();
+  });
+
+  it("renders {{atom:snapshot:<id>:focus}} markers as snapshot citation chips", () => {
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "compare" },
+        {
+          role: "assistant",
+          content: `Per {{atom:snapshot:${SNAP_A}:focus}} the wall count rose from 12 to {{atom:snapshot:${SNAP_B}:focus}}.`,
+        },
+      ] as Array<{ role: string; content: string }>,
+    };
+    render(
+      <ClaudeChat
+        engagementId="eng-1"
+        hasSnapshots={true}
+        snapshots={[mkSnap(SNAP_A, 120), mkSnap(SNAP_B, 7200)]}
+      />,
+    );
+    // Both citation tokens become interactive chips with stable testids.
+    expect(screen.getByTestId(`snapshot-citation-${SNAP_A}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`snapshot-citation-${SNAP_B}`)).toBeInTheDocument();
+    // The raw token must not leak into the rendered DOM.
+    expect(
+      screen.queryByText(/\{\{atom:snapshot:/),
+    ).toBeNull();
   });
 });

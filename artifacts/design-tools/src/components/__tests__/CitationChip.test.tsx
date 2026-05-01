@@ -26,10 +26,13 @@ vi.mock("../../store/engagements", () => ({
     messagesByEngagement: stores.messagesByEngagement,
     attachedSheetsByEngagement: stores.attachedSheetsByEngagement,
     pendingChatInputByEngagement: stores.pendingChatInputByEngagement,
+    focusSnapshotIdsByEngagement: {} as Record<string, string[]>,
     streaming: stores.streaming,
     sendMessage: vi.fn(),
     detachSheet: vi.fn(),
     clearAttachedSheets: vi.fn(),
+    toggleFocusSnapshot: vi.fn(),
+    clearFocusSnapshots: vi.fn(),
     consumePendingChatInput: () => null,
   }),
 }));

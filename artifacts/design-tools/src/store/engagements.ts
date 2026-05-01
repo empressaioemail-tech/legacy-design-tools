@@ -7,6 +7,10 @@ export interface ChatMessage {
   // True when this user turn was sent with the "Dive deeper" toggle on, so the
   // transcript can show a chip indicating the full snapshot payload was loaded.
   snapshotFocus?: boolean;
+  // The explicit set of snapshot ids the user opted into comparing on this
+  // turn (Task #48). Stored on the user message so the transcript can show a
+  // "Compared N pushes" chip even after the focus picker resets.
+  snapshotFocusIds?: string[];
 }
 
 interface EngagementsUiState {
@@ -14,6 +18,10 @@ interface EngagementsUiState {
   messagesByEngagement: Record<string, ChatMessage[]>;
   attachedSheetsByEngagement: Record<string, SheetSummary[]>;
   pendingChatInputByEngagement: Record<string, string>;
+  // Snapshot ids the user has staged for the next comparison turn, keyed by
+  // engagement (Task #48). One-shot: cleared after each successful send so
+  // follow-up turns don't accidentally keep paying the focus cost.
+  focusSnapshotIdsByEngagement: Record<string, string[]>;
   streaming: boolean;
 
   selectSnapshot: (engagementId: string, snapshotId: string | null) => void;
@@ -22,10 +30,12 @@ interface EngagementsUiState {
   clearAttachedSheets: (engagementId: string) => void;
   setPendingChatInput: (engagementId: string, value: string) => void;
   consumePendingChatInput: (engagementId: string) => string | null;
+  toggleFocusSnapshot: (engagementId: string, snapshotId: string) => void;
+  clearFocusSnapshots: (engagementId: string) => void;
   sendMessage: (
     engagementId: string,
     question: string,
-    options?: { snapshotFocus?: boolean },
+    options?: { snapshotFocus?: boolean; snapshotFocusIds?: string[] },
   ) => Promise<void>;
 }
 
@@ -36,6 +46,7 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
   messagesByEngagement: {},
   attachedSheetsByEngagement: {},
   pendingChatInputByEngagement: {},
+  focusSnapshotIdsByEngagement: {},
   streaming: false,
 
   selectSnapshot: (engagementId, snapshotId) =>
@@ -97,19 +108,54 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
     return v;
   },
 
+  toggleFocusSnapshot: (engagementId, snapshotId) =>
+    set((state) => {
+      const existing =
+        state.focusSnapshotIdsByEngagement[engagementId] ?? [];
+      const isSelected = existing.includes(snapshotId);
+      const next = isSelected
+        ? existing.filter((id) => id !== snapshotId)
+        : [...existing, snapshotId];
+      return {
+        focusSnapshotIdsByEngagement: {
+          ...state.focusSnapshotIdsByEngagement,
+          [engagementId]: next,
+        },
+      };
+    }),
+
+  clearFocusSnapshots: (engagementId) =>
+    set((state) => ({
+      focusSnapshotIdsByEngagement: {
+        ...state.focusSnapshotIdsByEngagement,
+        [engagementId]: [],
+      },
+    })),
+
   sendMessage: async (engagementId, question, options) => {
     const snapshotFocus = options?.snapshotFocus === true;
+    const snapshotFocusIds = options?.snapshotFocusIds ?? [];
     set((state) => {
       const msgs = state.messagesByEngagement[engagementId] || [];
+      const userMsg: ChatMessage = { role: "user", content: question };
+      if (snapshotFocus) userMsg.snapshotFocus = true;
+      if (snapshotFocusIds.length > 0)
+        userMsg.snapshotFocusIds = [...snapshotFocusIds];
       return {
         streaming: true,
         messagesByEngagement: {
           ...state.messagesByEngagement,
           [engagementId]: [
             ...msgs,
-            { role: "user", content: question, snapshotFocus },
+            userMsg,
             { role: "assistant", content: "" },
           ],
+        },
+        // One-shot: clear staged focus snapshots as the request fires so
+        // the picker resets in the UI before the response starts streaming.
+        focusSnapshotIdsByEngagement: {
+          ...state.focusSnapshotIdsByEngagement,
+          [engagementId]: [],
         },
       };
     });
@@ -142,6 +188,7 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
           history,
           ...(referencedSheetIds.length > 0 ? { referencedSheetIds } : {}),
           ...(snapshotFocus ? { snapshotFocus: true } : {}),
+          ...(snapshotFocusIds.length > 0 ? { snapshotFocusIds } : {}),
         }),
       });
 

@@ -513,7 +513,13 @@ export function EngagementDetail() {
   return (
     <AppShell
       title={engagement.name}
-      rightPanel={<ClaudeChat engagementId={id} hasSnapshots={hasSnapshots} />}
+      rightPanel={
+        <ClaudeChat
+          engagementId={id}
+          hasSnapshots={hasSnapshots}
+          snapshots={snapshots}
+        />
+      }
     >
       <div className="flex flex-col gap-5 h-full">
         <div className="flex items-center justify-between flex-shrink-0">
