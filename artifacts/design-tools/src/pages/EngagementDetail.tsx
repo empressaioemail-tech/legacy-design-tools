@@ -130,33 +130,18 @@ import {
   // Task #316 — per-source briefing row, per-layer history panel,
   // and A–G narrative card extracted to portal-ui so plan-review
   // reviewers see the same provenance / divergence pills / prior-run
-  // comparison disclosure the architect sees here. Re-exported below
-  // so the test files in `artifacts/design-tools/src/pages/__tests__/`
-  // can keep importing these symbols from `../EngagementDetail`.
+  // comparison disclosure the architect sees here. Task #391 dropped
+  // the compatibility re-exports for the row, history panel,
+  // narrative panel, and three history-tier symbols once their
+  // legacy `__tests__/BriefingSourceRow.test.tsx` was migrated into
+  // the portal-ui spec files; the imports below are now scoped to
+  // the symbols this surface still consumes internally.
   BriefingSourceRow,
-  BriefingSourceHistoryPanel,
   BriefingNarrativePanel as SharedBriefingNarrativePanel,
-  BRIEFING_GENERATE_LAYERS_ACTOR_LABEL,
-  BRIEFING_SOURCE_HISTORY_TIER_STORAGE_PREFIX,
-  briefingSourceHistoryTierStorageKey,
   diffBriefingSourceFields,
   extractAdapterKeyFromProvider,
   formatBriefingDiffValue,
 } from "@workspace/portal-ui";
-
-// Re-export the symbols whose test files import them from
-// `../EngagementDetail` so the move to `@workspace/portal-ui` doesn't
-// break the design-tools test surface.
-export {
-  BriefingSourceRow,
-  BriefingSourceHistoryPanel,
-  BRIEFING_GENERATE_LAYERS_ACTOR_LABEL,
-  BRIEFING_SOURCE_HISTORY_TIER_STORAGE_PREFIX,
-  briefingSourceHistoryTierStorageKey,
-  diffBriefingSourceFields,
-  extractAdapterKeyFromProvider,
-  formatBriefingDiffValue,
-};
 import { useEngagementsStore } from "../store/engagements";
 import { relativeTime } from "../lib/relativeTime";
 import { formatActorLabel } from "../lib/actorLabel";
