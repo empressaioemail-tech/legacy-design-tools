@@ -47,25 +47,27 @@ import {
   type BriefingSections,
 } from "@workspace/briefing-engine";
 import {
+  BRIEFING_PDF_FOOTER_TOKENS,
   BRIEFING_PDF_HEADER_TOKENS,
+  BRIEFING_PDF_PAGE_NUMBER_TOKENS,
   DEFAULT_BRIEFING_PDF_HEADER,
+  DEFAULT_FOOTER_WATERMARK,
 } from "@workspace/briefing-pdf-tokens";
 
-// Re-exported for the route + tests that already import the constant
-// from this module. The single source of truth lives in
+// Re-exported for the route + tests that already import these
+// constants from this module. The single source of truth lives in
 // `@workspace/briefing-pdf-tokens` so the Settings live preview
-// can't drift from what an export actually prints.
+// (and any future footer preview surface) can't drift from what an
+// export actually prints.
 export { DEFAULT_BRIEFING_PDF_HEADER };
 
 /**
- * Footer watermark stamped on every printed page. The wording carries
- * the confidentiality + freshness disclaimer the brief asks for: the
- * PDF is a synthesised pre-design artefact, not an authoritative
- * regulatory record, and the recipient is expected to verify against
- * the cited primary sources before any binding decision.
+ * Footer watermark stamped on every printed page. Re-exported under
+ * the historical `FOOTER_WATERMARK` name so existing call sites keep
+ * compiling; the canonical token now lives in
+ * `@workspace/briefing-pdf-tokens` as `DEFAULT_FOOTER_WATERMARK`.
  */
-export const FOOTER_WATERMARK =
-  "Pre-Design Briefing — Not a Survey or Engineering Document. Verify all data with authoritative sources before relying for design or compliance decisions.";
+export const FOOTER_WATERMARK = DEFAULT_FOOTER_WATERMARK;
 
 /**
  * Subset of the engagement row the renderer cares about. Keeping the
@@ -314,8 +316,8 @@ function renderHead(input: RenderBriefingHtmlInput, header: string): string {
     size: Letter;
     margin: 0.85in 0.7in 0.95in 0.7in;
     @top-left { content: "${esc(header)}"; font-family: ${BRIEFING_PDF_HEADER_TOKENS.fontFamily}; font-size: ${BRIEFING_PDF_HEADER_TOKENS.fontSize}; color: ${BRIEFING_PDF_HEADER_TOKENS.color}; }
-    @bottom-center { content: "${esc(FOOTER_WATERMARK)}"; font-family: -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif; font-size: 7.5pt; color: #555; }
-    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-family: -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif; font-size: 7.5pt; color: #888; }
+    @bottom-center { content: "${esc(DEFAULT_FOOTER_WATERMARK)}"; font-family: ${BRIEFING_PDF_FOOTER_TOKENS.fontFamily}; font-size: ${BRIEFING_PDF_FOOTER_TOKENS.fontSize}; color: ${BRIEFING_PDF_FOOTER_TOKENS.color}; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-family: ${BRIEFING_PDF_PAGE_NUMBER_TOKENS.fontFamily}; font-size: ${BRIEFING_PDF_PAGE_NUMBER_TOKENS.fontSize}; color: ${BRIEFING_PDF_PAGE_NUMBER_TOKENS.color}; }
   }
   html, body { margin: 0; padding: 0; }
   body {

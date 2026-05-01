@@ -60,9 +60,12 @@ const {
   DEFAULT_BRIEFING_PDF_HEADER,
   FOOTER_WATERMARK,
 } = await import("../lib/briefingHtml");
-const { BRIEFING_PDF_HEADER_TOKENS } = await import(
-  "@workspace/briefing-pdf-tokens"
-);
+const {
+  BRIEFING_PDF_FOOTER_TOKENS,
+  BRIEFING_PDF_HEADER_TOKENS,
+  BRIEFING_PDF_PAGE_NUMBER_TOKENS,
+  DEFAULT_FOOTER_WATERMARK,
+} = await import("@workspace/briefing-pdf-tokens");
 const { closeBrowserForTests } = await import("../lib/briefingPdf");
 
 let getApp: () => Express;
@@ -486,6 +489,61 @@ describe("renderBriefingHtml (template contract)", () => {
     );
     expect(topLeftCss).toContain(
       `color: ${BRIEFING_PDF_HEADER_TOKENS.color}`,
+    );
+  });
+
+  it("prints the @bottom-center footer CSS + watermark using the shared briefing-pdf-tokens values (Task #396)", () => {
+    // Same no-drift contract as the header test above, but for the
+    // footer watermark margin box. The watermark string and its
+    // typography (font stack, 7.5pt, #555) all live in
+    // `@workspace/briefing-pdf-tokens` so a future footer preview
+    // surface (or a designer tweaking the disclaimer wording) can't
+    // silently desync from what an export actually prints.
+    const html = renderBriefingHtml(baseInput);
+    const bottomCenterMatch = html.match(/@bottom-center\s*\{[^}]*\}/);
+    expect(
+      bottomCenterMatch,
+      "renderer must emit an @bottom-center rule",
+    ).not.toBeNull();
+    const bottomCenterCss = bottomCenterMatch![0];
+    expect(bottomCenterCss).toContain(`content: "${DEFAULT_FOOTER_WATERMARK}"`);
+    expect(bottomCenterCss).toContain(
+      `font-family: ${BRIEFING_PDF_FOOTER_TOKENS.fontFamily}`,
+    );
+    expect(bottomCenterCss).toContain(
+      `font-size: ${BRIEFING_PDF_FOOTER_TOKENS.fontSize}`,
+    );
+    expect(bottomCenterCss).toContain(
+      `color: ${BRIEFING_PDF_FOOTER_TOKENS.color}`,
+    );
+    // The historical `FOOTER_WATERMARK` re-export must still resolve
+    // to the canonical token string so any caller importing it from
+    // briefingHtml continues to read what the renderer prints.
+    expect(FOOTER_WATERMARK).toBe(DEFAULT_FOOTER_WATERMARK);
+  });
+
+  it("prints the @bottom-right page-number CSS using the shared briefing-pdf-tokens values (Task #396)", () => {
+    // Page-number marker has its own token block — same family /
+    // size as the footer watermark but a lighter grey so the page
+    // count sits visually behind the disclaimer. Pin all three
+    // token fields here so a typography tweak in either direction
+    // requires touching the lib (and therefore any preview surface
+    // built on top of it).
+    const html = renderBriefingHtml(baseInput);
+    const bottomRightMatch = html.match(/@bottom-right\s*\{[^}]*\}/);
+    expect(
+      bottomRightMatch,
+      "renderer must emit an @bottom-right rule",
+    ).not.toBeNull();
+    const bottomRightCss = bottomRightMatch![0];
+    expect(bottomRightCss).toContain(
+      `font-family: ${BRIEFING_PDF_PAGE_NUMBER_TOKENS.fontFamily}`,
+    );
+    expect(bottomRightCss).toContain(
+      `font-size: ${BRIEFING_PDF_PAGE_NUMBER_TOKENS.fontSize}`,
+    );
+    expect(bottomRightCss).toContain(
+      `color: ${BRIEFING_PDF_PAGE_NUMBER_TOKENS.color}`,
     );
   });
 });
