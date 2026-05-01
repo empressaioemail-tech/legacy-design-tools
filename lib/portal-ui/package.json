@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./test-utils": "./src/test-utils/index.ts",
     "./styles": "./src/styles/index.css",
     "./styles/plan-review-disciplines.css": "./src/styles/plan-review-disciplines.css"
   },

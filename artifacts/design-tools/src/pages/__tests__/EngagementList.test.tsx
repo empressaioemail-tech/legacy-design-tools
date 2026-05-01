@@ -34,6 +34,7 @@ import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import type { EngagementSummary } from "@workspace/api-client-react";
 import { noApplicableAdaptersMessage } from "@workspace/adapters";
+import { createQueryKeyStubs } from "@workspace/portal-ui/test-utils";
 
 /**
  * The fixture deliberately interleaves in-pilot and out-of-pilot
@@ -96,7 +97,9 @@ vi.mock("@workspace/api-client-react", async () => {
       isFetching: false,
       refetch: () => {},
     }),
-    getListEngagementsQueryKey: () => ["listEngagements"],
+    // Task #382: shared query-key stub helper from
+    // `@workspace/portal-ui/test-utils`.
+    ...createQueryKeyStubs(["getListEngagementsQueryKey"] as const),
   };
 });
 

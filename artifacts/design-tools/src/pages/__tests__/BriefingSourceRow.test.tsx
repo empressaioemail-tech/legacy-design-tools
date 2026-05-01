@@ -40,6 +40,12 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import {
+  MockApiError,
+  createQueryKeyStubs,
+  noopMutationHook,
+  noopQueryHook,
+} from "@workspace/portal-ui/test-utils";
 
 const hoisted = vi.hoisted(() => ({
   // Drives `useListEngagementBriefingSources` for the history panel.
@@ -70,30 +76,6 @@ vi.mock("@workspace/site-context/client", () => ({
 // to *something* or the source file fails to load. We stub them as
 // no-ops below.
 vi.mock("@workspace/api-client-react", async () => {
-  class MockApiError extends Error {
-    readonly name = "ApiError" as const;
-    status: number;
-    data: unknown;
-    constructor(status: number, data: unknown = null, message?: string) {
-      super(message ?? `HTTP ${status}`);
-      Object.setPrototypeOf(this, MockApiError.prototype);
-      this.status = status;
-      this.data = data;
-    }
-  }
-  const noopHook = () => ({
-    data: undefined as unknown,
-    isLoading: false,
-    isError: false,
-    error: null,
-  });
-  const noopMutation = () => ({
-    mutate: vi.fn(),
-    mutateAsync: vi.fn(),
-    isPending: false,
-    isError: false,
-    variables: undefined,
-  });
   return {
     ApiError: MockApiError,
     RecordSubmissionResponseBodyStatus: {
@@ -102,59 +84,33 @@ vi.mock("@workspace/api-client-react", async () => {
       rejected: "rejected",
     },
     // Hooks the row + panel actually consume.
-    useRetryBriefingSourceConversion: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
+    useRetryBriefingSourceConversion: noopMutationHook,
     useListEngagementBriefingSources: () => ({
       data: { sources: hoisted.historySources },
       isLoading: hoisted.historyState.isLoading,
       isError: hoisted.historyState.isError,
     }),
-    useRestoreEngagementBriefingSource: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-      isError: false,
-      variables: undefined,
-    }),
-    // Query-key helpers used in invalidate calls.
-    getGetEngagementBriefingQueryKey: (id: string) => [
-      "getEngagementBriefing",
-      id,
-    ],
+    useRestoreEngagementBriefingSource: noopMutationHook,
+    // Custom-shape key that includes a `params` argument the
+    // panel passes into invalidate calls — kept inline because
+    // the standard `createQueryKeyStubs` algorithm does not
+    // produce `["listEngagementBriefingSources", id, params]`.
     getListEngagementBriefingSourcesQueryKey: (
       id: string,
       params: unknown,
     ) => ["listEngagementBriefingSources", id, params],
-    // Everything below is pulled in by the page module's import list
-    // but never called along the BriefingSourceRow code paths these
-    // tests exercise. No-op stubs keep the import resolution happy.
-    useGenerateEngagementLayers: noopMutation,
-    useGenerateEngagementBriefing: noopMutation,
-    useGetEngagement: noopHook,
-    useGetEngagementBriefing: noopHook,
-    useGetEngagementBriefingGenerationStatus: noopHook,
-    useGetSnapshot: noopHook,
-    useListEngagementSubmissions: noopHook,
-    useListEngagements: noopHook,
-    useUpdateEngagement: noopMutation,
-    useGetSession: noopHook,
-    useGetAtomHistory: noopHook,
-    useGetAtomSummary: noopHook,
-    useRecordSubmissionResponse: noopMutation,
-    useCreateEngagementSubmission: noopMutation,
-    useCreateEngagementBriefingSource: noopMutation,
-    getGetEngagementBriefingGenerationStatusQueryKey: (id: string) => [
-      "getEngagementBriefingGenerationStatus",
-      id,
-    ],
-    getGetEngagementQueryKey: (id: string) => ["getEngagement", id],
-    getGetSnapshotQueryKey: (id: string) => ["getSnapshot", id],
-    getListEngagementsQueryKey: () => ["listEngagements"],
-    getListEngagementSubmissionsQueryKey: (id: string) => [
-      "listEngagementSubmissions",
-      id,
-    ],
+    ...createQueryKeyStubs([
+      "getGetEngagementBriefingQueryKey",
+      "getGetEngagementBriefingGenerationStatusQueryKey",
+      "getGetEngagementQueryKey",
+      "getGetSnapshotQueryKey",
+      "getListEngagementsQueryKey",
+      "getListEngagementSubmissionsQueryKey",
+      "getGetSessionQueryKey",
+    ] as const),
+    // Custom-shape keys that prepend extra positional args — the
+    // standard `createQueryKeyStubs` algorithm does not produce
+    // `["getAtomHistory", scope, id, params ?? {}]`, so kept inline.
     getGetAtomHistoryQueryKey: (
       scope: string,
       id: string,
@@ -165,7 +121,24 @@ vi.mock("@workspace/api-client-react", async () => {
       scope,
       id,
     ],
-    getGetSessionQueryKey: () => ["getSession"],
+    // Everything below is pulled in by the page module's import list
+    // but never called along the BriefingSourceRow code paths these
+    // tests exercise. No-op stubs keep the import resolution happy.
+    useGenerateEngagementLayers: noopMutationHook,
+    useGenerateEngagementBriefing: noopMutationHook,
+    useGetEngagement: noopQueryHook,
+    useGetEngagementBriefing: noopQueryHook,
+    useGetEngagementBriefingGenerationStatus: noopQueryHook,
+    useGetSnapshot: noopQueryHook,
+    useListEngagementSubmissions: noopQueryHook,
+    useListEngagements: noopQueryHook,
+    useUpdateEngagement: noopMutationHook,
+    useGetSession: noopQueryHook,
+    useGetAtomHistory: noopQueryHook,
+    useGetAtomSummary: noopQueryHook,
+    useRecordSubmissionResponse: noopMutationHook,
+    useCreateEngagementSubmission: noopMutationHook,
+    useCreateEngagementBriefingSource: noopMutationHook,
   };
 });
 

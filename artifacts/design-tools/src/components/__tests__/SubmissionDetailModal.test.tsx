@@ -29,6 +29,7 @@ import {
   cleanup,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { createQueryKeyStubs } from "@workspace/portal-ui/test-utils";
 
 const hoisted = vi.hoisted(() => {
   return {
@@ -48,17 +49,13 @@ const hoisted = vi.hoisted(() => {
 vi.mock("@workspace/api-client-react", () => ({
   useGetAtomSummary: () => hoisted.summary ?? { isLoading: true },
   useGetAtomHistory: () => hoisted.history ?? { isLoading: true },
-  getGetAtomSummaryQueryKey: (slug: string, id: string) => [
-    "getAtomSummary",
-    slug,
-    id,
-  ],
-  getGetAtomHistoryQueryKey: (slug: string, id: string, params: unknown) => [
-    "getAtomHistory",
-    slug,
-    id,
-    params,
-  ],
+  // Task #382: shared query-key stub helper. The standard
+  // `getGet*QueryKey` → `[<name without "get" prefix and "QueryKey"
+  // suffix, lowered>, ...args]` shape matches what the modal expects.
+  ...createQueryKeyStubs([
+    "getGetAtomSummaryQueryKey",
+    "getGetAtomHistoryQueryKey",
+  ] as const),
 }));
 
 const { SubmissionDetailModal } = await import("../SubmissionDetailModal");

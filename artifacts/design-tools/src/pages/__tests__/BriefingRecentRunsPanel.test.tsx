@@ -45,6 +45,14 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import {
+  MockApiError,
+  createMutationCapture,
+  createQueryKeyStubs,
+  makeCapturingMutationHook,
+  noopMutationHook,
+  noopQueryHook,
+} from "@workspace/portal-ui/test-utils";
 
 type RunState = "pending" | "completed" | "failed";
 
@@ -62,10 +70,11 @@ interface FakeRun {
 // `runs` is the single source of truth the runs hook reads from on
 // every queryFn invocation, so a test can push a new pending row
 // after firing the kickoff `onSuccess` and the next refetch will
-// see it. `capturedGenerateBriefingOptions` captures the kickoff
-// hook's `mutation` options so a test can drive `onSuccess`
-// directly without having to fabricate a real fetch round-trip
-// under happy-dom.
+// see it. The shared `generateBriefing` mutation capture
+// (declared at module top-level below the hoisted block) captures
+// the kickoff hook's `mutation` options so a test can drive
+// `onSuccess` directly without having to fabricate a real fetch
+// round-trip under happy-dom.
 const hoisted = vi.hoisted(() => {
   const initialRuns: Array<{
     generationId: string;
@@ -110,16 +119,6 @@ const hoisted = vi.hoisted(() => {
     },
     runsHookCalls: 0,
     runsFetchCalls: 0,
-    capturedGenerateBriefingOptions: null as null | {
-      mutation?: {
-        onSuccess?: (
-          data: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => Promise<void> | void;
-      };
-    },
-    generateBriefingMutate: vi.fn(),
     // Task #281 — the briefing payload the GET /briefing query mock
     // returns. Tests that need a "narrative is currently on screen"
     // condition can replace this with a fixture that has a
@@ -134,6 +133,13 @@ const hoisted = vi.hoisted(() => {
     },
   };
 });
+
+// Capture for `useGenerateEngagementBriefing` (Task #230 kickoff
+// disclosure). Lives at module top-level via the shared
+// `createMutationCapture` helper (Task #382) so each test can drive
+// the captured `onSuccess` directly without standing up a real fetch
+// round-trip under happy-dom.
+const generateBriefing = createMutationCapture();
 
 vi.mock("wouter", async () => {
   const actual = await vi.importActual<typeof import("wouter")>("wouter");
@@ -157,17 +163,6 @@ vi.mock("@workspace/site-context/client", () => ({
 
 vi.mock("@workspace/api-client-react", async () => {
   const { useQuery } = await import("@tanstack/react-query");
-  class MockApiError extends Error {
-    readonly name = "ApiError" as const;
-    status: number;
-    data: unknown;
-    constructor(status: number, data: unknown = null, message?: string) {
-      super(message ?? `HTTP ${status}`);
-      Object.setPrototypeOf(this, MockApiError.prototype);
-      this.status = status;
-      this.data = data;
-    }
-  }
   return {
     ApiError: MockApiError,
     RecordSubmissionResponseBodyStatus: {
@@ -175,39 +170,24 @@ vi.mock("@workspace/api-client-react", async () => {
       corrections_requested: "corrections_requested",
       rejected: "rejected",
     },
-    useRecordSubmissionResponse: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    getGetEngagementQueryKey: (id: string) => ["getEngagement", id],
-    getGetSnapshotQueryKey: (id: string) => ["getSnapshot", id],
-    getListEngagementsQueryKey: () => ["listEngagements"],
-    getListEngagementSubmissionsQueryKey: (id: string) => [
-      "listEngagementSubmissions",
-      id,
-    ],
-    getGetEngagementBriefingQueryKey: (id: string) => [
-      "getEngagementBriefing",
-      id,
-    ],
-    getListEngagementBriefingSourcesQueryKey: (id: string) => [
-      "listEngagementBriefingSources",
-      id,
-    ],
-    getListBimModelDivergencesQueryKey: (id: string) => [
-      "listBimModelDivergences",
-      id,
-    ],
-    getGetEngagementBriefingGenerationStatusQueryKey: (id: string) => [
-      "getEngagementBriefingGenerationStatus",
-      id,
-    ],
-    // Task #230 — the new key the disclosure invalidates on
-    // kickoff and on the pending → terminal transition.
-    getListEngagementBriefingGenerationRunsQueryKey: (id: string) => [
-      "listEngagementBriefingGenerationRuns",
-      id,
-    ],
+    useRecordSubmissionResponse: noopMutationHook,
+    ...createQueryKeyStubs([
+      "getGetEngagementQueryKey",
+      "getGetSnapshotQueryKey",
+      "getListEngagementsQueryKey",
+      "getListEngagementSubmissionsQueryKey",
+      "getGetEngagementBriefingQueryKey",
+      "getListEngagementBriefingSourcesQueryKey",
+      "getListBimModelDivergencesQueryKey",
+      "getGetEngagementBriefingGenerationStatusQueryKey",
+      // Task #230 — the new key the disclosure invalidates on
+      // kickoff and on the pending → terminal transition.
+      "getListEngagementBriefingGenerationRunsQueryKey",
+      "getGetSessionQueryKey",
+    ] as const),
+    // Custom-shape keys that prepend extra positional args — the
+    // standard `createQueryKeyStubs` algorithm does not produce
+    // `["getAtomHistory", scope, id, params ?? {}]`, so kept inline.
     getGetAtomHistoryQueryKey: (
       scope: string,
       id: string,
@@ -218,7 +198,6 @@ vi.mock("@workspace/api-client-react", async () => {
       scope,
       id,
     ],
-    getGetSessionQueryKey: () => ["getSession"],
     useGetSession: () =>
       useQuery({
         queryKey: ["getSession"],
@@ -248,22 +227,9 @@ vi.mock("@workspace/api-client-react", async () => {
         queryFn: async () => null,
         enabled: opts?.query?.enabled ?? false,
       }),
-    useUpdateEngagement: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    useGetAtomHistory: () => ({
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      error: null,
-    }),
-    useGetAtomSummary: () => ({
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      error: null,
-    }),
+    useUpdateEngagement: noopMutationHook,
+    useGetAtomHistory: noopQueryHook,
+    useGetAtomSummary: noopQueryHook,
     useListEngagementSubmissions: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },
@@ -273,10 +239,7 @@ vi.mock("@workspace/api-client-react", async () => {
           opts?.query?.queryKey ?? (["listEngagementSubmissions", id] as const),
         queryFn: async () => [],
       }),
-    useCreateEngagementSubmission: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
+    useCreateEngagementSubmission: noopMutationHook,
     useGetEngagementBriefing: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },
@@ -347,42 +310,17 @@ vi.mock("@workspace/api-client-react", async () => {
         refetchOnWindowFocus: opts?.query?.refetchOnWindowFocus ?? true,
       });
     },
-    useGenerateEngagementBriefing: (
-      options: typeof hoisted.capturedGenerateBriefingOptions,
-    ) => {
-      hoisted.capturedGenerateBriefingOptions = options;
-      return {
-        mutate: hoisted.generateBriefingMutate,
-        isPending: false,
-      };
-    },
-    useCreateEngagementBriefingSource: () => ({
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-      isPending: false,
-    }),
-    useRestoreEngagementBriefingSource: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    useRetryBriefingSourceConversion: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    useGenerateEngagementLayers: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
+    useGenerateEngagementBriefing: makeCapturingMutationHook(generateBriefing),
+    useCreateEngagementBriefingSource: noopMutationHook,
+    useRestoreEngagementBriefingSource: noopMutationHook,
+    useRetryBriefingSourceConversion: noopMutationHook,
+    useGenerateEngagementLayers: noopMutationHook,
     // PushToRevitAffordance fan-in — inert stubs are enough,
     // the affordance is not asserted against here.
-    getGetEngagementBimModelQueryKey: (id: string) => [
-      "getEngagementBimModel",
-      id,
-    ],
-    getGetBimModelRefreshQueryKey: (id: string) => [
-      "getBimModelRefresh",
-      id,
-    ],
+    ...createQueryKeyStubs([
+      "getGetEngagementBimModelQueryKey",
+      "getGetBimModelRefreshQueryKey",
+    ] as const),
     useGetEngagementBimModel: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },
@@ -402,11 +340,7 @@ vi.mock("@workspace/api-client-react", async () => {
         queryFn: async () => null,
         enabled: opts?.query?.enabled ?? false,
       }),
-    usePushEngagementBimModel: () => ({
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-      isPending: false,
-    }),
+    usePushEngagementBimModel: noopMutationHook,
     useListBimModelDivergences: (
       id: string,
       opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
@@ -490,8 +424,7 @@ beforeEach(() => {
   hoisted.runs = [];
   hoisted.runsHookCalls = 0;
   hoisted.runsFetchCalls = 0;
-  hoisted.capturedGenerateBriefingOptions = null;
-  hoisted.generateBriefingMutate.mockReset();
+  generateBriefing.reset();
   // Task #263 — default to "no narrative on screen" so prior tests
   // keep their existing semantics; the Current-pill tests below
   // override this with a non-null narrative payload.
@@ -687,10 +620,10 @@ describe("BriefingRecentRunsPanel (Task #230)", () => {
       ...hoisted.runs,
     ];
     expect(
-      hoisted.capturedGenerateBriefingOptions?.mutation?.onSuccess,
+      generateBriefing.capturedOptions?.mutation?.onSuccess,
     ).toBeDefined();
     await act(async () => {
-      await hoisted.capturedGenerateBriefingOptions!.mutation!.onSuccess!(
+      await generateBriefing.capturedOptions!.mutation!.onSuccess!(
         { generationId: "gen-new" },
         { id: hoisted.engagement.id },
         undefined,

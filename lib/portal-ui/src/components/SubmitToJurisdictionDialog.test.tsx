@@ -45,71 +45,36 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import {
+  MockApiError,
+  createMutationCapture,
+  createQueryKeyStubs,
+  makeCapturingMutationHook,
+} from "@workspace/portal-ui/test-utils";
 
-// ── Hoisted state shared with the mocks ────────────────────────────
+// ── Module-level capture shared with the mock (Task #382) ──────────
 //
-// `mutateMock` is the spy the component's submit button drives, and
-// `capturedOptions` is the mutation-options object the component
-// passed into `useCreateEngagementSubmission` — we reach into it to
-// fire `onSuccess` / `onError` without needing a real network round-
-// trip. `state.isPending` lets a test flip the in-flight branch.
-const hoisted = vi.hoisted(() => {
-  class MockApiError extends Error {
-    readonly name = "ApiError" as const;
-    status: number;
-    data: unknown;
-    constructor(status: number, data: unknown = null, message?: string) {
-      super(message ?? `HTTP ${status}`);
-      Object.setPrototypeOf(this, MockApiError.prototype);
-      this.status = status;
-      this.data = data;
-    }
-  }
-
-  return {
-    mutateMock: ((..._args: unknown[]) => {}) as unknown as ReturnType<
-      typeof vi.fn
-    >,
-    capturedOptions: null as null | {
-      mutation?: {
-        onSuccess?: (
-          data: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => Promise<void> | void;
-        onError?: (
-          err: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => void;
-      };
-    },
-    state: { isPending: false },
-    MockApiError,
-  };
-});
-
-hoisted.mutateMock = vi.fn();
+// `hoisted.mutate` is the spy the component's submit button drives,
+// `hoisted.capturedOptions` is the mutation-options object the
+// component passed into `useCreateEngagementSubmission` — we reach
+// into it to fire `onSuccess` / `onError` without needing a real
+// network round-trip — and `hoisted.state.isPending` lets a test
+// flip the in-flight branch. `vi.mock` is hoisted above imports but
+// its FACTORY is called lazily on `await import(...)` below, so the
+// closure over `hoisted` is initialised by the time it runs.
+// The shared helper at `@workspace/portal-ui/test-utils` exposes
+// the same `MockApiError` + capture primitives every other dialog
+// test uses.
+const hoisted = createMutationCapture();
 
 vi.mock("@workspace/api-client-react", () => ({
-  useCreateEngagementSubmission: (options: typeof hoisted.capturedOptions) => {
-    hoisted.capturedOptions = options;
-    return {
-      mutate: hoisted.mutateMock,
-      isPending: hoisted.state.isPending,
-    };
-  },
-  getGetEngagementQueryKey: (id: string) => ["getEngagement", id],
-  getGetAtomHistoryQueryKey: (scope: string, id: string) => [
-    "getAtomHistory",
-    scope,
-    id,
-  ],
-  getListEngagementSubmissionsQueryKey: (id: string) => [
-    "listEngagementSubmissions",
-    id,
-  ],
-  ApiError: hoisted.MockApiError,
+  useCreateEngagementSubmission: makeCapturingMutationHook(hoisted),
+  ...createQueryKeyStubs([
+    "getGetEngagementQueryKey",
+    "getGetAtomHistoryQueryKey",
+    "getListEngagementSubmissionsQueryKey",
+  ] as const),
+  ApiError: MockApiError,
 }));
 
 // 2 KB note ceiling — match the real generated constant so the over-
@@ -169,9 +134,7 @@ function renderDialog(
 }
 
 beforeEach(() => {
-  hoisted.mutateMock.mockReset();
-  hoisted.capturedOptions = null;
-  hoisted.state.isPending = false;
+  hoisted.reset();
 });
 
 describe("SubmitToJurisdictionDialog", () => {
@@ -260,7 +223,7 @@ describe("SubmitToJurisdictionDialog", () => {
 
     // Clicking the disabled-by-overlimit button must NOT fire mutate.
     fireEvent.click(submit);
-    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(hoisted.mutate).not.toHaveBeenCalled();
 
     // Cancel stays available so users can back out without first
     // trimming the note down.
@@ -272,8 +235,8 @@ describe("SubmitToJurisdictionDialog", () => {
   it("sends an empty body when the note is empty", () => {
     renderDialog({ engagementId: "eng-42" });
     fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
-    expect(hoisted.mutateMock).toHaveBeenCalledWith({
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
+    expect(hoisted.mutate).toHaveBeenCalledWith({
       id: "eng-42",
       data: {},
     });
@@ -284,7 +247,7 @@ describe("SubmitToJurisdictionDialog", () => {
     const textarea = screen.getByTestId("submit-jurisdiction-note");
     fireEvent.change(textarea, { target: { value: "   \n\t  " } });
     fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledWith({
+    expect(hoisted.mutate).toHaveBeenCalledWith({
       id: "eng-42",
       data: {},
     });
@@ -297,7 +260,7 @@ describe("SubmitToJurisdictionDialog", () => {
       target: { value: "  Permit set v1, all sheets cleaned.  " },
     });
     fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledWith({
+    expect(hoisted.mutate).toHaveBeenCalledWith({
       id: "eng-7",
       data: { note: "Permit set v1, all sheets cleaned." },
     });
@@ -316,7 +279,7 @@ describe("SubmitToJurisdictionDialog", () => {
 
     // Clicking the in-flight button must not enqueue another mutation.
     fireEvent.click(submit);
-    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(hoisted.mutate).not.toHaveBeenCalled();
   });
 
   it("does not call onClose when the backdrop is clicked while pending", () => {
@@ -397,7 +360,7 @@ describe("SubmitToJurisdictionDialog", () => {
     fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(404, { detail: "not found" }),
+        new MockApiError(404, { detail: "not found" }),
         { id: "eng-1", data: {} },
         undefined,
       );
@@ -414,7 +377,7 @@ describe("SubmitToJurisdictionDialog", () => {
     fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(400, {
+        new MockApiError(400, {
           detail: "Note contains forbidden control characters.",
         }),
         { id: "eng-1", data: {} },
@@ -431,7 +394,7 @@ describe("SubmitToJurisdictionDialog", () => {
     fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(400, {}),
+        new MockApiError(400, {}),
         { id: "eng-1", data: {} },
         undefined,
       );
@@ -446,7 +409,7 @@ describe("SubmitToJurisdictionDialog", () => {
     fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(503, { detail: "db down" }),
+        new MockApiError(503, { detail: "db down" }),
         { id: "eng-1", data: {} },
         undefined,
       );
@@ -461,7 +424,7 @@ describe("SubmitToJurisdictionDialog", () => {
     fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(503),
+        new MockApiError(503),
         { id: "eng-1", data: {} },
         undefined,
       );

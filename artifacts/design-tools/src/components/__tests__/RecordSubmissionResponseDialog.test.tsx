@@ -29,76 +29,32 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import {
+  MockApiError,
+  createMutationCapture,
+  createQueryKeyStubs,
+  makeCapturingMutationHook,
+} from "@workspace/portal-ui/test-utils";
 
-const hoisted = vi.hoisted(() => {
-  class MockApiError extends Error {
-    readonly name = "ApiError" as const;
-    status: number;
-    data: unknown;
-    constructor(status: number, data: unknown = null, message?: string) {
-      super(message ?? `HTTP ${status}`);
-      Object.setPrototypeOf(this, MockApiError.prototype);
-      this.status = status;
-      this.data = data;
-    }
-  }
-
-  return {
-    mutateMock: ((..._args: unknown[]) => {}) as unknown as ReturnType<
-      typeof vi.fn
-    >,
-    capturedOptions: null as null | {
-      mutation?: {
-        onSuccess?: (
-          data: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => Promise<void> | void;
-        onError?: (
-          err: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => void;
-      };
-    },
-    state: { isPending: false },
-    MockApiError,
-  };
-});
-
-hoisted.mutateMock = vi.fn();
+// Module-level capture shared with the mock (Task #382). `vi.mock` is
+// hoisted but its FACTORY runs lazily on `await import(...)` below,
+// so the closure over `hoisted` is initialised by the time it runs.
+const hoisted = createMutationCapture();
 
 vi.mock("@workspace/api-client-react", () => ({
-  useRecordSubmissionResponse: (
-    options: typeof hoisted.capturedOptions,
-  ) => {
-    hoisted.capturedOptions = options;
-    return {
-      mutate: hoisted.mutateMock,
-      isPending: hoisted.state.isPending,
-    };
-  },
-  getGetEngagementQueryKey: (id: string) => ["getEngagement", id],
-  getGetAtomHistoryQueryKey: (scope: string, id: string) => [
-    "getAtomHistory",
-    scope,
-    id,
-  ],
-  getGetAtomSummaryQueryKey: (scope: string, id: string) => [
-    "getAtomSummary",
-    scope,
-    id,
-  ],
-  getListEngagementSubmissionsQueryKey: (id: string) => [
-    "listEngagementSubmissions",
-    id,
-  ],
+  useRecordSubmissionResponse: makeCapturingMutationHook(hoisted),
+  ...createQueryKeyStubs([
+    "getGetEngagementQueryKey",
+    "getGetAtomHistoryQueryKey",
+    "getGetAtomSummaryQueryKey",
+    "getListEngagementSubmissionsQueryKey",
+  ] as const),
   RecordSubmissionResponseBodyStatus: {
     approved: "approved",
     corrections_requested: "corrections_requested",
     rejected: "rejected",
   },
-  ApiError: hoisted.MockApiError,
+  ApiError: MockApiError,
 }));
 
 vi.mock("@workspace/api-zod", () => ({
@@ -153,9 +109,7 @@ function renderDialog(overrides: {
 }
 
 beforeEach(() => {
-  hoisted.mutateMock.mockReset();
-  hoisted.capturedOptions = null;
-  hoisted.state.isPending = false;
+  hoisted.reset();
 });
 
 afterEach(() => {
@@ -221,7 +175,7 @@ describe("RecordSubmissionResponseDialog", () => {
     expect(submit).toBeDisabled();
 
     fireEvent.click(submit);
-    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(hoisted.mutate).not.toHaveBeenCalled();
 
     expect(
       screen.getByRole("button", { name: /^Cancel$/i }),
@@ -231,8 +185,8 @@ describe("RecordSubmissionResponseDialog", () => {
   it("sends only status when the comment is empty", () => {
     renderDialog({ engagementId: "eng-7", submissionId: "sub-9" });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
-    expect(hoisted.mutateMock).toHaveBeenCalledWith({
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
+    expect(hoisted.mutate).toHaveBeenCalledWith({
       id: "eng-7",
       submissionId: "sub-9",
       data: { status: "approved" },
@@ -245,7 +199,7 @@ describe("RecordSubmissionResponseDialog", () => {
       target: { value: "   \n\t  " },
     });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledWith({
+    expect(hoisted.mutate).toHaveBeenCalledWith({
       id: "eng-7",
       submissionId: "sub-9",
       data: { status: "approved" },
@@ -265,7 +219,7 @@ describe("RecordSubmissionResponseDialog", () => {
     });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
 
-    expect(hoisted.mutateMock).toHaveBeenCalledWith({
+    expect(hoisted.mutate).toHaveBeenCalledWith({
       id: "eng-7",
       submissionId: "sub-9",
       data: {
@@ -282,8 +236,8 @@ describe("RecordSubmissionResponseDialog", () => {
     // *not* include `respondedAt` — we want the server clock to be
     // authoritative whenever the dialog wasn't being used to backfill.
     fireEvent.click(screen.getByTestId("record-response-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
-    const call = hoisted.mutateMock.mock.calls[0]?.[0] as {
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
+    const call = hoisted.mutate.mock.calls[0]?.[0] as {
       data: Record<string, unknown>;
     };
     expect(call.data).toEqual({ status: "approved" });
@@ -302,8 +256,8 @@ describe("RecordSubmissionResponseDialog", () => {
     });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
 
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
-    const call = hoisted.mutateMock.mock.calls[0]?.[0] as {
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
+    const call = hoisted.mutate.mock.calls[0]?.[0] as {
       data: { status: string; respondedAt?: string };
     };
     expect(call.data.status).toBe("approved");
@@ -331,7 +285,7 @@ describe("RecordSubmissionResponseDialog", () => {
     });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
 
-    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(hoisted.mutate).not.toHaveBeenCalled();
     expect(
       screen.getByTestId("record-response-responded-at-help"),
     ).toHaveTextContent(/can't be in the future/i);
@@ -352,8 +306,8 @@ describe("RecordSubmissionResponseDialog", () => {
     });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
 
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
-    const call = hoisted.mutateMock.mock.calls[0]?.[0] as {
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
+    const call = hoisted.mutate.mock.calls[0]?.[0] as {
       data: Record<string, unknown>;
     };
     expect(call.data).toEqual({ status: "approved" });
@@ -391,7 +345,7 @@ describe("RecordSubmissionResponseDialog", () => {
     ).toHaveTextContent(/Defaults to now/i);
 
     fireEvent.click(screen.getByTestId("record-response-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
   });
 
   it("disables Record / Cancel and flips the button label while pending", () => {
@@ -406,7 +360,7 @@ describe("RecordSubmissionResponseDialog", () => {
     expect(screen.getByTestId("record-response-comment")).toBeDisabled();
 
     fireEvent.click(submit);
-    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(hoisted.mutate).not.toHaveBeenCalled();
   });
 
   it("invalidates the engagement, atom-history, atom-summary, and submissions caches and closes on success", async () => {
@@ -470,7 +424,7 @@ describe("RecordSubmissionResponseDialog", () => {
     fireEvent.click(screen.getByTestId("record-response-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(404, { detail: "not found" }),
+        new MockApiError(404, { detail: "not found" }),
         { id: "eng-1", submissionId: "sub-1", data: { status: "approved" } },
         undefined,
       );
@@ -486,7 +440,7 @@ describe("RecordSubmissionResponseDialog", () => {
     fireEvent.click(screen.getByTestId("record-response-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(400, {
+        new MockApiError(400, {
           error: "Submission does not belong to this engagement",
         }),
         { id: "eng-1", submissionId: "sub-1", data: { status: "approved" } },
@@ -503,7 +457,7 @@ describe("RecordSubmissionResponseDialog", () => {
     fireEvent.click(screen.getByTestId("record-response-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(400, {}),
+        new MockApiError(400, {}),
         { id: "eng-1", submissionId: "sub-1", data: { status: "approved" } },
         undefined,
       );
@@ -518,7 +472,7 @@ describe("RecordSubmissionResponseDialog", () => {
     fireEvent.click(screen.getByTestId("record-response-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(503, { detail: "db down" }),
+        new MockApiError(503, { detail: "db down" }),
         { id: "eng-1", submissionId: "sub-1", data: { status: "approved" } },
         undefined,
       );
@@ -541,7 +495,7 @@ describe("RecordSubmissionResponseDialog", () => {
     });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
 
-    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(hoisted.mutate).not.toHaveBeenCalled();
     expect(
       screen.getByTestId("record-response-responded-at-help"),
     ).toHaveTextContent(/can't be before the package was sent/i);
@@ -591,7 +545,7 @@ describe("RecordSubmissionResponseDialog", () => {
     });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
 
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
   });
 
   it("skips the lower-bound check when no submittedAt is supplied (graceful degradation)", () => {
@@ -607,7 +561,7 @@ describe("RecordSubmissionResponseDialog", () => {
       target: { value: "2010-01-01T09:00" },
     });
     fireEvent.click(screen.getByTestId("record-response-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
   });
 
   it("clears the lower-bound error once the user picks a valid post-submission time", () => {
@@ -631,7 +585,7 @@ describe("RecordSubmissionResponseDialog", () => {
     ).toHaveTextContent(/Defaults to now/i);
 
     fireEvent.click(screen.getByTestId("record-response-confirm"));
-    expect(hoisted.mutateMock).toHaveBeenCalledTimes(1);
+    expect(hoisted.mutate).toHaveBeenCalledTimes(1);
   });
 
   it("reactively disables Record while the picked respondedAt is in the future (Task #127)", () => {
@@ -667,7 +621,7 @@ describe("RecordSubmissionResponseDialog", () => {
 
     // And clicking the (now-disabled) button must not start a request.
     fireEvent.click(submit);
-    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(hoisted.mutate).not.toHaveBeenCalled();
 
     // Correcting to a clearly-past time re-enables Record without a
     // round trip.
@@ -698,7 +652,7 @@ describe("RecordSubmissionResponseDialog", () => {
     ).toHaveTextContent(/can't be before the package was sent/i);
 
     fireEvent.click(submit);
-    expect(hoisted.mutateMock).not.toHaveBeenCalled();
+    expect(hoisted.mutate).not.toHaveBeenCalled();
 
     // Bumping to a post-submission date re-enables the button reactively.
     fireEvent.change(screen.getByTestId("record-response-responded-at"), {
@@ -712,7 +666,7 @@ describe("RecordSubmissionResponseDialog", () => {
     fireEvent.click(screen.getByTestId("record-response-confirm"));
     act(() => {
       hoisted.capturedOptions!.mutation!.onError!(
-        new hoisted.MockApiError(503),
+        new MockApiError(503),
         { id: "eng-1", submissionId: "sub-1", data: { status: "approved" } },
         undefined,
       );

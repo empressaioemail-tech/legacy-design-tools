@@ -41,13 +41,22 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import {
+  createMutationCapture,
+  createQueryKeyStubs,
+  makeCapturingMutationHook,
+} from "@workspace/portal-ui/test-utils";
 
-// ── Hoisted mock state ──────────────────────────────────────────────────
+// ── Hoisted fixture state ───────────────────────────────────────────────
 //
-// Single-object reset target shared between the `vi.mock` factories
-// and individual test bodies, mirroring the convention in
-// EngagementDetail.test.tsx so the two surfaces stay easy to read
-// side-by-side.
+// Data fixtures stay in `vi.hoisted` so the mock factory below sees
+// them at hoist time. The two captures
+// (`push.capturedOptions` + `push.mutate`,
+// `resolve.capturedOptions` + `resolve.mutate`) live at module
+// top-level via the shared `createMutationCapture` helper
+// (Task #382) — `vi.mock` is hoisted but its factory runs lazily,
+// so the closures over `push` and `resolve` are initialised by
+// the time it runs.
 const hoisted = vi.hoisted(() => {
   return {
     bimModel: {
@@ -106,39 +115,17 @@ const hoisted = vi.hoisted(() => {
         elements: [] as unknown[],
       },
     } as unknown,
-    capturedPushOptions: null as null | {
-      mutation?: {
-        onSuccess?: (
-          data: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => Promise<void> | void;
-      };
-    },
-    pushMutate: vi.fn(),
-    pushIsPending: false,
-    pushIsError: false,
-    // Resolve-mutation capture for the Task #268 resolve-action-flow
-    // test. The hook's `mutate` is a spy so the test can assert the
-    // call shape, and `capturedResolveOptions` exposes the
-    // `onSuccess` the row registers so the test can fire the
-    // post-mutation invalidation chain by hand — same pattern the
-    // push-affordance test uses for `useCreateEngagementSubmission`
-    // and `usePushEngagementBimModel` above.
-    capturedResolveOptions: null as null | {
-      mutation?: {
-        onSuccess?: (
-          data: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => Promise<void> | void;
-      };
-    },
-    resolveMutate: vi.fn(),
-    resolveIsPending: false,
-    resolveIsError: false,
   };
 });
+
+// Push-mutation capture (Task #172). The hook's `mutate` is a spy so
+// the test can assert the call shape, and `capturedOptions` exposes
+// the `onSuccess` the affordance registers so the test can fire the
+// post-mutation invalidation chain by hand.
+const push = createMutationCapture();
+// Resolve-mutation capture (Task #268). Same pattern as `push` above
+// for the resolve-action-flow test.
+const resolve = createMutationCapture();
 
 // Stub `SiteMap` so leaflet's CSS + image asset side effects don't
 // have to load under happy-dom. The component is never mounted by
@@ -166,18 +153,11 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
     // the QueryClient cache below — the real helpers prepend the
     // generated `/api/...` request URL which would force the test
     // to mirror the URL surface for no extra coverage.
-    getGetEngagementBimModelQueryKey: (id: string) => [
-      "getEngagementBimModel",
-      id,
-    ],
-    getGetBimModelRefreshQueryKey: (id: string) => [
-      "getBimModelRefresh",
-      id,
-    ],
-    getListBimModelDivergencesQueryKey: (id: string) => [
-      "listBimModelDivergences",
-      id,
-    ],
+    ...createQueryKeyStubs([
+      "getGetEngagementBimModelQueryKey",
+      "getGetBimModelRefreshQueryKey",
+      "getListBimModelDivergencesQueryKey",
+    ] as const),
     useGetEngagementBimModel: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },
@@ -243,26 +223,8 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
       }
       return q;
     },
-    usePushEngagementBimModel: (
-      options: typeof hoisted.capturedPushOptions,
-    ) => {
-      hoisted.capturedPushOptions = options;
-      return {
-        mutate: hoisted.pushMutate,
-        isPending: hoisted.pushIsPending,
-        isError: hoisted.pushIsError,
-      };
-    },
-    useResolveBimModelDivergence: (
-      options: typeof hoisted.capturedResolveOptions,
-    ) => {
-      hoisted.capturedResolveOptions = options;
-      return {
-        mutate: hoisted.resolveMutate,
-        isPending: hoisted.resolveIsPending,
-        isError: hoisted.resolveIsError,
-      };
-    },
+    usePushEngagementBimModel: makeCapturingMutationHook(push),
+    useResolveBimModelDivergence: makeCapturingMutationHook(resolve),
   };
 });
 
@@ -364,14 +326,8 @@ beforeEach(() => {
       elements: [],
     },
   };
-  hoisted.capturedPushOptions = null;
-  hoisted.pushMutate.mockReset();
-  hoisted.pushIsPending = false;
-  hoisted.pushIsError = false;
-  hoisted.capturedResolveOptions = null;
-  hoisted.resolveMutate.mockReset();
-  hoisted.resolveIsPending = false;
-  hoisted.resolveIsError = false;
+  push.reset();
+  resolve.reset();
 });
 
 afterEach(() => {
@@ -1286,12 +1242,12 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
     // invalidation chain by hand without racing a real network
     // round-trip.
     fireEvent.click(screen.getByTestId("briefing-divergences-resolve-button"));
-    expect(hoisted.resolveMutate).toHaveBeenCalledTimes(1);
-    expect(hoisted.resolveMutate).toHaveBeenCalledWith({
+    expect(resolve.mutate).toHaveBeenCalledTimes(1);
+    expect(resolve.mutate).toHaveBeenCalledWith({
       id: "bim-1",
       divergenceId: "div-to-resolve",
     });
-    expect(hoisted.capturedResolveOptions?.mutation?.onSuccess).toBeDefined();
+    expect(resolve.capturedOptions?.mutation?.onSuccess).toBeDefined();
 
     // The api-server's resolve handler stamps `resolvedAt` and
     // `resolvedByRequestor` on the row and re-emits it via the
@@ -1316,7 +1272,7 @@ describe("BriefingDivergencesPanel (Task #172)", () => {
     };
     hoisted.divergences = [resolvedRowFixture];
     await act(async () => {
-      await hoisted.capturedResolveOptions!.mutation!.onSuccess!(
+      await resolve.capturedOptions!.mutation!.onSuccess!(
         undefined,
         { id: "bim-1", divergenceId: "div-to-resolve" },
         undefined,
@@ -1738,12 +1694,12 @@ describe("PushToRevitAffordance → divergences invalidation (Task #172)", () =>
     // exercise the page-level invalidation chain, mirroring the
     // Task #126 banner test pattern.
     fireEvent.click(screen.getByTestId("push-to-revit-button"));
-    expect(hoisted.pushMutate).toHaveBeenCalledTimes(1);
-    expect(hoisted.capturedPushOptions?.mutation?.onSuccess).toBeDefined();
+    expect(push.mutate).toHaveBeenCalledTimes(1);
+    expect(push.capturedOptions?.mutation?.onSuccess).toBeDefined();
 
     invalidateSpy.mockClear();
     await act(async () => {
-      await hoisted.capturedPushOptions!.mutation!.onSuccess!(
+      await push.capturedOptions!.mutation!.onSuccess!(
         { bimModel: { ...hoisted.bimModel } },
         { id: hoisted.bimModel.engagementId, data: {} },
         undefined,
@@ -1944,7 +1900,7 @@ describe("PushToRevitAffordance status / CTA / explainer mapping (Task #207)", (
     // click failed — a regression that hides it (e.g. a refactor
     // that drops the `pushMutation.isError &&` branch) would leave
     // them clicking a "Push" button that silently does nothing.
-    hoisted.pushIsError = true;
+    push.state.isError = true;
 
     renderPushAffordance();
 

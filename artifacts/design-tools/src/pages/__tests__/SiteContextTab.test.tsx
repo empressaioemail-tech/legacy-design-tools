@@ -58,16 +58,24 @@ import {
   PILOT_JURISDICTION_COVERAGE,
   PILOT_JURISDICTIONS,
 } from "@workspace/adapters";
+import {
+  MockApiError,
+  createMutationCapture,
+  createQueryKeyStubs,
+  makeCapturingMutationHook,
+  noopMutationHook,
+  noopQueryHook,
+} from "@workspace/portal-ui/test-utils";
 
-// ── Hoisted mock state ──────────────────────────────────────────────────
+// ── Hoisted fixture state ───────────────────────────────────────────────
 //
-// `capturedGenerateOptions` is the seam every test drives through:
+// `generate.capturedOptions` is the seam every test drives through:
 // the SiteContextTab passes its `mutation: { onError, onSuccess }`
-// options to `useGenerateEngagementLayers`, the mock captures them,
-// and each test fires `onError` with a fake ApiError to trigger the
-// banner branches. The two pre-resolved query keys mirror the real
-// generated ones so `invalidateQueries` calls inside the page do not
-// no-op against a different key.
+// options to `useGenerateEngagementLayers`, the helper captures
+// them, and each test fires `onError` with a fake ApiError to
+// trigger the banner branches. The capture lives at module
+// top-level (Task #382 shared `createMutationCapture` helper) so
+// only the data fixture needs to stay inside `vi.hoisted`.
 // Default fixture is a Moab UT engagement so the in-pilot pre-flight
 // (Task #189) keeps the empty-pilot banner offscreen until a test
 // fires the post-error path on its own. The proactive-banner tests
@@ -104,23 +112,10 @@ const hoisted = vi.hoisted(() => {
       revitCentralGuid: null as string | null,
       revitDocumentPath: null as string | null,
     },
-    capturedGenerateOptions: null as null | {
-      mutation?: {
-        onSuccess?: (
-          data: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => Promise<void> | void;
-        onError?: (
-          err: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => void;
-      };
-    },
-    generateMutate: vi.fn(),
   };
 });
+
+const generate = createMutationCapture();
 
 // useParams is consumed by the page from wouter; pin it to the seeded
 // engagement id so we don't need a Router wrapper.
@@ -155,17 +150,6 @@ vi.mock("@workspace/site-context/client", () => ({
 // briefing-sources placeholder paints.
 vi.mock("@workspace/api-client-react", async () => {
   const { useQuery } = await import("@tanstack/react-query");
-  class MockApiError extends Error {
-    readonly name = "ApiError" as const;
-    status: number;
-    data: unknown;
-    constructor(status: number, data: unknown = null, message?: string) {
-      super(message ?? `HTTP ${status}`);
-      Object.setPrototypeOf(this, MockApiError.prototype);
-      this.status = status;
-      this.data = data;
-    }
-  }
   return {
     ApiError: MockApiError,
     RecordSubmissionResponseBodyStatus: {
@@ -173,33 +157,21 @@ vi.mock("@workspace/api-client-react", async () => {
       corrections_requested: "corrections_requested",
       rejected: "rejected",
     },
-    useRecordSubmissionResponse: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    getGetEngagementQueryKey: (id: string) => ["getEngagement", id],
-    getGetSnapshotQueryKey: (id: string) => ["getSnapshot", id],
-    getListEngagementsQueryKey: () => ["listEngagements"],
-    getListEngagementSubmissionsQueryKey: (id: string) => [
-      "listEngagementSubmissions",
-      id,
-    ],
-    getGetEngagementBriefingQueryKey: (id: string) => [
-      "getEngagementBriefing",
-      id,
-    ],
-    getListEngagementBriefingSourcesQueryKey: (id: string) => [
-      "listEngagementBriefingSources",
-      id,
-    ],
-    getListBimModelDivergencesQueryKey: (id: string) => [
-      "listBimModelDivergences",
-      id,
-    ],
-    getGetEngagementBriefingGenerationStatusQueryKey: (id: string) => [
-      "getEngagementBriefingGenerationStatus",
-      id,
-    ],
+    useRecordSubmissionResponse: noopMutationHook,
+    ...createQueryKeyStubs([
+      "getGetEngagementQueryKey",
+      "getGetSnapshotQueryKey",
+      "getListEngagementsQueryKey",
+      "getListEngagementSubmissionsQueryKey",
+      "getGetEngagementBriefingQueryKey",
+      "getListEngagementBriefingSourcesQueryKey",
+      "getListBimModelDivergencesQueryKey",
+      "getGetEngagementBriefingGenerationStatusQueryKey",
+      "getGetSessionQueryKey",
+    ] as const),
+    // Custom-shape keys that prepend extra positional args — the
+    // standard `createQueryKeyStubs` algorithm does not produce
+    // `["getAtomHistory", scope, id, params ?? {}]`, so kept inline.
     getGetAtomHistoryQueryKey: (
       scope: string,
       id: string,
@@ -210,7 +182,6 @@ vi.mock("@workspace/api-client-react", async () => {
       scope,
       id,
     ],
-    getGetSessionQueryKey: () => ["getSession"],
     useGetSession: () =>
       useQuery({
         queryKey: ["getSession"],
@@ -240,22 +211,9 @@ vi.mock("@workspace/api-client-react", async () => {
         queryFn: async () => null,
         enabled: opts?.query?.enabled ?? false,
       }),
-    useUpdateEngagement: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    useGetAtomHistory: () => ({
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      error: null,
-    }),
-    useGetAtomSummary: () => ({
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      error: null,
-    }),
+    useUpdateEngagement: noopMutationHook,
+    useGetAtomHistory: noopQueryHook,
+    useGetAtomSummary: noopQueryHook,
     useListEngagementSubmissions: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },
@@ -265,10 +223,7 @@ vi.mock("@workspace/api-client-react", async () => {
           opts?.query?.queryKey ?? (["listEngagementSubmissions", id] as const),
         queryFn: async () => [],
       }),
-    useCreateEngagementSubmission: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
+    useCreateEngagementSubmission: noopMutationHook,
     // SiteContextTab — the briefing read backs the empty-state
     // placeholder and the tier-grouped source rows. An empty
     // briefing keeps the SiteContextTab in its "no sources yet"
@@ -303,10 +258,7 @@ vi.mock("@workspace/api-client-react", async () => {
           (["getEngagementBriefingGenerationStatus", id] as const),
         queryFn: async () => ({ status: "idle" }),
       }),
-    useGenerateEngagementBriefing: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
+    useGenerateEngagementBriefing: noopMutationHook,
     // Task #230 — BriefingNarrativePanel mounts the Recent runs
     // disclosure unconditionally. The disclosure only fetches when
     // the auditor opens it, but the hook is still consulted on
@@ -334,44 +286,22 @@ vi.mock("@workspace/api-client-react", async () => {
     // happens during the test — without a stub the modal blows up
     // with "No 'useCreateEngagementBriefingSource' export defined" the
     // moment the CTA opens it.
-    useCreateEngagementBriefingSource: () => ({
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-      isPending: false,
-    }),
-    useRestoreEngagementBriefingSource: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    useRetryBriefingSourceConversion: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
+    useCreateEngagementBriefingSource: noopMutationHook,
+    useRestoreEngagementBriefingSource: noopMutationHook,
+    useRetryBriefingSourceConversion: noopMutationHook,
     // The hook under test — capture the mutation options so each
     // test can synthesize an ApiError and fire `onError` directly,
     // bypassing the real fetch round-trip.
-    useGenerateEngagementLayers: (
-      options: typeof hoisted.capturedGenerateOptions,
-    ) => {
-      hoisted.capturedGenerateOptions = options;
-      return {
-        mutate: hoisted.generateMutate,
-        isPending: false,
-      };
-    },
+    useGenerateEngagementLayers: makeCapturingMutationHook(generate),
     // PushToRevitAffordance is mounted inside SiteContextTab and
     // pulls these three hooks on every render. None of them affect
     // the empty-pilot banner under test, so we hand back inert
     // shapes that keep the affordance in its idle "no bim model"
     // state instead of asserting against it.
-    getGetEngagementBimModelQueryKey: (id: string) => [
-      "getEngagementBimModel",
-      id,
-    ],
-    getGetBimModelRefreshQueryKey: (id: string) => [
-      "getBimModelRefresh",
-      id,
-    ],
+    ...createQueryKeyStubs([
+      "getGetEngagementBimModelQueryKey",
+      "getGetBimModelRefreshQueryKey",
+    ] as const),
     useGetEngagementBimModel: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },
@@ -391,11 +321,7 @@ vi.mock("@workspace/api-client-react", async () => {
         queryFn: async () => null,
         enabled: opts?.query?.enabled ?? false,
       }),
-    usePushEngagementBimModel: () => ({
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-      isPending: false,
-    }),
+    usePushEngagementBimModel: noopMutationHook,
     useListBimModelDivergences: (
       id: string,
       opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
@@ -498,8 +424,7 @@ beforeEach(() => {
     revitCentralGuid: null,
     revitDocumentPath: null,
   };
-  hoisted.capturedGenerateOptions = null;
-  hoisted.generateMutate.mockReset();
+  generate.reset();
 });
 
 afterEach(() => {
@@ -529,11 +454,11 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     // Drive the failure path through the captured mutation options.
     // Mirroring the real `customFetch` shape: an ApiError carrying the
     // `{ error, message }` envelope on `.data`, with a status of 422.
-    expect(hoisted.capturedGenerateOptions?.mutation?.onError).toBeDefined();
+    expect(generate.capturedOptions?.mutation?.onError).toBeDefined();
     const serverMessage =
       'No adapters configured for jurisdiction "CO" / "Boulder".';
     act(() => {
-      hoisted.capturedGenerateOptions!.mutation!.onError!(
+      generate.capturedOptions!.mutation!.onError!(
         makeApiErrorLike(422, {
           error: "no_applicable_adapters",
           message: serverMessage,
@@ -580,7 +505,7 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     ).toBeNull();
 
     act(() => {
-      hoisted.capturedGenerateOptions!.mutation!.onError!(
+      generate.capturedOptions!.mutation!.onError!(
         makeApiErrorLike(422, {
           error: "no_applicable_adapters",
           message:
@@ -613,7 +538,7 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     renderPage();
 
     act(() => {
-      hoisted.capturedGenerateOptions!.mutation!.onError!(
+      generate.capturedOptions!.mutation!.onError!(
         makeApiErrorLike(500, {
           error: "no_applicable_adapters",
           message: "Internal failure that happened to share the slug",
@@ -740,7 +665,7 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     }
 
     act(() => {
-      hoisted.capturedGenerateOptions!.mutation!.onError!(
+      generate.capturedOptions!.mutation!.onError!(
         makeApiErrorLike(422, {
           error: "no_applicable_adapters",
           message:
@@ -775,7 +700,7 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     // existing alert banner so an architect can tell a real outage
     // apart from an out-of-pilot dead-end.
     act(() => {
-      hoisted.capturedGenerateOptions!.mutation!.onError!(
+      generate.capturedOptions!.mutation!.onError!(
         makeApiErrorLike(500, {
           error: "internal_error",
           message: "Failed to run adapters",
@@ -1034,9 +959,9 @@ describe("GenerateLayersSummaryBanner (Task #229)", () => {
       screen.queryByTestId("generate-layers-summary-banner"),
     ).not.toBeInTheDocument();
 
-    expect(hoisted.capturedGenerateOptions?.mutation?.onSuccess).toBeDefined();
+    expect(generate.capturedOptions?.mutation?.onSuccess).toBeDefined();
     await act(async () => {
-      await hoisted.capturedGenerateOptions!.mutation!.onSuccess!(
+      await generate.capturedOptions!.mutation!.onSuccess!(
         {
           briefing: null,
           outcomes: [

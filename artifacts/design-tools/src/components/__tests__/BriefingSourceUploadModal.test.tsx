@@ -41,50 +41,44 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import {
+  createMutationCapture,
+  createQueryKeyStubs,
+  makeCapturingMutationHook,
+} from "@workspace/portal-ui/test-utils";
 
-const hoisted = vi.hoisted(() => ({
+// Upload-side state (object-storage-web's `useUpload`) stays in a
+// dedicated `vi.hoisted` block since it is outside the shared mock
+// harness. The api-client-react mutation
+// `useCreateEngagementBriefingSource` is captured through the shared
+// `createMutationCapture` helper (Task #382): `hoisted.mutateAsync`
+// is the spy and `hoisted.capturedOptions` exposes the registered
+// `mutation: { onSuccess }` for hand-firing in tests.
+const hoistedLocal = vi.hoisted(() => ({
   uploadFileMock: vi.fn(),
   uploadState: {
     isUploading: false,
     error: null as Error | null,
     progress: 0,
   },
-  mutateAsyncMock: vi.fn(),
-  capturedMutationOptions: null as null | {
-    mutation?: {
-      onSuccess?: (
-        data: unknown,
-        variables: unknown,
-        context: unknown,
-      ) => Promise<void> | void;
-    };
-  },
-  mutationState: { isPending: false },
 }));
+
+const hoisted = createMutationCapture();
 
 vi.mock("@workspace/object-storage-web", () => ({
   useUpload: () => ({
-    uploadFile: hoisted.uploadFileMock,
-    isUploading: hoisted.uploadState.isUploading,
-    error: hoisted.uploadState.error,
-    progress: hoisted.uploadState.progress,
+    uploadFile: hoistedLocal.uploadFileMock,
+    isUploading: hoistedLocal.uploadState.isUploading,
+    error: hoistedLocal.uploadState.error,
+    progress: hoistedLocal.uploadState.progress,
   }),
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
-  useCreateEngagementBriefingSource: (
-    options: typeof hoisted.capturedMutationOptions,
-  ) => {
-    hoisted.capturedMutationOptions = options;
-    return {
-      mutateAsync: hoisted.mutateAsyncMock,
-      isPending: hoisted.mutationState.isPending,
-    };
-  },
-  getGetEngagementBriefingQueryKey: (id: string) => [
-    "getEngagementBriefing",
-    id,
-  ],
+  useCreateEngagementBriefingSource: makeCapturingMutationHook(hoisted),
+  ...createQueryKeyStubs([
+    "getGetEngagementBriefingQueryKey",
+  ] as const),
 }));
 
 const { BriefingSourceUploadModal } = await import(
@@ -143,13 +137,11 @@ const sampleFile = () =>
   });
 
 beforeEach(() => {
-  hoisted.uploadFileMock.mockReset();
-  hoisted.mutateAsyncMock.mockReset();
-  hoisted.uploadState.isUploading = false;
-  hoisted.uploadState.error = null;
-  hoisted.uploadState.progress = 0;
-  hoisted.mutationState.isPending = false;
-  hoisted.capturedMutationOptions = null;
+  hoistedLocal.uploadFileMock.mockReset();
+  hoistedLocal.uploadState.isUploading = false;
+  hoistedLocal.uploadState.error = null;
+  hoistedLocal.uploadState.progress = 0;
+  hoisted.reset();
 });
 
 afterEach(() => {
@@ -158,7 +150,7 @@ afterEach(() => {
 
 describe("BriefingSourceUploadModal", () => {
   it("happy path: uploads bytes, posts metadata, closes the modal, and invalidates the briefing query", async () => {
-    hoisted.uploadFileMock.mockResolvedValueOnce({
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce({
       uploadURL: "https://storage.example/put-target",
       objectPath: "uploads/eng-1/zoning.zip",
       metadata: {
@@ -167,7 +159,7 @@ describe("BriefingSourceUploadModal", () => {
         contentType: "application/zip",
       },
     });
-    hoisted.mutateAsyncMock.mockResolvedValueOnce({
+    hoisted.mutateAsync.mockResolvedValueOnce({
       id: "src-1",
       layerKind: "qgis-zoning",
     });
@@ -183,14 +175,14 @@ describe("BriefingSourceUploadModal", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
 
     // The upload hook was driven with the actual File the user picked.
-    expect(hoisted.uploadFileMock).toHaveBeenCalledTimes(1);
-    const uploadedFile = hoisted.uploadFileMock.mock.calls[0]?.[0] as File;
+    expect(hoistedLocal.uploadFileMock).toHaveBeenCalledTimes(1);
+    const uploadedFile = hoistedLocal.uploadFileMock.mock.calls[0]?.[0] as File;
     expect(uploadedFile.name).toBe("zoning.zip");
 
     // The metadata mutation got the resolved objectPath + the file's
     // own metadata so the server can land the briefing source row.
-    expect(hoisted.mutateAsyncMock).toHaveBeenCalledTimes(1);
-    expect(hoisted.mutateAsyncMock).toHaveBeenCalledWith({
+    expect(hoisted.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(hoisted.mutateAsync).toHaveBeenCalledWith({
       id: "eng-42",
       data: expect.objectContaining({
         layerKind: "qgis-zoning",
@@ -206,9 +198,9 @@ describe("BriefingSourceUploadModal", () => {
     // The modal wires its `onSuccess` into useCreateEngagementBriefingSource
     // options. Real react-query triggers it; in this test the mock
     // doesn't, so we drive it manually to assert the invalidation key.
-    expect(hoisted.capturedMutationOptions?.mutation?.onSuccess).toBeDefined();
+    expect(hoisted.capturedOptions?.mutation?.onSuccess).toBeDefined();
     await act(async () => {
-      await hoisted.capturedMutationOptions!.mutation!.onSuccess!(
+      await hoisted.capturedOptions!.mutation!.onSuccess!(
         { id: "src-1" },
         { id: "eng-42", data: {} },
         undefined,
@@ -222,8 +214,8 @@ describe("BriefingSourceUploadModal", () => {
   it("surfaces the presigned-URL request error verbatim and keeps the modal open", async () => {
     // First step of the two-step flow fails: the storage route returned
     // 4xx and `useUpload` populated `error` before resolving null.
-    hoisted.uploadState.error = new Error("Failed to get upload URL");
-    hoisted.uploadFileMock.mockResolvedValueOnce(null);
+    hoistedLocal.uploadState.error = new Error("Failed to get upload URL");
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce(null);
 
     const onClose = vi.fn();
     renderModal({ onClose });
@@ -236,7 +228,7 @@ describe("BriefingSourceUploadModal", () => {
 
     // The metadata POST must NOT fire if we never got a presigned URL,
     // and the modal must stay mounted so the architect can retry.
-    expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
+    expect(hoisted.mutateAsync).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(
       screen.getByRole("button", { name: /^Upload$/ }),
@@ -248,8 +240,8 @@ describe("BriefingSourceUploadModal", () => {
     // The modal can't tell which step blew up — it just trusts
     // `useUpload`'s error message — so the user-visible contract is
     // "show the verbatim hook error and stay open for retry".
-    hoisted.uploadState.error = new Error("Failed to upload file to storage");
-    hoisted.uploadFileMock.mockResolvedValueOnce(null);
+    hoistedLocal.uploadState.error = new Error("Failed to upload file to storage");
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce(null);
 
     const onClose = vi.fn();
     renderModal({ onClose });
@@ -259,7 +251,7 @@ describe("BriefingSourceUploadModal", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/Failed to upload file to storage/);
-    expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
+    expect(hoisted.mutateAsync).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -267,8 +259,8 @@ describe("BriefingSourceUploadModal", () => {
     // Defensive: if uploadFile returns null without populating
     // `error` (shouldn't happen, but the modal hedges), the user must
     // still see *something* rather than a silently dismissed click.
-    hoisted.uploadState.error = null;
-    hoisted.uploadFileMock.mockResolvedValueOnce(null);
+    hoistedLocal.uploadState.error = null;
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce(null);
 
     renderModal();
     attachFile(sampleFile());
@@ -284,7 +276,7 @@ describe("BriefingSourceUploadModal", () => {
     // storage — the modal can't undo that, but it MUST keep itself
     // open and show the error so the architect doesn't think the
     // upload silently succeeded.
-    hoisted.uploadFileMock.mockResolvedValueOnce({
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce({
       uploadURL: "https://storage.example/put-target",
       objectPath: "uploads/eng-1/zoning.zip",
       metadata: {
@@ -293,7 +285,7 @@ describe("BriefingSourceUploadModal", () => {
         contentType: "application/zip",
       },
     });
-    hoisted.mutateAsyncMock.mockRejectedValueOnce(
+    hoisted.mutateAsync.mockRejectedValueOnce(
       new Error("Briefing source insert failed: unique constraint"),
     );
 
@@ -316,7 +308,7 @@ describe("BriefingSourceUploadModal", () => {
   });
 
   it("falls back to a generic message when the metadata POST rejects with a non-Error value", async () => {
-    hoisted.uploadFileMock.mockResolvedValueOnce({
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce({
       uploadURL: "https://storage.example/put-target",
       objectPath: "uploads/eng-1/zoning.zip",
       metadata: {
@@ -328,7 +320,7 @@ describe("BriefingSourceUploadModal", () => {
     // Some clients reject with a plain string / object. The modal
     // narrows on `instanceof Error` and otherwise falls back to a
     // generic copy.
-    hoisted.mutateAsyncMock.mockRejectedValueOnce("boom");
+    hoisted.mutateAsync.mockRejectedValueOnce("boom");
 
     renderModal();
     attachFile(sampleFile());
@@ -364,12 +356,12 @@ describe("BriefingSourceUploadModal", () => {
 
     // No network calls should have fired — the validation gate is
     // strictly client-side.
-    expect(hoisted.uploadFileMock).not.toHaveBeenCalled();
-    expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
+    expect(hoistedLocal.uploadFileMock).not.toHaveBeenCalled();
+    expect(hoisted.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("accepts a valid custom slug under 'Other' and forwards it to the metadata POST", async () => {
-    hoisted.uploadFileMock.mockResolvedValueOnce({
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce({
       uploadURL: "https://storage.example/put-target",
       objectPath: "uploads/eng-1/easements.zip",
       metadata: {
@@ -378,7 +370,7 @@ describe("BriefingSourceUploadModal", () => {
         contentType: "application/zip",
       },
     });
-    hoisted.mutateAsyncMock.mockResolvedValueOnce({ id: "src-2" });
+    hoisted.mutateAsync.mockResolvedValueOnce({ id: "src-2" });
 
     const onClose = vi.fn();
     renderModal({ onClose });
@@ -395,7 +387,7 @@ describe("BriefingSourceUploadModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(hoisted.mutateAsyncMock).toHaveBeenCalledWith(
+    expect(hoisted.mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ layerKind: "qgis-easements" }),
       }),
@@ -409,8 +401,8 @@ describe("BriefingSourceUploadModal", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /Pick a file to upload\./,
     );
-    expect(hoisted.uploadFileMock).not.toHaveBeenCalled();
-    expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
+    expect(hoistedLocal.uploadFileMock).not.toHaveBeenCalled();
+    expect(hoisted.mutateAsync).not.toHaveBeenCalled();
   });
 
   // DA-MV-1: the new DXF branch in the picker must (a) flip
@@ -418,7 +410,7 @@ describe("BriefingSourceUploadModal", () => {
   // (b) reject non-`.dxf` files at the client gate so the architect
   // doesn't pay the network round-trip for a guaranteed 4xx.
   it("forwards upload.kind='dxf' for a DXF layer kind and a .dxf file", async () => {
-    hoisted.uploadFileMock.mockResolvedValueOnce({
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce({
       uploadURL: "https://storage.example/put-target",
       objectPath: "uploads/eng-1/terrain.dxf",
       metadata: {
@@ -427,7 +419,7 @@ describe("BriefingSourceUploadModal", () => {
         contentType: "application/octet-stream",
       },
     });
-    hoisted.mutateAsyncMock.mockResolvedValueOnce({
+    hoisted.mutateAsync.mockResolvedValueOnce({
       id: "src-3",
       layerKind: "terrain",
     });
@@ -446,7 +438,7 @@ describe("BriefingSourceUploadModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(hoisted.mutateAsyncMock).toHaveBeenCalledWith(
+    expect(hoisted.mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "eng-9",
         data: expect.objectContaining({
@@ -476,8 +468,8 @@ describe("BriefingSourceUploadModal", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /3D-geometry layers expect a DXF file/,
     );
-    expect(hoisted.uploadFileMock).not.toHaveBeenCalled();
-    expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
+    expect(hoistedLocal.uploadFileMock).not.toHaveBeenCalled();
+    expect(hoisted.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("rejects a .dxf file under a 2D-overlay layer kind before any upload fires", () => {
@@ -494,12 +486,12 @@ describe("BriefingSourceUploadModal", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /2D-overlay layers expect a vector file/,
     );
-    expect(hoisted.uploadFileMock).not.toHaveBeenCalled();
-    expect(hoisted.mutateAsyncMock).not.toHaveBeenCalled();
+    expect(hoistedLocal.uploadFileMock).not.toHaveBeenCalled();
+    expect(hoisted.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("forwards upload.kind='qgis' on the default 2D-overlay branch", async () => {
-    hoisted.uploadFileMock.mockResolvedValueOnce({
+    hoistedLocal.uploadFileMock.mockResolvedValueOnce({
       uploadURL: "https://storage.example/put-target",
       objectPath: "uploads/eng-1/zoning.zip",
       metadata: {
@@ -508,7 +500,7 @@ describe("BriefingSourceUploadModal", () => {
         contentType: "application/zip",
       },
     });
-    hoisted.mutateAsyncMock.mockResolvedValueOnce({ id: "src-4" });
+    hoisted.mutateAsync.mockResolvedValueOnce({ id: "src-4" });
 
     const onClose = vi.fn();
     renderModal({ onClose });
@@ -516,7 +508,7 @@ describe("BriefingSourceUploadModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(hoisted.mutateAsyncMock).toHaveBeenCalledWith(
+    expect(hoisted.mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           upload: expect.objectContaining({ kind: "qgis" }),

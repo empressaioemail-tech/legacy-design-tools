@@ -47,13 +47,24 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import {
+  MockApiError,
+  createMutationCapture,
+  createQueryKeyStubs,
+  makeCapturingMutationHook,
+  noopMutationHook,
+  noopQueryHook,
+} from "@workspace/portal-ui/test-utils";
 
-// ── Hoisted mock state ──────────────────────────────────────────────────
+// ── Hoisted fixture state ───────────────────────────────────────────────
 //
-// Shared between the vi.mock factories below and the test bodies. We
-// keep this in a single object so each `beforeEach` reset is one
-// place to think about. The shape mirrors the plan-review test so
-// the two surfaces stay easy to read side-by-side.
+// Data fixtures stay in `vi.hoisted` so the mock factory below sees
+// them at hoist time. The capture for `useCreateEngagementSubmission`
+// (`submit.mutate`, `submit.capturedOptions`, `submit.state.isPending`)
+// lives at module top-level via the shared `createMutationCapture`
+// helper (Task #382) — `vi.mock` is hoisted but its FACTORY runs
+// lazily on `await import(...)` below, so the closure over `submit`
+// is initialised by the time it runs.
 const hoisted = vi.hoisted(() => {
   return {
     engagement: {
@@ -96,24 +107,10 @@ const hoisted = vi.hoisted(() => {
       reviewerComment: string | null;
       respondedAt: string | null;
     }>,
-    capturedSubmitOptions: null as null | {
-      mutation?: {
-        onSuccess?: (
-          data: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => Promise<void> | void;
-        onError?: (
-          err: unknown,
-          variables: unknown,
-          context: unknown,
-        ) => void;
-      };
-    },
-    submitMutate: vi.fn(),
-    submitState: { isPending: false },
   };
 });
+
+const submit = createMutationCapture();
 
 // useParams comes from wouter inside the page; hard-pin it to the
 // engagement id so we don't need a Router wrapper.
@@ -155,17 +152,6 @@ vi.mock("@workspace/site-context/client", () => ({
 // crashing while we exercise the banner.
 vi.mock("@workspace/api-client-react", async () => {
   const { useQuery } = await import("@tanstack/react-query");
-  class MockApiError extends Error {
-    readonly name = "ApiError" as const;
-    status: number;
-    data: unknown;
-    constructor(status: number, data: unknown = null, message?: string) {
-      super(message ?? `HTTP ${status}`);
-      Object.setPrototypeOf(this, MockApiError.prototype);
-      this.status = status;
-      this.data = data;
-    }
-  }
   return {
     ApiError: MockApiError,
     RecordSubmissionResponseBodyStatus: {
@@ -173,17 +159,17 @@ vi.mock("@workspace/api-client-react", async () => {
       corrections_requested: "corrections_requested",
       rejected: "rejected",
     },
-    useRecordSubmissionResponse: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    getGetEngagementQueryKey: (id: string) => ["getEngagement", id],
-    getGetSnapshotQueryKey: (id: string) => ["getSnapshot", id],
-    getListEngagementsQueryKey: () => ["listEngagements"],
-    getListEngagementSubmissionsQueryKey: (id: string) => [
-      "listEngagementSubmissions",
-      id,
-    ],
+    useRecordSubmissionResponse: noopMutationHook,
+    ...createQueryKeyStubs([
+      "getGetEngagementQueryKey",
+      "getGetSnapshotQueryKey",
+      "getListEngagementsQueryKey",
+      "getListEngagementSubmissionsQueryKey",
+      "getGetSessionQueryKey",
+    ] as const),
+    // Custom-shape keys that prepend extra positional args — the
+    // standard `createQueryKeyStubs` algorithm does not produce
+    // `["getAtomHistory", scope, id, params ?? {}]`, so kept inline.
     getGetAtomHistoryQueryKey: (
       scope: string,
       id: string,
@@ -194,7 +180,6 @@ vi.mock("@workspace/api-client-react", async () => {
       scope,
       id,
     ],
-    getGetSessionQueryKey: () => ["getSession"],
     useGetSession: () =>
       useQuery({
         queryKey: ["getSession"],
@@ -224,22 +209,9 @@ vi.mock("@workspace/api-client-react", async () => {
         queryFn: async () => null,
         enabled: opts?.query?.enabled ?? false,
       }),
-    useUpdateEngagement: () => ({
-      mutate: vi.fn(),
-      isPending: false,
-    }),
-    useGetAtomHistory: () => ({
-      data: undefined as unknown,
-      isLoading: false,
-      isError: false,
-      error: null,
-    }),
-    useGetAtomSummary: () => ({
-      data: undefined as unknown,
-      isLoading: false,
-      isError: false,
-      error: null,
-    }),
+    useUpdateEngagement: noopMutationHook,
+    useGetAtomHistory: noopQueryHook,
+    useGetAtomSummary: noopQueryHook,
     useListEngagementSubmissions: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },
@@ -249,15 +221,7 @@ vi.mock("@workspace/api-client-react", async () => {
           opts?.query?.queryKey ?? (["listEngagementSubmissions", id] as const),
         queryFn: async () => hoisted.submissions.map((s) => ({ ...s })),
       }),
-    useCreateEngagementSubmission: (
-      options: typeof hoisted.capturedSubmitOptions,
-    ) => {
-      hoisted.capturedSubmitOptions = options;
-      return {
-        mutate: hoisted.submitMutate,
-        isPending: hoisted.submitState.isPending,
-      };
-    },
+    useCreateEngagementSubmission: makeCapturingMutationHook(submit),
   };
 });
 
@@ -327,9 +291,7 @@ beforeEach(() => {
     revitDocumentPath: null,
   };
   hoisted.submissions = [];
-  hoisted.capturedSubmitOptions = null;
-  hoisted.submitMutate.mockReset();
-  hoisted.submitState.isPending = false;
+  submit.reset();
   // Reset URL state — the page reads the active tab from
   // `?tab=…` once on mount via `useState(() => readTabFromUrl())`,
   // so a leftover query string from a prior test would land us on
@@ -360,8 +322,8 @@ async function submitOnce(opts?: {
   // call (the mutate spy is a no-op so the promise never resolves on
   // its own — we manually fire onSuccess below).
   fireEvent.click(screen.getByTestId("submit-jurisdiction-confirm"));
-  expect(hoisted.submitMutate).toHaveBeenCalledTimes(1);
-  expect(hoisted.capturedSubmitOptions?.mutation?.onSuccess).toBeDefined();
+  expect(submit.mutate).toHaveBeenCalledTimes(1);
+  expect(submit.capturedOptions?.mutation?.onSuccess).toBeDefined();
 
   const submittedAtIso = new Date().toISOString();
   const receipt = opts?.receipt ?? {
@@ -382,7 +344,7 @@ async function submitOnce(opts?: {
   // Push the new row first so the invalidateQueries refetch sees it.
   hoisted.submissions = [row, ...hoisted.submissions];
   await act(async () => {
-    await hoisted.capturedSubmitOptions!.mutation!.onSuccess!(
+    await submit.capturedOptions!.mutation!.onSuccess!(
       receipt,
       { id: hoisted.engagement.id, data: {} },
       undefined,
