@@ -72,6 +72,12 @@ const { makeBriefingSourceAtom } = await import(
 const { makeSheetAtom } = await import("../atoms/sheet.atom");
 const { makeSnapshotAtom } = await import("../atoms/snapshot.atom");
 const { makeSubmissionAtom } = await import("../atoms/submission.atom");
+const { makeViewpointRenderAtom } = await import(
+  "../atoms/viewpoint-render.atom"
+);
+const { makeNeighboringContextAtom } = await import(
+  "../atoms/neighboring-context.atom"
+);
 
 const lazyDb = new Proxy({} as typeof dbModule.db, {
   get: (_t, prop) => Reflect.get(dbModule.db as object, prop, dbModule.db),
@@ -211,7 +217,10 @@ describe("bim-model atom (contract)", () => {
     // The non-forward-ref edges from bim-model are `engagement`,
     // `parcel-briefing`, and `briefing-divergence`. parcel-briefing
     // in turn has its own non-forward-ref children (intent and
-    // briefing-source) so `validate()` requires them too.
+    // briefing-source) so `validate()` requires them too. As of
+    // DA-RP-0, `engagement` also composes `viewpoint-render`, which
+    // in turn references `neighboring-context` — both must be
+    // registered for `validate()` to succeed.
     alsoRegister: [
       // bim-model's direct concrete edges:
       makeEngagementAtom({ db: lazyDb }),
@@ -225,6 +234,11 @@ describe("bim-model atom (contract)", () => {
       makeSheetAtom({ db: lazyDb }),
       makeSnapshotAtom({ db: lazyDb }),
       makeSubmissionAtom({ db: lazyDb }),
+      // DA-RP-0: engagement composes viewpoint-render, which in turn
+      // composes neighboring-context (bim-model + parcel-briefing
+      // are already in this list above).
+      makeViewpointRenderAtom(),
+      makeNeighboringContextAtom(),
     ],
   });
 });

@@ -187,6 +187,13 @@ export function makeEngagementAtom(
   //     key, so `resolveComposition` naturally produces zero
   //     parcel-briefing children — the same lazy pattern submissions
   //     used before they had a real table.
+  // The `viewpoint-render` edge (DA-RP-0) is concrete because the
+  // `viewpoint-render` atom registers in the same sprint as this edge.
+  // `parentData["renders"]` is intentionally left unpopulated until
+  // DA-RP-1 wires the renders table — `resolveComposition` produces
+  // zero children for an absent / empty `renders` key, the same lazy
+  // pattern `activeBriefing` used before DA-PI-3 and `submissions`
+  // used before sprint A4 / Task #63.
   const composition: ReadonlyArray<AtomComposition> = [
     {
       childEntityType: "snapshot",
@@ -202,6 +209,11 @@ export function makeEngagementAtom(
       childEntityType: "parcel-briefing",
       childMode: "card",
       dataKey: "activeBriefing",
+    },
+    {
+      childEntityType: "viewpoint-render",
+      childMode: "card",
+      dataKey: "renders",
     },
   ];
 

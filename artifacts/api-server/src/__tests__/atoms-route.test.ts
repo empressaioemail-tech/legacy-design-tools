@@ -58,6 +58,12 @@ const { BRIEFING_DIVERGENCE_EVENT_TYPES } = await import(
 const { NEIGHBORING_CONTEXT_EVENT_TYPES } = await import(
   "../atoms/neighboring-context.atom"
 );
+const { VIEWPOINT_RENDER_EVENT_TYPES } = await import(
+  "../atoms/viewpoint-render.atom"
+);
+const { RENDER_OUTPUT_EVENT_TYPES } = await import(
+  "../atoms/render-output.atom"
+);
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -543,13 +549,16 @@ describe("GET /api/atoms/catalog", () => {
     expect(engagement?.eventTypes).toEqual([...ENGAGEMENT_EVENT_TYPES]);
     // After DA-PI-1, engagement composes the new `parcel-briefing` atom
     // alongside its existing `snapshot` and forward-ref `submission`
-    // edges. `composes` reflects the raw `childEntityType` order from the
-    // composition array (forward-ref edges are NOT filtered — see
+    // edges. After DA-RP-0 it also composes `viewpoint-render` (the
+    // engagement's render gallery, populated by DA-RP-1's renders
+    // table). `composes` reflects the raw `childEntityType` order from
+    // the composition array (forward-ref edges are NOT filtered — see
     // `describeForPrompt` in the framework registry).
     expect(engagement?.composes).toEqual([
       "snapshot",
       "submission",
       "parcel-briefing",
+      "viewpoint-render",
     ]);
 
     // DA-PI-1 parcel-intelligence atoms — assert the full registration
@@ -653,6 +662,38 @@ describe("GET /api/atoms/catalog", () => {
       "materializable-element",
       "parcel-briefing",
     ]);
+
+    // DA-RP-0 mnml.ai render-pipeline atoms — same drift-check
+    // pattern as the DA-PI-1 / DA-PI-5 atoms above. Both register
+    // shape-only this sprint; the renders persistence layer ships
+    // in DA-RP-1.
+
+    const viewpointRender = byType.get("viewpoint-render");
+    expect(viewpointRender).toBeDefined();
+    expect(viewpointRender?.eventTypes).toEqual([
+      ...VIEWPOINT_RENDER_EVENT_TYPES,
+    ]);
+    // viewpoint-render is the architect's demonstration surface —
+    // card-as-primary per the catalog convention and Spec 54 §3.
+    expect(viewpointRender?.defaultMode).toBe("card");
+    // Composition order from viewpoint-render.atom: engagement,
+    // parcel-briefing (briefingAtRender snapshot key),
+    // bim-model (bimModelAtRender snapshot key),
+    // neighboring-context (optional, neighboringContextAtRender).
+    expect(viewpointRender?.composes).toEqual([
+      "engagement",
+      "parcel-briefing",
+      "bim-model",
+      "neighboring-context",
+    ]);
+
+    const renderOutput = byType.get("render-output");
+    expect(renderOutput).toBeDefined();
+    expect(renderOutput?.eventTypes).toEqual([...RENDER_OUTPUT_EVENT_TYPES]);
+    // render-output primarily appears as a thumbnail in its parent
+    // viewpoint-render's gallery — compact mode mirrors briefing-source.
+    expect(renderOutput?.defaultMode).toBe("compact");
+    expect(renderOutput?.composes).toEqual(["viewpoint-render"]);
   });
 
   // The atoms route is fully dynamic (resolves through the registry),
@@ -669,6 +710,8 @@ describe("GET /api/atoms/catalog", () => {
       ["intent"],
       ["briefing-source"],
       ["neighboring-context"],
+      ["viewpoint-render"],
+      ["render-output"],
     ] as const)(
       "%s: returns the four-layer not-found envelope (data engine pending)",
       async (slug) => {

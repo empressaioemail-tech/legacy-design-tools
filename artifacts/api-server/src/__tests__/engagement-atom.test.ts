@@ -69,6 +69,19 @@ const { makeBriefingSourceAtom } = await import(
   "../atoms/briefing-source.atom"
 );
 const { makeSubmissionAtom } = await import("../atoms/submission.atom");
+const { makeViewpointRenderAtom } = await import(
+  "../atoms/viewpoint-render.atom"
+);
+const { makeBimModelAtom } = await import("../atoms/bim-model.atom");
+const { makeNeighboringContextAtom } = await import(
+  "../atoms/neighboring-context.atom"
+);
+const { makeBriefingDivergenceAtom } = await import(
+  "../atoms/briefing-divergence.atom"
+);
+const { makeMaterializableElementAtom } = await import(
+  "../atoms/materializable-element.atom"
+);
 
 // Lazy `db` proxy: same trick as `sheet-atom.test.ts`. The mock above
 // throws at property-access time when `ctx.schema` is null, so building
@@ -119,19 +132,23 @@ describe("engagement atom (contract)", () => {
 
   // The contract suite's `composition references resolve in the registry`
   // step needs every non-forward-ref child registered. Engagement's
-  // composition (post-DA-PI-1, post-Task #63) is:
+  // composition (post-DA-PI-1, post-Task #63, post-DA-RP-0) is:
   //   - snapshot (concrete) → snapshot in turn composes sheet
   //   - submission (concrete as of sprint A4 / Task #63) → leaf, no
   //     transitive children
   //   - parcel-briefing (concrete, DA-PI-1) → parcel-briefing in turn
   //     composes intent + briefing-source as concrete children, plus
   //     forward-refs to parcel and code-section
+  //   - viewpoint-render (concrete, DA-RP-0) → viewpoint-render in turn
+  //     composes engagement (this atom — already self-registered),
+  //     parcel-briefing (above), bim-model, and neighboring-context
   //
   // So the `alsoRegister` set has to be:
   //   sheet, snapshot, submission, intent, briefing-source,
-  //   parcel-briefing. The forward-ref edges on parcel-briefing
-  //   (parcel, code-section) and briefing-source (parcel) are skipped
-  //   by validate() — no stubs needed for those.
+  //   parcel-briefing, viewpoint-render, bim-model,
+  //   neighboring-context. The forward-ref edges on parcel-briefing
+  //   (parcel, code-section) and briefing-source (parcel) are
+  //   skipped by validate() — no stubs needed for those.
   runAtomContractTests(engagementAtom, {
     withFixture: { entityId: ENGAGEMENT_ID },
     alsoRegister: [
@@ -141,6 +158,14 @@ describe("engagement atom (contract)", () => {
       makeIntentAtom(),
       makeBriefingSourceAtom(),
       makeParcelBriefingAtom(),
+      makeViewpointRenderAtom(),
+      makeBimModelAtom({ db: lazyDb }),
+      makeNeighboringContextAtom(),
+      // bim-model in turn composes briefing-divergence; briefing-
+      // divergence composes materializable-element. Both must be
+      // registered for `validate()` to succeed.
+      makeBriefingDivergenceAtom({ db: lazyDb }),
+      makeMaterializableElementAtom({ db: lazyDb }),
     ],
   });
 });
@@ -193,16 +218,20 @@ describe("engagement atom (behavior)", () => {
     }
 
     // Build a real registry containing every non-forward-ref child the
-    // engagement atom (post-DA-PI-1, post-Task #63) and its transitive
-    // children declare. The `submission` composition edge dropped its
-    // `forwardRef: true` opt-out in sprint A4 / Task #63, so the boot
-    // validator now requires `submission` to be registered too — but
-    // it still produces zero children at lookup time because no
-    // submission rows are seeded in this test, so `relatedAtoms` is
-    // exactly N snapshot references. The `parcel-briefing` edge
-    // (DA-PI-1, concrete) similarly produces zero children at lookup
-    // time because `parentData` has no `activeBriefing` key — the
-    // data engine that populates it ships in DA-PI-3.
+    // engagement atom (post-DA-PI-1, post-Task #63, post-DA-RP-0) and
+    // its transitive children declare. The `submission` composition
+    // edge dropped its `forwardRef: true` opt-out in sprint A4 /
+    // Task #63, so the boot validator now requires `submission` to be
+    // registered too — but it still produces zero children at lookup
+    // time because no submission rows are seeded in this test, so
+    // `relatedAtoms` is exactly N snapshot references. The
+    // `parcel-briefing` edge (DA-PI-1, concrete) similarly produces
+    // zero children at lookup time because `parentData` has no
+    // `activeBriefing` key — the data engine that populates it ships
+    // in DA-PI-3. The `viewpoint-render` edge (DA-RP-0, concrete)
+    // also produces zero children because `parentData["renders"]` is
+    // intentionally unpopulated until DA-RP-1 wires the renders
+    // table.
     const registry = createAtomRegistry();
     registry.register(makeSheetAtom({ db: lazyDb }));
     registry.register(makeSnapshotAtom({ db: lazyDb }));
@@ -210,20 +239,29 @@ describe("engagement atom (behavior)", () => {
     registry.register(makeIntentAtom());
     registry.register(makeBriefingSourceAtom());
     registry.register(makeParcelBriefingAtom());
+    registry.register(makeViewpointRenderAtom());
+    registry.register(makeBimModelAtom({ db: lazyDb }));
+    registry.register(makeNeighboringContextAtom());
+    registry.register(makeBriefingDivergenceAtom({ db: lazyDb }));
+    registry.register(makeMaterializableElementAtom({ db: lazyDb }));
     const atom = makeEngagementAtom({ db: lazyDb, registry });
     registry.register(atom);
     // Sanity: validate must succeed with every concrete child edge
-    // (snapshot, submission, parcel-briefing) resolvable in the
-    // registry.
+    // (snapshot, submission, parcel-briefing, viewpoint-render —
+    // and viewpoint-render's transitive children bim-model and
+    // neighboring-context, plus bim-model's briefing-divergence
+    // and materializable-element) resolvable in the registry.
     expect(registry.validate().ok).toBe(true);
 
     const summary = await atom.contextSummary(eng.id, defaultScope());
 
     // No submission rows seeded above, so `relatedAtoms` is exactly N
     // snapshot references — the submission edge contributes zero
-    // children when `parentData["submissions"]` is empty, and the
+    // children when `parentData["submissions"]` is empty, the
     // parcel-briefing edge contributes zero because `parentData` has
-    // no `activeBriefing` key.
+    // no `activeBriefing` key, and the viewpoint-render edge
+    // contributes zero because `parentData` has no `renders` key
+    // (the renders table ships in DA-RP-1).
     expect(summary.relatedAtoms).toHaveLength(N);
     for (const ref of summary.relatedAtoms) {
       expect(ref.kind).toBe("atom");
@@ -322,5 +360,69 @@ describe("engagement atom (behavior)", () => {
     expect(summary.keyMetrics).toEqual([]);
     expect(summary.prose).toContain("could not be found");
     expect(summary.scopeFiltered).toBe(false);
+  });
+
+  it("DA-RP-0 renders edge: composes viewpoint-render and resolves to empty when no renders exist", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    const [eng] = await db
+      .insert(engagements)
+      .values({
+        name: "Renders Edge Test",
+        nameLower: "renders-edge-test",
+        jurisdiction: "Moab, UT",
+        address: "1 Render Way",
+      })
+      .returning({ id: engagements.id });
+
+    // Build a registry with every concrete child the engagement
+    // composition declares so validate() succeeds and the resolver
+    // walks every edge — including the DA-RP-0 viewpoint-render edge.
+    // viewpoint-render's transitive children (bim-model,
+    // neighboring-context) must be registered too, plus bim-model's
+    // briefing-divergence (which itself composes
+    // materializable-element).
+    const registry = createAtomRegistry();
+    registry.register(makeSheetAtom({ db: lazyDb }));
+    registry.register(makeSnapshotAtom({ db: lazyDb }));
+    registry.register(makeSubmissionAtom({ db: lazyDb }));
+    registry.register(makeIntentAtom());
+    registry.register(makeBriefingSourceAtom());
+    registry.register(makeParcelBriefingAtom());
+    registry.register(makeViewpointRenderAtom());
+    registry.register(makeBimModelAtom({ db: lazyDb }));
+    registry.register(makeNeighboringContextAtom());
+    registry.register(makeBriefingDivergenceAtom({ db: lazyDb }));
+    registry.register(makeMaterializableElementAtom({ db: lazyDb }));
+    const atom = makeEngagementAtom({ db: lazyDb, registry });
+    registry.register(atom);
+    expect(registry.validate().ok).toBe(true);
+
+    // Engagement composition exposes the renders edge as a concrete
+    // (non-forwardRef) child of type viewpoint-render, dataKey
+    // `renders` — the contract the renders persistence layer wires
+    // against in DA-RP-1.
+    const rendersEdge = atom.composition.find(
+      (c) => c.dataKey === "renders",
+    );
+    expect(rendersEdge).toBeDefined();
+    expect(rendersEdge?.childEntityType).toBe("viewpoint-render");
+    expect(rendersEdge?.forwardRef).toBeFalsy();
+    expect(rendersEdge?.childMode).toBe("card");
+
+    // No renders rows exist (no renders table yet); the resolver
+    // produces zero viewpoint-render children for the engagement
+    // because `parentData["renders"]` is unpopulated. That matches
+    // Spec 54's "no renders yet" steady state and mirrors how
+    // `activeBriefing` behaved before DA-PI-3.
+    const summary = await atom.contextSummary(eng.id, defaultScope());
+    const renderRefs = summary.relatedAtoms.filter(
+      (r) => r.entityType === "viewpoint-render",
+    );
+    expect(renderRefs).toEqual([]);
+    // No regression: the snapshot/submission/activeBriefing children
+    // (all empty here too because none are seeded) keep producing the
+    // same zero-children behavior they always did.
+    expect(summary.relatedAtoms).toEqual([]);
   });
 });

@@ -61,6 +61,12 @@ const { makeBriefingDivergenceAtom } = await import(
 const { makeBimModelAtom } = await import("../atoms/bim-model.atom");
 const { makeEngagementAtom } = await import("../atoms/engagement.atom");
 const { makeSnapshotAtom } = await import("../atoms/snapshot.atom");
+const { makeNeighboringContextAtom } = await import(
+  "../atoms/neighboring-context.atom"
+);
+const { makeViewpointRenderAtom } = await import(
+  "../atoms/viewpoint-render.atom"
+);
 
 const lazyDb = new Proxy({} as typeof dbModule.db, {
   get: (_t, prop) => Reflect.get(dbModule.db as object, prop, dbModule.db),
@@ -139,6 +145,12 @@ describe("reviewer-annotation atom (contract)", () => {
       makeBimModelAtom({ db: lazyDb }),
       makeEngagementAtom({ db: lazyDb }),
       makeSnapshotAtom({ db: lazyDb }),
+      // engagement composes `renders` → viewpoint-render (DA-RP-0),
+      // and viewpoint-render composes neighboring-context, so the
+      // validator's transitive resolution requires both to be
+      // registered alongside the existing target set.
+      makeNeighboringContextAtom(),
+      makeViewpointRenderAtom(),
     ],
   });
 });

@@ -60,6 +60,12 @@ const { makeEngagementAtom } = await import("../atoms/engagement.atom");
 const { makeSheetAtom } = await import("../atoms/sheet.atom");
 const { makeSnapshotAtom } = await import("../atoms/snapshot.atom");
 const { makeSubmissionAtom } = await import("../atoms/submission.atom");
+const { makeViewpointRenderAtom } = await import(
+  "../atoms/viewpoint-render.atom"
+);
+const { makeNeighboringContextAtom } = await import(
+  "../atoms/neighboring-context.atom"
+);
 
 const lazyDb = new Proxy({} as typeof dbModule.db, {
   get: (_t, prop) => Reflect.get(dbModule.db as object, prop, dbModule.db),
@@ -118,7 +124,10 @@ describe("materializable-element atom (contract)", () => {
   // `materializable-element`, and `parcel-briefing`; bim-model has
   // concrete edges to `engagement` (which pulls in sheet/snapshot/
   // submission), `parcel-briefing`, and `briefing-divergence`.
-  // parcel-briefing pulls in intent and briefing-source.
+  // parcel-briefing pulls in intent and briefing-source. As of
+  // DA-RP-0, `engagement` also composes `viewpoint-render`, which
+  // in turn references `neighboring-context` (bim-model and
+  // parcel-briefing are already in this list).
   runAtomContractTests(atom, {
     withFixture: { entityId: ELEMENT_ID },
     alsoRegister: [
@@ -131,6 +140,8 @@ describe("materializable-element atom (contract)", () => {
       makeSheetAtom({ db: lazyDb }),
       makeSnapshotAtom({ db: lazyDb }),
       makeSubmissionAtom({ db: lazyDb }),
+      makeViewpointRenderAtom(),
+      makeNeighboringContextAtom(),
     ],
   });
 });

@@ -32,6 +32,8 @@ import { makeBimModelAtom } from "./bim-model.atom";
 import { makeMaterializableElementAtom } from "./materializable-element.atom";
 import { makeBriefingDivergenceAtom } from "./briefing-divergence.atom";
 import { makeReviewerAnnotationAtom } from "./reviewer-annotation.atom";
+import { makeViewpointRenderAtom } from "./viewpoint-render.atom";
+import { makeRenderOutputAtom } from "./render-output.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -118,6 +120,22 @@ export function getHistoryService(): EventAnchoringService {
  *     architect override against a locked materializable element;
  *     composes `bim-model`, `materializable-element`,
  *     `parcel-briefing`.
+ *   - `reviewer-annotation` (Wave 2 Sprint C / Spec 307) — declarative
+ *     reviewer note bound to one of multiple potential target types
+ *     (submission, briefing-source, materializable-element,
+ *     briefing-divergence, sheet, parcel-briefing); only the matching
+ *     target edge is populated at lookup time.
+ *   - `viewpoint-render` (DA-RP-0, shape-only) — the render the
+ *     architect requested from mnml.ai for an engagement that has a
+ *     `parcel-briefing` and a `bim-model`; composes `engagement`,
+ *     `parcel-briefing` (briefingAtRender), `bim-model`
+ *     (bimModelAtRender), and `neighboring-context`
+ *     (neighboringContextAtRender, optional). All four edges concrete.
+ *     The renders persistence layer ships in DA-RP-1.
+ *   - `render-output` (DA-RP-0, shape-only) — a single output file
+ *     produced by a `viewpoint-render` (e.g. one of an elevation set's
+ *     four images, the mp4 of a video render); composes
+ *     `viewpoint-render` (concrete). Persistence ships in DA-RP-1.
  */
 export function getAtomRegistry(): AtomRegistry {
   if (_registry) return _registry;
@@ -148,15 +166,20 @@ export function getAtomRegistry(): AtomRegistry {
   registry.register(makeMaterializableElementAtom({ db, history }));
   registry.register(makeBriefingDivergenceAtom({ db, history }));
   registry.register(makeBimModelAtom({ db, history }));
-  // Wave 2 Sprint C / Spec 307 — reviewer-annotation is the
-  // 12th catalog atom. Composes every potential target type
-  // (submission, briefing-source, materializable-element,
-  // briefing-divergence, sheet, parcel-briefing) declaratively;
-  // only the matching edge is populated at lookup time. Registered
-  // last so the boot-log tail makes the dependency order obvious
-  // (every target has been registered before the annotation atom
-  // declares them as children).
+  // Wave 2 Sprint C / Spec 307 — reviewer-annotation composes every
+  // potential target type (submission, briefing-source,
+  // materializable-element, briefing-divergence, sheet,
+  // parcel-briefing) declaratively; only the matching edge is
+  // populated at lookup time. Registered after every target so the
+  // boot-log tail makes the dependency order obvious.
   registry.register(makeReviewerAnnotationAtom({ db, history }));
+  // DA-RP-0 mnml.ai render-pipeline atoms — shape-only, no DB lookup
+  // yet. Both registered before any consumer references their slugs;
+  // `register()` itself does not care about order, but the boot-log
+  // tail surfaces the dependency order naturally (render-output
+  // composes viewpoint-render).
+  registry.register(makeViewpointRenderAtom({ history }));
+  registry.register(makeRenderOutputAtom({ history }));
   _registry = registry;
   return registry;
 }
