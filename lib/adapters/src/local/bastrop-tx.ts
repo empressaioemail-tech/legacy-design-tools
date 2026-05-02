@@ -12,11 +12,15 @@
  *   - `bastrop-tx:zoning`
  *   - `bastrop-tx:floodplain`
  *
- * Roads intentionally NOT included here: Bastrop's road network in the
- * SmartCity OS pilot was sourced via OSM directly (the city's GIS roads
- * layer was not in active use), and the Edwards Aquifer Contributing
+ * Roads intentionally NOT included here. Decision (DA-PI-4 / V1-5,
+ * 2026-05-02): stay with the OSM-direct path. Bastrop's road network in
+ * the SmartCity OS pilot was sourced via OSM directly (the city's GIS
+ * roads layer was not in active use); the Edwards Aquifer Contributing
  * zone (state tier) plus floodplain (this layer) cover the regulatory
- * inputs the briefing engine needs first.
+ * inputs the briefing engine needs first. Adding a Bastrop roads
+ * adapter is net-new maintenance burden for a jurisdiction whose road
+ * data is already adequately served by OSM — revisit only if OSM proves
+ * insufficient under real architect use.
  */
 
 import { arcgisPointQuery } from "../arcgis";

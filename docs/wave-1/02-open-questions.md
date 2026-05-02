@@ -104,3 +104,24 @@ post-merge.sh integration check, B.8 pruned-run annotation copy._
 - **Total open at HEAD `666880c`:** 4
 
 When the sibling-sprint roll-up completes, update the totals and the date.
+
+---
+
+## Resolved (V1-5, 2026-05-02)
+
+The four DA-PI-4 carry-forward questions above (Q1-Q4) were resolved per
+the recommended answers and documented at the closest meaningful
+location in the codebase rather than expanding spec docs:
+
+- **Q1.** Annotated in
+  `artifacts/api-server/src/__tests__/generate-layers.test.ts`
+  (file-header JSDoc) — keep route fakes.
+- **Q2.** Annotated in `lib/adapters/src/local/bastrop-tx.ts`
+  (file-header JSDoc) — stay with OSM-direct.
+- **Q3.** Documented in `lib/adapters/src/local/setbacks/README.md` —
+  new "Statewide fallback tables" section.
+- **Q4.** Documented in `lib/adapters/src/local/setbacks/README.md` —
+  subsection "Why no texas-unincorporated table".
+
+Sibling-sprint roll-up sections above remain placeholders pending Task A
++ Task B Phase 4 reports.

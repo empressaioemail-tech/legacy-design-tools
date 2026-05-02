@@ -15,6 +15,20 @@
  *     stamps the prior row + backfills `superseded_by_id`),
  *   - prove the briefing-source.fetched event is emitted with the
  *     adapter-driven `system:briefing-generate-layers` actor.
+ *
+ * Why fakes rather than the real `ALL_ADAPTERS`?
+ * --------------------------------------------
+ * Decision (DA-PI-4 / V1-5, 2026-05-02): keep the route-test fakes. The
+ * `vi.mock("@workspace/adapters", …)` block below replaces the runner
+ * with a per-test set of `makeAdapter()` shapes that share the real
+ * registry's key naming (e.g. `bastrop-tx:zoning`, `ugrc:parcels`) but
+ * carry trivial inline payloads. This keeps the route-level concerns of
+ * this file — fan-out, supersession, event emission — decoupled from
+ * each adapter's network shape, which is covered by
+ * `lib/adapters/src/__tests__/*` against fixture HTTP. Replacing the
+ * fakes with real adapters here would buy us nothing the lib-side tests
+ * don't already pin and would re-introduce a fixture-fetch dependency
+ * the route tests have always avoided.
  */
 
 import { describe, it, expect, vi } from "vitest";
