@@ -5,6 +5,11 @@
 **Branch:** `main` · **HEAD:** `b26388a` (last commit before this report; production deploy is `a6e28d7` "Published your App", 2026-05-01 23:57 UTC)
 **Generated:** 2026-05-02
 
+**Canonical production URLs (Replit):**
+
+- **Design-tools (architect surface):** https://prompt-agent-accelerator.replit.app/
+- **Plan-review (reviewer surface):** https://prompt-agent-accelerator.replit.app/plan-review/
+
 ---
 
 ## TL;DR
@@ -160,4 +165,4 @@ Cleanup that becomes possible once execution moves off Replit (Cursor / Claude C
 
 **End of recon. Ready for the purge-dispatch prompt.**
 
-No tasks were drafted, no branches were pruned, no files were modified, no workflows were restarted. Production deploy at `smartcityos.io` (commit `a6e28d7`) is untouched.
+No tasks were drafted, no branches were pruned, no files were modified, no workflows were restarted. Production deploy (commit `a6e28d7`) is unchanged: design-tools at https://prompt-agent-accelerator.replit.app/ and plan-review at https://prompt-agent-accelerator.replit.app/plan-review/.
