@@ -44,3 +44,12 @@ export {
   type CreateMnmlClientOptions,
   type MnmlRenderMode,
 } from "./factory";
+
+export {
+  RENDER_COST_CREDITS,
+  actualDebitedCredits,
+  estimateRenderCost,
+  type DomainRenderKind,
+  type RenderCostBreakdownEntry,
+  type RenderCostEstimate,
+} from "./cost";

@@ -56,9 +56,11 @@ import {
   type ViewpointRender,
 } from "@workspace/db";
 import {
+  estimateRenderCost,
   getMnmlClient,
   MnmlError,
   type ArchDiffusionRequest,
+  type DomainRenderKind,
   type RenderRequest,
   type VideoAiRequest,
 } from "@workspace/mnml-client";
@@ -1121,10 +1123,16 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
   // Fire-and-forget worker. The 202 returns immediately.
   void runRenderPolling({ viewpointRenderId: inserted.id, body: body.data });
 
+  // Surface the kickoff cost on the response so the FE can render
+  // a "Render: N credits" chip without a second round-trip. Spec 54
+  // v2 §4 — static costs, no quote call to mnml. DA-RP-2 owns the
+  // running-balance UI; V1-4 just exposes the per-kickoff figure.
+  const cost = estimateRenderCost({ kind: inserted.kind as DomainRenderKind });
   res.status(202).json({
     renderId: inserted.id,
     state: "queued",
     kind: inserted.kind,
+    cost,
   });
 });
 
