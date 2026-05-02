@@ -34,7 +34,8 @@
     "google-auth-library": "^10.6.2",
     "pino": "^9",
     "pino-http": "^10",
-    "puppeteer": "^24.42.0"
+    "puppeteer": "^24.42.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/busboy": "^1.5.4",
