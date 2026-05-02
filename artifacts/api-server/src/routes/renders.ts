@@ -73,6 +73,7 @@ import {
   mirrorRenderOutput,
   RenderMirrorError,
 } from "../lib/rendersObjectMirror";
+import { runRendersSweep } from "../lib/rendersSweep";
 
 // ─────────────────────────────────────────────────────────────────────
 // Constants
@@ -1252,6 +1253,46 @@ router.post("/renders/:id/cancel", async (req: Request, res: Response) => {
     .where(eq(viewpointRenders.id, row.id));
   await emitRenderEvent(row.id, "viewpoint-render.cancelled", {});
   res.json({ id: row.id, status: "cancelled" });
+});
+
+/**
+ * POST /api/admin/renders/sweep — cron-invoked maintenance pass.
+ *
+ * Auth via the `x-renders-admin-secret` header (compared to
+ * `RENDERS_ADMIN_SECRET` env var). Mirrors the snapshot ingest's
+ * shared-secret pattern at `routes/snapshots.ts` because Cloud
+ * Scheduler does not carry a session cookie. When the env var is
+ * unset, the route returns 503 — that is, sweep-mode is opt-in per
+ * environment.
+ *
+ * The handler invokes {@link runRendersSweep} once and returns the
+ * three-bucket counts (rescuedStuck, reapedTerminal,
+ * warnedIncompleteMirror) plus the wall-clock duration. No body
+ * required. The cron schedule is configured outside the api-server
+ * (Cloud Scheduler / Replit cron / k8s CronJob).
+ */
+router.post("/admin/renders/sweep", async (req: Request, res: Response) => {
+  const expected = process.env["RENDERS_ADMIN_SECRET"];
+  if (!expected) {
+    res.status(503).json({
+      error: "renders_sweep_disabled",
+      message:
+        "RENDERS_ADMIN_SECRET is not configured; sweep is disabled in this environment.",
+    });
+    return;
+  }
+  const provided = req.header("x-renders-admin-secret");
+  if (provided !== expected) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  try {
+    const result = await runRendersSweep({ logger });
+    res.json(result);
+  } catch (err) {
+    logger.error({ err }, "renders sweep route: unexpected failure");
+    res.status(500).json({ error: "renders_sweep_failed" });
+  }
 });
 
 export default router;
