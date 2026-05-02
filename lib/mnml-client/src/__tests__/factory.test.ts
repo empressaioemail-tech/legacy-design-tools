@@ -18,7 +18,11 @@ import {
 } from "../factory";
 import { HttpMnmlClient } from "../httpClient";
 import { MockMnmlClient } from "../mockClient";
-import type { CancelRenderResult, MnmlClient, RenderStatusResult, TriggerRenderResult } from "../types";
+import type {
+  MnmlClient,
+  RenderStatusResult,
+  TriggerRenderResult,
+} from "../types";
 
 const ENV_KEYS = ["MNML_RENDER_MODE", "MNML_API_URL", "MNML_API_KEY"] as const;
 
@@ -131,15 +135,11 @@ describe("getMnmlClient + setMnmlClient singleton", () => {
     const fake: MnmlClient = {
       triggerRender: async (): Promise<TriggerRenderResult> => ({
         renderId: "fake",
-        status: "queued",
+        remainingCredits: 100,
       }),
       getRenderStatus: async (renderId: string): Promise<RenderStatusResult> => ({
         renderId,
         status: "ready",
-      }),
-      cancelRender: async (renderId: string): Promise<CancelRenderResult> => ({
-        renderId,
-        status: "cancelled",
       }),
     };
     setMnmlClient(fake);
@@ -148,11 +148,17 @@ describe("getMnmlClient + setMnmlClient singleton", () => {
   });
 
   it("setMnmlClient(null) resets back to the env factory", () => {
-    setMnmlClient({
-      triggerRender: async () => ({ renderId: "x", status: "queued" }) as TriggerRenderResult,
-      getRenderStatus: async (renderId) => ({ renderId, status: "ready" }) as RenderStatusResult,
-      cancelRender: async (renderId) => ({ renderId, status: "cancelled" }) as CancelRenderResult,
-    });
+    const fake: MnmlClient = {
+      triggerRender: async (): Promise<TriggerRenderResult> => ({
+        renderId: "x",
+        remainingCredits: 0,
+      }),
+      getRenderStatus: async (renderId: string): Promise<RenderStatusResult> => ({
+        renderId,
+        status: "ready",
+      }),
+    };
+    setMnmlClient(fake);
     setMnmlClient(null);
     delete process.env.MNML_RENDER_MODE;
     const fresh = getMnmlClient();

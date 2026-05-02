@@ -1,130 +1,123 @@
 /**
- * Public type contracts for {@link @workspace/mnml-client}. Mirrors
- * Spec 54 §3 (atom shape — `viewpoint-render` + `render-output`) and
- * §4 (output format taxonomy — still / elevation / video) verbatim so
- * downstream consumers (DA-RP-1's trigger endpoint, DA-RP-2's UI) can
- * import this once and avoid re-deriving the schema.
+ * Public type contracts for {@link @workspace/mnml-client} v2.
  *
- * The discriminated unions deliberately mirror the per-kind viewpoint
- * metadata fields Spec 54 §4 lists. Where Spec 54 tags a field
- * "(optional)", it is `?` here. Where Spec 54 lists a constrained
- * literal set (e.g. `framerate: 24 | 30 | 60`), the literal union is
- * preserved.
+ * Implements the wire shape Spec 54 v2 §6.1 names. Supersedes the v1
+ * types — which assumed mnml.ai accepted IFC/glb scene geometry against
+ * a unified `/v1/renders` resource — with the actual production API
+ * surface verified live against `mnmlai.dev/docs` on 2026-05-02:
  *
- * If the Wave 2 Recon sprint surfaces a contradiction with Spec 54 §4
- * once it lands, refine the unions in place; the discriminator
- * (`kind`, `pathKind`) is the stable hinge.
+ *   - `POST /v1/archDiffusion-v43`  (multipart) — single image render
+ *   - `POST /v1/video-ai`           (multipart) — Kling-backed video
+ *   - `GET  /v1/status/{id}`                    — shared status poll
+ *
+ * Two `kind`-discriminated request shapes:
+ *   - `archdiffusion` — one still image. The api-server route makes
+ *     four separate `triggerRender` calls (with distinct
+ *     `expertParams.camera_direction`) when the architect requests an
+ *     elevation set; the client itself stays single-call.
+ *   - `video`         — one 5- or 10-second clip. The video-thumbnail
+ *     `render-output` row is server-synthesized post-`ready` via
+ *     ffmpeg first-frame extraction; mnml does not return one.
+ *
+ * Output role taxonomy (`primary` / `elevation-{n,e,s,w}` /
+ * `video-{primary,thumbnail}`) lives here for the api-server's
+ * `render_outputs` row tagging — it is not a wire field. mnml's
+ * `GET /v1/status/{id}` returns plain URLs in `message[]`; the route
+ * assigns the role based on which call in the elevation-set fan-out
+ * produced each output.
  */
 
-/** XYZ vector in world coordinates (units defined by the upstream BIM model). */
-export interface Vec3 {
-  x: number;
-  y: number;
-  z: number;
-}
-
-/** Spec 54 §4 timeOfDay set — superset of all three render kinds. */
+/** Spec 54 v2 §2.1.1 `time_of_day` enum — useful as an `expertParams` value for the exterior expert. */
 export type TimeOfDay = "dawn" | "morning" | "midday" | "evening" | "night";
 
-/** Spec 54 §4 weather set — superset of all three render kinds. */
+/** Spec 54 v2 §2.1.1 `weather` enum — useful as an `expertParams` value for the exterior expert. */
 export type Weather = "clear" | "overcast" | "stormy";
 
-/** Spec 54 §4 — still: a single photorealistic image from a viewpoint. */
-export interface StillRenderRequest {
-  kind: "still";
-  cameraPosition: Vec3;
-  cameraTarget: Vec3;
-  /** Degrees. Spec 54 §4 default 35. */
-  fieldOfView?: number;
-  /** Free-form e.g. "1920x1080", "3840x2160", "1080x1080". */
-  resolution: string;
-  timeOfDay?: TimeOfDay;
-  weather?: Weather;
-}
-
-/** Spec 54 §4 — elevation: north / east / south / west cardinal stills. */
-export interface ElevationRenderRequest {
-  kind: "elevation";
-  buildingCenter: Vec3;
-  /** Meters from buildingCenter along each cardinal axis. */
-  cameraDistance: number;
-  /** Meters above ground. */
-  cameraHeight: number;
-  resolution: string;
-  /** Spec 54 §4 elevation excludes "night" — we keep the superset and let mnml.ai validate. */
-  timeOfDay?: TimeOfDay;
-  /** Spec 54 §4 elevation excludes "stormy" — we keep the superset and let mnml.ai validate. */
-  weather?: Weather;
-}
-
-/** A single waypoint inside an interior-walkthrough video path. */
-export interface VideoWaypoint {
-  position: Vec3;
-  target: Vec3;
-  holdSeconds: number;
-}
-
-/** Spec 54 §4 — video path kinds. v1 supports the three preset paths. */
-export type VideoPathKind =
-  | "exterior-orbit"
-  | "interior-walkthrough"
-  | "fly-over";
-
-/** Spec 54 §4 — durationSeconds capped at 60 in v1. */
-export type VideoDurationSeconds = 10 | 20 | 30 | 60;
-
-/** Spec 54 §4 — framerate set. */
-export type VideoFramerate = 24 | 30 | 60;
-
-interface VideoRenderRequestBase {
-  kind: "video";
-  durationSeconds: VideoDurationSeconds;
-  resolution: string;
-  framerate: VideoFramerate;
-  /** Spec 54 §4 video excludes "dawn" / "night" — we keep the superset; mnml.ai validates. */
-  timeOfDay?: TimeOfDay;
-  weather?: Weather;
-}
-
-/** Spec 54 §4 — exterior-orbit: camera orbits buildingCenter at distance/height. */
-export interface ExteriorOrbitVideoRequest extends VideoRenderRequestBase {
-  pathKind: "exterior-orbit";
-  buildingCenter?: Vec3;
-  cameraDistance?: number;
-  cameraHeight?: number;
-}
-
-/** Spec 54 §4 — interior-walkthrough: ordered waypoint list. */
-export interface InteriorWalkthroughVideoRequest
-  extends VideoRenderRequestBase {
-  pathKind: "interior-walkthrough";
-  waypoints?: VideoWaypoint[];
-}
-
-/** Spec 54 §4 — fly-over: entry + exit at altitude. */
-export interface FlyOverVideoRequest extends VideoRenderRequestBase {
-  pathKind: "fly-over";
-  flyOverStart?: Vec3;
-  flyOverEnd?: Vec3;
-  flyOverAltitude?: number;
-}
-
-export type VideoRenderRequest =
-  | ExteriorOrbitVideoRequest
-  | InteriorWalkthroughVideoRequest
-  | FlyOverVideoRequest;
+// ─────────────────────────────────────────────────────────────────────
+// Render request union (Spec 54 v2 §6.1)
+// ─────────────────────────────────────────────────────────────────────
 
 /**
- * Top-level request union. The `kind` discriminator partitions the
- * three render kinds; the video kind nests `pathKind` for its three
- * preset paths.
+ * Spec 54 v2 §2.1 — `POST /v1/archDiffusion-v43`. Single still image.
+ *
+ * `expertParams` is the per-expert flat string→string bag that
+ * mnml.ai's v4.3-Ultra endpoint accepts as form fields alongside the
+ * documented `expert_name` / `render_style` / etc. The client passes
+ * each entry through verbatim as a multipart field; it does NOT
+ * validate against the per-expert allowed values. That validation is
+ * the caller's contract — the api-server route owns the per-expert
+ * enum-checking before constructing the request.
  */
-export type RenderRequest =
-  | StillRenderRequest
-  | ElevationRenderRequest
-  | VideoRenderRequest;
+export interface ArchDiffusionRequest {
+  kind: "archdiffusion";
+  /** JPEG/PNG/WebP, 1KB–15MB. Auto-resized server-side to 1344px width. */
+  image: Buffer | Blob;
+  /** Max 2000 chars per Spec 54 v2 §2.1. */
+  prompt: string;
+  expertName?:
+    | "exterior"
+    | "interior"
+    | "masterplan"
+    | "landscape"
+    | "plan"
+    | "product";
+  renderStyle?:
+    | "raw"
+    | "photoreal"
+    | "cgi_render"
+    | "cad"
+    | "freehand_sketch"
+    | "clay_model"
+    | "illustration"
+    | "watercolor";
+  geometry?: "precise" | "creative";
+  viewMode?: "auto" | "manual";
+  /**
+   * Expert-specific form fields — `camera_angle`, `camera_direction`,
+   * `time_of_day`, `weather`, `room_type`, etc. Passed through as
+   * verbatim multipart fields; not validated by the client.
+   */
+  expertParams?: Record<string, string>;
+  /** Up to 4 reference images per Spec 54 v2 §2.1. Extras are dropped. */
+  referenceImages?: ReadonlyArray<Buffer | Blob>;
+  /** 0..1,000,000. Random if omitted. */
+  seed?: number;
+}
 
-/** Spec 54 §3 viewpoint-render lifecycle states. */
+/**
+ * Spec 54 v2 §2.2 — `POST /v1/video-ai`. Single Kling v2.1 clip.
+ *
+ * `duration` is constrained to mnml's documented `5 | 10` per the
+ * Video AI docs page; the client does not coerce other values, the
+ * caller must pick one.
+ */
+export interface VideoAiRequest {
+  kind: "video";
+  /** JPG/PNG/GIF/WebP, max 10MB. */
+  image: Buffer | Blob;
+  prompt: string;
+  /** Spec 54 v2 §2.2 — only `5` or `10` accepted. */
+  duration: 5 | 10;
+  cfgScale?: number;
+  aspectRatio?: "16:9" | "4:3" | "1:1";
+  negativePrompt?: string;
+  movementType?: "horizontal" | "vertical" | "zoom_in" | "zoom_out" | "pan";
+  direction?: "left" | "right" | "up" | "down";
+  seed?: number;
+}
+
+export type RenderRequest = ArchDiffusionRequest | VideoAiRequest;
+
+// ─────────────────────────────────────────────────────────────────────
+// Status / Result
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Codebase-internal render lifecycle. The wire vocabulary (`starting`
+ * / `processing` / `success` / `failed` / `canceled`) is translated
+ * inside {@link HttpMnmlClient} per Spec 54 v2 §3 — call sites
+ * downstream of the client see only this set.
+ */
 export type RenderStatus =
   | "queued"
   | "rendering"
@@ -132,94 +125,98 @@ export type RenderStatus =
   | "failed"
   | "cancelled";
 
-/** Spec 54 §3 render-output role discriminator. */
-export type RenderOutputRole =
-  | "primary"
-  | "elevation-north"
-  | "elevation-east"
-  | "elevation-south"
-  | "elevation-west"
-  | "video-primary"
-  | "video-thumbnail";
-
-/** Spec 54 §3 render-output formats. */
-export type RenderOutputFormat = "png" | "jpg" | "mp4" | "webm";
-
-/**
- * One file produced by a render. Mirrors Spec 54 §3 render-output
- * sub-atom Layer 3 metrics so the persistence layer can hydrate
- * `render-output` rows directly off this shape.
- */
-export interface RenderOutput {
-  role: RenderOutputRole;
-  /** Direct URL to the rendered asset on mnml.ai's CDN (or fixture host in mock mode). */
-  url: string;
-  format: RenderOutputFormat;
-  /** e.g. "3840x2160". */
-  resolution: string;
-  /** Bytes — best-effort; mnml.ai may report 0 if unknown. */
-  sizeBytes: number;
-  /** Video only. */
-  durationSeconds?: number;
-  /** Optional preview URL (e.g. video-primary's poster frame). */
-  thumbnailUrl?: string;
-  /** mnml.ai-side output id for support tracking. */
-  mnmlOutputId?: string;
-}
-
 /** {@link MnmlClient.triggerRender} return shape. */
 export interface TriggerRenderResult {
-  /** Client-stable render id; the api-server uses this as the mnmlJobId on the viewpoint-render atom. */
+  /** mnml-side render id; the api-server stamps this onto `viewpoint_renders.mnml_job_id`. */
   renderId: string;
-  /** Always `"queued"` on first acknowledgement — Spec 54 §5 async pattern. */
-  status: "queued";
+  /**
+   * The user's remaining credit balance after the deduction (mnml's
+   * `credits` response field per Spec 54 v2 §2.1). The api-server
+   * route surfaces this on the kickoff response so DA-RP-2 can
+   * eventually display it; V1-4 itself does not render the value.
+   * `-1` is the sentinel when mnml omits the field.
+   */
+  remainingCredits: number;
 }
 
-/** {@link MnmlClient.getRenderStatus} return shape. */
+/**
+ * {@link MnmlClient.getRenderStatus} return shape. `outputUrls` is the
+ * raw `message[]` array mnml returns on `success` — caller-side role
+ * tagging happens in the api-server route, since role is determined by
+ * which call in an elevation-set fan-out produced each output rather
+ * than by anything mnml carries on the wire.
+ */
 export interface RenderStatusResult {
   renderId: string;
   status: RenderStatus;
-  /** Populated when status === "ready". */
-  outputs?: RenderOutput[];
-  /** Populated when status === "failed". */
-  error?: { code: MnmlErrorCode; message: string };
-}
-
-/** {@link MnmlClient.cancelRender} return shape. */
-export interface CancelRenderResult {
-  renderId: string;
-  status: "cancelled";
+  /** Populated when status === "ready". Length ≥ 1. */
+  outputUrls?: string[];
+  /** Populated when mnml returned a seed. */
+  seed?: number;
+  /** Populated when status === "failed". `code` is mnml's error code (or a transport-bucket sentinel). */
+  error?: { code: string; message: string };
 }
 
 /**
- * Spec 54 §5 failure-handling categories collapsed into a coarse code
- * bucket. Mirrors the {@link ConverterError} pattern in
- * `artifacts/api-server/src/lib/converterClient.ts:57`: a stable code
- * the UI can branch on, plus a human-readable message the status pill
- * renders verbatim.
+ * Persistence-layer role taxonomy. The api-server uses these as the
+ * literal `render_outputs.role` enum.
  *
- *   - `invalid_scene`   — scene geometry unprocessable (Spec 54 §5)
- *   - `quota_exceeded`  — mnml.ai-side rate limit (Spec 54 §5)
- *   - `timeout`         — render exceeded mnml.ai-side wall clock
- *   - `internal_error`  — anything else mnml.ai-side
- *   - `unavailable`     — network / transport failure before mnml.ai answered
+ * The four `elevation-*` slots are populated by the route's
+ * elevation-set fan-out (one mnml call per cardinal direction). The
+ * `video-thumbnail` slot is server-synthesized via ffmpeg post-`ready`
+ * — mnml does not return a thumbnail.
  */
-export type MnmlErrorCode =
-  | "invalid_scene"
-  | "quota_exceeded"
-  | "timeout"
-  | "internal_error"
-  | "unavailable";
+export type RenderOutputRole =
+  | "primary"
+  | "elevation-n"
+  | "elevation-e"
+  | "elevation-s"
+  | "elevation-w"
+  | "video-primary"
+  | "video-thumbnail";
+
+// ─────────────────────────────────────────────────────────────────────
+// Errors (Spec 54 v2 §5)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Spec 54 v2 §5 — coarse error category surfaced on
+ * `viewpoint-render.failed` events and inspected by route-level retry
+ * / surfacing logic. Distinct remediation paths drive the bucketing:
+ *
+ *   - `validation`           — 400-family / invalid-image / oversize
+ *   - `auth`                 — 401 missing/invalid api key
+ *   - `insufficient_credits` — 403 NO_CREDITS / insufficient_credits
+ *   - `not_found`            — 404 (e.g. unknown renderId on status poll)
+ *   - `rate_limited`         — 429 with `details.retryAfterSeconds`
+ *   - `unavailable`          — 5xx (transient, retry with backoff)
+ *   - `transport`            — pre-mnml network/timeout failure
+ */
+export type MnmlErrorKind =
+  | "validation"
+  | "auth"
+  | "insufficient_credits"
+  | "not_found"
+  | "rate_limited"
+  | "unavailable"
+  | "transport";
 
 /**
  * Surfaced as the structured error reason on viewpoint-render.failed
- * events. `code` is the coarse bucket the UI branches on; `message`
- * is the human-readable blurb the status pill renders.
+ * events. `kind` is the coarse remediation bucket the UI branches on;
+ * `code` is mnml's verbatim wire code (e.g. `NO_CREDITS`,
+ * `IMAGE_TOO_LARGE`, `rate_limit_exceeded`) for support tracking;
+ * `message` is the human-readable blurb the status pill renders;
+ * `details` carries any structured payload mnml attached (e.g.
+ * `available_credits` / `required_credits` for `insufficient_credits`,
+ * `retryAfterSeconds` for `rate_limited`).
  */
 export class MnmlError extends Error {
   constructor(
-    public readonly code: MnmlErrorCode,
+    public readonly kind: MnmlErrorKind,
+    public readonly code: string,
     message: string,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "MnmlError";
@@ -227,16 +224,27 @@ export class MnmlError extends Error {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Client interface
+// ─────────────────────────────────────────────────────────────────────
+
 /**
- * The pluggable contract Spec 54 §5 names. Both {@link MockMnmlClient}
- * and {@link HttpMnmlClient} satisfy it; tests can swap one for the
- * other via {@link setMnmlClient}.
+ * The pluggable client both {@link MockMnmlClient} and
+ * {@link HttpMnmlClient} satisfy.
+ *
+ * `cancelRender` is intentionally absent — mnml.ai exposes no public
+ * cancel endpoint (Spec 54 v2 §6.1). Cancellation, when needed, is a
+ * server-side concept tracked via a `viewpoint_renders.status =
+ * 'cancelled'` transition; the api-server simply stops polling.
  */
 export interface MnmlClient {
   triggerRender(input: RenderRequest): Promise<TriggerRenderResult>;
   getRenderStatus(renderId: string): Promise<RenderStatusResult>;
-  cancelRender(renderId: string): Promise<CancelRenderResult>;
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Logger
+// ─────────────────────────────────────────────────────────────────────
 
 /**
  * Minimal structured-logger contract the http client emits against.

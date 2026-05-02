@@ -1,28 +1,41 @@
 /**
- * Hermetic stand-in for the mnml.ai API. Walks a deterministic
+ * Hermetic stand-in for mnml.ai. Walks a deterministic
  * `queued → rendering → ready` transition on a configurable timer
- * (default 100 ms total ready) so DA-RP-1's polling logic can exercise
- * real state-machine paths without opening a network socket.
+ * (default 100 ms total ready) so DA-RP-1's polling logic can
+ * exercise real state-machine paths without opening a network socket.
+ *
+ * Speaks the codebase's internal vocabulary natively (Spec 54 v2 §6.5)
+ * — the wire-status translation lives in {@link HttpMnmlClient} and
+ * the mock never exercises that path. Output shape matches
+ * Spec 54 v2 §6.5: archdiffusion → 1 fixture URL; video → 1 fixture
+ * URL (the `video-thumbnail` role is server-synthesized post-`ready`
+ * by the api-server route, not returned here).
  *
  * Mirrors the {@link MockConverterClient} affordance pattern in
  * `artifacts/api-server/src/lib/converterClient.ts:88` — `alwaysFail`
  * for forcing the failed branch in tests, `fixedRenderId` for pinning
  * the id under test, plus a swappable `now` for clock control.
+ *
+ * `remainingCredits` simulation: each `triggerRender` decrements an
+ * internal balance by the static cost from Spec 54 v2 §4 (3 credits
+ * for archdiffusion, 10 for video). Tests asserting against the
+ * balance can pin the starting value via {@link MockMnmlClientOptions.startingCredits}.
  */
 
 import { randomUUID } from "node:crypto";
 import {
   MnmlError,
-  type CancelRenderResult,
   type MnmlClient,
-  type RenderOutput,
   type RenderRequest,
-  type RenderStatusResult,
   type RenderStatus,
+  type RenderStatusResult,
   type TriggerRenderResult,
 } from "./types";
 
-/** Spec 54 §5 mock-client construction options. */
+/** Spec 54 v2 §4 — static per-operation credit cost. */
+const COST_PER_KIND = { archdiffusion: 3, video: 10 } as const;
+
+/** Spec 54 v2 §6.5 mock-client construction options. */
 export interface MockMnmlClientOptions {
   /**
    * Total wall-clock time before a render reports `"ready"`. The
@@ -33,9 +46,10 @@ export interface MockMnmlClientOptions {
   readyAfterMs?: number;
   /**
    * When true, every triggered render walks queued → rendering →
-   * `"failed"` (instead of `"ready"`) with code `internal_error`.
-   * Mirrors {@link MockConverterClient.opts.alwaysFail} so the failure
-   * branch is exercisable from tests without monkey-patching.
+   * `"failed"` (instead of `"ready"`) with kind `validation` /
+   * code `MOCK_FORCED`. Mirrors {@link MockConverterClient}'s
+   * `alwaysFail` so the failure branch is exercisable from tests
+   * without monkey-patching.
    */
   alwaysFail?: boolean;
   /**
@@ -49,33 +63,29 @@ export interface MockMnmlClientOptions {
    * actual sleeping.
    */
   now?: () => number;
+  /**
+   * Starting credit balance for the `remainingCredits` simulation.
+   * Default 1000. Each successful trigger decrements by Spec 54 v2 §4
+   * cost (3 archdiffusion / 10 video). Tests asserting the post-
+   * trigger balance can pin a known starting value here.
+   */
+  startingCredits?: number;
 }
 
 interface MockRenderState {
   request: RenderRequest;
   createdAt: number;
-  cancelled: boolean;
 }
 
 /**
- * Fixture URLs the mock client returns. These point at well-known
- * placeholder hosts so any consumer that tries to actually load the
- * asset gets a recognizable "this is the mock" image rather than a
- * broken link. The host is `mnml.ai/mock/...` so log lines self-
- * identify as mock outputs.
+ * Fixture URLs the mock client returns. The host is `mnml.ai/mock/...`
+ * so log lines self-identify as mock outputs and any consumer that
+ * tries to actually load the asset gets a recognizable "this is the
+ * mock" 404 rather than a confused empty render.
  */
-const MOCK_STILL_URL = "https://mnml.ai/mock/still.png";
-const MOCK_ELEVATION_URLS: Record<
-  "elevation-north" | "elevation-east" | "elevation-south" | "elevation-west",
-  string
-> = {
-  "elevation-north": "https://mnml.ai/mock/elevation-north.png",
-  "elevation-east": "https://mnml.ai/mock/elevation-east.png",
-  "elevation-south": "https://mnml.ai/mock/elevation-south.png",
-  "elevation-west": "https://mnml.ai/mock/elevation-west.png",
-};
+const MOCK_ARCHDIFFUSION_URL = "https://mnml.ai/mock/archdiffusion.png";
 const MOCK_VIDEO_URL = "https://mnml.ai/mock/video.mp4";
-const MOCK_VIDEO_THUMB_URL = "https://mnml.ai/mock/video-thumbnail.png";
+const MOCK_SEED = 12345;
 
 export class MockMnmlClient implements MnmlClient {
   private readonly readyAfterMs: number;
@@ -83,12 +93,14 @@ export class MockMnmlClient implements MnmlClient {
   private readonly fixedRenderId?: string;
   private readonly now: () => number;
   private readonly renders = new Map<string, MockRenderState>();
+  private remainingCredits: number;
 
   constructor(opts: MockMnmlClientOptions = {}) {
     this.readyAfterMs = opts.readyAfterMs ?? 100;
     this.alwaysFail = opts.alwaysFail ?? false;
     this.fixedRenderId = opts.fixedRenderId;
     this.now = opts.now ?? (() => Date.now());
+    this.remainingCredits = opts.startingCredits ?? 1000;
   }
 
   async triggerRender(input: RenderRequest): Promise<TriggerRenderResult> {
@@ -96,21 +108,21 @@ export class MockMnmlClient implements MnmlClient {
     this.renders.set(renderId, {
       request: input,
       createdAt: this.now(),
-      cancelled: false,
     });
-    return { renderId, status: "queued" };
+    this.remainingCredits -= COST_PER_KIND[input.kind];
+    return { renderId, remainingCredits: this.remainingCredits };
   }
 
   async getRenderStatus(renderId: string): Promise<RenderStatusResult> {
     const state = this.renders.get(renderId);
     if (!state) {
+      // Mirrors mnml.ai's 404 surface for unknown renderIds (Spec 54
+      // v2 §5: 404 → not_found bucket).
       throw new MnmlError(
-        "invalid_scene",
+        "not_found",
+        "UNKNOWN_RENDER_ID",
         `MockMnmlClient: unknown renderId=${renderId}`,
       );
-    }
-    if (state.cancelled) {
-      return { renderId, status: "cancelled" };
     }
     const elapsed = this.now() - state.createdAt;
     const status = this.statusForElapsed(elapsed);
@@ -123,7 +135,7 @@ export class MockMnmlClient implements MnmlClient {
         renderId,
         status: "failed",
         error: {
-          code: "internal_error",
+          code: "MOCK_FORCED",
           message: "MockMnmlClient: forced failure (alwaysFail=true)",
         },
       };
@@ -131,20 +143,9 @@ export class MockMnmlClient implements MnmlClient {
     return {
       renderId,
       status: "ready",
-      outputs: buildMockOutputs(state.request),
+      outputUrls: buildMockOutputUrls(state.request),
+      seed: MOCK_SEED,
     };
-  }
-
-  async cancelRender(renderId: string): Promise<CancelRenderResult> {
-    const state = this.renders.get(renderId);
-    if (!state) {
-      throw new MnmlError(
-        "invalid_scene",
-        `MockMnmlClient: unknown renderId=${renderId}`,
-      );
-    }
-    state.cancelled = true;
-    return { renderId, status: "cancelled" };
   }
 
   /**
@@ -160,55 +161,17 @@ export class MockMnmlClient implements MnmlClient {
   }
 }
 
-function buildMockOutputs(request: RenderRequest): RenderOutput[] {
-  if (request.kind === "still") {
-    return [
-      {
-        role: "primary",
-        url: MOCK_STILL_URL,
-        format: "png",
-        resolution: request.resolution,
-        sizeBytes: 0,
-        mnmlOutputId: "mock-still",
-      },
-    ];
+/**
+ * Spec 54 v2 §6.5 — one fixture URL per render kind. The
+ * `video-thumbnail` role is the route's responsibility post-`ready`
+ * (ffmpeg first-frame extraction) and is NOT part of the mock's
+ * return shape. The route's elevation-set fan-out makes 4 separate
+ * `triggerRender(archdiffusion)` calls; the role tagging happens
+ * route-side based on which `camera_direction` was passed.
+ */
+function buildMockOutputUrls(request: RenderRequest): string[] {
+  if (request.kind === "video") {
+    return [MOCK_VIDEO_URL];
   }
-  if (request.kind === "elevation") {
-    return (
-      [
-        "elevation-north",
-        "elevation-east",
-        "elevation-south",
-        "elevation-west",
-      ] as const
-    ).map((role) => ({
-      role,
-      url: MOCK_ELEVATION_URLS[role],
-      format: "png" as const,
-      resolution: request.resolution,
-      sizeBytes: 0,
-      mnmlOutputId: `mock-${role}`,
-    }));
-  }
-  // video
-  return [
-    {
-      role: "video-primary",
-      url: MOCK_VIDEO_URL,
-      format: "mp4",
-      resolution: request.resolution,
-      sizeBytes: 0,
-      durationSeconds: request.durationSeconds,
-      thumbnailUrl: MOCK_VIDEO_THUMB_URL,
-      mnmlOutputId: "mock-video-primary",
-    },
-    {
-      role: "video-thumbnail",
-      url: MOCK_VIDEO_THUMB_URL,
-      format: "png",
-      resolution: request.resolution,
-      sizeBytes: 0,
-      mnmlOutputId: "mock-video-thumbnail",
-    },
-  ];
+  return [MOCK_ARCHDIFFUSION_URL];
 }

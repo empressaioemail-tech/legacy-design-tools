@@ -1,122 +1,142 @@
 /**
- * Production HTTP client for mnml.ai. Speaks Spec 54 §5's wire
- * contract:
+ * Production HTTP client for mnml.ai. Speaks Spec 54 v2 §2's wire
+ * contract verified live against `mnmlai.dev/docs` on 2026-05-02:
  *
- *   POST   {baseUrl}/v1/renders           — submit a job
- *   GET    {baseUrl}/v1/renders/{id}      — get status + outputs
- *   DELETE {baseUrl}/v1/renders/{id}      — cancel a queued / rendering job
+ *   POST {baseUrl}/v1/archDiffusion-v43   — multipart, single image render
+ *   POST {baseUrl}/v1/video-ai            — multipart, Kling 5/10s clip
+ *   GET  {baseUrl}/v1/status/{id}         — shared status poll
  *
- * Auth: `Authorization: Bearer {apiKey}` on every request.
+ * Auth: `Authorization: Bearer {apiKey}` on every request. Multipart
+ * Content-Type is set by the runtime's FormData wiring (we MUST NOT
+ * set it ourselves — fetch needs to mint the boundary).
  *
- * Mirrors `HttpConverterClient`
- * (`artifacts/api-server/src/lib/converterClient.ts:213`) for:
- *   - per-attempt timeout via {@link AbortSignal.timeout}
- *   - structured logging on every attempt (success + failure)
- *   - {@link MnmlError} mapping that splits transport-side failures
- *     (`unavailable` / `timeout`) from mnml.ai-side failures
- *     (`invalid_scene` / `quota_exceeded` / `internal_error`)
+ * Status translation (Spec 54 v2 §3) lives here so consumers downstream
+ * of the client never have to know about mnml's wire vocabulary
+ * (`starting | processing | success | failed | canceled`):
  *
- * No retry policy at this layer in v1: Spec 54 §5 names polling as
- * the v1 transition mechanism, and the polling cadence (5 s → 15 s →
- * 60 s) is itself the retry surface for transient status fetches.
- * The trigger and cancel calls are one-shot; DA-RP-1 may layer a
- * retry policy on top once it has real failure-mode data from Wave 2
- * Recon.
+ *   starting   → queued
+ *   processing → rendering
+ *   success    → ready
+ *   failed     → failed
+ *   canceled   → cancelled    (note codebase spelling)
+ *   {anything else} → rendering (defer to next poll; the unknown
+ *                                value will likely resolve)
  *
- * TODO(wave-2-recon): Spec 54 §5's endpoint shapes are inferred from
- * typical render-API patterns, not from mnml.ai's actual docs. The
- * Wave 2 Recon sprint validates and, if needed, the request /
- * response payload mappers below adapt while keeping the public
- * {@link MnmlClient} contract stable.
+ * Error mapping (Spec 54 v2 §5): the {@link MnmlError} `kind` is
+ * derived from the HTTP status (and, for some buckets, the body's
+ * `code`); the `code` field carries mnml's verbatim wire code
+ * (`NO_CREDITS`, `IMAGE_TOO_LARGE`, etc.) for support tracking;
+ * `details` passes through the body's structured payload.
+ *
+ * Per-attempt timeouts are operation-specific (Spec 54 v2 §6 calls
+ * for 30 s on triggers and 10 s on status polls) — both are configurable.
+ *
+ * No retry policy at this layer in v1: Spec 54 v2 §2.3 names polling
+ * as the v1 transition mechanism, and the polling cadence is itself
+ * the retry surface for transient status fetches. Trigger calls are
+ * one-shot.
  */
 
 import {
   MnmlError,
   noopMnmlLogger,
-  type CancelRenderResult,
+  type ArchDiffusionRequest,
   type MnmlClient,
-  type MnmlErrorCode,
+  type MnmlErrorKind,
   type MnmlLogger,
-  type RenderOutput,
   type RenderRequest,
   type RenderStatus,
   type RenderStatusResult,
   type TriggerRenderResult,
+  type VideoAiRequest,
 } from "./types";
 
 export interface HttpMnmlClientOptions {
-  /** Base URL for the mnml.ai API, e.g. `"https://api.mnml.ai"`. No trailing slash required. */
+  /** Base URL for the mnml.ai API, e.g. `"https://api.mnmlai.dev"`. No trailing slash required. */
   baseUrl: string;
   /** Bearer token; sent on every request as `Authorization: Bearer {apiKey}`. */
   apiKey: string;
   /**
-   * Test-injectable fetch implementation. Mirrors
-   * {@link createAnthropicClient}'s `fetcher` option so tests can
-   * stub the network without `vi.mock`-ing global fetch.
+   * Test-injectable fetch implementation. Mirrors the converter
+   * client's `fetcher` option so tests can stub the network without
+   * `vi.mock`-ing global fetch.
    */
   fetcher?: typeof fetch;
-  /** Per-attempt timeout. Default 30 s (matches `HttpConverterClient`). */
-  timeoutMs?: number;
+  /**
+   * Per-attempt timeout for triggerRender. Default 30 s — Spec 54 v2
+   * §6 names this as the trigger budget. (Triggers spend most of
+   * their wall clock uploading the multipart image.)
+   */
+  triggerTimeoutMs?: number;
+  /**
+   * Per-attempt timeout for getRenderStatus. Default 10 s — Spec 54
+   * v2 §6 names this as the poll budget. (Status polls are tiny.)
+   */
+  statusTimeoutMs?: number;
   /** Optional structured logger. Defaults to a no-op so tests stay quiet. */
   logger?: MnmlLogger;
 }
 
-interface MnmlErrorBody {
-  error?: { code?: string; message?: string };
-}
-
 interface MnmlTriggerResponseBody {
-  // TODO(wave-2-recon): mnml.ai may use `id` or `job_id` or `render_id` —
-  // verify and adjust. The accessor in `extractRenderId` accepts all three.
-  id?: string;
-  job_id?: string;
-  render_id?: string;
   status?: string;
-}
-
-interface MnmlOutputBody {
-  role?: string;
-  url?: string;
-  format?: string;
-  resolution?: string;
-  size_bytes?: number;
-  duration_seconds?: number;
-  thumbnail_url?: string;
-  output_id?: string;
+  id?: string;
+  prompt?: string;
+  expert_name?: string;
+  /** Spec 54 v2 §2.1 — user's remaining credit balance after deduction. */
+  credits?: number;
+  /** Spec 54 v2 §2.2 — video-ai also returns the seed inline. */
+  seed?: number;
 }
 
 interface MnmlStatusResponseBody {
-  id?: string;
-  job_id?: string;
-  render_id?: string;
   status?: string;
-  outputs?: MnmlOutputBody[];
-  error?: { code?: string; message?: string };
+  /** Spec 54 v2 §2.3 — output URL list on `success`. */
+  message?: string[] | string;
+  seed?: number;
+  /** Verbatim engine error string on `failed`. */
+  error?: string;
+}
+
+interface MnmlErrorResponseBody {
+  status?: string;
+  code?: string;
+  message?: string;
+  details?: Record<string, unknown>;
 }
 
 export class HttpMnmlClient implements MnmlClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly fetchImpl: typeof fetch;
-  private readonly timeoutMs: number;
+  private readonly triggerTimeoutMs: number;
+  private readonly statusTimeoutMs: number;
   private readonly logger: MnmlLogger;
 
   constructor(opts: HttpMnmlClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.apiKey = opts.apiKey;
     this.fetchImpl = opts.fetcher ?? fetch;
-    this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.triggerTimeoutMs = opts.triggerTimeoutMs ?? 30_000;
+    this.statusTimeoutMs = opts.statusTimeoutMs ?? 10_000;
     this.logger = opts.logger ?? noopMnmlLogger;
   }
 
   async triggerRender(input: RenderRequest): Promise<TriggerRenderResult> {
-    const url = `${this.baseUrl}/v1/renders`;
+    const path =
+      input.kind === "video" ? "/v1/video-ai" : "/v1/archDiffusion-v43";
+    const url = `${this.baseUrl}${path}`;
+    const form =
+      input.kind === "video"
+        ? buildVideoForm(input)
+        : buildArchDiffusionForm(input);
+
     const startedAt = Date.now();
     const response = await this.doFetch(
       "POST",
       url,
+      form,
+      this.triggerTimeoutMs,
       "triggerRender",
-      JSON.stringify(input),
     );
     const durationMs = Date.now() - startedAt;
 
@@ -126,10 +146,11 @@ export class HttpMnmlClient implements MnmlClient {
         {
           op: "triggerRender",
           url,
+          kind: input.kind,
           status: response.status,
           durationMs,
+          mnmlKind: err.kind,
           code: err.code,
-          err,
         },
         "mnml.ai trigger failed",
       );
@@ -137,41 +158,57 @@ export class HttpMnmlClient implements MnmlClient {
     }
 
     const body = (await safeJson<MnmlTriggerResponseBody>(response)) ?? {};
-    const renderId = extractRenderId(body);
+    const renderId = body.id;
     if (!renderId) {
       const err = new MnmlError(
-        "internal_error",
-        "mnml.ai trigger response missing renderId",
+        "validation",
+        "MISSING_ID",
+        "mnml.ai trigger response had no id",
       );
       this.logger.warn(
         {
           op: "triggerRender",
           url,
+          kind: input.kind,
           status: response.status,
           durationMs,
-          code: err.code,
         },
         "mnml.ai trigger response malformed",
       );
       throw err;
     }
+    // Spec 54 v2 §2.1 — `credits` is the post-deduction balance. `-1`
+    // is the sentinel when mnml omits the field (e.g. video-ai docs
+    // currently elide it on the success envelope; treat as unknown
+    // rather than zero so callers can distinguish "we don't know" from
+    // "you're out").
+    const remainingCredits =
+      typeof body.credits === "number" ? body.credits : -1;
     this.logger.info(
       {
         op: "triggerRender",
         url,
+        kind: input.kind,
         status: response.status,
         durationMs,
         renderId,
+        remainingCredits,
       },
       "mnml.ai trigger ok",
     );
-    return { renderId, status: "queued" };
+    return { renderId, remainingCredits };
   }
 
   async getRenderStatus(renderId: string): Promise<RenderStatusResult> {
-    const url = `${this.baseUrl}/v1/renders/${encodeURIComponent(renderId)}`;
+    const url = `${this.baseUrl}/v1/status/${encodeURIComponent(renderId)}`;
     const startedAt = Date.now();
-    const response = await this.doFetch("GET", url, "getRenderStatus");
+    const response = await this.doFetch(
+      "GET",
+      url,
+      null,
+      this.statusTimeoutMs,
+      "getRenderStatus",
+    );
     const durationMs = Date.now() - startedAt;
 
     if (!response.ok) {
@@ -183,8 +220,8 @@ export class HttpMnmlClient implements MnmlClient {
           renderId,
           status: response.status,
           durationMs,
+          mnmlKind: err.kind,
           code: err.code,
-          err,
         },
         "mnml.ai status fetch failed",
       );
@@ -192,20 +229,23 @@ export class HttpMnmlClient implements MnmlClient {
     }
 
     const body = (await safeJson<MnmlStatusResponseBody>(response)) ?? {};
-    const status = mapStatus(body.status);
-    const result: RenderStatusResult = {
-      renderId,
-      status,
-    };
-    if (status === "ready" && body.outputs) {
-      result.outputs = body.outputs.map(mapOutput);
+    const status = translateStatus(body.status);
+    const result: RenderStatusResult = { renderId, status };
+
+    if (status === "ready") {
+      // Spec 54 v2 §2.3 — `message` is `string[]` on success, but be
+      // defensive in case mnml ever returns a single-string variant.
+      const raw = body.message;
+      result.outputUrls = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      if (typeof body.seed === "number") result.seed = body.seed;
     }
-    if (status === "failed" && body.error) {
+    if (status === "failed") {
       result.error = {
-        code: mapErrorCode(body.error.code),
-        message: body.error.message ?? "mnml.ai render failed",
+        code: "render_failed",
+        message: body.error ?? "mnml.ai render failed",
       };
     }
+
     this.logger.info(
       {
         op: "getRenderStatus",
@@ -220,77 +260,45 @@ export class HttpMnmlClient implements MnmlClient {
     return result;
   }
 
-  async cancelRender(renderId: string): Promise<CancelRenderResult> {
-    const url = `${this.baseUrl}/v1/renders/${encodeURIComponent(renderId)}`;
-    const startedAt = Date.now();
-    const response = await this.doFetch("DELETE", url, "cancelRender");
-    const durationMs = Date.now() - startedAt;
-
-    if (!response.ok) {
-      const err = await mapErrorResponse(response);
-      this.logger.warn(
-        {
-          op: "cancelRender",
-          url,
-          renderId,
-          status: response.status,
-          durationMs,
-          code: err.code,
-          err,
-        },
-        "mnml.ai cancel failed",
-      );
-      throw err;
-    }
-    this.logger.info(
-      {
-        op: "cancelRender",
-        url,
-        renderId,
-        status: response.status,
-        durationMs,
-      },
-      "mnml.ai cancel ok",
-    );
-    return { renderId, status: "cancelled" };
-  }
-
   private async doFetch(
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "POST",
     url: string,
-    op: "triggerRender" | "getRenderStatus" | "cancelRender",
-    body?: string,
+    body: FormData | null,
+    timeoutMs: number,
+    op: "triggerRender" | "getRenderStatus",
   ): Promise<Response> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
       Accept: "application/json",
     };
-    if (body !== undefined) {
-      headers["Content-Type"] = "application/json";
-    }
+    // Intentionally do NOT set Content-Type for multipart bodies —
+    // fetch sets it (with the multipart boundary) automatically.
+    // Setting it manually breaks the boundary parameter and mnml
+    // returns a `MISSING_IMAGE` 400.
     const startedAt = Date.now();
     try {
       return await this.fetchImpl(url, {
         method,
         headers,
-        body,
-        signal: AbortSignal.timeout(this.timeoutMs),
+        body: body ?? undefined,
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       // Transport-side failure (DNS, ECONN*, abort, timeout). Log
       // before translating to MnmlError so every attempt — happy or
-      // not — emits exactly one structured record. Mirrors
-      // HttpConverterClient's per-attempt logging contract.
+      // not — emits exactly one structured record.
       const name = (err as { name?: string } | null)?.name;
       const durationMs = Date.now() - startedAt;
       const mnmlErr =
         name === "TimeoutError" || name === "AbortError"
           ? new MnmlError(
+              "transport",
               "timeout",
-              `mnml.ai did not respond within ${this.timeoutMs} ms`,
+              `mnml.ai did not respond within ${timeoutMs} ms`,
             )
           : new MnmlError(
-              "unavailable",
+              "transport",
+              "network",
               `mnml.ai request failed: ${(err as Error).message}`,
             );
       this.logger.warn(
@@ -299,8 +307,8 @@ export class HttpMnmlClient implements MnmlClient {
           url,
           method,
           durationMs,
+          mnmlKind: mnmlErr.kind,
           code: mnmlErr.code,
-          err: mnmlErr,
         },
         `mnml.ai ${op} transport failure`,
       );
@@ -309,113 +317,129 @@ export class HttpMnmlClient implements MnmlClient {
   }
 }
 
-function extractRenderId(body: MnmlTriggerResponseBody): string | null {
-  return body.id ?? body.render_id ?? body.job_id ?? null;
+// ─────────────────────────────────────────────────────────────────────
+// Form builders
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Wrap Buffer/Blob into a Blob FormData accepts. TS 5.9 narrows the
+ * Blob ctor's accept-set to `Uint8Array<ArrayBuffer>` (strict), while
+ * `Buffer` is `Uint8Array<ArrayBufferLike>` (broader — could be a
+ * `SharedArrayBuffer`-backed view). We copy into a fresh
+ * `Uint8Array(byteLength)` whose backing is a freshly-allocated
+ * non-shared `ArrayBuffer`, satisfying the strict variant without
+ * any cast and without pulling in DOM lib for `BlobPart`.
+ *
+ * One byte copy per upload — image payloads are megabytes, the cost
+ * is negligible against the network round-trip.
+ */
+function asFormBlob(image: Buffer | Blob): Blob {
+  if (image instanceof Blob) return image;
+  const copy = new Uint8Array(image.byteLength);
+  copy.set(image);
+  return new Blob([copy]);
 }
 
-/** Maps mnml.ai's status string onto our discriminated set. */
-function mapStatus(raw: string | undefined): RenderStatus {
+function buildArchDiffusionForm(req: ArchDiffusionRequest): FormData {
+  const form = new FormData();
+  form.append("image", asFormBlob(req.image), "input.jpg");
+  form.append("prompt", req.prompt);
+  if (req.expertName) form.append("expert_name", req.expertName);
+  if (req.renderStyle) form.append("render_style", req.renderStyle);
+  if (req.geometry) form.append("geometry", req.geometry);
+  if (req.viewMode) form.append("view_mode", req.viewMode);
+  if (req.seed !== undefined) form.append("seed", String(req.seed));
+  if (req.referenceImages) {
+    // Spec 54 v2 §2.1 — `reference_image_1..4`. Extras silently dropped.
+    req.referenceImages.slice(0, 4).forEach((img, i) => {
+      form.append(`reference_image_${i + 1}`, asFormBlob(img));
+    });
+  }
+  if (req.expertParams) {
+    for (const [k, v] of Object.entries(req.expertParams)) {
+      form.append(k, v);
+    }
+  }
+  return form;
+}
+
+function buildVideoForm(req: VideoAiRequest): FormData {
+  const form = new FormData();
+  form.append("image", asFormBlob(req.image), "input.jpg");
+  form.append("prompt", req.prompt);
+  form.append("duration", String(req.duration));
+  if (req.cfgScale !== undefined) form.append("cfg_scale", String(req.cfgScale));
+  if (req.aspectRatio) form.append("aspect_ratio", req.aspectRatio);
+  if (req.negativePrompt) form.append("negative_prompt", req.negativePrompt);
+  if (req.movementType) form.append("movement_type", req.movementType);
+  if (req.direction) form.append("direction", req.direction);
+  if (req.seed !== undefined) form.append("seed", String(req.seed));
+  return form;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Status + error mapping
+// ─────────────────────────────────────────────────────────────────────
+
+/** Spec 54 v2 §3 — mnml wire status → codebase status. */
+function translateStatus(raw: string | undefined): RenderStatus {
   switch (raw) {
-    case "queued":
-    case "pending":
+    case "starting":
       return "queued";
-    case "rendering":
     case "processing":
-    case "running":
       return "rendering";
-    case "ready":
-    case "complete":
-    case "succeeded":
+    case "success":
       return "ready";
     case "failed":
-    case "error":
       return "failed";
-    case "cancelled":
     case "canceled":
       return "cancelled";
     default:
       // Unknown status string → treat as still rendering rather than
       // poisoning the row. The next poll will likely return a known
-      // value; if it persists, mnml.ai is sending us something Spec 54
-      // didn't account for and Wave 2 Recon needs to extend the map.
+      // value; if it persists, mnml.ai is sending us something Spec
+      // 54 v2 didn't account for and the integration recon needs to
+      // extend the map.
       return "rendering";
   }
 }
 
-function mapOutput(raw: MnmlOutputBody): RenderOutput {
-  return {
-    role: (raw.role as RenderOutput["role"]) ?? "primary",
-    url: raw.url ?? "",
-    format: (raw.format as RenderOutput["format"]) ?? "png",
-    resolution: raw.resolution ?? "",
-    sizeBytes: raw.size_bytes ?? 0,
-    ...(raw.duration_seconds !== undefined
-      ? { durationSeconds: raw.duration_seconds }
-      : {}),
-    ...(raw.thumbnail_url !== undefined
-      ? { thumbnailUrl: raw.thumbnail_url }
-      : {}),
-    ...(raw.output_id !== undefined ? { mnmlOutputId: raw.output_id } : {}),
-  };
-}
-
 /**
- * Maps mnml.ai's response status + body onto a {@link MnmlError}.
- * Spec 54 §5 names the four mnml.ai-side failure categories
- * (invalid-scene / quota-exceeded / timeout / internal-error); we
- * derive the bucket from the response status and, if present, the
- * body's `error.code` field.
+ * Spec 54 v2 §5 — HTTP status → MnmlErrorKind bucket. The body's
+ * `code` field is preserved verbatim on the `MnmlError.code` field
+ * for support tracking; `details` passes through whatever structured
+ * payload mnml attached (e.g. `available_credits` / `required_credits`
+ * for `insufficient_credits`).
  */
 async function mapErrorResponse(response: Response): Promise<MnmlError> {
-  const body = await safeJson<MnmlErrorBody>(response);
-  const bodyCode = body?.error?.code;
-  const bodyMessage = body?.error?.message;
-
-  let code: MnmlErrorCode;
-  if (bodyCode) {
-    code = mapErrorCode(bodyCode);
-  } else if (response.status === 429) {
-    code = "quota_exceeded";
-  } else if (response.status === 408 || response.status === 504) {
-    code = "timeout";
-  } else if (response.status >= 400 && response.status < 500) {
-    code = "invalid_scene";
-  } else {
-    code = "internal_error";
-  }
-
+  const body = await safeJson<MnmlErrorResponseBody>(response);
+  const code = body?.code ?? `HTTP_${response.status}`;
   const message =
-    bodyMessage ??
+    body?.message ??
     `mnml.ai returned ${response.status} ${response.statusText || ""}`.trim();
-  return new MnmlError(code, message);
-}
+  const details = body?.details;
 
-/** Maps mnml.ai's textual error code onto our coarse bucket. */
-function mapErrorCode(raw: string | undefined): MnmlErrorCode {
-  if (!raw) return "internal_error";
-  // Accept hyphen + underscore variants — mnml.ai spec drift insurance.
-  const normalized = raw.toLowerCase().replace(/-/g, "_");
-  switch (normalized) {
-    case "invalid_scene":
-    case "scene_invalid":
-    case "bad_request":
-      return "invalid_scene";
-    case "quota_exceeded":
-    case "rate_limited":
-    case "too_many_requests":
-      return "quota_exceeded";
-    case "timeout":
-    case "timed_out":
-      return "timeout";
-    case "internal_error":
-    case "server_error":
-      return "internal_error";
-    case "unavailable":
-    case "service_unavailable":
-      return "unavailable";
-    default:
-      return "internal_error";
+  let kind: MnmlErrorKind;
+  if (response.status === 401) {
+    kind = "auth";
+  } else if (response.status === 403) {
+    kind = "insufficient_credits";
+  } else if (response.status === 404) {
+    kind = "not_found";
+  } else if (response.status === 429) {
+    kind = "rate_limited";
+  } else if (response.status >= 500) {
+    kind = "unavailable";
+  } else {
+    // 4xx default — `validation` covers MISSING_IMAGE,
+    // INVALID_IMAGE_TYPE, IMAGE_TOO_LARGE, MISSING_PROMPT,
+    // invalid_request_id, etc.
+    kind = "validation";
   }
+
+  return details === undefined
+    ? new MnmlError(kind, code, message)
+    : new MnmlError(kind, code, message, details);
 }
 
 async function safeJson<T>(response: Response): Promise<T | null> {
