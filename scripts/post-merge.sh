@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 pnpm install --frozen-lockfile
-pnpm --filter db push
+pnpm --filter @workspace/db run push-force
 # Task #281 — stamp the producing job id onto every legacy
 # `parcel_briefings` row whose `generated_at` is non-null but whose
 # new `generation_id` column is. Idempotent (only acts on rows where
