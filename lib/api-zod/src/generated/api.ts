@@ -4862,3 +4862,541 @@ export const DismissReviewerRequestResponse = zod
   .describe(
     "Wire envelope for `POST \/engagements\/{id}\/reviewer-requests`\nand `POST \/reviewer-requests\/{id}\/dismiss`. Carries the\naffected row in the same shape the list endpoint returns so\nthe FE can splice the response into cached lists without a\nfollow-up fetch.\n",
   );
+
+/**
+ * Synchronous up to row insert + 202 response; the polling
+worker (capture → trigger → poll → mirror → terminal) runs
+fire-and-forget. Body is a discriminated union by `kind`:
+
+  - `still`         — single image. 1 archDiffusion-v43 call.
+  - `elevation-set` — north / east / south / west. 4 archDiff
+                      calls fanned out by the route, persisted
+                      as ONE viewpoint_renders parent row +
+                      4 render_outputs children.
+  - `video`         — single 5- or 10-second Kling clip.
+
+Architect-audience-only. Behind `RENDERS_PROD_ENABLED` in
+production (returns 503 with `renders_preview_disabled` until
+the operator flips the flag). The body MUST include `glbUrl`
+— V1-4 does not resolve the bim-model row's GLB pointer
+server-side (V1-5 follow-up).
+
+ * @summary Kick off a mnml.ai render for an engagement
+ */
+export const KickoffRenderParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const kickoffRenderBodyOneOnePromptMax = 2000;
+
+export const kickoffRenderBodyOneTwoFovMin = 10;
+export const kickoffRenderBodyOneTwoFovMax = 120;
+
+export const kickoffRenderBodyTwoOnePromptMax = 2000;
+
+export const kickoffRenderBodyTwoTwoCameraDistanceExclusiveMin = 0;
+
+export const kickoffRenderBodyTwoTwoFovMin = 10;
+export const kickoffRenderBodyTwoTwoFovMax = 120;
+
+export const kickoffRenderBodyThreeOnePromptMax = 2000;
+
+export const kickoffRenderBodyThreeTwoCfgScaleMin = 0;
+export const kickoffRenderBodyThreeTwoCfgScaleMax = 1;
+
+export const KickoffRenderBody = zod.union([
+  zod
+    .object({
+      glbUrl: zod
+        .string()
+        .url()
+        .describe(
+          "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+        ),
+      prompt: zod
+        .string()
+        .min(1)
+        .max(kickoffRenderBodyOneOnePromptMax)
+        .describe(
+          "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
+        ),
+      expertName: zod
+        .enum([
+          "exterior",
+          "interior",
+          "masterplan",
+          "landscape",
+          "plan",
+          "product",
+        ])
+        .optional()
+        .describe("mnml expert routing per Spec 54 v2 §2.1."),
+      renderStyle: zod
+        .enum([
+          "raw",
+          "photoreal",
+          "cgi_render",
+          "cad",
+          "freehand_sketch",
+          "clay_model",
+          "illustration",
+          "watercolor",
+        ])
+        .optional(),
+      expertParams: zod
+        .record(zod.string(), zod.string())
+        .optional()
+        .describe(
+          "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
+        ),
+    })
+    .describe("Common kickoff fields shared across every render kind.")
+    .and(
+      zod
+        .object({
+          kind: zod.enum(["still"]),
+          cameraPosition: zod
+            .object({
+              x: zod.number(),
+              y: zod.number(),
+              z: zod.number(),
+            })
+            .describe(
+              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+            ),
+          cameraTarget: zod
+            .object({
+              x: zod.number(),
+              y: zod.number(),
+              z: zod.number(),
+            })
+            .describe(
+              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+            ),
+          fov: zod
+            .number()
+            .min(kickoffRenderBodyOneTwoFovMin)
+            .max(kickoffRenderBodyOneTwoFovMax)
+            .optional()
+            .describe("Field of view in degrees. Default 50 if omitted."),
+        })
+        .describe("Single still image kickoff."),
+    )
+    .and(
+      zod.object({
+        kind: zod.enum(["still"]),
+      }),
+    ),
+  zod
+    .object({
+      glbUrl: zod
+        .string()
+        .url()
+        .describe(
+          "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+        ),
+      prompt: zod
+        .string()
+        .min(1)
+        .max(kickoffRenderBodyTwoOnePromptMax)
+        .describe(
+          "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
+        ),
+      expertName: zod
+        .enum([
+          "exterior",
+          "interior",
+          "masterplan",
+          "landscape",
+          "plan",
+          "product",
+        ])
+        .optional()
+        .describe("mnml expert routing per Spec 54 v2 §2.1."),
+      renderStyle: zod
+        .enum([
+          "raw",
+          "photoreal",
+          "cgi_render",
+          "cad",
+          "freehand_sketch",
+          "clay_model",
+          "illustration",
+          "watercolor",
+        ])
+        .optional(),
+      expertParams: zod
+        .record(zod.string(), zod.string())
+        .optional()
+        .describe(
+          "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
+        ),
+    })
+    .describe("Common kickoff fields shared across every render kind.")
+    .and(
+      zod
+        .object({
+          kind: zod.enum(["elevation-set"]),
+          buildingCenter: zod
+            .object({
+              x: zod.number(),
+              y: zod.number(),
+              z: zod.number(),
+            })
+            .describe(
+              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+            ),
+          cameraDistance: zod
+            .number()
+            .gt(kickoffRenderBodyTwoTwoCameraDistanceExclusiveMin)
+            .describe("Meters from buildingCenter along each cardinal axis.\n"),
+          cameraHeight: zod
+            .number()
+            .describe("Meters above ground for the camera origin."),
+          fov: zod
+            .number()
+            .min(kickoffRenderBodyTwoTwoFovMin)
+            .max(kickoffRenderBodyTwoTwoFovMax)
+            .optional(),
+        })
+        .describe(
+          "Cardinal-elevation set. The route fans out 4 separate\narchDiffusion-v43 calls (camera_direction front \/ right \/\nback \/ left) and persists ONE viewpoint_renders parent\nrow + 4 render_outputs children (one per cardinal role).\n",
+        ),
+    )
+    .and(
+      zod.object({
+        kind: zod.enum(["elevation-set"]),
+      }),
+    ),
+  zod
+    .object({
+      glbUrl: zod
+        .string()
+        .url()
+        .describe(
+          "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+        ),
+      prompt: zod
+        .string()
+        .min(1)
+        .max(kickoffRenderBodyThreeOnePromptMax)
+        .describe(
+          "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
+        ),
+      expertName: zod
+        .enum([
+          "exterior",
+          "interior",
+          "masterplan",
+          "landscape",
+          "plan",
+          "product",
+        ])
+        .optional()
+        .describe("mnml expert routing per Spec 54 v2 §2.1."),
+      renderStyle: zod
+        .enum([
+          "raw",
+          "photoreal",
+          "cgi_render",
+          "cad",
+          "freehand_sketch",
+          "clay_model",
+          "illustration",
+          "watercolor",
+        ])
+        .optional(),
+      expertParams: zod
+        .record(zod.string(), zod.string())
+        .optional()
+        .describe(
+          "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
+        ),
+    })
+    .describe("Common kickoff fields shared across every render kind.")
+    .and(
+      zod
+        .object({
+          kind: zod.enum(["video"]),
+          cameraPosition: zod
+            .object({
+              x: zod.number(),
+              y: zod.number(),
+              z: zod.number(),
+            })
+            .describe(
+              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+            ),
+          cameraTarget: zod
+            .object({
+              x: zod.number(),
+              y: zod.number(),
+              z: zod.number(),
+            })
+            .describe(
+              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+            ),
+          duration: zod.union([zod.literal(5), zod.literal(10)]),
+          cfgScale: zod
+            .number()
+            .min(kickoffRenderBodyThreeTwoCfgScaleMin)
+            .max(kickoffRenderBodyThreeTwoCfgScaleMax)
+            .optional(),
+          aspectRatio: zod.enum(["16:9", "4:3", "1:1"]).optional(),
+          movementType: zod
+            .enum(["horizontal", "vertical", "zoom_in", "zoom_out", "pan"])
+            .optional(),
+          direction: zod.enum(["left", "right", "up", "down"]).optional(),
+        })
+        .describe(
+          "Single 5- or 10-second Kling clip. mnml's documented hard\ncap (Spec 54 v2 §2.2) — duration outside `{5, 10}` is\nrejected by validation.\n",
+        ),
+    )
+    .and(
+      zod.object({
+        kind: zod.enum(["video"]),
+      }),
+    ),
+]);
+
+/**
+ * Returns up to 100 most-recent renders ordered by `createdAt`
+DESC. Architect-audience-only. No pagination in V1-4 — the
+architect's render history is small enough that the cap is
+not user-visible. Pagination is a V1-5 follow-up if the cap
+becomes a constraint.
+
+ * @summary List renders for an engagement (newest first)
+ */
+export const ListEngagementRendersParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ListEngagementRendersResponse = zod
+  .object({
+    items: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          kind: zod
+            .enum(["still", "elevation-set", "video"])
+            .describe(
+              "API-server domain render taxonomy. Distinct from mnml-client's\nwire kind (`archdiffusion | video`) because `elevation-set` is\na fan-out concept that lives in the route, not on the wire\n(Spec 54 v2 §6.2).\n",
+            ),
+          status: zod
+            .enum(["queued", "rendering", "ready", "failed", "cancelled"])
+            .describe(
+              "Render lifecycle. Codebase-internal vocabulary; mnml's wire\nstatuses (`starting | processing | success | failed |\ncanceled`) translate to this set inside HttpMnmlClient.\n",
+            ),
+          errorCode: zod.string().nullable(),
+          requestedBy: zod.string(),
+          createdAt: zod.coerce.date(),
+          updatedAt: zod.coerce.date(),
+          completedAt: zod.coerce.date().nullable(),
+        })
+        .describe(
+          "One row in the per-engagement render history. Slimmer than\nthe detail shape — outputs are NOT included; clients fetch\n`GET \/renders\/{id}` for the gallery view.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/engagements\/{id}\/renders`. Newest\nfirst. Capped at 100 items in V1-4; pagination is V1-5.\n",
+  );
+
+/**
+ * Returns the row's status (`queued | rendering | ready |
+failed | cancelled`), the upstream-snapshot atom_event_ids
+(freshness anchors per Spec 54 §6), the per-direction
+in-flight tracking JSONB for `elevation-set` parents
+(`mnmlJobs`), and the child `render_outputs` rows projected
+for FE consumption. Architect-audience-only.
+
+No mnml call from this handler — the polling worker advances
+state. Clients poll this endpoint while non-terminal.
+
+ * @summary Get one render's status + outputs
+ */
+export const GetRenderParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetRenderResponse = zod
+  .object({
+    id: zod.string(),
+    engagementId: zod.string(),
+    kind: zod
+      .enum(["still", "elevation-set", "video"])
+      .describe(
+        "API-server domain render taxonomy. Distinct from mnml-client's\nwire kind (`archdiffusion | video`) because `elevation-set` is\na fan-out concept that lives in the route, not on the wire\n(Spec 54 v2 §6.2).\n",
+      ),
+    status: zod
+      .enum(["queued", "rendering", "ready", "failed", "cancelled"])
+      .describe(
+        "Render lifecycle. Codebase-internal vocabulary; mnml's wire\nstatuses (`starting | processing | success | failed |\ncanceled`) translate to this set inside HttpMnmlClient.\n",
+      ),
+    mnmlJobId: zod.string().nullable(),
+    mnmlJobs: zod
+      .array(
+        zod
+          .object({
+            role: zod.enum([
+              "elevation-n",
+              "elevation-e",
+              "elevation-s",
+              "elevation-w",
+            ]),
+            cameraDirection: zod.enum(["front", "back", "right", "left"]),
+            mnmlJobId: zod.string().nullable(),
+            status: zod.enum([
+              "pending-trigger",
+              "queued",
+              "rendering",
+              "ready",
+              "failed",
+            ]),
+            error: zod
+              .object({
+                code: zod.string(),
+                message: zod.string(),
+              })
+              .nullish(),
+            outputUrl: zod
+              .string()
+              .nullish()
+              .describe("mnml CDN URL on `ready`, before mirror."),
+            mirroredObjectKey: zod.string().nullish(),
+          })
+          .describe(
+            "One in-flight per-direction job for an `elevation-set` parent.\nStored as JSONB on `viewpoint_renders.mnml_jobs` while\npolling — render_outputs rows are inserted only when each\nchild resolves to `ready` (Spec 54 v2 §6.2). Surfaced on the\ndetail response so the FE can render a per-direction progress\nchip while the set is in-flight.\n",
+          ),
+      )
+      .nullable(),
+    errorCode: zod.string().nullable(),
+    errorMessage: zod.string().nullable(),
+    errorDetails: zod.record(zod.string(), zod.unknown()).nullable(),
+    requestedBy: zod.string(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+    completedAt: zod.coerce.date().nullable(),
+    outputs: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          role: zod
+            .enum([
+              "primary",
+              "elevation-n",
+              "elevation-e",
+              "elevation-s",
+              "elevation-w",
+              "video-primary",
+              "video-thumbnail",
+            ])
+            .describe(
+              "Persistence-layer role taxonomy. The route's elevation-set\nfan-out tags each output by which `camera_direction`\nproduced it; the video-thumbnail role is server-synthesized\nvia ffmpeg post-`ready` (mnml does not return a thumbnail).\n",
+            ),
+          format: zod.enum(["png", "jpg", "mp4", "webm"]),
+          resolution: zod.string().nullable(),
+          sizeBytes: zod.number().nullable(),
+          durationSeconds: zod.number().nullable(),
+          mirroredObjectKey: zod
+            .string()
+            .nullable()
+            .describe(
+              "GCS key under our durable bucket. NULL during the brief\nunmirrored window between row insert and mirror\ncompletion (the route writes both `source_url` and\n`mirroredObjectKey` in the same transaction so a NULL\nhere on a `ready` parent is an error condition the sweep\nsurfaces).\n",
+            ),
+          thumbnailUrl: zod.string().nullable(),
+          seed: zod.number().nullable(),
+        })
+        .describe(
+          "Subset of `render_outputs` columns the FE \/ chat needs to\nrender the gallery row without a second round-trip. The full\nLayer 3 surface lives on the `render-output` atom's typed\npayload via `GET \/atoms\/render-output\/{id}\/summary`.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Full row + child outputs projection for `GET \/renders\/{id}`.\nThe `mnmlJobs` array is populated only for `elevation-set`\nkinds (in-flight per-direction tracking); `mnmlJobId` is the\nsingle mnml render id for `still` \/ `video`.\n",
+  );
+
+/**
+ * Server-side cancellation. mnml.ai has no public cancel API
+(Spec 54 v2 §6.1) — this endpoint flips the row status to
+`cancelled` and the polling worker checks status before each
+poll iteration and bails. Outputs already mirrored before
+cancellation persist as artifacts of the partial run.
+
+Returns 409 when the render is already in a terminal state
+(`ready | failed | cancelled`) — those cannot be re-cancelled.
+
+ * @summary Cancel a queued or rendering render
+ */
+export const CancelRenderParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CancelRenderResponse = zod
+  .object({
+    id: zod.string(),
+    status: zod.enum(["cancelled"]),
+  })
+  .describe(
+    "Wire envelope for `POST \/renders\/{id}\/cancel`. The polling\nworker observes `status='cancelled'` on its next iteration\nand bails — there is no synchronous mnml call.\n",
+  );
+
+/**
+ * Three buckets:
+
+  1. Stuck-render rescue — rows in `queued`/`rendering`
+     older than the rescue threshold are flipped to `failed`
+     with `error_code='polling_timeout_sweep'`.
+  2. Old terminal reap — `failed`/`cancelled` rows older
+     than the retention window are DELETEd. `ready` rows
+     are NEVER reaped.
+  3. Incomplete-mirror warning — `ready` rows whose
+     `render_outputs` carry NULL `mirroredObjectKey` are
+     surfaced via warn logs (no auto-heal in V1-4).
+
+Auth: shared-secret header `x-renders-admin-secret` ↔
+`RENDERS_ADMIN_SECRET` env var. Cloud Scheduler / Replit
+cron / k8s CronJob configures the schedule outside the
+api-server. Returns 503 when the env var is unset (sweep
+is opt-in per environment).
+
+ * @summary Cron-invoked maintenance sweep over renders
+ */
+export const RunRendersSweepHeader = zod.object({
+  "x-renders-admin-secret": zod.string(),
+});
+
+export const runRendersSweepResponseRescuedStuckMin = 0;
+
+export const runRendersSweepResponseReapedTerminalMin = 0;
+
+export const runRendersSweepResponseWarnedIncompleteMirrorMin = 0;
+
+export const runRendersSweepResponseDurationMsMin = 0;
+
+export const RunRendersSweepResponse = zod
+  .object({
+    rescuedStuck: zod
+      .number()
+      .min(runRendersSweepResponseRescuedStuckMin)
+      .describe(
+        "Rows in `queued`\/`rendering` older than the rescue\nthreshold (default 15 min) flipped to `failed` with\n`error_code='polling_timeout_sweep'`.\n",
+      ),
+    reapedTerminal: zod
+      .number()
+      .min(runRendersSweepResponseReapedTerminalMin)
+      .describe(
+        "`failed`\/`cancelled` rows older than the retention window\n(default 30 days) DELETEd. Cascade clears\n`render_outputs` children. `ready` rows are NEVER reaped.\n",
+      ),
+    warnedIncompleteMirror: zod
+      .number()
+      .min(runRendersSweepResponseWarnedIncompleteMirrorMin)
+      .describe(
+        "`ready` rows whose `render_outputs` carry NULL\n`mirroredObjectKey`. Logged as warnings; no auto-heal in\nV1-4 (V1-5 follow-up).\n",
+      ),
+    durationMs: zod.number().min(runRendersSweepResponseDurationMsMin),
+  })
+  .describe(
+    "Wire envelope for `POST \/admin\/renders\/sweep`. Counts surface\nfor observability (paste into the operator's Cloud Scheduler\nlog + dashboard); the sweep itself is idempotent so multiple\ninvocations on the same minute produce the same end state.\n",
+  );

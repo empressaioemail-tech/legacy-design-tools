@@ -2684,6 +2684,465 @@ export interface ListReviewerRequestsResponse {
   requests: ReviewerRequest[];
 }
 
+/**
+ * XYZ vector in world coordinates. Y-up, Z+ = north convention
+matches the FE BimViewer's three.js setup.
+
+ */
+export interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * API-server domain render taxonomy. Distinct from mnml-client's
+wire kind (`archdiffusion | video`) because `elevation-set` is
+a fan-out concept that lives in the route, not on the wire
+(Spec 54 v2 §6.2).
+
+ */
+export type DomainRenderKind =
+  (typeof DomainRenderKind)[keyof typeof DomainRenderKind];
+
+export const DomainRenderKind = {
+  still: "still",
+  "elevation-set": "elevation-set",
+  video: "video",
+} as const;
+
+/**
+ * Render lifecycle. Codebase-internal vocabulary; mnml's wire
+statuses (`starting | processing | success | failed |
+canceled`) translate to this set inside HttpMnmlClient.
+
+ */
+export type RenderStatus = (typeof RenderStatus)[keyof typeof RenderStatus];
+
+export const RenderStatus = {
+  queued: "queued",
+  rendering: "rendering",
+  ready: "ready",
+  failed: "failed",
+  cancelled: "cancelled",
+} as const;
+
+/**
+ * Persistence-layer role taxonomy. The route's elevation-set
+fan-out tags each output by which `camera_direction`
+produced it; the video-thumbnail role is server-synthesized
+via ffmpeg post-`ready` (mnml does not return a thumbnail).
+
+ */
+export type RenderOutputRole =
+  (typeof RenderOutputRole)[keyof typeof RenderOutputRole];
+
+export const RenderOutputRole = {
+  primary: "primary",
+  "elevation-n": "elevation-n",
+  "elevation-e": "elevation-e",
+  "elevation-s": "elevation-s",
+  "elevation-w": "elevation-w",
+  "video-primary": "video-primary",
+  "video-thumbnail": "video-thumbnail",
+} as const;
+
+export type RenderCostBreakdownEntryKind =
+  (typeof RenderCostBreakdownEntryKind)[keyof typeof RenderCostBreakdownEntryKind];
+
+export const RenderCostBreakdownEntryKind = {
+  archdiffusion: "archdiffusion",
+  video: "video",
+} as const;
+
+/**
+ * One bucket of the cost breakdown. An elevation-set's
+breakdown has one entry with `count: 4` (four archdiffusion
+calls); a still's has `count: 1`. Future kinds (e.g. a
+compare-set of one archdiffusion + one video) would surface
+as multiple entries.
+
+ */
+export interface RenderCostBreakdownEntry {
+  kind: RenderCostBreakdownEntryKind;
+  /** @minimum 1 */
+  count: number;
+  /** @minimum 0 */
+  creditsPerCall: number;
+  /** @minimum 0 */
+  subtotal: number;
+}
+
+/**
+ * Static cost estimate from `estimateRenderCost` in
+`@workspace/mnml-client`. Spec 54 v2 §4 names the per-
+operation credit costs as a static table — no quote call
+to mnml. The kickoff response surfaces this so the FE can
+render a "Render: N credits" chip without a second round-trip.
+
+ */
+export interface RenderCostEstimate {
+  /** @minimum 0 */
+  credits: number;
+  breakdown: RenderCostBreakdownEntry[];
+}
+
+/**
+ * mnml expert routing per Spec 54 v2 §2.1.
+ */
+export type KickoffRenderCommonFieldsExpertName =
+  (typeof KickoffRenderCommonFieldsExpertName)[keyof typeof KickoffRenderCommonFieldsExpertName];
+
+export const KickoffRenderCommonFieldsExpertName = {
+  exterior: "exterior",
+  interior: "interior",
+  masterplan: "masterplan",
+  landscape: "landscape",
+  plan: "plan",
+  product: "product",
+} as const;
+
+export type KickoffRenderCommonFieldsRenderStyle =
+  (typeof KickoffRenderCommonFieldsRenderStyle)[keyof typeof KickoffRenderCommonFieldsRenderStyle];
+
+export const KickoffRenderCommonFieldsRenderStyle = {
+  raw: "raw",
+  photoreal: "photoreal",
+  cgi_render: "cgi_render",
+  cad: "cad",
+  freehand_sketch: "freehand_sketch",
+  clay_model: "clay_model",
+  illustration: "illustration",
+  watercolor: "watercolor",
+} as const;
+
+/**
+ * Per-expert flat string-map. The api-server passes each
+entry through verbatim as a multipart field; mnml
+validates against per-expert allowed values.
+
+ */
+export type KickoffRenderCommonFieldsExpertParams = { [key: string]: string };
+
+/**
+ * Common kickoff fields shared across every render kind.
+ */
+export interface KickoffRenderCommonFields {
+  /** Absolute URL the headless capture browser fetches the GLB
+from. The FE provides this — typically a signed object-
+storage URL the FE already loaded into its viewer.
+Server-side resolution from the bim-model row is V1-5.
+ */
+  glbUrl: string;
+  /**
+   * Free-form prompt forwarded to mnml as the
+`archDiffusion-v43.prompt` (or `video-ai.prompt`) form
+field. Spec 54 v2 §2.1 caps at 2000 chars.
+
+   * @minLength 1
+   * @maxLength 2000
+   */
+  prompt: string;
+  /** mnml expert routing per Spec 54 v2 §2.1. */
+  expertName?: KickoffRenderCommonFieldsExpertName;
+  renderStyle?: KickoffRenderCommonFieldsRenderStyle;
+  /** Per-expert flat string-map. The api-server passes each
+entry through verbatim as a multipart field; mnml
+validates against per-expert allowed values.
+ */
+  expertParams?: KickoffRenderCommonFieldsExpertParams;
+}
+
+export type KickoffRenderStillBodyKind =
+  (typeof KickoffRenderStillBodyKind)[keyof typeof KickoffRenderStillBodyKind];
+
+export const KickoffRenderStillBodyKind = {
+  still: "still",
+} as const;
+
+export type KickoffRenderStillBody = KickoffRenderCommonFields & {
+  kind: "still";
+  cameraPosition: Vec3;
+  cameraTarget: Vec3;
+  /**
+   * Field of view in degrees. Default 50 if omitted.
+   * @minimum 10
+   * @maximum 120
+   */
+  fov?: number;
+} & {
+  kind: KickoffRenderStillBodyKind;
+};
+
+export type KickoffRenderElevationSetBodyKind =
+  (typeof KickoffRenderElevationSetBodyKind)[keyof typeof KickoffRenderElevationSetBodyKind];
+
+export const KickoffRenderElevationSetBodyKind = {
+  "elevation-set": "elevation-set",
+} as const;
+
+export type KickoffRenderElevationSetBody = KickoffRenderCommonFields & {
+  kind: "elevation-set";
+  buildingCenter: Vec3;
+  /**
+   * Meters from buildingCenter along each cardinal axis.
+
+   * @exclusiveMinimum 0
+   */
+  cameraDistance: number;
+  /** Meters above ground for the camera origin. */
+  cameraHeight: number;
+  /**
+   * @minimum 10
+   * @maximum 120
+   */
+  fov?: number;
+} & {
+  kind: KickoffRenderElevationSetBodyKind;
+};
+
+export type KickoffRenderVideoBodyKind =
+  (typeof KickoffRenderVideoBodyKind)[keyof typeof KickoffRenderVideoBodyKind];
+
+export const KickoffRenderVideoBodyKind = {
+  video: "video",
+} as const;
+
+export type KickoffRenderVideoBody = KickoffRenderCommonFields & {
+  kind: "video";
+  cameraPosition: Vec3;
+  cameraTarget: Vec3;
+  duration: 5 | 10;
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  cfgScale?: number;
+  aspectRatio?: "16:9" | "4:3" | "1:1";
+  movementType?: "horizontal" | "vertical" | "zoom_in" | "zoom_out" | "pan";
+  direction?: "left" | "right" | "up" | "down";
+} & {
+  kind: KickoffRenderVideoBodyKind;
+};
+
+export type KickoffRenderBody =
+  | KickoffRenderStillBody
+  | KickoffRenderElevationSetBody
+  | KickoffRenderVideoBody;
+
+/**
+ * 202 envelope. The polling worker is fire-and-forget; clients
+observe state via `GET /renders/{renderId}`.
+
+ */
+export interface KickoffRenderResponse {
+  /** Opaque render id (the `viewpoint_renders.id` PK). */
+  renderId: string;
+  state: RenderStatus;
+  kind: DomainRenderKind;
+  cost: RenderCostEstimate;
+}
+
+export type RenderOutputProjectionFormat =
+  (typeof RenderOutputProjectionFormat)[keyof typeof RenderOutputProjectionFormat];
+
+export const RenderOutputProjectionFormat = {
+  png: "png",
+  jpg: "jpg",
+  mp4: "mp4",
+  webm: "webm",
+} as const;
+
+/**
+ * Subset of `render_outputs` columns the FE / chat needs to
+render the gallery row without a second round-trip. The full
+Layer 3 surface lives on the `render-output` atom's typed
+payload via `GET /atoms/render-output/{id}/summary`.
+
+ */
+export interface RenderOutputProjection {
+  id: string;
+  role: RenderOutputRole;
+  format: RenderOutputProjectionFormat;
+  resolution: string | null;
+  sizeBytes: number | null;
+  durationSeconds: number | null;
+  /** GCS key under our durable bucket. NULL during the brief
+unmirrored window between row insert and mirror
+completion (the route writes both `source_url` and
+`mirroredObjectKey` in the same transaction so a NULL
+here on a `ready` parent is an error condition the sweep
+surfaces).
+ */
+  mirroredObjectKey: string | null;
+  thumbnailUrl: string | null;
+  seed: number | null;
+}
+
+export type ElevationSetJobRole =
+  (typeof ElevationSetJobRole)[keyof typeof ElevationSetJobRole];
+
+export const ElevationSetJobRole = {
+  "elevation-n": "elevation-n",
+  "elevation-e": "elevation-e",
+  "elevation-s": "elevation-s",
+  "elevation-w": "elevation-w",
+} as const;
+
+export type ElevationSetJobCameraDirection =
+  (typeof ElevationSetJobCameraDirection)[keyof typeof ElevationSetJobCameraDirection];
+
+export const ElevationSetJobCameraDirection = {
+  front: "front",
+  back: "back",
+  right: "right",
+  left: "left",
+} as const;
+
+export type ElevationSetJobStatus =
+  (typeof ElevationSetJobStatus)[keyof typeof ElevationSetJobStatus];
+
+export const ElevationSetJobStatus = {
+  "pending-trigger": "pending-trigger",
+  queued: "queued",
+  rendering: "rendering",
+  ready: "ready",
+  failed: "failed",
+} as const;
+
+export type ElevationSetJobError = {
+  code: string;
+  message: string;
+} | null;
+
+/**
+ * One in-flight per-direction job for an `elevation-set` parent.
+Stored as JSONB on `viewpoint_renders.mnml_jobs` while
+polling — render_outputs rows are inserted only when each
+child resolves to `ready` (Spec 54 v2 §6.2). Surfaced on the
+detail response so the FE can render a per-direction progress
+chip while the set is in-flight.
+
+ */
+export interface ElevationSetJob {
+  role: ElevationSetJobRole;
+  cameraDirection: ElevationSetJobCameraDirection;
+  mnmlJobId: string | null;
+  status: ElevationSetJobStatus;
+  error?: ElevationSetJobError;
+  /** mnml CDN URL on `ready`, before mirror. */
+  outputUrl?: string | null;
+  mirroredObjectKey?: string | null;
+}
+
+export type RenderDetailResponseErrorDetails = {
+  [key: string]: unknown;
+} | null;
+
+/**
+ * Full row + child outputs projection for `GET /renders/{id}`.
+The `mnmlJobs` array is populated only for `elevation-set`
+kinds (in-flight per-direction tracking); `mnmlJobId` is the
+single mnml render id for `still` / `video`.
+
+ */
+export interface RenderDetailResponse {
+  id: string;
+  engagementId: string;
+  kind: DomainRenderKind;
+  status: RenderStatus;
+  mnmlJobId: string | null;
+  mnmlJobs: ElevationSetJob[] | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  errorDetails: RenderDetailResponseErrorDetails;
+  requestedBy: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  outputs: RenderOutputProjection[];
+}
+
+/**
+ * One row in the per-engagement render history. Slimmer than
+the detail shape — outputs are NOT included; clients fetch
+`GET /renders/{id}` for the gallery view.
+
+ */
+export interface RenderListItem {
+  id: string;
+  kind: DomainRenderKind;
+  status: RenderStatus;
+  errorCode: string | null;
+  requestedBy: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+/**
+ * Wire envelope for `GET /engagements/{id}/renders`. Newest
+first. Capped at 100 items in V1-4; pagination is V1-5.
+
+ */
+export interface RenderListResponse {
+  items: RenderListItem[];
+}
+
+export type CancelRenderResponseStatus =
+  (typeof CancelRenderResponseStatus)[keyof typeof CancelRenderResponseStatus];
+
+export const CancelRenderResponseStatus = {
+  cancelled: "cancelled",
+} as const;
+
+/**
+ * Wire envelope for `POST /renders/{id}/cancel`. The polling
+worker observes `status='cancelled'` on its next iteration
+and bails — there is no synchronous mnml call.
+
+ */
+export interface CancelRenderResponse {
+  id: string;
+  status: CancelRenderResponseStatus;
+}
+
+/**
+ * Wire envelope for `POST /admin/renders/sweep`. Counts surface
+for observability (paste into the operator's Cloud Scheduler
+log + dashboard); the sweep itself is idempotent so multiple
+invocations on the same minute produce the same end state.
+
+ */
+export interface RendersSweepResponse {
+  /**
+   * Rows in `queued`/`rendering` older than the rescue
+threshold (default 15 min) flipped to `failed` with
+`error_code='polling_timeout_sweep'`.
+
+   * @minimum 0
+   */
+  rescuedStuck: number;
+  /**
+   * `failed`/`cancelled` rows older than the retention window
+(default 30 days) DELETEd. Cascade clears
+`render_outputs` children. `ready` rows are NEVER reaped.
+
+   * @minimum 0
+   */
+  reapedTerminal: number;
+  /**
+   * `ready` rows whose `render_outputs` carry NULL
+`mirroredObjectKey`. Logged as warnings; no auto-heal in
+V1-4 (V1-5 follow-up).
+
+   * @minimum 0
+   */
+  warnedIncompleteMirror: number;
+  /** @minimum 0 */
+  durationMs: number;
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
