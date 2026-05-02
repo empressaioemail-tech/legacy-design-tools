@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  ApiError,
   useGenerateEngagementLayers,
   useGetBimModelRefresh,
   useGetEngagement,
@@ -10,6 +11,8 @@ import {
   useGetSnapshot,
   useListEngagementBriefingGenerationRuns,
   useListEngagementSubmissions,
+  useListSubmissionFindings,
+  useOverrideFinding,
   usePushEngagementBimModel,
   useResolveBimModelDivergence,
   useUpdateEngagement,
@@ -22,12 +25,14 @@ import {
   getListEngagementBriefingGenerationRunsQueryKey,
   getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
+  getListSubmissionFindingsQueryKey,
   type BimModelDivergenceListEntry,
   type BriefingGenerationRun,
   type EngagementBriefingNarrative,
   type EngagementBriefingSource,
   type EngagementDetail as EngagementDetailType,
   type EngagementSubmissionSummary,
+  type Finding,
   type GenerateLayersOutcome,
   type SubmissionReceipt,
   type SubmissionResponse,
@@ -88,14 +93,18 @@ import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
 import { ReviewerRequestsStrip } from "../components/ReviewerRequestsStrip";
 import {
+  ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
   BriefingDivergenceDetailDialog,
   BriefingDivergenceRow as PortalBriefingDivergenceRow,
   BriefingDivergencesPanel as PortalBriefingDivergencesPanel,
+  FindingDetailPanel,
+  FindingsList,
   ParcelZoningCard,
   ReviewerComment,
   SiteContextViewer,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
+  countUnaddressedFindings,
   formatRelativeMaterializedAt,
   useSidebarState,
   // Task #316 — per-source briefing row, per-layer history panel,
@@ -188,6 +197,7 @@ type TabId =
   | "site"
   | "site-context"
   | "submissions"
+  | "findings"
   | "settings";
 
 /**
@@ -211,6 +221,7 @@ function readTabFromUrl(): TabId {
     raw === "site" ||
     raw === "site-context" ||
     raw === "submissions" ||
+    raw === "findings" ||
     raw === "settings"
   ) {
     return raw;
@@ -340,9 +351,19 @@ function writeRecentRunsOpenToUrl(next: boolean): void {
 function TabBar({
   active,
   onChange,
+  findingsBadgeCount,
 }: {
   active: TabId;
   onChange: (id: TabId) => void;
+  /**
+   * Number of unaddressed findings on the most-recent submission
+   * (Task #421 / V1-1 / V1-7). Rendered as a small badge on the
+   * "Findings" tab so an architect can spot blocker / concern work
+   * without having to open the tab. `undefined` while the badge
+   * fetch is loading or the engagement has no submissions yet —
+   * we render the tab with no badge in that case.
+   */
+  findingsBadgeCount?: number | undefined;
 }) {
   const tabs: Array<{ id: TabId; label: string }> = [
     { id: "snapshots", label: "Snapshots" },
@@ -350,6 +371,7 @@ function TabBar({
     { id: "site", label: "Site" },
     { id: "site-context", label: "Site context" },
     { id: "submissions", label: "Submissions" },
+    { id: "findings", label: "Findings" },
     { id: "settings", label: "Settings" },
   ];
   return (
@@ -362,11 +384,16 @@ function TabBar({
     >
       {tabs.map((t) => {
         const isActive = active === t.id;
+        const showBadge =
+          t.id === "findings" &&
+          typeof findingsBadgeCount === "number" &&
+          findingsBadgeCount > 0;
         return (
           <button
             key={t.id}
             onClick={() => onChange(t.id)}
             className="sc-tab"
+            data-testid={`engagement-tab-${t.id}`}
             style={{
               padding: "8px 14px",
               background: "transparent",
@@ -382,9 +409,33 @@ function TabBar({
               cursor: "pointer",
               transition: "color 0.12s, border-color 0.12s",
               marginBottom: -1,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
             }}
           >
             {t.label}
+            {showBadge && (
+              <span
+                data-testid="engagement-tab-findings-badge"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: 16,
+                  height: 16,
+                  padding: "0 5px",
+                  borderRadius: 8,
+                  background: "rgba(239, 68, 68, 0.18)",
+                  color: "#ef4444",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  lineHeight: 1,
+                }}
+              >
+                {findingsBadgeCount}
+              </span>
+            )}
           </button>
         );
       })}
@@ -3644,6 +3695,277 @@ function SubmissionsTab({
   );
 }
 
+/**
+ * Architect-side "Findings" tab (Task #421 / V1-1 / V1-7).
+ *
+ * Owns the per-engagement submission picker, the per-submission
+ * findings query, and the override mutation. The list + detail
+ * card themselves live in `lib/portal-ui` so any future reviewer
+ * audit surface can render the same chrome — this component is the
+ * thin data-layer adapter that wires those views to the engagement
+ * page.
+ *
+ * Selection rules:
+ *   - Submission picker defaults to the engagement's most-recent
+ *     submission (passed in by the parent so the badge fetch and
+ *     this fetch share the same id without two reductions).
+ *   - Selected finding clears whenever the submission switches —
+ *     a finding from a different submission would render stale
+ *     citations / CAD ref against the wrong drawings.
+ *   - On submission switch we wait for the new findings list to
+ *     resolve and then auto-select the first row in severity order
+ *     so the detail panel is never blank when the architect first
+ *     lands on a submission with at least one finding.
+ *
+ * The override mutation calls `useOverrideFinding` with the
+ * existing row's text/severity/category preserved (the wire treats
+ * an override as a same-content revision under a fresh reviewer
+ * comment) and stamps {@link ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT}
+ * so the reviewer-side timeline can render the "addressed in next
+ * revision" affordance. On success we invalidate
+ * `getListSubmissionFindingsQueryKey` for the active submission so
+ * the row's status flips to `overridden` (which dims it via
+ * {@link FindingsList}'s addressed branch) without a manual reload.
+ */
+function FindingsTab({
+  engagementId,
+  initialSubmissionId,
+}: {
+  engagementId: string;
+  initialSubmissionId: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const codeLibraryBase = `${import.meta.env.BASE_URL}code-library`;
+
+  const {
+    data: submissions,
+    isLoading: submissionsLoading,
+    error: submissionsError,
+  } = useListEngagementSubmissions(engagementId, {
+    query: {
+      enabled: !!engagementId,
+      queryKey: getListEngagementSubmissionsQueryKey(engagementId),
+    },
+  });
+
+  const sortedSubmissions = useMemo<EngagementSubmissionSummary[]>(() => {
+    if (!submissions) return [];
+    return [...submissions].sort(
+      (a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt),
+    );
+  }, [submissions]);
+
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<
+    string | null
+  >(initialSubmissionId);
+  // Once submissions resolve, fall back to the freshest one so the
+  // picker always has a valid selection — we do NOT overwrite an
+  // explicit user pick once they touch the dropdown.
+  useEffect(() => {
+    if (selectedSubmissionId !== null) return;
+    if (sortedSubmissions.length === 0) return;
+    setSelectedSubmissionId(sortedSubmissions[0].id);
+  }, [selectedSubmissionId, sortedSubmissions]);
+
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(
+    null,
+  );
+  // Drop the active selection whenever the submission changes —
+  // citations and CAD refs would render against the wrong drawings.
+  useEffect(() => {
+    setSelectedFindingId(null);
+  }, [selectedSubmissionId]);
+
+  const findingsQueryKey = selectedSubmissionId
+    ? getListSubmissionFindingsQueryKey(selectedSubmissionId)
+    : (["findings", "none"] as const);
+  const {
+    data: findingsData,
+    isLoading: findingsLoading,
+    error: findingsError,
+  } = useListSubmissionFindings(selectedSubmissionId ?? "", {
+    query: {
+      enabled: !!selectedSubmissionId,
+      queryKey: findingsQueryKey,
+    },
+  });
+  const findings = findingsData?.findings ?? [];
+
+  // Auto-select the highest-severity row when the list resolves so
+  // the right pane is never blank if there is anything to triage.
+  useEffect(() => {
+    if (selectedFindingId !== null) return;
+    if (findings.length === 0) return;
+    const sorted = [...findings].sort((a, b) => {
+      const order = { blocker: 0, concern: 1, advisory: 2 } as const;
+      const delta = order[a.severity] - order[b.severity];
+      if (delta !== 0) return delta;
+      return Date.parse(a.aiGeneratedAt) - Date.parse(b.aiGeneratedAt);
+    });
+    setSelectedFindingId(sorted[0].id);
+  }, [findings, selectedFindingId]);
+
+  const selectedFinding =
+    findings.find((f) => f.id === selectedFindingId) ?? null;
+
+  const overrideMutation = useOverrideFinding();
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+  const handleAddressWithRevision = (finding: Finding) => {
+    setOverrideError(null);
+    overrideMutation.mutate(
+      {
+        findingId: finding.id,
+        data: {
+          text: finding.text,
+          severity: finding.severity,
+          category: finding.category,
+          reviewerComment: ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
+        },
+      },
+      {
+        onSuccess: () => {
+          if (selectedSubmissionId) {
+            queryClient.invalidateQueries({
+              queryKey: getListSubmissionFindingsQueryKey(
+                selectedSubmissionId,
+              ),
+            });
+          }
+        },
+        onError: (err: unknown) => {
+          if (err instanceof ApiError) {
+            setOverrideError(err.message);
+          } else if (err instanceof Error) {
+            setOverrideError(err.message);
+          } else {
+            setOverrideError("Could not address finding. Try again.");
+          }
+        },
+      },
+    );
+  };
+
+  if (submissionsLoading) {
+    return (
+      <div className="sc-prose opacity-60" data-testid="findings-tab-loading">
+        Loading submissions…
+      </div>
+    );
+  }
+  if (submissionsError) {
+    return (
+      <div
+        className="alert-block warning"
+        data-testid="findings-tab-error"
+      >
+        Could not load submissions for this engagement.
+      </div>
+    );
+  }
+  if (sortedSubmissions.length === 0) {
+    return (
+      <div
+        className="sc-card p-6"
+        data-testid="findings-tab-empty-no-submissions"
+      >
+        <div className="sc-prose opacity-70">
+          No submissions yet. Findings appear here once the architect plan
+          review run completes.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="findings-tab">
+      <div className="sc-row-sb" style={{ gap: 12 }}>
+        <label
+          className="sc-label"
+          style={{ display: "flex", alignItems: "center", gap: 8 }}
+        >
+          SUBMISSION
+          <select
+            data-testid="findings-tab-submission-picker"
+            className="sc-select"
+            value={selectedSubmissionId ?? ""}
+            onChange={(e) => setSelectedSubmissionId(e.target.value || null)}
+            style={{ minWidth: 240 }}
+          >
+            {sortedSubmissions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.submittedAt}
+                {s.status ? ` · ${s.status}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span
+          className="sc-meta"
+          data-testid="findings-tab-unaddressed-count"
+          style={{ opacity: 0.7, fontSize: 11 }}
+        >
+          {findings.length === 0
+            ? "0 findings"
+            : `${countUnaddressedFindings(findings)} unaddressed of ${findings.length}`}
+        </span>
+      </div>
+
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: "minmax(280px, 360px) 1fr",
+          gap: 12,
+          minHeight: 420,
+        }}
+      >
+        <div
+          className="sc-card"
+          style={{ overflow: "auto", maxHeight: 600 }}
+        >
+          {findingsLoading ? (
+            <div
+              className="sc-prose opacity-60 p-4"
+              data-testid="findings-tab-list-loading"
+            >
+              Loading findings…
+            </div>
+          ) : findingsError ? (
+            <div
+              className="alert-block warning m-3"
+              data-testid="findings-tab-list-error"
+            >
+              Could not load findings for this submission.
+            </div>
+          ) : findings.length === 0 ? (
+            <div
+              className="sc-prose opacity-60 p-4"
+              data-testid="findings-tab-list-empty"
+            >
+              No findings on this submission.
+            </div>
+          ) : (
+            <FindingsList
+              findings={findings}
+              selectedFindingId={selectedFindingId}
+              onSelect={setSelectedFindingId}
+            />
+          )}
+        </div>
+
+        <FindingDetailPanel
+          finding={selectedFinding}
+          codeLibraryBase={codeLibraryBase}
+          onAddressWithRevision={handleAddressWithRevision}
+          isAddressing={overrideMutation.isPending}
+          addressError={overrideError}
+          onRetry={handleAddressWithRevision}
+          onClose={() => setSelectedFindingId(null)}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function EngagementDetail() {
   const params = useParams();
   const id = params.id as string;
@@ -3789,6 +4111,41 @@ export function EngagementDetail() {
     },
   });
 
+  // Badge fetch for the Findings tab (Task #421 / V1-1 / V1-7).
+  // The architect surface only highlights work on the most-recent
+  // submission — older submissions still have findings, but the
+  // queue an architect needs to triage day-to-day is the live one.
+  // We resolve "most-recent" client-side so this stays correct
+  // regardless of the listing endpoint's sort order on a given
+  // refetch (the API already sorts newest-first today; the
+  // client-side reduce keeps us robust to that contract evolving).
+  const { data: submissionsForBadge } = useListEngagementSubmissions(id, {
+    query: {
+      enabled: !!id,
+      queryKey: getListEngagementSubmissionsQueryKey(id),
+    },
+  });
+  const latestSubmissionId = useMemo(() => {
+    if (!submissionsForBadge || submissionsForBadge.length === 0) return null;
+    return submissionsForBadge.reduce<EngagementSubmissionSummary>(
+      (acc, s) =>
+        Date.parse(s.submittedAt) > Date.parse(acc.submittedAt) ? s : acc,
+      submissionsForBadge[0],
+    ).id;
+  }, [submissionsForBadge]);
+  const { data: badgeFindings } = useListSubmissionFindings(
+    latestSubmissionId ?? "",
+    {
+      query: {
+        enabled: !!latestSubmissionId,
+        queryKey: getListSubmissionFindingsQueryKey(latestSubmissionId ?? ""),
+      },
+    },
+  );
+  const findingsBadgeCount = badgeFindings
+    ? countUnaddressedFindings(badgeFindings.findings)
+    : undefined;
+
   if (!engagement) {
     return (
       <AppShell title="Loading…">
@@ -3887,7 +4244,11 @@ export function EngagementDetail() {
         */}
         <ReviewerRequestsStrip engagementId={id} />
 
-        <TabBar active={tab} onChange={setTab} />
+        <TabBar
+          active={tab}
+          onChange={setTab}
+          findingsBadgeCount={findingsBadgeCount}
+        />
 
         {tab === "snapshots" && (
           <>
@@ -4032,6 +4393,13 @@ export function EngagementDetail() {
             backfillFilter={backfillFilter}
             onBackfillFilterChange={setBackfillFilter}
             onOpenSubmission={(sid) => setOpenSubmissionId(sid)}
+          />
+        )}
+
+        {tab === "findings" && (
+          <FindingsTab
+            engagementId={engagement.id}
+            initialSubmissionId={latestSubmissionId}
           />
         )}
 

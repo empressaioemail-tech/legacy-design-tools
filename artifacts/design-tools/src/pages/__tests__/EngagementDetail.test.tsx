@@ -117,6 +117,22 @@ const hoisted = vi.hoisted(() => {
 });
 
 const submit = createMutationCapture();
+// Findings override mutation (Task #421 / V1-1 / V1-7) — captured so
+// the "Address with next revision" tests can assert the page wires
+// the row's text/severity/category through and stamps the
+// reviewer-comment marker the reviewer-side timeline expects.
+const overrideFinding = createMutationCapture<
+  unknown,
+  {
+    findingId: string;
+    data: {
+      text: string;
+      severity: string;
+      category: string;
+      reviewerComment: string;
+    };
+  }
+>();
 
 // useParams comes from wouter inside the page; hard-pin it to the
 // engagement id so we don't need a Router wrapper.
@@ -195,6 +211,8 @@ vi.mock("@workspace/api-client-react", async () => {
           hoisted.briefing ? { briefing: hoisted.briefing } : null,
         enabled: opts?.query?.enabled ?? true,
       }),
+    // Findings tab (Task #421): capture the override mutation.
+    useOverrideFinding: makeCapturingMutationHook(overrideFinding),
   };
 });
 
@@ -219,9 +237,16 @@ function makeQueryClient() {
   });
 }
 
-function renderPage() {
+function renderPage(opts?: { seed?: (client: QueryClient) => void }) {
   const client = makeQueryClient();
   activeClient = client;
+  // Per-test seeding hook (Task #421) — runs BEFORE the page mounts
+  // so the findings-tab tests can populate the submissions list +
+  // findings cache before the page's queries fire. Without this, the
+  // badge query (`useListSubmissionFindings(latestSubmissionId)`)
+  // would still see `submissionsForBadge === undefined` on first
+  // paint and never enable, so no `data-testid` ever appears.
+  opts?.seed?.(client);
   // Seed the React Query cache with the initial engagement,
   // submissions list, session, and the AppShell's engagements list so
   // the page renders fully on the first paint — no async `findBy*`
@@ -273,6 +298,7 @@ beforeEach(() => {
   hoisted.submissions = [];
   hoisted.briefing = null;
   submit.reset();
+  overrideFinding.reset();
   // Reset URL state — the page reads the active tab from
   // `?tab=…` once on mount via `useState(() => readTabFromUrl())`,
   // so a leftover query string from a prior test would land us on
@@ -358,6 +384,93 @@ function gotoSubmissionsTab() {
   fireEvent.click(screen.getByRole("button", { name: "Submissions" }));
 }
 
+function gotoFindingsTab() {
+  fireEvent.click(screen.getByTestId("engagement-tab-findings"));
+}
+
+/** Convenience builder for `Finding` fixtures used by the findings-tab tests. */
+function findingFixture(
+  overrides: Partial<{
+    id: string;
+    submissionId: string;
+    severity: "blocker" | "concern" | "advisory";
+    category: string;
+    status: string;
+    text: string;
+    citations: unknown[];
+    confidence: number;
+    lowConfidence: boolean;
+    reviewerStatusBy: { kind: "user"; id: string; displayName: string } | null;
+    reviewerStatusChangedAt: string | null;
+    reviewerComment: string | null;
+    elementRef: string | null;
+    sourceRef: unknown;
+    aiGeneratedAt: string;
+    revisionOf: string | null;
+  }> = {},
+) {
+  return {
+    id: "finding:sub-latest:01",
+    submissionId: "sub-latest",
+    severity: "blocker" as const,
+    category: "egress",
+    status: "ai-produced",
+    text: "Door clearance fails at corridor.",
+    citations: [],
+    confidence: 0.9,
+    lowConfidence: false,
+    reviewerStatusBy: null,
+    reviewerStatusChangedAt: null,
+    reviewerComment: null,
+    elementRef: null,
+    sourceRef: null,
+    aiGeneratedAt: "2026-05-01T00:00:00Z",
+    revisionOf: null,
+    ...overrides,
+  };
+}
+
+function seedSubmissionsWithFindings(
+  findings: ReturnType<typeof findingFixture>[],
+): (client: QueryClient) => void {
+  return (client) => {
+    const subs = [
+      {
+        id: "sub-old",
+        submittedAt: "2026-04-01T00:00:00Z",
+        jurisdiction: "Boulder, CO",
+        note: null,
+        status: "approved" as const,
+        reviewerComment: null,
+        respondedAt: null,
+        responseRecordedAt: null,
+      },
+      {
+        id: "sub-latest",
+        submittedAt: "2026-05-01T00:00:00Z",
+        jurisdiction: "Boulder, CO",
+        note: null,
+        status: "pending" as const,
+        reviewerComment: null,
+        respondedAt: null,
+        responseRecordedAt: null,
+      },
+    ];
+    hoisted.submissions = subs;
+    client.setQueryData(
+      ["listEngagementSubmissions", hoisted.engagement.id],
+      subs.map((s) => ({ ...s })),
+    );
+    // Mirror the helper's getListSubmissionFindingsQueryKey shape.
+    client.setQueryData(["/api/submissions/sub-latest/findings"], {
+      findings,
+    });
+    client.setQueryData(["/api/submissions/sub-old/findings"], {
+      findings: [],
+    });
+  };
+}
+
 describe("EngagementDetail submission banner (Task #126)", () => {
   it("surfaces a 'just now' confirmation banner with the recorded jurisdiction after a successful submit", async () => {
     renderPage();
@@ -408,26 +521,31 @@ describe("EngagementDetail submission banner (Task #126)", () => {
   });
 
   it("mounts cleanly under [data-theme=\"light\"] (Task #420 sanity)", () => {
-    // The architect dashboard now ships a light/dark theme toggle.
-    // Light theme reuses the same components against a different
-    // CSS-variable token set, but a regression that hard-codes a
-    // dark-theme color into an inline style could throw at render
-    // time (e.g. invalid CSS shorthand) or — worse — render a
-    // white-on-white surface that ships silently. Pin the page so a
-    // light-theme mount is always exercised.
     document.documentElement.dataset.theme = "light";
     try {
       expect(() => renderPage()).not.toThrow();
-      // The page-level submit affordance is the most chrome-heavy
-      // element on first paint — confirming it lands proves the
-      // surrounding header / tabs / status pills survived the light
-      // tokens.
       expect(
         screen.getByTestId("submit-jurisdiction-trigger"),
       ).toBeInTheDocument();
     } finally {
       document.documentElement.dataset.theme = "dark";
     }
+  });
+
+  it("renders the Findings tab between Submissions and Settings", () => {
+    renderPage();
+    const tabs = screen
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("data-testid"))
+      .filter(
+        (v): v is string => typeof v === "string" && v.startsWith("engagement-tab-"),
+      );
+    const sub = tabs.indexOf("engagement-tab-submissions");
+    const find = tabs.indexOf("engagement-tab-findings");
+    const settings = tabs.indexOf("engagement-tab-settings");
+    expect(sub).toBeGreaterThanOrEqual(0);
+    expect(find).toBe(sub + 1);
+    expect(settings).toBe(find + 1);
   });
 
   it("auto-clears the banner after the 8s timeout and leaves the submission row intact", async () => {
@@ -624,5 +742,101 @@ describe("EngagementDetail Site tab parcel & zoning card", () => {
     expect(
       within(card).getByTestId("parcel-zoning-card-site-context-link"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
+  it("badges the Findings tab with the unaddressed-finding count from the most recent submission", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({ id: "finding:sub-latest:01", severity: "blocker" }),
+        findingFixture({ id: "finding:sub-latest:02", severity: "concern" }),
+        findingFixture({
+          id: "finding:sub-latest:03",
+          severity: "advisory",
+          status: "overridden",
+        }),
+      ]),
+    });
+    const badge = screen.getByTestId("engagement-tab-findings-badge");
+    expect(badge.textContent).toBe("2");
+  });
+
+  it("does not render the badge when there are no unaddressed findings", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          status: "overridden",
+        }),
+      ]),
+    });
+    expect(
+      screen.queryByTestId("engagement-tab-findings-badge"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state when the engagement has no submissions", () => {
+    renderPage();
+    gotoFindingsTab();
+    expect(
+      screen.getByTestId("findings-tab-empty-no-submissions"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the severity-sorted list and auto-selects the highest-severity finding", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({ id: "finding:sub-latest:advisory", severity: "advisory" }),
+        findingFixture({ id: "finding:sub-latest:blocker", severity: "blocker" }),
+        findingFixture({ id: "finding:sub-latest:concern", severity: "concern" }),
+      ]),
+    });
+    gotoFindingsTab();
+    expect(screen.getByTestId("findings-tab")).toBeInTheDocument();
+    const list = screen.getByTestId("architect-findings-list");
+    const rows = within(list)
+      .getAllByRole("listitem")
+      .map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual([
+      "architect-findings-row-finding:sub-latest:blocker",
+      "architect-findings-row-finding:sub-latest:concern",
+      "architect-findings-row-finding:sub-latest:advisory",
+    ]);
+    expect(
+      screen.getByTestId(
+        "architect-finding-detail-finding:sub-latest:blocker",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking 'Address with next revision' calls override with the marker comment and the row's content", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          category: "egress",
+          text: "Door clearance fails at corridor.",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    fireEvent.click(
+      screen.getByTestId("architect-finding-detail-address-button"),
+    );
+    expect(overrideFinding.mutate).toHaveBeenCalledTimes(1);
+    const [vars] = overrideFinding.mutate.mock.calls[0];
+    expect(vars).toEqual({
+      findingId: "finding:sub-latest:01",
+      data: {
+        text: "Door clearance fails at corridor.",
+        severity: "blocker",
+        category: "egress",
+        reviewerComment: "Addressed in next revision",
+      },
+    });
+>>>>>>> fdd1ca9 (Add a findings tab to the engagement details page)
   });
 });

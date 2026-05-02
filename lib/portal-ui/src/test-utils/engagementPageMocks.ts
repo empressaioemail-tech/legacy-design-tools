@@ -196,5 +196,30 @@ export async function makeEngagementPageMockHooks(
         queryFn: async () => ({ requests: [] }),
         enabled: opts?.query?.enabled ?? true,
       }),
+    // Architect-side findings surface (V1-1 / V1-7 / Task #421).
+    // EngagementDetail mounts a "Findings" tab that fetches the
+    // selected submission's findings and an additional fetch for
+    // the latest submission's findings to drive the tab badge. The
+    // override mutation backs the "Address with next revision"
+    // affordance on the FindingDetailPanel. Defaults: empty list +
+    // no-op mutation; tests that exercise the tab override these.
+    getListSubmissionFindingsQueryKey: (submissionId: string) =>
+      [`/api/submissions/${submissionId}/findings`] as const,
+    useListSubmissionFindings: (
+      submissionId: string,
+      opts?: {
+        query?: { enabled?: boolean; queryKey?: readonly unknown[] };
+      },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          ([
+            `/api/submissions/${submissionId}/findings`,
+          ] as const),
+        queryFn: async () => ({ findings: [] }),
+        enabled: opts?.query?.enabled ?? !!submissionId,
+      }),
+    useOverrideFinding: noopMutationHook,
   };
 }

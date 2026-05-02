@@ -164,6 +164,22 @@ export type { EngagementContextPanelProps } from "./components/EngagementContext
 export { ParcelZoningCard } from "./components/ParcelZoningCard";
 export type { ParcelZoningCardProps } from "./components/ParcelZoningCard";
 
+// Architect-side AIR-1 findings surfaces (Task #421 / V1-1 / V1-7).
+export {
+  FindingsList,
+  compareFindings,
+  countUnaddressedFindings,
+  isFindingAddressed,
+  isFindingReviewerPromoted,
+  sortFindings,
+} from "./components/FindingsList";
+export type { FindingsListProps } from "./components/FindingsList";
+export {
+  FindingDetailPanel,
+  ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
+} from "./components/FindingDetailPanel";
+export type { FindingDetailPanelProps } from "./components/FindingDetailPanel";
+
 export {
   initTheme,
   setTheme,
