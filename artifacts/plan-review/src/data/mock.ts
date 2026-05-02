@@ -1,55 +1,30 @@
-export const KPIS = {
-  avgReviewTime: { value: "2.4d", trend: "down" as const, trendLabel: "12% faster than last month" },
-  aiAccuracy:    { value: "94%",  trend: "up"   as const, trendLabel: "+3 pts vs Q1" },
-  complianceRate:{ value: "87%",  trend: "up"   as const, trendLabel: "+5 pts vs Q1" },
-  backlog:       { value: "12",   trend: "down" as const, trendLabel: "Down from 18" }
-};
+/**
+ * Plan Review mock data — narrowed to the FINDINGS surface only.
+ * Consumed by FindingsLibrary and AIBriefingPanel.
+ */
 
-export type Status = "draft" | "intake" | "ai-review" | "in-review" | "rejected" | "approved";
-export type Discipline = "architectural" | "structural" | "mep" | "civil" | "fire-life-safety" | "landscape" | "zoning";
-
-export interface Submittal {
-  id: string;            // e.g., "SUB-2026-0142"
-  projectName: string;
-  address: string;
-  firm: string;
-  firmInitials: string;  // e.g., "S&C"
-  submittedAt: string;   // ISO
-  disciplines: Discipline[];
-  status: Status;
-  aiFindingsCount: number;
-  blockingCount: number;
-  reviewProgress: number; // 0-100
-}
+export type Discipline =
+  | "architectural"
+  | "structural"
+  | "mep"
+  | "civil"
+  | "fire-life-safety"
+  | "landscape"
+  | "zoning";
 
 export interface Finding {
-  id: string;            // e.g., "F-A2.04-001"
+  id: string;
   submittalId: string;
   discipline: Discipline;
   severity: "blocking" | "warning" | "info";
   source: "ai-reviewer" | "human-reviewer";
   title: string;
   detail: string;
-  codeRef: string;       // e.g., "IBC §1010.1.2"
-  edition: string;       // e.g., "IBC 2021"
-  identifiedAt: string;  // ISO
+  codeRef: string;
+  edition: string;
+  identifiedAt: string;
   status: "open" | "acknowledged" | "resolved";
 }
-
-export const SUBMITTALS: Submittal[] = [
-  { id: "SUB-2026-0142", projectName: "Lost Pines Townhomes — Phase 2", address: "1400 Pine St, Bastrop, TX", firm: "Studio Architecture", firmInitials: "SA", submittedAt: "2026-04-12T10:00:00Z", disciplines: ["architectural", "civil", "landscape"], status: "in-review", aiFindingsCount: 3, blockingCount: 1, reviewProgress: 60 },
-  { id: "SUB-2026-0143", projectName: "Bastrop Brewing — Tasting Room Addition", address: "812 Main St, Bastrop, TX", firm: "Design Co", firmInitials: "DC", submittedAt: "2026-04-14T11:30:00Z", disciplines: ["architectural", "mep", "fire-life-safety"], status: "ai-review", aiFindingsCount: 0, blockingCount: 0, reviewProgress: 15 },
-  { id: "SUB-2026-0144", projectName: "Colorado River Trail — Visitor Center", address: "River Rd, Bastrop, TX", firm: "Civil Works", firmInitials: "CW", submittedAt: "2026-04-01T09:15:00Z", disciplines: ["civil", "landscape"], status: "approved", aiFindingsCount: 2, blockingCount: 0, reviewProgress: 100 },
-  { id: "SUB-2026-0145", projectName: "Highland Estates Lot 7 — New SFR", address: "7 Highland Dr, Bastrop, TX", firm: "Smith Builders", firmInitials: "SB", submittedAt: "2026-04-16T14:20:00Z", disciplines: ["architectural", "structural", "mep"], status: "in-review", aiFindingsCount: 4, blockingCount: 2, reviewProgress: 40 },
-  { id: "SUB-2026-0146", projectName: "Main St. Adaptive Reuse — Loft Conversion", address: "1015 Main St, Bastrop, TX", firm: "Urban Concepts", firmInitials: "UC", submittedAt: "2026-04-10T08:45:00Z", disciplines: ["architectural", "structural", "fire-life-safety"], status: "rejected", aiFindingsCount: 8, blockingCount: 3, reviewProgress: 100 },
-  { id: "SUB-2026-0147", projectName: "Pecan Park Pavilion", address: "Pecan Park, Bastrop, TX", firm: "Parks & Rec", firmInitials: "PR", submittedAt: "2026-04-17T13:10:00Z", disciplines: ["structural", "civil"], status: "draft", aiFindingsCount: 0, blockingCount: 0, reviewProgress: 0 },
-  { id: "SUB-2026-0148", projectName: "Bastrop ISD — Maintenance Annex", address: "1602 Hill St, Bastrop, TX", firm: "Education Planners", firmInitials: "EP", submittedAt: "2026-04-05T15:30:00Z", disciplines: ["architectural", "mep", "civil"], status: "approved", aiFindingsCount: 1, blockingCount: 0, reviewProgress: 100 },
-  { id: "SUB-2026-0149", projectName: "Riverside Clinic — Phase 1", address: "1200 Riverside Dr, Bastrop, TX", firm: "HealthArch", firmInitials: "HA", submittedAt: "2026-04-15T09:00:00Z", disciplines: ["architectural", "mep", "zoning"], status: "ai-review", aiFindingsCount: 0, blockingCount: 0, reviewProgress: 10 },
-  { id: "SUB-2026-0150", projectName: "Old Iron Bridge Plaza", address: "Water St, Bastrop, TX", firm: "Civic Design", firmInitials: "CD", submittedAt: "2026-04-13T10:45:00Z", disciplines: ["landscape", "civil"], status: "in-review", aiFindingsCount: 2, blockingCount: 0, reviewProgress: 75 },
-  { id: "SUB-2026-0151", projectName: "Sage Hill Subdivision — Common House", address: "Sage Hill Blvd, Bastrop, TX", firm: "Community Builders", firmInitials: "CB", submittedAt: "2026-03-28T11:20:00Z", disciplines: ["architectural", "structural", "mep"], status: "rejected", aiFindingsCount: 5, blockingCount: 2, reviewProgress: 100 },
-  { id: "SUB-2026-0152", projectName: "Tahitian Village SFR — Block 12", address: "Tahitian Dr, Bastrop, TX", firm: "Island Homes", firmInitials: "IH", submittedAt: "2026-04-18T08:15:00Z", disciplines: ["architectural", "civil"], status: "draft", aiFindingsCount: 0, blockingCount: 0, reviewProgress: 0 },
-  { id: "SUB-2026-0153", projectName: "El Camino Real Mixed-Use", address: "Hwy 71, Bastrop, TX", firm: "Commercial Dev", firmInitials: "CD", submittedAt: "2026-04-02T14:50:00Z", disciplines: ["architectural", "zoning", "civil", "mep"], status: "approved", aiFindingsCount: 6, blockingCount: 0, reviewProgress: 100 }
-];
 
 export const FINDINGS: Finding[] = [
   { id: "F-A2.04-001", submittalId: "SUB-2026-0142", discipline: "architectural", severity: "blocking", source: "ai-reviewer", title: "Egress door swing direction", detail: "Door 104B swings against the direction of egress travel.", codeRef: "IBC §1010.1.2", edition: "IBC 2021", identifiedAt: "2026-04-12T10:30:00Z", status: "open" },

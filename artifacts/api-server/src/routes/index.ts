@@ -24,6 +24,7 @@ import reviewerAnnotationsRouter from "./reviewerAnnotations";
 import submissionCommentsRouter from "./submissionComments";
 import findingsRouter from "./findings";
 import reviewerRequestsRouter from "./reviewerRequests";
+import reviewerQueueRouter from "./submissions";
 import rendersRouter from "./renders";
 
 const router: IRouter = Router();
@@ -95,6 +96,8 @@ router.use(findingsRouter);
 // not match the longer `/engagements/:id/reviewer-requests` path,
 // so mount ordering relative to engagementsRouter is indifferent.
 router.use(reviewerRequestsRouter);
+// Cross-engagement reviewer Inbox feed at /reviewer/queue.
+router.use(reviewerQueueRouter);
 // V1-4 / DA-RP-1 — mnml.ai renders. Mounts under
 // /engagements/:id/renders (kickoff + list) and top-level /renders/:id
 // (status + cancel). The /engagements/:id/renders path is more

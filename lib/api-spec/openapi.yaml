@@ -37,6 +37,12 @@ tags:
       reviewer-annotations (which is reviewer-only scratch notes); this
       surface is the cross-audience reply channel architects post into
       from the submission detail modal.
+  - name: reviewer
+    description: |
+      Cross-engagement reviewer surfaces — Plan Review's reviewer
+      Inbox + KPI strip (Reviewer V1-B / Task #426). Reviewer-only
+      (audience-gated to `internal`), reads across every engagement
+      a reviewer can see in a single round-trip.
 paths:
   /healthz:
     get:
@@ -3208,6 +3214,74 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /reviewer/queue:
+    get:
+      operationId: listReviewerQueue
+      tags: [reviewer]
+      summary: List submissions awaiting reviewer attention across every engagement
+      description: |
+        Cross-engagement reviewer Inbox feed (Reviewer V1-B / Task
+        #426). Returns the slice of `submissions` rows whose `status`
+        matches the requested filter, joined to their parent
+        engagement's metadata (`name`, `jurisdiction`, `address`) so
+        the Plan Review Inbox can render a row per submission without
+        a follow-up `GET /engagements/{id}` per row.
+
+        Reviewer-only (`session.audience === "internal"`). Non-reviewer
+        callers receive 403 with the
+        `reviewer_queue_requires_internal_audience` error code; the
+        gate mirrors `reviewerAnnotations` / `reviewerRequests`.
+
+        The default filter is `pending,corrections_requested` — the
+        two states a reviewer needs to act on. Pass `?status=` with a
+        comma-separated subset of `SubmissionStatus` values to widen
+        the cut (e.g. `?status=pending,corrections_requested,rejected`
+        for a "what was just rejected" tab). An unrecognized status
+        value is rejected with 400 rather than silently ignored so a
+        typo does not return a misleading queue.
+
+        Items are ordered by `submittedAt` DESC so the freshest
+        package is at the top — matches the existing per-engagement
+        list contract (`GET /engagements/{id}/submissions`).
+
+        `counts` accompanies the items as a denormalized roll-up so
+        the page's KPI strip and "X in review · Y awaiting AI ·
+        Z rejected" header can render off the same response payload
+        without a second round trip. Counts are computed *across the
+        full submissions table* (not just the filtered slice) so the
+        strip stays meaningful regardless of how the caller narrowed
+        `status`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Comma-separated list of `SubmissionStatus` values to
+            include in `items`. Defaults to
+            `pending,corrections_requested`. Unknown values cause a
+            400 (no silent partial-match).
+      responses:
+        "200":
+          description: Reviewer Inbox feed + denormalized counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewerQueueResponse"
+        "400":
+          description: Invalid `status` filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not a reviewer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /engagements/{id}/reviewer-requests:
     get:
       operationId: listEngagementReviewerRequests
@@ -4012,6 +4086,115 @@ components:
         - approved
         - corrections_requested
         - rejected
+
+    ReviewerQueueItem:
+      type: object
+      description: |
+        One submission row in the cross-engagement reviewer Inbox
+        (`GET /reviewer/queue`). Joins the row to its parent
+        engagement so the Inbox can render a row per submission
+        without a follow-up `GET /engagements/{id}` per row.
+
+        `engagementName` is denormalized off the engagement at
+        read-time (not at submit-time, unlike `jurisdiction` which is
+        snapshotted into the submission row by the create route) —
+        the Inbox should reflect the current engagement name even if
+        the project was renamed after the package was submitted.
+        `applicantFirm` is currently always null (the engagement
+        schema has no applicant/firm column today, Reviewer V1-B
+        ships without that field rather than inventing one); the
+        property is part of the contract so adding it later is
+        non-breaking.
+      properties:
+        submissionId:
+          type: string
+        engagementId:
+          type: string
+        engagementName:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        applicantFirm:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/SubmissionStatus"
+        note:
+          type: string
+          nullable: true
+        reviewerComment:
+          type: string
+          nullable: true
+      required:
+        - submissionId
+        - engagementId
+        - engagementName
+        - jurisdiction
+        - address
+        - applicantFirm
+        - submittedAt
+        - status
+        - note
+        - reviewerComment
+
+    ReviewerQueueCounts:
+      type: object
+      description: |
+        Cross-system roll-up counts the reviewer Inbox renders in its
+        KPI strip / header summary line. Computed across the entire
+        `submissions` table (NOT just the filtered queue items) so
+        the strip stays meaningful regardless of the caller's
+        `?status=` filter.
+
+          - `awaitingAi` — submissions in `pending`. The mock surface
+            called this "awaiting AI" because the AI reviewer engine
+            is the next thing that should fire on a freshly-arrived
+            package; the name is preserved here so the FE wording
+            stays consistent.
+          - `inReview` — submissions in `corrections_requested`.
+          - `rejected` — submissions in `rejected`.
+          - `backlog` — `awaitingAi + inReview`, i.e. the size of the
+            default queue. Surfaced separately so the FE doesn't have
+            to repeat the addition.
+      properties:
+        inReview:
+          type: integer
+        awaitingAi:
+          type: integer
+        rejected:
+          type: integer
+        backlog:
+          type: integer
+      required:
+        - inReview
+        - awaitingAi
+        - rejected
+        - backlog
+
+    ReviewerQueueResponse:
+      type: object
+      description: |
+        Response payload of `GET /reviewer/queue`. The `items` array
+        is the filtered queue (newest-first); the `counts` object is
+        a cross-system roll-up (NOT scoped to the filter) so the
+        Inbox's KPI strip can render off the same response.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerQueueItem"
+        counts:
+          $ref: "#/components/schemas/ReviewerQueueCounts"
+      required:
+        - items
+        - counts
 
     BriefingSourceKind:
       type: string

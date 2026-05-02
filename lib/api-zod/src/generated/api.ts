@@ -4691,6 +4691,89 @@ export const OverrideFindingResponse = zod
   );
 
 /**
+ * Cross-engagement reviewer Inbox feed (Reviewer V1-B / Task
+#426). Returns the slice of `submissions` rows whose `status`
+matches the requested filter, joined to their parent
+engagement's metadata (`name`, `jurisdiction`, `address`) so
+the Plan Review Inbox can render a row per submission without
+a follow-up `GET /engagements/{id}` per row.
+
+Reviewer-only (`session.audience === "internal"`). Non-reviewer
+callers receive 403 with the
+`reviewer_queue_requires_internal_audience` error code; the
+gate mirrors `reviewerAnnotations` / `reviewerRequests`.
+
+The default filter is `pending,corrections_requested` — the
+two states a reviewer needs to act on. Pass `?status=` with a
+comma-separated subset of `SubmissionStatus` values to widen
+the cut (e.g. `?status=pending,corrections_requested,rejected`
+for a "what was just rejected" tab). An unrecognized status
+value is rejected with 400 rather than silently ignored so a
+typo does not return a misleading queue.
+
+Items are ordered by `submittedAt` DESC so the freshest
+package is at the top — matches the existing per-engagement
+list contract (`GET /engagements/{id}/submissions`).
+
+`counts` accompanies the items as a denormalized roll-up so
+the page's KPI strip and "X in review · Y awaiting AI ·
+Z rejected" header can render off the same response payload
+without a second round trip. Counts are computed *across the
+full submissions table* (not just the filtered slice) so the
+strip stays meaningful regardless of how the caller narrowed
+`status`.
+
+ * @summary List submissions awaiting reviewer attention across every engagement
+ */
+export const ListReviewerQueueQueryParams = zod.object({
+  status: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Comma-separated list of `SubmissionStatus` values to\ninclude in `items`. Defaults to\n`pending,corrections_requested`. Unknown values cause a\n400 (no silent partial-match).\n",
+    ),
+});
+
+export const ListReviewerQueueResponse = zod
+  .object({
+    items: zod.array(
+      zod
+        .object({
+          submissionId: zod.string(),
+          engagementId: zod.string(),
+          engagementName: zod.string(),
+          jurisdiction: zod.string().nullable(),
+          address: zod.string().nullable(),
+          applicantFirm: zod.string().nullable(),
+          submittedAt: zod.coerce.date(),
+          status: zod
+            .enum(["pending", "approved", "corrections_requested", "rejected"])
+            .describe(
+              "Canonical jurisdiction-response status for a submission.\n`pending` is the default at insert (no response recorded yet);\nthe other three are review outcomes the response route may\ntransition the row into.\n",
+            ),
+          note: zod.string().nullable(),
+          reviewerComment: zod.string().nullable(),
+        })
+        .describe(
+          "One submission row in the cross-engagement reviewer Inbox\n(`GET \/reviewer\/queue`). Joins the row to its parent\nengagement so the Inbox can render a row per submission\nwithout a follow-up `GET \/engagements\/{id}` per row.\n\n`engagementName` is denormalized off the engagement at\nread-time (not at submit-time, unlike `jurisdiction` which is\nsnapshotted into the submission row by the create route) —\nthe Inbox should reflect the current engagement name even if\nthe project was renamed after the package was submitted.\n`applicantFirm` is currently always null (the engagement\nschema has no applicant\/firm column today, Reviewer V1-B\nships without that field rather than inventing one); the\nproperty is part of the contract so adding it later is\nnon-breaking.\n",
+        ),
+    ),
+    counts: zod
+      .object({
+        inReview: zod.number(),
+        awaitingAi: zod.number(),
+        rejected: zod.number(),
+        backlog: zod.number(),
+      })
+      .describe(
+        "Cross-system roll-up counts the reviewer Inbox renders in its\nKPI strip \/ header summary line. Computed across the entire\n`submissions` table (NOT just the filtered queue items) so\nthe strip stays meaningful regardless of the caller's\n`?status=` filter.\n\n  - `awaitingAi` — submissions in `pending`. The mock surface\n    called this \"awaiting AI\" because the AI reviewer engine\n    is the next thing that should fire on a freshly-arrived\n    package; the name is preserved here so the FE wording\n    stays consistent.\n  - `inReview` — submissions in `corrections_requested`.\n  - `rejected` — submissions in `rejected`.\n  - `backlog` — `awaitingAi + inReview`, i.e. the size of the\n    default queue. Surfaced separately so the FE doesn't have\n    to repeat the addition.\n",
+      ),
+  })
+  .describe(
+    "Response payload of `GET \/reviewer\/queue`. The `items` array\nis the filtered queue (newest-first); the `counts` object is\na cross-system roll-up (NOT scoped to the filter) so the\nInbox's KPI strip can render off the same response.\n",
+  );
+
+/**
  * Returns reviewer-requests filed against the engagement,
 newest-first by `requestedAt`. Architect AND reviewer audiences
 can both read this list — architect drives the

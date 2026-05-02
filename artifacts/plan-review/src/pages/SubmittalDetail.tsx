@@ -1,7 +1,6 @@
 import { useParams } from "wouter";
 import { DashboardLayout } from "@workspace/portal-ui";
 import { useNavGroups } from "../components/NavGroups";
-import { SUBMITTALS, FINDINGS } from "../data/mock";
 import { AIBriefingPanel } from "../components/AIBriefingPanel";
 import { Folder, FileText } from "lucide-react";
 
@@ -9,10 +8,11 @@ export default function SubmittalDetail() {
   const navGroups = useNavGroups();
   const params = useParams();
   const id = params.id as string;
-  const submittal = SUBMITTALS.find(s => s.id === id);
 
-  // If not found, just gracefully degrade title, but mock data ensures it'll exist if navigated from console.
-  const title = submittal ? submittal.projectName : `Submittal ${id}`;
+  // Legacy route — degrades to the raw id until a real per-submission
+  // surface lands. The Inbox no longer routes here; it deep-links to
+  // /engagements/:id?submission=:sid&tab=note instead.
+  const title = `Submittal ${id}`;
 
   return (
     <DashboardLayout

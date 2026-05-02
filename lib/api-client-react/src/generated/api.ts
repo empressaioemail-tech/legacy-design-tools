@@ -65,6 +65,7 @@ import type {
   ListJurisdictionAtomsParams,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
+  ListReviewerQueueParams,
   ListReviewerRequestsResponse,
   ListSubmissionCommentsResponse,
   ListSubmissionFindingsResponse,
@@ -86,6 +87,7 @@ import type {
   RetrievalProbeBody,
   RetrievalProbeResponse,
   ReviewerAnnotationResponse,
+  ReviewerQueueResponse,
   ReviewerRequestResponse,
   Session,
   SheetSummary,
@@ -7126,6 +7128,135 @@ export const useOverrideFinding = <
 > => {
   return useMutation(getOverrideFindingMutationOptions(options));
 };
+
+/**
+ * Cross-engagement reviewer Inbox feed (Reviewer V1-B / Task
+#426). Returns the slice of `submissions` rows whose `status`
+matches the requested filter, joined to their parent
+engagement's metadata (`name`, `jurisdiction`, `address`) so
+the Plan Review Inbox can render a row per submission without
+a follow-up `GET /engagements/{id}` per row.
+
+Reviewer-only (`session.audience === "internal"`). Non-reviewer
+callers receive 403 with the
+`reviewer_queue_requires_internal_audience` error code; the
+gate mirrors `reviewerAnnotations` / `reviewerRequests`.
+
+The default filter is `pending,corrections_requested` — the
+two states a reviewer needs to act on. Pass `?status=` with a
+comma-separated subset of `SubmissionStatus` values to widen
+the cut (e.g. `?status=pending,corrections_requested,rejected`
+for a "what was just rejected" tab). An unrecognized status
+value is rejected with 400 rather than silently ignored so a
+typo does not return a misleading queue.
+
+Items are ordered by `submittedAt` DESC so the freshest
+package is at the top — matches the existing per-engagement
+list contract (`GET /engagements/{id}/submissions`).
+
+`counts` accompanies the items as a denormalized roll-up so
+the page's KPI strip and "X in review · Y awaiting AI ·
+Z rejected" header can render off the same response payload
+without a second round trip. Counts are computed *across the
+full submissions table* (not just the filtered slice) so the
+strip stays meaningful regardless of how the caller narrowed
+`status`.
+
+ * @summary List submissions awaiting reviewer attention across every engagement
+ */
+export const getListReviewerQueueUrl = (params?: ListReviewerQueueParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reviewer/queue?${stringifiedParams}`
+    : `/api/reviewer/queue`;
+};
+
+export const listReviewerQueue = async (
+  params?: ListReviewerQueueParams,
+  options?: RequestInit,
+): Promise<ReviewerQueueResponse> => {
+  return customFetch<ReviewerQueueResponse>(getListReviewerQueueUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListReviewerQueueQueryKey = (
+  params?: ListReviewerQueueParams,
+) => {
+  return [`/api/reviewer/queue`, ...(params ? [params] : [])] as const;
+};
+
+export const getListReviewerQueueQueryOptions = <
+  TData = Awaited<ReturnType<typeof listReviewerQueue>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListReviewerQueueParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listReviewerQueue>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListReviewerQueueQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listReviewerQueue>>
+  > = ({ signal }) => listReviewerQueue(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listReviewerQueue>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListReviewerQueueQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listReviewerQueue>>
+>;
+export type ListReviewerQueueQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List submissions awaiting reviewer attention across every engagement
+ */
+
+export function useListReviewerQueue<
+  TData = Awaited<ReturnType<typeof listReviewerQueue>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListReviewerQueueParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listReviewerQueue>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListReviewerQueueQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Returns reviewer-requests filed against the engagement,

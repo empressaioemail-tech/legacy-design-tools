@@ -191,6 +191,75 @@ server clock on every response update.
 }
 
 /**
+ * One submission row in the cross-engagement reviewer Inbox
+(`GET /reviewer/queue`). Joins the row to its parent
+engagement so the Inbox can render a row per submission
+without a follow-up `GET /engagements/{id}` per row.
+
+`engagementName` is denormalized off the engagement at
+read-time (not at submit-time, unlike `jurisdiction` which is
+snapshotted into the submission row by the create route) —
+the Inbox should reflect the current engagement name even if
+the project was renamed after the package was submitted.
+`applicantFirm` is currently always null (the engagement
+schema has no applicant/firm column today, Reviewer V1-B
+ships without that field rather than inventing one); the
+property is part of the contract so adding it later is
+non-breaking.
+
+ */
+export interface ReviewerQueueItem {
+  submissionId: string;
+  engagementId: string;
+  engagementName: string;
+  jurisdiction: string | null;
+  address: string | null;
+  applicantFirm: string | null;
+  submittedAt: string;
+  status: SubmissionStatus;
+  note: string | null;
+  reviewerComment: string | null;
+}
+
+/**
+ * Cross-system roll-up counts the reviewer Inbox renders in its
+KPI strip / header summary line. Computed across the entire
+`submissions` table (NOT just the filtered queue items) so
+the strip stays meaningful regardless of the caller's
+`?status=` filter.
+
+  - `awaitingAi` — submissions in `pending`. The mock surface
+    called this "awaiting AI" because the AI reviewer engine
+    is the next thing that should fire on a freshly-arrived
+    package; the name is preserved here so the FE wording
+    stays consistent.
+  - `inReview` — submissions in `corrections_requested`.
+  - `rejected` — submissions in `rejected`.
+  - `backlog` — `awaitingAi + inReview`, i.e. the size of the
+    default queue. Surfaced separately so the FE doesn't have
+    to repeat the addition.
+
+ */
+export interface ReviewerQueueCounts {
+  inReview: number;
+  awaitingAi: number;
+  rejected: number;
+  backlog: number;
+}
+
+/**
+ * Response payload of `GET /reviewer/queue`. The `items` array
+is the filtered queue (newest-first); the `counts` object is
+a cross-system roll-up (NOT scoped to the filter) so the
+Inbox's KPI strip can render off the same response.
+
+ */
+export interface ReviewerQueueResponse {
+  items: ReviewerQueueItem[];
+  counts: ReviewerQueueCounts;
+}
+
+/**
  * Producer flavor for a `briefing_sources` row. `manual-upload` is
 the DA-PI-1B sprint's manual-QGIS upload path; `federal-adapter`
 ships in DA-PI-2 when the federal-data adapters write into the
@@ -3395,6 +3464,17 @@ anchored to this target entity id. Must be paired with
 
  */
   targetEntityId?: string;
+};
+
+export type ListReviewerQueueParams = {
+  /**
+ * Comma-separated list of `SubmissionStatus` values to
+include in `items`. Defaults to
+`pending,corrections_requested`. Unknown values cause a
+400 (no silent partial-match).
+
+ */
+  status?: string;
 };
 
 export type ListEngagementReviewerRequestsParams = {
