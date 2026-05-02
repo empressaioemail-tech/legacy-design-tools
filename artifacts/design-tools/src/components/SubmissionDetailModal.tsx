@@ -9,7 +9,7 @@ import {
   type AtomSummary,
   type SubmissionStatus,
 } from "@workspace/api-client-react";
-import { ReviewerComment } from "@workspace/portal-ui";
+import { ReviewerComment, SubmissionCommentThread } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
 import { backfillAnnotation } from "../lib/submissionBackfill";
 import { friendlyAgentLabel } from "../lib/actorLabel";
@@ -386,6 +386,26 @@ export function SubmissionDetailModal(props: SubmissionDetailModalProps) {
                       Responded {relativeTime(typed.respondedAt)}
                     </span>
                   )}
+                </Section>
+              )}
+
+              {/*
+                * Task #431 — architect-facing reply thread under the
+                * reviewer comment. Mounted only when the submission
+                * has a reviewer comment to reply *to* (otherwise
+                * there's no conversation seed and the surface is
+                * confusing). The seed itself renders above in the
+                * REVIEWER COMMENT section, so we pass `null` here to
+                * suppress the duplicate render inside the thread
+                * component.
+                */}
+              {typed.reviewerComment && submissionId && (
+                <Section label="CONVERSATION">
+                  <SubmissionCommentThread
+                    submissionId={submissionId}
+                    authorRole="architect"
+                    seedReviewerComment={null}
+                  />
                 </Section>
               )}
 

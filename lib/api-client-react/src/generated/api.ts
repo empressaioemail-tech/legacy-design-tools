@@ -33,6 +33,7 @@ import type {
   CreateEngagementSubmissionBody,
   CreateReviewerAnnotationBody,
   CreateReviewerRequestBody,
+  CreateSubmissionCommentBody,
   CreateUserBody,
   DismissReviewerRequestBody,
   EngagementBimModelResponse,
@@ -65,6 +66,7 @@ import type {
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
   ListReviewerRequestsResponse,
+  ListSubmissionCommentsResponse,
   ListSubmissionFindingsResponse,
   LocalSetbackTable,
   MatchEngagementBody,
@@ -93,6 +95,7 @@ import type {
   SnapshotReceipt,
   SnapshotSheetHistoryResponse,
   SnapshotSummary,
+  SubmissionCommentResponse,
   SubmissionFindingsGenerationRunsResponse,
   SubmissionFindingsGenerationStatusResponse,
   SubmissionReceipt,
@@ -6177,6 +6180,217 @@ export const usePromoteReviewerAnnotations = <
   TContext
 > => {
   return useMutation(getPromoteReviewerAnnotationsMutationOptions(options));
+};
+
+/**
+ * Returns every comment row anchored to the submission, in
+oldest-first chronological order so the thread reads
+top-to-bottom like a chat transcript. The thread is the
+reply surface for the seed reviewer comment carried on the
+`submissions.reviewer_comment` field — the seed itself is NOT
+repeated in this response.
+
+Both reviewer (plan-review) and architect (design-tools)
+callers may read. The endpoint requires `audience: "internal"`
+— both surfaces run under this audience today, so a single
+gate covers both. The response carries `authorRole` per row
+so the UI can color-code reviewer vs architect entries
+without a follow-up lookup.
+
+ * @summary List the reviewer↔architect comment thread for a submission
+ */
+export const getListSubmissionCommentsUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/comments`;
+};
+
+export const listSubmissionComments = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<ListSubmissionCommentsResponse> => {
+  return customFetch<ListSubmissionCommentsResponse>(
+    getListSubmissionCommentsUrl(submissionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListSubmissionCommentsQueryKey = (submissionId: string) => {
+  return [`/api/submissions/${submissionId}/comments`] as const;
+};
+
+export const getListSubmissionCommentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSubmissionComments>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionComments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListSubmissionCommentsQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSubmissionComments>>
+  > = ({ signal }) =>
+    listSubmissionComments(submissionId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSubmissionComments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSubmissionCommentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSubmissionComments>>
+>;
+export type ListSubmissionCommentsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the reviewer↔architect comment thread for a submission
+ */
+
+export function useListSubmissionComments<
+  TData = Awaited<ReturnType<typeof listSubmissionComments>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionComments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSubmissionCommentsQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Inserts a new comment row under the submission. The body
+carries the `authorRole` field — `architect` from
+design-tools, `reviewer` from plan-review — which the route
+records verbatim alongside the session-bound author id.
+
+Both audiences may post; the endpoint requires `audience:
+"internal"`. The comment row is plain text (no threading,
+no promotion concept); the response splices the new row
+back into the same envelope shape `GET` returns so the FE
+can append without a follow-up fetch.
+
+ * @summary Post a reply into a submission's comment thread
+ */
+export const getCreateSubmissionCommentUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/comments`;
+};
+
+export const createSubmissionComment = async (
+  submissionId: string,
+  createSubmissionCommentBody: CreateSubmissionCommentBody,
+  options?: RequestInit,
+): Promise<SubmissionCommentResponse> => {
+  return customFetch<SubmissionCommentResponse>(
+    getCreateSubmissionCommentUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createSubmissionCommentBody),
+    },
+  );
+};
+
+export const getCreateSubmissionCommentMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionComment>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionCommentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createSubmissionComment>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionCommentBody> },
+  TContext
+> => {
+  const mutationKey = ["createSubmissionComment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createSubmissionComment>>,
+    { submissionId: string; data: BodyType<CreateSubmissionCommentBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return createSubmissionComment(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateSubmissionCommentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createSubmissionComment>>
+>;
+export type CreateSubmissionCommentMutationBody =
+  BodyType<CreateSubmissionCommentBody>;
+export type CreateSubmissionCommentMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Post a reply into a submission's comment thread
+ */
+export const useCreateSubmissionComment = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionComment>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionCommentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createSubmissionComment>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionCommentBody> },
+  TContext
+> => {
+  return useMutation(getCreateSubmissionCommentMutationOptions(options));
 };
 
 /**

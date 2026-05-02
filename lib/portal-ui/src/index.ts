@@ -14,6 +14,11 @@ export { SubmissionRecordedBanner } from "./components/SubmissionRecordedBanner"
 export type { SubmissionRecordedBannerProps } from "./components/SubmissionRecordedBanner";
 export { ReviewerComment } from "./components/ReviewerComment";
 export type { ReviewerCommentProps } from "./components/ReviewerComment";
+// Task #431 — reviewer↔architect inline reply thread anchored to a
+// submission. Audience-agnostic at the component layer; the parent
+// surface decides which `authorRole` to tag posts with.
+export { SubmissionCommentThread } from "./components/SubmissionCommentThread";
+export type { SubmissionCommentThreadProps } from "./components/SubmissionCommentThread";
 export { ReviewerAnnotationAffordance } from "./components/ReviewerAnnotationAffordance";
 export type { ReviewerAnnotationAffordanceProps } from "./components/ReviewerAnnotationAffordance";
 export { ReviewerAnnotationPanel } from "./components/ReviewerAnnotationPanel";

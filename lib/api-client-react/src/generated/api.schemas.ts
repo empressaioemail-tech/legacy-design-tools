@@ -2210,6 +2210,79 @@ export interface PromoteReviewerAnnotationsResponse {
 }
 
 /**
+ * Closed enum of comment-author roles on the
+reviewer↔architect submission thread. `architect` rows are
+posted from design-tools; `reviewer` rows are posted from
+plan-review. The role is body-supplied (not session-derived)
+because both surfaces today share the same `internal`
+audience.
+
+ */
+export type SubmissionCommentAuthorRole =
+  (typeof SubmissionCommentAuthorRole)[keyof typeof SubmissionCommentAuthorRole];
+
+export const SubmissionCommentAuthorRole = {
+  architect: "architect",
+  reviewer: "reviewer",
+} as const;
+
+/**
+ * One row in a submission's reviewer↔architect comment thread.
+The seed of the thread is the reviewer's comment carried on
+the parent `submissions.reviewer_comment` field — that seed is
+NOT a row in this response; only replies posted via this route
+are.
+
+ */
+export interface SubmissionComment {
+  id: string;
+  submissionId: string;
+  authorRole: SubmissionCommentAuthorRole;
+  authorId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Request body for `POST /submissions/{submissionId}/comments`.
+`authorRole` is required because the architect and reviewer
+surfaces both run under the `internal` audience today — the
+role distinguishes which UI a row was posted from. `authorId`
+is server-derived from the session-bound requestor and is NOT
+part of the request body.
+
+ */
+export interface CreateSubmissionCommentBody {
+  authorRole: SubmissionCommentAuthorRole;
+  /**
+   * @minLength 1
+   * @maxLength 4096
+   */
+  body: string;
+}
+
+/**
+ * Wire envelope for `POST /submissions/{submissionId}/comments`.
+Carries the affected row in the same shape the list endpoint
+returns so the FE can splice the new row into cached lists
+without a follow-up fetch.
+
+ */
+export interface SubmissionCommentResponse {
+  comment: SubmissionComment;
+}
+
+/**
+ * Wire envelope for `GET /submissions/{submissionId}/comments`.
+Oldest-first chronological list (chat-transcript order).
+
+ */
+export interface ListSubmissionCommentsResponse {
+  comments: SubmissionComment[];
+}
+
+/**
  * AIR-1 severity rubric (locked v1, see findingsMock.ts:41):
   - blocker  — code violation requiring resolution before approval
   - concern  — ambiguity or risk

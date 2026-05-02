@@ -3873,6 +3873,86 @@ export const PromoteReviewerAnnotationsResponse = zod
   );
 
 /**
+ * Returns every comment row anchored to the submission, in
+oldest-first chronological order so the thread reads
+top-to-bottom like a chat transcript. The thread is the
+reply surface for the seed reviewer comment carried on the
+`submissions.reviewer_comment` field — the seed itself is NOT
+repeated in this response.
+
+Both reviewer (plan-review) and architect (design-tools)
+callers may read. The endpoint requires `audience: "internal"`
+— both surfaces run under this audience today, so a single
+gate covers both. The response carries `authorRole` per row
+so the UI can color-code reviewer vs architect entries
+without a follow-up lookup.
+
+ * @summary List the reviewer↔architect comment thread for a submission
+ */
+export const ListSubmissionCommentsParams = zod.object({
+  submissionId: zod.coerce.string().describe("Submission id."),
+});
+
+export const ListSubmissionCommentsResponse = zod
+  .object({
+    comments: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          submissionId: zod.string(),
+          authorRole: zod
+            .enum(["architect", "reviewer"])
+            .describe(
+              "Closed enum of comment-author roles on the\nreviewer↔architect submission thread. `architect` rows are\nposted from design-tools; `reviewer` rows are posted from\nplan-review. The role is body-supplied (not session-derived)\nbecause both surfaces today share the same `internal`\naudience.\n",
+            ),
+          authorId: zod.string(),
+          body: zod.string(),
+          createdAt: zod.coerce.date(),
+          updatedAt: zod.coerce.date(),
+        })
+        .describe(
+          "One row in a submission's reviewer↔architect comment thread.\nThe seed of the thread is the reviewer's comment carried on\nthe parent `submissions.reviewer_comment` field — that seed is\nNOT a row in this response; only replies posted via this route\nare.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/submissions\/{submissionId}\/comments`.\nOldest-first chronological list (chat-transcript order).\n",
+  );
+
+/**
+ * Inserts a new comment row under the submission. The body
+carries the `authorRole` field — `architect` from
+design-tools, `reviewer` from plan-review — which the route
+records verbatim alongside the session-bound author id.
+
+Both audiences may post; the endpoint requires `audience:
+"internal"`. The comment row is plain text (no threading,
+no promotion concept); the response splices the new row
+back into the same envelope shape `GET` returns so the FE
+can append without a follow-up fetch.
+
+ * @summary Post a reply into a submission's comment thread
+ */
+export const CreateSubmissionCommentParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const createSubmissionCommentBodyBodyMax = 4096;
+
+export const CreateSubmissionCommentBody = zod
+  .object({
+    authorRole: zod
+      .enum(["architect", "reviewer"])
+      .describe(
+        "Closed enum of comment-author roles on the\nreviewer↔architect submission thread. `architect` rows are\nposted from design-tools; `reviewer` rows are posted from\nplan-review. The role is body-supplied (not session-derived)\nbecause both surfaces today share the same `internal`\naudience.\n",
+      ),
+    body: zod.string().min(1).max(createSubmissionCommentBodyBodyMax),
+  })
+  .describe(
+    "Request body for `POST \/submissions\/{submissionId}\/comments`.\n`authorRole` is required because the architect and reviewer\nsurfaces both run under the `internal` audience today — the\nrole distinguishes which UI a row was posted from. `authorId`\nis server-derived from the session-bound requestor and is NOT\npart of the request body.\n",
+  );
+
+/**
  * Returns the current set of findings for a submission, newest
 first, after every reviewer mutation has been applied. The list
 includes overridden originals (status `overridden` with

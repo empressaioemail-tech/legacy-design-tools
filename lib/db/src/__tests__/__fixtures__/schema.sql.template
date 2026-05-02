@@ -268,6 +268,45 @@ CREATE TABLE @@SCHEMA@@.reviewer_annotations (
 );
 
 
+-- Name: submission_comments; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.submission_comments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    submission_id uuid NOT NULL,
+    author_role text NOT NULL,
+    author_id text NOT NULL,
+    body text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT submission_comments_author_role_check CHECK ((author_role = ANY (ARRAY['architect'::text, 'reviewer'::text])))
+);
+
+
+-- Name: reviewer_requests; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.reviewer_requests (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    request_kind text NOT NULL,
+    target_entity_type text NOT NULL,
+    target_entity_id text NOT NULL,
+    reason text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    requested_by jsonb NOT NULL,
+    requested_at timestamp with time zone DEFAULT now() NOT NULL,
+    dismissed_by jsonb,
+    dismissed_at timestamp with time zone,
+    dismissal_reason text,
+    resolved_at timestamp with time zone,
+    triggered_action_event_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT reviewer_requests_kind_check CHECK ((request_kind = ANY (ARRAY['refresh-briefing-source'::text, 'refresh-bim-model'::text, 'regenerate-briefing'::text]))),
+    CONSTRAINT reviewer_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'dismissed'::text, 'resolved'::text]))),
+    CONSTRAINT reviewer_requests_target_type_check CHECK ((target_entity_type = ANY (ARRAY['briefing-source'::text, 'bim-model'::text, 'parcel-briefing'::text])))
+);
+
+
 -- Name: sheets; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.sheets (
@@ -445,6 +484,18 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
     ADD CONSTRAINT reviewer_annotations_pkey PRIMARY KEY (id);
 
 
+-- Name: submission_comments submission_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.submission_comments
+    ADD CONSTRAINT submission_comments_pkey PRIMARY KEY (id);
+
+
+-- Name: reviewer_requests reviewer_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
+    ADD CONSTRAINT reviewer_requests_pkey PRIMARY KEY (id);
+
+
 -- Name: sheets sheets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.sheets
@@ -619,6 +670,21 @@ CREATE INDEX reviewer_annotations_parent_idx ON @@SCHEMA@@.reviewer_annotations 
 CREATE INDEX reviewer_annotations_target_idx ON @@SCHEMA@@.reviewer_annotations USING btree (submission_id, target_entity_type, target_entity_id);
 
 
+-- Name: reviewer_requests_pending_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX reviewer_requests_pending_idx ON @@SCHEMA@@.reviewer_requests USING btree (engagement_id, status, requested_at);
+
+
+-- Name: reviewer_requests_target_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX reviewer_requests_target_idx ON @@SCHEMA@@.reviewer_requests USING btree (target_entity_type, target_entity_id, status);
+
+
+-- Name: submission_comments_submission_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX submission_comments_submission_idx ON @@SCHEMA@@.submission_comments USING btree (submission_id, created_at);
+
+
 -- Name: sheets_engagement_number_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX sheets_engagement_number_idx ON @@SCHEMA@@.sheets USING btree (engagement_id, sheet_number);
@@ -760,6 +826,18 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
     ADD CONSTRAINT reviewer_annotations_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
+
+
+-- Name: submission_comments submission_comments_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.submission_comments
+    ADD CONSTRAINT submission_comments_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
+
+
+-- Name: reviewer_requests reviewer_requests_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
+    ADD CONSTRAINT reviewer_requests_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: sheets sheets_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -21,6 +21,7 @@ import generateLayersRouter from "./generateLayers";
 import localSetbacksRouter from "./localSetbacks";
 import adapterCacheRouter from "./adapterCache";
 import reviewerAnnotationsRouter from "./reviewerAnnotations";
+import submissionCommentsRouter from "./submissionComments";
 import findingsRouter from "./findings";
 import reviewerRequestsRouter from "./reviewerRequests";
 import rendersRouter from "./renders";
@@ -78,6 +79,11 @@ router.use(adapterCacheRouter);
 // Mounts under /submissions/:submissionId/reviewer-annotations; no
 // path overlap with any existing router so ordering is indifferent.
 router.use(reviewerAnnotationsRouter);
+// Task #431 — reviewer↔architect inline comment thread surface.
+// Mounts under /submissions/:submissionId/comments; no path overlap
+// with the reviewer-annotations router (its parametric segment is
+// always `reviewer-annotations`) so ordering is indifferent.
+router.use(submissionCommentsRouter);
 // V1-1 / AIR-1 — findings surface. Mounts under
 // /submissions/:submissionId/findings* and /findings/:findingId/*;
 // no path overlap with reviewer-annotations or any other router so

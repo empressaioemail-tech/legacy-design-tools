@@ -99,6 +99,11 @@ describe("lib/db schema integration", () => {
         "reviewer_requests",
         "sheets",
         "snapshots",
+        // Task #431 — reviewer↔architect inline reply thread anchored
+        // to a submission. Distinct from `reviewer_annotations` (which
+        // is reviewer-only scratch notes); this table is the
+        // cross-audience conversation channel.
+        "submission_comments",
         "submissions",
         "users",
         "viewpoint_renders",

@@ -15,6 +15,7 @@ export * from "./briefingDivergences";
 export * from "./briefingGenerationJobs";
 export * from "./adapterResponseCache";
 export * from "./reviewerAnnotations";
+export * from "./submissionComments";
 export * from "./findingRuns";
 export * from "./findings";
 export * from "./reviewerRequests";

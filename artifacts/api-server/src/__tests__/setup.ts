@@ -79,6 +79,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // explicitly per the "if a route writes to it, it's in this list"
   // invariant.
   "reviewer_annotations",
+  // Task #431 — reviewer↔architect inline reply thread. Cascades off
+  // `submissions`, but listed explicitly per the "if a route writes
+  // to it, it's in this list" invariant.
+  "submission_comments",
   // V1-1 / AIR-1 — finding row + its producing-run row. Both
   // cascade off `submissions`, but listed explicitly per the
   // "if a route writes to it, it's in this list" invariant. `findings`
