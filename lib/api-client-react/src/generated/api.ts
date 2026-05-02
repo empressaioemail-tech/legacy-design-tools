@@ -34,6 +34,7 @@ import type {
   CreateReviewerAnnotationBody,
   CreateReviewerRequestBody,
   CreateSubmissionCommentBody,
+  CreateSubmissionCommunicationBody,
   CreateSubmissionFindingBody,
   CreateUserBody,
   DismissReviewerRequestBody,
@@ -74,6 +75,7 @@ import type {
   ListReviewerQueueParams,
   ListReviewerRequestsResponse,
   ListSubmissionCommentsResponse,
+  ListSubmissionCommunicationsResponse,
   ListSubmissionFindingsResponse,
   LocalSetbackTable,
   MarkNotificationsReadResponse,
@@ -105,6 +107,7 @@ import type {
   SnapshotSheetHistoryResponse,
   SnapshotSummary,
   SubmissionCommentResponse,
+  SubmissionCommunicationResponse,
   SubmissionFindingsGenerationRunsResponse,
   SubmissionFindingsGenerationStatusResponse,
   SubmissionReceipt,
@@ -6612,6 +6615,215 @@ export const useCreateSubmissionComment = <
   TContext
 > => {
   return useMutation(getCreateSubmissionCommentMutationOptions(options));
+};
+
+/**
+ * Returns every `submission_communications` row for the
+submission, newest-first. Reviewer-only (`audience:
+"internal"`); the FE consumes the `sentAt` of the newest row
+for the SubmissionDetailModal's "Last comment letter sent"
+status pill.
+
+ * @summary List the comment letters previously sent for a submission
+ */
+export const getListSubmissionCommunicationsUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/communications`;
+};
+
+export const listSubmissionCommunications = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<ListSubmissionCommunicationsResponse> => {
+  return customFetch<ListSubmissionCommunicationsResponse>(
+    getListSubmissionCommunicationsUrl(submissionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListSubmissionCommunicationsQueryKey = (
+  submissionId: string,
+) => {
+  return [`/api/submissions/${submissionId}/communications`] as const;
+};
+
+export const getListSubmissionCommunicationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSubmissionCommunications>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionCommunications>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListSubmissionCommunicationsQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSubmissionCommunications>>
+  > = ({ signal }) =>
+    listSubmissionCommunications(submissionId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSubmissionCommunications>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSubmissionCommunicationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSubmissionCommunications>>
+>;
+export type ListSubmissionCommunicationsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the comment letters previously sent for a submission
+ */
+
+export function useListSubmissionCommunications<
+  TData = Awaited<ReturnType<typeof listSubmissionCommunications>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionCommunications>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSubmissionCommunicationsQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Persists a `submission_communications` row with the reviewer-
+edited subject + body, snapshots the open-finding atom ids
+the draft was assembled from, and appends a single
+`communication-event.sent` history event against the new
+row's atom id. Reviewer-only (`audience: "internal"`).
+
+Email dispatch is intentionally not part of this contract:
+the api-server has no outbound-mail pipeline yet, so the
+route logs the intended recipient list and persists it for a
+future dispatcher to pick up. The `recipientUserIds` array
+MAY be empty when no architect-of-record contact has been
+captured on the parent engagement.
+
+ * @summary Send an AI-drafted comment letter for a submission
+ */
+export const getCreateSubmissionCommunicationUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/communications`;
+};
+
+export const createSubmissionCommunication = async (
+  submissionId: string,
+  createSubmissionCommunicationBody: CreateSubmissionCommunicationBody,
+  options?: RequestInit,
+): Promise<SubmissionCommunicationResponse> => {
+  return customFetch<SubmissionCommunicationResponse>(
+    getCreateSubmissionCommunicationUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createSubmissionCommunicationBody),
+    },
+  );
+};
+
+export const getCreateSubmissionCommunicationMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionCommunication>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionCommunicationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createSubmissionCommunication>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionCommunicationBody> },
+  TContext
+> => {
+  const mutationKey = ["createSubmissionCommunication"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createSubmissionCommunication>>,
+    { submissionId: string; data: BodyType<CreateSubmissionCommunicationBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return createSubmissionCommunication(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateSubmissionCommunicationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createSubmissionCommunication>>
+>;
+export type CreateSubmissionCommunicationMutationBody =
+  BodyType<CreateSubmissionCommunicationBody>;
+export type CreateSubmissionCommunicationMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Send an AI-drafted comment letter for a submission
+ */
+export const useCreateSubmissionCommunication = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionCommunication>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionCommunicationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createSubmissionCommunication>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionCommunicationBody> },
+  TContext
+> => {
+  return useMutation(getCreateSubmissionCommunicationMutationOptions(options));
 };
 
 /**

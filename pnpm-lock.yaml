@@ -964,9 +964,15 @@ importers:
       '@workspace/briefing-prior-snapshot':
         specifier: workspace:*
         version: link:../../lib/briefing-prior-snapshot
+      '@workspace/comment-letter':
+        specifier: workspace:*
+        version: link:../../lib/comment-letter
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/finding-engine':
+        specifier: workspace:*
+        version: link:../../lib/finding-engine
       '@workspace/object-storage-web':
         specifier: workspace:*
         version: link:../../lib/object-storage-web
@@ -1234,6 +1240,25 @@ importers:
       pdf-parse-fork:
         specifier: ^1.2.0
         version: 1.2.0
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.3.5
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+
+  lib/comment-letter:
+    dependencies:
+      '@workspace/finding-engine':
+        specifier: workspace:*
+        version: link:../finding-engine
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

@@ -24,6 +24,7 @@ import reviewerAnnotationsRouter from "./reviewerAnnotations";
 import submissionCommentsRouter from "./submissionComments";
 import findingsRouter from "./findings";
 import submissionEventsRouter from "./submissionEvents";
+import communicationsRouter from "./communications";
 import reviewerRequestsRouter from "./reviewerRequests";
 import reviewerQueueRouter from "./submissions";
 import rendersRouter from "./renders";
@@ -96,6 +97,11 @@ router.use(findingsRouter);
 // `/submissions/:submissionId/events`; distinct path subtree from
 // every other router so ordering is indifferent.
 router.use(submissionEventsRouter);
+// PLR-5 — communications surface (AI comment-letter compose + send).
+// Mounts under /submissions/:submissionId/communications; no path
+// overlap with the findings or comments routers so ordering is
+// indifferent.
+router.use(communicationsRouter);
 // Wave 2 Sprint D / V1-2 — reviewer-request surface. Mounts under
 // /engagements/:id/reviewer-requests + /reviewer-requests/:id/dismiss.
 // engagementsRouter's `/engagements/:id` handler is a leaf and does

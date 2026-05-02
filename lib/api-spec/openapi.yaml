@@ -48,6 +48,13 @@ tags:
       Architect-side in-app notification surface (Task #432). Newest-
       first list of submission status changes and reviewer-requests
       across every engagement, plus a per-architect read-watermark.
+  - name: communications
+    description: |
+      AI-drafted comment letters (PLR-5) the reviewer composes from
+      open findings and sends to the architect of record. Reviewer-
+      only (audience `internal`); persists a `communication-event`
+      atom row plus a `communication-event.sent` history event per
+      send.
 paths:
   /healthz:
     get:
@@ -2947,6 +2954,97 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Caller is not internal-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/communications:
+    get:
+      operationId: listSubmissionCommunications
+      tags: [communications]
+      summary: List the comment letters previously sent for a submission
+      description: |
+        Returns every `submission_communications` row for the
+        submission, newest-first. Reviewer-only (`audience:
+        "internal"`); the FE consumes the `sentAt` of the newest row
+        for the SubmissionDetailModal's "Last comment letter sent"
+        status pill.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Newest-first list of comment letters (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSubmissionCommunicationsResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createSubmissionCommunication
+      tags: [communications]
+      summary: Send an AI-drafted comment letter for a submission
+      description: |
+        Persists a `submission_communications` row with the reviewer-
+        edited subject + body, snapshots the open-finding atom ids
+        the draft was assembled from, and appends a single
+        `communication-event.sent` history event against the new
+        row's atom id. Reviewer-only (`audience: "internal"`).
+
+        Email dispatch is intentionally not part of this contract:
+        the api-server has no outbound-mail pipeline yet, so the
+        route logs the intended recipient list and persists it for a
+        future dispatcher to pick up. The `recipientUserIds` array
+        MAY be empty when no architect-of-record contact has been
+        captured on the parent engagement.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubmissionCommunicationBody"
+      responses:
+        "201":
+          description: Comment letter persisted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionCommunicationResponse"
+        "400":
+          description: Invalid body or missing session requestor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
           content:
             application/json:
               schema:
@@ -7455,6 +7553,115 @@ components:
             $ref: "#/components/schemas/SubmissionComment"
       required:
         - comments
+
+    SubmissionCommunication:
+      type: object
+      description: |
+        One row in `submission_communications` — an AI-drafted
+        comment letter the reviewer sent for a submission (PLR-5).
+        Append-only; neither subject nor body is mutable after
+        insert. `atomId` is the public id used for empressa-atom
+        history lookups (`communication-event:{submissionId}:{rowId}`).
+      properties:
+        id:
+          type: string
+        atomId:
+          type: string
+        submissionId:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+        findingAtomIds:
+          type: array
+          description: |
+            Snapshot of the open-finding atom ids the draft was
+            assembled from at send time.
+          items:
+            type: string
+        recipientUserIds:
+          type: array
+          description: |
+            Recipient list as opaque user / contact ids. May be
+            empty when no architect-of-record contact has been
+            captured on the parent engagement.
+          items:
+            type: string
+        sentBy:
+          $ref: "#/components/schemas/FindingActor"
+        sentAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - atomId
+        - submissionId
+        - subject
+        - body
+        - findingAtomIds
+        - recipientUserIds
+        - sentBy
+        - sentAt
+
+    CreateSubmissionCommunicationBody:
+      type: object
+      description: |
+        Request body for `POST /submissions/{submissionId}/communications`.
+        `recipientUserIds` is the reviewer-confirmed recipient list
+        — empty arrays are legal. `findingAtomIds` snapshots which
+        open findings the reviewer included in the draft so the
+        audit trail can reproduce what the architect was told.
+      properties:
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 256
+        body:
+          type: string
+          minLength: 1
+          maxLength: 32768
+        findingAtomIds:
+          type: array
+          items:
+            type: string
+        recipientUserIds:
+          type: array
+          items:
+            type: string
+      required:
+        - subject
+        - body
+        - findingAtomIds
+        - recipientUserIds
+
+    SubmissionCommunicationResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /submissions/{submissionId}/communications`.
+        Carries the affected row in the same shape the list endpoint
+        returns so the FE can splice it into cached lists without a
+        follow-up fetch.
+      properties:
+        communication:
+          $ref: "#/components/schemas/SubmissionCommunication"
+      required:
+        - communication
+
+    ListSubmissionCommunicationsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /submissions/{submissionId}/communications`.
+        Newest-first list — index 0 is the most recently sent
+        comment letter (drives the SubmissionDetailModal's "Last
+        sent" status pill).
+      properties:
+        communications:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubmissionCommunication"
+      required:
+        - communications
 
     FindingSeverity:
       type: string

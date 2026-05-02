@@ -28,6 +28,11 @@ import {
   BriefingPriorSnapshotHeader,
 } from "@workspace/briefing-prior-snapshot";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
+import { CommunicateComposer } from "../components/communicate/CommunicateComposer";
+import {
+  useListSubmissionCommunications,
+  getListSubmissionCommunicationsQueryKey,
+} from "@workspace/api-client-react";
 import { relativeTime } from "../lib/relativeTime";
 import {
   readFindingFromUrl,
@@ -1000,21 +1005,61 @@ function OpenSubmissionModalRenderer({
       queryKey: getListEngagementSubmissionsQueryKey(engagementId),
     },
   });
+  const { data: engagement } = useGetEngagement(engagementId, {
+    query: {
+      enabled: !!engagementId,
+      queryKey: getGetEngagementQueryKey(engagementId),
+    },
+  });
+  // PLR-5 — feed the SubmissionDetailModal's "Last sent" pill and
+  // open the CommunicateComposer. Reviewer-only route; gated by the
+  // session middleware on the api-server side.
+  const isReviewer = audience === "internal";
+  const { data: commsData } = useListSubmissionCommunications(
+    openSubmissionId ?? "",
+    {
+      query: {
+        enabled: !!openSubmissionId && isReviewer,
+        queryKey: getListSubmissionCommunicationsQueryKey(
+          openSubmissionId ?? "",
+        ),
+      },
+    },
+  );
+  const lastCommunicatedAt = commsData?.communications?.[0]?.sentAt ?? null;
+  const [composerOpen, setComposerOpen] = useState(false);
+
   if (!openSubmissionId) return null;
   const submission = submissions?.find((s) => s.id === openSubmissionId);
   if (!submission) return null;
   return (
-    <SubmissionDetailModal
-      submission={submission}
-      engagementId={engagementId}
-      tab={submissionTab}
-      selectedFindingId={selectedFindingId}
-      onTabChange={onTabChange}
-      onSelectFinding={onSelectFinding}
-      onClose={onClose}
-      audience={audience}
-      onOpenSubmission={onOpenSubmission}
-    />
+    <>
+      <SubmissionDetailModal
+        submission={submission}
+        engagementId={engagementId}
+        tab={submissionTab}
+        selectedFindingId={selectedFindingId}
+        onTabChange={onTabChange}
+        onSelectFinding={onSelectFinding}
+        onClose={onClose}
+        audience={audience}
+        onOpenSubmission={onOpenSubmission}
+        onCommunicate={isReviewer ? () => setComposerOpen(true) : undefined}
+        lastCommunicatedAt={lastCommunicatedAt}
+      />
+      {isReviewer && (
+        <CommunicateComposer
+          open={composerOpen}
+          onClose={() => setComposerOpen(false)}
+          submissionId={submission.id}
+          jurisdictionLabel={
+            submission.jurisdiction ?? engagement?.jurisdiction ?? "this jurisdiction"
+          }
+          applicantFirm={engagement?.applicantFirm ?? null}
+          submittedAt={submission.submittedAt}
+        />
+      )}
+    </>
   );
 }
 

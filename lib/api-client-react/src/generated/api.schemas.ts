@@ -2429,6 +2429,114 @@ export interface ListSubmissionCommentsResponse {
   comments: SubmissionComment[];
 }
 
+export type FindingActorKind =
+  (typeof FindingActorKind)[keyof typeof FindingActorKind];
+
+export const FindingActorKind = {
+  user: "user",
+  agent: "agent",
+  system: "system",
+} as const;
+
+/**
+ * Stable actor envelope shared by reviewer-side audit surfaces
+(reviewer-requests, findings, eventually reviewer-annotations).
+
+`kind` distinguishes session-bound human actors (`user`) from
+AI/bot writes (`agent`) and infrastructure-stamped events
+(`system`). `id` is opaque to the framework — application code
+chooses its identity scheme (today: the upstream identity
+layer's stable user id). `displayName` is hydrated at write
+time so consumer surfaces (e.g. the architect's
+ReviewerRequestsStrip) can render "Requested by Alex" without
+a per-row roundtrip.
+
+Promoted to a shared schema in V1-2 — was previously only a
+TS interface in `artifacts/plan-review/src/lib/findingsMock.ts`.
+Both V1-1 (findings) and V1-2 (reviewer-requests) consume this
+envelope; future consumers (e.g. promoted reviewer-annotations
+when they pick up architect-visible attribution) should import
+from here rather than re-deriving the shape.
+
+ */
+export interface FindingActor {
+  kind: FindingActorKind;
+  id: string;
+  displayName?: string | null;
+}
+
+/**
+ * One row in `submission_communications` — an AI-drafted
+comment letter the reviewer sent for a submission (PLR-5).
+Append-only; neither subject nor body is mutable after
+insert. `atomId` is the public id used for empressa-atom
+history lookups (`communication-event:{submissionId}:{rowId}`).
+
+ */
+export interface SubmissionCommunication {
+  id: string;
+  atomId: string;
+  submissionId: string;
+  subject: string;
+  body: string;
+  /** Snapshot of the open-finding atom ids the draft was
+assembled from at send time.
+ */
+  findingAtomIds: string[];
+  /** Recipient list as opaque user / contact ids. May be
+empty when no architect-of-record contact has been
+captured on the parent engagement.
+ */
+  recipientUserIds: string[];
+  sentBy: FindingActor;
+  sentAt: string;
+}
+
+/**
+ * Request body for `POST /submissions/{submissionId}/communications`.
+`recipientUserIds` is the reviewer-confirmed recipient list
+— empty arrays are legal. `findingAtomIds` snapshots which
+open findings the reviewer included in the draft so the
+audit trail can reproduce what the architect was told.
+
+ */
+export interface CreateSubmissionCommunicationBody {
+  /**
+   * @minLength 1
+   * @maxLength 256
+   */
+  subject: string;
+  /**
+   * @minLength 1
+   * @maxLength 32768
+   */
+  body: string;
+  findingAtomIds: string[];
+  recipientUserIds: string[];
+}
+
+/**
+ * Wire envelope for `POST /submissions/{submissionId}/communications`.
+Carries the affected row in the same shape the list endpoint
+returns so the FE can splice it into cached lists without a
+follow-up fetch.
+
+ */
+export interface SubmissionCommunicationResponse {
+  communication: SubmissionCommunication;
+}
+
+/**
+ * Wire envelope for `GET /submissions/{submissionId}/communications`.
+Newest-first list — index 0 is the most recently sent
+comment letter (drives the SubmissionDetailModal's "Last
+sent" status pill).
+
+ */
+export interface ListSubmissionCommunicationsResponse {
+  communications: SubmissionCommunication[];
+}
+
 /**
  * AIR-1 severity rubric (locked v1, see findingsMock.ts:41):
   - blocker  — code violation requiring resolution before approval
@@ -2481,42 +2589,6 @@ export const FindingStatus = {
   overridden: "overridden",
   "promoted-to-architect": "promoted-to-architect",
 } as const;
-
-export type FindingActorKind =
-  (typeof FindingActorKind)[keyof typeof FindingActorKind];
-
-export const FindingActorKind = {
-  user: "user",
-  agent: "agent",
-  system: "system",
-} as const;
-
-/**
- * Stable actor envelope shared by reviewer-side audit surfaces
-(reviewer-requests, findings, eventually reviewer-annotations).
-
-`kind` distinguishes session-bound human actors (`user`) from
-AI/bot writes (`agent`) and infrastructure-stamped events
-(`system`). `id` is opaque to the framework — application code
-chooses its identity scheme (today: the upstream identity
-layer's stable user id). `displayName` is hydrated at write
-time so consumer surfaces (e.g. the architect's
-ReviewerRequestsStrip) can render "Requested by Alex" without
-a per-row roundtrip.
-
-Promoted to a shared schema in V1-2 — was previously only a
-TS interface in `artifacts/plan-review/src/lib/findingsMock.ts`.
-Both V1-1 (findings) and V1-2 (reviewer-requests) consume this
-envelope; future consumers (e.g. promoted reviewer-annotations
-when they pick up architect-visible attribution) should import
-from here rather than re-deriving the shape.
-
- */
-export interface FindingActor {
-  kind: FindingActorKind;
-  id: string;
-  displayName?: string | null;
-}
 
 export type FindingCodeCitationKind =
   (typeof FindingCodeCitationKind)[keyof typeof FindingCodeCitationKind];

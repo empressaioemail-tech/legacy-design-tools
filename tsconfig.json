@@ -46,6 +46,12 @@
       "path": "./lib/briefing-prior-snapshot"
     },
     {
+      "path": "./lib/finding-engine"
+    },
+    {
+      "path": "./lib/comment-letter"
+    },
+    {
       "path": "./lib/integrations-anthropic-ai"
     },
     {

@@ -36,6 +36,7 @@ import { makeReviewerRequestAtom } from "./reviewer-request.atom";
 import { makeViewpointRenderAtom } from "./viewpoint-render.atom";
 import { makeRenderOutputAtom } from "./render-output.atom";
 import { makeFindingAtom } from "./finding.atom";
+import { makeCommunicationEventAtom } from "./communication-event.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -207,6 +208,10 @@ export function getAtomRegistry(): AtomRegistry {
   // is forwardRef because the Code Library catalog atom is not yet
   // registered (mirrors parcel-briefing.atom.ts).
   registry.register(makeFindingAtom({ db, history }));
+  // PLR-5 — communication-event row representing a sent comment
+  // letter. Registered AFTER submission (its only concrete child)
+  // so the boot-log tail surfaces the dependency order naturally.
+  registry.register(makeCommunicationEventAtom({ db, history }));
   _registry = registry;
   return registry;
 }

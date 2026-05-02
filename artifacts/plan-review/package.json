@@ -65,6 +65,8 @@
     "@workspace/api-zod": "workspace:*",
     "@workspace/briefing-diff": "workspace:*",
     "@workspace/briefing-prior-snapshot": "workspace:*",
+    "@workspace/comment-letter": "workspace:*",
+    "@workspace/finding-engine": "workspace:*",
     "@workspace/object-storage-web": "workspace:*",
     "@workspace/portal-ui": "workspace:*",
     "class-variance-authority": "catalog:",

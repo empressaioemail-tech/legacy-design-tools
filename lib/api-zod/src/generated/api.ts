@@ -4093,6 +4093,97 @@ export const CreateSubmissionCommentBody = zod
   );
 
 /**
+ * Returns every `submission_communications` row for the
+submission, newest-first. Reviewer-only (`audience:
+"internal"`); the FE consumes the `sentAt` of the newest row
+for the SubmissionDetailModal's "Last comment letter sent"
+status pill.
+
+ * @summary List the comment letters previously sent for a submission
+ */
+export const ListSubmissionCommunicationsParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const ListSubmissionCommunicationsResponse = zod
+  .object({
+    communications: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          atomId: zod.string(),
+          submissionId: zod.string(),
+          subject: zod.string(),
+          body: zod.string(),
+          findingAtomIds: zod
+            .array(zod.string())
+            .describe(
+              "Snapshot of the open-finding atom ids the draft was\nassembled from at send time.\n",
+            ),
+          recipientUserIds: zod
+            .array(zod.string())
+            .describe(
+              "Recipient list as opaque user \/ contact ids. May be\nempty when no architect-of-record contact has been\ncaptured on the parent engagement.\n",
+            ),
+          sentBy: zod
+            .object({
+              kind: zod.enum(["user", "agent", "system"]),
+              id: zod.string(),
+              displayName: zod.string().nullish(),
+            })
+            .describe(
+              "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+            ),
+          sentAt: zod.coerce.date(),
+        })
+        .describe(
+          "One row in `submission_communications` — an AI-drafted\ncomment letter the reviewer sent for a submission (PLR-5).\nAppend-only; neither subject nor body is mutable after\ninsert. `atomId` is the public id used for empressa-atom\nhistory lookups (`communication-event:{submissionId}:{rowId}`).\n",
+        ),
+    ),
+  })
+  .describe(
+    'Wire envelope for `GET \/submissions\/{submissionId}\/communications`.\nNewest-first list — index 0 is the most recently sent\ncomment letter (drives the SubmissionDetailModal\'s \"Last\nsent\" status pill).\n',
+  );
+
+/**
+ * Persists a `submission_communications` row with the reviewer-
+edited subject + body, snapshots the open-finding atom ids
+the draft was assembled from, and appends a single
+`communication-event.sent` history event against the new
+row's atom id. Reviewer-only (`audience: "internal"`).
+
+Email dispatch is intentionally not part of this contract:
+the api-server has no outbound-mail pipeline yet, so the
+route logs the intended recipient list and persists it for a
+future dispatcher to pick up. The `recipientUserIds` array
+MAY be empty when no architect-of-record contact has been
+captured on the parent engagement.
+
+ * @summary Send an AI-drafted comment letter for a submission
+ */
+export const CreateSubmissionCommunicationParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const createSubmissionCommunicationBodySubjectMax = 256;
+
+export const createSubmissionCommunicationBodyBodyMax = 32768;
+
+export const CreateSubmissionCommunicationBody = zod
+  .object({
+    subject: zod
+      .string()
+      .min(1)
+      .max(createSubmissionCommunicationBodySubjectMax),
+    body: zod.string().min(1).max(createSubmissionCommunicationBodyBodyMax),
+    findingAtomIds: zod.array(zod.string()),
+    recipientUserIds: zod.array(zod.string()),
+  })
+  .describe(
+    "Request body for `POST \/submissions\/{submissionId}\/communications`.\n`recipientUserIds` is the reviewer-confirmed recipient list\n— empty arrays are legal. `findingAtomIds` snapshots which\nopen findings the reviewer included in the draft so the\naudit trail can reproduce what the architect was told.\n",
+  );
+
+/**
  * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
 finding the AI engine missed without re-running generation.
 Persists with `status="ai-produced"` (so accept/reject/override
