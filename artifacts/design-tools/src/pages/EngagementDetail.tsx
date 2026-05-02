@@ -2091,8 +2091,20 @@ function SiteContextTab({
 
   const sources = briefingQuery.data?.briefing?.sources ?? [];
   const narrative = briefingQuery.data?.briefing?.narrative ?? null;
+  // M-A5: pair each layerKind with its producer adapter key for the
+  // upload modal's supersede chip. Manual rows use the conventional
+  // `manual-qgis-import` key; adapter rows expose the key embedded in
+  // `provider` (`<adapterKey> (cached <n>h ago)`), falling back to
+  // `sourceKind` when the provider tail is absent.
   const existingLayerKinds = useMemo(
-    () => sources.map((s) => s.layerKind),
+    () =>
+      sources.map((s) => ({
+        layerKind: s.layerKind,
+        adapterKey:
+          s.sourceKind === "manual-upload"
+            ? "manual-qgis-import"
+            : extractAdapterKeyFromProvider(s.provider) ?? s.sourceKind,
+      })),
     [sources],
   );
 

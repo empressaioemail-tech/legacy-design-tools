@@ -98,7 +98,7 @@ function renderModal(overrides: {
   engagementId?: string;
   isOpen?: boolean;
   onClose?: () => void;
-  existingLayerKinds?: string[];
+  existingLayerKinds?: Array<{ layerKind: string; adapterKey: string }>;
   client?: QueryClient;
 } = {}) {
   const onClose = overrides.onClose ?? vi.fn();
@@ -488,6 +488,199 @@ describe("BriefingSourceUploadModal", () => {
     );
     expect(hoistedLocal.uploadFileMock).not.toHaveBeenCalled();
     expect(hoisted.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  // M-A5: parameterized happy-path coverage for the five layer kinds
+  // Empressa needs for Spanish Valley. Each test seeds
+  // `existingLayerKinds` so the supersede chip pins the
+  // `manual-qgis-import` contract end-to-end (the server stamps the
+  // adapter key on every manual-upload row; the chip surfaces it).
+  describe.each([
+    {
+      slug: "qgis-zoning",
+      uploadKind: "qgis" as const,
+      filename: "zoning.geojson",
+      contentType: "application/geo+json",
+    },
+    {
+      slug: "qgis-parcel",
+      uploadKind: "qgis" as const,
+      filename: "parcel.geojson",
+      contentType: "application/geo+json",
+    },
+    {
+      slug: "qgis-utilities",
+      uploadKind: "qgis" as const,
+      filename: "roads.geojson",
+      contentType: "application/geo+json",
+    },
+    {
+      slug: "neighbor-mass",
+      uploadKind: "dxf" as const,
+      filename: "neighbors.dxf",
+      contentType: "application/octet-stream",
+    },
+    {
+      slug: "floodplain",
+      uploadKind: "dxf" as const,
+      filename: "floodplain.dxf",
+      contentType: "application/octet-stream",
+    },
+  ])(
+    "M-A5 layer-kind coverage: $slug",
+    ({ slug, uploadKind, filename, contentType }) => {
+      it(`forwards layerKind + upload.kind and pins manual-qgis-import via supersede chip`, async () => {
+        hoistedLocal.uploadFileMock.mockResolvedValueOnce({
+          uploadURL: "https://storage.example/put-target",
+          objectPath: `uploads/eng-1/${filename}`,
+          metadata: { name: filename, size: 99, contentType },
+        });
+        hoisted.mutateAsync.mockResolvedValueOnce({
+          id: `src-${slug}`,
+          layerKind: slug,
+        });
+
+        const onClose = vi.fn();
+        renderModal({
+          engagementId: "eng-spanish-valley",
+          onClose,
+          existingLayerKinds: [
+            { layerKind: slug, adapterKey: "manual-qgis-import" },
+          ],
+        });
+
+        fireEvent.change(screen.getByLabelText("Layer kind"), {
+          target: { value: slug },
+        });
+
+        // The chip pins the produced-row contract: this layer kind
+        // resolves to adapter `manual-qgis-import` per the server
+        // stamping convention.
+        const chip = screen.getByTestId("briefing-source-supersede-chip");
+        expect(chip).toHaveTextContent(slug);
+        expect(chip).toHaveTextContent("manual-qgis-import");
+
+        attachFile(new File(["bytes"], filename, { type: contentType }));
+        fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+
+        await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+        expect(hoisted.mutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "eng-spanish-valley",
+            data: expect.objectContaining({
+              layerKind: slug,
+              upload: expect.objectContaining({
+                kind: uploadKind,
+                originalFilename: filename,
+              }),
+            }),
+          }),
+        );
+      });
+
+      it(`rejects an invalid file type for ${slug} with a per-field testid`, () => {
+        renderModal();
+        fireEvent.change(screen.getByLabelText("Layer kind"), {
+          target: { value: slug },
+        });
+        const wrongName =
+          uploadKind === "dxf" ? "wrong.geojson" : "wrong.dxf";
+        const wrongType =
+          uploadKind === "dxf"
+            ? "application/geo+json"
+            : "application/octet-stream";
+        attachFile(new File(["bytes"], wrongName, { type: wrongType }));
+        fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+
+        const fieldError = screen.getByTestId(
+          "briefing-source-error-file-type",
+        );
+        expect(fieldError).toHaveTextContent(
+          uploadKind === "dxf"
+            ? /3D-geometry layers expect a DXF file/
+            : /2D-overlay layers expect a vector file/,
+        );
+        expect(hoistedLocal.uploadFileMock).not.toHaveBeenCalled();
+        expect(hoisted.mutateAsync).not.toHaveBeenCalled();
+      });
+    },
+  );
+
+  describe("supersede chip", () => {
+    it("renders the chip with the manual-qgis-import adapter key when re-uploading a manual layer", () => {
+      renderModal({
+        existingLayerKinds: [
+          { layerKind: "qgis-zoning", adapterKey: "manual-qgis-import" },
+        ],
+      });
+      const chip = screen.getByTestId("briefing-source-supersede-chip");
+      expect(chip).toHaveTextContent(/Will supersede current/);
+      expect(chip).toHaveTextContent(/qgis-zoning/);
+      expect(chip).toHaveTextContent(/manual-qgis-import/);
+    });
+
+    it("names the federal adapter key when superseding an adapter-fetched row", () => {
+      renderModal({
+        existingLayerKinds: [
+          { layerKind: "floodplain", adapterKey: "federal-fema:flood" },
+        ],
+      });
+      fireEvent.change(screen.getByLabelText("Layer kind"), {
+        target: { value: "floodplain" },
+      });
+      const chip = screen.getByTestId("briefing-source-supersede-chip");
+      expect(chip).toHaveTextContent(/floodplain/);
+      expect(chip).toHaveTextContent(/federal-fema:flood/);
+    });
+
+    it("does not render the chip when the picked layer has no prior source", () => {
+      renderModal({
+        existingLayerKinds: [
+          { layerKind: "neighbor-mass", adapterKey: "manual-qgis-import" },
+        ],
+      });
+      expect(
+        screen.queryByTestId("briefing-source-supersede-chip"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("per-field validation testids", () => {
+    it("tags the missing-file error with briefing-source-error-file", () => {
+      renderModal();
+      fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+      expect(
+        screen.getByTestId("briefing-source-error-file"),
+      ).toHaveTextContent(/Pick a file to upload\./);
+    });
+
+    it("tags the invalid custom-slug error with briefing-source-error-custom-slug", () => {
+      renderModal();
+      attachFile(sampleFile());
+      fireEvent.change(screen.getByLabelText("Layer kind"), {
+        target: { value: "__other__" },
+      });
+      fireEvent.change(screen.getByPlaceholderText("qgis-easements"), {
+        target: { value: "BAD SLUG!" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+      expect(
+        screen.getByTestId("briefing-source-error-custom-slug"),
+      ).toHaveTextContent(/Layer slug must be lowercase/);
+    });
+
+    it("tags the empty custom-slug error with briefing-source-error-layer-kind", () => {
+      renderModal();
+      attachFile(sampleFile());
+      fireEvent.change(screen.getByLabelText("Layer kind"), {
+        target: { value: "__other__" },
+      });
+      // Leave the custom slug field empty.
+      fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+      expect(
+        screen.getByTestId("briefing-source-error-layer-kind"),
+      ).toHaveTextContent(/Pick a layer kind/);
+    });
   });
 
   it("forwards upload.kind='qgis' on the default 2D-overlay branch", async () => {

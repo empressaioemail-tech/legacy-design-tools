@@ -122,12 +122,17 @@ export interface BriefingSourceUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   /**
-   * Layer kinds that already have a current source. Surfaced under the
-   * picker so the architect knows a re-upload will mark the prior
-   * source superseded — Spec 51 §4 contract is intentional, and the
-   * modal makes it visible rather than silent.
+   * Layer kinds that already have a current source, paired with a
+   * short adapter-key label for the producer that owns the row
+   * (`manual-qgis-import` for manual uploads, the federal/state/local
+   * adapter key — extracted from `provider` — for adapter rows). The
+   * modal renders a supersede chip when the architect picks a layer
+   * kind whose row already exists, so the Spec 51 §4 supersession is
+   * never silent. M-A5: the producer label is part of the chip copy
+   * so the architect can tell at a glance whether they are about to
+   * overwrite an adapter-fetched row or another manual upload.
    */
-  existingLayerKinds: string[];
+  existingLayerKinds: Array<{ layerKind: string; adapterKey: string }>;
 }
 
 interface FormState {
@@ -138,6 +143,35 @@ interface FormState {
   note: string;
   file: File | null;
 }
+
+/**
+ * Discriminator for inline field-error rendering. The validation
+ * surface is split per-field so e2e tests can target a specific
+ * error (`briefing-source-error-file-type`, etc.) instead of
+ * scraping a single `role="alert"` block — required by M2-C done
+ * criteria for the Spanish Valley DXF flow.
+ */
+type FieldErrorKind =
+  | "file"
+  | "fileType"
+  | "layerKind"
+  | "customSlug"
+  | "upload"
+  | "submit";
+
+interface FieldError {
+  kind: FieldErrorKind;
+  message: string;
+}
+
+const ERROR_TESTID: Record<FieldErrorKind, string> = {
+  file: "briefing-source-error-file",
+  fileType: "briefing-source-error-file-type",
+  layerKind: "briefing-source-error-layer-kind",
+  customSlug: "briefing-source-error-custom-slug",
+  upload: "briefing-source-error-upload",
+  submit: "briefing-source-error-submit",
+};
 
 const EMPTY_FORM: FormState = {
   layerKindChoice: LAYER_KIND_OPTIONS[0]!.value,
@@ -170,11 +204,8 @@ export function BriefingSourceUploadModal({
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<FieldError | null>(null);
 
-  // Reset form whenever the modal re-opens so a previous attempt does
-  // not leak across openings (mirrors the EngagementDetailsModal
-  // pattern).
   useEffect(() => {
     if (isOpen) {
       setForm(EMPTY_FORM);
@@ -213,9 +244,11 @@ export function BriefingSourceUploadModal({
   const resolvedUploadKind: "qgis" | "dxf" =
     selectedOption?.kind === "dxf" ? "dxf" : "qgis";
 
-  const willSupersede =
-    resolvedLayerKind.length > 0 &&
-    existingLayerKinds.includes(resolvedLayerKind);
+  const supersededRow =
+    resolvedLayerKind.length > 0
+      ? existingLayerKinds.find((r) => r.layerKind === resolvedLayerKind)
+      : undefined;
+  const willSupersede = supersededRow !== undefined;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
@@ -225,44 +258,48 @@ export function BriefingSourceUploadModal({
   const handleSubmit = async () => {
     setError(null);
     if (!form.file) {
-      setError("Pick a file to upload.");
+      setError({ kind: "file", message: "Pick a file to upload." });
       return;
     }
     if (!resolvedLayerKind) {
-      setError("Pick a layer kind (or fill in the custom slug).");
+      setError({
+        kind: "layerKind",
+        message: "Pick a layer kind (or fill in the custom slug).",
+      });
       return;
     }
     if (
       form.layerKindChoice === OTHER_OPTION_VALUE &&
       !LAYER_KIND_PATTERN.test(resolvedLayerKind)
     ) {
-      setError(
-        "Layer slug must be lowercase letters / digits / dashes (e.g. qgis-zoning).",
-      );
+      setError({
+        kind: "customSlug",
+        message:
+          "Layer slug must be lowercase letters / digits / dashes (e.g. qgis-zoning).",
+      });
       return;
     }
-    // Client-side extension check. The server accepts content-type
-    // strings (not extensions) so this is a UX guardrail, not a
-    // security boundary — its job is to catch a `.dxf` accidentally
-    // landing on the QGIS branch (or vice versa) before bytes hit the
-    // network.
+    // Client-side extension check; the server's content-type check is
+    // the actual gate.
     const ext = fileExtension(form.file.name);
     const allowed = ALLOWED_EXTENSIONS[resolvedUploadKind];
     if (ext && !allowed.includes(ext)) {
-      setError(
-        resolvedUploadKind === "dxf"
-          ? `3D-geometry layers expect a DXF file (.dxf); picked ${ext}.`
-          : `2D-overlay layers expect a vector file (${allowed.join(", ")}); picked ${ext}.`,
-      );
+      setError({
+        kind: "fileType",
+        message:
+          resolvedUploadKind === "dxf"
+            ? `3D-geometry layers expect a DXF file (.dxf); picked ${ext}.`
+            : `2D-overlay layers expect a vector file (${allowed.join(", ")}); picked ${ext}.`,
+      });
       return;
     }
 
     const uploadResponse = await upload.uploadFile(form.file);
     if (!uploadResponse) {
-      // useUpload populated `error`; surface its message verbatim so a
-      // 4xx from the storage route shows up in the modal rather than
-      // getting silently dropped.
-      setError(upload.error?.message ?? "Upload failed.");
+      setError({
+        kind: "upload",
+        message: upload.error?.message ?? "Upload failed.",
+      });
       return;
     }
 
@@ -281,6 +318,10 @@ export function BriefingSourceUploadModal({
 
     try {
       await createMutation.mutateAsync({
+        // The server stamps `sourceKind: "manual-upload"` on every row
+        // produced by this route; the M-A5 conventional adapter key
+        // for that kind is `manual-qgis-import`, surfaced in the
+        // supersede chip when re-uploading.
         id: engagementId,
         data: {
           layerKind: resolvedLayerKind,
@@ -300,7 +341,7 @@ export function BriefingSourceUploadModal({
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to record briefing source.";
-      setError(message);
+      setError({ kind: "submit", message });
     }
   };
 
@@ -414,11 +455,22 @@ export function BriefingSourceUploadModal({
                 }
               />
             )}
-            {willSupersede && (
-              <span style={{ fontSize: 11, color: "var(--warning-text)" }}>
-                A current source already exists for{" "}
-                <code>{resolvedLayerKind}</code>; this upload will mark the
-                prior one superseded.
+            {willSupersede && supersededRow && (
+              <span
+                data-testid="briefing-source-supersede-chip"
+                style={{
+                  alignSelf: "flex-start",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: "var(--warning-text)",
+                  background: "var(--warning-dim, rgba(251, 191, 36, 0.12))",
+                  border: "1px solid var(--warning-text)",
+                  borderRadius: 999,
+                  padding: "2px 8px",
+                }}
+              >
+                Will supersede current <code>{resolvedLayerKind}</code> source
+                from <code>{supersededRow.adapterKey}</code>
               </span>
             )}
           </div>
@@ -522,6 +574,8 @@ export function BriefingSourceUploadModal({
           {error && (
             <div
               role="alert"
+              data-testid={ERROR_TESTID[error.kind]}
+              data-error-kind={error.kind}
               style={{
                 fontSize: 12,
                 color: "var(--danger-text)",
@@ -530,7 +584,7 @@ export function BriefingSourceUploadModal({
                 borderRadius: 4,
               }}
             >
-              {error}
+              {error.message}
             </div>
           )}
 
