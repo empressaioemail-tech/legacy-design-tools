@@ -239,20 +239,6 @@ vi.mock("@workspace/api-client-react", async () => {
     // test can synthesize an ApiError and fire `onError` directly,
     // bypassing the real fetch round-trip.
     useGenerateEngagementLayers: makeCapturingMutationHook(generate),
-    // AppShell (Task #432) polls the architect-inbox unread count to
-    // paint a badge in the side-nav; without an inert stub here the
-    // entire page mount throws on first render. The badge is
-    // irrelevant to every Site Context assertion below.
-    getListMyNotificationsQueryKey: () => ["listMyNotifications"],
-    useListMyNotifications: (
-      _params: unknown,
-      opts?: { query?: { queryKey?: readonly unknown[] } },
-    ) =>
-      useQuery({
-        queryKey:
-          opts?.query?.queryKey ?? (["listMyNotifications"] as const),
-        queryFn: async () => ({ unreadCount: 0, notifications: [] }),
-      }),
     // PushToRevitAffordance is mounted inside SiteContextTab and
     // pulls these three hooks on every render. None of them affect
     // the empty-pilot banner under test, so we hand back inert

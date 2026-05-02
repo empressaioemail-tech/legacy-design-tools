@@ -75,6 +75,15 @@ export interface EngagementPageMockHooksOptions {
    * this to return real fixtures.
    */
   renders?: () => Array<Record<string, unknown>>;
+  /**
+   * Returns the architect-inbox notifications payload AppShell reads
+   * through `useListMyNotifications()` (Task #432) to paint the
+   * side-nav unread badge. Defaults to `{ unreadCount: 0,
+   * notifications: [] }` so adopting tests that don't exercise the
+   * inbox don't need to declare it. Tests that drive the badge
+   * override this accessor.
+   */
+  notifications?: () => { unreadCount: number; notifications: unknown[] };
 }
 
 /**
@@ -100,6 +109,9 @@ export async function makeEngagementPageMockHooks(
   const getSession =
     opts.session ?? (() => ({ permissions: [] as string[] }));
   const getRenders = opts.renders ?? (() => []);
+  const getNotifications =
+    opts.notifications ??
+    (() => ({ unreadCount: 0, notifications: [] as unknown[] }));
 
   return {
     // Re-export `MockApiError` as `ApiError` so component code that
@@ -125,6 +137,7 @@ export async function makeEngagementPageMockHooks(
       "getGetSessionQueryKey",
       "getListEngagementRendersQueryKey",
       "getGetRenderQueryKey",
+      "getListMyNotificationsQueryKey",
     ] as const),
 
     // Custom-shape query-key helpers that prepend extra positional
@@ -256,5 +269,19 @@ export async function makeEngagementPageMockHooks(
       }),
     useCancelRender: noopMutationHook,
     useKickoffRender: noopMutationHook,
+    // AppShell (Task #432) polls the architect-inbox unread count to
+    // paint a badge in the side-nav; without an inert stub here the
+    // entire page mount throws on first render. Defaults to a zero-
+    // count payload so adopting tests that don't exercise the badge
+    // don't have to declare it.
+    useListMyNotifications: (
+      _params?: unknown,
+      opts?: { query?: { queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["listMyNotifications"] as const),
+        queryFn: async () => ({ ...getNotifications() }),
+      }),
   };
 }
