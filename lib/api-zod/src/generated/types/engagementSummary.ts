@@ -22,4 +22,10 @@ export interface EngagementSummary {
   site: Site;
   revitCentralGuid: string | null;
   revitDocumentPath: string | null;
+  /** Free-text applicant firm (architect / designer of record)
+recorded against the engagement. Surfaced to reviewers in
+the Plan Review Inbox row (Task #439). Null when no firm
+has been recorded yet.
+ */
+  applicantFirm: string | null;
 }

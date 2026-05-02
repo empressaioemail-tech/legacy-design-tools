@@ -1670,6 +1670,136 @@ async function runBriefingGeneration(args: {
   }
 }
 
+// Outcomes mirror the manual route's 404/400/409/202 response set so
+// both call sites can share the same vocabulary.
+export type KickoffBriefingOutcome =
+  | { kind: "engagement_not_found" }
+  | { kind: "no_briefing_sources_for_engagement" }
+  | { kind: "already_in_flight"; generationId: string | null }
+  | { kind: "started"; generationId: string; sourceCount: number };
+
+// Shared kickoff helper used by the manual HTTP route and the
+// `engagement.created` auto-trigger subscriber. Returns a discriminated
+// outcome for the expected business cases; unique-violation races are
+// folded into `already_in_flight`. Other unexpected DB/setup failures
+// are rethrown so the manual route returns 500 and the auto wrapper can
+// log + swallow them.
+// `onSettled` (optional) fires once the void-launched runner finalizes
+// the job row, so callers can observe terminal state without polling.
+export async function kickoffBriefingGeneration(args: {
+  engagementId: string;
+  reqLog: typeof logger;
+  onSettled?: (settled: {
+    state: "completed" | "failed";
+    generationId: string;
+    error: string | null;
+  }) => void | Promise<void>;
+}): Promise<KickoffBriefingOutcome> {
+  const { engagementId, reqLog, onSettled } = args;
+  const eng = await db
+    .select({ id: engagements.id })
+    .from(engagements)
+    .where(eq(engagements.id, engagementId))
+    .limit(1);
+  if (eng.length === 0) {
+    return { kind: "engagement_not_found" };
+  }
+
+  const briefingRows = await db
+    .select()
+    .from(parcelBriefings)
+    .where(eq(parcelBriefings.engagementId, engagementId))
+    .limit(1);
+  const briefing = briefingRows[0];
+  if (!briefing) {
+    return { kind: "no_briefing_sources_for_engagement" };
+  }
+  const sources = await loadCurrentSources(briefing.id);
+  if (sources.length === 0) {
+    return { kind: "no_briefing_sources_for_engagement" };
+  }
+
+  // Single-flight guard via partial unique index on
+  // `briefing_generation_jobs (engagement_id) WHERE state='pending'`.
+  let kickoffRow: BriefingGenerationJob;
+  try {
+    const inserted = await db
+      .insert(briefingGenerationJobs)
+      .values({
+        engagementId,
+        briefingId: briefing.id,
+        state: "pending",
+      })
+      .returning();
+    kickoffRow = inserted[0]!;
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const [existing] = await db
+        .select({ id: briefingGenerationJobs.id })
+        .from(briefingGenerationJobs)
+        .where(eq(briefingGenerationJobs.engagementId, engagementId))
+        .orderBy(desc(briefingGenerationJobs.startedAt))
+        .limit(1);
+      return {
+        kind: "already_in_flight",
+        generationId: existing?.id ?? null,
+      };
+    }
+    throw err;
+  }
+  const generationId = kickoffRow.id;
+
+  // Fire-and-forget. Callers return immediately; the job row's
+  // state is what the status endpoint reads.
+  void (async () => {
+    await runBriefingGeneration({
+      engagementId,
+      briefingId: briefing.id,
+      generationId,
+      generatedBy: BRIEFING_ENGINE_GENERATED_BY,
+      sources,
+      reqLog,
+    });
+    if (!onSettled) return;
+    try {
+      const [terminal] = await db
+        .select({
+          state: briefingGenerationJobs.state,
+          error: briefingGenerationJobs.error,
+        })
+        .from(briefingGenerationJobs)
+        .where(eq(briefingGenerationJobs.id, generationId))
+        .limit(1);
+      if (
+        terminal &&
+        (terminal.state === "completed" || terminal.state === "failed")
+      ) {
+        await onSettled({
+          state: terminal.state,
+          generationId,
+          error: terminal.error ?? null,
+        });
+      }
+    } catch (err) {
+      reqLog.warn(
+        { err, engagementId, generationId },
+        "briefing generation: onSettled subscriber threw",
+      );
+    }
+  })();
+
+  reqLog.info(
+    {
+      engagementId,
+      briefingId: briefing.id,
+      generationId,
+      sourceCount: sources.length,
+    },
+    "briefing generation: kicked off",
+  );
+  return { kind: "started", generationId, sourceCount: sources.length };
+}
+
 router.post(
   "/engagements/:id/briefing/generate",
   async (req: Request, res: Response) => {
@@ -1690,106 +1820,42 @@ router.post(
     const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
 
     try {
-      const eng = await db
-        .select({ id: engagements.id })
-        .from(engagements)
-        .where(eq(engagements.id, engagementId))
-        .limit(1);
-      if (eng.length === 0) {
-        res.status(404).json({ error: "engagement_not_found" });
-        return;
-      }
-
-      const briefingRows = await db
-        .select()
-        .from(parcelBriefings)
-        .where(eq(parcelBriefings.engagementId, engagementId))
-        .limit(1);
-      const briefing = briefingRows[0];
-      if (!briefing) {
-        // No briefing → no sources → nothing to synthesize. The 400
-        // mirrors what the UI's tooltip says ("Upload a layer or run
-        // an adapter first").
-        res
-          .status(400)
-          .json({ error: "no_briefing_sources_for_engagement" });
-        return;
-      }
-      const sources = await loadCurrentSources(briefing.id);
-      if (sources.length === 0) {
-        res
-          .status(400)
-          .json({ error: "no_briefing_sources_for_engagement" });
-        return;
-      }
-
-      // Single-flight guard: a generation already in flight for this
-      // engagement is a 409, not a "queue another one" because the
-      // engine call is non-trivial and the result would race the
-      // first run's persist. Enforced by the partial unique index on
-      // `briefing_generation_jobs (engagement_id) WHERE state =
-      // 'pending'` — a concurrent kickoff that races past our
-      // pre-check still trips the constraint, and the catch below
-      // maps that into the same 409 a caller would see for a stale
-      // poll.
-      let kickoffRow: BriefingGenerationJob;
-      try {
-        const inserted = await db
-          .insert(briefingGenerationJobs)
-          .values({
-            engagementId,
-            briefingId: briefing.id,
-            state: "pending",
-          })
-          .returning();
-        kickoffRow = inserted[0]!;
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          // Another kickoff won the race. Surface its id so the
-          // caller can poll the same job's outcome rather than
-          // retrying with a fresh generationId. We pull the most
-          // recent row (typically still `pending`, but the engine
-          // could have settled in the brief window between the
-          // failed insert and this select — either way, this is the
-          // job the caller should poll).
-          const [existing] = await db
-            .select({ id: briefingGenerationJobs.id })
-            .from(briefingGenerationJobs)
-            .where(eq(briefingGenerationJobs.engagementId, engagementId))
-            .orderBy(desc(briefingGenerationJobs.startedAt))
-            .limit(1);
-          res.status(409).json({
-            error: "briefing_generation_already_in_flight",
-            generationId: existing?.id ?? null,
-          });
-          return;
-        }
-        throw err;
-      }
-      const generationId = kickoffRow.id;
-
-      // Fire-and-forget. The job row's state is what the status
-      // endpoint reads. We do not await — the 202 returns immediately.
-      void runBriefingGeneration({
+      const outcome = await kickoffBriefingGeneration({
         engagementId,
-        briefingId: briefing.id,
-        generationId,
-        generatedBy: BRIEFING_ENGINE_GENERATED_BY,
-        sources,
         reqLog,
       });
-
-      reqLog.info(
-        {
-          engagementId,
-          briefingId: briefing.id,
-          generationId,
-          regenerate: bodyParse.data?.regenerate ?? false,
-          sourceCount: sources.length,
-        },
-        "briefing generation: kicked off",
-      );
-      res.status(202).json({ generationId, state: "pending" });
+      switch (outcome.kind) {
+        case "engagement_not_found":
+          res.status(404).json({ error: "engagement_not_found" });
+          return;
+        case "no_briefing_sources_for_engagement":
+          // No briefing / no sources → nothing to synthesize. The 400
+          // mirrors what the UI's tooltip says ("Upload a layer or run
+          // an adapter first").
+          res
+            .status(400)
+            .json({ error: "no_briefing_sources_for_engagement" });
+          return;
+        case "already_in_flight":
+          res.status(409).json({
+            error: "briefing_generation_already_in_flight",
+            generationId: outcome.generationId,
+          });
+          return;
+        case "started":
+          reqLog.info(
+            {
+              engagementId,
+              generationId: outcome.generationId,
+              regenerate: bodyParse.data?.regenerate ?? false,
+            },
+            "briefing generation: manual kickoff route returning 202",
+          );
+          res
+            .status(202)
+            .json({ generationId: outcome.generationId, state: "pending" });
+          return;
+      }
     } catch (err) {
       logger.error({ err, engagementId }, "kickoff briefing generation failed");
       res.status(500).json({ error: "Failed to kick off briefing generation" });

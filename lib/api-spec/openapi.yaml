@@ -30,6 +30,24 @@ tags:
       inside a specific submission. Threaded via parentAnnotationId,
       promoted into architect visibility as part of a jurisdiction
       response (Wave 2 Sprint C / Spec 307).
+  - name: submission-comments
+    description: |
+      Inline reviewer↔architect conversation hanging off a single
+      plan-review submission (Task #431). Distinct from
+      reviewer-annotations (which is reviewer-only scratch notes); this
+      surface is the cross-audience reply channel architects post into
+      from the submission detail modal.
+  - name: reviewer
+    description: |
+      Cross-engagement reviewer surfaces — Plan Review's reviewer
+      Inbox + KPI strip (Reviewer V1-B / Task #426). Reviewer-only
+      (audience-gated to `internal`), reads across every engagement
+      a reviewer can see in a single round-trip.
+  - name: notifications
+    description: |
+      Architect-side in-app notification surface (Task #432). Newest-
+      first list of submission status changes and reviewer-requests
+      across every engagement, plus a per-architect read-watermark.
 paths:
   /healthz:
     get:
@@ -177,6 +195,14 @@ paths:
                 lotAreaSqft:
                   type: number
                   nullable: true
+                applicantFirm:
+                  type: string
+                  nullable: true
+                  description: |
+                    Free-text name of the applicant firm (architect /
+                    designer of record). Pass `null` to clear an
+                    existing value. Surfaced to reviewers in the Plan
+                    Review Inbox row (Task #439).
       responses:
         "200":
           description: Updated engagement detail
@@ -2241,6 +2267,84 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /me/notifications:
+    get:
+      operationId: listMyNotifications
+      tags: [notifications]
+      summary: List the architect's recent inbox notifications
+      description: |
+        Task #432 — architect-wide in-app notification surface for the
+        design-tools side-nav inbox.
+
+        Newest-first list of recent submission status changes and
+        reviewer-requests across every engagement. Each row carries a
+        `read` flag derived from the architect's persisted
+        `lastReadAt` watermark, plus the response envelope includes an
+        aggregate `unreadCount` so the side-nav badge can render
+        without a follow-up call.
+
+        Architect-only — anonymous and agent callers get a 401. The
+        `lastReadAt` watermark is per-requestor, persisted in
+        `architect_notification_reads` keyed by
+        `req.session.requestor.id`.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: |
+            Maximum number of items to return. Capped server-side at
+            200; defaults to 50 when omitted.
+      responses:
+        "200":
+          description: Notification list with unread count and watermark
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListNotificationsResponse"
+        "401":
+          description: |
+            No `user`-kind requestor on the session — anonymous and
+            agent callers cannot view the architect inbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /me/notifications/mark-read:
+    post:
+      operationId: markMyNotificationsRead
+      tags: [notifications]
+      summary: Bump the architect's "last viewed inbox" watermark
+      description: |
+        Task #432 — sets `architect_notification_reads.last_read_at`
+        for the calling architect to "now". Subsequent
+        `GET /me/notifications` calls report `unreadCount: 0` and
+        flip every existing item to `read: true` until a fresh event
+        lands.
+
+        Idempotent — calling twice in quick succession just bumps the
+        watermark twice. No request body is required.
+      responses:
+        "200":
+          description: Updated watermark
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarkNotificationsReadResponse"
+        "401":
+          description: |
+            No `user`-kind requestor on the session — anonymous and
+            agent callers cannot mark notifications as read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /session:
     get:
       operationId: getSession
@@ -2756,7 +2860,158 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /submissions/{submissionId}/comments:
+    get:
+      operationId: listSubmissionComments
+      tags: [submission-comments]
+      summary: List the reviewer↔architect comment thread for a submission
+      description: |
+        Returns every comment row anchored to the submission, in
+        oldest-first chronological order so the thread reads
+        top-to-bottom like a chat transcript. The thread is the
+        reply surface for the seed reviewer comment carried on the
+        `submissions.reviewer_comment` field — the seed itself is NOT
+        repeated in this response.
+
+        Both reviewer (plan-review) and architect (design-tools)
+        callers may read. The endpoint requires `audience: "internal"`
+        — both surfaces run under this audience today, so a single
+        gate covers both. The response carries `authorRole` per row
+        so the UI can color-code reviewer vs architect entries
+        without a follow-up lookup.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Submission id.
+      responses:
+        "200":
+          description: Oldest-first list of submission comments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSubmissionCommentsResponse"
+        "403":
+          description: Caller is not internal-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createSubmissionComment
+      tags: [submission-comments]
+      summary: Post a reply into a submission's comment thread
+      description: |
+        Inserts a new comment row under the submission. The body
+        carries the `authorRole` field — `architect` from
+        design-tools, `reviewer` from plan-review — which the route
+        records verbatim alongside the session-bound author id.
+
+        Both audiences may post; the endpoint requires `audience:
+        "internal"`. The comment row is plain text (no threading,
+        no promotion concept); the response splices the new row
+        back into the same envelope shape `GET` returns so the FE
+        can append without a follow-up fetch.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubmissionCommentBody"
+      responses:
+        "201":
+          description: Comment created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionCommentResponse"
+        "400":
+          description: Invalid request body or missing session requestor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not internal-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /submissions/{submissionId}/findings:
+    post:
+      operationId: createSubmissionFinding
+      tags: [findings]
+      summary: Manually add a reviewer-authored finding to a submission
+      description: |
+        Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
+        finding the AI engine missed without re-running generation.
+        Persists with `status="ai-produced"` (so accept/reject/override
+        work the same as engine rows), `confidence=1.0`, and a
+        reviewer-attributed actor on `reviewerStatusBy` so the wire
+        shape is consistent with the AI surface — the FE distinguishes
+        manual rows by the `reviewerStatusBy.kind === "user"` actor on
+        an otherwise-untouched row.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubmissionFindingBody"
+      responses:
+        "201":
+          description: The newly created reviewer-authored finding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingResponse"
+        "400":
+          description: Invalid manual-finding body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
     get:
       operationId: listSubmissionFindings
       tags: [findings]
@@ -3103,6 +3358,74 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /reviewer/queue:
+    get:
+      operationId: listReviewerQueue
+      tags: [reviewer]
+      summary: List submissions awaiting reviewer attention across every engagement
+      description: |
+        Cross-engagement reviewer Inbox feed (Reviewer V1-B / Task
+        #426). Returns the slice of `submissions` rows whose `status`
+        matches the requested filter, joined to their parent
+        engagement's metadata (`name`, `jurisdiction`, `address`) so
+        the Plan Review Inbox can render a row per submission without
+        a follow-up `GET /engagements/{id}` per row.
+
+        Reviewer-only (`session.audience === "internal"`). Non-reviewer
+        callers receive 403 with the
+        `reviewer_queue_requires_internal_audience` error code; the
+        gate mirrors `reviewerAnnotations` / `reviewerRequests`.
+
+        The default filter is `pending,corrections_requested` — the
+        two states a reviewer needs to act on. Pass `?status=` with a
+        comma-separated subset of `SubmissionStatus` values to widen
+        the cut (e.g. `?status=pending,corrections_requested,rejected`
+        for a "what was just rejected" tab). An unrecognized status
+        value is rejected with 400 rather than silently ignored so a
+        typo does not return a misleading queue.
+
+        Items are ordered by `submittedAt` DESC so the freshest
+        package is at the top — matches the existing per-engagement
+        list contract (`GET /engagements/{id}/submissions`).
+
+        `counts` accompanies the items as a denormalized roll-up so
+        the page's KPI strip and "X in review · Y awaiting AI ·
+        Z rejected" header can render off the same response payload
+        without a second round trip. Counts are computed *across the
+        full submissions table* (not just the filtered slice) so the
+        strip stays meaningful regardless of how the caller narrowed
+        `status`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Comma-separated list of `SubmissionStatus` values to
+            include in `items`. Defaults to
+            `pending,corrections_requested`. Unknown values cause a
+            400 (no silent partial-match).
+      responses:
+        "200":
+          description: Reviewer Inbox feed + denormalized counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewerQueueResponse"
+        "400":
+          description: Invalid `status` filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not a reviewer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /engagements/{id}/reviewer-requests:
     get:
       operationId: listEngagementReviewerRequests
@@ -3110,9 +3433,17 @@ paths:
       summary: List reviewer-requests on an engagement
       description: |
         Returns reviewer-requests filed against the engagement,
-        newest-first by `requestedAt`. Architect-only — the endpoint
-        requires the `architect` audience and 403s any non-architect
-        caller. Drives the architect-side `ReviewerRequestsStrip`.
+        newest-first by `requestedAt`. Architect AND reviewer audiences
+        can both read this list — architect drives the
+        `ReviewerRequestsStrip` open queue, reviewer (Task #429) binds
+        the three Request-Refresh affordances to a "Refresh requested"
+        pending state so a target with an open request disables the
+        affordance rather than letting the reviewer file a duplicate.
+        403s any other audience (e.g. agent traffic).
+
+        Mutations stay split: only reviewers can create
+        (`POST /engagements/{id}/reviewer-requests`) and only architects
+        can dismiss (`POST /reviewer-requests/{id}/dismiss`).
 
         The optional `status` filter narrows the result to one
         lifecycle state. The strip queries `?status=pending` to render
@@ -3149,7 +3480,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ListReviewerRequestsResponse"
         "403":
-          description: Caller is not architect-audience.
+          description: Caller is neither architect- nor reviewer-audience.
           content:
             application/json:
               schema:
@@ -3226,6 +3557,56 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /reviewer-requests:
+    get:
+      operationId: listMyReviewerRequests
+      tags: [reviewer-requests]
+      summary: List the calling reviewer's own reviewer-requests, across every engagement
+      description: |
+        Cross-engagement read for the reviewer-side "Outstanding
+        Requests" page. Returns reviewer-requests authored by the
+        *calling* reviewer — ownership is enforced server-side by
+        filtering on the `requested_by` actor envelope against the
+        session requestor; the client cannot widen the scope.
+
+        Reviewer-only: requires the `internal` audience and 403s any
+        non-reviewer caller. Newest-first by `requestedAt`, joined
+        with each target engagement's id/name/jurisdiction.
+
+        Status filter: defaults to `pending` when omitted. Pass
+        `status=all` to return every lifecycle state, or one of the
+        three specific states (`pending` / `dismissed` / `resolved`)
+        to restrict the result.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, dismissed, resolved, all]
+          description: |
+            Lifecycle filter. Defaults to `pending` when omitted.
+            Pass `all` to return every state.
+      responses:
+        "200":
+          description: Newest-first list of the caller's reviewer-requests, with engagement context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListMyReviewerRequestsResponse"
+        "400":
+          description: Caller has no session requestor (anonymous internal session).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /reviewer-requests/{id}/dismiss:
     post:
       operationId: dismissReviewerRequest
@@ -3287,6 +3668,85 @@ paths:
           description: |
             Request is already in a terminal state that bars dismissal
             (e.g. already `resolved` via a domain action).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /reviewer-requests/{id}/withdraw:
+    post:
+      operationId: withdrawReviewerRequest
+      tags: [reviewer-requests]
+      summary: Withdraw the caller's own pending reviewer-request
+      description: |
+        Reviewer-side retract path (Task #443). Lets the *original
+        requester* clear their own outstanding ask without an
+        architect context-switch — back-end mirror of the architect
+        dismiss endpoint, but reserved to the row's author and gated
+        on the reviewer audience.
+
+        Stamps `withdrawnBy` / `withdrawnAt` (and optional
+        `withdrawalReason` if the caller supplies one), flips
+        `status` to `withdrawn`, and emits a
+        `reviewer-request.<kind>.withdrawn` event anchored to the
+        row. The `withdrawn` lifecycle event is deliberately distinct
+        from the architect-side `.dismissed` event so the engagement
+        timeline can tell apart "architect declined" from "reviewer
+        changed their mind".
+
+        Idempotent in spirit — withdrawing an already-withdrawn row
+        returns the existing envelope without re-emitting an event.
+        409s on `dismissed` (architect already closed the ask) and on
+        `resolved` (a domain action already implicitly closed it).
+
+        Reviewer-only: requires the `internal` audience and 403s any
+        non-reviewer caller. Author-only: 403s when the calling
+        reviewer is not the row's `requestedBy.id`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Reviewer-request id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WithdrawReviewerRequestBody"
+      responses:
+        "200":
+          description: Reviewer-request withdrawn (or already withdrawn).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewerRequestResponse"
+        "400":
+          description: Invalid request body, or caller has no session requestor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: |
+            Caller is not reviewer-audience, OR is reviewer but is not
+            the row's original requester.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Reviewer-request not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Request is already in a terminal state that bars
+            withdrawal (already `dismissed` by an architect, or
+            already `resolved` by a domain action).
           content:
             application/json:
               schema:
@@ -3504,6 +3964,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /render-outputs/{id}/file:
+    get:
+      operationId: getRenderOutputFile
+      tags: [renders]
+      summary: Stream a render output file
+      description: |
+        Streams the durable mirrored bytes for a single
+        `render_outputs` row. mnml's CDN URLs expire within minutes;
+        this endpoint is the only stable preview/download surface.
+        `?download=1` adds a `Content-Disposition: attachment` header
+        so the browser saves rather than navigates inline.
+        Architect-audience-only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: download
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["1"]
+      responses:
+        "200":
+          description: Mirrored file bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid render output id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Audience is not architect.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Output row missing or its mirrored object is gone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Storage backend not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /admin/renders/sweep:
     post:
       operationId: runRendersSweep
@@ -3672,6 +4189,14 @@ components:
         revitDocumentPath:
           type: string
           nullable: true
+        applicantFirm:
+          type: string
+          nullable: true
+          description: |
+            Free-text applicant firm (architect / designer of record)
+            recorded against the engagement. Surfaced to reviewers in
+            the Plan Review Inbox row (Task #439). Null when no firm
+            has been recorded yet.
       required:
         - id
         - name
@@ -3685,6 +4210,7 @@ components:
         - site
         - revitCentralGuid
         - revitDocumentPath
+        - applicantFirm
 
     EngagementDetail:
       type: object
@@ -3729,6 +4255,14 @@ components:
         revitDocumentPath:
           type: string
           nullable: true
+        applicantFirm:
+          type: string
+          nullable: true
+          description: |
+            Free-text applicant firm (architect / designer of record)
+            recorded against the engagement. Surfaced to reviewers in
+            the Plan Review Inbox row (Task #439). Null when no firm
+            has been recorded yet.
       required:
         - id
         - name
@@ -3743,6 +4277,7 @@ components:
         - site
         - revitCentralGuid
         - revitDocumentPath
+        - applicantFirm
 
 
     SnapshotSummary:
@@ -3899,6 +4434,190 @@ components:
         - approved
         - corrections_requested
         - rejected
+
+    ReviewerQueueItem:
+      type: object
+      description: |
+        One submission row in the cross-engagement reviewer Inbox
+        (`GET /reviewer/queue`). Joins the row to its parent
+        engagement so the Inbox can render a row per submission
+        without a follow-up `GET /engagements/{id}` per row.
+
+        `engagementName` is denormalized off the engagement at
+        read-time (not at submit-time, unlike `jurisdiction` which is
+        snapshotted into the submission row by the create route) —
+        the Inbox should reflect the current engagement name even if
+        the project was renamed after the package was submitted.
+        `applicantFirm` is read-through from the engagement's own
+        `applicant_firm` column (Task #439). Null when the engagement
+        has no recorded firm — legacy engagements that pre-date the
+        column or new engagements where the field hasn't been filled
+        in yet.
+      properties:
+        submissionId:
+          type: string
+        engagementId:
+          type: string
+        engagementName:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        applicantFirm:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/SubmissionStatus"
+        note:
+          type: string
+          nullable: true
+        reviewerComment:
+          type: string
+          nullable: true
+      required:
+        - submissionId
+        - engagementId
+        - engagementName
+        - jurisdiction
+        - address
+        - applicantFirm
+        - submittedAt
+        - status
+        - note
+        - reviewerComment
+
+    ReviewerQueueCounts:
+      type: object
+      description: |
+        Cross-system roll-up counts the reviewer Inbox renders in its
+        KPI strip / header summary line. Computed across the entire
+        `submissions` table (NOT just the filtered queue items) so
+        the strip stays meaningful regardless of the caller's
+        `?status=` filter.
+
+          - `awaitingAi` — submissions in `pending`. The mock surface
+            called this "awaiting AI" because the AI reviewer engine
+            is the next thing that should fire on a freshly-arrived
+            package; the name is preserved here so the FE wording
+            stays consistent.
+          - `inReview` — submissions in `corrections_requested`.
+          - `rejected` — submissions in `rejected`.
+          - `backlog` — `awaitingAi + inReview`, i.e. the size of the
+            default queue. Surfaced separately so the FE doesn't have
+            to repeat the addition.
+      properties:
+        inReview:
+          type: integer
+        awaitingAi:
+          type: integer
+        rejected:
+          type: integer
+        backlog:
+          type: integer
+      required:
+        - inReview
+        - awaitingAi
+        - rejected
+        - backlog
+
+    ReviewerKpiMetric:
+      type: object
+      description: |
+        One KPI tile in the reviewer Inbox's KPI strip. `value` is
+        null when there is not yet enough data to compute the metric
+        (e.g. no submissions have been responded to in the trailing
+        window); the FE renders the "—" placeholder in that case.
+        `trend` / `trendLabel` are null when there is not enough data
+        in the prior window to compute a delta — the FE then hides
+        the trend chip.
+
+        Concrete shapes per metric:
+          - AVG REVIEW TIME — `value` is hours (float). Computed as
+            the mean wall-clock gap between `submittedAt` and
+            `respondedAt` over submissions whose response landed in
+            the trailing 30-day window.
+          - AI ACCURACY — `value` is a percentage 0-100. Computed as
+            `accepted / (accepted + rejected + overridden)` over
+            findings whose reviewer-status changed in the trailing
+            30-day window. `promoted-to-architect` is bucketed with
+            `accepted` (it's the reviewer agreeing the AI was right).
+          - COMPLIANCE RATE — `value` is a percentage 0-100. Computed
+            as `approved / (approved + corrections_requested +
+            rejected)` over submissions whose response landed in the
+            trailing 30-day window.
+
+        Trend direction compares the current 30-day window against
+        the prior 30-day window (i.e. days 31-60 ago). For AVG
+        REVIEW TIME, "down" is the favorable direction (faster
+        turn-around); for AI ACCURACY and COMPLIANCE RATE, "up" is
+        favorable. The route does not encode "favorable" — it just
+        reports whether the value moved up or down — so the FE can
+        choose how to color the chip.
+      properties:
+        value:
+          type: number
+          nullable: true
+        trend:
+          type: string
+          enum: [up, down]
+          nullable: true
+        trendLabel:
+          type: string
+          nullable: true
+      required:
+        - value
+        - trend
+        - trendLabel
+
+    ReviewerQueueKpis:
+      type: object
+      description: |
+        KPI tiles rendered above the reviewer Inbox queue. Computed
+        across the full submissions / findings tables (NOT scoped to
+        the caller's `?status=` filter) over a trailing 30-day window
+        so the strip stays meaningful regardless of how the caller
+        narrowed the queue.
+      properties:
+        avgReviewTime:
+          $ref: "#/components/schemas/ReviewerKpiMetric"
+        aiAccuracy:
+          $ref: "#/components/schemas/ReviewerKpiMetric"
+        complianceRate:
+          $ref: "#/components/schemas/ReviewerKpiMetric"
+      required:
+        - avgReviewTime
+        - aiAccuracy
+        - complianceRate
+
+    ReviewerQueueResponse:
+      type: object
+      description: |
+        Response payload of `GET /reviewer/queue`. The `items` array
+        is the filtered queue (newest-first); the `counts` object is
+        a cross-system roll-up (NOT scoped to the filter) so the
+        Inbox's KPI strip can render off the same response. `kpis`
+        carries the trailing-window KPI metrics (avg review time, AI
+        accuracy, compliance rate) the strip renders alongside the
+        backlog count.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerQueueItem"
+        counts:
+          $ref: "#/components/schemas/ReviewerQueueCounts"
+        kpis:
+          $ref: "#/components/schemas/ReviewerQueueKpis"
+      required:
+        - items
+        - counts
+        - kpis
 
     BriefingSourceKind:
       type: string
@@ -6646,6 +7365,97 @@ components:
         - alreadyPromoted
         - unknown
 
+    SubmissionCommentAuthorRole:
+      type: string
+      enum: [architect, reviewer]
+      description: |
+        Closed enum of comment-author roles on the
+        reviewer↔architect submission thread. `architect` rows are
+        posted from design-tools; `reviewer` rows are posted from
+        plan-review. The role is body-supplied (not session-derived)
+        because both surfaces today share the same `internal`
+        audience.
+
+    SubmissionComment:
+      type: object
+      description: |
+        One row in a submission's reviewer↔architect comment thread.
+        The seed of the thread is the reviewer's comment carried on
+        the parent `submissions.reviewer_comment` field — that seed is
+        NOT a row in this response; only replies posted via this route
+        are.
+      properties:
+        id:
+          type: string
+        submissionId:
+          type: string
+        authorRole:
+          $ref: "#/components/schemas/SubmissionCommentAuthorRole"
+        authorId:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - submissionId
+        - authorRole
+        - authorId
+        - body
+        - createdAt
+        - updatedAt
+
+    CreateSubmissionCommentBody:
+      type: object
+      description: |
+        Request body for `POST /submissions/{submissionId}/comments`.
+        `authorRole` is required because the architect and reviewer
+        surfaces both run under the `internal` audience today — the
+        role distinguishes which UI a row was posted from. `authorId`
+        is server-derived from the session-bound requestor and is NOT
+        part of the request body.
+      properties:
+        authorRole:
+          $ref: "#/components/schemas/SubmissionCommentAuthorRole"
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4096
+      required:
+        - authorRole
+        - body
+
+    SubmissionCommentResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /submissions/{submissionId}/comments`.
+        Carries the affected row in the same shape the list endpoint
+        returns so the FE can splice the new row into cached lists
+        without a follow-up fetch.
+      properties:
+        comment:
+          $ref: "#/components/schemas/SubmissionComment"
+      required:
+        - comment
+
+    ListSubmissionCommentsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /submissions/{submissionId}/comments`.
+        Oldest-first chronological list (chat-transcript order).
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubmissionComment"
+      required:
+        - comments
+
     FindingSeverity:
       type: string
       enum: [blocker, concern, advisory]
@@ -7036,6 +7846,49 @@ components:
       required:
         - runs
 
+    CreateSubmissionFindingBody:
+      type: object
+      description: |
+        Body for `POST /submissions/{id}/findings` (manual reviewer
+        add). `title` is the headline; optional `description`
+        appends long-form context. `severity` and `category` mirror
+        the AI surface so manual rows render in the same severity
+        bucket and filter chips. Optional `codeCitation` and
+        `sourceCitation` populate the citations array; optional
+        `elementRef` anchors a BIM-element pointer.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Required short headline for the finding.
+        description:
+          type: string
+          nullable: true
+          description: Optional long-form context appended after the title.
+        severity:
+          $ref: "#/components/schemas/FindingSeverity"
+        category:
+          $ref: "#/components/schemas/FindingCategory"
+        codeCitation:
+          type: string
+          nullable: true
+          description: |
+            Optional code-section atom id. Persisted as a
+            `code-section` citation. Not validated against the
+            corpus — manual rows are reviewer-trusted.
+        sourceCitation:
+          $ref: "#/components/schemas/FindingSourceRef"
+          nullable: true
+          description: Optional briefing-source pointer.
+        elementRef:
+          type: string
+          nullable: true
+          description: Optional BIM element pointer.
+      required:
+        - title
+        - severity
+        - category
+
     OverrideFindingBody:
       type: object
       description: |
@@ -7081,11 +7934,16 @@ components:
         the initial state at insert; `dismissed` is the architect-
         explicit reject path (carries `dismissalReason`); `resolved` is
         set by the implicit-resolve hook when the matching domain
-        action emits its event (carries `triggeredActionEventId`).
+        action emits its event (carries `triggeredActionEventId`);
+        `withdrawn` is the reviewer-explicit retract path (Task #443)
+        for a reviewer to clear their own outstanding ask without
+        architect involvement (carries `withdrawnBy` /
+        `withdrawnAt` / optional `withdrawalReason`).
       enum:
         - pending
         - dismissed
         - resolved
+        - withdrawn
 
     ReviewerRequestTargetType:
       type: string
@@ -7138,6 +7996,17 @@ components:
         dismissalReason:
           type: string
           nullable: true
+        withdrawnBy:
+          allOf:
+            - $ref: "#/components/schemas/FindingActor"
+          nullable: true
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+        withdrawalReason:
+          type: string
+          nullable: true
         resolvedAt:
           type: string
           format: date-time
@@ -7164,6 +8033,9 @@ components:
         - dismissedBy
         - dismissedAt
         - dismissalReason
+        - withdrawnBy
+        - withdrawnAt
+        - withdrawalReason
         - resolvedAt
         - triggeredActionEventId
         - createdAt
@@ -7211,6 +8083,22 @@ components:
       required:
         - dismissalReason
 
+    WithdrawReviewerRequestBody:
+      type: object
+      description: |
+        Request body for `POST /reviewer-requests/{id}/withdraw`
+        (Task #443). Reviewer-side retract path. Unlike
+        `DismissReviewerRequestBody`, the `withdrawalReason` is
+        OPTIONAL — withdrawing one's own ask is a low-friction
+        triage action; if supplied, the reason is capped at 4 KB and
+        rejected when whitespace-only.
+      properties:
+        withdrawalReason:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          nullable: true
+
     ReviewerRequestResponse:
       type: object
       description: |
@@ -7235,6 +8123,61 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReviewerRequest"
+      required:
+        - requests
+
+    ReviewerRequestEngagementSummary:
+      type: object
+      description: |
+        Engagement metadata joined onto each row of the cross-engagement
+        "my outstanding requests" list (Reviewer V1-F / R13). Just the
+        three fields the FE renders inline on each row — `id` for the
+        deep-link target, `name` as the row's primary line,
+        `jurisdiction` as the secondary chip. The full engagement
+        envelope is not included; consumers that need it should follow
+        the link to `/engagements/{id}`.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+        - jurisdiction
+
+    ReviewerRequestWithEngagement:
+      type: object
+      description: |
+        Reviewer-request row plus a small engagement-context envelope.
+        Returned only by the cross-engagement reviewer-side list at
+        `GET /reviewer-requests`; the per-engagement architect-side
+        list returns the bare `ReviewerRequest` shape because the
+        engagement is implicit from the path.
+      allOf:
+        - $ref: "#/components/schemas/ReviewerRequest"
+        - type: object
+          properties:
+            engagement:
+              $ref: "#/components/schemas/ReviewerRequestEngagementSummary"
+          required:
+            - engagement
+
+    ListMyReviewerRequestsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /reviewer-requests`. Newest-first list of
+        the calling reviewer's own reviewer-requests across every
+        engagement, with engagement metadata joined onto each row so
+        the FE can render without a follow-up fetch.
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerRequestWithEngagement"
       required:
         - requests
 
@@ -7523,10 +8466,26 @@ components:
         thumbnailUrl:
           type: string
           nullable: true
+        previewUrl:
+          type: string
+          nullable: true
+          description: |
+            Relative path the FE hits to stream the durable mirrored
+            asset back (`/api/render-outputs/{id}/file`). NULL while
+            the row is still un-mirrored. Use this rather than
+            `thumbnailUrl`, which is null on still and elevation
+            outputs.
+        downloadUrl:
+          type: string
+          nullable: true
+          description: |
+            Same endpoint as `previewUrl` with `?download=1` so the
+            browser saves rather than navigates. NULL when
+            `mirroredObjectKey` is NULL.
         seed:
           type: integer
           nullable: true
-      required: [id, role, format, resolution, sizeBytes, durationSeconds, mirroredObjectKey, thumbnailUrl, seed]
+      required: [id, role, format, resolution, sizeBytes, durationSeconds, mirroredObjectKey, thumbnailUrl, previewUrl, downloadUrl, seed]
 
     ElevationSetJob:
       type: object
@@ -7731,3 +8690,109 @@ components:
           type: integer
           minimum: 0
       required: [rescuedStuck, reapedTerminal, warnedIncompleteMirror, durationMs]
+
+    NotificationItem:
+      type: object
+      description: |
+        One row in the architect inbox. Materialised on the fly from
+        an `atom_events` row; the `kind` discriminates how to render
+        the title and what target the deep link should open.
+      properties:
+        id:
+          type: string
+          description: Stable atom-event id; safe to use as a React key.
+        kind:
+          type: string
+          enum: [submission-status-changed, reviewer-request-filed]
+        title:
+          type: string
+          description: |
+            Human-readable headline pre-formatted server-side so the
+            FE renders the same wording it logs (e.g. "Submission
+            approved", "Reviewer requested briefing-source refresh").
+        body:
+          type: string
+          nullable: true
+          description: |
+            Optional supporting text. For status-changes this is the
+            reviewer's `note`; for reviewer-requests it is the
+            `reason`. Null when the producing event carried no note.
+        occurredAt:
+          type: string
+          format: date-time
+        recordedAt:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+          description: |
+            True when `occurredAt <= lastReadAt` for the calling
+            architect. Stamped server-side so the FE doesn't have to
+            re-derive the comparison.
+        engagementId:
+          type: string
+          nullable: true
+          description: |
+            Engagement the event belongs to. Used as the deep-link
+            target — the FE routes the row click to
+            `/engagements/{engagementId}` (or the submission if
+            present, but the engagement detail page is the canonical
+            surface today).
+        engagementName:
+          type: string
+          nullable: true
+        submissionId:
+          type: string
+          nullable: true
+        reviewerRequestId:
+          type: string
+          nullable: true
+      required:
+        - id
+        - kind
+        - title
+        - body
+        - occurredAt
+        - recordedAt
+        - read
+        - engagementId
+        - engagementName
+        - submissionId
+        - reviewerRequestId
+
+    ListNotificationsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /me/notifications`. The `unreadCount`
+        feeds the side-nav badge directly so the FE doesn't have to
+        re-tally `items` (and stays correct even when the page is
+        capped by `limit`).
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationItem"
+        unreadCount:
+          type: integer
+          minimum: 0
+        lastReadAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            The architect's persisted read-watermark, or null when
+            they have never opened the inbox. The FE uses this for
+            the "all caught up since …" subtitle.
+      required: [items, unreadCount, lastReadAt]
+
+    MarkNotificationsReadResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /me/notifications/mark-read`. Returns
+        the new `lastReadAt` so the FE can splice it into the cached
+        list response without a follow-up GET.
+      properties:
+        lastReadAt:
+          type: string
+          format: date-time
+      required: [lastReadAt]

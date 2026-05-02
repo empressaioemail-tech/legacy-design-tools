@@ -23,6 +23,9 @@
   --cyan-bright: #22d3ee;
   --cyan-dim: rgba(0, 180, 216, 0.10);
   --cyan-glow: rgba(0, 180, 216, 0.20);
+  --cyan-accent-bg: rgba(0, 180, 216, 0.15);
+  --cyan-accent-border: rgba(0, 180, 216, 0.55);
+  --cyan-accent-glow: rgba(0, 180, 216, 0.75);
   --cyan-text: #22d3ee;
   --success: #22c55e;
   --success-dim: rgba(34, 197, 94, 0.12);
@@ -83,6 +86,9 @@
   --cyan-bright: #0ea5e9;
   --cyan-dim: rgba(2, 132, 199, 0.09);
   --cyan-glow: rgba(2, 132, 199, 0.16);
+  --cyan-accent-bg: rgba(0, 180, 216, 0.15);
+  --cyan-accent-border: rgba(0, 180, 216, 0.55);
+  --cyan-accent-glow: rgba(0, 180, 216, 0.75);
   --cyan-text: #0284c7;
   --success: #16a34a;
   --success-dim: rgba(22, 163, 74, 0.09);

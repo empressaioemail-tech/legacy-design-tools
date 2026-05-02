@@ -49,15 +49,47 @@ vi.mock("@workspace/codes", async () => {
       enqueued: 0,
       skipped: 0,
     })),
+    // Stub the embeddings-backed retrieval boundary so the auto-trigger
+    // (Task #447) finding-engine path is deterministic without standing
+    // up the embeddings service. Same precedent as findings-route.test.ts.
+    retrieveAtomsForQuestion: vi.fn(async () => []),
+  };
+});
+
+// Task #447 — auto-trigger AI plan review on submission.created. The
+// auto-trigger fires the same finding-engine path the manual generate
+// endpoint uses; we wrap `generateFindings` in a spy that defaults to
+// the real implementation so most tests in this file are unaffected,
+// and the failure-path test below can swap in a throwing impl.
+const generateFindingsMock = vi.hoisted(() => vi.fn());
+vi.mock("@workspace/finding-engine", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/finding-engine")>(
+      "@workspace/finding-engine",
+    );
+  return {
+    ...actual,
+    generateFindings: generateFindingsMock,
   };
 });
 
 const { setupRouteTests } = await import("./setup");
-const { engagements, atomEvents, submissions } = await import("@workspace/db");
-const { eq, and, asc } = await import("drizzle-orm");
+const {
+  engagements,
+  atomEvents,
+  submissions,
+  parcelBriefings,
+  briefingSources,
+  findings,
+  findingRuns,
+} = await import("@workspace/db");
+const { eq, and, asc, desc } = await import("drizzle-orm");
 const { geocodeAddress } = await import("@workspace/site-context/server");
 const registryModule = await import("../atoms/registry");
 const { resetAtomRegistryForTests } = registryModule;
+const findingEngineActual = await vi.importActual<
+  typeof import("@workspace/finding-engine")
+>("@workspace/finding-engine");
 
 const SECRET = process.env["SNAPSHOT_SECRET"]!;
 
@@ -80,6 +112,11 @@ beforeEach(() => {
   // Reset queued `mockResolvedValueOnce` returns so a test that does
   // NOT call geocode does not pick up a leftover from the prior test.
   mockedGeocodeAddress.mockReset();
+  // Default `generateFindings` to the real engine impl so the rest of
+  // the suite is unaffected; the auto-trigger failure test below
+  // overrides per-call to force a deterministic failure.
+  generateFindingsMock.mockReset();
+  generateFindingsMock.mockImplementation(findingEngineActual.generateFindings);
 });
 
 async function seedEngagement(overrides: Partial<{
@@ -1097,5 +1134,135 @@ describe("POST /api/snapshots create-new — fireGeocodeAndWarmup emits jurisdic
       histRes.body.events as Array<{ eventType: string }>
     ).map((e) => e.eventType);
     expect(histTypes).toContain("engagement.jurisdiction-resolved");
+  });
+});
+
+describe("POST /api/engagements/:id/submissions — auto AI plan review", () => {
+  // Auto-trigger fires after the 201 returns, so the run row
+  // appears asynchronously — poll until it reaches the terminal
+  // state we care about.
+  async function waitForRunState(
+    submissionId: string,
+    expected: "completed" | "failed",
+    timeoutMs = 3000,
+  ): Promise<{ id: string; state: string; error: string | null }> {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const deadline = Date.now() + timeoutMs;
+    let last: { id: string; state: string; error: string | null } | null = null;
+    while (Date.now() < deadline) {
+      const [row] = await ctx.schema.db
+        .select({
+          id: findingRuns.id,
+          state: findingRuns.state,
+          error: findingRuns.error,
+        })
+        .from(findingRuns)
+        .where(eq(findingRuns.submissionId, submissionId))
+        .orderBy(desc(findingRuns.startedAt))
+        .limit(1);
+      if (row) {
+        last = row;
+        if (row.state === expected) return row;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error(
+      `finding_runs row for submission ${submissionId} did not reach ${expected} within ${timeoutMs}ms; last=${JSON.stringify(last)}`,
+    );
+  }
+
+  async function seedBriefing(engagementId: string) {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const [briefing] = await ctx.schema.db
+      .insert(parcelBriefings)
+      .values({ engagementId })
+      .returning();
+    await ctx.schema.db.insert(briefingSources).values({
+      briefingId: briefing!.id,
+      layerKind: "qgis-zoning",
+      sourceKind: "manual-upload",
+      provider: "Bastrop UDC",
+      note: "auto-trigger test seed",
+      uploadObjectPath: "/objects/zoning",
+      uploadOriginalFilename: "zoning.geojson",
+      uploadContentType: "application/geo+json",
+      uploadByteSize: 1024,
+      snapshotDate: new Date("2026-01-01T00:00:00Z"),
+    });
+  }
+
+  it("auto-fires the shared finding-engine path after submission insert", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const eng = await seedEngagement({
+      address: "1 Auto-Trigger Way",
+      jurisdictionCity: "Bastrop",
+      jurisdictionState: "TX",
+    });
+    await seedBriefing(eng.id);
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions`)
+      .send({ note: "auto-trigger smoke" });
+    expect(res.status).toBe(201);
+    const submissionId = res.body.submissionId as string;
+
+    const run = await waitForRunState(submissionId, "completed");
+    expect(run.error).toBeNull();
+
+    const rows = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, submissionId));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r.findingRunId).toBe(run.id);
+      expect(r.status).toBe("ai-produced");
+    }
+    expect(generateFindingsMock).toHaveBeenCalled();
+  });
+
+  it("swallows engine failures, returns 201, and logs structured { submissionId, error }", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    const { logger } = await import("../lib/logger");
+    const errSpy = vi.spyOn(logger, "error");
+
+    const eng = await seedEngagement({
+      address: "2 Failure Path Ave",
+      jurisdictionCity: "Bastrop",
+      jurisdictionState: "TX",
+    });
+    await seedBriefing(eng.id);
+
+    generateFindingsMock.mockImplementationOnce(async () => {
+      throw new Error("forced engine failure for auto-trigger test");
+    });
+
+    const res = await request(getApp())
+      .post(`/api/engagements/${eng.id}/submissions`)
+      .send({});
+    expect(res.status).toBe(201);
+    const submissionId = res.body.submissionId as string;
+
+    const run = await waitForRunState(submissionId, "failed");
+    expect(run.error).not.toBeNull();
+
+    const rows = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, submissionId));
+    expect(rows).toHaveLength(0);
+
+    // Required structured-fields contract: at least one error log
+    // carries both `submissionId` and `error` so observability can
+    // diagnose auto-trigger AI failures without scraping free text.
+    const matched = errSpy.mock.calls.some(
+      ([fields]) =>
+        typeof fields === "object" &&
+        fields !== null &&
+        (fields as Record<string, unknown>)["submissionId"] === submissionId &&
+        typeof (fields as Record<string, unknown>)["error"] === "string",
+    );
+    expect(matched).toBe(true);
+    errSpy.mockRestore();
   });
 });

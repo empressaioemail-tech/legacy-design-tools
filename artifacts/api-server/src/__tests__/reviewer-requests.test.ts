@@ -105,14 +105,24 @@ async function listEvents(reviewerRequestId: string) {
 const SOURCE_UUID = "44444444-4444-4444-4444-444444444444";
 
 describe("GET /api/engagements/:id/reviewer-requests", () => {
-  it("403s when the caller is not architect-audience", async () => {
+  it("allows reviewer-audience callers (Task #429: reviewers read pending requests to disable affordances)", async () => {
     const { id } = await seedEngagement();
     const res = await asReviewer(
       request(getApp()).get(`/api/engagements/${id}/reviewer-requests`),
     );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ requests: [] });
+  });
+
+  it("403s when the caller is neither architect nor reviewer audience", async () => {
+    const { id } = await seedEngagement();
+    const res = await request(getApp())
+      .get(`/api/engagements/${id}/reviewer-requests`)
+      .set("x-audience", "ai")
+      .set("x-requestor", "agent:bot-1");
     expect(res.status).toBe(403);
     expect(res.body.error).toBe(
-      "reviewer_requests_require_architect_audience",
+      "reviewer_requests_require_architect_or_reviewer_audience",
     );
   });
 
@@ -393,6 +403,190 @@ describe("POST /api/reviewer-requests/:id/dismiss", () => {
   });
 });
 
+// Reviewer-side retract path (Task #443). Mirrors the architect
+// dismiss suite above but is gated on the *reviewer* audience AND on
+// row ownership — only the original requester can clear their own
+// outstanding ask. The 9-event vocabulary keeps `*.withdrawn`
+// distinct from `*.dismissed` so the engagement timeline can tell
+// apart "architect declined" from "reviewer changed their mind".
+describe("POST /api/reviewer-requests/:id/withdraw (Task #443)", () => {
+  async function seedPendingFor(requesterId: string): Promise<{
+    engagementId: string;
+    requestId: string;
+  }> {
+    const { id } = await seedEngagement();
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const [row] = await ctx.schema.db
+      .insert(reviewerRequests)
+      .values({
+        engagementId: id,
+        requestKind: "refresh-briefing-source",
+        targetEntityType: "briefing-source",
+        targetEntityId: SOURCE_UUID,
+        reason: "Source PDF appears outdated.",
+        status: "pending",
+        requestedBy: { kind: "user", id: requesterId },
+      })
+      .returning({ id: reviewerRequests.id });
+    return { engagementId: id, requestId: row.id };
+  }
+
+  it("403s architect-audience callers (withdraw is reviewer-only)", async () => {
+    const { requestId } = await seedPendingFor("reviewer-1");
+    const res = await asArchitect(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({}),
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(
+      "reviewer_requests_require_internal_audience",
+    );
+  });
+
+  it("withdraws + emits .withdrawn event on happy path (no reason)", async () => {
+    const { requestId } = await seedPendingFor("reviewer-1");
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({}),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.request.status).toBe("withdrawn");
+    expect(res.body.request.withdrawnBy.id).toBe("reviewer-1");
+    expect(res.body.request.withdrawnAt).not.toBeNull();
+    // No reason provided — column stays null, not coerced to "".
+    expect(res.body.request.withdrawalReason).toBeNull();
+    // Dismissal columns stay untouched — withdrawal is its own lane.
+    expect(res.body.request.dismissedBy).toBeNull();
+    expect(res.body.request.dismissedAt).toBeNull();
+    const eventTypes = await listEvents(requestId);
+    expect(eventTypes).toEqual([
+      "reviewer-request.refresh-briefing-source.withdrawn",
+    ]);
+  });
+
+  it("persists an optional withdrawalReason when supplied", async () => {
+    const { requestId } = await seedPendingFor("reviewer-1");
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({ withdrawalReason: "Found a fresher source." }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.request.withdrawalReason).toBe(
+      "Found a fresher source.",
+    );
+  });
+
+  it("403s reviewers who are not the row's original requester", async () => {
+    // Row authored by reviewer-2; calling reviewer is reviewer-1.
+    const { requestId } = await seedPendingFor("reviewer-2");
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({}),
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(
+      "reviewer_request_withdraw_requires_author",
+    );
+    // Row stayed pending — non-author 403 must not flip status.
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const [after] = await ctx.schema.db
+      .select()
+      .from(reviewerRequests)
+      .where(eq(reviewerRequests.id, requestId));
+    expect(after.status).toBe("pending");
+  });
+
+  it("is idempotent on already-withdrawn (returns existing without re-emit)", async () => {
+    const { requestId } = await seedPendingFor("reviewer-1");
+    const first = await asReviewer(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({ withdrawalReason: "first" }),
+    );
+    expect(first.status).toBe(200);
+    const second = await asReviewer(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({ withdrawalReason: "second" }),
+    );
+    expect(second.status).toBe(200);
+    // Reason from FIRST withdraw — second call is a no-op.
+    expect(second.body.request.withdrawalReason).toBe("first");
+    const eventTypes = await listEvents(requestId);
+    expect(eventTypes).toEqual([
+      "reviewer-request.refresh-briefing-source.withdrawn",
+    ]);
+  });
+
+  it("409s on already-dismissed (architect already closed the ask)", async () => {
+    const { requestId } = await seedPendingFor("reviewer-1");
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    await ctx.schema.db
+      .update(reviewerRequests)
+      .set({
+        status: "dismissed",
+        dismissedBy: { kind: "user", id: "architect-1" },
+        dismissedAt: new Date(),
+        dismissalReason: "no longer relevant",
+      })
+      .where(eq(reviewerRequests.id, requestId));
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({}),
+    );
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("reviewer_request_already_dismissed");
+  });
+
+  it("409s on already-resolved (a domain action implicitly closed it)", async () => {
+    const { requestId } = await seedPendingFor("reviewer-1");
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    await ctx.schema.db
+      .update(reviewerRequests)
+      .set({
+        status: "resolved",
+        resolvedAt: new Date(),
+        triggeredActionEventId: "55555555-5555-5555-5555-555555555555",
+      })
+      .where(eq(reviewerRequests.id, requestId));
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({}),
+    );
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("reviewer_request_already_resolved");
+  });
+
+  it("404s on unknown request id", async () => {
+    const res = await asReviewer(
+      request(getApp())
+        .post(
+          "/api/reviewer-requests/00000000-0000-0000-0000-000000000000/withdraw",
+        )
+        .send({}),
+    );
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("reviewer_request_not_found");
+  });
+
+  it("400s on whitespace-only withdrawalReason (reason is optional but, if supplied, must be non-blank)", async () => {
+    const { requestId } = await seedPendingFor("reviewer-1");
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/reviewer-requests/${requestId}/withdraw`)
+        .send({ withdrawalReason: "" }),
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_request_body");
+  });
+});
+
 describe("resolveMatchingReviewerRequests (implicit-resolve helper)", () => {
   it("flips a pending request to resolved + stamps the action event id", async () => {
     const { id: engagementId } = await seedEngagement();
@@ -495,5 +689,200 @@ describe("resolveMatchingReviewerRequests (implicit-resolve helper)", () => {
       log: fakeLog,
     });
     expect(resolved).toBe(0);
+  });
+});
+
+// Cross-engagement reviewer list. Reviewer-only audience gate,
+// ownership scoped by `requested_by ->> 'id'`, default status filter
+// `pending`, `?status=all` returns every lifecycle state, joined
+// with engagement metadata.
+describe("GET /api/reviewer-requests (cross-engagement)", () => {
+  it("403s when the caller is not reviewer-audience", async () => {
+    const res = await asArchitect(
+      request(getApp()).get("/api/reviewer-requests"),
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe(
+      "reviewer_requests_require_internal_audience",
+    );
+  });
+
+  it("returns only the calling reviewer's own requests, joined with engagement metadata", async () => {
+    const { id: engA } = await seedEngagement("Engagement A");
+    const { id: engB } = await seedEngagement("Engagement B");
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    // Three rows: two by `reviewer-1` (the caller), one by
+    // `reviewer-2` (a peer). The peer's row must not appear in the
+    // caller's response — ownership scope is the load-bearing
+    // assertion of this test.
+    await ctx.schema.db.insert(reviewerRequests).values([
+      {
+        engagementId: engA,
+        requestKind: "refresh-briefing-source",
+        targetEntityType: "briefing-source",
+        targetEntityId: SOURCE_UUID,
+        reason: "mine on A",
+        status: "pending",
+        requestedBy: { kind: "user", id: "reviewer-1" },
+      },
+      {
+        engagementId: engB,
+        requestKind: "refresh-bim-model",
+        targetEntityType: "bim-model",
+        targetEntityId: SOURCE_UUID,
+        reason: "mine on B",
+        status: "pending",
+        requestedBy: { kind: "user", id: "reviewer-1" },
+      },
+      {
+        engagementId: engA,
+        requestKind: "refresh-briefing-source",
+        targetEntityType: "briefing-source",
+        targetEntityId: SOURCE_UUID,
+        reason: "peer's row",
+        status: "pending",
+        requestedBy: { kind: "user", id: "reviewer-2" },
+      },
+    ]);
+    const res = await asReviewer(
+      request(getApp()).get("/api/reviewer-requests"),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.requests).toHaveLength(2);
+    const reasons = res.body.requests.map(
+      (r: { reason: string }) => r.reason,
+    );
+    expect(reasons).toContain("mine on A");
+    expect(reasons).toContain("mine on B");
+    expect(reasons).not.toContain("peer's row");
+    // Engagement metadata joined onto every row, with the right
+    // engagement on each side.
+    const byReason = new Map<string, { engagement: { id: string; name: string; jurisdiction: string | null } }>(
+      res.body.requests.map((r: { reason: string; engagement: { id: string; name: string; jurisdiction: string | null } }) => [r.reason, r]),
+    );
+    expect(byReason.get("mine on A")?.engagement).toEqual({
+      id: engA,
+      name: "Engagement A",
+      jurisdiction: "Moab, UT",
+    });
+    expect(byReason.get("mine on B")?.engagement).toEqual({
+      id: engB,
+      name: "Engagement B",
+      jurisdiction: "Moab, UT",
+    });
+  });
+
+  it("defaults to `pending` and returns every lifecycle state on `?status=all`", async () => {
+    const { id } = await seedEngagement();
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    await ctx.schema.db.insert(reviewerRequests).values([
+      {
+        engagementId: id,
+        requestKind: "refresh-briefing-source",
+        targetEntityType: "briefing-source",
+        targetEntityId: SOURCE_UUID,
+        reason: "still pending",
+        status: "pending",
+        requestedBy: { kind: "user", id: "reviewer-1" },
+      },
+      {
+        engagementId: id,
+        requestKind: "refresh-briefing-source",
+        targetEntityType: "briefing-source",
+        targetEntityId: SOURCE_UUID,
+        reason: "closed out",
+        status: "dismissed",
+        dismissedBy: { kind: "user", id: "architect-1" },
+        dismissedAt: new Date(),
+        dismissalReason: "no longer relevant",
+        requestedBy: { kind: "user", id: "reviewer-1" },
+      },
+    ]);
+    // No status param → default to `pending` (the closed row must
+    // not appear).
+    const defaultRes = await asReviewer(
+      request(getApp()).get("/api/reviewer-requests"),
+    );
+    expect(defaultRes.status).toBe(200);
+    expect(defaultRes.body.requests).toHaveLength(1);
+    expect(defaultRes.body.requests[0].reason).toBe("still pending");
+    // `?status=all` → both rows, regardless of lifecycle state.
+    const allRes = await asReviewer(
+      request(getApp())
+        .get("/api/reviewer-requests")
+        .query({ status: "all" }),
+    );
+    expect(allRes.status).toBe(200);
+    expect(allRes.body.requests).toHaveLength(2);
+    const reasons = allRes.body.requests.map(
+      (r: { reason: string }) => r.reason,
+    );
+    expect(reasons).toContain("still pending");
+    expect(reasons).toContain("closed out");
+    // Explicit `?status=dismissed` still works for narrowing.
+    const dismissedRes = await asReviewer(
+      request(getApp())
+        .get("/api/reviewer-requests")
+        .query({ status: "dismissed" }),
+    );
+    expect(dismissedRes.status).toBe(200);
+    expect(dismissedRes.body.requests).toHaveLength(1);
+    expect(dismissedRes.body.requests[0].reason).toBe("closed out");
+  });
+
+  it("orders results newest-first by requestedAt", async () => {
+    const { id } = await seedEngagement();
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const older = new Date("2026-01-01T00:00:00.000Z");
+    const newer = new Date("2026-04-01T00:00:00.000Z");
+    await ctx.schema.db.insert(reviewerRequests).values([
+      {
+        engagementId: id,
+        requestKind: "refresh-briefing-source",
+        targetEntityType: "briefing-source",
+        targetEntityId: SOURCE_UUID,
+        reason: "older",
+        status: "pending",
+        requestedAt: older,
+        requestedBy: { kind: "user", id: "reviewer-1" },
+      },
+      {
+        engagementId: id,
+        requestKind: "refresh-briefing-source",
+        targetEntityType: "briefing-source",
+        targetEntityId: SOURCE_UUID,
+        reason: "newer",
+        status: "pending",
+        requestedAt: newer,
+        requestedBy: { kind: "user", id: "reviewer-1" },
+      },
+    ]);
+    const res = await asReviewer(
+      request(getApp()).get("/api/reviewer-requests"),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.requests).toHaveLength(2);
+    expect(res.body.requests[0].reason).toBe("newer");
+    expect(res.body.requests[1].reason).toBe("older");
+  });
+
+  it("400s when the internal session has no requestor (defensive)", async () => {
+    // Reviewer audience without an `x-requestor` override — the
+    // session has no requestor to scope ownership against, so the
+    // route must fail loudly rather than silently leak every
+    // reviewer's rows.
+    const res = await request(getApp())
+      .get("/api/reviewer-requests")
+      .set("x-audience", "internal");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("missing_requestor");
+  });
+
+  it("returns an empty list when the reviewer has no requests at all", async () => {
+    const res = await asReviewer(
+      request(getApp()).get("/api/reviewer-requests"),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ requests: [] });
   });
 });

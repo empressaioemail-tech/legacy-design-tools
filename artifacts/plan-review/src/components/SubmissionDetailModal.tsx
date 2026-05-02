@@ -342,6 +342,7 @@ export function SubmissionDetailModal({
                 selectedFindingId={selectedFindingId}
                 onSelectFinding={onSelectFinding ?? (() => {})}
                 onShowInViewer={handleShowInViewer}
+                audience={audience}
               />
             </TabsContent>
             <TabsContent
@@ -351,6 +352,7 @@ export function SubmissionDetailModal({
               <BimModelTab
                 engagementId={engagementId}
                 highlightToken={highlightToken}
+                audience={audience}
               />
             </TabsContent>
           </Tabs>

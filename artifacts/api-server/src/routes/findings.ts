@@ -60,6 +60,8 @@ import {
 } from "@workspace/codes";
 import {
   AcceptFindingParams,
+  CreateSubmissionFindingBody,
+  CreateSubmissionFindingParams,
   GenerateSubmissionFindingsBody,
   GenerateSubmissionFindingsParams,
   GetSubmissionFindingsGenerationStatusParams,
@@ -832,10 +834,71 @@ async function runFindingGeneration(args: {
       reqLog,
     );
     reqLog.error(
-      { err, submissionId, generationId },
+      { err, error: message, submissionId, generationId },
       "finding generation: failed",
     );
   }
+}
+
+/**
+ * Outcome of {@link kickoffFindingGenerationForSubmission}: either a
+ * fresh run was started, or the partial-unique index tripped because
+ * one is already in flight.
+ */
+export type FindingKickoffOutcome =
+  | { kind: "started"; generationId: string }
+  | { kind: "already_running"; generationId: string | null };
+
+/**
+ * Insert the `finding_runs` kickoff row and dispatch
+ * `runFindingGeneration` fire-and-forget. Shared by the manual
+ * generate route and the auto-trigger hook so single-flight + dispatch
+ * live in exactly one place. Caller is responsible for verifying the
+ * submission row exists; on unique-violation the helper returns
+ * `already_running` rather than throwing.
+ */
+export async function kickoffFindingGenerationForSubmission(
+  submissionId: string,
+  reqLog: typeof logger,
+): Promise<FindingKickoffOutcome> {
+  let kickoffRow: FindingRun;
+  try {
+    const inserted = await db
+      .insert(findingRuns)
+      .values({
+        submissionId,
+        state: "pending",
+      })
+      .returning();
+    kickoffRow = inserted[0]!;
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const [existing] = await db
+        .select({ id: findingRuns.id })
+        .from(findingRuns)
+        .where(eq(findingRuns.submissionId, submissionId))
+        .orderBy(desc(findingRuns.startedAt))
+        .limit(1);
+      return { kind: "already_running", generationId: existing?.id ?? null };
+    }
+    throw err;
+  }
+
+  const generationId = kickoffRow.id;
+
+  // Fire-and-forget; the row's state is what the status endpoint
+  // reads. We do not await — callers return immediately.
+  void runFindingGeneration({
+    submissionId,
+    generationId,
+    reqLog,
+  });
+
+  reqLog.info(
+    { submissionId, generationId },
+    "finding generation: kicked off",
+  );
+  return { kind: "started", generationId };
 }
 
 // ─── POST /submissions/:id/findings/generate ─────────────────────
@@ -864,51 +927,23 @@ router.post(
         return;
       }
 
-      let kickoffRow: FindingRun;
-      try {
-        const inserted = await db
-          .insert(findingRuns)
-          .values({
-            submissionId,
-            state: "pending",
-          })
-          .returning();
-        kickoffRow = inserted[0]!;
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          // Another kickoff won the single-flight race. Surface its
-          // id so the caller can poll the same job's outcome rather
-          // than retrying with a fresh generationId.
-          const [existing] = await db
-            .select({ id: findingRuns.id })
-            .from(findingRuns)
-            .where(eq(findingRuns.submissionId, submissionId))
-            .orderBy(desc(findingRuns.startedAt))
-            .limit(1);
-          res.status(409).json({
-            error: "finding_generation_already_in_flight",
-            generationId: existing?.id ?? null,
-          });
-          return;
-        }
-        throw err;
-      }
-
-      const generationId = kickoffRow.id;
-
-      // Fire-and-forget; the row's state is what the status endpoint
-      // reads. We do not await — the 202 returns immediately.
-      void runFindingGeneration({
+      const outcome = await kickoffFindingGenerationForSubmission(
         submissionId,
-        generationId,
         reqLog,
-      });
-
-      reqLog.info(
-        { submissionId, generationId },
-        "finding generation: kicked off",
       );
-      res.status(202).json({ generationId, state: "pending" });
+      if (outcome.kind === "already_running") {
+        // Another kickoff won the single-flight race. Surface its
+        // id so the caller can poll the same job's outcome rather
+        // than retrying with a fresh generationId.
+        res.status(409).json({
+          error: "finding_generation_already_in_flight",
+          generationId: outcome.generationId,
+        });
+        return;
+      }
+      res
+        .status(202)
+        .json({ generationId: outcome.generationId, state: "pending" });
     } catch (err) {
       logger.error({ err, submissionId }, "kickoff finding generation failed");
       res.status(500).json({ error: "Failed to kick off finding generation" });
@@ -1030,6 +1065,139 @@ router.get(
     } catch (err) {
       logger.error({ err, submissionId }, "list submission findings failed");
       res.status(500).json({ error: "Failed to list findings" });
+    }
+  },
+);
+
+// ─── POST /submissions/:id/findings (manual-add) ───
+//
+// Reviewer adds a finding the AI engine missed. Persists with
+// `status="ai-produced"` (so accept/reject/override transitions
+// behave identically to engine rows), `confidence=1.0` (the row is
+// reviewer-trusted), and reviewer attribution stamped on
+// `reviewerStatusBy` so consumers can distinguish a manual row from
+// an untouched engine row by the actor's `kind === "user"`.
+
+router.post(
+  "/submissions/:submissionId/findings",
+  async (req: Request, res: Response): Promise<void> => {
+    if (requireReviewerAudience(req, res)) return;
+    const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+    const params = CreateSubmissionFindingParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "invalid_submission_id" });
+      return;
+    }
+    const body = CreateSubmissionFindingBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: "invalid_create_finding_body" });
+      return;
+    }
+    const submissionId = params.data.submissionId;
+    const actor = actorFromRequest(req);
+    if (!actor) {
+      res.status(400).json({ error: "missing_session_requestor" });
+      return;
+    }
+
+    try {
+      const sub = await loadSubmission(submissionId);
+      if (!sub) {
+        res.status(404).json({ error: "submission_not_found" });
+        return;
+      }
+
+      const title = body.data.title.trim();
+      if (title.length === 0) {
+        res.status(400).json({ error: "invalid_create_finding_body" });
+        return;
+      }
+      const description = body.data.description?.trim() ?? "";
+      const text = description.length > 0 ? `${title}\n\n${description}` : title;
+
+      const newUlid =
+        Date.now().toString(36).toUpperCase() +
+        Math.random().toString(36).slice(2, 10).toUpperCase();
+      const atomId = `finding:${submissionId}:${newUlid}`;
+
+      const citations: FindingCitation[] = [];
+      if (body.data.codeCitation) {
+        citations.push({
+          kind: "code-section",
+          atomId: body.data.codeCitation,
+        });
+      }
+      if (body.data.sourceCitation) {
+        citations.push({
+          kind: "briefing-source",
+          id: body.data.sourceCitation.id,
+          label: body.data.sourceCitation.label,
+        });
+      }
+
+      const now = new Date();
+      const [row] = await db
+        .insert(findings)
+        .values({
+          atomId,
+          submissionId,
+          severity: body.data.severity,
+          category: body.data.category,
+          status: "ai-produced",
+          text,
+          citations: citations as unknown as Record<string, unknown>[],
+          confidence: "1",
+          lowConfidence: false,
+          reviewerStatusBy: actor as unknown as Record<string, unknown>,
+          reviewerStatusChangedAt: now,
+          elementRef: body.data.elementRef ?? null,
+          sourceRef:
+            (body.data.sourceCitation as unknown as Record<
+              string,
+              unknown
+            > | null) ?? null,
+          aiGeneratedAt: now,
+        })
+        .returning();
+      const finalRow = row!;
+
+      // Emit a `finding.generated` event so the per-finding history
+      // chain has an origin entry, with the reviewer as the actor —
+      // distinguishes manual-add provenance from engine-added rows.
+      await emitFindingMutationEvent(
+        getHistoryService(),
+        {
+          finding: finalRow,
+          eventType: FINDING_GENERATED_EVENT_TYPE,
+          actor,
+          payload: {
+            findingId: finalRow.id,
+            atomId: finalRow.atomId,
+            submissionId: finalRow.submissionId,
+            severity: finalRow.severity,
+            category: finalRow.category,
+            confidence: 1,
+            source: "human-reviewer",
+          },
+        },
+        reqLog,
+      );
+
+      reqLog.info(
+        {
+          submissionId,
+          findingId: finalRow.id,
+          atomId: finalRow.atomId,
+        },
+        "manual finding created",
+      );
+      res.status(201).json({ finding: toWire(finalRow, null) });
+    } catch (err) {
+      logger.error(
+        { err, submissionId },
+        "create manual finding failed",
+      );
+      res.status(500).json({ error: "Failed to create finding" });
     }
   },
 );

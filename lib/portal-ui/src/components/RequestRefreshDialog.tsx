@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useCreateEngagementReviewerRequest,
   getListEngagementReviewerRequestsQueryKey,
+  getListMyReviewerRequestsQueryKey,
   getGetAtomHistoryQueryKey,
   ApiError,
   type ReviewerRequestKind,
@@ -113,6 +114,14 @@ export function RequestRefreshDialog({
           // viewing it concurrently.
           qc.invalidateQueries({
             queryKey: getGetAtomHistoryQueryKey("engagement", engagementId),
+          }),
+          // Refresh the cross-engagement reviewer queue (Outstanding
+          // Requests page + sidebar pending-count badge) so the
+          // newly-filed row appears without a manual reload. Passing
+          // the bare key (no params) matches every cached `?status=`
+          // variant the reviewer might have warmed.
+          qc.invalidateQueries({
+            queryKey: getListMyReviewerRequestsQueryKey(),
           }),
         ]);
         onCreated?.(response.request);

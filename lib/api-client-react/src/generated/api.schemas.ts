@@ -78,6 +78,12 @@ export interface EngagementSummary {
   site: Site;
   revitCentralGuid: string | null;
   revitDocumentPath: string | null;
+  /** Free-text applicant firm (architect / designer of record)
+recorded against the engagement. Surfaced to reviewers in
+the Plan Review Inbox row (Task #439). Null when no firm
+has been recorded yet.
+ */
+  applicantFirm: string | null;
 }
 
 export interface EngagementDetail {
@@ -95,6 +101,12 @@ export interface EngagementDetail {
   warnings?: string[];
   revitCentralGuid: string | null;
   revitDocumentPath: string | null;
+  /** Free-text applicant firm (architect / designer of record)
+recorded against the engagement. Surfaced to reviewers in
+the Plan Review Inbox row (Task #439). Null when no firm
+has been recorded yet.
+ */
+  applicantFirm: string | null;
 }
 
 /**
@@ -188,6 +200,141 @@ Null while the submission is still pending; set to the
 server clock on every response update.
  */
   responseRecordedAt: string | null;
+}
+
+/**
+ * One submission row in the cross-engagement reviewer Inbox
+(`GET /reviewer/queue`). Joins the row to its parent
+engagement so the Inbox can render a row per submission
+without a follow-up `GET /engagements/{id}` per row.
+
+`engagementName` is denormalized off the engagement at
+read-time (not at submit-time, unlike `jurisdiction` which is
+snapshotted into the submission row by the create route) —
+the Inbox should reflect the current engagement name even if
+the project was renamed after the package was submitted.
+`applicantFirm` is read-through from the engagement's own
+`applicant_firm` column (Task #439). Null when the engagement
+has no recorded firm — legacy engagements that pre-date the
+column or new engagements where the field hasn't been filled
+in yet.
+
+ */
+export interface ReviewerQueueItem {
+  submissionId: string;
+  engagementId: string;
+  engagementName: string;
+  jurisdiction: string | null;
+  address: string | null;
+  applicantFirm: string | null;
+  submittedAt: string;
+  status: SubmissionStatus;
+  note: string | null;
+  reviewerComment: string | null;
+}
+
+/**
+ * Cross-system roll-up counts the reviewer Inbox renders in its
+KPI strip / header summary line. Computed across the entire
+`submissions` table (NOT just the filtered queue items) so
+the strip stays meaningful regardless of the caller's
+`?status=` filter.
+
+  - `awaitingAi` — submissions in `pending`. The mock surface
+    called this "awaiting AI" because the AI reviewer engine
+    is the next thing that should fire on a freshly-arrived
+    package; the name is preserved here so the FE wording
+    stays consistent.
+  - `inReview` — submissions in `corrections_requested`.
+  - `rejected` — submissions in `rejected`.
+  - `backlog` — `awaitingAi + inReview`, i.e. the size of the
+    default queue. Surfaced separately so the FE doesn't have
+    to repeat the addition.
+
+ */
+export interface ReviewerQueueCounts {
+  inReview: number;
+  awaitingAi: number;
+  rejected: number;
+  backlog: number;
+}
+
+export type ReviewerKpiMetricTrend =
+  | (typeof ReviewerKpiMetricTrend)[keyof typeof ReviewerKpiMetricTrend]
+  | null;
+
+export const ReviewerKpiMetricTrend = {
+  up: "up",
+  down: "down",
+} as const;
+
+/**
+ * One KPI tile in the reviewer Inbox's KPI strip. `value` is
+null when there is not yet enough data to compute the metric
+(e.g. no submissions have been responded to in the trailing
+window); the FE renders the "—" placeholder in that case.
+`trend` / `trendLabel` are null when there is not enough data
+in the prior window to compute a delta — the FE then hides
+the trend chip.
+
+Concrete shapes per metric:
+  - AVG REVIEW TIME — `value` is hours (float). Computed as
+    the mean wall-clock gap between `submittedAt` and
+    `respondedAt` over submissions whose response landed in
+    the trailing 30-day window.
+  - AI ACCURACY — `value` is a percentage 0-100. Computed as
+    `accepted / (accepted + rejected + overridden)` over
+    findings whose reviewer-status changed in the trailing
+    30-day window. `promoted-to-architect` is bucketed with
+    `accepted` (it's the reviewer agreeing the AI was right).
+  - COMPLIANCE RATE — `value` is a percentage 0-100. Computed
+    as `approved / (approved + corrections_requested +
+    rejected)` over submissions whose response landed in the
+    trailing 30-day window.
+
+Trend direction compares the current 30-day window against
+the prior 30-day window (i.e. days 31-60 ago). For AVG
+REVIEW TIME, "down" is the favorable direction (faster
+turn-around); for AI ACCURACY and COMPLIANCE RATE, "up" is
+favorable. The route does not encode "favorable" — it just
+reports whether the value moved up or down — so the FE can
+choose how to color the chip.
+
+ */
+export interface ReviewerKpiMetric {
+  value: number | null;
+  trend: ReviewerKpiMetricTrend;
+  trendLabel: string | null;
+}
+
+/**
+ * KPI tiles rendered above the reviewer Inbox queue. Computed
+across the full submissions / findings tables (NOT scoped to
+the caller's `?status=` filter) over a trailing 30-day window
+so the strip stays meaningful regardless of how the caller
+narrowed the queue.
+
+ */
+export interface ReviewerQueueKpis {
+  avgReviewTime: ReviewerKpiMetric;
+  aiAccuracy: ReviewerKpiMetric;
+  complianceRate: ReviewerKpiMetric;
+}
+
+/**
+ * Response payload of `GET /reviewer/queue`. The `items` array
+is the filtered queue (newest-first); the `counts` object is
+a cross-system roll-up (NOT scoped to the filter) so the
+Inbox's KPI strip can render off the same response. `kpis`
+carries the trailing-window KPI metrics (avg review time, AI
+accuracy, compliance rate) the strip renders alongside the
+backlog count.
+
+ */
+export interface ReviewerQueueResponse {
+  items: ReviewerQueueItem[];
+  counts: ReviewerQueueCounts;
+  kpis: ReviewerQueueKpis;
 }
 
 /**
@@ -2210,6 +2357,79 @@ export interface PromoteReviewerAnnotationsResponse {
 }
 
 /**
+ * Closed enum of comment-author roles on the
+reviewer↔architect submission thread. `architect` rows are
+posted from design-tools; `reviewer` rows are posted from
+plan-review. The role is body-supplied (not session-derived)
+because both surfaces today share the same `internal`
+audience.
+
+ */
+export type SubmissionCommentAuthorRole =
+  (typeof SubmissionCommentAuthorRole)[keyof typeof SubmissionCommentAuthorRole];
+
+export const SubmissionCommentAuthorRole = {
+  architect: "architect",
+  reviewer: "reviewer",
+} as const;
+
+/**
+ * One row in a submission's reviewer↔architect comment thread.
+The seed of the thread is the reviewer's comment carried on
+the parent `submissions.reviewer_comment` field — that seed is
+NOT a row in this response; only replies posted via this route
+are.
+
+ */
+export interface SubmissionComment {
+  id: string;
+  submissionId: string;
+  authorRole: SubmissionCommentAuthorRole;
+  authorId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Request body for `POST /submissions/{submissionId}/comments`.
+`authorRole` is required because the architect and reviewer
+surfaces both run under the `internal` audience today — the
+role distinguishes which UI a row was posted from. `authorId`
+is server-derived from the session-bound requestor and is NOT
+part of the request body.
+
+ */
+export interface CreateSubmissionCommentBody {
+  authorRole: SubmissionCommentAuthorRole;
+  /**
+   * @minLength 1
+   * @maxLength 4096
+   */
+  body: string;
+}
+
+/**
+ * Wire envelope for `POST /submissions/{submissionId}/comments`.
+Carries the affected row in the same shape the list endpoint
+returns so the FE can splice the new row into cached lists
+without a follow-up fetch.
+
+ */
+export interface SubmissionCommentResponse {
+  comment: SubmissionComment;
+}
+
+/**
+ * Wire envelope for `GET /submissions/{submissionId}/comments`.
+Oldest-first chronological list (chat-transcript order).
+
+ */
+export interface ListSubmissionCommentsResponse {
+  comments: SubmissionComment[];
+}
+
+/**
  * AIR-1 severity rubric (locked v1, see findingsMock.ts:41):
   - blocker  — code violation requiring resolution before approval
   - concern  — ambiguity or risk
@@ -2533,6 +2753,37 @@ export interface SubmissionFindingsGenerationRunsResponse {
 }
 
 /**
+ * Body for `POST /submissions/{id}/findings` (manual reviewer
+add). `title` is the headline; optional `description`
+appends long-form context. `severity` and `category` mirror
+the AI surface so manual rows render in the same severity
+bucket and filter chips. Optional `codeCitation` and
+`sourceCitation` populate the citations array; optional
+`elementRef` anchors a BIM-element pointer.
+
+ */
+export interface CreateSubmissionFindingBody {
+  /**
+   * Required short headline for the finding.
+   * @minLength 1
+   */
+  title: string;
+  /** Optional long-form context appended after the title. */
+  description?: string | null;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  /** Optional code-section atom id. Persisted as a
+`code-section` citation. Not validated against the
+corpus — manual rows are reviewer-trusted.
+ */
+  codeCitation?: string | null;
+  /** Optional briefing-source pointer. */
+  sourceCitation?: FindingSourceRef | null;
+  /** Optional BIM element pointer. */
+  elementRef?: string | null;
+}
+
+/**
  * Body for `POST /findings/{id}/override`. Mirrors
 `OverrideFindingPayload` at findingsMock.ts:409-415. Atomic:
 the route stamps the original `overridden` and inserts the
@@ -2570,7 +2821,11 @@ export const ReviewerRequestKind = {
 the initial state at insert; `dismissed` is the architect-
 explicit reject path (carries `dismissalReason`); `resolved` is
 set by the implicit-resolve hook when the matching domain
-action emits its event (carries `triggeredActionEventId`).
+action emits its event (carries `triggeredActionEventId`);
+`withdrawn` is the reviewer-explicit retract path (Task #443)
+for a reviewer to clear their own outstanding ask without
+architect involvement (carries `withdrawnBy` /
+`withdrawnAt` / optional `withdrawalReason`).
 
  */
 export type ReviewerRequestStatus =
@@ -2580,6 +2835,7 @@ export const ReviewerRequestStatus = {
   pending: "pending",
   dismissed: "dismissed",
   resolved: "resolved",
+  withdrawn: "withdrawn",
 } as const;
 
 /**
@@ -2619,6 +2875,9 @@ export interface ReviewerRequest {
   dismissedBy: FindingActor | null;
   dismissedAt: string | null;
   dismissalReason: string | null;
+  withdrawnBy: FindingActor | null;
+  withdrawnAt: string | null;
+  withdrawalReason: string | null;
   resolvedAt: string | null;
   triggeredActionEventId: string | null;
   createdAt: string;
@@ -2664,6 +2923,23 @@ export interface DismissReviewerRequestBody {
 }
 
 /**
+ * Request body for `POST /reviewer-requests/{id}/withdraw`
+(Task #443). Reviewer-side retract path. Unlike
+`DismissReviewerRequestBody`, the `withdrawalReason` is
+OPTIONAL — withdrawing one's own ask is a low-friction
+triage action; if supplied, the reason is capped at 4 KB and
+rejected when whitespace-only.
+
+ */
+export interface WithdrawReviewerRequestBody {
+  /**
+   * @minLength 1
+   * @maxLength 4096
+   */
+  withdrawalReason?: string | null;
+}
+
+/**
  * Wire envelope for `POST /engagements/{id}/reviewer-requests`
 and `POST /reviewer-requests/{id}/dismiss`. Carries the
 affected row in the same shape the list endpoint returns so
@@ -2682,6 +2958,45 @@ Newest-first list, optionally filtered by lifecycle state.
  */
 export interface ListReviewerRequestsResponse {
   requests: ReviewerRequest[];
+}
+
+/**
+ * Engagement metadata joined onto each row of the cross-engagement
+"my outstanding requests" list (Reviewer V1-F / R13). Just the
+three fields the FE renders inline on each row — `id` for the
+deep-link target, `name` as the row's primary line,
+`jurisdiction` as the secondary chip. The full engagement
+envelope is not included; consumers that need it should follow
+the link to `/engagements/{id}`.
+
+ */
+export interface ReviewerRequestEngagementSummary {
+  id: string;
+  name: string;
+  jurisdiction: string | null;
+}
+
+/**
+ * Reviewer-request row plus a small engagement-context envelope.
+Returned only by the cross-engagement reviewer-side list at
+`GET /reviewer-requests`; the per-engagement architect-side
+list returns the bare `ReviewerRequest` shape because the
+engagement is implicit from the path.
+
+ */
+export type ReviewerRequestWithEngagement = ReviewerRequest & {
+  engagement: ReviewerRequestEngagementSummary;
+};
+
+/**
+ * Wire envelope for `GET /reviewer-requests`. Newest-first list of
+the calling reviewer's own reviewer-requests across every
+engagement, with engagement metadata joined onto each row so
+the FE can render without a follow-up fetch.
+
+ */
+export interface ListMyReviewerRequestsResponse {
+  requests: ReviewerRequestWithEngagement[];
 }
 
 /**
@@ -2976,6 +3291,18 @@ surfaces).
  */
   mirroredObjectKey: string | null;
   thumbnailUrl: string | null;
+  /** Relative path the FE hits to stream the durable mirrored
+asset back (`/api/render-outputs/{id}/file`). NULL while
+the row is still un-mirrored. Use this rather than
+`thumbnailUrl`, which is null on still and elevation
+outputs.
+ */
+  previewUrl: string | null;
+  /** Same endpoint as `previewUrl` with `?download=1` so the
+browser saves rather than navigates. NULL when
+`mirroredObjectKey` is NULL.
+ */
+  downloadUrl: string | null;
   seed: number | null;
 }
 
@@ -3143,6 +3470,81 @@ V1-4 (V1-5 follow-up).
   durationMs: number;
 }
 
+export type NotificationItemKind =
+  (typeof NotificationItemKind)[keyof typeof NotificationItemKind];
+
+export const NotificationItemKind = {
+  "submission-status-changed": "submission-status-changed",
+  "reviewer-request-filed": "reviewer-request-filed",
+} as const;
+
+/**
+ * One row in the architect inbox. Materialised on the fly from
+an `atom_events` row; the `kind` discriminates how to render
+the title and what target the deep link should open.
+
+ */
+export interface NotificationItem {
+  /** Stable atom-event id; safe to use as a React key. */
+  id: string;
+  kind: NotificationItemKind;
+  /** Human-readable headline pre-formatted server-side so the
+FE renders the same wording it logs (e.g. "Submission
+approved", "Reviewer requested briefing-source refresh").
+ */
+  title: string;
+  /** Optional supporting text. For status-changes this is the
+reviewer's `note`; for reviewer-requests it is the
+`reason`. Null when the producing event carried no note.
+ */
+  body: string | null;
+  occurredAt: string;
+  recordedAt: string;
+  /** True when `occurredAt <= lastReadAt` for the calling
+architect. Stamped server-side so the FE doesn't have to
+re-derive the comparison.
+ */
+  read: boolean;
+  /** Engagement the event belongs to. Used as the deep-link
+target — the FE routes the row click to
+`/engagements/{engagementId}` (or the submission if
+present, but the engagement detail page is the canonical
+surface today).
+ */
+  engagementId: string | null;
+  engagementName: string | null;
+  submissionId: string | null;
+  reviewerRequestId: string | null;
+}
+
+/**
+ * Wire envelope for `GET /me/notifications`. The `unreadCount`
+feeds the side-nav badge directly so the FE doesn't have to
+re-tally `items` (and stays correct even when the page is
+capped by `limit`).
+
+ */
+export interface ListNotificationsResponse {
+  items: NotificationItem[];
+  /** @minimum 0 */
+  unreadCount: number;
+  /** The architect's persisted read-watermark, or null when
+they have never opened the inbox. The FE uses this for
+the "all caught up since …" subtitle.
+ */
+  lastReadAt: string | null;
+}
+
+/**
+ * Wire envelope for `POST /me/notifications/mark-read`. Returns
+the new `lastReadAt` so the FE can splice it into the cached
+list response without a follow-up GET.
+
+ */
+export interface MarkNotificationsReadResponse {
+  lastReadAt: string;
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
@@ -3151,6 +3553,12 @@ export type UpdateEngagementBody = {
   projectType?: ProjectType;
   zoningCode?: string;
   lotAreaSqft?: number | null;
+  /** Free-text name of the applicant firm (architect /
+designer of record). Pass `null` to clear an
+existing value. Surfaced to reviewers in the Plan
+Review Inbox row (Task #439).
+ */
+  applicantFirm?: string | null;
 };
 
 export type ListEngagementBriefingSourcesParams = {
@@ -3307,6 +3715,17 @@ export type GetAtomHistoryParams = {
   limit?: number;
 };
 
+export type ListMyNotificationsParams = {
+  /**
+ * Maximum number of items to return. Capped server-side at
+200; defaults to 50 when omitted.
+
+ * @minimum 1
+ * @maximum 200
+ */
+  limit?: number;
+};
+
 export type ListReviewerAnnotationsParams = {
   /**
  * Optional filter — restrict the result to annotations
@@ -3324,6 +3743,17 @@ anchored to this target entity id. Must be paired with
   targetEntityId?: string;
 };
 
+export type ListReviewerQueueParams = {
+  /**
+ * Comma-separated list of `SubmissionStatus` values to
+include in `items`. Defaults to
+`pending,corrections_requested`. Unknown values cause a
+400 (no silent partial-match).
+
+ */
+  status?: string;
+};
+
 export type ListEngagementReviewerRequestsParams = {
   /**
  * Optional filter — restrict the result to requests in this
@@ -3333,3 +3763,33 @@ for its open queue.
  */
   status?: ReviewerRequestStatus;
 };
+
+export type ListMyReviewerRequestsParams = {
+  /**
+ * Lifecycle filter. Defaults to `pending` when omitted.
+Pass `all` to return every state.
+
+ */
+  status?: ListMyReviewerRequestsStatus;
+};
+
+export type ListMyReviewerRequestsStatus =
+  (typeof ListMyReviewerRequestsStatus)[keyof typeof ListMyReviewerRequestsStatus];
+
+export const ListMyReviewerRequestsStatus = {
+  pending: "pending",
+  dismissed: "dismissed",
+  resolved: "resolved",
+  all: "all",
+} as const;
+
+export type GetRenderOutputFileParams = {
+  download?: GetRenderOutputFileDownload;
+};
+
+export type GetRenderOutputFileDownload =
+  (typeof GetRenderOutputFileDownload)[keyof typeof GetRenderOutputFileDownload];
+
+export const GetRenderOutputFileDownload = {
+  NUMBER_1: "1",
+} as const;

@@ -79,6 +79,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // explicitly per the "if a route writes to it, it's in this list"
   // invariant.
   "reviewer_annotations",
+  // Task #431 — reviewer↔architect inline reply thread. Cascades off
+  // `submissions`, but listed explicitly per the "if a route writes
+  // to it, it's in this list" invariant.
+  "submission_comments",
   // V1-1 / AIR-1 — finding row + its producing-run row. Both
   // cascade off `submissions`, but listed explicitly per the
   // "if a route writes to it, it's in this list" invariant. `findings`
@@ -101,6 +105,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // slate.
   "viewpoint_renders",
   "render_outputs",
+  // Architect inbox read-watermark. No FK to anything, so the
+  // engagements truncate above does not clear it. Listed explicitly
+  // per the "if a route writes to it, it's in this list" invariant,
+  // and so the notifications suite can assert unread-count
+  // transitions from a known empty starting state.
+  "architect_notification_reads",
 ];
 
 /**

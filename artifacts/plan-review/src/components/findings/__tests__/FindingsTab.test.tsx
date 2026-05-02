@@ -44,8 +44,10 @@ import { FindingsTab } from "../FindingsTab";
 import {
   __resetFindingsMockForTests,
   __seedFindingsForTests,
+  __seedRunsForTests,
   __peekFindingsForTests,
   type Finding,
+  type FindingRun,
 } from "../../../lib/findingsMock";
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -58,13 +60,20 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
-function ControlledTab({ submissionId }: { submissionId: string }) {
+function ControlledTab({
+  submissionId,
+  audience = "internal",
+}: {
+  submissionId: string;
+  audience?: "internal" | "user" | "ai";
+}) {
   const [selected, setSelected] = useState<string | null>(null);
   return (
     <FindingsTab
       submissionId={submissionId}
       selectedFindingId={selected}
       onSelectFinding={setSelected}
+      audience={audience}
     />
   );
 }
@@ -214,6 +223,70 @@ describe("FindingsTab (AIR-2)", () => {
     expect(revision?.reviewerComment).toBe("Original conflated two issues.");
   });
 
+  it("surfaces an auto-trigger failure badge when the most recent run is failed (Task #450)", async () => {
+    // Simulate the state Task #447's auto-trigger leaves behind on
+    // engine error: a `failed` finding_runs row with no findings on
+    // the submission. Reviewers must see a distinct alert + a
+    // re-run action instead of the bare "no findings yet" empty
+    // state.
+    const failedRun: FindingRun = {
+      generationId: "frun_auto_failed_1",
+      state: "failed",
+      startedAt: "2026-04-30T11:55:00.000Z",
+      completedAt: "2026-04-30T11:55:02.000Z",
+      error: "engine_unreachable",
+      invalidCitationCount: 0,
+      discardedFindingCount: 0,
+    };
+    __seedRunsForTests("sub-auto-fail", [failedRun]);
+    render(<ControlledTab submissionId="sub-auto-fail" />, { wrapper });
+
+    const badge = await screen.findByTestId("findings-auto-failure-badge");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("role")).toBe("alert");
+    expect(badge.textContent).toContain("AI plan review failed");
+    expect(
+      screen.getByTestId("findings-auto-failure-detail").textContent,
+    ).toContain("engine_unreachable");
+
+    // The empty state still renders below — the badge is the new
+    // hint, not a replacement for the existing CTA.
+    expect(screen.getByTestId("findings-empty-state")).toBeTruthy();
+
+    // Clicking the re-run action calls the existing manual generate
+    // mutation. The mock resolves it into the deterministic fixture
+    // which clears the failure badge (latest run is now `completed`).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("findings-auto-failure-rerun"));
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("findings-auto-failure-badge")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("findings-group-blocker")).toBeTruthy();
+    });
+  });
+
+  it("does not show the auto-failure badge when the latest run is completed (Task #450)", async () => {
+    __seedRunsForTests("sub-completed", [
+      {
+        generationId: "frun_ok_1",
+        state: "completed",
+        startedAt: "2026-04-30T11:55:00.000Z",
+        completedAt: "2026-04-30T11:55:02.000Z",
+        error: null,
+        invalidCitationCount: 0,
+        discardedFindingCount: 0,
+      },
+    ]);
+    __seedFindingsForTests("sub-completed", [
+      fakeFinding({ id: "finding:sub-completed:1", submissionId: "sub-completed" }),
+    ]);
+    render(<ControlledTab submissionId="sub-completed" />, { wrapper });
+    await screen.findByTestId("finding-row-finding:sub-completed:1");
+    expect(screen.queryByTestId("findings-auto-failure-badge")).toBeNull();
+  });
+
   it("disables the 3D viewer button when no onShowInViewer host is wired (Task #343)", async () => {
     __seedFindingsForTests("sub-viewer-stub", [
       fakeFinding({
@@ -274,7 +347,119 @@ describe("FindingsTab (AIR-2)", () => {
     expect(onShow).toHaveBeenCalledWith("wall:north-side-l2");
   });
 
-  it("activates the viewer-jump button via the keyboard (Enter key, Task #343)", async () => {
+  it("hides reviewer-only mutate affordances on the applicant audience", async () => {
+    __seedFindingsForTests("sub-aud", [
+      fakeFinding({ id: "finding:sub-aud:1", submissionId: "sub-aud" }),
+    ]);
+    render(<ControlledTab submissionId="sub-aud" audience="user" />, {
+      wrapper,
+    });
+    await screen.findByTestId("finding-row-finding:sub-aud:1");
+    // Run-AI generate CTA is hidden; the runs panel itself still
+    // renders so the applicant can see history.
+    expect(screen.queryByTestId("findings-runs-generate")).toBeNull();
+    expect(screen.getByTestId("findings-runs-panel")).toBeTruthy();
+    // Per-row Accept/Reject/Override buttons are hidden.
+    expect(
+      screen.queryByTestId("finding-row-accept-finding:sub-aud:1"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("finding-row-reject-finding:sub-aud:1"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("finding-row-override-finding:sub-aud:1"),
+    ).toBeNull();
+    // Manual-add disclosure is hidden.
+    expect(screen.queryByTestId("findings-manual-add")).toBeNull();
+  });
+
+  it("manual-add disclosure files a new ai-produced row attributed to the reviewer", async () => {
+    __seedFindingsForTests("sub-add", []);
+    render(<ControlledTab submissionId="sub-add" />, { wrapper });
+    fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
+    fireEvent.change(screen.getByTestId("findings-manual-add-title"), {
+      target: { value: "Manually filed code-19.3 setback issue." },
+    });
+    fireEvent.change(screen.getByTestId("findings-manual-add-description"), {
+      target: { value: "North wall encroaches by 0.4m." },
+    });
+    fireEvent.change(screen.getByTestId("findings-manual-add-code-citation"), {
+      target: { value: "code:zoning-19.3.2" },
+    });
+    fireEvent.change(screen.getByTestId("findings-manual-add-element-ref"), {
+      target: { value: "wall:north-side-l2" },
+    });
+    fireEvent.change(screen.getByTestId("findings-manual-add-severity"), {
+      target: { value: "blocker" },
+    });
+    fireEvent.change(screen.getByTestId("findings-manual-add-category"), {
+      target: { value: "setback" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("findings-manual-add-submit"));
+    });
+    await waitFor(() => {
+      expect(__peekFindingsForTests("sub-add").length).toBe(1);
+    });
+    const row = __peekFindingsForTests("sub-add")[0];
+    expect(row.status).toBe("ai-produced");
+    expect(row.confidence).toBe(1);
+    expect(row.severity).toBe("blocker");
+    expect(row.category).toBe("setback");
+    expect(row.text).toBe(
+      "Manually filed code-19.3 setback issue.\n\nNorth wall encroaches by 0.4m.",
+    );
+    expect(row.elementRef).toBe("wall:north-side-l2");
+    expect(
+      row.citations.some(
+        (c) => c.kind === "code-section" && c.atomId === "code:zoning-19.3.2",
+      ),
+    ).toBe(true);
+    expect(row.reviewerStatusBy?.kind).toBe("user");
+    // Disclosure auto-collapses on success — form is gone.
+    await waitFor(() => {
+      expect(screen.queryByTestId("findings-manual-add-title")).toBeNull();
+    });
+  });
+
+  it("surfaces a 409 conflict block with refresh button when overriding an already-overridden finding", async () => {
+    // Pre-seed an already-overridden original so the second override
+    // attempt trips the FindingAlreadyOverriddenError branch in the
+    // mock (mirrors the server's 409 envelope).
+    const isoEarlier = "2026-04-29T10:00:00.000Z";
+    __seedFindingsForTests("sub-409", [
+      fakeFinding({
+        id: "finding:sub-409:orig",
+        submissionId: "sub-409",
+        status: "overridden",
+        reviewerStatusBy: {
+          kind: "user",
+          id: "reviewer-other",
+          displayName: "Other Reviewer",
+        },
+        reviewerStatusChangedAt: isoEarlier,
+      }),
+    ]);
+    render(<ControlledTab submissionId="sub-409" />, { wrapper });
+    const row = await screen.findByTestId("finding-row-finding:sub-409:orig");
+    fireEvent.click(row);
+    fireEvent.click(await screen.findByTestId("finding-drill-in-override"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("override-finding-submit"));
+    });
+    const conflict = await screen.findByTestId("override-finding-conflict");
+    expect(conflict.textContent).toContain("Already overridden");
+    expect(conflict.textContent).toContain("Other Reviewer");
+    expect(conflict.textContent).toContain("This finding was already actioned by");
+    // Refresh button is offered as the recovery affordance.
+    expect(
+      screen.getByTestId("override-finding-conflict-refresh"),
+    ).toBeTruthy();
+    // No new revision row was created.
+    expect(__peekFindingsForTests("sub-409").length).toBe(1);
+  });
+
+  it("activates the viewer-jump button via the keyboard", async () => {
     __seedFindingsForTests("sub-viewer-kbd", [
       fakeFinding({
         id: "finding:sub-viewer-kbd:1",

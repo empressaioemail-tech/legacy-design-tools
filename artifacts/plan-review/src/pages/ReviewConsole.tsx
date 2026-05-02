@@ -1,36 +1,192 @@
 import { useMemo, useState } from "react";
+import { Link } from "wouter";
+import { ChevronRight } from "lucide-react";
 import { DashboardLayout } from "@workspace/portal-ui";
+import {
+  useListReviewerQueue,
+  getListReviewerQueueQueryKey,
+  type ReviewerKpiMetric,
+  type ReviewerQueueItem,
+  type ReviewerQueueResponse,
+  type SubmissionStatus,
+} from "@workspace/api-client-react";
 import { useNavGroups } from "../components/NavGroups";
-import { KPIS, SUBMITTALS } from "../data/mock";
 import { KpiTile } from "../components/KpiTile";
-import { SubmittalQueueRow } from "../components/SubmittalQueueRow";
 import { AIBriefingPanel } from "../components/AIBriefingPanel";
+import { relativeTime } from "../lib/relativeTime";
+
+/**
+ * Reviewer Inbox at `/`. Reads the cross-engagement queue from
+ * `GET /api/reviewer/queue`. Row click deep-links to the AIR-2
+ * submission-detail modal in EngagementDetail.
+ */
+
+const STATUS_PILL_CLASS: Record<SubmissionStatus, string> = {
+  pending: "sc-pill-cyan",
+  approved: "sc-pill-green",
+  corrections_requested: "sc-pill-amber",
+  rejected: "sc-pill-red",
+};
+
+const STATUS_PILL_LABEL: Record<SubmissionStatus, string> = {
+  pending: "pending",
+  approved: "approved",
+  corrections_requested: "corrections",
+  rejected: "rejected",
+};
+
+function formatHours(value: number): string {
+  if (value < 1) {
+    const minutes = Math.max(1, Math.round(value * 60));
+    return `${minutes}m`;
+  }
+  if (value < 10) return `${value.toFixed(1)}h`;
+  return `${Math.round(value)}h`;
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value)}%`;
+}
+
+function kpiTileProps(
+  metric: ReviewerKpiMetric | undefined,
+  format: (v: number) => string,
+): {
+  value: string;
+  trend?: "up" | "down";
+  trendLabel?: string;
+} {
+  if (!metric || metric.value == null) return { value: "—" };
+  const props: {
+    value: string;
+    trend?: "up" | "down";
+    trendLabel?: string;
+  } = { value: format(metric.value) };
+  if (metric.trend && metric.trendLabel) {
+    props.trend = metric.trend;
+    props.trendLabel = metric.trendLabel;
+  }
+  return props;
+}
+
+function ReviewerQueueRow({ item }: { item: ReviewerQueueItem }) {
+  const initials = item.engagementName
+    .split(/\s+/)
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  const subtitleParts = [item.jurisdiction, item.address].filter(
+    (s): s is string => !!s,
+  );
+
+  // EngagementDetail reads ?submission=&tab=note on mount to open the
+  // AIR-2 modal directly to the Note tab.
+  const href = `/engagements/${item.engagementId}?submission=${item.submissionId}&tab=note`;
+
+  const pillClass = STATUS_PILL_CLASS[item.status] ?? "sc-pill-muted";
+  const pillLabel = STATUS_PILL_LABEL[item.status] ?? item.status;
+
+  return (
+    <Link
+      href={href}
+      className="sc-card-row flex items-center gap-3 no-underline"
+      data-testid={`reviewer-queue-row-${item.submissionId}`}
+    >
+      <div
+        className="sc-avatar-mark shrink-0"
+        style={{ background: "#6398AA", color: "#0f1318" }}
+      >
+        {initials || "EN"}
+      </div>
+
+      <div className="flex flex-col min-w-0 flex-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="sc-medium truncate">{item.engagementName}</div>
+          {item.applicantFirm ? (
+            <span
+              className="sc-meta truncate text-[var(--text-secondary)]"
+              data-testid={`reviewer-queue-row-${item.submissionId}-firm`}
+            >
+              · {item.applicantFirm}
+            </span>
+          ) : null}
+          <span className={`sc-pill ${pillClass} capitalize shrink-0`}>
+            {pillLabel}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 mt-1 min-w-0">
+          {subtitleParts.length > 0 ? (
+            <span
+              className="sc-meta truncate"
+              data-testid={`reviewer-queue-row-${item.submissionId}-subtitle`}
+            >
+              {subtitleParts.join(" · ")}
+            </span>
+          ) : (
+            <span className="sc-meta opacity-60">
+              No applicant, jurisdiction, or address
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div
+        className="hidden md:block sc-mono-sm shrink-0 w-28 text-right text-[var(--text-secondary)]"
+        title={new Date(item.submittedAt).toLocaleString()}
+      >
+        {relativeTime(item.submittedAt)}
+      </div>
+
+      <ChevronRight size={14} className="text-[var(--text-muted)] shrink-0" />
+    </Link>
+  );
+}
 
 export default function ReviewConsole() {
   const navGroups = useNavGroups();
-  const inReviewCount = SUBMITTALS.filter(s => s.status === "in-review").length;
-  const aiWaitCount = SUBMITTALS.filter(s => s.status === "ai-review").length;
-  const rejectedCount = SUBMITTALS.filter(s => s.status === "rejected").length;
-  const queueCount = SUBMITTALS.length;
+
+  const { data, isLoading, isError } = useListReviewerQueue(undefined, {
+    query: { queryKey: getListReviewerQueueQueryKey() },
+  });
+  const queue: ReviewerQueueResponse | undefined = data;
+
+  const items = queue?.items ?? [];
+  const counts = queue?.counts;
+  const kpis = queue?.kpis;
 
   const [searchQuery, setSearchQuery] = useState("");
   const trimmedQuery = searchQuery.trim().toLowerCase();
-  const filteredSubmittals = useMemo(() => {
-    if (!trimmedQuery) return SUBMITTALS;
-    return SUBMITTALS.filter((s) => {
+  const filteredItems = useMemo(() => {
+    if (!trimmedQuery) return items;
+    return items.filter((s) => {
       const haystack = [
-        s.id,
-        s.projectName,
+        s.engagementName,
+        s.jurisdiction,
         s.address,
-        s.firm,
+        s.applicantFirm,
         s.status,
-        ...s.disciplines,
+        s.note,
+        s.reviewerComment,
       ]
+        .filter((v): v is string => !!v)
         .join(" ")
         .toLowerCase();
       return haystack.includes(trimmedQuery);
     });
-  }, [trimmedQuery]);
+  }, [items, trimmedQuery]);
+
+  const queueCount = items.length;
+
+  const inReview = counts?.inReview ?? 0;
+  const awaitingAi = counts?.awaitingAi ?? 0;
+  const rejected = counts?.rejected ?? 0;
+  // Render the dash while loading so the tile doesn't flash from "—"
+  // to "0" to a real value on the second pass.
+  const backlogValue =
+    counts != null ? String(counts.backlog) : "—";
 
   return (
     <DashboardLayout
@@ -46,12 +202,14 @@ export default function ReviewConsole() {
       }}
     >
       <div className="flex flex-col gap-6">
-        {/* Header Row */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-[22px] font-bold font-['Oxygen'] text-[var(--text-primary)]">Active submittals</h2>
-            <div className="sc-body mt-1">
-              {inReviewCount} in review · {aiWaitCount} awaiting AI · {rejectedCount} rejected
+            <h2 className="text-[22px] font-bold font-['Oxygen'] text-[var(--text-primary)]">
+              Active submittals
+            </h2>
+            <div className="sc-body mt-1" data-testid="review-console-summary">
+              {inReview} in review · {awaitingAi} awaiting AI · {rejected}{" "}
+              rejected
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -60,39 +218,66 @@ export default function ReviewConsole() {
           </div>
         </div>
 
-        {/* KPI Strip */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiTile label="AVG REVIEW TIME" value={KPIS.avgReviewTime.value} trend={KPIS.avgReviewTime.trend} trendLabel={KPIS.avgReviewTime.trendLabel} />
-          <KpiTile label="AI ACCURACY" value={KPIS.aiAccuracy.value} trend={KPIS.aiAccuracy.trend} trendLabel={KPIS.aiAccuracy.trendLabel} />
-          <KpiTile label="COMPLIANCE RATE" value={KPIS.complianceRate.value} trend={KPIS.complianceRate.trend} trendLabel={KPIS.complianceRate.trendLabel} />
-          <KpiTile label="BACKLOG" value={KPIS.backlog.value} trend={KPIS.backlog.trend} trendLabel={KPIS.backlog.trendLabel} />
+          <KpiTile
+            label="AVG REVIEW TIME"
+            {...kpiTileProps(kpis?.avgReviewTime, formatHours)}
+          />
+          <KpiTile
+            label="AI ACCURACY"
+            {...kpiTileProps(kpis?.aiAccuracy, formatPercent)}
+          />
+          <KpiTile
+            label="COMPLIANCE RATE"
+            {...kpiTileProps(kpis?.complianceRate, formatPercent)}
+          />
+          <KpiTile label="BACKLOG" value={backlogValue} />
         </div>
 
-        {/* Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           <div className="lg:col-span-2 sc-card">
             <div className="sc-card-header sc-row-sb">
               <span className="sc-label">REVIEW QUEUE</span>
               <span className="sc-meta">
                 {trimmedQuery
-                  ? `${filteredSubmittals.length} of ${queueCount} items`
+                  ? `${filteredItems.length} of ${queueCount} items`
                   : `${queueCount} items`}
               </span>
             </div>
             <div className="flex flex-col" data-testid="review-queue">
-              {SUBMITTALS.length === 0 ? (
-                <div className="p-8 text-center sc-body">No new submittals. The AI Reviewer is monitoring Procore and Bluebeam intake.</div>
-              ) : filteredSubmittals.length === 0 ? (
+              {isLoading ? (
+                <div
+                  className="p-8 text-center sc-body"
+                  data-testid="review-queue-loading"
+                >
+                  Loading queue…
+                </div>
+              ) : isError ? (
+                <div
+                  className="p-8 text-center sc-body"
+                  data-testid="review-queue-error"
+                >
+                  Couldn't load the reviewer queue. Refresh to try again.
+                </div>
+              ) : items.length === 0 ? (
+                <div
+                  className="p-8 text-center sc-body"
+                  data-testid="review-queue-empty"
+                >
+                  No submissions awaiting review. The AI Reviewer is
+                  monitoring intake.
+                </div>
+              ) : filteredItems.length === 0 ? (
                 <div
                   className="p-8 text-center sc-body"
                   data-testid="review-queue-no-matches"
                 >
-                  No submittals match “{searchQuery.trim()}”. Try a different
-                  project, firm, address, or status.
+                  No submissions match “{searchQuery.trim()}”. Try a
+                  different project, jurisdiction, or status.
                 </div>
               ) : (
-                filteredSubmittals.map(sub => (
-                  <SubmittalQueueRow key={sub.id} submittal={sub} />
+                filteredItems.map((it) => (
+                  <ReviewerQueueRow key={it.submissionId} item={it} />
                 ))
               )}
             </div>
@@ -105,28 +290,31 @@ export default function ReviewConsole() {
               </div>
               <div className="flex flex-col">
                 <div className="sc-card-row flex items-center gap-3">
-                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">AI</div>
-                  <div className="sc-body">AI Reviewer flagged 3 findings on Lost Pines Townhomes — Phase 2 · 4 min ago</div>
+                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">
+                    AI
+                  </div>
+                  <div className="sc-body">
+                    AI Reviewer flagged 3 findings on Lost Pines Townhomes
+                    — Phase 2 · 4 min ago
+                  </div>
                 </div>
                 <div className="sc-card-row flex items-center gap-3">
-                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">CD</div>
-                  <div className="sc-body">Civic Design uploaded revised sheets for Old Iron Bridge Plaza · 2 hrs ago</div>
+                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">
+                    CD
+                  </div>
+                  <div className="sc-body">
+                    Civic Design uploaded revised sheets for Old Iron
+                    Bridge Plaza · 2 hrs ago
+                  </div>
                 </div>
                 <div className="sc-card-row flex items-center gap-3">
-                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">AI</div>
-                  <div className="sc-body">AI Reviewer cleared 5 findings on Riverside Clinic — Phase 1 · 3 hrs ago</div>
-                </div>
-                <div className="sc-card-row flex items-center gap-3">
-                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">SA</div>
-                  <div className="sc-body">Studio Architecture replied to finding F-A2.04-001 · 5 hrs ago</div>
-                </div>
-                <div className="sc-card-row flex items-center gap-3">
-                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">PR</div>
-                  <div className="sc-body">Parks & Rec created new submittal Pecan Park Pavilion · 1 day ago</div>
-                </div>
-                <div className="sc-card-row flex items-center gap-3">
-                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">AI</div>
-                  <div className="sc-body">AI Reviewer flagged 8 findings on Main St. Adaptive Reuse · 1 day ago</div>
+                  <div className="sc-avatar-mark bg-[#6398AA] text-[#0f1318]">
+                    AI
+                  </div>
+                  <div className="sc-body">
+                    AI Reviewer cleared 5 findings on Riverside Clinic —
+                    Phase 1 · 3 hrs ago
+                  </div>
                 </div>
               </div>
             </div>
@@ -139,30 +327,33 @@ export default function ReviewConsole() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="sc-dot sc-dot-red"></div>
-                    <div className="sc-medium truncate max-w-[180px]">Lost Pines Townhomes — Phase 2</div>
+                    <div className="sc-medium truncate max-w-[180px]">
+                      Lost Pines Townhomes — Phase 2
+                    </div>
                   </div>
                   <div className="sc-mono-sm text-[var(--danger)]">Today</div>
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="sc-dot sc-dot-amber"></div>
-                    <div className="sc-medium truncate max-w-[180px]">Highland Estates Lot 7</div>
+                    <div className="sc-medium truncate max-w-[180px]">
+                      Highland Estates Lot 7
+                    </div>
                   </div>
-                  <div className="sc-mono-sm text-[var(--warning)]">Tomorrow</div>
+                  <div className="sc-mono-sm text-[var(--warning)]">
+                    Tomorrow
+                  </div>
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="sc-dot sc-dot-green"></div>
-                    <div className="sc-medium truncate max-w-[180px]">Old Iron Bridge Plaza</div>
+                    <div className="sc-medium truncate max-w-[180px]">
+                      Old Iron Bridge Plaza
+                    </div>
                   </div>
-                  <div className="sc-mono-sm text-[var(--text-secondary)]">Thu</div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="sc-dot sc-dot-dim"></div>
-                    <div className="sc-medium truncate max-w-[180px]">Riverside Clinic — Phase 1</div>
+                  <div className="sc-mono-sm text-[var(--text-secondary)]">
+                    Thu
                   </div>
-                  <div className="sc-mono-sm text-[var(--text-secondary)]">Fri</div>
                 </div>
               </div>
             </div>

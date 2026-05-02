@@ -21,9 +21,12 @@ import generateLayersRouter from "./generateLayers";
 import localSetbacksRouter from "./localSetbacks";
 import adapterCacheRouter from "./adapterCache";
 import reviewerAnnotationsRouter from "./reviewerAnnotations";
+import submissionCommentsRouter from "./submissionComments";
 import findingsRouter from "./findings";
 import reviewerRequestsRouter from "./reviewerRequests";
+import reviewerQueueRouter from "./submissions";
 import rendersRouter from "./renders";
+import notificationsRouter from "./notifications";
 
 const router: IRouter = Router();
 
@@ -78,6 +81,11 @@ router.use(adapterCacheRouter);
 // Mounts under /submissions/:submissionId/reviewer-annotations; no
 // path overlap with any existing router so ordering is indifferent.
 router.use(reviewerAnnotationsRouter);
+// Task #431 — reviewer↔architect inline comment thread surface.
+// Mounts under /submissions/:submissionId/comments; no path overlap
+// with the reviewer-annotations router (its parametric segment is
+// always `reviewer-annotations`) so ordering is indifferent.
+router.use(submissionCommentsRouter);
 // V1-1 / AIR-1 — findings surface. Mounts under
 // /submissions/:submissionId/findings* and /findings/:findingId/*;
 // no path overlap with reviewer-annotations or any other router so
@@ -89,6 +97,8 @@ router.use(findingsRouter);
 // not match the longer `/engagements/:id/reviewer-requests` path,
 // so mount ordering relative to engagementsRouter is indifferent.
 router.use(reviewerRequestsRouter);
+// Cross-engagement reviewer Inbox feed at /reviewer/queue.
+router.use(reviewerQueueRouter);
 // V1-4 / DA-RP-1 — mnml.ai renders. Mounts under
 // /engagements/:id/renders (kickoff + list) and top-level /renders/:id
 // (status + cancel). The /engagements/:id/renders path is more
@@ -98,5 +108,10 @@ router.use(reviewerRequestsRouter);
 // ordering-indifferent group (line 55), so we land here matching the
 // briefing-router precedent (line 34 ordering note).
 router.use(rendersRouter);
+// Architect inbox/notification surface. Mounts under
+// `/me/notifications*`; a distinct path subtree from `meRouter`
+// (`/me/architect-pdf-header`, `/me/profile`) so ordering relative
+// to it is indifferent.
+router.use(notificationsRouter);
 
 export default router;

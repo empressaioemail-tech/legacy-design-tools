@@ -1,8 +1,10 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   useListSubmissionFindings,
+  useListSubmissionFindingsGenerationRuns,
   useGenerateSubmissionFindings,
   useFindingsGenerationPolling,
+  useCreateSubmissionFinding,
   compareFindings,
   FINDING_CATEGORY_LABELS,
   FINDING_SEVERITY_LABELS,
@@ -20,6 +22,9 @@ import { FindingDrillIn } from "./FindingDrillIn";
 import { CodeAtomPill, renderFindingBody } from "./CodeAtomPill";
 import { SEVERITY_PALETTE, STATUS_PALETTE } from "./severityStyles";
 import { OverrideFindingModal } from "./OverrideFindingModal";
+import { LowConfidencePill } from "@workspace/portal-ui";
+
+export type FindingsTabAudience = "internal" | "user" | "ai";
 
 const SEVERITY_FILTER_OPTIONS: FindingSeverity[] = ["blocker", "concern", "advisory"];
 const STATUS_FILTER_OPTIONS: FindingStatus[] = [
@@ -45,13 +50,9 @@ export interface FindingsTabProps {
   submissionId: string;
   selectedFindingId: string | null;
   onSelectFinding: (id: string | null) => void;
-  /**
-   * Task #343 — passed straight through to {@link FindingDrillIn}
-   * so the modal shell can switch to the BIM Model tab and
-   * highlight the referenced element when the reviewer clicks
-   * "Show in 3D viewer".
-   */
   onShowInViewer?: (elementRef: string) => void;
+  /** Only "internal" shows reviewer mutation affordances. */
+  audience?: FindingsTabAudience;
 }
 
 export function FindingsTab({
@@ -59,7 +60,9 @@ export function FindingsTab({
   selectedFindingId,
   onSelectFinding,
   onShowInViewer,
+  audience = "user",
 }: FindingsTabProps) {
+  const isReviewer = audience === "internal";
   const findingsQuery = useListSubmissionFindings(submissionId);
   const findings = useMemo(
     () => (findingsQuery.data ?? []).slice().sort(compareFindings),
@@ -119,10 +122,17 @@ export function FindingsTab({
           overflow: "auto",
         }}
       >
+        <FindingsAutoFailureBadge submissionId={submissionId} />
+
         <FindingsRunsPanel
           submissionId={submissionId}
           hasExistingFindings={hasAnyFindings}
+          canTriggerGeneration={isReviewer}
         />
+
+        {isReviewer && (
+          <ManualAddFindingDisclosure submissionId={submissionId} />
+        )}
 
         <div
           data-testid="findings-filters"
@@ -192,7 +202,10 @@ export function FindingsTab({
         )}
 
         {!findingsQuery.isLoading && !hasAnyFindings && (
-          <FindingsEmptyState submissionId={submissionId} />
+          <FindingsEmptyState
+            submissionId={submissionId}
+            isReviewer={isReviewer}
+          />
         )}
 
         {hasAnyFindings && !hasVisibleFindings && (
@@ -218,6 +231,7 @@ export function FindingsTab({
                 findings={group}
                 selectedFindingId={selectedFindingId}
                 onSelect={onSelectFinding}
+                isReviewer={isReviewer}
               />
             );
           })}
@@ -231,6 +245,7 @@ export function FindingsTab({
             onSelectFinding(next.id);
           }}
           onShowInViewer={onShowInViewer}
+          isReviewer={isReviewer}
         />
       )}
     </div>
@@ -244,7 +259,87 @@ function toggleSet<T>(prev: Set<T>, value: T): Set<T> {
   return next;
 }
 
-function FindingsEmptyState({ submissionId }: { submissionId: string }) {
+/**
+ * Surfaces a distinct alert when the most recent generation run is
+ * `failed` — typically produced by the auto-trigger that records
+ * `finding_runs.state="failed"` on engine error but otherwise leaves
+ * reviewers staring at "no findings yet" with no hint that the AI
+ * tried and failed.
+ *
+ * The "Re-run AI plan review" action calls the same manual generate
+ * endpoint reviewers use elsewhere (`useGenerateSubmissionFindings`)
+ * so a successful retry clears the badge by inserting a new
+ * `pending` → `completed` row at the head of the runs list.
+ */
+function FindingsAutoFailureBadge({ submissionId }: { submissionId: string }) {
+  const runsQuery = useListSubmissionFindingsGenerationRuns(submissionId);
+  const generate = useGenerateSubmissionFindings(submissionId);
+  const live = useFindingsGenerationPolling(
+    submissionId,
+    generate.isPending || runsQuery.data?.runs?.[0]?.state === "pending",
+  );
+  const latestRun = runsQuery.data?.runs?.[0] ?? null;
+  const isPending =
+    generate.isPending || live?.state === "pending";
+  if (!latestRun || latestRun.state !== "failed") return null;
+  return (
+    <div
+      role="alert"
+      data-testid="findings-auto-failure-badge"
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12,
+        padding: "10px 12px",
+        border: "1px solid var(--danger-border, var(--danger-text))",
+        background: "var(--danger-dim)",
+        borderRadius: 6,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--danger-text)",
+          }}
+        >
+          AI plan review failed
+        </div>
+        <div
+          data-testid="findings-auto-failure-detail"
+          style={{
+            fontSize: 12,
+            color: "var(--danger-text)",
+            marginTop: 2,
+            wordBreak: "break-word",
+          }}
+        >
+          {latestRun.error
+            ? `The most recent attempt failed: ${latestRun.error}`
+            : "The most recent automatic attempt failed. Re-run to try again."}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="sc-btn-primary"
+        onClick={() => generate.mutate()}
+        disabled={isPending}
+        data-testid="findings-auto-failure-rerun"
+      >
+        {isPending ? "Re-running…" : "Re-run AI plan review"}
+      </button>
+    </div>
+  );
+}
+
+function FindingsEmptyState({
+  submissionId,
+  isReviewer,
+}: {
+  submissionId: string;
+  isReviewer: boolean;
+}) {
   const generate = useGenerateSubmissionFindings(submissionId);
   const live = useFindingsGenerationPolling(submissionId, generate.isPending);
   const isPending = generate.isPending || live?.state === "pending";
@@ -269,20 +364,22 @@ function FindingsEmptyState({ submissionId }: { submissionId: string }) {
         className="sc-meta"
         style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: 380 }}
       >
-        Generate AI compliance findings — the engine checks setback,
-        height, coverage, egress, and other rules against the proposed
-        design.
+        {isReviewer
+          ? "Generate AI compliance findings — the engine checks setback, height, coverage, egress, and other rules against the proposed design."
+          : "The reviewer hasn't run AI compliance findings against this submission yet."}
       </span>
-      <button
-        type="button"
-        className="sc-btn-primary"
-        onClick={() => generate.mutate()}
-        disabled={isPending}
-        data-testid="findings-empty-generate"
-        style={{ marginTop: 4 }}
-      >
-        {isPending ? "Generating…" : "Generate findings"}
-      </button>
+      {isReviewer && (
+        <button
+          type="button"
+          className="sc-btn-primary"
+          onClick={() => generate.mutate()}
+          disabled={isPending}
+          data-testid="findings-empty-generate"
+          style={{ marginTop: 4 }}
+        >
+          {isPending ? "Generating…" : "Generate findings"}
+        </button>
+      )}
       <span
         className="sc-meta opacity-60"
         style={{ fontSize: 11, color: "var(--text-muted)" }}
@@ -298,11 +395,13 @@ function FindingsSeverityGroup({
   findings,
   selectedFindingId,
   onSelect,
+  isReviewer,
 }: {
   severity: FindingSeverity;
   findings: Finding[];
   selectedFindingId: string | null;
   onSelect: (id: string | null) => void;
+  isReviewer: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const palette = SEVERITY_PALETTE[severity];
@@ -361,6 +460,7 @@ function FindingsSeverityGroup({
               finding={f}
               selected={f.id === selectedFindingId}
               onSelect={() => onSelect(f.id === selectedFindingId ? null : f.id)}
+              isReviewer={isReviewer}
             />
           ))}
         </div>
@@ -373,10 +473,12 @@ function FindingRow({
   finding,
   selected,
   onSelect,
+  isReviewer,
 }: {
   finding: Finding;
   selected: boolean;
   onSelect: () => void;
+  isReviewer: boolean;
 }) {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const accept = useAcceptFinding(finding.submissionId);
@@ -447,21 +549,10 @@ function FindingRow({
           {FINDING_STATUS_LABELS[finding.status]}
         </span>
         {finding.lowConfidence && (
-          <span
-            data-testid={`finding-row-low-conf-${finding.id}`}
-            title={`Model confidence ${(finding.confidence * 100).toFixed(0)}%`}
-            style={{
-              background: "var(--warning-dim)",
-              color: "var(--warning-text)",
-              fontSize: 10,
-              padding: "1px 6px",
-              borderRadius: 3,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-            }}
-          >
-            Low conf
-          </span>
+          <LowConfidencePill
+            confidence={finding.confidence}
+            testid={`finding-row-low-conf-${finding.id}`}
+          />
         )}
         <span
           data-testid={`finding-row-citation-count-${finding.id}`}
@@ -498,46 +589,49 @@ function FindingRow({
           .map((c, i) => (
             <CodeAtomPill key={`${c.atomId}-${i}`} atomId={c.atomId} />
           ))}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <button
-            type="button"
-            className="sc-btn-sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              accept.mutateAsync({ findingId: finding.id });
-            }}
-            disabled={accept.isPending || finding.status === "accepted"}
-            data-testid={`finding-row-accept-${finding.id}`}
-            style={{ fontSize: 11, padding: "2px 8px" }}
-          >
-            Accept
-          </button>
-          <button
-            type="button"
-            className="sc-btn-sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              reject.mutateAsync({ findingId: finding.id });
-            }}
-            disabled={reject.isPending || finding.status === "rejected"}
-            data-testid={`finding-row-reject-${finding.id}`}
-            style={{ fontSize: 11, padding: "2px 8px" }}
-          >
-            Reject
-          </button>
-          <button
-            type="button"
-            className="sc-btn-sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOverrideOpen(true);
-            }}
-            data-testid={`finding-row-override-${finding.id}`}
-            style={{ fontSize: 11, padding: "2px 8px" }}
-          >
-            Override
-          </button>
-        </div>
+        {isReviewer && (
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              className="sc-btn-sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                accept.mutateAsync({ findingId: finding.id });
+              }}
+              disabled={accept.isPending || finding.status === "accepted"}
+              data-testid={`finding-row-accept-${finding.id}`}
+              style={{ fontSize: 11, padding: "2px 8px" }}
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              className="sc-btn-sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                reject.mutateAsync({ findingId: finding.id });
+              }}
+              disabled={reject.isPending || finding.status === "rejected"}
+              data-testid={`finding-row-reject-${finding.id}`}
+              style={{ fontSize: 11, padding: "2px 8px" }}
+            >
+              Reject
+            </button>
+            <button
+              type="button"
+              className="sc-btn-sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOverrideOpen(true);
+              }}
+              disabled={finding.status === "overridden"}
+              data-testid={`finding-row-override-${finding.id}`}
+              style={{ fontSize: 11, padding: "2px 8px" }}
+            >
+              Override
+            </button>
+          </div>
+        )}
       </div>
       {overrideOpen && (
         <OverrideFindingModal
@@ -545,6 +639,274 @@ function FindingRow({
           onClose={() => setOverrideOpen(false)}
           onOverridden={() => setOverrideOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+function ManualAddFindingDisclosure({
+  submissionId,
+}: {
+  submissionId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [codeCitation, setCodeCitation] = useState("");
+  const [elementRef, setElementRef] = useState("");
+  const [severity, setSeverity] = useState<FindingSeverity>("concern");
+  const [category, setCategory] = useState<FindingCategory>("other");
+  const [error, setError] = useState<string | null>(null);
+  const create = useCreateSubmissionFinding(submissionId);
+
+  const reset = () => {
+    setTitle("");
+    setDescription("");
+    setCodeCitation("");
+    setElementRef("");
+    setSeverity("concern");
+    setCategory("other");
+    setError(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setError("Title is required.");
+      return;
+    }
+    try {
+      const trimmedDesc = description.trim();
+      const trimmedCode = codeCitation.trim();
+      const trimmedElem = elementRef.trim();
+      await create.mutateAsync({
+        title: trimmedTitle,
+        description: trimmedDesc.length > 0 ? trimmedDesc : null,
+        severity,
+        category,
+        codeCitation: trimmedCode.length > 0 ? trimmedCode : null,
+        elementRef: trimmedElem.length > 0 ? trimmedElem : null,
+      });
+      reset();
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add finding.");
+    }
+  };
+
+  return (
+    <div
+      data-testid="findings-manual-add"
+      style={{
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        padding: "8px 12px",
+        background: "var(--surface-1, transparent)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        data-testid="findings-manual-add-toggle"
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          textAlign: "left",
+          color: "var(--text-secondary)",
+          fontSize: 12,
+          alignSelf: "flex-start",
+          fontWeight: 600,
+        }}
+      >
+        {open ? "▾" : "▸"} Add finding manually
+      </button>
+
+      {open && (
+        <form
+          onSubmit={handleSubmit}
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          <label className="flex flex-col" style={{ gap: 2 }}>
+            <span className="sc-label" style={{ fontSize: 10 }}>
+              TITLE
+            </span>
+            <input
+              data-testid="findings-manual-add-title"
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+              placeholder="Short headline (required)."
+              style={{
+                background: "var(--bg-input)",
+                border: "1px solid var(--border-default)",
+                borderRadius: 4,
+                padding: "4px 6px",
+                fontSize: 12,
+                color: "var(--text-primary)",
+                fontFamily: "inherit",
+              }}
+            />
+          </label>
+          <label className="flex flex-col" style={{ gap: 2 }}>
+            <span className="sc-label" style={{ fontSize: 10 }}>
+              DESCRIPTION (OPTIONAL)
+            </span>
+            <textarea
+              data-testid="findings-manual-add-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="Add detail. Use [[CODE:section-id]] to cite a code section."
+              style={{
+                background: "var(--bg-input)",
+                border: "1px solid var(--border-default)",
+                borderRadius: 4,
+                padding: 8,
+                fontSize: 12,
+                color: "var(--text-primary)",
+                fontFamily: "inherit",
+                resize: "vertical",
+              }}
+            />
+          </label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <label className="flex flex-col" style={{ gap: 2, flex: 1 }}>
+              <span className="sc-label" style={{ fontSize: 10 }}>
+                CODE CITATION (OPTIONAL)
+              </span>
+              <input
+                data-testid="findings-manual-add-code-citation"
+                type="text"
+                value={codeCitation}
+                onChange={(e) => setCodeCitation(e.target.value)}
+                placeholder="e.g. code:zoning-19.3.2"
+                style={{
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: "4px 6px",
+                  fontSize: 12,
+                  color: "var(--text-primary)",
+                }}
+              />
+            </label>
+            <label className="flex flex-col" style={{ gap: 2, flex: 1 }}>
+              <span className="sc-label" style={{ fontSize: 10 }}>
+                ELEMENT REF (OPTIONAL)
+              </span>
+              <input
+                data-testid="findings-manual-add-element-ref"
+                type="text"
+                value={elementRef}
+                onChange={(e) => setElementRef(e.target.value)}
+                placeholder="e.g. wall:north-side-l2"
+                style={{
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: "4px 6px",
+                  fontSize: 12,
+                  color: "var(--text-primary)",
+                }}
+              />
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <label className="flex flex-col" style={{ gap: 2, flex: 1 }}>
+              <span className="sc-label" style={{ fontSize: 10 }}>
+                SEVERITY
+              </span>
+              <select
+                data-testid="findings-manual-add-severity"
+                value={severity}
+                onChange={(e) =>
+                  setSeverity(e.target.value as FindingSeverity)
+                }
+                style={{
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: "4px 6px",
+                  fontSize: 12,
+                  color: "var(--text-primary)",
+                }}
+              >
+                {SEVERITY_FILTER_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {FINDING_SEVERITY_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col" style={{ gap: 2, flex: 1 }}>
+              <span className="sc-label" style={{ fontSize: 10 }}>
+                CATEGORY
+              </span>
+              <select
+                data-testid="findings-manual-add-category"
+                value={category}
+                onChange={(e) =>
+                  setCategory(e.target.value as FindingCategory)
+                }
+                style={{
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: "4px 6px",
+                  fontSize: 12,
+                  color: "var(--text-primary)",
+                }}
+              >
+                {CATEGORY_FILTER_OPTIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {FINDING_CATEGORY_LABELS[c]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {error && (
+            <div
+              role="alert"
+              data-testid="findings-manual-add-error"
+              style={{ fontSize: 11, color: "var(--danger-text)" }}
+            >
+              {error}
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+            <button
+              type="button"
+              className="sc-btn-ghost"
+              onClick={() => {
+                reset();
+                setOpen(false);
+              }}
+              data-testid="findings-manual-add-cancel"
+              style={{ fontSize: 11, padding: "2px 8px" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="sc-btn-primary"
+              disabled={create.isPending}
+              data-testid="findings-manual-add-submit"
+              style={{ fontSize: 11, padding: "2px 8px" }}
+            >
+              {create.isPending ? "Adding…" : "Add finding"}
+            </button>
+          </div>
+        </form>
       )}
     </div>
   );

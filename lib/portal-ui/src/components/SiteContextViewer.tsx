@@ -15,6 +15,18 @@ import {
 
 export interface SiteContextViewerProps {
   sources: EngagementBriefingSource[];
+  /**
+   * CAD element reference (e.g. `door:l2-corridor-9`) the architect
+   * deep-linked from a finding. Surfaced as a small "Selected element"
+   * badge above the 3D canvas so the architect knows which element the
+   * finding pointed at; in-scene highlighting is intentionally deferred
+   * until the GLB→element index lands. The badge is cleared via
+   * {@link onClearSelectedElement} so the parent state can be reset
+   * without re-clicking the citation.
+   */
+  selectedElementRef?: string | null;
+  /** Optional clear handler paired with `selectedElementRef`. */
+  onClearSelectedElement?: () => void;
 }
 
 const TERRAIN_COLOR = 0x8b7355;
@@ -132,6 +144,114 @@ interface LoadedSourceState {
   error?: string;
 }
 
+const SELECTED_HIGHLIGHT_COLOR = 0xffd24a;
+
+/**
+ * Normalize an element ref or scene-object name so the
+ * elementRef → BIM-object lookup is forgiving across the casing,
+ * separator, and prefixing variations real DXF/glb pipelines emit
+ * (e.g. `door:l2-corridor-9` should match a node named
+ * `Door_L2_Corridor_9`, `door-l2-corridor-9`, or `door.l2.corridor.9`).
+ */
+function normalizeRef(ref: string): string {
+  return ref.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+interface MatchedObject {
+  object: THREE.Object3D;
+  /** Materials we mutated, paired with their pre-highlight values
+   * so {@link restoreMatch} can put the scene back exactly the way
+   * it was when the architect dismisses the deep-link. */
+  originals: Array<{
+    material: THREE.MeshStandardMaterial | THREE.MeshLambertMaterial | THREE.MeshBasicMaterial;
+    color: THREE.Color;
+    emissive: THREE.Color | null;
+  }>;
+}
+
+function isHighlightableMaterial(
+  m: THREE.Material,
+): m is THREE.MeshStandardMaterial | THREE.MeshLambertMaterial | THREE.MeshBasicMaterial {
+  return (
+    (m as THREE.MeshBasicMaterial).color instanceof THREE.Color
+  );
+}
+
+function highlightObject(object: THREE.Object3D): MatchedObject["originals"] {
+  const originals: MatchedObject["originals"] = [];
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      if (!mat || !isHighlightableMaterial(mat)) continue;
+      const emissiveSrc =
+        (mat as THREE.MeshStandardMaterial | THREE.MeshLambertMaterial)
+          .emissive ?? null;
+      originals.push({
+        material: mat,
+        color: mat.color.clone(),
+        emissive: emissiveSrc ? emissiveSrc.clone() : null,
+      });
+      mat.color.setHex(SELECTED_HIGHLIGHT_COLOR);
+      if (emissiveSrc) {
+        emissiveSrc.setHex(SELECTED_HIGHLIGHT_COLOR);
+      }
+    }
+  });
+  return originals;
+}
+
+function restoreMatch(match: MatchedObject): void {
+  for (const { material, color, emissive } of match.originals) {
+    material.color.copy(color);
+    const emissiveTarget =
+      (material as THREE.MeshStandardMaterial | THREE.MeshLambertMaterial)
+        .emissive ?? null;
+    if (emissive && emissiveTarget) {
+      emissiveTarget.copy(emissive);
+    }
+  }
+}
+
+function findObjectByRef(
+  groups: Map<string, THREE.Group>,
+  ref: string,
+): THREE.Object3D | null {
+  const target = normalizeRef(ref);
+  if (!target) return null;
+  let exact: THREE.Object3D | null = null;
+  let partial: THREE.Object3D | null = null;
+  for (const group of groups.values()) {
+    group.traverse((child) => {
+      if (exact) return;
+      const candidates: string[] = [];
+      if (child.name) candidates.push(child.name);
+      const ud = child.userData as
+        | { name?: unknown; elementRef?: unknown; id?: unknown }
+        | undefined;
+      if (ud) {
+        if (typeof ud.name === "string") candidates.push(ud.name);
+        if (typeof ud.elementRef === "string") candidates.push(ud.elementRef);
+        if (typeof ud.id === "string") candidates.push(ud.id);
+      }
+      for (const c of candidates) {
+        const norm = normalizeRef(c);
+        if (!norm) continue;
+        if (norm === target) {
+          exact = child;
+          return;
+        }
+        if (!partial && (norm.includes(target) || target.includes(norm))) {
+          partial = child;
+        }
+      }
+    });
+    if (exact) break;
+  }
+  return exact ?? partial;
+}
+
 function detectWebGl(): boolean {
   if (typeof document === "undefined") return false;
   try {
@@ -164,7 +284,11 @@ function applyVariant(root: THREE.Object3D, layerKind: string): THREE.Object3D {
   return handler(root);
 }
 
-export function SiteContextViewer({ sources }: SiteContextViewerProps) {
+export function SiteContextViewer({
+  sources,
+  selectedElementRef,
+  onClearSelectedElement,
+}: SiteContextViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -172,12 +296,24 @@ export function SiteContextViewer({ sources }: SiteContextViewerProps) {
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const sourceGroupsRef = useRef<Map<string, THREE.Group>>(new Map());
+  const activeMatchRef = useRef<MatchedObject | null>(null);
 
   const [webGlOk] = useState<boolean>(detectWebGl);
   const [sourceState, setSourceState] = useState<
     Record<string, LoadedSourceState>
   >({});
   const [retryNonce, setRetryNonce] = useState<Record<string, number>>({});
+  /** True when the active `selectedElementRef` resolved to a real
+   * scene object on the most recent attempt. Drives the
+   * "selected/not-found" copy on the badge so the architect sees
+   * immediately when the citation points at an element no source has
+   * loaded yet. `null` means there is no active selection. */
+  const [matchFound, setMatchFound] = useState<boolean | null>(null);
+  /** Bumps every time a source finishes loading so the
+   * highlight/focus effect re-runs once new geometry shows up — a
+   * deep-link clicked before the relevant glb has resolved still
+   * snaps once the scene has the object. */
+  const [loadedNonce, setLoadedNonce] = useState(0);
 
   const readySources = useMemo(
     () =>
@@ -339,6 +475,7 @@ export function SiteContextViewer({ sources }: SiteContextViewerProps) {
                   ...prev,
                   [source.id]: { status: "loaded" },
                 }));
+                setLoadedNonce((n) => n + 1);
                 resolve();
               },
               (err) => reject(err as unknown),
@@ -365,6 +502,60 @@ export function SiteContextViewer({ sources }: SiteContextViewerProps) {
     // sources already loaded.
   }, [readySources, webGlOk, retryNonce]);
 
+  // Element-ref highlight + camera focus. Re-runs whenever the
+  // selected ref changes, sources are dropped, or a new glb resolves
+  // (loadedNonce). Restoring the previous match's materials before
+  // applying the next keeps the scene from drifting after several
+  // back-to-back deep-links.
+  useEffect(() => {
+    if (!webGlOk) {
+      return;
+    }
+    const prev = activeMatchRef.current;
+    if (prev) {
+      restoreMatch(prev);
+      activeMatchRef.current = null;
+    }
+    if (!selectedElementRef) {
+      setMatchFound(null);
+      return;
+    }
+    const groups = sourceGroupsRef.current;
+    const match = findObjectByRef(groups, selectedElementRef);
+    if (!match) {
+      setMatchFound(false);
+      return;
+    }
+    const originals = highlightObject(match);
+    activeMatchRef.current = { object: match, originals };
+    setMatchFound(true);
+
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (camera && controls) {
+      const box = new THREE.Box3().setFromObject(match);
+      if (!box.isEmpty()) {
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3()).length();
+        // Pull back along the existing view direction so the object
+        // sits roughly centered without yanking the architect's
+        // orbit orientation. A 1.8× distance leaves comfortable
+        // padding around even tall envelope geometry.
+        const distance = Math.max(size * 1.8, 5);
+        const dir = new THREE.Vector3()
+          .subVectors(camera.position, controls.target)
+          .normalize();
+        if (!isFinite(dir.x) || dir.lengthSq() === 0) {
+          dir.set(1, 1, 1).normalize();
+        }
+        camera.position.copy(center).addScaledVector(dir, distance);
+        controls.target.copy(center);
+        camera.lookAt(center);
+        controls.update();
+      }
+    }
+  }, [selectedElementRef, webGlOk, loadedNonce, readySources]);
+
   const retryFetch = useCallback((sourceId: string) => {
     // Dropping the group makes the next pass re-fetch only this id.
     const group = sourceGroupsRef.current.get(sourceId);
@@ -385,6 +576,7 @@ export function SiteContextViewer({ sources }: SiteContextViewerProps) {
   return (
     <div
       data-testid="site-context-viewer"
+      data-selected-element={selectedElementRef ?? ""}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -393,6 +585,60 @@ export function SiteContextViewer({ sources }: SiteContextViewerProps) {
         minHeight: 0,
       }}
     >
+      {selectedElementRef && (
+        <div
+          data-testid="site-context-viewer-selected-element"
+          data-match-state={
+            matchFound === true
+              ? "found"
+              : matchFound === false
+                ? "not-found"
+                : "pending"
+          }
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "4px 8px",
+            borderRadius: 4,
+            background:
+              matchFound === false ? "var(--warning-dim)" : "var(--info-dim)",
+            color:
+              matchFound === false ? "var(--warning-text)" : "var(--info-text)",
+            fontSize: 12,
+          }}
+        >
+          <span className="sc-label" style={{ fontSize: 10 }}>
+            {matchFound === false ? "NOT IN SCENE" : "SELECTED ELEMENT"}
+          </span>
+          <code
+            className="sc-mono-sm"
+            style={{ fontSize: 11, background: "transparent" }}
+          >
+            {selectedElementRef}
+          </code>
+          {onClearSelectedElement && (
+            <button
+              type="button"
+              data-testid="site-context-viewer-selected-element-clear"
+              onClick={onClearSelectedElement}
+              aria-label="Clear selected element"
+              title="Clear"
+              style={{
+                marginLeft: "auto",
+                background: "transparent",
+                border: "none",
+                color: "inherit",
+                cursor: "pointer",
+                fontSize: 14,
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
       <div
         ref={containerRef}
         data-testid="site-context-viewer-canvas"

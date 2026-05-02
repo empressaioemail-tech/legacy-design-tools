@@ -5,8 +5,10 @@ import {
   ReviewerAnnotationAffordance,
   ReviewerAnnotationPanel,
   ReviewerComment,
+  RequestRefreshAffordance,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
+  useReviewerRequestIsPending,
 } from "@workspace/portal-ui";
 import {
   useGetEngagement,
@@ -484,6 +486,21 @@ export default function EngagementDetail() {
         */}
         {id && (
           <div id="briefing">
+            {/*
+              Task #429 — reviewer-side "Request briefing regeneration"
+              affordance. Sits at the top of the briefing panel so the
+              reviewer can file the ask in the same eye-line as the
+              run-history disclosure they were inspecting when they
+              decided a regeneration was warranted. Wrapped in its own
+              component so the per-engagement reviewer-requests query
+              hook only runs when `audience === "internal"`.
+            */}
+            {audience === "internal" && (
+              <BriefingRegenerationAffordance
+                engagementId={id}
+                engagementName={engagement?.name ?? null}
+              />
+            )}
             <BriefingRecentRunsPanel
               engagementId={id}
               renderPriorSnapshotHeader={({
@@ -994,5 +1011,52 @@ function OpenSubmissionModalRenderer({
       onClose={onClose}
       audience={audience}
     />
+  );
+}
+
+/**
+ * Task #429 — small wrapper around `RequestRefreshAffordance` that
+ * binds the per-engagement reviewer-requests pending-state lookup to
+ * the briefing-regen `(regenerate-briefing, engagementId)` pair.
+ *
+ * Lives in `EngagementDetail` rather than portal-ui because the
+ * "briefing regeneration" target is engagement-scoped (the parcel-
+ * briefing atom keyed by engagement id) — no other surface needs
+ * the same wiring, so promoting it to portal-ui would just add
+ * indirection. The engagement-name fallback is local to plan-review
+ * too: design-tools surfaces the regen via its own "Regenerate"
+ * button rather than the reviewer-request flow.
+ */
+function BriefingRegenerationAffordance({
+  engagementId,
+  engagementName,
+}: {
+  engagementId: string;
+  engagementName: string | null;
+}) {
+  const pending = useReviewerRequestIsPending(
+    engagementId,
+    "regenerate-briefing",
+    engagementId,
+    true,
+  );
+  return (
+    <div
+      data-testid="briefing-regen-affordance-row"
+      style={{
+        display: "flex",
+        justifyContent: "flex-end",
+        marginBottom: 12,
+      }}
+    >
+      <RequestRefreshAffordance
+        engagementId={engagementId}
+        requestKind="regenerate-briefing"
+        targetEntityType="parcel-briefing"
+        targetEntityId={engagementId}
+        targetLabel={engagementName ?? "briefing"}
+        pending={pending}
+      />
+    </div>
   );
 }

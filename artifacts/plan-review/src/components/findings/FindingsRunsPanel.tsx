@@ -25,14 +25,15 @@ export interface FindingsRunsPanelProps {
   submissionId: string;
   /** Whether any findings already exist for this submission. */
   hasExistingFindings: boolean;
-  /** Confirm dialog before regenerate. Test hook lets us bypass it. */
   confirmFn?: (msg: string) => boolean;
+  canTriggerGeneration?: boolean;
 }
 
 export function FindingsRunsPanel({
   submissionId,
   hasExistingFindings,
   confirmFn,
+  canTriggerGeneration = true,
 }: FindingsRunsPanelProps) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,15 +123,17 @@ export function FindingsRunsPanel({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          className="sc-btn-primary"
-          onClick={handleGenerate}
-          disabled={isPending}
-          data-testid="findings-runs-generate"
-        >
-          {ctaLabel}
-        </button>
+        {canTriggerGeneration && (
+          <button
+            type="button"
+            className="sc-btn-primary"
+            onClick={handleGenerate}
+            disabled={isPending}
+            data-testid="findings-runs-generate"
+          >
+            {ctaLabel}
+          </button>
+        )}
       </div>
 
       {error && (

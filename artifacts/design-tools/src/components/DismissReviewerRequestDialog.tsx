@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useDismissReviewerRequest,
@@ -6,28 +6,31 @@ import {
   getGetAtomHistoryQueryKey,
   ApiError,
   type ReviewerRequest,
+  type ListReviewerRequestsResponse,
 } from "@workspace/api-client-react";
+import { formatActorLabel } from "@workspace/portal-ui";
+import { relativeTime } from "../lib/relativeTime";
 
 /**
- * Wave 2 Sprint D / V1-2 — architect-side dialog for dismissing a
- * pending reviewer-request with a reason.
- *
- * Modeled on `RequestRefreshDialog` (the reviewer-side companion):
- * free-text reason capture, cancel / dismiss buttons, inline error
- * surface, click-outside-to-close semantics, character-count gate.
- *
- * Posts via the generated `useDismissReviewerRequest` hook. The
- * route is idempotent on already-dismissed rows and 409s on already-
- * resolved rows; the dialog surfaces both as inline errors.
+ * Architect-side dialog for dismissing a pending reviewer-request
+ * with a reason. Posts via `useDismissReviewerRequest`, applies an
+ * optimistic cache update with rollback on error, and surfaces server
+ * errors inline.
  */
 export interface DismissReviewerRequestDialogProps {
   request: ReviewerRequest;
   isOpen: boolean;
   onClose: () => void;
   /**
+   * Fires synchronously inside the mutation's `onMutate`, BEFORE the
+   * optimistic cache removal. The parent strip uses this to record
+   * the row as user-dismissed so its implicit-resolve diff doesn't
+   * misclassify the optimistic shrink as a backend resolve.
+   */
+  onDismissStarted?: (request: ReviewerRequest) => void;
+  /**
    * Fires after a successful dismiss, just before `onClose` runs.
-   * Parent uses this to flash a transient confirmation pill on the
-   * strip.
+   * Parent uses this to flash the "Request dismissed" pill.
    */
   onDismissed?: (request: ReviewerRequest) => void;
 }
@@ -43,15 +46,22 @@ const REQUEST_KIND_SHORT_LABEL: Record<
   "regenerate-briefing": "regenerate briefing",
 };
 
+interface OptimisticContext {
+  queryKey: readonly unknown[];
+  previous: ListReviewerRequestsResponse | undefined;
+}
+
 export function DismissReviewerRequestDialog({
   request,
   isOpen,
   onClose,
+  onDismissStarted,
   onDismissed,
 }: DismissReviewerRequestDialogProps) {
   const qc = useQueryClient();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -60,8 +70,43 @@ export function DismissReviewerRequestDialog({
     }
   }, [isOpen, request.id]);
 
+  // Auto-focus the reason textarea when the dialog opens so the
+  // architect can start typing immediately. Defers a frame so the
+  // node is mounted by the time we call `.focus()`.
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isOpen, request.id]);
+
   const mutation = useDismissReviewerRequest({
     mutation: {
+      // Optimistically remove the row from the pending-list cache.
+      // We mark the row as user-dismissed via `onDismissStarted`
+      // BEFORE the cache write so the strip's implicit-resolve diff
+      // (which runs on the next render after the cache change) sees
+      // the mark and doesn't misclassify this shrink as a backend
+      // resolve.
+      onMutate: async (): Promise<OptimisticContext> => {
+        const queryKey = getListEngagementReviewerRequestsQueryKey(
+          request.engagementId,
+          { status: "pending" },
+        );
+        await qc.cancelQueries({ queryKey });
+        const previous = qc.getQueryData<ListReviewerRequestsResponse>(
+          queryKey,
+        );
+        onDismissStarted?.(request);
+        if (previous) {
+          qc.setQueryData<ListReviewerRequestsResponse>(queryKey, {
+            ...previous,
+            requests: previous.requests.filter((r) => r.id !== request.id),
+          });
+        }
+        return { queryKey, previous };
+      },
       onSuccess: async (response) => {
         await Promise.all([
           qc.invalidateQueries({
@@ -79,11 +124,32 @@ export function DismissReviewerRequestDialog({
         onDismissed?.(response.request);
         onClose();
       },
-      onError: (err) => {
+      onError: (err, _vars, context) => {
+        // Roll the optimistic write back so the strip restores the
+        // row before the user sees the inline error.
+        const ctx = context as OptimisticContext | undefined;
+        if (ctx?.queryKey && ctx.previous !== undefined) {
+          qc.setQueryData(ctx.queryKey, ctx.previous);
+        }
         setError(formatDismissError(err));
       },
     },
   });
+
+  // Esc-to-close — guard against closing mid-flight so a slow network
+  // doesn't strand the architect with a half-applied optimistic
+  // update they can't see the error from.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (mutation.isPending) return;
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isOpen, onClose, mutation.isPending]);
 
   if (!isOpen) return null;
 
@@ -108,6 +174,9 @@ export function DismissReviewerRequestDialog({
       }}
       data-testid="dismiss-reviewer-request-dialog"
       data-request-id={request.id}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dismiss-reviewer-request-title"
       style={{
         position: "fixed",
         inset: 0,
@@ -134,6 +203,7 @@ export function DismissReviewerRequestDialog({
         <div className="sc-card-header">
           <div className="flex flex-col gap-1">
             <span
+              id="dismiss-reviewer-request-title"
               style={{
                 fontSize: 16,
                 fontWeight: 600,
@@ -157,20 +227,43 @@ export function DismissReviewerRequestDialog({
         <div className="p-4 flex flex-col" style={{ gap: 12 }}>
           <div
             className="sc-meta"
-            data-testid="dismiss-reviewer-request-original-reason"
+            data-testid="dismiss-reviewer-request-summary"
             style={{
               padding: 8,
               borderRadius: 4,
               background: "var(--bg-input)",
               color: "var(--text-muted)",
-              fontStyle: "italic",
-              whiteSpace: "pre-wrap",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
             }}
           >
-            <strong style={{ color: "var(--text-secondary)" }}>
-              Reviewer wrote:
-            </strong>{" "}
-            {request.reason}
+            <span
+              data-testid="dismiss-reviewer-request-requester"
+              style={{ fontSize: 11, color: "var(--text-muted)" }}
+            >
+              <strong style={{ color: "var(--text-secondary)" }}>
+                {formatActorLabel({
+                  kind: request.requestedBy.kind,
+                  id: request.requestedBy.id,
+                  displayName:
+                    request.requestedBy.displayName ?? undefined,
+                })}
+              </strong>{" "}
+              · {relativeTime(request.requestedAt)}
+            </span>
+            <span
+              data-testid="dismiss-reviewer-request-original-reason"
+              style={{
+                fontStyle: "italic",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              <strong style={{ color: "var(--text-secondary)" }}>
+                Reviewer wrote:
+              </strong>{" "}
+              {request.reason}
+            </span>
           </div>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -181,6 +274,7 @@ export function DismissReviewerRequestDialog({
               Dismissal reason (required)
             </span>
             <textarea
+              ref={textareaRef}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               disabled={submitting}
@@ -188,6 +282,7 @@ export function DismissReviewerRequestDialog({
               placeholder='e.g. "Source is current — verified upstream feed at 2026-04-30."'
               data-testid="dismiss-reviewer-request-reason"
               className="sc-ui sc-scroll"
+              aria-invalid={overLimit || undefined}
               style={{
                 width: "100%",
                 background: "var(--bg-input)",

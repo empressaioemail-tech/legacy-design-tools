@@ -161,10 +161,10 @@ describe("reviewer-request atom (contract)", () => {
 });
 
 describe("reviewer-request atom (registration shape)", () => {
-  it("declares the V1-2 event vocabulary (6 types: 3 .requested + 3 .dismissed)", () => {
+  it("declares the event vocabulary (9 types: 3 .requested + 3 .dismissed + 3 .withdrawn — Task #443 adds the reviewer-side .withdrawn lane)", () => {
     const atom = makeReviewerRequestAtom({ db: lazyDb });
     expect(atom.eventTypes).toEqual([...REVIEWER_REQUEST_EVENT_TYPES]);
-    expect(atom.eventTypes).toHaveLength(6);
+    expect(atom.eventTypes).toHaveLength(9);
     // Three .requested per kind.
     expect(atom.eventTypes).toContain(
       "reviewer-request.refresh-briefing-source.requested",
@@ -185,9 +185,21 @@ describe("reviewer-request atom (registration shape)", () => {
     expect(atom.eventTypes).toContain(
       "reviewer-request.regenerate-briefing.dismissed",
     );
-    // V1-2 minimum cut deliberately omits .honored — the matching
-    // domain action's existing event (e.g. briefing-source.refreshed)
-    // is the resolution signal, hooked by reviewerRequestResolution.ts.
+    // Three .withdrawn per kind (Task #443) — distinct lane from
+    // .dismissed so the engagement timeline can tell apart
+    // "architect declined" from "reviewer changed their mind".
+    expect(atom.eventTypes).toContain(
+      "reviewer-request.refresh-briefing-source.withdrawn",
+    );
+    expect(atom.eventTypes).toContain(
+      "reviewer-request.refresh-bim-model.withdrawn",
+    );
+    expect(atom.eventTypes).toContain(
+      "reviewer-request.regenerate-briefing.withdrawn",
+    );
+    // .honored is still deliberately omitted — the matching domain
+    // action's existing event (e.g. briefing-source.refreshed) is
+    // the resolution signal, hooked by reviewerRequestResolution.ts.
     expect(
       (atom.eventTypes as readonly string[]).filter((t) => t.endsWith(".honored")),
     ).toEqual([]);

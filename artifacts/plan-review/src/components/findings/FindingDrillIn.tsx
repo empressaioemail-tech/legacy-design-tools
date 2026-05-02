@@ -21,20 +21,9 @@ export interface FindingDrillInProps {
   finding: Finding;
   onClose: () => void;
   onAfterMutate?: (next: Finding) => void;
-  /**
-   * Called when the reviewer clicks "Show in 3D viewer" on a
-   * finding that carries an `elementRef`. The host (the
-   * SubmissionDetailModal) is responsible for switching to the
-   * BIM Model tab and asking the materializable-elements list to
-   * highlight + scroll to the referenced element.
-   *
-   * Optional so tests that mount the drill-in in isolation
-   * (without the modal shell) don't have to stub this — when
-   * absent the button still renders for layout symmetry but is
-   * disabled with a "no viewer host attached" hint instead of
-   * throwing on click.
-   */
   onShowInViewer?: (elementRef: string) => void;
+  /** When false, hides Accept / Reject / Override mutation buttons. */
+  isReviewer?: boolean;
 }
 
 export function FindingDrillIn({
@@ -42,6 +31,7 @@ export function FindingDrillIn({
   onClose,
   onAfterMutate,
   onShowInViewer,
+  isReviewer = true,
 }: FindingDrillInProps) {
   const [overrideOpen, setOverrideOpen] = useState(false);
 
@@ -60,11 +50,6 @@ export function FindingDrillIn({
     onAfterMutate?.(next);
   };
 
-  // Task #343 — the modal owns the cross-tab jump; we just hand it
-  // the elementRef the finding points at. The button is gated on
-  // both `elementRef` and `onShowInViewer` so a hosted-without-
-  // wiring render still gives the user a clear "viewer not
-  // attached" affordance instead of a click that silently no-ops.
   const viewerJumpEnabled =
     finding.elementRef !== null && typeof onShowInViewer === "function";
   const handleViewerJump = () => {
@@ -72,11 +57,6 @@ export function FindingDrillIn({
     onShowInViewer?.(finding.elementRef);
   };
 
-  // Look up the superseded original AI finding via the same React
-  // Query cache the parent FindingsTab already mounted — pulling it
-  // out of the cached query means we don't need any test-only peek
-  // helper here, and the same code path will work against the
-  // generated AIR-1 hooks once the swap lands.
   const submissionFindings = useListSubmissionFindings(finding.submissionId);
   const originalAi = finding.revisionOf
     ? (submissionFindings.data ?? []).find(
@@ -411,43 +391,45 @@ export function FindingDrillIn({
         </Section>
       </div>
 
-      <div
-        style={{
-          padding: "10px 14px",
-          borderTop: "1px solid var(--border-default)",
-          background: "var(--bg-default)",
-          display: "flex",
-          gap: 8,
-          justifyContent: "flex-end",
-        }}
-      >
-        <button
-          type="button"
-          className="sc-btn-ghost"
-          onClick={handleReject}
-          disabled={reject.isPending || finding.status === "rejected"}
-          data-testid="finding-drill-in-reject"
+      {isReviewer && (
+        <div
+          style={{
+            padding: "10px 14px",
+            borderTop: "1px solid var(--border-default)",
+            background: "var(--bg-default)",
+            display: "flex",
+            gap: 8,
+            justifyContent: "flex-end",
+          }}
         >
-          Reject
-        </button>
-        <button
-          type="button"
-          className="sc-btn-ghost"
-          onClick={() => setOverrideOpen(true)}
-          data-testid="finding-drill-in-override"
-        >
-          Override
-        </button>
-        <button
-          type="button"
-          className="sc-btn-primary"
-          onClick={handleAccept}
-          disabled={accept.isPending || finding.status === "accepted"}
-          data-testid="finding-drill-in-accept"
-        >
-          {accept.isPending ? "Accepting…" : "Accept"}
-        </button>
-      </div>
+          <button
+            type="button"
+            className="sc-btn-ghost"
+            onClick={handleReject}
+            disabled={reject.isPending || finding.status === "rejected"}
+            data-testid="finding-drill-in-reject"
+          >
+            Reject
+          </button>
+          <button
+            type="button"
+            className="sc-btn-ghost"
+            onClick={() => setOverrideOpen(true)}
+            data-testid="finding-drill-in-override"
+          >
+            Override
+          </button>
+          <button
+            type="button"
+            className="sc-btn-primary"
+            onClick={handleAccept}
+            disabled={accept.isPending || finding.status === "accepted"}
+            data-testid="finding-drill-in-accept"
+          >
+            {accept.isPending ? "Accepting…" : "Accept"}
+          </button>
+        </div>
+      )}
 
       {overrideOpen && (
         <OverrideFindingModal

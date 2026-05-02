@@ -67,6 +67,14 @@ export interface EngagementPageMockHooksOptions {
    * a test exercises a permission gate.
    */
   session?: () => { permissions: string[] };
+  /**
+   * Returns the renders list the design-tools "Renders" tab reads
+   * through `useListEngagementRenders(id)`. Defaults to `[]` so the
+   * tab's empty-state branch keeps adopting tests from having to
+   * declare it. Adopting tests that exercise the gallery override
+   * this to return real fixtures.
+   */
+  renders?: () => Array<Record<string, unknown>>;
 }
 
 /**
@@ -91,6 +99,7 @@ export async function makeEngagementPageMockHooks(
   const getSubmissions = opts.submissions ?? (() => []);
   const getSession =
     opts.session ?? (() => ({ permissions: [] as string[] }));
+  const getRenders = opts.renders ?? (() => []);
 
   return {
     // Re-export `MockApiError` as `ApiError` so component code that
@@ -114,6 +123,8 @@ export async function makeEngagementPageMockHooks(
       "getListEngagementsQueryKey",
       "getListEngagementSubmissionsQueryKey",
       "getGetSessionQueryKey",
+      "getListEngagementRendersQueryKey",
+      "getGetRenderQueryKey",
     ] as const),
 
     // Custom-shape query-key helpers that prepend extra positional
@@ -196,5 +207,54 @@ export async function makeEngagementPageMockHooks(
         queryFn: async () => ({ requests: [] }),
         enabled: opts?.query?.enabled ?? true,
       }),
+    // Architect-side findings surface (Task #421). Defaults: empty
+    // list + no-op mutation; tests that exercise the tab override.
+    getListSubmissionFindingsQueryKey: (submissionId: string) =>
+      [`/api/submissions/${submissionId}/findings`] as const,
+    useListSubmissionFindings: (
+      submissionId: string,
+      opts?: {
+        query?: { enabled?: boolean; queryKey?: readonly unknown[] };
+      },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          ([
+            `/api/submissions/${submissionId}/findings`,
+          ] as const),
+        queryFn: async () => ({ findings: [] }),
+        enabled: opts?.query?.enabled ?? !!submissionId,
+      }),
+    useOverrideFinding: noopMutationHook,
+    // The design-tools Renders tab mounts `RenderGallery`, which
+    // calls `useListEngagementRenders(id)` on first paint and
+    // `useGetRender(item.id)` per card. Both default to an empty /
+    // no-op shape so adopting tests that don't exercise the tab
+    // don't have to declare them.
+    useListEngagementRenders: (
+      id: string,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["listEngagementRenders", id] as const),
+        queryFn: async () => ({
+          items: getRenders().map((r) => ({ ...r })),
+        }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
+    useGetRender: (
+      id: string,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["getRender", id] as const),
+        queryFn: async () => null,
+        enabled: opts?.query?.enabled ?? false,
+      }),
+    useCancelRender: noopMutationHook,
+    useKickoffRender: noopMutationHook,
   };
 }

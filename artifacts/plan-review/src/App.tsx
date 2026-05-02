@@ -1,7 +1,6 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReviewConsole from "./pages/ReviewConsole";
-import SubmittalDetail from "./pages/SubmittalDetail";
 import EngagementDetail from "./pages/EngagementDetail";
 import EngagementsList from "./pages/EngagementsList";
 import FindingsLibrary from "./pages/FindingsLibrary";
@@ -9,6 +8,7 @@ import CodeLibrary from "./pages/CodeLibrary";
 import StyleProbe from "./pages/StyleProbe";
 import Sheets from "./pages/Sheets";
 import Users from "./pages/Users";
+import OutstandingRequests from "./pages/OutstandingRequests";
 import ComingSoon from "./pages/ComingSoon";
 import { RequirePermission } from "./components/permissions";
 
@@ -18,10 +18,10 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={ReviewConsole} />
-      <Route path="/submittals/:id" component={SubmittalDetail} />
       <Route path="/engagements" component={EngagementsList} />
       <Route path="/engagements/:id" component={EngagementDetail} />
       <Route path="/findings" component={FindingsLibrary} />
+      <Route path="/requests" component={OutstandingRequests} />
       <Route path="/code" component={CodeLibrary} />
       <Route path="/sheets" component={Sheets} />
       <Route path="/style-probe" component={StyleProbe} />

@@ -33,6 +33,8 @@ import type {
   CreateEngagementSubmissionBody,
   CreateReviewerAnnotationBody,
   CreateReviewerRequestBody,
+  CreateSubmissionCommentBody,
+  CreateSubmissionFindingBody,
   CreateUserBody,
   DismissReviewerRequestBody,
   EngagementBimModelResponse,
@@ -52,6 +54,7 @@ import type {
   GenerateSubmissionFindingsResponse,
   GetAtomHistoryParams,
   GetAtomSummaryParams,
+  GetRenderOutputFileParams,
   GetSnapshotSheetHistoryParams,
   HealthStatus,
   JurisdictionSummary,
@@ -62,11 +65,18 @@ import type {
   ListEngagementBriefingSourcesParams,
   ListEngagementReviewerRequestsParams,
   ListJurisdictionAtomsParams,
+  ListMyNotificationsParams,
+  ListMyReviewerRequestsParams,
+  ListMyReviewerRequestsResponse,
+  ListNotificationsResponse,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
+  ListReviewerQueueParams,
   ListReviewerRequestsResponse,
+  ListSubmissionCommentsResponse,
   ListSubmissionFindingsResponse,
   LocalSetbackTable,
+  MarkNotificationsReadResponse,
   MatchEngagementBody,
   MatchEngagementResponse,
   OverrideFindingBody,
@@ -84,6 +94,7 @@ import type {
   RetrievalProbeBody,
   RetrievalProbeResponse,
   ReviewerAnnotationResponse,
+  ReviewerQueueResponse,
   ReviewerRequestResponse,
   Session,
   SheetSummary,
@@ -93,6 +104,7 @@ import type {
   SnapshotReceipt,
   SnapshotSheetHistoryResponse,
   SnapshotSummary,
+  SubmissionCommentResponse,
   SubmissionFindingsGenerationRunsResponse,
   SubmissionFindingsGenerationStatusResponse,
   SubmissionReceipt,
@@ -106,6 +118,7 @@ import type {
   User,
   WarmupResult,
   WarmupStatus,
+  WithdrawReviewerRequestBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -5089,6 +5102,217 @@ export const useUpdateMyProfile = <
 };
 
 /**
+ * Task #432 — architect-wide in-app notification surface for the
+design-tools side-nav inbox.
+
+Newest-first list of recent submission status changes and
+reviewer-requests across every engagement. Each row carries a
+`read` flag derived from the architect's persisted
+`lastReadAt` watermark, plus the response envelope includes an
+aggregate `unreadCount` so the side-nav badge can render
+without a follow-up call.
+
+Architect-only — anonymous and agent callers get a 401. The
+`lastReadAt` watermark is per-requestor, persisted in
+`architect_notification_reads` keyed by
+`req.session.requestor.id`.
+
+ * @summary List the architect's recent inbox notifications
+ */
+export const getListMyNotificationsUrl = (
+  params?: ListMyNotificationsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/me/notifications?${stringifiedParams}`
+    : `/api/me/notifications`;
+};
+
+export const listMyNotifications = async (
+  params?: ListMyNotificationsParams,
+  options?: RequestInit,
+): Promise<ListNotificationsResponse> => {
+  return customFetch<ListNotificationsResponse>(
+    getListMyNotificationsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListMyNotificationsQueryKey = (
+  params?: ListMyNotificationsParams,
+) => {
+  return [`/api/me/notifications`, ...(params ? [params] : [])] as const;
+};
+
+export const getListMyNotificationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMyNotifications>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListMyNotificationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMyNotifications>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListMyNotificationsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMyNotifications>>
+  > = ({ signal }) =>
+    listMyNotifications(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMyNotifications>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMyNotificationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMyNotifications>>
+>;
+export type ListMyNotificationsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the architect's recent inbox notifications
+ */
+
+export function useListMyNotifications<
+  TData = Awaited<ReturnType<typeof listMyNotifications>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListMyNotificationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMyNotifications>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMyNotificationsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Task #432 — sets `architect_notification_reads.last_read_at`
+for the calling architect to "now". Subsequent
+`GET /me/notifications` calls report `unreadCount: 0` and
+flip every existing item to `read: true` until a fresh event
+lands.
+
+Idempotent — calling twice in quick succession just bumps the
+watermark twice. No request body is required.
+
+ * @summary Bump the architect's "last viewed inbox" watermark
+ */
+export const getMarkMyNotificationsReadUrl = () => {
+  return `/api/me/notifications/mark-read`;
+};
+
+export const markMyNotificationsRead = async (
+  options?: RequestInit,
+): Promise<MarkNotificationsReadResponse> => {
+  return customFetch<MarkNotificationsReadResponse>(
+    getMarkMyNotificationsReadUrl(),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getMarkMyNotificationsReadMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markMyNotificationsRead>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof markMyNotificationsRead>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["markMyNotificationsRead"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof markMyNotificationsRead>>,
+    void
+  > = () => {
+    return markMyNotificationsRead(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MarkMyNotificationsReadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof markMyNotificationsRead>>
+>;
+
+export type MarkMyNotificationsReadMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Bump the architect's "last viewed inbox" watermark
+ */
+export const useMarkMyNotificationsRead = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markMyNotificationsRead>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof markMyNotificationsRead>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getMarkMyNotificationsReadMutationOptions(options));
+};
+
+/**
  * Returns whatever `req.session` the server has attached for the
 caller. Today this is derived from the dev `pr_session` cookie
 / `x-requestor` / `x-permissions` header overrides outside
@@ -6180,6 +6404,319 @@ export const usePromoteReviewerAnnotations = <
 };
 
 /**
+ * Returns every comment row anchored to the submission, in
+oldest-first chronological order so the thread reads
+top-to-bottom like a chat transcript. The thread is the
+reply surface for the seed reviewer comment carried on the
+`submissions.reviewer_comment` field — the seed itself is NOT
+repeated in this response.
+
+Both reviewer (plan-review) and architect (design-tools)
+callers may read. The endpoint requires `audience: "internal"`
+— both surfaces run under this audience today, so a single
+gate covers both. The response carries `authorRole` per row
+so the UI can color-code reviewer vs architect entries
+without a follow-up lookup.
+
+ * @summary List the reviewer↔architect comment thread for a submission
+ */
+export const getListSubmissionCommentsUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/comments`;
+};
+
+export const listSubmissionComments = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<ListSubmissionCommentsResponse> => {
+  return customFetch<ListSubmissionCommentsResponse>(
+    getListSubmissionCommentsUrl(submissionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListSubmissionCommentsQueryKey = (submissionId: string) => {
+  return [`/api/submissions/${submissionId}/comments`] as const;
+};
+
+export const getListSubmissionCommentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSubmissionComments>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionComments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListSubmissionCommentsQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSubmissionComments>>
+  > = ({ signal }) =>
+    listSubmissionComments(submissionId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSubmissionComments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSubmissionCommentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSubmissionComments>>
+>;
+export type ListSubmissionCommentsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the reviewer↔architect comment thread for a submission
+ */
+
+export function useListSubmissionComments<
+  TData = Awaited<ReturnType<typeof listSubmissionComments>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionComments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSubmissionCommentsQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Inserts a new comment row under the submission. The body
+carries the `authorRole` field — `architect` from
+design-tools, `reviewer` from plan-review — which the route
+records verbatim alongside the session-bound author id.
+
+Both audiences may post; the endpoint requires `audience:
+"internal"`. The comment row is plain text (no threading,
+no promotion concept); the response splices the new row
+back into the same envelope shape `GET` returns so the FE
+can append without a follow-up fetch.
+
+ * @summary Post a reply into a submission's comment thread
+ */
+export const getCreateSubmissionCommentUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/comments`;
+};
+
+export const createSubmissionComment = async (
+  submissionId: string,
+  createSubmissionCommentBody: CreateSubmissionCommentBody,
+  options?: RequestInit,
+): Promise<SubmissionCommentResponse> => {
+  return customFetch<SubmissionCommentResponse>(
+    getCreateSubmissionCommentUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createSubmissionCommentBody),
+    },
+  );
+};
+
+export const getCreateSubmissionCommentMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionComment>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionCommentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createSubmissionComment>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionCommentBody> },
+  TContext
+> => {
+  const mutationKey = ["createSubmissionComment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createSubmissionComment>>,
+    { submissionId: string; data: BodyType<CreateSubmissionCommentBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return createSubmissionComment(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateSubmissionCommentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createSubmissionComment>>
+>;
+export type CreateSubmissionCommentMutationBody =
+  BodyType<CreateSubmissionCommentBody>;
+export type CreateSubmissionCommentMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Post a reply into a submission's comment thread
+ */
+export const useCreateSubmissionComment = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionComment>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionCommentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createSubmissionComment>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionCommentBody> },
+  TContext
+> => {
+  return useMutation(getCreateSubmissionCommentMutationOptions(options));
+};
+
+/**
+ * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
+finding the AI engine missed without re-running generation.
+Persists with `status="ai-produced"` (so accept/reject/override
+work the same as engine rows), `confidence=1.0`, and a
+reviewer-attributed actor on `reviewerStatusBy` so the wire
+shape is consistent with the AI surface — the FE distinguishes
+manual rows by the `reviewerStatusBy.kind === "user"` actor on
+an otherwise-untouched row.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Manually add a reviewer-authored finding to a submission
+ */
+export const getCreateSubmissionFindingUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/findings`;
+};
+
+export const createSubmissionFinding = async (
+  submissionId: string,
+  createSubmissionFindingBody: CreateSubmissionFindingBody,
+  options?: RequestInit,
+): Promise<FindingResponse> => {
+  return customFetch<FindingResponse>(
+    getCreateSubmissionFindingUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createSubmissionFindingBody),
+    },
+  );
+};
+
+export const getCreateSubmissionFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionFinding>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createSubmissionFinding>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionFindingBody> },
+  TContext
+> => {
+  const mutationKey = ["createSubmissionFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createSubmissionFinding>>,
+    { submissionId: string; data: BodyType<CreateSubmissionFindingBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return createSubmissionFinding(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateSubmissionFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createSubmissionFinding>>
+>;
+export type CreateSubmissionFindingMutationBody =
+  BodyType<CreateSubmissionFindingBody>;
+export type CreateSubmissionFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Manually add a reviewer-authored finding to a submission
+ */
+export const useCreateSubmissionFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionFinding>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createSubmissionFinding>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionFindingBody> },
+  TContext
+> => {
+  return useMutation(getCreateSubmissionFindingMutationOptions(options));
+};
+
+/**
  * Returns the current set of findings for a submission, newest
 first, after every reviewer mutation has been applied. The list
 includes overridden originals (status `overridden` with
@@ -6914,10 +7451,147 @@ export const useOverrideFinding = <
 };
 
 /**
+ * Cross-engagement reviewer Inbox feed (Reviewer V1-B / Task
+#426). Returns the slice of `submissions` rows whose `status`
+matches the requested filter, joined to their parent
+engagement's metadata (`name`, `jurisdiction`, `address`) so
+the Plan Review Inbox can render a row per submission without
+a follow-up `GET /engagements/{id}` per row.
+
+Reviewer-only (`session.audience === "internal"`). Non-reviewer
+callers receive 403 with the
+`reviewer_queue_requires_internal_audience` error code; the
+gate mirrors `reviewerAnnotations` / `reviewerRequests`.
+
+The default filter is `pending,corrections_requested` — the
+two states a reviewer needs to act on. Pass `?status=` with a
+comma-separated subset of `SubmissionStatus` values to widen
+the cut (e.g. `?status=pending,corrections_requested,rejected`
+for a "what was just rejected" tab). An unrecognized status
+value is rejected with 400 rather than silently ignored so a
+typo does not return a misleading queue.
+
+Items are ordered by `submittedAt` DESC so the freshest
+package is at the top — matches the existing per-engagement
+list contract (`GET /engagements/{id}/submissions`).
+
+`counts` accompanies the items as a denormalized roll-up so
+the page's KPI strip and "X in review · Y awaiting AI ·
+Z rejected" header can render off the same response payload
+without a second round trip. Counts are computed *across the
+full submissions table* (not just the filtered slice) so the
+strip stays meaningful regardless of how the caller narrowed
+`status`.
+
+ * @summary List submissions awaiting reviewer attention across every engagement
+ */
+export const getListReviewerQueueUrl = (params?: ListReviewerQueueParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reviewer/queue?${stringifiedParams}`
+    : `/api/reviewer/queue`;
+};
+
+export const listReviewerQueue = async (
+  params?: ListReviewerQueueParams,
+  options?: RequestInit,
+): Promise<ReviewerQueueResponse> => {
+  return customFetch<ReviewerQueueResponse>(getListReviewerQueueUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListReviewerQueueQueryKey = (
+  params?: ListReviewerQueueParams,
+) => {
+  return [`/api/reviewer/queue`, ...(params ? [params] : [])] as const;
+};
+
+export const getListReviewerQueueQueryOptions = <
+  TData = Awaited<ReturnType<typeof listReviewerQueue>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListReviewerQueueParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listReviewerQueue>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListReviewerQueueQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listReviewerQueue>>
+  > = ({ signal }) => listReviewerQueue(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listReviewerQueue>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListReviewerQueueQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listReviewerQueue>>
+>;
+export type ListReviewerQueueQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List submissions awaiting reviewer attention across every engagement
+ */
+
+export function useListReviewerQueue<
+  TData = Awaited<ReturnType<typeof listReviewerQueue>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListReviewerQueueParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listReviewerQueue>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListReviewerQueueQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * Returns reviewer-requests filed against the engagement,
-newest-first by `requestedAt`. Architect-only — the endpoint
-requires the `architect` audience and 403s any non-architect
-caller. Drives the architect-side `ReviewerRequestsStrip`.
+newest-first by `requestedAt`. Architect AND reviewer audiences
+can both read this list — architect drives the
+`ReviewerRequestsStrip` open queue, reviewer (Task #429) binds
+the three Request-Refresh affordances to a "Refresh requested"
+pending state so a target with an open request disables the
+affordance rather than letting the reviewer file a duplicate.
+403s any other audience (e.g. agent traffic).
+
+Mutations stay split: only reviewers can create
+(`POST /engagements/{id}/reviewer-requests`) and only architects
+can dismiss (`POST /reviewer-requests/{id}/dismiss`).
 
 The optional `status` filter narrows the result to one
 lifecycle state. The strip queries `?status=pending` to render
@@ -7166,6 +7840,124 @@ export const useCreateEngagementReviewerRequest = <
 };
 
 /**
+ * Cross-engagement read for the reviewer-side "Outstanding
+Requests" page. Returns reviewer-requests authored by the
+*calling* reviewer — ownership is enforced server-side by
+filtering on the `requested_by` actor envelope against the
+session requestor; the client cannot widen the scope.
+
+Reviewer-only: requires the `internal` audience and 403s any
+non-reviewer caller. Newest-first by `requestedAt`, joined
+with each target engagement's id/name/jurisdiction.
+
+Status filter: defaults to `pending` when omitted. Pass
+`status=all` to return every lifecycle state, or one of the
+three specific states (`pending` / `dismissed` / `resolved`)
+to restrict the result.
+
+ * @summary List the calling reviewer's own reviewer-requests, across every engagement
+ */
+export const getListMyReviewerRequestsUrl = (
+  params?: ListMyReviewerRequestsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reviewer-requests?${stringifiedParams}`
+    : `/api/reviewer-requests`;
+};
+
+export const listMyReviewerRequests = async (
+  params?: ListMyReviewerRequestsParams,
+  options?: RequestInit,
+): Promise<ListMyReviewerRequestsResponse> => {
+  return customFetch<ListMyReviewerRequestsResponse>(
+    getListMyReviewerRequestsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListMyReviewerRequestsQueryKey = (
+  params?: ListMyReviewerRequestsParams,
+) => {
+  return [`/api/reviewer-requests`, ...(params ? [params] : [])] as const;
+};
+
+export const getListMyReviewerRequestsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMyReviewerRequests>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListMyReviewerRequestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMyReviewerRequests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListMyReviewerRequestsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMyReviewerRequests>>
+  > = ({ signal }) =>
+    listMyReviewerRequests(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMyReviewerRequests>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMyReviewerRequestsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMyReviewerRequests>>
+>;
+export type ListMyReviewerRequestsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the calling reviewer's own reviewer-requests, across every engagement
+ */
+
+export function useListMyReviewerRequests<
+  TData = Awaited<ReturnType<typeof listMyReviewerRequests>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListMyReviewerRequestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMyReviewerRequests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMyReviewerRequestsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * Architect-side explicit dismissal of a pending reviewer-request.
 Captures the architect's reason for not honoring the ask
 (`dismissalReason`) and emits a
@@ -7268,6 +8060,121 @@ export const useDismissReviewerRequest = <
   TContext
 > => {
   return useMutation(getDismissReviewerRequestMutationOptions(options));
+};
+
+/**
+ * Reviewer-side retract path (Task #443). Lets the *original
+requester* clear their own outstanding ask without an
+architect context-switch — back-end mirror of the architect
+dismiss endpoint, but reserved to the row's author and gated
+on the reviewer audience.
+
+Stamps `withdrawnBy` / `withdrawnAt` (and optional
+`withdrawalReason` if the caller supplies one), flips
+`status` to `withdrawn`, and emits a
+`reviewer-request.<kind>.withdrawn` event anchored to the
+row. The `withdrawn` lifecycle event is deliberately distinct
+from the architect-side `.dismissed` event so the engagement
+timeline can tell apart "architect declined" from "reviewer
+changed their mind".
+
+Idempotent in spirit — withdrawing an already-withdrawn row
+returns the existing envelope without re-emitting an event.
+409s on `dismissed` (architect already closed the ask) and on
+`resolved` (a domain action already implicitly closed it).
+
+Reviewer-only: requires the `internal` audience and 403s any
+non-reviewer caller. Author-only: 403s when the calling
+reviewer is not the row's `requestedBy.id`.
+
+ * @summary Withdraw the caller's own pending reviewer-request
+ */
+export const getWithdrawReviewerRequestUrl = (id: string) => {
+  return `/api/reviewer-requests/${id}/withdraw`;
+};
+
+export const withdrawReviewerRequest = async (
+  id: string,
+  withdrawReviewerRequestBody: WithdrawReviewerRequestBody,
+  options?: RequestInit,
+): Promise<ReviewerRequestResponse> => {
+  return customFetch<ReviewerRequestResponse>(
+    getWithdrawReviewerRequestUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(withdrawReviewerRequestBody),
+    },
+  );
+};
+
+export const getWithdrawReviewerRequestMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+    TError,
+    { id: string; data: BodyType<WithdrawReviewerRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+  TError,
+  { id: string; data: BodyType<WithdrawReviewerRequestBody> },
+  TContext
+> => {
+  const mutationKey = ["withdrawReviewerRequest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+    { id: string; data: BodyType<WithdrawReviewerRequestBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return withdrawReviewerRequest(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type WithdrawReviewerRequestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof withdrawReviewerRequest>>
+>;
+export type WithdrawReviewerRequestMutationBody =
+  BodyType<WithdrawReviewerRequestBody>;
+export type WithdrawReviewerRequestMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Withdraw the caller's own pending reviewer-request
+ */
+export const useWithdrawReviewerRequest = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+    TError,
+    { id: string; data: BodyType<WithdrawReviewerRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+  TError,
+  { id: string; data: BodyType<WithdrawReviewerRequestBody> },
+  TContext
+> => {
+  return useMutation(getWithdrawReviewerRequestMutationOptions(options));
 };
 
 /**
@@ -7655,6 +8562,126 @@ export const useCancelRender = <
 > => {
   return useMutation(getCancelRenderMutationOptions(options));
 };
+
+/**
+ * Streams the durable mirrored bytes for a single
+`render_outputs` row. mnml's CDN URLs expire within minutes;
+this endpoint is the only stable preview/download surface.
+`?download=1` adds a `Content-Disposition: attachment` header
+so the browser saves rather than navigates inline.
+Architect-audience-only.
+
+ * @summary Stream a render output file
+ */
+export const getGetRenderOutputFileUrl = (
+  id: string,
+  params?: GetRenderOutputFileParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/render-outputs/${id}/file?${stringifiedParams}`
+    : `/api/render-outputs/${id}/file`;
+};
+
+export const getRenderOutputFile = async (
+  id: string,
+  params?: GetRenderOutputFileParams,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetRenderOutputFileUrl(id, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRenderOutputFileQueryKey = (
+  id: string,
+  params?: GetRenderOutputFileParams,
+) => {
+  return [
+    `/api/render-outputs/${id}/file`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetRenderOutputFileQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRenderOutputFile>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: GetRenderOutputFileParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRenderOutputFile>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetRenderOutputFileQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRenderOutputFile>>
+  > = ({ signal }) =>
+    getRenderOutputFile(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRenderOutputFile>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRenderOutputFileQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRenderOutputFile>>
+>;
+export type GetRenderOutputFileQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Stream a render output file
+ */
+
+export function useGetRenderOutputFile<
+  TData = Awaited<ReturnType<typeof getRenderOutputFile>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: GetRenderOutputFileParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRenderOutputFile>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRenderOutputFileQueryOptions(id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Three buckets:

@@ -59,6 +59,7 @@ vi.mock("@workspace/api-client-react", async () => {
     await vi.importActual<typeof import("@workspace/api-client-react")>(
       "@workspace/api-client-react",
     );
+  const { useQuery } = await import("@tanstack/react-query");
   return {
     ...actual,
     useRetryBriefingSourceConversion: () => ({
@@ -84,6 +85,31 @@ vi.mock("@workspace/api-client-react", async () => {
       id: string,
       params: unknown,
     ) => ["listEngagementBriefingSources", id, params],
+    // Task #429 — reviewer-requests pending lookup. The helper hook
+    // calls `useListEngagementReviewerRequests` with a status=pending
+    // filter; we route it through react-query against the cache so a
+    // test can pre-seed `queryClient.setQueryData(...)` to flip the
+    // pending state without hitting the network.
+    getListEngagementReviewerRequestsQueryKey: (
+      engagementId: string,
+      params?: Record<string, unknown>,
+    ) => ["listEngagementReviewerRequests", engagementId, params] as const,
+    useListEngagementReviewerRequests: (
+      engagementId: string,
+      params?: Record<string, unknown>,
+      opts?: { query?: { queryKey?: readonly unknown[]; enabled?: boolean } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          ([
+            "listEngagementReviewerRequests",
+            engagementId,
+            params,
+          ] as const),
+        queryFn: async () => ({ requests: [] as unknown[] }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
   };
 });
 
@@ -782,5 +808,87 @@ describe("BriefingSourceRow — readOnly mode (Task #316)", () => {
     expect(
       screen.getByTestId(`briefing-source-last-refreshed-${source.id}`),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Task #429 — reviewer-side Request-Refresh affordance pending-state
+ * binding. The row now reads from the per-engagement reviewer-
+ * requests list query and disables its affordance when a matching
+ * `(refresh-briefing-source, source.id)` row is already pending.
+ *
+ * Uses `fema-nfhl-flood-zone` because that's the layerKind the
+ * federal freshness evaluator owns — the affordance gate requires
+ * `evaluateRowFreshness(...).verdict.isStale === true`, which only
+ * fires when the row's layerKind matches a tier evaluator AND the
+ * snapshot date crosses the per-tier threshold. A 2020 snapshot
+ * date trips that threshold regardless of test wall-clock time.
+ */
+describe("BriefingSourceRow — reviewer Request-Refresh pending gate (Task #429)", () => {
+  const STALE_SNAPSHOT_DATE = "2020-01-01T00:00:00.000Z";
+
+  it("renders the affordance enabled when no pending reviewer-request matches the source", async () => {
+    const source = mkSource({
+      id: "src-fed-pending-none",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:nfhl-flood-zone (FEMA NFHL)",
+      snapshotDate: STALE_SNAPSHOT_DATE,
+    });
+    renderRow(source, "eng-1", { readOnly: true, audience: "internal" });
+    const btn = await screen.findByTestId(
+      `request-refresh-affordance-${source.id}`,
+    );
+    expect(btn).toBeEnabled();
+    expect(btn).not.toHaveAttribute("data-pending");
+    expect(btn.textContent).toContain("Request refresh");
+  });
+
+  it("disables the affordance and re-labels to 'Refresh requested' when a matching pending request exists", async () => {
+    const source = mkSource({
+      id: "src-fed-pending-yes",
+      layerKind: "fema-nfhl-flood-zone",
+      sourceKind: "federal-adapter",
+      provider: "fema:nfhl-flood-zone (FEMA NFHL)",
+      snapshotDate: STALE_SNAPSHOT_DATE,
+    });
+    // Seed react-query's cache up-front so the row's first paint
+    // already observes the pending row — same shape the helper hook
+    // queries (status=pending filter on the per-engagement endpoint).
+    const client = makeQueryClient();
+    client.setQueryData(
+      ["listEngagementReviewerRequests", "eng-1", { status: "pending" }],
+      {
+        requests: [
+          {
+            id: "rr-1",
+            engagementId: "eng-1",
+            requestKind: "refresh-briefing-source",
+            targetEntityType: "briefing-source",
+            targetEntityId: source.id,
+            status: "pending",
+            reason: "stale",
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      },
+    );
+    const node: ReactNode = (
+      <QueryClientProvider client={client}>
+        <BriefingSourceRow
+          engagementId="eng-1"
+          source={source as unknown as EngagementBriefingSource}
+          readOnly
+          audience="internal"
+        />
+      </QueryClientProvider>
+    );
+    render(node);
+    const btn = await screen.findByTestId(
+      `request-refresh-affordance-${source.id}`,
+    );
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("data-pending", "true");
+    expect(btn.textContent).toContain("Refresh requested");
   });
 });

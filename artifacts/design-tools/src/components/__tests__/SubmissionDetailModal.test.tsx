@@ -815,6 +815,87 @@ describe("SubmissionDetailModal", () => {
     },
   );
 
+  it("renders the reviewer comment inline when present", () => {
+    setSummary({
+      data: {
+        prose: "x",
+        typed: {
+          id: "sub-1",
+          found: true,
+          submittedAt: "2026-04-30T12:00:00.000Z",
+          note: "Permit set v2.",
+          status: "corrections_requested",
+          reviewerComment: "Update egress widths on A2.04 and resubmit.",
+          respondedAt: "2026-04-30T13:00:00.000Z",
+          responseRecordedAt: "2026-04-30T13:00:00.000Z",
+        },
+        keyMetrics: [],
+        relatedAtoms: [],
+        historyProvenance: {
+          latestEventId: "",
+          latestEventAt: "2026-04-30T13:00:00.000Z",
+        },
+        scopeFiltered: false,
+      },
+    });
+    setHistory({ data: { events: [] } });
+
+    renderModal(
+      <SubmissionDetailModal
+        submissionId="sub-1"
+        engagementId="eng-1"
+        onClose={() => {}}
+      />,
+    );
+
+    const comment = screen.getByTestId("submission-reviewer-comment-sub-1");
+    expect(comment.textContent).toContain("Update egress widths on A2.04");
+    expect(
+      screen.getByTestId("submission-detail-reviewer-responded-at")
+        .textContent,
+    ).toContain("Responded");
+  });
+
+  it("omits the reviewer comment section when none was recorded", () => {
+    setSummary({
+      data: {
+        prose: "x",
+        typed: {
+          id: "sub-1",
+          found: true,
+          submittedAt: "2026-04-30T12:00:00.000Z",
+          note: "Permit set v2.",
+          status: "pending",
+          reviewerComment: null,
+          respondedAt: null,
+        },
+        keyMetrics: [],
+        relatedAtoms: [],
+        historyProvenance: {
+          latestEventId: "",
+          latestEventAt: "2026-04-30T12:00:00.000Z",
+        },
+        scopeFiltered: false,
+      },
+    });
+    setHistory({ data: { events: [] } });
+
+    renderModal(
+      <SubmissionDetailModal
+        submissionId="sub-1"
+        engagementId="eng-1"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(
+      screen.queryByTestId("submission-reviewer-comment-sub-1"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("submission-detail-reviewer-responded-at"),
+    ).toBeNull();
+  });
+
   it("calls onClose when the close button is pressed", () => {
     setSummary({
       data: {

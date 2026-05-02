@@ -14,6 +14,11 @@ export { SubmissionRecordedBanner } from "./components/SubmissionRecordedBanner"
 export type { SubmissionRecordedBannerProps } from "./components/SubmissionRecordedBanner";
 export { ReviewerComment } from "./components/ReviewerComment";
 export type { ReviewerCommentProps } from "./components/ReviewerComment";
+// Task #431 — reviewer↔architect inline reply thread anchored to a
+// submission. Audience-agnostic at the component layer; the parent
+// surface decides which `authorRole` to tag posts with.
+export { SubmissionCommentThread } from "./components/SubmissionCommentThread";
+export type { SubmissionCommentThreadProps } from "./components/SubmissionCommentThread";
 export { ReviewerAnnotationAffordance } from "./components/ReviewerAnnotationAffordance";
 export type { ReviewerAnnotationAffordanceProps } from "./components/ReviewerAnnotationAffordance";
 export { ReviewerAnnotationPanel } from "./components/ReviewerAnnotationPanel";
@@ -30,6 +35,26 @@ export { RequestRefreshDialog } from "./components/RequestRefreshDialog";
 export type { RequestRefreshDialogProps } from "./components/RequestRefreshDialog";
 export { RequestRefreshAffordance } from "./components/RequestRefreshAffordance";
 export type { RequestRefreshAffordanceProps } from "./components/RequestRefreshAffordance";
+
+// Task #429 — shared helper hook so the three reviewer-side
+// Request-Refresh affordances bind to the same per-engagement
+// reviewer-requests list query and disable themselves on a matching
+// pending row. See `lib/reviewerRequestPending.ts`.
+export { useReviewerRequestIsPending } from "./lib/reviewerRequestPending";
+
+// Shared mnml.ai render surface. RenderCard + RenderGallery are
+// audience-agnostic; RenderKickoffDialog is architect-only by
+// deployment context (only the design-tools Renders tab mounts it).
+export {
+  RenderCard,
+  isRenderInFlight,
+  isRenderCancellable,
+} from "./components/RenderCard";
+export type { RenderCardProps } from "./components/RenderCard";
+export { RenderGallery } from "./components/RenderGallery";
+export type { RenderGalleryProps } from "./components/RenderGallery";
+export { RenderKickoffDialog } from "./components/RenderKickoffDialog";
+export type { RenderKickoffDialogProps } from "./components/RenderKickoffDialog";
 
 // Briefing divergences — shared by design-tools (architect surface)
 // and plan-review (read-only reviewer surface). Promoted to portal-ui
@@ -147,6 +172,35 @@ export {
 export { EngagementContextPanel } from "./components/EngagementContextPanel";
 export type { EngagementContextPanelProps } from "./components/EngagementContextPanel";
 
+// Headline Parcel & Zoning summary card on the Site tab — Task #424.
+// Replaces the long-standing "Coming soon" placeholder with the same
+// parcel-id / zoning / overlays / provenance the briefing surfaces.
+export { ParcelZoningCard } from "./components/ParcelZoningCard";
+export type { ParcelZoningCardProps } from "./components/ParcelZoningCard";
+
+// Reviewer-side low-confidence chip — extracted in Task #427 so the
+// FindingsTab row in plan-review and any future architect-preview
+// surface render the identical "Low conf" pill against the same
+// `Model confidence NN%` tooltip copy.
+export { LowConfidencePill } from "./components/LowConfidencePill";
+export type { LowConfidencePillProps } from "./components/LowConfidencePill";
+
+// Architect-side AIR-1 findings surfaces (Task #421 / V1-1 / V1-7).
+export {
+  FindingsList,
+  compareFindings,
+  countUnaddressedFindings,
+  isFindingAddressed,
+  isFindingReviewerPromoted,
+  sortFindings,
+} from "./components/FindingsList";
+export type { FindingsListProps } from "./components/FindingsList";
+export {
+  FindingDetailPanel,
+  ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
+} from "./components/FindingDetailPanel";
+export type { FindingDetailPanelProps } from "./components/FindingDetailPanel";
+
 export {
   initTheme,
   setTheme,
@@ -157,6 +211,12 @@ export {
 
 export {
   useSidebarState,
+  LEFT_SIDEBAR_DEFAULT_WIDTH,
+  LEFT_SIDEBAR_MIN_WIDTH,
+  LEFT_SIDEBAR_MAX_WIDTH,
+  RIGHT_SIDEBAR_DEFAULT_WIDTH,
+  RIGHT_SIDEBAR_MIN_WIDTH,
+  RIGHT_SIDEBAR_MAX_WIDTH,
   type SidebarStateValue,
 } from "./lib/sidebar-state";
 

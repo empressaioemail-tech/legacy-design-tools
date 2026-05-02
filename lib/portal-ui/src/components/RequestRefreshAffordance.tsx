@@ -29,6 +29,16 @@ import { RequestRefreshDialog } from "./RequestRefreshDialog";
  *     (the parcel-briefing atom anchors atom-history events on
  *     engagementId; the reviewer-request must match for the
  *     implicit-resolve hook to fire).
+ *
+ * Task #429 — when the parent passes `pending={true}` (i.e. the
+ * per-engagement reviewer-requests list already carries a `pending`
+ * row matching this `(requestKind, targetEntityId)` pair) the
+ * button disables itself and re-labels to "Refresh requested".
+ * This prevents the reviewer from filing a duplicate while the
+ * architect has the open ask in front of them. The pending lookup
+ * lives at the parent so multiple call sites against the same
+ * engagement share one query (helper hook
+ * `useReviewerRequestIsPending` in `lib/reviewerRequestPending.ts`).
  */
 export interface RequestRefreshAffordanceProps {
   engagementId: string;
@@ -46,6 +56,16 @@ export interface RequestRefreshAffordanceProps {
    * mirroring the architect-side "Refreshed just now" pill.
    */
   onCreated?: (request: ReviewerRequest) => void;
+  /**
+   * Task #429 — when `true`, the engagement already has a pending
+   * reviewer-request matching `(requestKind, targetEntityId)`. The
+   * button renders disabled with a "Refresh requested" label and a
+   * `data-pending="true"` attribute so e2e tests and CSS can pin
+   * the bound state. Defaults to `false` so the architect-side and
+   * other callers that don't bind to the list see the existing
+   * one-click "Request refresh" behavior.
+   */
+  pending?: boolean;
 }
 
 export function RequestRefreshAffordance({
@@ -55,6 +75,7 @@ export function RequestRefreshAffordance({
   targetEntityId,
   targetLabel,
   onCreated,
+  pending = false,
 }: RequestRefreshAffordanceProps) {
   const [open, setOpen] = useState(false);
   return (
@@ -62,17 +83,30 @@ export function RequestRefreshAffordance({
       <button
         type="button"
         className="sc-btn-ghost"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          if (pending) return;
+          setOpen(true);
+        }}
+        disabled={pending}
+        aria-disabled={pending || undefined}
         data-testid={`request-refresh-affordance-${targetEntityId}`}
         data-request-kind={requestKind}
+        data-pending={pending ? "true" : undefined}
+        title={
+          pending
+            ? "A refresh request is already pending for this target. The architect will resolve or dismiss it."
+            : undefined
+        }
         style={{
           fontSize: 11,
           padding: "2px 8px",
           borderRadius: 4,
           alignSelf: "flex-start",
+          opacity: pending ? 0.6 : 1,
+          cursor: pending ? "not-allowed" : undefined,
         }}
       >
-        Request refresh
+        {pending ? "Refresh requested" : "Request refresh"}
       </button>
       <RequestRefreshDialog
         engagementId={engagementId}
@@ -80,7 +114,7 @@ export function RequestRefreshAffordance({
         targetEntityType={targetEntityType}
         targetEntityId={targetEntityId}
         targetLabel={targetLabel}
-        isOpen={open}
+        isOpen={open && !pending}
         onClose={() => setOpen(false)}
         onCreated={(req) => {
           onCreated?.(req);

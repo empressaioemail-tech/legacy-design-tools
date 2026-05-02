@@ -74,7 +74,10 @@ import {
 import {
   mirrorRenderOutput,
   RenderMirrorError,
+  resolveRenderBucketName,
 } from "../lib/rendersObjectMirror";
+import { objectStorageClient } from "../lib/objectStorage";
+import { Readable } from "node:stream";
 import { runRendersSweep } from "../lib/rendersSweep";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1186,10 +1189,102 @@ router.get("/renders/:id", async (req: Request, res: Response) => {
       durationSeconds: o.durationSeconds,
       mirroredObjectKey: o.mirroredObjectKey,
       thumbnailUrl: o.thumbnailUrl,
+      previewUrl: o.mirroredObjectKey ? `/api/render-outputs/${o.id}/file` : null,
+      downloadUrl: o.mirroredObjectKey
+        ? `/api/render-outputs/${o.id}/file?download=1`
+        : null,
       seed: o.seed,
     })),
   });
 });
+
+/**
+ * GET /api/render-outputs/:id/file — stream the durable mirrored
+ * object back to the architect. `?download=1` adds a
+ * Content-Disposition: attachment header so the browser saves rather
+ * than navigates. The route is the only durable preview/download
+ * surface; mnml's CDN URL expires within minutes.
+ */
+router.get(
+  "/render-outputs/:id/file",
+  async (req: Request, res: Response) => {
+    if (requireArchitectAudience(req, res)) return;
+    const params = z
+      .object({ id: z.string().uuid() })
+      .safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "invalid_render_output_id" });
+      return;
+    }
+    const [row] = await db
+      .select()
+      .from(renderOutputs)
+      .where(eq(renderOutputs.id, params.data.id))
+      .limit(1);
+    if (!row || !row.mirroredObjectKey) {
+      res.status(404).json({ error: "render_output_not_found" });
+      return;
+    }
+    let bucketName: string;
+    try {
+      bucketName = resolveRenderBucketName();
+    } catch (err) {
+      req.log.error(
+        { err: (err as Error).message },
+        "render output file: bucket unresolved",
+      );
+      res.status(503).json({ error: "renders_storage_unavailable" });
+      return;
+    }
+    const file = objectStorageClient.bucket(bucketName).file(row.mirroredObjectKey);
+    const [exists] = await file.exists();
+    if (!exists) {
+      res.status(404).json({ error: "render_output_file_missing" });
+      return;
+    }
+    const [metadata] = await file.getMetadata();
+    const contentType =
+      (metadata.contentType as string | undefined) ?? contentTypeForFormat(row.format);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    if (metadata.size) res.setHeader("Content-Length", String(metadata.size));
+    if (req.query.download === "1") {
+      const ext = row.format || "bin";
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="render-${row.id}.${ext}"`,
+      );
+    }
+    const stream = file.createReadStream();
+    stream.on("error", (err) => {
+      req.log.error(
+        { err: err.message, key: row.mirroredObjectKey },
+        "render output file stream error",
+      );
+      if (!res.headersSent) {
+        res.status(502).json({ error: "render_output_stream_failed" });
+      } else {
+        res.destroy(err);
+      }
+    });
+    Readable.from(stream).pipe(res);
+  },
+);
+
+function contentTypeForFormat(format: string): string {
+  switch (format) {
+    case "png":
+      return "image/png";
+    case "jpg":
+      return "image/jpeg";
+    case "mp4":
+      return "video/mp4";
+    case "webm":
+      return "video/webm";
+    default:
+      return "application/octet-stream";
+  }
+}
 
 /**
  * GET /api/engagements/:id/renders — list. Newest first. No

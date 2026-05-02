@@ -18,3 +18,9 @@ id = "yAbGqGYkVrMNaWKO6ejPu"
 uri = "file://docs/replit-purge-phase-1a-preflight.md"
 type = "text"
 title = "Phase 1A Pre-flight — awaiting approval"
+
+[[outputs]]
+id = "II-cxeFrGupK8jST0G2Ds"
+uri = "file://attached_assets/ui-audit/UI-AUDIT.md"
+type = "text"
+title = "SmartCity OS — UI Audit"

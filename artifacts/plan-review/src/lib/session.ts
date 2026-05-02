@@ -58,6 +58,26 @@ export function useSessionUserId(): string | null {
   return requestor.id;
 }
 
+/**
+ * Resolve the current session's audience (`internal` for reviewers,
+ * `user` for architects, `ai` for agent calls). Returns `null` while
+ * the session is loading or the field is absent. Shares the same
+ * `Infinity` cache as `useSessionPermissions` to avoid double-fetch.
+ */
+export function useSessionAudience(): {
+  audience: "internal" | "user" | "ai" | null;
+  isLoading: boolean;
+} {
+  const { data, isLoading } = useGetSession({
+    query: {
+      queryKey: getGetSessionQueryKey(),
+      staleTime: Number.POSITIVE_INFINITY,
+      gcTime: Number.POSITIVE_INFINITY,
+    },
+  });
+  return { audience: data?.audience ?? null, isLoading };
+}
+
 export type PermissionStatus = "loading" | "granted" | "denied";
 
 /**

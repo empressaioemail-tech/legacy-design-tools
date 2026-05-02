@@ -30,6 +30,9 @@ export interface ReviewerRequest {
   dismissedBy: FindingActor | null;
   dismissedAt: Date | null;
   dismissalReason: string | null;
+  withdrawnBy: FindingActor | null;
+  withdrawnAt: Date | null;
+  withdrawalReason: string | null;
   resolvedAt: Date | null;
   triggeredActionEventId: string | null;
   createdAt: Date;

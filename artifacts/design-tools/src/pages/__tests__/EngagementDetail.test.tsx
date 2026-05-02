@@ -104,10 +104,35 @@ const hoisted = vi.hoisted(() => {
       reviewerComment: string | null;
       respondedAt: string | null;
     }>,
+    // Briefing payload consumed by the Site tab's `ParcelZoningCard`.
+    briefing: null as null | {
+      id: string;
+      engagementId: string;
+      createdAt: string;
+      updatedAt: string;
+      sources: Array<Record<string, unknown>>;
+      narrative: null;
+    },
   };
 });
 
 const submit = createMutationCapture();
+// Findings override mutation (Task #421 / V1-1 / V1-7) — captured so
+// the "Address with next revision" tests can assert the page wires
+// the row's text/severity/category through and stamps the
+// reviewer-comment marker the reviewer-side timeline expects.
+const overrideFinding = createMutationCapture<
+  unknown,
+  {
+    findingId: string;
+    data: {
+      text: string;
+      severity: string;
+      category: string;
+      reviewerComment: string;
+    };
+  }
+>();
 
 // useParams comes from wouter inside the page; hard-pin it to the
 // engagement id so we don't need a Router wrapper.
@@ -147,8 +172,20 @@ vi.mock("@workspace/site-context/client", () => ({
 // gated by `enabled: false` or rendered behind closed modals on the
 // initial paint, so a no-op stub is enough to keep the page from
 // crashing while we exercise the banner.
-vi.mock("@workspace/api-client-react", async () => {
+vi.mock("@workspace/api-client-react", async (importOriginal) => {
+  // Pull `useQuery` once at factory time so the per-render hook
+  // bodies below stay synchronous (an `await import` inside the
+  // hook itself would make it return a Promise instead of a
+  // QueryResult and crash the renderer).
+  const { useQuery } = await import("@tanstack/react-query");
+  // Spread the real module so any hook the page transitively
+  // imports — e.g. the new SiteContextTab pulled in by Task #437 —
+  // resolves without a per-test mock entry. The explicit overrides
+  // below replace just the hooks this suite needs to control.
+  const actual =
+    (await importOriginal()) as Record<string, unknown>;
   return {
+    ...actual,
     // Shared engagement-page hook bag (Task #398) — provides the
     // dozen identical `useGetEngagement` / `useListEngagements` /
     // `useGetSession` / `useGetSnapshot` / `useListEngagementSubmissions`
@@ -167,6 +204,108 @@ vi.mock("@workspace/api-client-react", async () => {
     // options so the dialog's `onSubmitted` chain can be driven
     // synchronously from each test.
     useCreateEngagementSubmission: makeCapturingMutationHook(submit),
+    // Site-tab `ParcelZoningCard` reads the briefing via this hook.
+    getGetEngagementBriefingQueryKey: (id: string) =>
+      ["getEngagementBriefing", id] as const,
+    useGetEngagementBriefing: (
+      id: string,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["getEngagementBriefing", id] as const),
+        queryFn: async () =>
+          hoisted.briefing ? { briefing: hoisted.briefing } : null,
+        enabled: opts?.query?.enabled ?? true,
+      }),
+    // Findings tab (Task #421): capture the override mutation.
+    useOverrideFinding: makeCapturingMutationHook(overrideFinding),
+    // Filter chips (Task #436) consume the generated enums for the
+    // URL allow-list and chip labels — re-export the literal shape
+    // here so the page module's `Object.keys(FindingCategory)` /
+    // `hasOwnProperty(FindingSeverity, raw)` checks survive the mock.
+    FindingSeverity: {
+      blocker: "blocker",
+      concern: "concern",
+      advisory: "advisory",
+    } as const,
+    FindingCategory: {
+      setback: "setback",
+      height: "height",
+      coverage: "coverage",
+      egress: "egress",
+      use: "use",
+      "overlay-conflict": "overlay-conflict",
+      "divergence-related": "divergence-related",
+      other: "other",
+    } as const,
+    // Site Context tab hooks (Task #437) — the elementRef deep-link
+    // test mounts SiteContextTab, which pulls in the layer/BIM
+    // mutations + the briefing-runs list. None of them are exercised
+    // by the test, so a no-op stub returning the shape react-query
+    // expects is enough to keep the page from crashing.
+    useGenerateEngagementLayers: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    }),
+    usePushEngagementBimModel: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    }),
+    useResolveBimModelDivergence: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    }),
+    useListEngagementBriefingGenerationRuns: () =>
+      useQuery({
+        queryKey: ["listEngagementBriefingGenerationRuns"] as const,
+        queryFn: async () => [],
+        enabled: true,
+      }),
+    useGenerateEngagementBriefing: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    }),
+    useGetEngagementBriefingGenerationStatus: () =>
+      useQuery({
+        queryKey: ["getEngagementBriefingGenerationStatus"] as const,
+        queryFn: async () => null,
+        enabled: false,
+      }),
+    getGetEngagementBriefingGenerationStatusQueryKey: (id: string) =>
+      ["getEngagementBriefingGenerationStatus", id] as const,
+    useGetEngagementBimModel: () =>
+      useQuery({
+        queryKey: ["getEngagementBimModel"] as const,
+        queryFn: async () => null,
+        enabled: false,
+      }),
+    useGetBimModelRefresh: () =>
+      useQuery({
+        queryKey: ["getBimModelRefresh"] as const,
+        queryFn: async () => null,
+        enabled: false,
+      }),
+    getGetBimModelRefreshQueryKey: (id: string) =>
+      ["getBimModelRefresh", id] as const,
+    getListEngagementBriefingGenerationRunsQueryKey: (id: string) =>
+      ["listEngagementBriefingGenerationRuns", id] as const,
+    getListBimModelDivergencesQueryKey: (id: string) =>
+      ["listBimModelDivergences", id] as const,
+    useListBimModelDivergences: () =>
+      useQuery({
+        queryKey: ["listBimModelDivergences"] as const,
+        queryFn: async () => [],
+        enabled: false,
+      }),
   };
 });
 
@@ -191,9 +330,16 @@ function makeQueryClient() {
   });
 }
 
-function renderPage() {
+function renderPage(opts?: { seed?: (client: QueryClient) => void }) {
   const client = makeQueryClient();
   activeClient = client;
+  // Per-test seeding hook (Task #421) — runs BEFORE the page mounts
+  // so the findings-tab tests can populate the submissions list +
+  // findings cache before the page's queries fire. Without this, the
+  // badge query (`useListSubmissionFindings(latestSubmissionId)`)
+  // would still see `submissionsForBadge === undefined` on first
+  // paint and never enable, so no `data-testid` ever appears.
+  opts?.seed?.(client);
   // Seed the React Query cache with the initial engagement,
   // submissions list, session, and the AppShell's engagements list so
   // the page renders fully on the first paint — no async `findBy*`
@@ -209,6 +355,19 @@ function renderPage() {
   );
   client.setQueryData(["listEngagements"], [{ ...hoisted.engagement }]);
   client.setQueryData(["getSession"], { permissions: [] as string[] });
+  // Pre-seed the briefing cache so the Site-tab card paints
+  // synchronously on mount.
+  if (hoisted.briefing) {
+    client.setQueryData(["getEngagementBriefing", hoisted.engagement.id], {
+      briefing: hoisted.briefing,
+    });
+  }
+  // Pre-seed the renders list so the Renders tab's gallery skips
+  // its loading state on first paint when activated.
+  client.setQueryData(
+    ["listEngagementRenders", hoisted.engagement.id],
+    { items: [] },
+  );
   const node: ReactNode = (
     <QueryClientProvider client={client}>
       <EngagementDetail />
@@ -236,7 +395,9 @@ beforeEach(() => {
     revitDocumentPath: null,
   };
   hoisted.submissions = [];
+  hoisted.briefing = null;
   submit.reset();
+  overrideFinding.reset();
   // Reset URL state — the page reads the active tab from
   // `?tab=…` once on mount via `useState(() => readTabFromUrl())`,
   // so a leftover query string from a prior test would land us on
@@ -322,6 +483,115 @@ function gotoSubmissionsTab() {
   fireEvent.click(screen.getByRole("button", { name: "Submissions" }));
 }
 
+function gotoFindingsTab() {
+  fireEvent.click(screen.getByTestId("engagement-tab-findings"));
+}
+
+/** Convenience builder for `Finding` fixtures used by the findings-tab tests. */
+function findingFixture(
+  overrides: Partial<{
+    id: string;
+    submissionId: string;
+    severity: "blocker" | "concern" | "advisory";
+    category: string;
+    status: string;
+    text: string;
+    citations: unknown[];
+    confidence: number;
+    lowConfidence: boolean;
+    reviewerStatusBy: { kind: "user"; id: string; displayName: string } | null;
+    reviewerStatusChangedAt: string | null;
+    reviewerComment: string | null;
+    elementRef: string | null;
+    sourceRef: unknown;
+    aiGeneratedAt: string;
+    revisionOf: string | null;
+  }> = {},
+) {
+  return {
+    id: "finding:sub-latest:01",
+    submissionId: "sub-latest",
+    severity: "blocker" as const,
+    category: "egress",
+    status: "ai-produced",
+    text: "Door clearance fails at corridor.",
+    citations: [],
+    confidence: 0.9,
+    lowConfidence: false,
+    reviewerStatusBy: null,
+    reviewerStatusChangedAt: null,
+    reviewerComment: null,
+    elementRef: null,
+    sourceRef: null,
+    aiGeneratedAt: "2026-05-01T00:00:00Z",
+    revisionOf: null,
+    ...overrides,
+  };
+}
+
+function seedSubmissionsWithFindings(
+  findings: ReturnType<typeof findingFixture>[],
+): (client: QueryClient) => void {
+  return (client) => {
+    const subs = [
+      {
+        id: "sub-old",
+        submittedAt: "2026-04-01T00:00:00Z",
+        jurisdiction: "Boulder, CO",
+        note: null,
+        status: "approved" as const,
+        reviewerComment: null,
+        respondedAt: null,
+        responseRecordedAt: null,
+      },
+      {
+        id: "sub-latest",
+        submittedAt: "2026-05-01T00:00:00Z",
+        jurisdiction: "Boulder, CO",
+        note: null,
+        status: "pending" as const,
+        reviewerComment: null,
+        respondedAt: null,
+        responseRecordedAt: null,
+      },
+    ];
+    hoisted.submissions = subs;
+    client.setQueryData(
+      ["listEngagementSubmissions", hoisted.engagement.id],
+      subs.map((s) => ({ ...s })),
+    );
+    // Mirror the helper's getListSubmissionFindingsQueryKey shape.
+    client.setQueryData(["/api/submissions/sub-latest/findings"], {
+      findings,
+    });
+    client.setQueryData(["/api/submissions/sub-old/findings"], {
+      findings: [],
+    });
+  };
+}
+describe("EngagementDetail renders tab (Task #422)", () => {
+  it("renders the 'Renders' tab in the tab bar and mounts the gallery + new-render button when activated", () => {
+    renderPage();
+    const tabBtn = screen.getByRole("button", { name: "Renders" });
+    expect(tabBtn).toBeInTheDocument();
+    fireEvent.click(tabBtn);
+    expect(screen.getByTestId("renders-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("renders-tab-new-render")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("renders-gallery-empty"),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the kickoff dialog when 'New render' is clicked", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Renders" }));
+    fireEvent.click(screen.getByTestId("renders-tab-new-render"));
+    expect(
+      screen.getByTestId("render-kickoff-dialog"),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("EngagementDetail submission banner (Task #126)", () => {
   it("surfaces a 'just now' confirmation banner with the recorded jurisdiction after a successful submit", async () => {
     renderPage();
@@ -371,6 +641,34 @@ describe("EngagementDetail submission banner (Task #126)", () => {
     ).toBeInTheDocument();
   });
 
+  it("mounts cleanly under [data-theme=\"light\"] (Task #420 sanity)", () => {
+    document.documentElement.dataset.theme = "light";
+    try {
+      expect(() => renderPage()).not.toThrow();
+      expect(
+        screen.getByTestId("submit-jurisdiction-trigger"),
+      ).toBeInTheDocument();
+    } finally {
+      document.documentElement.dataset.theme = "dark";
+    }
+  });
+
+  it("renders the Findings tab between Submissions and Settings", () => {
+    renderPage();
+    const tabs = screen
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("data-testid"))
+      .filter(
+        (v): v is string => typeof v === "string" && v.startsWith("engagement-tab-"),
+      );
+    const sub = tabs.indexOf("engagement-tab-submissions");
+    const find = tabs.indexOf("engagement-tab-findings");
+    const settings = tabs.indexOf("engagement-tab-settings");
+    expect(sub).toBeGreaterThanOrEqual(0);
+    expect(find).toBe(sub + 1);
+    expect(settings).toBe(find + 1);
+  });
+
   it("auto-clears the banner after the 8s timeout and leaves the submission row intact", async () => {
     // Fake only `setTimeout`/`clearTimeout` so we can fast-forward
     // the parent's auto-dismiss schedule without touching the timers
@@ -413,5 +711,458 @@ describe("EngagementDetail submission banner (Task #126)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// Site-tab `ParcelZoningCard` — Bastrop populated + Boston fallback.
+function gotoSiteTab() {
+  fireEvent.click(screen.getByRole("button", { name: "Site" }));
+}
+
+describe("EngagementDetail Site tab parcel & zoning card", () => {
+  it("renders the populated ParcelZoningCard for a Bastrop engagement", () => {
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      jurisdiction: "Bastrop County, TX",
+      address: "123 Cedar Way, Bastrop, TX",
+      site: {
+        geocode: { latitude: 30.1105, longitude: -97.3153 },
+      },
+    };
+    hoisted.briefing = {
+      id: "brf-1",
+      engagementId: hoisted.engagement.id,
+      createdAt: "2026-04-16T00:00:00.000Z",
+      updatedAt: "2026-04-16T00:00:00.000Z",
+      narrative: null,
+      sources: [
+        {
+          id: "src-parcel",
+          layerKind: "bastrop-tx-parcels",
+          sourceKind: "local-adapter",
+          provider: "Bastrop County GIS",
+          snapshotDate: "2026-04-20T00:00:00.000Z",
+          note: null,
+          uploadObjectPath: "",
+          uploadOriginalFilename: "",
+          uploadContentType: "",
+          uploadByteSize: 0,
+          dxfObjectPath: null,
+          glbObjectPath: null,
+          conversionStatus: null,
+          conversionError: null,
+          payload: {
+            kind: "parcel",
+            parcel: {
+              attributes: { PARCEL_ID: "R12345", ACRES: 0.5 },
+            },
+          },
+          createdAt: "2026-04-20T00:00:00.000Z",
+          supersededAt: null,
+          supersededById: null,
+        },
+        {
+          id: "src-zoning",
+          layerKind: "bastrop-tx-zoning",
+          sourceKind: "local-adapter",
+          provider: "Bastrop County Zoning",
+          snapshotDate: "2026-04-18T00:00:00.000Z",
+          note: null,
+          uploadObjectPath: "",
+          uploadOriginalFilename: "",
+          uploadContentType: "",
+          uploadByteSize: 0,
+          dxfObjectPath: null,
+          glbObjectPath: null,
+          conversionStatus: null,
+          conversionError: null,
+          payload: {
+            kind: "zoning",
+            zoning: {
+              attributes: {
+                ZONING: "R-1",
+                ZONE_DESC: "Single-Family Residential",
+              },
+            },
+          },
+          createdAt: "2026-04-18T00:00:00.000Z",
+          supersededAt: null,
+          supersededById: null,
+        },
+        {
+          id: "src-flood",
+          layerKind: "bastrop-tx-floodplain",
+          sourceKind: "local-adapter",
+          provider: "Bastrop County GIS",
+          snapshotDate: "2026-04-19T00:00:00.000Z",
+          note: null,
+          uploadObjectPath: "",
+          uploadOriginalFilename: "",
+          uploadContentType: "",
+          uploadByteSize: 0,
+          dxfObjectPath: null,
+          glbObjectPath: null,
+          conversionStatus: null,
+          conversionError: null,
+          payload: {
+            kind: "floodplain",
+            inMappedFloodplain: true,
+            features: [{ attributes: { FLD_ZONE: "AE" } }],
+          },
+          createdAt: "2026-04-19T00:00:00.000Z",
+          supersededAt: null,
+          supersededById: null,
+        },
+      ],
+    };
+
+    renderPage();
+    gotoSiteTab();
+
+    const card = screen.getByTestId("parcel-zoning-card");
+    expect(card).toHaveAttribute("data-state", "populated");
+    expect(within(card).getByText("R12345")).toBeInTheDocument();
+    expect(
+      within(card).getByText(/R-1.*Single-Family Residential/),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByText(/In mapped floodplain \(Zone AE\)/i),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByTestId("parcel-zoning-card-provenance"),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to the friendly unsupported-jurisdiction copy for a Boston engagement", () => {
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      jurisdiction: "Boston, MA",
+      address: "1 City Hall Sq, Boston, MA",
+      site: {
+        geocode: { latitude: 42.3601, longitude: -71.0589 },
+      },
+    };
+    // Briefing exists but no local adapter coverage for Boston.
+    hoisted.briefing = {
+      id: "brf-1",
+      engagementId: hoisted.engagement.id,
+      createdAt: "2026-04-16T00:00:00.000Z",
+      updatedAt: "2026-04-16T00:00:00.000Z",
+      narrative: null,
+      sources: [],
+    };
+
+    renderPage();
+    gotoSiteTab();
+
+    const card = screen.getByTestId("parcel-zoning-card");
+    expect(card).toHaveAttribute("data-state", "unsupported");
+    expect(
+      within(card).getByTestId("parcel-zoning-card-unsupported-message"),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByTestId("parcel-zoning-card-site-context-link"),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
+  it("badges the Findings tab with the unaddressed-finding count from the most recent submission", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({ id: "finding:sub-latest:01", severity: "blocker" }),
+        findingFixture({ id: "finding:sub-latest:02", severity: "concern" }),
+        findingFixture({
+          id: "finding:sub-latest:03",
+          severity: "advisory",
+          status: "overridden",
+        }),
+      ]),
+    });
+    const badge = screen.getByTestId("engagement-tab-findings-badge");
+    expect(badge.textContent).toBe("2");
+  });
+
+  it("does not render the badge when there are no unaddressed findings", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          status: "overridden",
+        }),
+      ]),
+    });
+    expect(
+      screen.queryByTestId("engagement-tab-findings-badge"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the empty state when the engagement has no submissions", () => {
+    renderPage();
+    gotoFindingsTab();
+    expect(
+      screen.getByTestId("findings-tab-empty-no-submissions"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the severity-sorted list and auto-selects the highest-severity finding", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({ id: "finding:sub-latest:advisory", severity: "advisory" }),
+        findingFixture({ id: "finding:sub-latest:blocker", severity: "blocker" }),
+        findingFixture({ id: "finding:sub-latest:concern", severity: "concern" }),
+      ]),
+    });
+    gotoFindingsTab();
+    expect(screen.getByTestId("findings-tab")).toBeInTheDocument();
+    const list = screen.getByTestId("architect-findings-list");
+    const rows = within(list)
+      .getAllByRole("listitem")
+      .map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual([
+      "architect-findings-row-finding:sub-latest:blocker",
+      "architect-findings-row-finding:sub-latest:concern",
+      "architect-findings-row-finding:sub-latest:advisory",
+    ]);
+    expect(
+      screen.getByTestId(
+        "architect-finding-detail-finding:sub-latest:blocker",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("filters the list by severity chip and updates the URL", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({ id: "finding:sub-latest:blocker", severity: "blocker" }),
+        findingFixture({ id: "finding:sub-latest:concern", severity: "concern" }),
+        findingFixture({ id: "finding:sub-latest:advisory", severity: "advisory" }),
+      ]),
+    });
+    gotoFindingsTab();
+    fireEvent.click(
+      screen.getByTestId("findings-tab-filter-severity-concern"),
+    );
+    const list = screen.getByTestId("architect-findings-list");
+    const rows = within(list)
+      .getAllByRole("listitem")
+      .map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual([
+      "architect-findings-row-finding:sub-latest:concern",
+    ]);
+    expect(window.location.search).toBe("?tab=findings&severity=concern");
+    // Active chip carries the data-active marker.
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-severity-concern")
+        .getAttribute("data-active"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-severity-all")
+        .getAttribute("data-active"),
+    ).toBe("false");
+  });
+
+  it("filters the list by category chip and updates the URL", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          category: "egress",
+        }),
+        findingFixture({
+          id: "finding:sub-latest:02",
+          severity: "blocker",
+          category: "setback",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    fireEvent.click(
+      screen.getByTestId("findings-tab-filter-category-setback"),
+    );
+    const list = screen.getByTestId("architect-findings-list");
+    const rows = within(list)
+      .getAllByRole("listitem")
+      .map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual(["architect-findings-row-finding:sub-latest:02"]);
+    expect(window.location.search).toBe("?tab=findings&category=setback");
+  });
+
+  it("hides addressed findings when the Addressed toggle is flipped off and updates the URL", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:open",
+          severity: "blocker",
+        }),
+        findingFixture({
+          id: "finding:sub-latest:done",
+          severity: "concern",
+          status: "overridden",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    // Both rows visible by default.
+    expect(
+      within(screen.getByTestId("architect-findings-list"))
+        .getAllByRole("listitem")
+        .map((r) => r.getAttribute("data-testid")),
+    ).toEqual([
+      "architect-findings-row-finding:sub-latest:open",
+      "architect-findings-row-finding:sub-latest:done",
+    ]);
+    fireEvent.click(screen.getByTestId("findings-tab-filter-show-addressed"));
+    expect(
+      within(screen.getByTestId("architect-findings-list"))
+        .getAllByRole("listitem")
+        .map((r) => r.getAttribute("data-testid")),
+    ).toEqual(["architect-findings-row-finding:sub-latest:open"]);
+    expect(window.location.search).toBe(
+      "?tab=findings&showAddressed=false",
+    );
+  });
+
+  it("hydrates filter state from the URL on first paint", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?tab=findings&severity=concern&category=egress&showAddressed=false",
+    );
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:match",
+          severity: "concern",
+          category: "egress",
+        }),
+        findingFixture({
+          id: "finding:sub-latest:miss",
+          severity: "blocker",
+          category: "egress",
+        }),
+        findingFixture({
+          id: "finding:sub-latest:done",
+          severity: "concern",
+          category: "egress",
+          status: "overridden",
+        }),
+      ]),
+    });
+    // No need to click the tab — it was deep-linked via ?tab=findings.
+    expect(screen.getByTestId("findings-tab")).toBeInTheDocument();
+    const rows = within(screen.getByTestId("architect-findings-list"))
+      .getAllByRole("listitem")
+      .map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual(["architect-findings-row-finding:sub-latest:match"]);
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-severity-concern")
+        .getAttribute("data-active"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-category-egress")
+        .getAttribute("data-active"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-show-addressed")
+        .getAttribute("data-active"),
+    ).toBe("true");
+  });
+
+  it("renders the filtered-empty state when no finding matches the active filters", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          category: "egress",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    fireEvent.click(
+      screen.getByTestId("findings-tab-filter-category-setback"),
+    );
+    expect(
+      screen.getByTestId("findings-tab-list-filtered-empty"),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking the CAD elementRef link swings the page to the Site Context tab and pre-selects the element in the BIM viewer (Task #437)", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          elementRef: "door:l2-corridor-9",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    // Sanity: the panel rendered the elementRef as a clickable button
+    // (the lib/portal-ui FindingDetailPanel switches to <button> when
+    // an `onElementRefClick` is wired — that wire-up is exactly the
+    // thing this test guards against silent regression of).
+    const link = screen.getByTestId("architect-finding-detail-cad-ref-link");
+    expect(link.tagName).toBe("BUTTON");
+    fireEvent.click(link);
+    // The page swings the tab strip over to Site Context. We assert
+    // via the page URL contract (`?tab=site-context`) which is the
+    // same channel deep-links use, so a future tab-strip re-render
+    // can't mask a regression here.
+    expect(window.location.search).toContain("tab=site-context");
+    // The findings list/detail is no longer in the DOM — proves the
+    // tab actually switched, not just URL-only.
+    expect(screen.queryByTestId("findings-tab")).not.toBeInTheDocument();
+    // Flip to the 3D sub-tab so the SiteContextViewer mounts. The
+    // engagement has no ready DXF sources in this fixture, so the
+    // viewer would otherwise default to the legacy Map placeholder
+    // and the badge wouldn't render.
+    fireEvent.click(screen.getByTestId("site-context-subtab-3d"));
+    const badge = screen.getByTestId("site-context-viewer-selected-element");
+    expect(badge.textContent).toContain("door:l2-corridor-9");
+    // Clearing the badge wipes the page-level selection state, so
+    // the badge unmounts.
+    fireEvent.click(
+      screen.getByTestId("site-context-viewer-selected-element-clear"),
+    );
+    expect(
+      screen.queryByTestId("site-context-viewer-selected-element"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clicking 'Address with next revision' calls override with the marker comment and the row's content", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          category: "egress",
+          text: "Door clearance fails at corridor.",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    fireEvent.click(
+      screen.getByTestId("architect-finding-detail-address-button"),
+    );
+    expect(overrideFinding.mutate).toHaveBeenCalledTimes(1);
+    const [vars] = overrideFinding.mutate.mock.calls[0];
+    expect(vars).toEqual({
+      findingId: "finding:sub-latest:01",
+      data: {
+        text: "Door clearance fails at corridor.",
+        severity: "blocker",
+        category: "egress",
+        reviewerComment: "Addressed in next revision",
+      },
+    });
   });
 });

@@ -34,6 +34,7 @@ import { getHistoryService } from "../atoms/registry";
 import type { EngagementEventType } from "../atoms/engagement.atom";
 import { emitEngagementJurisdictionResolvedEvent } from "../lib/engagementEvents";
 import { hydrateActors, type HydratedActor } from "../lib/userLookup";
+import { kickoffBriefingGeneration } from "./parcelBriefings";
 
 /**
  * Engagement event-type literals used by the producers in this file.
@@ -365,11 +366,79 @@ async function attachSnapshot(
   });
 }
 
-/**
- * Best-effort: geocode the address (if any) and enqueue jurisdiction
- * warmup. Errors swallowed — user can retry via POST /engagements/:id/geocode.
- * Only ever called on the create-new branch.
- */
+// Fire-and-forget auto-trigger of the shared briefing kickoff helper
+// on `engagement.created`. Never blocks or throws back into the ingest
+// response. Only fires when the create-new branch actually inserted a
+// new engagement (autoCreated=true).
+function fireAutoBriefingKickoff(
+  outcome: SnapshotAttachOutcome,
+  reqLog: typeof logger,
+): void {
+  if (!outcome.result.autoCreated) return;
+  const engagementId = outcome.result.engagementId;
+  void (async () => {
+    let jurisdiction: string | null = null;
+    try {
+      const [row] = await db
+        .select({ jurisdiction: engagements.jurisdiction })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      jurisdiction = row?.jurisdiction ?? null;
+    } catch {
+      // observability-only
+    }
+
+    try {
+      const result = await kickoffBriefingGeneration({
+        engagementId,
+        reqLog,
+        onSettled: (settled) => {
+          if (settled.state === "failed") {
+            reqLog.error(
+              {
+                engagementId,
+                jurisdiction,
+                generationId: settled.generationId,
+                error: settled.error ?? "unknown engine failure",
+              },
+              "auto-briefing: generation failed",
+            );
+          }
+        },
+      });
+      if (result.kind === "no_briefing_sources_for_engagement") {
+        reqLog.warn(
+          {
+            engagementId,
+            jurisdiction,
+            error: "no_briefing_sources_for_engagement",
+          },
+          "auto-briefing: skipped, no briefing sources yet",
+        );
+      } else if (result.kind === "engagement_not_found") {
+        reqLog.warn(
+          {
+            engagementId,
+            jurisdiction,
+            error: "engagement_not_found",
+          },
+          "auto-briefing: engagement disappeared before kickoff",
+        );
+      }
+    } catch (err) {
+      reqLog.error(
+        {
+          engagementId,
+          jurisdiction,
+          error: (err as Error).message ?? String(err),
+        },
+        "auto-briefing: kickoff failed",
+      );
+    }
+  })();
+}
+
 function fireGeocodeAndWarmup(
   engagementId: string,
   incomingAddress: string,
@@ -629,6 +698,18 @@ router.post("/snapshots", async (req: Request, res: Response) => {
     // bound to an existing engagement and must NOT re-emit it.
     await emitSnapshotLifecycleEvents(history, outcome, reqLog);
     await emitEngagementCreatedEvent(history, outcome, reqLog);
+    // Auto-trigger briefing generation on the create-new branch so the
+    // architect lands on the engagement detail page and sees Site
+    // Context populating without clicking "Generate Layers". Mirrors the
+    // event-subscriber contract used by `emitEngagementCreatedEvent`:
+    // fire-and-forget (`void`-launched), every error is caught and
+    // logged via the same shared logger with structured fields, and
+    // nothing is propagated back to the snapshot-ingest response. The
+    // shared `kickoffBriefingGeneration` helper is the same code path
+    // the manual `POST /briefing/generate` route runs, so the
+    // single-flight unique index on `briefing_generation_jobs` is the
+    // canonical race guard against a manual kickoff that lands first.
+    fireAutoBriefingKickoff(outcome, reqLog);
     // Always emit `engagement.snapshot-received` against the parent —
     // applies equally to a freshly-inserted engagement (its first
     // snapshot is still a snapshot landing) and to the GUID-race

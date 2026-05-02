@@ -1,4 +1,9 @@
-import { useSessionPermissions } from "../lib/session";
+import type { ReactNode } from "react";
+import {
+  useListMyReviewerRequests,
+  getListMyReviewerRequestsQueryKey,
+} from "@workspace/api-client-react";
+import { useSessionAudience, useSessionPermissions } from "../lib/session";
 
 /**
  * Sidebar group definitions, paired with the optional permission claim
@@ -24,6 +29,15 @@ export interface NavItem {
   href: string;
   /** Optional permission claim the session must carry for this item to render. */
   requiresPermission?: string;
+  /** Optional audience the session must match for this item to render. */
+  requiresAudience?: "internal" | "user" | "ai";
+  /**
+   * Optional trailing badge node forwarded to the sidebar. Populated
+   * dynamically by {@link useNavGroups} (e.g. the Outstanding
+   * Requests pending-count pill); the static {@link ALL_NAV_GROUPS}
+   * tree never sets this directly.
+   */
+  badge?: ReactNode;
 }
 
 export interface NavGroup {
@@ -39,6 +53,9 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { label: "Approved", href: "/approved" },
       { label: "Rejected", href: "/rejected" },
       { label: "Sheets", href: "/sheets" },
+  ]},
+  { label: "MY WORK", items: [
+      { label: "Outstanding Requests", href: "/requests", requiresAudience: "internal" },
   ]},
   { label: "AI REVIEWER", items: [
       { label: "Compliance Engine", href: "/compliance" },
@@ -61,18 +78,27 @@ const ALL_NAV_GROUPS: NavGroup[] = [
 ];
 
 /**
- * Filter the static {@link ALL_NAV_GROUPS} tree against a set of
- * permission claims. Pure (no React hooks) so it can also be used in
- * tests and from non-component code.
+ * Filter the static {@link ALL_NAV_GROUPS} tree against the caller's
+ * permission claims and audience. Pure (no React hooks) so it can be
+ * used in tests. Entries without `requiresAudience` show for every
+ * audience; passing `null` for `audience` hides every audience-gated
+ * entry (mirrors the conservative permission-filter stance).
  */
 export function filterNavGroups(
   permissions: ReadonlyArray<string>,
+  audience: "internal" | "user" | "ai" | null = null,
 ): NavGroup[] {
   const granted = new Set(permissions);
   return ALL_NAV_GROUPS.flatMap((group) => {
-    const items = group.items.filter(
-      (i) => !i.requiresPermission || granted.has(i.requiresPermission),
-    );
+    const items = group.items.filter((i) => {
+      if (i.requiresPermission && !granted.has(i.requiresPermission)) {
+        return false;
+      }
+      if (i.requiresAudience && i.requiresAudience !== audience) {
+        return false;
+      }
+      return true;
+    });
     if (items.length === 0) return [];
     return [{ label: group.label, items }];
   });
@@ -91,5 +117,58 @@ export function filterNavGroups(
  */
 export function useNavGroups(): NavGroup[] {
   const { permissions } = useSessionPermissions();
-  return filterNavGroups(permissions);
+  const { audience } = useSessionAudience();
+  const pendingCount = useOutstandingRequestsBadgeCount(audience === "internal");
+  const groups = filterNavGroups(permissions, audience);
+  if (pendingCount <= 0) return groups;
+  return groups.map((group) => ({
+    ...group,
+    items: group.items.map((item) =>
+      item.href === "/requests"
+        ? { ...item, badge: <OutstandingRequestsBadge count={pendingCount} /> }
+        : item,
+    ),
+  }));
+}
+
+/**
+ * Fetch the reviewer's pending-request count to drive the sidebar
+ * badge. Shares the exact `?status=pending` query key the
+ * `OutstandingRequests` page already uses so the two consumers hit
+ * the same react-query cache entry — visiting the page warms the
+ * badge, and filing/dismissing a request invalidates one and refreshes
+ * the other.
+ *
+ * Gated on `enabled` because the underlying endpoint 403s any
+ * non-reviewer audience; passing the gate as `false` short-circuits
+ * the fetch and yields a count of 0 (the badge then hides itself).
+ */
+function useOutstandingRequestsBadgeCount(enabled: boolean): number {
+  const params = { status: "pending" as const };
+  const { data } = useListMyReviewerRequests(params, {
+    query: {
+      queryKey: getListMyReviewerRequestsQueryKey(params),
+      enabled,
+    },
+  });
+  return data?.requests?.length ?? 0;
+}
+
+/**
+ * Trailing pill rendered on the Outstanding Requests sidebar entry.
+ * Caps display at `99+` so a wildly stale queue doesn't blow out the
+ * sidebar width. The wrapping `useNavGroups` only constructs this
+ * when `count > 0`, so the badge stays absent at rest.
+ */
+function OutstandingRequestsBadge({ count }: { count: number }) {
+  const label = count > 99 ? "99+" : String(count);
+  return (
+    <span
+      className="sc-pill sc-pill-amber"
+      data-testid="nav-outstanding-requests-badge"
+      aria-label={`${count} pending ${count === 1 ? "request" : "requests"}`}
+    >
+      {label}
+    </span>
+  );
 }

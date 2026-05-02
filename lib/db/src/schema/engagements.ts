@@ -24,6 +24,13 @@ export const engagements = pgTable(
     nameLower: text("name_lower").notNull(),
     jurisdiction: text("jurisdiction"),
     address: text("address"),
+    // Free-text name of the applicant firm (architect / designer of
+    // record) submitting plan-review packages for this engagement.
+    // Nullable: legacy engagements created before this column landed
+    // have no recorded applicant firm. Surfaced to reviewers in the
+    // Plan Review Inbox so triage can identify "who submitted this"
+    // without opening the engagement (Task #439).
+    applicantFirm: text("applicant_firm"),
     status: text("status").notNull().default("active"),
 
     // Wave 1.2: site context fields (all nullable, additive)
