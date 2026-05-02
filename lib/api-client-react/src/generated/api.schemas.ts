@@ -2827,6 +2827,45 @@ export interface ListReviewerRequestsResponse {
 }
 
 /**
+ * Engagement metadata joined onto each row of the cross-engagement
+"my outstanding requests" list (Reviewer V1-F / R13). Just the
+three fields the FE renders inline on each row — `id` for the
+deep-link target, `name` as the row's primary line,
+`jurisdiction` as the secondary chip. The full engagement
+envelope is not included; consumers that need it should follow
+the link to `/engagements/{id}`.
+
+ */
+export interface ReviewerRequestEngagementSummary {
+  id: string;
+  name: string;
+  jurisdiction: string | null;
+}
+
+/**
+ * Reviewer-request row plus a small engagement-context envelope.
+Returned only by the cross-engagement reviewer-side list at
+`GET /reviewer-requests`; the per-engagement architect-side
+list returns the bare `ReviewerRequest` shape because the
+engagement is implicit from the path.
+
+ */
+export type ReviewerRequestWithEngagement = ReviewerRequest & {
+  engagement: ReviewerRequestEngagementSummary;
+};
+
+/**
+ * Wire envelope for `GET /reviewer-requests`. Newest-first list of
+the calling reviewer's own reviewer-requests across every
+engagement, with engagement metadata joined onto each row so
+the FE can render without a follow-up fetch.
+
+ */
+export interface ListMyReviewerRequestsResponse {
+  requests: ReviewerRequestWithEngagement[];
+}
+
+/**
  * XYZ vector in world coordinates. Y-up, Z+ = north convention
 matches the FE BimViewer's three.js setup.
 
@@ -3572,3 +3611,22 @@ for its open queue.
  */
   status?: ReviewerRequestStatus;
 };
+
+export type ListMyReviewerRequestsParams = {
+  /**
+ * Lifecycle filter. Defaults to `pending` when omitted.
+Pass `all` to return every state.
+
+ */
+  status?: ListMyReviewerRequestsStatus;
+};
+
+export type ListMyReviewerRequestsStatus =
+  (typeof ListMyReviewerRequestsStatus)[keyof typeof ListMyReviewerRequestsStatus];
+
+export const ListMyReviewerRequestsStatus = {
+  pending: "pending",
+  dismissed: "dismissed",
+  resolved: "resolved",
+  all: "all",
+} as const;

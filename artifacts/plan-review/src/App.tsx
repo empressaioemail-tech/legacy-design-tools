@@ -8,6 +8,7 @@ import CodeLibrary from "./pages/CodeLibrary";
 import StyleProbe from "./pages/StyleProbe";
 import Sheets from "./pages/Sheets";
 import Users from "./pages/Users";
+import OutstandingRequests from "./pages/OutstandingRequests";
 import ComingSoon from "./pages/ComingSoon";
 import { RequirePermission } from "./components/permissions";
 
@@ -20,6 +21,7 @@ function Router() {
       <Route path="/engagements" component={EngagementsList} />
       <Route path="/engagements/:id" component={EngagementDetail} />
       <Route path="/findings" component={FindingsLibrary} />
+      <Route path="/requests" component={OutstandingRequests} />
       <Route path="/code" component={CodeLibrary} />
       <Route path="/sheets" component={Sheets} />
       <Route path="/style-probe" component={StyleProbe} />

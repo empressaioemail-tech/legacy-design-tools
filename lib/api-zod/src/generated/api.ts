@@ -5049,6 +5049,113 @@ export const CreateEngagementReviewerRequestBody = zod
   );
 
 /**
+ * Cross-engagement read for the reviewer-side "Outstanding
+Requests" page. Returns reviewer-requests authored by the
+*calling* reviewer — ownership is enforced server-side by
+filtering on the `requested_by` actor envelope against the
+session requestor; the client cannot widen the scope.
+
+Reviewer-only: requires the `internal` audience and 403s any
+non-reviewer caller. Newest-first by `requestedAt`, joined
+with each target engagement's id/name/jurisdiction.
+
+Status filter: defaults to `pending` when omitted. Pass
+`status=all` to return every lifecycle state, or one of the
+three specific states (`pending` / `dismissed` / `resolved`)
+to restrict the result.
+
+ * @summary List the calling reviewer's own reviewer-requests, across every engagement
+ */
+export const ListMyReviewerRequestsQueryParams = zod.object({
+  status: zod
+    .enum(["pending", "dismissed", "resolved", "all"])
+    .optional()
+    .describe(
+      "Lifecycle filter. Defaults to `pending` when omitted.\nPass `all` to return every state.\n",
+    ),
+});
+
+export const ListMyReviewerRequestsResponse = zod
+  .object({
+    requests: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          engagementId: zod.string(),
+          requestKind: zod
+            .enum([
+              "refresh-briefing-source",
+              "refresh-bim-model",
+              "regenerate-briefing",
+            ])
+            .describe(
+              "Closed enum of reviewer-request action kinds. One-to-one with\n`ReviewerRequestTargetType` — each kind targets exactly one\natom type (`refresh-briefing-source` → `briefing-source`,\netc.), and the route layer enforces the pairing at validate\ntime.\n",
+            ),
+          targetEntityType: zod
+            .enum(["briefing-source", "bim-model", "parcel-briefing"])
+            .describe(
+              "Closed enum of target atom types a reviewer-request may anchor\nagainst. Mirrors `REVIEWER_REQUEST_TARGET_TYPES` in\n`lib\/db\/src\/schema\/reviewerRequests.ts` — adding a new target\ntype requires updating both the DB-side tuple and this enum so\nthe route validator and the atom composition list stay in sync.\n",
+            ),
+          targetEntityId: zod.string(),
+          reason: zod.string(),
+          status: zod
+            .enum(["pending", "dismissed", "resolved"])
+            .describe(
+              "Closed enum of reviewer-request lifecycle states. `pending` is\nthe initial state at insert; `dismissed` is the architect-\nexplicit reject path (carries `dismissalReason`); `resolved` is\nset by the implicit-resolve hook when the matching domain\naction emits its event (carries `triggeredActionEventId`).\n",
+            ),
+          requestedBy: zod
+            .object({
+              kind: zod.enum(["user", "agent", "system"]),
+              id: zod.string(),
+              displayName: zod.string().nullish(),
+            })
+            .describe(
+              "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+            ),
+          requestedAt: zod.coerce.date(),
+          dismissedBy: zod
+            .object({
+              kind: zod.enum(["user", "agent", "system"]),
+              id: zod.string(),
+              displayName: zod.string().nullish(),
+            })
+            .describe(
+              "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+            )
+            .nullable(),
+          dismissedAt: zod.coerce.date().nullable(),
+          dismissalReason: zod.string().nullable(),
+          resolvedAt: zod.coerce.date().nullable(),
+          triggeredActionEventId: zod.string().nullable(),
+          createdAt: zod.coerce.date(),
+          updatedAt: zod.coerce.date(),
+        })
+        .describe(
+          "One reviewer-request row. `dismissedBy` \/ `dismissedAt` \/\n`dismissalReason` are populated only when `status` is\n`dismissed`; `resolvedAt` \/ `triggeredActionEventId` only when\n`status` is `resolved`.\n",
+        )
+        .and(
+          zod.object({
+            engagement: zod
+              .object({
+                id: zod.string(),
+                name: zod.string(),
+                jurisdiction: zod.string().nullable(),
+              })
+              .describe(
+                'Engagement metadata joined onto each row of the cross-engagement\n\"my outstanding requests\" list (Reviewer V1-F \/ R13). Just the\nthree fields the FE renders inline on each row — `id` for the\ndeep-link target, `name` as the row\'s primary line,\n`jurisdiction` as the secondary chip. The full engagement\nenvelope is not included; consumers that need it should follow\nthe link to `\/engagements\/{id}`.\n',
+              ),
+          }),
+        )
+        .describe(
+          "Reviewer-request row plus a small engagement-context envelope.\nReturned only by the cross-engagement reviewer-side list at\n`GET \/reviewer-requests`; the per-engagement architect-side\nlist returns the bare `ReviewerRequest` shape because the\nengagement is implicit from the path.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/reviewer-requests`. Newest-first list of\nthe calling reviewer's own reviewer-requests across every\nengagement, with engagement metadata joined onto each row so\nthe FE can render without a follow-up fetch.\n",
+  );
+
+/**
  * Architect-side explicit dismissal of a pending reviewer-request.
 Captures the architect's reason for not honoring the ask
 (`dismissalReason`) and emits a

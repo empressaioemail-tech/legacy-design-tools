@@ -64,6 +64,8 @@ import type {
   ListEngagementReviewerRequestsParams,
   ListJurisdictionAtomsParams,
   ListMyNotificationsParams,
+  ListMyReviewerRequestsParams,
+  ListMyReviewerRequestsResponse,
   ListNotificationsResponse,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
@@ -7731,6 +7733,124 @@ export const useCreateEngagementReviewerRequest = <
     getCreateEngagementReviewerRequestMutationOptions(options),
   );
 };
+
+/**
+ * Cross-engagement read for the reviewer-side "Outstanding
+Requests" page. Returns reviewer-requests authored by the
+*calling* reviewer — ownership is enforced server-side by
+filtering on the `requested_by` actor envelope against the
+session requestor; the client cannot widen the scope.
+
+Reviewer-only: requires the `internal` audience and 403s any
+non-reviewer caller. Newest-first by `requestedAt`, joined
+with each target engagement's id/name/jurisdiction.
+
+Status filter: defaults to `pending` when omitted. Pass
+`status=all` to return every lifecycle state, or one of the
+three specific states (`pending` / `dismissed` / `resolved`)
+to restrict the result.
+
+ * @summary List the calling reviewer's own reviewer-requests, across every engagement
+ */
+export const getListMyReviewerRequestsUrl = (
+  params?: ListMyReviewerRequestsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/reviewer-requests?${stringifiedParams}`
+    : `/api/reviewer-requests`;
+};
+
+export const listMyReviewerRequests = async (
+  params?: ListMyReviewerRequestsParams,
+  options?: RequestInit,
+): Promise<ListMyReviewerRequestsResponse> => {
+  return customFetch<ListMyReviewerRequestsResponse>(
+    getListMyReviewerRequestsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListMyReviewerRequestsQueryKey = (
+  params?: ListMyReviewerRequestsParams,
+) => {
+  return [`/api/reviewer-requests`, ...(params ? [params] : [])] as const;
+};
+
+export const getListMyReviewerRequestsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMyReviewerRequests>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListMyReviewerRequestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMyReviewerRequests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListMyReviewerRequestsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMyReviewerRequests>>
+  > = ({ signal }) =>
+    listMyReviewerRequests(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMyReviewerRequests>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMyReviewerRequestsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMyReviewerRequests>>
+>;
+export type ListMyReviewerRequestsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the calling reviewer's own reviewer-requests, across every engagement
+ */
+
+export function useListMyReviewerRequests<
+  TData = Awaited<ReturnType<typeof listMyReviewerRequests>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListMyReviewerRequestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMyReviewerRequests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMyReviewerRequestsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Architect-side explicit dismissal of a pending reviewer-request.

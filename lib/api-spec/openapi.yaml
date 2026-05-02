@@ -3496,6 +3496,56 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /reviewer-requests:
+    get:
+      operationId: listMyReviewerRequests
+      tags: [reviewer-requests]
+      summary: List the calling reviewer's own reviewer-requests, across every engagement
+      description: |
+        Cross-engagement read for the reviewer-side "Outstanding
+        Requests" page. Returns reviewer-requests authored by the
+        *calling* reviewer — ownership is enforced server-side by
+        filtering on the `requested_by` actor envelope against the
+        session requestor; the client cannot widen the scope.
+
+        Reviewer-only: requires the `internal` audience and 403s any
+        non-reviewer caller. Newest-first by `requestedAt`, joined
+        with each target engagement's id/name/jurisdiction.
+
+        Status filter: defaults to `pending` when omitted. Pass
+        `status=all` to return every lifecycle state, or one of the
+        three specific states (`pending` / `dismissed` / `resolved`)
+        to restrict the result.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, dismissed, resolved, all]
+          description: |
+            Lifecycle filter. Defaults to `pending` when omitted.
+            Pass `all` to return every state.
+      responses:
+        "200":
+          description: Newest-first list of the caller's reviewer-requests, with engagement context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListMyReviewerRequestsResponse"
+        "400":
+          description: Caller has no session requestor (anonymous internal session).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /reviewer-requests/{id}/dismiss:
     post:
       operationId: dismissReviewerRequest
@@ -7705,6 +7755,61 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReviewerRequest"
+      required:
+        - requests
+
+    ReviewerRequestEngagementSummary:
+      type: object
+      description: |
+        Engagement metadata joined onto each row of the cross-engagement
+        "my outstanding requests" list (Reviewer V1-F / R13). Just the
+        three fields the FE renders inline on each row — `id` for the
+        deep-link target, `name` as the row's primary line,
+        `jurisdiction` as the secondary chip. The full engagement
+        envelope is not included; consumers that need it should follow
+        the link to `/engagements/{id}`.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+        - jurisdiction
+
+    ReviewerRequestWithEngagement:
+      type: object
+      description: |
+        Reviewer-request row plus a small engagement-context envelope.
+        Returned only by the cross-engagement reviewer-side list at
+        `GET /reviewer-requests`; the per-engagement architect-side
+        list returns the bare `ReviewerRequest` shape because the
+        engagement is implicit from the path.
+      allOf:
+        - $ref: "#/components/schemas/ReviewerRequest"
+        - type: object
+          properties:
+            engagement:
+              $ref: "#/components/schemas/ReviewerRequestEngagementSummary"
+          required:
+            - engagement
+
+    ListMyReviewerRequestsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /reviewer-requests`. Newest-first list of
+        the calling reviewer's own reviewer-requests across every
+        engagement, with engagement metadata joined onto each row so
+        the FE can render without a follow-up fetch.
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerRequestWithEngagement"
       required:
         - requests
 
