@@ -136,6 +136,16 @@ export interface RenderCardProps {
   /** Reviewer surfaces pass `false`; architect surfaces use the default. */
   canCancel?: boolean;
   cancelError?: string | null;
+  /**
+   * When true, the still-image preview (and each elevation cell) is
+   * wrapped in a link that opens the full-resolution mirrored asset
+   * in a new tab. Reviewer surfaces (Task #428) opt in so a click on
+   * the thumbnail reveals the underlying render at native resolution
+   * without forcing the reviewer to use the Download affordance —
+   * architect surfaces can keep the previous static-thumbnail behavior
+   * by leaving this flag off.
+   */
+  openPreviewInNewTab?: boolean;
 }
 
 export function RenderCard({
@@ -144,6 +154,7 @@ export function RenderCard({
   cancelPending = false,
   canCancel = true,
   cancelError = null,
+  openPreviewInNewTab = false,
 }: RenderCardProps) {
   const isDetail = "outputs" in render;
   const detail = isDetail ? (render as RenderDetailResponse) : null;
@@ -191,11 +202,15 @@ export function RenderCard({
       </div>
 
       {detail && detail.kind === "elevation-set" ? (
-        <ElevationSetGrid detail={detail} />
+        <ElevationSetGrid
+          detail={detail}
+          openPreviewInNewTab={openPreviewInNewTab}
+        />
       ) : (
         <PrimaryThumb
           status={render.status}
           output={primaryOutput ?? null}
+          openPreviewInNewTab={openPreviewInNewTab}
         />
       )}
 
@@ -250,13 +265,20 @@ export function RenderCard({
 function PrimaryThumb({
   status,
   output,
+  openPreviewInNewTab = false,
 }: {
   status: RenderStatus;
   output: RenderOutputProjection | null;
+  openPreviewInNewTab?: boolean;
 }) {
   const previewHref = output ? previewHrefFor(output) : null;
   const downloadHref = output ? downloadHrefFor(output) : null;
   const ready = status === "ready" && !!output && !!previewHref;
+  // Reviewer surfaces (Task #428) opt into a clickable thumbnail
+  // that opens the full-resolution mirrored asset in a new tab —
+  // skip the wrapping link for video outputs since the inline
+  // <video controls> affordance already exposes full playback.
+  const wrapPreview = openPreviewInNewTab && ready && output && !isVideoOutput(output);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {ready && output ? (
@@ -273,6 +295,28 @@ function PrimaryThumb({
                 borderRadius: 4,
               }}
             />
+          ) : wrapPreview ? (
+            <a
+              data-testid={`render-primary-open-${output.id}`}
+              href={previewHref ?? undefined}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open render at full resolution in a new tab"
+              style={{ display: "block", lineHeight: 0 }}
+            >
+              <img
+                src={previewHref ?? undefined}
+                alt="Render output"
+                style={{
+                  width: "100%",
+                  maxHeight: 320,
+                  objectFit: "contain",
+                  background: "var(--bg-input)",
+                  borderRadius: 4,
+                  cursor: "zoom-in",
+                }}
+              />
+            </a>
           ) : (
             <img
               src={previewHref ?? undefined}
@@ -343,7 +387,13 @@ function PlaceholderTile({ status }: { status: RenderStatus }) {
  * the in-flight tracking for the rest. Each cell sources its preview
  * from whichever surface has data.
  */
-function ElevationSetGrid({ detail }: { detail: RenderDetailResponse }) {
+function ElevationSetGrid({
+  detail,
+  openPreviewInNewTab = false,
+}: {
+  detail: RenderDetailResponse;
+  openPreviewInNewTab?: boolean;
+}) {
   const order: ElevationSetJob["role"][] = [
     "elevation-n",
     "elevation-e",
@@ -407,17 +457,41 @@ function ElevationSetGrid({ detail }: { detail: RenderDetailResponse }) {
               </span>
             </div>
             {previewHref ? (
-              <img
-                src={previewHref}
-                alt={`${ELEVATION_DIRECTION_LABEL[role]} elevation`}
-                style={{
-                  width: "100%",
-                  height: 120,
-                  objectFit: "contain",
-                  background: "var(--bg-input)",
-                  borderRadius: 4,
-                }}
-              />
+              openPreviewInNewTab ? (
+                <a
+                  data-testid={`render-elevation-open-${detail.id}-${role}`}
+                  href={previewHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Open ${ELEVATION_DIRECTION_LABEL[role]} elevation at full resolution in a new tab`}
+                  style={{ display: "block", lineHeight: 0 }}
+                >
+                  <img
+                    src={previewHref}
+                    alt={`${ELEVATION_DIRECTION_LABEL[role]} elevation`}
+                    style={{
+                      width: "100%",
+                      height: 120,
+                      objectFit: "contain",
+                      background: "var(--bg-input)",
+                      borderRadius: 4,
+                      cursor: "zoom-in",
+                    }}
+                  />
+                </a>
+              ) : (
+                <img
+                  src={previewHref}
+                  alt={`${ELEVATION_DIRECTION_LABEL[role]} elevation`}
+                  style={{
+                    width: "100%",
+                    height: 120,
+                    objectFit: "contain",
+                    background: "var(--bg-input)",
+                    borderRadius: 4,
+                  }}
+                />
+              )
             ) : (
               <div
                 className="sc-meta opacity-60"

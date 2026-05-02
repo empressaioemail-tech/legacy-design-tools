@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   EngagementContextPanel,
+  RenderGallery,
   ReviewerComment,
 } from "@workspace/portal-ui";
 import {
@@ -70,6 +71,7 @@ import type {
   SubmissionStatus,
 } from "@workspace/api-client-react";
 import { BimModelTab } from "./BimModelTab";
+import { DecisionTab } from "./DecisionTab";
 import { EngagementContextTab } from "./EngagementContextTab";
 import { relativeTime } from "../lib/relativeTime";
 import { FindingsTab } from "./findings/FindingsTab";
@@ -108,6 +110,17 @@ export interface SubmissionDetailModalProps {
    * and any non-reviewer-audience consumer keep current behavior.
    */
   audience?: "internal" | "user" | "ai";
+  /**
+   * Optional callback fired when a sibling row in the Decision tab's
+   * revision history is opened. The parent (`EngagementDetail`) wires
+   * this to its own modal-state setter so clicking "Open this
+   * submission" actually swaps the modal over to the chosen revision
+   * — the controlled-modal architecture means a URL-only deep-link
+   * would change `?submission=` without flipping `openSubmissionId`.
+   * When omitted, the history list falls back to a plain wouter
+   * `<Link>` for non-controlled callers / tests.
+   */
+  onOpenSubmission?: (submissionId: string) => void;
 }
 
 const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
@@ -126,6 +139,7 @@ export function SubmissionDetailModal({
   onTabChange,
   onSelectFinding,
   audience = "user",
+  onOpenSubmission,
 }: SubmissionDetailModalProps) {
   const isOpen = submission !== null;
 
@@ -260,6 +274,18 @@ export function SubmissionDetailModal({
                 Findings
               </TabsTrigger>
               <TabsTrigger
+                value="renders"
+                data-testid="submission-detail-modal-tab-renders"
+              >
+                Renders
+              </TabsTrigger>
+              <TabsTrigger
+                value="decision"
+                data-testid="submission-detail-modal-tab-decision"
+              >
+                Decision
+              </TabsTrigger>
+              <TabsTrigger
                 value="bim-model"
                 data-testid="submission-detail-modal-tab-bim-model"
               >
@@ -343,6 +369,39 @@ export function SubmissionDetailModal({
                 onSelectFinding={onSelectFinding ?? (() => {})}
                 onShowInViewer={handleShowInViewer}
                 audience={audience}
+              />
+            </TabsContent>
+            <TabsContent
+              value="renders"
+              data-testid="submission-detail-modal-renders-content"
+            >
+              {/*
+               * Reviewer-side renders pane (Task #428). Reuses
+               * `RenderGallery` from portal-ui with `canCancel={false}`
+               * so the reviewer cannot cancel an architect's in-flight
+               * job (the route would 403 anyway). Empty state copy is
+               * tuned for the reviewer audience: they don't kick off
+               * renders themselves, so the architect-side "Generate
+               * your first render" CTA wouldn't make sense here.
+               */}
+              <div style={{ padding: 16 }}>
+                <RenderGallery
+                  engagementId={engagementId}
+                  canCancel={false}
+                  openPreviewInNewTab
+                  emptyStateHint="The architect hasn't produced any renders for this engagement yet."
+                />
+              </div>
+            </TabsContent>
+            <TabsContent
+              value="decision"
+              data-testid="submission-detail-modal-decision-content"
+            >
+              <DecisionTab
+                submission={submission}
+                engagementId={engagementId}
+                audience={audience}
+                onOpenSubmission={onOpenSubmission}
               />
             </TabsContent>
             <TabsContent

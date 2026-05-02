@@ -548,6 +548,7 @@ export default function EngagementDetail() {
         onSelectFinding={handleSelectFinding}
         onClose={closeSubmissionModal}
         audience={audience}
+        onOpenSubmission={openSubmissionModal}
       />
 
       {engagement && (
@@ -981,6 +982,7 @@ function OpenSubmissionModalRenderer({
   onSelectFinding,
   onClose,
   audience,
+  onOpenSubmission,
 }: {
   engagementId: string;
   openSubmissionId: string | null;
@@ -990,6 +992,7 @@ function OpenSubmissionModalRenderer({
   onSelectFinding: (id: string | null) => void;
   onClose: () => void;
   audience: "internal" | "user" | "ai";
+  onOpenSubmission: (submissionId: string) => void;
 }) {
   const { data: submissions } = useListEngagementSubmissions(engagementId, {
     query: {
@@ -1010,6 +1013,7 @@ function OpenSubmissionModalRenderer({
       onSelectFinding={onSelectFinding}
       onClose={onClose}
       audience={audience}
+      onOpenSubmission={onOpenSubmission}
     />
   );
 }

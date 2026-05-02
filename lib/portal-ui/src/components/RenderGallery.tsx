@@ -32,6 +32,13 @@ export interface RenderGalleryProps {
   engagementId: string;
   canCancel?: boolean;
   emptyStateHint?: string;
+  /**
+   * When true, each card's still preview is wrapped in a link that
+   * opens the full-resolution mirrored asset in a new tab. Reviewer
+   * surfaces (Task #428) opt in so a click on the thumbnail reveals
+   * the underlying render at native resolution.
+   */
+  openPreviewInNewTab?: boolean;
 }
 
 const POLL_INTERVAL_MS = 3000;
@@ -41,6 +48,7 @@ export function RenderGallery({
   engagementId,
   canCancel = true,
   emptyStateHint,
+  openPreviewInNewTab = false,
 }: RenderGalleryProps) {
   const listQuery = useListEngagementRenders(engagementId, {
     query: {
@@ -125,6 +133,7 @@ export function RenderGallery({
           engagementId={engagementId}
           listItem={item}
           canCancel={canCancel}
+          openPreviewInNewTab={openPreviewInNewTab}
         />
       ))}
     </div>
@@ -141,10 +150,12 @@ function RenderGalleryCard({
   engagementId,
   listItem,
   canCancel,
+  openPreviewInNewTab,
 }: {
   engagementId: string;
   listItem: RenderListItem;
   canCancel: boolean;
+  openPreviewInNewTab: boolean;
 }) {
   const qc = useQueryClient();
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -218,6 +229,7 @@ function RenderGalleryCard({
       cancelPending={cancel.isPending}
       cancelError={cancelError}
       onCancel={handleCancel}
+      openPreviewInNewTab={openPreviewInNewTab}
     />
   );
 }
