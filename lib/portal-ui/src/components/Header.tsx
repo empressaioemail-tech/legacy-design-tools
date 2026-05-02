@@ -1,4 +1,6 @@
-import { Bell, Search } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bell, Moon, Search, Sun } from "lucide-react";
+import { getTheme, toggleTheme, type ThemeName } from "../lib/theme";
 
 export interface HeaderSearch {
   placeholder?: string;
@@ -9,6 +11,67 @@ export interface HeaderSearch {
 export interface HeaderProps {
   title?: string;
   search?: HeaderSearch;
+}
+
+function ThemeToggle() {
+  // Mirror the data-theme attribute that `setTheme` writes to <html>.
+  // We seed from `getTheme()` on mount (not at module init) so SSR /
+  // happy-dom test renders don't latch onto a stale value.
+  const [theme, setThemeState] = useState<ThemeName>("dark");
+
+  useEffect(() => {
+    setThemeState(getTheme());
+    // Stay in sync if `setTheme` is called from somewhere else (e.g.
+    // a future settings page). MutationObserver is overkill here, but
+    // it keeps the icon honest without a global event bus.
+    if (typeof MutationObserver === "undefined") return;
+    const obs = new MutationObserver(() => setThemeState(getTheme()));
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => obs.disconnect();
+  }, []);
+
+  const isDark = theme === "dark";
+  const label = isDark ? "Switch to light theme" : "Switch to dark theme";
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        const next = toggleTheme();
+        setThemeState(next);
+      }}
+      aria-label={label}
+      aria-pressed={!isDark}
+      title={label}
+      data-testid="theme-toggle"
+      style={{
+        width: 32,
+        height: 32,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "transparent",
+        border: "1px solid var(--border-default)",
+        borderRadius: 6,
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        transition: "background 0.12s, color 0.12s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--depth-hover-bg)";
+        e.currentTarget.style.color = "var(--text-primary)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.color = "var(--text-secondary)";
+      }}
+    >
+      {isDark ? <Sun size={14} /> : <Moon size={14} />}
+    </button>
+  );
 }
 
 export function Header({ title, search }: HeaderProps) {
@@ -89,6 +152,7 @@ export function Header({ title, search }: HeaderProps) {
             />
           </div>
         )}
+        <ThemeToggle />
         <button
           type="button"
           aria-label="Notifications"

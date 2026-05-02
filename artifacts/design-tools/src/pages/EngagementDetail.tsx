@@ -125,7 +125,7 @@ import { scrollToBriefingSource } from "@workspace/portal-ui";
 
 const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
   active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },
-  on_hold: { bg: "rgba(245,158,11,0.18)", color: "#f59e0b" },
+  on_hold: { bg: "var(--warning-dim)", color: "var(--warning)" },
   archived: { bg: "var(--bg-input)", color: "var(--text-muted)" },
 };
 
@@ -632,7 +632,7 @@ function SettingsTab({
                   data: { status: "archived" },
                 })
               }
-              style={{ background: "#ef4444" }}
+              style={{ background: "var(--danger)" }}
             >
               {archive.isPending ? "Archiving…" : "Confirm archive"}
             </button>

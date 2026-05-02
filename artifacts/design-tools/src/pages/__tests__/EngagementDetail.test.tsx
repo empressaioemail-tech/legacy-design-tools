@@ -371,6 +371,29 @@ describe("EngagementDetail submission banner (Task #126)", () => {
     ).toBeInTheDocument();
   });
 
+  it("mounts cleanly under [data-theme=\"light\"] (Task #420 sanity)", () => {
+    // The architect dashboard now ships a light/dark theme toggle.
+    // Light theme reuses the same components against a different
+    // CSS-variable token set, but a regression that hard-codes a
+    // dark-theme color into an inline style could throw at render
+    // time (e.g. invalid CSS shorthand) or — worse — render a
+    // white-on-white surface that ships silently. Pin the page so a
+    // light-theme mount is always exercised.
+    document.documentElement.dataset.theme = "light";
+    try {
+      expect(() => renderPage()).not.toThrow();
+      // The page-level submit affordance is the most chrome-heavy
+      // element on first paint — confirming it lands proves the
+      // surrounding header / tabs / status pills survived the light
+      // tokens.
+      expect(
+        screen.getByTestId("submit-jurisdiction-trigger"),
+      ).toBeInTheDocument();
+    } finally {
+      document.documentElement.dataset.theme = "dark";
+    }
+  });
+
   it("auto-clears the banner after the 8s timeout and leaves the submission row intact", async () => {
     // Fake only `setTimeout`/`clearTimeout` so we can fast-forward
     // the parent's auto-dismiss schedule without touching the timers

@@ -1,7 +1,12 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useSidebarState } from "../lib/sidebar-state";
+import {
+  useSidebarState,
+  LEFT_SIDEBAR_DEFAULT_WIDTH,
+  LEFT_SIDEBAR_MIN_WIDTH,
+  LEFT_SIDEBAR_MAX_WIDTH,
+} from "../lib/sidebar-state";
 
 export interface SidebarItem {
   label: string;
@@ -19,6 +24,9 @@ export interface SidebarProps {
   brandProductName: string;
   groups: SidebarGroup[];
 }
+
+const COLLAPSED_WIDTH = 56;
+const KEYBOARD_NUDGE = 16;
 
 function HexGlyph({ size = 18 }: { size?: number }) {
   return (
@@ -47,6 +55,9 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
   const [location] = useLocation();
   const collapsed = useSidebarState((s) => s.leftCollapsed);
   const toggleLeft = useSidebarState((s) => s.toggleLeft);
+  const width = useSidebarState((s) => s.leftWidth);
+  const setLeftWidth = useSidebarState((s) => s.setLeftWidth);
+  const resetLeftWidth = useSidebarState((s) => s.resetLeftWidth);
 
   // Cmd/Ctrl+B keyboard shortcut (VS Code convention)
   useEffect(() => {
@@ -69,12 +80,62 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
     return () => window.removeEventListener("keydown", handler);
   }, [toggleLeft]);
 
-  const width = collapsed ? 56 : 256;
+  const renderedWidth = collapsed ? COLLAPSED_WIDTH : width;
+
+  // Drag-to-resize. Captures the starting pointer X and width once on
+  // pointer-down, then computes the new width from each pointermove
+  // delta — that way the user's pointer stays glued to the drag
+  // handle even when the clamp pins us at the min/max bounds.
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const onHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (collapsed) return;
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startWidth: width };
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onHandlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = dragRef.current;
+    if (!start) return;
+    const next = start.startWidth + (e.clientX - start.startX);
+    setLeftWidth(next);
+  };
+
+  const onHandlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    setDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore — pointer may already be released
+    }
+  };
+
+  const onHandleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (collapsed) return;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setLeftWidth(width - KEYBOARD_NUDGE);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setLeftWidth(width + KEYBOARD_NUDGE);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setLeftWidth(LEFT_SIDEBAR_MIN_WIDTH);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setLeftWidth(LEFT_SIDEBAR_MAX_WIDTH);
+    }
+  };
 
   return (
     <aside
       style={{
-        width,
+        width: renderedWidth,
         background: "var(--bg-chrome)",
         borderRight: "1px solid var(--chrome-border)",
         display: "flex",
@@ -85,7 +146,9 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
         top: 0,
         overflowY: "auto",
         overflowX: "hidden",
-        transition: "width 200ms ease-out",
+        // Skip the width transition mid-drag so the panel tracks the
+        // pointer 1:1 instead of easing into the new width.
+        transition: dragging ? "none" : "width 200ms ease-out",
       }}
       className="sc-scroll"
     >
@@ -265,6 +328,59 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
           {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
       </div>
+
+      {/* Drag handle pinned to the right edge. Hidden while collapsed
+          since there's nothing meaningful to resize between the icon
+          stub and the user's last-chosen width. */}
+      {!collapsed && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuemin={LEFT_SIDEBAR_MIN_WIDTH}
+          aria-valuemax={LEFT_SIDEBAR_MAX_WIDTH}
+          aria-valuenow={width}
+          tabIndex={0}
+          data-testid="sidebar-resize-handle"
+          onPointerDown={onHandlePointerDown}
+          onPointerMove={onHandlePointerMove}
+          onPointerUp={onHandlePointerUp}
+          onPointerCancel={onHandlePointerUp}
+          onDoubleClick={resetLeftWidth}
+          onKeyDown={onHandleKeyDown}
+          title="Drag to resize, double-click to reset"
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            width: 6,
+            height: "100%",
+            cursor: "col-resize",
+            background: dragging ? "var(--cyan-dim)" : "transparent",
+            transition: dragging ? "none" : "background 0.12s",
+            outline: "none",
+            zIndex: 5,
+          }}
+          onMouseEnter={(e) => {
+            if (!dragging) {
+              e.currentTarget.style.background = "var(--cyan-dim)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!dragging) {
+              e.currentTarget.style.background = "transparent";
+            }
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.background = "var(--cyan-dim)";
+          }}
+          onBlur={(e) => {
+            if (!dragging) {
+              e.currentTarget.style.background = "transparent";
+            }
+          }}
+        />
+      )}
     </aside>
   );
 }

@@ -157,6 +157,12 @@ export {
 
 export {
   useSidebarState,
+  LEFT_SIDEBAR_DEFAULT_WIDTH,
+  LEFT_SIDEBAR_MIN_WIDTH,
+  LEFT_SIDEBAR_MAX_WIDTH,
+  RIGHT_SIDEBAR_DEFAULT_WIDTH,
+  RIGHT_SIDEBAR_MIN_WIDTH,
+  RIGHT_SIDEBAR_MAX_WIDTH,
   type SidebarStateValue,
 } from "./lib/sidebar-state";
 
