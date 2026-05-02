@@ -1372,44 +1372,13 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     ).toBeNull();
   });
 
-  // --- Task #410 — persist the "knows the gestures" preference ---
-
-  it("keeps the '?' affordance on a fresh engagement once the reviewer has dismissed the legend in a prior session (persisted preference)", () => {
-    // Task #410 — the dismissed state used to be per-engagement
-    // and reset on every briefingId change. That meant a power
-    // user who already knew pan/zoom/rotate still got the full
-    // legend on every reload, every revisit, and every fresh BIM
-    // model — exactly the "persistent visual noise" Task #405 was
-    // supposed to eliminate. The dismissed state now seeds from a
-    // localStorage preference, so a returning reviewer who has
-    // ever dismissed the legend lands on the "?" affordance even
-    // when they jump to a brand-new engagement.
-    const { container, rerender } = render(
-      <BimModelViewport elements={elements} />,
-    );
-    fireEvent.pointerDown(container.querySelector("canvas")!);
-    expect(
-      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
-    ).toBeInTheDocument();
-    const otherEngagementElements = elements.map((el) => ({
-      ...el,
-      briefingId: "br-2-different-engagement",
-    }));
-    rerender(<BimModelViewport elements={otherEngagementElements} />);
-    expect(
-      screen.queryByTestId("bim-model-viewport-gesture-hint"),
-    ).toBeNull();
-    expect(
-      screen.getByTestId("bim-model-viewport-gesture-hint-toggle"),
-    ).toBeInTheDocument();
-  });
-
   it("a first-time reviewer with no stored preference still sees the full legend on a fresh engagement", () => {
-    // Belt-and-braces — the persisted-preference path must not
-    // affect first-time reviewers. With no localStorage entry the
-    // engagement-change reset still surfaces the full legend, so a
-    // brand-new reviewer learns the gesture model the same way
-    // they did before #410.
+    // First-time reviewers (no graduation flag, empty streak) get
+    // the full legend on every fresh engagement. Task #409 only
+    // collapses the legend after GRADUATE_THRESHOLD consecutive
+    // dismissals — until then, the engagement-change reset still
+    // surfaces the full affordance every time, matching the
+    // Task #405 default for new reviewers.
     const otherEngagementElements = elements.map((el) => ({
       ...el,
       briefingId: "br-2-different-engagement",
