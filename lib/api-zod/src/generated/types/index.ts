@@ -106,6 +106,8 @@ export * from "./geocode";
 export * from "./geocodeSource";
 export * from "./getAtomHistoryParams";
 export * from "./getAtomSummaryParams";
+export * from "./getRenderOutputFileDownload";
+export * from "./getRenderOutputFileParams";
 export * from "./getSnapshotSheetHistoryParams";
 export * from "./healthStatus";
 export * from "./jurisdictionSummary";

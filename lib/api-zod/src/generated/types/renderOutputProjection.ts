@@ -31,5 +31,17 @@ surfaces).
  */
   mirroredObjectKey: string | null;
   thumbnailUrl: string | null;
+  /** Relative path the FE hits to stream the durable mirrored
+asset back (`/api/render-outputs/{id}/file`). NULL while
+the row is still un-mirrored. Use this rather than
+`thumbnailUrl`, which is null on still and elevation
+outputs.
+ */
+  previewUrl: string | null;
+  /** Same endpoint as `previewUrl` with `?download=1` so the
+browser saves rather than navigates. NULL when
+`mirroredObjectKey` is NULL.
+ */
+  downloadUrl: string | null;
   seed: number | null;
 }

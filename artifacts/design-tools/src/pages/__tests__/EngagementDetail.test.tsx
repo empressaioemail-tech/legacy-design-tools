@@ -288,6 +288,12 @@ function renderPage(opts?: { seed?: (client: QueryClient) => void }) {
       briefing: hoisted.briefing,
     });
   }
+  // Pre-seed the renders list so the Renders tab's gallery skips
+  // its loading state on first paint when activated.
+  client.setQueryData(
+    ["listEngagementRenders", hoisted.engagement.id],
+    { items: [] },
+  );
   const node: ReactNode = (
     <QueryClientProvider client={client}>
       <EngagementDetail />
@@ -489,6 +495,28 @@ function seedSubmissionsWithFindings(
     });
   };
 }
+describe("EngagementDetail renders tab (Task #422)", () => {
+  it("renders the 'Renders' tab in the tab bar and mounts the gallery + new-render button when activated", () => {
+    renderPage();
+    const tabBtn = screen.getByRole("button", { name: "Renders" });
+    expect(tabBtn).toBeInTheDocument();
+    fireEvent.click(tabBtn);
+    expect(screen.getByTestId("renders-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("renders-tab-new-render")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("renders-gallery-empty"),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the kickoff dialog when 'New render' is clicked", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Renders" }));
+    fireEvent.click(screen.getByTestId("renders-tab-new-render"));
+    expect(
+      screen.getByTestId("render-kickoff-dialog"),
+    ).toBeInTheDocument();
+  });
+});
 
 describe("EngagementDetail submission banner (Task #126)", () => {
   it("surfaces a 'just now' confirmation banner with the recorded jurisdiction after a successful submit", async () => {

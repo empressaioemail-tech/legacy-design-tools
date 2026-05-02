@@ -42,6 +42,20 @@ export type { RequestRefreshAffordanceProps } from "./components/RequestRefreshA
 // pending row. See `lib/reviewerRequestPending.ts`.
 export { useReviewerRequestIsPending } from "./lib/reviewerRequestPending";
 
+// Shared mnml.ai render surface. RenderCard + RenderGallery are
+// audience-agnostic; RenderKickoffDialog is architect-only by
+// deployment context (only the design-tools Renders tab mounts it).
+export {
+  RenderCard,
+  isRenderInFlight,
+  isRenderCancellable,
+} from "./components/RenderCard";
+export type { RenderCardProps } from "./components/RenderCard";
+export { RenderGallery } from "./components/RenderGallery";
+export type { RenderGalleryProps } from "./components/RenderGallery";
+export { RenderKickoffDialog } from "./components/RenderKickoffDialog";
+export type { RenderKickoffDialogProps } from "./components/RenderKickoffDialog";
+
 // Briefing divergences — shared by design-tools (architect surface)
 // and plan-review (read-only reviewer surface). Promoted to portal-ui
 // by Wave 2 Sprint B (Task #306) so the two surfaces stay in

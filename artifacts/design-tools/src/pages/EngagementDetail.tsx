@@ -124,6 +124,12 @@ import {
   BriefingSourceRow,
   BriefingNarrativePanel as SharedBriefingNarrativePanel,
   extractAdapterKeyFromProvider,
+  // V1-4 / Task #422 — shared mnml.ai render surface. The
+  // gallery + card live in portal-ui (re-used by plan-review's
+  // RenderGalleryStrip from Task #428); the kickoff dialog is
+  // architect-only and only mounted here.
+  RenderGallery,
+  RenderKickoffDialog,
 } from "@workspace/portal-ui";
 import { useEngagementsStore } from "../store/engagements";
 import { relativeTime } from "../lib/relativeTime";
@@ -203,6 +209,7 @@ type TabId =
   | "site-context"
   | "submissions"
   | "findings"
+  | "renders"
   | "settings";
 
 /**
@@ -227,6 +234,7 @@ function readTabFromUrl(): TabId {
     raw === "site-context" ||
     raw === "submissions" ||
     raw === "findings" ||
+    raw === "renders" ||
     raw === "settings"
   ) {
     return raw;
@@ -490,6 +498,7 @@ function TabBar({
     { id: "site-context", label: "Site context" },
     { id: "submissions", label: "Submissions" },
     { id: "findings", label: "Findings" },
+    { id: "renders", label: "Renders" },
     { id: "settings", label: "Settings" },
   ];
   return (
@@ -3393,6 +3402,56 @@ function BackfillFilterChips({
   );
 }
 
+/**
+ * Architect-only "Renders" tab. Wraps the shared `RenderGallery`
+ * from portal-ui and mounts `RenderKickoffDialog` behind a "New
+ * render" button. The gallery owns polling, cancel confirmation,
+ * and downloads; this tab just owns the dialog's open state.
+ */
+function RendersTab({ engagementId }: { engagementId: string }) {
+  const [kickoffOpen, setKickoffOpen] = useState(false);
+  return (
+    <div
+      data-testid="renders-tab"
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-1">
+          <span
+            className="sc-section-title"
+            style={{ color: "var(--text-primary)" }}
+          >
+            Renders
+          </span>
+          <span className="sc-meta opacity-70">
+            mnml.ai-powered architectural renders for this
+            engagement. Stills, 4-direction elevation sets, and
+            short videos all run on the same polling worker.
+          </span>
+        </div>
+        <button
+          type="button"
+          className="sc-btn-primary"
+          onClick={() => setKickoffOpen(true)}
+          data-testid="renders-tab-new-render"
+        >
+          New render
+        </button>
+      </div>
+      <RenderGallery
+        engagementId={engagementId}
+        canCancel
+        emptyStateHint="No renders yet. Click 'New render' to kick off your first one."
+      />
+      <RenderKickoffDialog
+        engagementId={engagementId}
+        isOpen={kickoffOpen}
+        onClose={() => setKickoffOpen(false)}
+      />
+    </div>
+  );
+}
+
 function SubmissionsTab({
   engagementId,
   backfillFilter,
@@ -4716,6 +4775,8 @@ export function EngagementDetail() {
             initialSubmissionId={latestSubmissionId}
           />
         )}
+
+        {tab === "renders" && <RendersTab engagementId={engagement.id} />}
 
         {tab === "settings" && (
           <SettingsTab engagement={engagement} onEdit={openEdit} />

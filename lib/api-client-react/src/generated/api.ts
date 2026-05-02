@@ -53,6 +53,7 @@ import type {
   GenerateSubmissionFindingsResponse,
   GetAtomHistoryParams,
   GetAtomSummaryParams,
+  GetRenderOutputFileParams,
   GetSnapshotSheetHistoryParams,
   HealthStatus,
   JurisdictionSummary,
@@ -8342,6 +8343,126 @@ export const useCancelRender = <
 > => {
   return useMutation(getCancelRenderMutationOptions(options));
 };
+
+/**
+ * Streams the durable mirrored bytes for a single
+`render_outputs` row. mnml's CDN URLs expire within minutes;
+this endpoint is the only stable preview/download surface.
+`?download=1` adds a `Content-Disposition: attachment` header
+so the browser saves rather than navigates inline.
+Architect-audience-only.
+
+ * @summary Stream a render output file
+ */
+export const getGetRenderOutputFileUrl = (
+  id: string,
+  params?: GetRenderOutputFileParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/render-outputs/${id}/file?${stringifiedParams}`
+    : `/api/render-outputs/${id}/file`;
+};
+
+export const getRenderOutputFile = async (
+  id: string,
+  params?: GetRenderOutputFileParams,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetRenderOutputFileUrl(id, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRenderOutputFileQueryKey = (
+  id: string,
+  params?: GetRenderOutputFileParams,
+) => {
+  return [
+    `/api/render-outputs/${id}/file`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetRenderOutputFileQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRenderOutputFile>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: GetRenderOutputFileParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRenderOutputFile>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetRenderOutputFileQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRenderOutputFile>>
+  > = ({ signal }) =>
+    getRenderOutputFile(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRenderOutputFile>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRenderOutputFileQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRenderOutputFile>>
+>;
+export type GetRenderOutputFileQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Stream a render output file
+ */
+
+export function useGetRenderOutputFile<
+  TData = Awaited<ReturnType<typeof getRenderOutputFile>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: GetRenderOutputFileParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRenderOutputFile>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRenderOutputFileQueryOptions(id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Three buckets:

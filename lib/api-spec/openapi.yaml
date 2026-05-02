@@ -3824,6 +3824,63 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /render-outputs/{id}/file:
+    get:
+      operationId: getRenderOutputFile
+      tags: [renders]
+      summary: Stream a render output file
+      description: |
+        Streams the durable mirrored bytes for a single
+        `render_outputs` row. mnml's CDN URLs expire within minutes;
+        this endpoint is the only stable preview/download surface.
+        `?download=1` adds a `Content-Disposition: attachment` header
+        so the browser saves rather than navigates inline.
+        Architect-audience-only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: download
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["1"]
+      responses:
+        "200":
+          description: Mirrored file bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid render output id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Audience is not architect.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Output row missing or its mirrored object is gone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Storage backend not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /admin/renders/sweep:
     post:
       operationId: runRendersSweep
@@ -8098,10 +8155,26 @@ components:
         thumbnailUrl:
           type: string
           nullable: true
+        previewUrl:
+          type: string
+          nullable: true
+          description: |
+            Relative path the FE hits to stream the durable mirrored
+            asset back (`/api/render-outputs/{id}/file`). NULL while
+            the row is still un-mirrored. Use this rather than
+            `thumbnailUrl`, which is null on still and elevation
+            outputs.
+        downloadUrl:
+          type: string
+          nullable: true
+          description: |
+            Same endpoint as `previewUrl` with `?download=1` so the
+            browser saves rather than navigates. NULL when
+            `mirroredObjectKey` is NULL.
         seed:
           type: integer
           nullable: true
-      required: [id, role, format, resolution, sizeBytes, durationSeconds, mirroredObjectKey, thumbnailUrl, seed]
+      required: [id, role, format, resolution, sizeBytes, durationSeconds, mirroredObjectKey, thumbnailUrl, previewUrl, downloadUrl, seed]
 
     ElevationSetJob:
       type: object

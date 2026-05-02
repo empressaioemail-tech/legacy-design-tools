@@ -5694,6 +5694,18 @@ export const GetRenderResponse = zod
               "GCS key under our durable bucket. NULL during the brief\nunmirrored window between row insert and mirror\ncompletion (the route writes both `source_url` and\n`mirroredObjectKey` in the same transaction so a NULL\nhere on a `ready` parent is an error condition the sweep\nsurfaces).\n",
             ),
           thumbnailUrl: zod.string().nullable(),
+          previewUrl: zod
+            .string()
+            .nullable()
+            .describe(
+              "Relative path the FE hits to stream the durable mirrored\nasset back (`\/api\/render-outputs\/{id}\/file`). NULL while\nthe row is still un-mirrored. Use this rather than\n`thumbnailUrl`, which is null on still and elevation\noutputs.\n",
+            ),
+          downloadUrl: zod
+            .string()
+            .nullable()
+            .describe(
+              "Same endpoint as `previewUrl` with `?download=1` so the\nbrowser saves rather than navigates. NULL when\n`mirroredObjectKey` is NULL.\n",
+            ),
           seed: zod.number().nullable(),
         })
         .describe(
@@ -5729,6 +5741,24 @@ export const CancelRenderResponse = zod
   .describe(
     "Wire envelope for `POST \/renders\/{id}\/cancel`. The polling\nworker observes `status='cancelled'` on its next iteration\nand bails — there is no synchronous mnml call.\n",
   );
+
+/**
+ * Streams the durable mirrored bytes for a single
+`render_outputs` row. mnml's CDN URLs expire within minutes;
+this endpoint is the only stable preview/download surface.
+`?download=1` adds a `Content-Disposition: attachment` header
+so the browser saves rather than navigates inline.
+Architect-audience-only.
+
+ * @summary Stream a render output file
+ */
+export const GetRenderOutputFileParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetRenderOutputFileQueryParams = zod.object({
+  download: zod.enum(["1"]).optional(),
+});
 
 /**
  * Three buckets:
