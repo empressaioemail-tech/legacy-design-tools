@@ -11,7 +11,11 @@
 the initial state at insert; `dismissed` is the architect-
 explicit reject path (carries `dismissalReason`); `resolved` is
 set by the implicit-resolve hook when the matching domain
-action emits its event (carries `triggeredActionEventId`).
+action emits its event (carries `triggeredActionEventId`);
+`withdrawn` is the reviewer-explicit retract path (Task #443)
+for a reviewer to clear their own outstanding ask without
+architect involvement (carries `withdrawnBy` /
+`withdrawnAt` / optional `withdrawalReason`).
 
  */
 export type ReviewerRequestStatus =
@@ -21,4 +25,5 @@ export const ReviewerRequestStatus = {
   pending: "pending",
   dismissed: "dismissed",
   resolved: "resolved",
+  withdrawn: "withdrawn",
 } as const;

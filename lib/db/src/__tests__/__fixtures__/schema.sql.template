@@ -345,12 +345,15 @@ CREATE TABLE @@SCHEMA@@.reviewer_requests (
     dismissed_by jsonb,
     dismissed_at timestamp with time zone,
     dismissal_reason text,
+    withdrawn_by jsonb,
+    withdrawn_at timestamp with time zone,
+    withdrawal_reason text,
     resolved_at timestamp with time zone,
     triggered_action_event_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT reviewer_requests_kind_check CHECK ((request_kind = ANY (ARRAY['refresh-briefing-source'::text, 'refresh-bim-model'::text, 'regenerate-briefing'::text]))),
-    CONSTRAINT reviewer_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'dismissed'::text, 'resolved'::text]))),
+    CONSTRAINT reviewer_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'dismissed'::text, 'resolved'::text, 'withdrawn'::text]))),
     CONSTRAINT reviewer_requests_target_type_check CHECK ((target_entity_type = ANY (ARRAY['briefing-source'::text, 'bim-model'::text, 'parcel-briefing'::text])))
 );
 

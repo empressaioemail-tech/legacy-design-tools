@@ -29,13 +29,17 @@
  * — requests appear as line items inside the architect's
  * ReviewerRequestsStrip.
  *
- * Event types — six per V1-2 minimum cut. Three `*.requested` (one
- * per kind, emitted at create) plus three `*.dismissed` (emitted when
- * an architect dismisses with reason). `*.honored` events are
+ * Event types — nine entries. Three `*.requested` (one per kind,
+ * emitted at create), three `*.dismissed` (emitted when an architect
+ * dismisses with reason), and three `*.withdrawn` (Task #443 — emitted
+ * when the *original requester* retracts their own pending ask via
+ * the reviewer-side withdraw endpoint). `*.honored` events are
  * deliberately NOT modelled — the architect's existing domain action
  * (e.g. `briefing-source.refreshed`) is the resolution signal, hooked
  * by `lib/reviewerRequestResolution.ts` to flip `status` and stamp
- * `triggered_action_event_id`.
+ * `triggered_action_event_id`. The `*.withdrawn` event is kept
+ * distinct from `*.dismissed` so the engagement timeline can tell
+ * apart "architect declined" from "reviewer changed their mind".
  */
 
 import { eq } from "drizzle-orm";
@@ -90,6 +94,9 @@ export const REVIEWER_REQUEST_EVENT_TYPES = [
   "reviewer-request.refresh-briefing-source.dismissed",
   "reviewer-request.refresh-bim-model.dismissed",
   "reviewer-request.regenerate-briefing.dismissed",
+  "reviewer-request.refresh-briefing-source.withdrawn",
+  "reviewer-request.refresh-bim-model.withdrawn",
+  "reviewer-request.regenerate-briefing.withdrawn",
 ] as const;
 
 export type ReviewerRequestEventType =
@@ -146,6 +153,9 @@ export interface ReviewerRequestTypedPayload {
   dismissedBy?: ReviewerRequestActor | null;
   dismissedAt?: string | null;
   dismissalReason?: string | null;
+  withdrawnBy?: ReviewerRequestActor | null;
+  withdrawnAt?: string | null;
+  withdrawalReason?: string | null;
   resolvedAt?: string | null;
   triggeredActionEventId?: string | null;
   createdAt?: string;
@@ -251,7 +261,9 @@ export function makeReviewerRequestAtom(
           ? "pending"
           : row.status === "dismissed"
             ? `dismissed${row.dismissalReason ? `: "${row.dismissalReason}"` : ""}`
-            : "resolved";
+            : row.status === "withdrawn"
+              ? `withdrawn${row.withdrawalReason ? `: "${row.withdrawalReason}"` : ""}`
+              : "resolved";
       const proseRaw =
         `Reviewer request (${row.requestKind}) by ${requesterLabel} ` +
         `against ${row.targetEntityType} ${row.targetEntityId} — ` +
@@ -267,6 +279,7 @@ export function makeReviewerRequestAtom(
       ];
 
       const dismissedBy = row.dismissedBy as ReviewerRequestActor | null;
+      const withdrawnBy = row.withdrawnBy as ReviewerRequestActor | null;
       const typed: ReviewerRequestTypedPayload = {
         id: row.id,
         found: true,
@@ -281,6 +294,9 @@ export function makeReviewerRequestAtom(
         dismissedBy: dismissedBy ?? null,
         dismissedAt: row.dismissedAt ? row.dismissedAt.toISOString() : null,
         dismissalReason: row.dismissalReason,
+        withdrawnBy: withdrawnBy ?? null,
+        withdrawnAt: row.withdrawnAt ? row.withdrawnAt.toISOString() : null,
+        withdrawalReason: row.withdrawalReason,
         resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
         triggeredActionEventId: row.triggeredActionEventId,
         createdAt: row.createdAt.toISOString(),

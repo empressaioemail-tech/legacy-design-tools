@@ -35,13 +35,21 @@ export type ReviewerRequestKind = (typeof REVIEWER_REQUEST_KINDS)[number];
 /**
  * Closed enum of statuses a reviewer-request row may hold. `pending`
  * is the default at insert; `dismissed` is the architect-explicit
- * reject path; `resolved` is set by the implicit-resolve hook when the
- * matching domain action emits.
+ * reject path; `resolved` is set by the implicit-resolve hook when
+ * the matching domain action emits; `withdrawn` is the *reviewer*-
+ * explicit retract path (Task #443) for a reviewer to clear their
+ * own outstanding ask without architect involvement. `withdrawn`
+ * stays distinct from `dismissed` so the audit trail can tell apart
+ * "architect declined" from "reviewer changed their mind" — both
+ * the row-level columns (`withdrawn_by` / `withdrawn_at` /
+ * `withdrawal_reason`) and the lifecycle event
+ * (`reviewer-request.<kind>.withdrawn`) preserve that split.
  */
 export const REVIEWER_REQUEST_STATUSES = [
   "pending",
   "dismissed",
   "resolved",
+  "withdrawn",
 ] as const;
 
 export type ReviewerRequestStatus =
@@ -175,8 +183,27 @@ export const reviewerRequests = pgTable(
      */
     dismissalReason: text("dismissal_reason"),
     /**
+     * Actor envelope stamped at withdraw time (Task #443). Null while
+     * the request is in any state other than `withdrawn`. Mirrors the
+     * `dismissedBy` shape — the *reviewer* who filed the row is the
+     * only actor allowed to populate it; the route layer enforces
+     * that ownership gate at write time.
+     */
+    withdrawnBy: jsonb("withdrawn_by").$type<ReviewerRequestActor>(),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    /**
+     * Optional free-text rationale the reviewer supplied at withdraw
+     * time. Capped at 4 KB by the route's Zod validator. Null when
+     * the reviewer did not supply one (the surface treats withdraw
+     * as a low-friction self-service action; a written reason is
+     * encouraged but not required, in contrast to the architect-side
+     * `dismissalReason` which is mandatory).
+     */
+    withdrawalReason: text("withdrawal_reason"),
+    /**
      * Set by the implicit-resolve hook when a matching domain action
-     * emits. Null while the request is `pending` or `dismissed`.
+     * emits. Null while the request is `pending`, `dismissed`, or
+     * `withdrawn`.
      */
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     /**
@@ -238,7 +265,7 @@ export const reviewerRequests = pgTable(
     ),
     statusCheck: check(
       "reviewer_requests_status_check",
-      sql`${t.status} IN ('pending', 'dismissed', 'resolved')`,
+      sql`${t.status} IN ('pending', 'dismissed', 'resolved', 'withdrawn')`,
     ),
     targetTypeCheck: check(
       "reviewer_requests_target_type_check",

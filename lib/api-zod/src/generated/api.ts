@@ -4980,7 +4980,7 @@ export const ListEngagementReviewerRequestsParams = zod.object({
 
 export const ListEngagementReviewerRequestsQueryParams = zod.object({
   status: zod
-    .enum(["pending", "dismissed", "resolved"])
+    .enum(["pending", "dismissed", "resolved", "withdrawn"])
     .optional()
     .describe(
       "Optional filter — restrict the result to requests in this\nlifecycle state. The architect strip queries `pending`\nfor its open queue.\n",
@@ -5011,9 +5011,9 @@ export const ListEngagementReviewerRequestsResponse = zod
           targetEntityId: zod.string(),
           reason: zod.string(),
           status: zod
-            .enum(["pending", "dismissed", "resolved"])
+            .enum(["pending", "dismissed", "resolved", "withdrawn"])
             .describe(
-              "Closed enum of reviewer-request lifecycle states. `pending` is\nthe initial state at insert; `dismissed` is the architect-\nexplicit reject path (carries `dismissalReason`); `resolved` is\nset by the implicit-resolve hook when the matching domain\naction emits its event (carries `triggeredActionEventId`).\n",
+              "Closed enum of reviewer-request lifecycle states. `pending` is\nthe initial state at insert; `dismissed` is the architect-\nexplicit reject path (carries `dismissalReason`); `resolved` is\nset by the implicit-resolve hook when the matching domain\naction emits its event (carries `triggeredActionEventId`);\n`withdrawn` is the reviewer-explicit retract path (Task #443)\nfor a reviewer to clear their own outstanding ask without\narchitect involvement (carries `withdrawnBy` \/\n`withdrawnAt` \/ optional `withdrawalReason`).\n",
             ),
           requestedBy: zod
             .object({
@@ -5037,6 +5037,18 @@ export const ListEngagementReviewerRequestsResponse = zod
             .nullable(),
           dismissedAt: zod.coerce.date().nullable(),
           dismissalReason: zod.string().nullable(),
+          withdrawnBy: zod
+            .object({
+              kind: zod.enum(["user", "agent", "system"]),
+              id: zod.string(),
+              displayName: zod.string().nullish(),
+            })
+            .describe(
+              "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+            )
+            .nullable(),
+          withdrawnAt: zod.coerce.date().nullable(),
+          withdrawalReason: zod.string().nullable(),
           resolvedAt: zod.coerce.date().nullable(),
           triggeredActionEventId: zod.string().nullable(),
           createdAt: zod.coerce.date(),
@@ -5162,9 +5174,9 @@ export const ListMyReviewerRequestsResponse = zod
           targetEntityId: zod.string(),
           reason: zod.string(),
           status: zod
-            .enum(["pending", "dismissed", "resolved"])
+            .enum(["pending", "dismissed", "resolved", "withdrawn"])
             .describe(
-              "Closed enum of reviewer-request lifecycle states. `pending` is\nthe initial state at insert; `dismissed` is the architect-\nexplicit reject path (carries `dismissalReason`); `resolved` is\nset by the implicit-resolve hook when the matching domain\naction emits its event (carries `triggeredActionEventId`).\n",
+              "Closed enum of reviewer-request lifecycle states. `pending` is\nthe initial state at insert; `dismissed` is the architect-\nexplicit reject path (carries `dismissalReason`); `resolved` is\nset by the implicit-resolve hook when the matching domain\naction emits its event (carries `triggeredActionEventId`);\n`withdrawn` is the reviewer-explicit retract path (Task #443)\nfor a reviewer to clear their own outstanding ask without\narchitect involvement (carries `withdrawnBy` \/\n`withdrawnAt` \/ optional `withdrawalReason`).\n",
             ),
           requestedBy: zod
             .object({
@@ -5188,6 +5200,18 @@ export const ListMyReviewerRequestsResponse = zod
             .nullable(),
           dismissedAt: zod.coerce.date().nullable(),
           dismissalReason: zod.string().nullable(),
+          withdrawnBy: zod
+            .object({
+              kind: zod.enum(["user", "agent", "system"]),
+              id: zod.string(),
+              displayName: zod.string().nullish(),
+            })
+            .describe(
+              "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+            )
+            .nullable(),
+          withdrawnAt: zod.coerce.date().nullable(),
+          withdrawalReason: zod.string().nullable(),
           resolvedAt: zod.coerce.date().nullable(),
           triggeredActionEventId: zod.string().nullable(),
           createdAt: zod.coerce.date(),
@@ -5275,9 +5299,9 @@ export const DismissReviewerRequestResponse = zod
         targetEntityId: zod.string(),
         reason: zod.string(),
         status: zod
-          .enum(["pending", "dismissed", "resolved"])
+          .enum(["pending", "dismissed", "resolved", "withdrawn"])
           .describe(
-            "Closed enum of reviewer-request lifecycle states. `pending` is\nthe initial state at insert; `dismissed` is the architect-\nexplicit reject path (carries `dismissalReason`); `resolved` is\nset by the implicit-resolve hook when the matching domain\naction emits its event (carries `triggeredActionEventId`).\n",
+            "Closed enum of reviewer-request lifecycle states. `pending` is\nthe initial state at insert; `dismissed` is the architect-\nexplicit reject path (carries `dismissalReason`); `resolved` is\nset by the implicit-resolve hook when the matching domain\naction emits its event (carries `triggeredActionEventId`);\n`withdrawn` is the reviewer-explicit retract path (Task #443)\nfor a reviewer to clear their own outstanding ask without\narchitect involvement (carries `withdrawnBy` \/\n`withdrawnAt` \/ optional `withdrawalReason`).\n",
           ),
         requestedBy: zod
           .object({
@@ -5301,6 +5325,137 @@ export const DismissReviewerRequestResponse = zod
           .nullable(),
         dismissedAt: zod.coerce.date().nullable(),
         dismissalReason: zod.string().nullable(),
+        withdrawnBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+          )
+          .nullable(),
+        withdrawnAt: zod.coerce.date().nullable(),
+        withdrawalReason: zod.string().nullable(),
+        resolvedAt: zod.coerce.date().nullable(),
+        triggeredActionEventId: zod.string().nullable(),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+      })
+      .describe(
+        "One reviewer-request row. `dismissedBy` \/ `dismissedAt` \/\n`dismissalReason` are populated only when `status` is\n`dismissed`; `resolvedAt` \/ `triggeredActionEventId` only when\n`status` is `resolved`.\n",
+      ),
+  })
+  .describe(
+    "Wire envelope for `POST \/engagements\/{id}\/reviewer-requests`\nand `POST \/reviewer-requests\/{id}\/dismiss`. Carries the\naffected row in the same shape the list endpoint returns so\nthe FE can splice the response into cached lists without a\nfollow-up fetch.\n",
+  );
+
+/**
+ * Reviewer-side retract path (Task #443). Lets the *original
+requester* clear their own outstanding ask without an
+architect context-switch — back-end mirror of the architect
+dismiss endpoint, but reserved to the row's author and gated
+on the reviewer audience.
+
+Stamps `withdrawnBy` / `withdrawnAt` (and optional
+`withdrawalReason` if the caller supplies one), flips
+`status` to `withdrawn`, and emits a
+`reviewer-request.<kind>.withdrawn` event anchored to the
+row. The `withdrawn` lifecycle event is deliberately distinct
+from the architect-side `.dismissed` event so the engagement
+timeline can tell apart "architect declined" from "reviewer
+changed their mind".
+
+Idempotent in spirit — withdrawing an already-withdrawn row
+returns the existing envelope without re-emitting an event.
+409s on `dismissed` (architect already closed the ask) and on
+`resolved` (a domain action already implicitly closed it).
+
+Reviewer-only: requires the `internal` audience and 403s any
+non-reviewer caller. Author-only: 403s when the calling
+reviewer is not the row's `requestedBy.id`.
+
+ * @summary Withdraw the caller's own pending reviewer-request
+ */
+export const WithdrawReviewerRequestParams = zod.object({
+  id: zod.coerce.string().describe("Reviewer-request id."),
+});
+
+export const withdrawReviewerRequestBodyWithdrawalReasonMax = 4096;
+
+export const WithdrawReviewerRequestBody = zod
+  .object({
+    withdrawalReason: zod
+      .string()
+      .min(1)
+      .max(withdrawReviewerRequestBodyWithdrawalReasonMax)
+      .nullish(),
+  })
+  .describe(
+    "Request body for `POST \/reviewer-requests\/{id}\/withdraw`\n(Task #443). Reviewer-side retract path. Unlike\n`DismissReviewerRequestBody`, the `withdrawalReason` is\nOPTIONAL — withdrawing one's own ask is a low-friction\ntriage action; if supplied, the reason is capped at 4 KB and\nrejected when whitespace-only.\n",
+  );
+
+export const WithdrawReviewerRequestResponse = zod
+  .object({
+    request: zod
+      .object({
+        id: zod.string(),
+        engagementId: zod.string(),
+        requestKind: zod
+          .enum([
+            "refresh-briefing-source",
+            "refresh-bim-model",
+            "regenerate-briefing",
+          ])
+          .describe(
+            "Closed enum of reviewer-request action kinds. One-to-one with\n`ReviewerRequestTargetType` — each kind targets exactly one\natom type (`refresh-briefing-source` → `briefing-source`,\netc.), and the route layer enforces the pairing at validate\ntime.\n",
+          ),
+        targetEntityType: zod
+          .enum(["briefing-source", "bim-model", "parcel-briefing"])
+          .describe(
+            "Closed enum of target atom types a reviewer-request may anchor\nagainst. Mirrors `REVIEWER_REQUEST_TARGET_TYPES` in\n`lib\/db\/src\/schema\/reviewerRequests.ts` — adding a new target\ntype requires updating both the DB-side tuple and this enum so\nthe route validator and the atom composition list stay in sync.\n",
+          ),
+        targetEntityId: zod.string(),
+        reason: zod.string(),
+        status: zod
+          .enum(["pending", "dismissed", "resolved", "withdrawn"])
+          .describe(
+            "Closed enum of reviewer-request lifecycle states. `pending` is\nthe initial state at insert; `dismissed` is the architect-\nexplicit reject path (carries `dismissalReason`); `resolved` is\nset by the implicit-resolve hook when the matching domain\naction emits its event (carries `triggeredActionEventId`);\n`withdrawn` is the reviewer-explicit retract path (Task #443)\nfor a reviewer to clear their own outstanding ask without\narchitect involvement (carries `withdrawnBy` \/\n`withdrawnAt` \/ optional `withdrawalReason`).\n",
+          ),
+        requestedBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+          ),
+        requestedAt: zod.coerce.date(),
+        dismissedBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+          )
+          .nullable(),
+        dismissedAt: zod.coerce.date().nullable(),
+        dismissalReason: zod.string().nullable(),
+        withdrawnBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+          )
+          .nullable(),
+        withdrawnAt: zod.coerce.date().nullable(),
+        withdrawalReason: zod.string().nullable(),
         resolvedAt: zod.coerce.date().nullable(),
         triggeredActionEventId: zod.string().nullable(),
         createdAt: zod.coerce.date(),

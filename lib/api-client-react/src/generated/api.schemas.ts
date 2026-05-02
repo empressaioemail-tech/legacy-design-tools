@@ -2790,7 +2790,11 @@ export const ReviewerRequestKind = {
 the initial state at insert; `dismissed` is the architect-
 explicit reject path (carries `dismissalReason`); `resolved` is
 set by the implicit-resolve hook when the matching domain
-action emits its event (carries `triggeredActionEventId`).
+action emits its event (carries `triggeredActionEventId`);
+`withdrawn` is the reviewer-explicit retract path (Task #443)
+for a reviewer to clear their own outstanding ask without
+architect involvement (carries `withdrawnBy` /
+`withdrawnAt` / optional `withdrawalReason`).
 
  */
 export type ReviewerRequestStatus =
@@ -2800,6 +2804,7 @@ export const ReviewerRequestStatus = {
   pending: "pending",
   dismissed: "dismissed",
   resolved: "resolved",
+  withdrawn: "withdrawn",
 } as const;
 
 /**
@@ -2839,6 +2844,9 @@ export interface ReviewerRequest {
   dismissedBy: FindingActor | null;
   dismissedAt: string | null;
   dismissalReason: string | null;
+  withdrawnBy: FindingActor | null;
+  withdrawnAt: string | null;
+  withdrawalReason: string | null;
   resolvedAt: string | null;
   triggeredActionEventId: string | null;
   createdAt: string;
@@ -2881,6 +2889,23 @@ export interface DismissReviewerRequestBody {
    * @maxLength 4096
    */
   dismissalReason: string;
+}
+
+/**
+ * Request body for `POST /reviewer-requests/{id}/withdraw`
+(Task #443). Reviewer-side retract path. Unlike
+`DismissReviewerRequestBody`, the `withdrawalReason` is
+OPTIONAL — withdrawing one's own ask is a low-friction
+triage action; if supplied, the reason is capped at 4 KB and
+rejected when whitespace-only.
+
+ */
+export interface WithdrawReviewerRequestBody {
+  /**
+   * @minLength 1
+   * @maxLength 4096
+   */
+  withdrawalReason?: string | null;
 }
 
 /**

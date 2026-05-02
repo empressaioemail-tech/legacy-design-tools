@@ -1,20 +1,26 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { ChevronRight } from "lucide-react";
 import { DashboardLayout } from "@workspace/portal-ui";
 import {
   useListMyReviewerRequests,
+  useWithdrawReviewerRequest,
   getListMyReviewerRequestsQueryKey,
   type ReviewerRequestStatus,
+  type ReviewerRequestTargetType,
   type ReviewerRequestWithEngagement,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavGroups } from "../components/NavGroups";
-import { useSessionAudience } from "../lib/session";
+import { useSessionAudience, useSessionUserId } from "../lib/session";
 import { relativeTime } from "../lib/relativeTime";
 
 // Cross-engagement reviewer-side queue. Server-side ownership scoping
 // is the source-of-truth; this page is purely a presentation surface
-// over `GET /api/reviewer-requests`.
+// over `GET /api/reviewer-requests`. Task #443 adds the inline
+// withdraw affordance + an inline link to the target atom so the
+// reviewer can act on (or back out of) their own ask without
+// context-switching to the engagement detail tab tree first.
 
 type StatusFilter = "pending" | "all";
 
@@ -47,13 +53,43 @@ const STATUS_LABEL: Record<ReviewerRequestStatus, string> = {
   pending: "Pending",
   dismissed: "Dismissed",
   resolved: "Resolved",
+  withdrawn: "Withdrawn",
 };
 
 const STATUS_PILL_CLASS: Record<ReviewerRequestStatus, string> = {
   pending: "sc-pill sc-pill-amber",
   dismissed: "sc-pill sc-pill-muted",
   resolved: "sc-pill sc-pill-green",
+  withdrawn: "sc-pill sc-pill-muted",
 };
+
+// Inline-link copy for the target atom column. The reviewer reads
+// the row to decide whether to keep / withdraw the ask, so the
+// label has to name the *thing they asked about*, not the abstract
+// atom kind.
+const TARGET_LABEL: Record<ReviewerRequestTargetType, string> = {
+  "briefing-source": "Open briefing source",
+  "bim-model": "Open BIM model",
+  "parcel-briefing": "Open parcel briefing",
+};
+
+// Map a target atom to the engagement-detail deep-link that lands
+// the reviewer on the right tab/section. We deliberately prefer
+// hashes/queries that already exist on EngagementDetail rather than
+// inventing new routing; if a future engagement-detail rework
+// changes the hash names this map is the single point of update.
+function targetHrefFor(row: ReviewerRequestWithEngagement): string {
+  const base = `/engagements/${row.engagement.id}`;
+  switch (row.targetEntityType as ReviewerRequestTargetType) {
+    case "bim-model":
+      return `${base}?tab=bim`;
+    case "briefing-source":
+    case "parcel-briefing":
+      return `${base}#briefing`;
+    default:
+      return base;
+  }
+}
 
 const VALID_FILTERS = new Set<StatusFilter>(["pending", "all"]);
 
@@ -66,19 +102,68 @@ function parseFilterFromSearch(search: string): StatusFilter {
   return "pending";
 }
 
-function RequestRow({ row }: { row: ReviewerRequestWithEngagement }) {
+function RequestRow({
+  row,
+  isOwn,
+  filter,
+}: {
+  row: ReviewerRequestWithEngagement;
+  isOwn: boolean;
+  filter: StatusFilter;
+}) {
   const kindLabel = KIND_LABEL[row.requestKind] ?? row.requestKind;
   const status = row.status as ReviewerRequestStatus;
   const subtitleParts = [row.engagement.jurisdiction].filter(
     (s): s is string => !!s,
   );
+  const targetLabel =
+    TARGET_LABEL[row.targetEntityType as ReviewerRequestTargetType] ??
+    "Open target";
+  const targetHref = targetHrefFor(row);
+
+  const queryClient = useQueryClient();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const withdrawMutation = useWithdrawReviewerRequest({
+    mutation: {
+      onSuccess: async () => {
+        // Invalidate every cached variant of the cross-engagement
+        // list so the row disappears from `?status=pending` and
+        // re-appears under `?status=all` with its new `withdrawn`
+        // pill — without us having to manually surgery the cache.
+        await queryClient.invalidateQueries({
+          queryKey: getListMyReviewerRequestsQueryKey({ status: "pending" }),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: getListMyReviewerRequestsQueryKey({ status: "all" }),
+        });
+      },
+      onError: () => {
+        setErrorMessage("Couldn't withdraw — try again.");
+      },
+    },
+  });
+
+  // Only the *original requester* can withdraw, and only while the
+  // row is still pending. The server enforces both gates; the FE
+  // mirrors them so the affordance is hidden when it would 403/409.
+  const canWithdraw = isOwn && status === "pending";
+
+  const handleWithdraw = () => {
+    if (!canWithdraw || withdrawMutation.isPending) return;
+    setErrorMessage(null);
+    withdrawMutation.mutate({ id: row.id, data: {} });
+  };
+
   return (
-    <Link
-      href={`/engagements/${row.engagement.id}`}
-      className="sc-card-row flex items-center gap-3 no-underline"
+    <div
+      className="sc-card-row flex items-center gap-3"
       data-testid={`request-row-${row.id}`}
     >
-      <div className="flex flex-col min-w-0 flex-1">
+      <Link
+        href={`/engagements/${row.engagement.id}`}
+        className="flex flex-col min-w-0 flex-1 no-underline"
+        data-testid={`request-row-link-${row.id}`}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <div className="sc-medium truncate">{row.engagement.name}</div>
           <span
@@ -102,20 +187,62 @@ function RequestRow({ row }: { row: ReviewerRequestWithEngagement }) {
             {row.reason}
           </span>
         </div>
+      </Link>
+
+      <div className="hidden md:flex flex-col items-end gap-1 shrink-0">
+        <Link
+          href={targetHref}
+          className="sc-link sc-mono-sm"
+          data-testid={`request-row-target-${row.id}`}
+        >
+          {targetLabel}
+        </Link>
+        <span className="sc-mono-sm w-28 text-right text-[var(--text-secondary)]">
+          {relativeTime(row.requestedAt)}
+        </span>
       </div>
 
-      <div className="hidden md:block sc-mono-sm shrink-0 w-28 text-right text-[var(--text-secondary)]">
-        {relativeTime(row.requestedAt)}
-      </div>
+      {canWithdraw ? (
+        <button
+          type="button"
+          className="sc-btn-sm shrink-0"
+          onClick={handleWithdraw}
+          disabled={withdrawMutation.isPending}
+          data-testid={`request-row-withdraw-${row.id}`}
+          aria-label={`Withdraw request for ${row.engagement.name}`}
+        >
+          {withdrawMutation.isPending ? "Withdrawing…" : "Withdraw"}
+        </button>
+      ) : null}
 
-      <ChevronRight size={14} className="text-[var(--text-muted)] shrink-0" />
-    </Link>
+      <Link
+        href={`/engagements/${row.engagement.id}`}
+        className="no-underline"
+        aria-label={`Open ${row.engagement.name}`}
+        data-testid={`request-row-chevron-${row.id}`}
+      >
+        <ChevronRight size={14} className="text-[var(--text-muted)] shrink-0" />
+      </Link>
+
+      {errorMessage ? (
+        <span
+          className="sr-only"
+          role="alert"
+          data-testid={`request-row-withdraw-error-${row.id}`}
+        >
+          {errorMessage}
+        </span>
+      ) : null}
+
+      {filter === "pending" ? null : null}
+    </div>
   );
 }
 
 export default function OutstandingRequests() {
   const navGroups = useNavGroups();
   const { audience, isLoading: audienceLoading } = useSessionAudience();
+  const sessionUserId = useSessionUserId();
 
   const search = useSearch();
   const [location, setLocation] = useLocation();
@@ -250,7 +377,17 @@ export default function OutstandingRequests() {
                 {FILTER_EMPTY[filter]}
               </div>
             ) : (
-              requests.map((r) => <RequestRow key={r.id} row={r} />)
+              requests.map((r) => (
+                <RequestRow
+                  key={r.id}
+                  row={r}
+                  filter={filter}
+                  isOwn={
+                    sessionUserId !== null &&
+                    (r.requestedBy as { id?: string }).id === sessionUserId
+                  }
+                />
+              ))
             )}
           </div>
         </div>

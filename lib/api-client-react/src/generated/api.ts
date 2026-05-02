@@ -117,6 +117,7 @@ import type {
   User,
   WarmupResult,
   WarmupStatus,
+  WithdrawReviewerRequestBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -7956,6 +7957,121 @@ export const useDismissReviewerRequest = <
   TContext
 > => {
   return useMutation(getDismissReviewerRequestMutationOptions(options));
+};
+
+/**
+ * Reviewer-side retract path (Task #443). Lets the *original
+requester* clear their own outstanding ask without an
+architect context-switch — back-end mirror of the architect
+dismiss endpoint, but reserved to the row's author and gated
+on the reviewer audience.
+
+Stamps `withdrawnBy` / `withdrawnAt` (and optional
+`withdrawalReason` if the caller supplies one), flips
+`status` to `withdrawn`, and emits a
+`reviewer-request.<kind>.withdrawn` event anchored to the
+row. The `withdrawn` lifecycle event is deliberately distinct
+from the architect-side `.dismissed` event so the engagement
+timeline can tell apart "architect declined" from "reviewer
+changed their mind".
+
+Idempotent in spirit — withdrawing an already-withdrawn row
+returns the existing envelope without re-emitting an event.
+409s on `dismissed` (architect already closed the ask) and on
+`resolved` (a domain action already implicitly closed it).
+
+Reviewer-only: requires the `internal` audience and 403s any
+non-reviewer caller. Author-only: 403s when the calling
+reviewer is not the row's `requestedBy.id`.
+
+ * @summary Withdraw the caller's own pending reviewer-request
+ */
+export const getWithdrawReviewerRequestUrl = (id: string) => {
+  return `/api/reviewer-requests/${id}/withdraw`;
+};
+
+export const withdrawReviewerRequest = async (
+  id: string,
+  withdrawReviewerRequestBody: WithdrawReviewerRequestBody,
+  options?: RequestInit,
+): Promise<ReviewerRequestResponse> => {
+  return customFetch<ReviewerRequestResponse>(
+    getWithdrawReviewerRequestUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(withdrawReviewerRequestBody),
+    },
+  );
+};
+
+export const getWithdrawReviewerRequestMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+    TError,
+    { id: string; data: BodyType<WithdrawReviewerRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+  TError,
+  { id: string; data: BodyType<WithdrawReviewerRequestBody> },
+  TContext
+> => {
+  const mutationKey = ["withdrawReviewerRequest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+    { id: string; data: BodyType<WithdrawReviewerRequestBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return withdrawReviewerRequest(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type WithdrawReviewerRequestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof withdrawReviewerRequest>>
+>;
+export type WithdrawReviewerRequestMutationBody =
+  BodyType<WithdrawReviewerRequestBody>;
+export type WithdrawReviewerRequestMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Withdraw the caller's own pending reviewer-request
+ */
+export const useWithdrawReviewerRequest = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+    TError,
+    { id: string; data: BodyType<WithdrawReviewerRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof withdrawReviewerRequest>>,
+  TError,
+  { id: string; data: BodyType<WithdrawReviewerRequestBody> },
+  TContext
+> => {
+  return useMutation(getWithdrawReviewerRequestMutationOptions(options));
 };
 
 /**

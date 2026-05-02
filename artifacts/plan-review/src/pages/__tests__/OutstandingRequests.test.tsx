@@ -5,19 +5,32 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import type { ReviewerRequestWithEngagement } from "@workspace/api-client-react";
 
 const hoisted = vi.hoisted(() => ({
   audience: "internal" as "internal" | "user" | "ai" | null,
+  sessionUserId: "reviewer-1" as string | null,
   requests: [] as ReviewerRequestWithEngagement[],
   lastListParams: null as null | { status?: string },
+  withdrawCalls: [] as Array<{ id: string; data: unknown }>,
+  withdrawIsPending: false,
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
   useGetSession: () => ({
-    data: { audience: hoisted.audience, permissions: [] },
+    data: {
+      audience: hoisted.audience,
+      permissions: [],
+      // `useSessionUserId` reads `requestor.kind === "user"` — feed
+      // it a matching envelope so the row-ownership gate exposes
+      // the withdraw button on rows where requestedBy.id matches.
+      requestor: hoisted.sessionUserId
+        ? { kind: "user", id: hoisted.sessionUserId }
+        : null,
+    },
     isLoading: false,
   }),
   getGetSessionQueryKey: () => ["getSession"],
@@ -38,6 +51,12 @@ vi.mock("@workspace/api-client-react", () => ({
     "listMyReviewerRequests",
     params?.status ?? "pending",
   ],
+  useWithdrawReviewerRequest: (_opts?: unknown) => ({
+    mutate: (vars: { id: string; data: unknown }) => {
+      hoisted.withdrawCalls.push(vars);
+    },
+    isPending: hoisted.withdrawIsPending,
+  }),
 }));
 
 const { default: OutstandingRequests } = await import("../OutstandingRequests");
@@ -63,6 +82,9 @@ function row(over: Partial<ReviewerRequestWithEngagement> & { id: string }): Rev
     dismissedBy: over.dismissedBy ?? null,
     dismissedAt: over.dismissedAt ?? null,
     dismissalReason: over.dismissalReason ?? null,
+    withdrawnBy: over.withdrawnBy ?? null,
+    withdrawnAt: over.withdrawnAt ?? null,
+    withdrawalReason: over.withdrawalReason ?? null,
     resolvedAt: over.resolvedAt ?? null,
     triggeredActionEventId: over.triggeredActionEventId ?? null,
     createdAt: over.createdAt ?? "2026-04-01T00:00:00.000Z",
@@ -77,10 +99,23 @@ function row(over: Partial<ReviewerRequestWithEngagement> & { id: string }): Rev
 
 function renderAt(initialPath: string) {
   const memory = memoryLocation({ path: initialPath, record: true });
+  // Task #443 added an inline mutation in RequestRow, which calls
+  // useQueryClient() to invalidate listings on success. Wrap every
+  // render in a fresh QueryClientProvider so that hook resolves —
+  // the API hooks themselves are mocked, so this client is just
+  // there to satisfy the context lookup.
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
   const utils = render(
-    <Router hook={memory.hook}>
-      <OutstandingRequests />
-    </Router>,
+    <QueryClientProvider client={client}>
+      <Router hook={memory.hook}>
+        <OutstandingRequests />
+      </Router>
+    </QueryClientProvider>,
   );
   return { ...utils, memory };
 }
@@ -95,8 +130,11 @@ function selectedTabTestId(): string | null {
 
 beforeEach(() => {
   hoisted.audience = "internal";
+  hoisted.sessionUserId = "reviewer-1";
   hoisted.requests = [];
   hoisted.lastListParams = null;
+  hoisted.withdrawCalls = [];
+  hoisted.withdrawIsPending = false;
 });
 
 afterEach(() => {
@@ -181,14 +219,22 @@ describe("OutstandingRequests — empty state + row rendering", () => {
     expect(rowA.textContent).toContain("Riverside Library");
     expect(rowA.textContent).toContain("Moab, UT");
     expect(rowA.textContent).toContain("Source PDF appears outdated.");
-    expect(rowA.getAttribute("href")).toBe("/engagements/eng-A");
+    // Task #443 split the row from a single Link into a div with
+    // an inner engagement-link wrapper — the href moved to the
+    // inner element while the row container hosts the action
+    // affordances.
+    expect(
+      screen.getByTestId("request-row-link-req-1").getAttribute("href"),
+    ).toBe("/engagements/eng-A");
     const pillA = screen.getByTestId("request-row-kind-req-1");
     expect(pillA.textContent).toBe("Refresh briefing source");
 
     const rowB = screen.getByTestId("request-row-req-2");
     expect(rowB.textContent).toContain("Civic Annex");
     expect(rowB.textContent).toContain("Salt Lake City, UT");
-    expect(rowB.getAttribute("href")).toBe("/engagements/eng-B");
+    expect(
+      screen.getByTestId("request-row-link-req-2").getAttribute("href"),
+    ).toBe("/engagements/eng-B");
     const pillB = screen.getByTestId("request-row-kind-req-2");
     expect(pillB.textContent).toBe("Refresh BIM model");
   });
@@ -311,6 +357,120 @@ describe("Outstanding Requests sidebar badge (Task #444)", () => {
     // (audience filter), so there is no item, hence no badge.
     expect(screen.getByTestId("probe-found").textContent).toBe("no");
     expect(screen.queryByTestId("nav-outstanding-requests-badge")).toBeNull();
+  });
+});
+
+describe("OutstandingRequests — withdraw + target deep-link (Task #443)", () => {
+  it("renders a Withdraw button on the reviewer's own pending row", () => {
+    hoisted.requests = [
+      row({
+        id: "req-mine-pending",
+        status: "pending",
+        requestedBy: { kind: "user", id: "reviewer-1", displayName: "Me" },
+      }),
+    ];
+    renderAt("/requests");
+    const btn = screen.getByTestId("request-row-withdraw-req-mine-pending");
+    expect(btn).not.toBeNull();
+    expect(btn.textContent).toBe("Withdraw");
+  });
+
+  it("hides the Withdraw button on a row owned by a different reviewer", () => {
+    hoisted.requests = [
+      row({
+        id: "req-not-mine",
+        status: "pending",
+        requestedBy: {
+          kind: "user",
+          id: "reviewer-other",
+          displayName: "Other",
+        },
+      }),
+    ];
+    renderAt("/requests");
+    expect(
+      screen.queryByTestId("request-row-withdraw-req-not-mine"),
+    ).toBeNull();
+  });
+
+  it("hides the Withdraw button on the reviewer's own non-pending rows", () => {
+    hoisted.requests = [
+      row({
+        id: "req-mine-dismissed",
+        status: "dismissed",
+        requestedBy: { kind: "user", id: "reviewer-1", displayName: "Me" },
+        dismissedBy: { kind: "user", id: "architect-1", displayName: "A" },
+        dismissedAt: "2026-04-02T00:00:00.000Z",
+        dismissalReason: "no longer relevant",
+      }),
+      row({
+        id: "req-mine-resolved",
+        status: "resolved",
+        requestedBy: { kind: "user", id: "reviewer-1", displayName: "Me" },
+        resolvedAt: "2026-04-02T00:00:00.000Z",
+        triggeredActionEventId: "evt-1",
+      }),
+    ];
+    renderAt("/requests?status=all");
+    expect(
+      screen.queryByTestId("request-row-withdraw-req-mine-dismissed"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("request-row-withdraw-req-mine-resolved"),
+    ).toBeNull();
+  });
+
+  it("clicking Withdraw fires the mutation with the row's id", () => {
+    hoisted.requests = [
+      row({
+        id: "req-mine-pending",
+        status: "pending",
+        requestedBy: { kind: "user", id: "reviewer-1", displayName: "Me" },
+      }),
+    ];
+    renderAt("/requests");
+    fireEvent.click(
+      screen.getByTestId("request-row-withdraw-req-mine-pending"),
+    );
+    expect(hoisted.withdrawCalls).toHaveLength(1);
+    expect(hoisted.withdrawCalls[0].id).toBe("req-mine-pending");
+    // Empty body — no reason supplied via the inline affordance.
+    expect(hoisted.withdrawCalls[0].data).toEqual({});
+  });
+
+  it("renders a per-row inline link to the target atom", () => {
+    hoisted.requests = [
+      row({
+        id: "req-bs",
+        targetEntityType: "briefing-source",
+        targetEntityId: "src-x",
+        engagement: { id: "eng-A", name: "Eng A", jurisdiction: "X" },
+      }),
+      row({
+        id: "req-bim",
+        requestKind: "refresh-bim-model",
+        targetEntityType: "bim-model",
+        targetEntityId: "bim-x",
+        engagement: { id: "eng-B", name: "Eng B", jurisdiction: "Y" },
+      }),
+      row({
+        id: "req-pb",
+        requestKind: "regenerate-briefing",
+        targetEntityType: "parcel-briefing",
+        targetEntityId: "pb-x",
+        engagement: { id: "eng-C", name: "Eng C", jurisdiction: "Z" },
+      }),
+    ];
+    renderAt("/requests");
+    expect(
+      screen.getByTestId("request-row-target-req-bs").getAttribute("href"),
+    ).toBe("/engagements/eng-A#briefing");
+    expect(
+      screen.getByTestId("request-row-target-req-bim").getAttribute("href"),
+    ).toBe("/engagements/eng-B?tab=bim");
+    expect(
+      screen.getByTestId("request-row-target-req-pb").getAttribute("href"),
+    ).toBe("/engagements/eng-C#briefing");
   });
 });
 

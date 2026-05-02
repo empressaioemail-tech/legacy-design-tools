@@ -20,6 +20,8 @@ import {
   ListEngagementReviewerRequestsParams,
   ListEngagementReviewerRequestsQueryParams,
   ListMyReviewerRequestsQueryParams,
+  WithdrawReviewerRequestBody,
+  WithdrawReviewerRequestParams,
 } from "@workspace/api-zod";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import type { Logger } from "pino";
@@ -40,9 +42,12 @@ type _EmittedRequestEventTypes =
   `reviewer-request.${ReviewerRequestKind}.requested`;
 type _EmittedDismissEventTypes =
   `reviewer-request.${ReviewerRequestKind}.dismissed`;
+type _EmittedWithdrawEventTypes =
+  `reviewer-request.${ReviewerRequestKind}.withdrawn`;
 type _EmittedEventTypesAreDeclared =
   | _EmittedRequestEventTypes
-  | _EmittedDismissEventTypes extends (typeof REVIEWER_REQUEST_EVENT_TYPES)[number]
+  | _EmittedDismissEventTypes
+  | _EmittedWithdrawEventTypes extends (typeof REVIEWER_REQUEST_EVENT_TYPES)[number]
   ? true
   : never;
 
@@ -119,6 +124,9 @@ interface ReviewerRequestWire {
   dismissedBy: ReviewerRequestActor | null;
   dismissedAt: string | null;
   dismissalReason: string | null;
+  withdrawnBy: ReviewerRequestActor | null;
+  withdrawnAt: string | null;
+  withdrawalReason: string | null;
   resolvedAt: string | null;
   triggeredActionEventId: string | null;
   createdAt: string;
@@ -139,6 +147,9 @@ function toWire(row: ReviewerRequest): ReviewerRequestWire {
     dismissedBy: (row.dismissedBy as ReviewerRequestActor | null) ?? null,
     dismissedAt: row.dismissedAt ? row.dismissedAt.toISOString() : null,
     dismissalReason: row.dismissalReason,
+    withdrawnBy: (row.withdrawnBy as ReviewerRequestActor | null) ?? null,
+    withdrawnAt: row.withdrawnAt ? row.withdrawnAt.toISOString() : null,
+    withdrawalReason: row.withdrawalReason,
     resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
     triggeredActionEventId: row.triggeredActionEventId,
     createdAt: row.createdAt.toISOString(),
@@ -521,6 +532,154 @@ router.post(
           targetEntityType: row.targetEntityType,
           targetEntityId: row.targetEntityId,
           dismissalReason: row.dismissalReason,
+        },
+      },
+      reqLog,
+    );
+
+    res.status(200).json({ request: toWire(row) });
+  },
+);
+
+router.post(
+  "/reviewer-requests/:id/withdraw",
+  async (req: Request, res: Response): Promise<void> => {
+    // Reviewer-side retract path (Task #443). Mirrors the architect
+    // dismiss endpoint structurally but is gated on the *reviewer*
+    // audience AND on row ownership — only the original requester
+    // can clear their own outstanding ask. The 9-event vocabulary
+    // keeps `*.withdrawn` distinct from `*.dismissed` so the
+    // engagement timeline can tell apart "architect declined" from
+    // "reviewer changed their mind".
+    if (requireReviewerAudience(req, res)) return;
+    const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
+    const params = WithdrawReviewerRequestParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "invalid_path_params" });
+      return;
+    }
+    const body = WithdrawReviewerRequestBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: "invalid_request_body" });
+      return;
+    }
+    const existing = await loadReviewerRequest(params.data.id);
+    if (!existing) {
+      res.status(404).json({ error: "reviewer_request_not_found" });
+      return;
+    }
+
+    const actor = await actorEnvelopeFromRequest(req);
+    if (!actor) {
+      reqLog.warn(
+        { reviewerRequestId: existing.id },
+        "reviewer-request withdraw rejected — reviewer audience without requestor",
+      );
+      res.status(400).json({ error: "missing_requestor" });
+      return;
+    }
+
+    // Author-only: the row's `requestedBy.id` + `kind` envelope must
+    // exactly match the calling reviewer. We compare both fields so
+    // a future cross-kind id collision can never grant withdraw
+    // rights to a non-author. 403 (not 404) is the right code here:
+    // the row exists and the caller's audience is correct, but they
+    // are not the author.
+    const requestedBy = existing.requestedBy as ReviewerRequestActor;
+    if (
+      requestedBy.id !== actor.id ||
+      requestedBy.kind !== actor.kind
+    ) {
+      reqLog.warn(
+        {
+          reviewerRequestId: existing.id,
+          callerId: actor.id,
+          callerKind: actor.kind,
+          requestedById: requestedBy.id,
+          requestedByKind: requestedBy.kind,
+        },
+        "reviewer-request withdraw rejected — caller is not row author",
+      );
+      res
+        .status(403)
+        .json({ error: "reviewer_request_withdraw_requires_author" });
+      return;
+    }
+
+    if (existing.status === "withdrawn") {
+      // Idempotent in spirit — re-issuing withdraw on an already-
+      // withdrawn row returns the existing envelope without re-
+      // emitting an event, mirroring the dismiss-already-dismissed
+      // precedent above.
+      reqLog.debug(
+        { reviewerRequestId: existing.id },
+        "reviewer-request already withdrawn — returning existing envelope",
+      );
+      res.status(200).json({ request: toWire(existing) });
+      return;
+    }
+    if (existing.status === "dismissed") {
+      res.status(409).json({
+        error: "reviewer_request_already_dismissed",
+        details: {
+          dismissedAt: existing.dismissedAt
+            ? existing.dismissedAt.toISOString()
+            : null,
+          dismissalReason: existing.dismissalReason,
+        },
+      });
+      return;
+    }
+    if (existing.status === "resolved") {
+      res.status(409).json({
+        error: "reviewer_request_already_resolved",
+        details: {
+          resolvedAt: existing.resolvedAt
+            ? existing.resolvedAt.toISOString()
+            : null,
+          triggeredActionEventId: existing.triggeredActionEventId,
+        },
+      });
+      return;
+    }
+
+    const withdrawalReason = body.data.withdrawalReason ?? null;
+
+    const updated = await db
+      .update(reviewerRequests)
+      .set({
+        status: "withdrawn",
+        withdrawnBy: actor,
+        withdrawnAt: new Date(),
+        withdrawalReason,
+        updatedAt: new Date(),
+      })
+      .where(eq(reviewerRequests.id, existing.id))
+      .returning();
+    const row = updated[0];
+    if (!row) {
+      reqLog.error(
+        { reviewerRequestId: existing.id },
+        "reviewer-request withdraw UPDATE returned no row",
+      );
+      res.status(500).json({ error: "Failed to withdraw reviewer-request" });
+      return;
+    }
+
+    const eventType =
+      `reviewer-request.${row.requestKind}.withdrawn` as ReviewerRequestEventType;
+    await emitReviewerRequestEvent(
+      getHistoryService(),
+      {
+        request: row,
+        eventType,
+        actor,
+        payload: {
+          engagementId: row.engagementId,
+          requestKind: row.requestKind,
+          targetEntityType: row.targetEntityType,
+          targetEntityId: row.targetEntityId,
+          withdrawalReason: row.withdrawalReason,
         },
       },
       reqLog,
