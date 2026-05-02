@@ -5,16 +5,11 @@ import {
   type EngagementBriefingSource,
   type LocalSetbackDistrict,
 } from "@workspace/api-client-react";
-import { evaluateFederalSnapshotFreshness } from "@workspace/adapters/federal/summaries";
-import { evaluateLocalSnapshotFreshness } from "@workspace/adapters/local/summaries";
-import { evaluateStateSnapshotFreshness } from "@workspace/adapters/state/summaries";
-
-type ProvenanceTier = "federal" | "state" | "local";
-type SnapshotFreshnessVerdict = {
-  ageMonths: number;
-  thresholdMonths: number;
-  isStale: boolean;
-};
+import {
+  evaluateRowFreshness,
+  type ProvenanceTier,
+  type SnapshotFreshnessVerdict,
+} from "../lib/briefingSourceHelpers";
 
 /**
  * "View layer details" panel for one adapter-driven briefing source row.
@@ -462,28 +457,20 @@ function ProvenanceFooter({
     typeof source.provider === "string" && source.provider.trim().length > 0
       ? source.provider.trim()
       : null;
-  // window declared with each adapter — federal (Task #222) plus
-  // state/local (Task #254). Each evaluator returns `null` when the
-  // layer kind isn't in its tier so we can probe each in turn and
-  // tag the verdict with whichever tier owned it; the FE only needs
-  // the tier to pick the testid suffix the e2e tests assert on.
+  // V1-2 Phase 1A decision (d-ii): the per-tier freshness probe lives
+  // in `briefingSourceHelpers.ts` so the row-level affordance gate
+  // and this footer-level badge both call into the same pure helper.
   // For non-adapter layer kinds, missing/malformed dates, or
-  // future-dated snapshots, all three return `null` and we fall
+  // future-dated snapshots, the helper returns `null` and we fall
   // through to the original "as of … · source: …" footer with no
-  // badge.
+  // badge. Memoize on the inputs that drive the helper.
   const freshness = useMemo<{
     tier: ProvenanceTier;
     verdict: SnapshotFreshnessVerdict;
-  } | null>(() => {
-    const snap = source.snapshotDate as unknown as string | null | undefined;
-    const fed = evaluateFederalSnapshotFreshness(source.layerKind, snap);
-    if (fed) return { tier: "federal", verdict: fed };
-    const st = evaluateStateSnapshotFreshness(source.layerKind, snap);
-    if (st) return { tier: "state", verdict: st };
-    const loc = evaluateLocalSnapshotFreshness(source.layerKind, snap);
-    if (loc) return { tier: "local", verdict: loc };
-    return null;
-  }, [source.layerKind, source.snapshotDate]);
+  } | null>(
+    () => evaluateRowFreshness(source),
+    [source.layerKind, source.snapshotDate],
+  );
   // Task #255 — recover the original adapterKey from the row's packed
   // `provider` string. The generate-layers route writes
   // `<adapterKey> (<provider-label>)`, so the adapterKey is everything

@@ -280,6 +280,10 @@ async function emitBriefingSourceRefreshedEvent(
   try {
     const event = await history.appendEvent({
       entityType: "briefing-source",
+      // Anchor .refreshed on the SUPERSEDED row's id, not the new row.
+      // Reviewer-requests carry target_entity_id = pre-refresh UUID,
+      // and the implicit-resolve helper matches on target_entity_id.
+      // Anchoring on the new id would orphan all pending requests.
       entityId: supersededSourceId,
       eventType: BRIEFING_SOURCE_REFRESHED_EVENT_TYPE,
       actor: BRIEFING_ADAPTER_ACTOR,
