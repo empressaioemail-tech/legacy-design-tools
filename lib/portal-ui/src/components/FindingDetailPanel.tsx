@@ -32,6 +32,15 @@ export interface FindingDetailPanelProps {
   /** Optional close/clear-selection handler. When provided, pressing Escape
    * dismisses the active finding and a close button appears in the header. */
   onClose?: () => void;
+  /**
+   * Optional handler invoked when the architect clicks the CAD `elementRef`.
+   * When provided, the elementRef renders as a button instead of static text
+   * so the parent can swing the BIM viewer to the matching element. The
+   * callback receives the raw `elementRef` string (e.g. `door:l2-corridor-9`)
+   * — interpretation is the parent's job since this panel ships in
+   * `lib/portal-ui` and must stay viewer-agnostic.
+   */
+  onElementRefClick?: (elementRef: string) => void;
   testIdPrefix?: string;
 }
 
@@ -78,6 +87,7 @@ export function FindingDetailPanel({
   addressError,
   onRetry,
   onClose,
+  onElementRefClick,
   testIdPrefix = DEFAULT_TESTID_PREFIX,
 }: FindingDetailPanelProps) {
   // Escape key clears the selection when an `onClose` is wired.
@@ -210,17 +220,39 @@ export function FindingDetailPanel({
             <div className="sc-label" style={{ marginBottom: 4 }}>
               CAD ELEMENT
             </div>
-            <code
-              className="sc-mono-sm"
-              style={{
-                background: "var(--bg-input)",
-                padding: "2px 6px",
-                borderRadius: 3,
-                fontSize: 11,
-              }}
-            >
-              {finding.elementRef}
-            </code>
+            {onElementRefClick ? (
+              <button
+                type="button"
+                data-testid={`${testIdPrefix}-cad-ref-link`}
+                onClick={() => onElementRefClick(finding.elementRef!)}
+                title="Open in 3D viewer"
+                className="sc-mono-sm"
+                style={{
+                  background: "var(--bg-input)",
+                  padding: "2px 6px",
+                  borderRadius: 3,
+                  fontSize: 11,
+                  border: "1px solid var(--border-default, transparent)",
+                  color: "var(--info-text, inherit)",
+                  textDecoration: "underline",
+                  cursor: "pointer",
+                }}
+              >
+                {finding.elementRef}
+              </button>
+            ) : (
+              <code
+                className="sc-mono-sm"
+                style={{
+                  background: "var(--bg-input)",
+                  padding: "2px 6px",
+                  borderRadius: 3,
+                  fontSize: 11,
+                }}
+              >
+                {finding.elementRef}
+              </code>
+            )}
           </div>
         )}
 

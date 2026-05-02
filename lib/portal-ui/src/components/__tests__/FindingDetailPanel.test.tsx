@@ -347,6 +347,65 @@ describe("FindingDetailPanel", () => {
     });
   });
 
+  it("renders elementRef as a clickable link and fires onElementRefClick with the raw ref", () => {
+    const finding = makeFinding();
+    const onElementRefClick = vi.fn();
+    render(
+      <FindingDetailPanel
+        finding={finding}
+        codeLibraryBase="/design-tools/code-library"
+        onAddressWithRevision={() => {}}
+        isAddressing={false}
+        onElementRefClick={onElementRefClick}
+      />,
+    );
+    const link = screen.getByTestId("architect-finding-detail-cad-ref-link");
+    expect(link.tagName).toBe("BUTTON");
+    expect(link.textContent).toContain("door:l2-corridor-9");
+    fireEvent.click(link);
+    expect(onElementRefClick).toHaveBeenCalledTimes(1);
+    expect(onElementRefClick).toHaveBeenCalledWith("door:l2-corridor-9");
+  });
+
+  it("renders elementRef as plain text when onElementRefClick is not wired", () => {
+    const finding = makeFinding();
+    render(
+      <FindingDetailPanel
+        finding={finding}
+        codeLibraryBase="/design-tools/code-library"
+        onAddressWithRevision={() => {}}
+        isAddressing={false}
+      />,
+    );
+    expect(
+      screen.queryByTestId("architect-finding-detail-cad-ref-link"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("architect-finding-detail-cad-ref").textContent,
+    ).toContain("door:l2-corridor-9");
+  });
+
+  it("does not render the CAD-element block when elementRef is null, even with onElementRefClick wired", () => {
+    const finding = makeFinding({ elementRef: null });
+    const onElementRefClick = vi.fn();
+    render(
+      <FindingDetailPanel
+        finding={finding}
+        codeLibraryBase="/design-tools/code-library"
+        onAddressWithRevision={() => {}}
+        isAddressing={false}
+        onElementRefClick={onElementRefClick}
+      />,
+    );
+    expect(
+      screen.queryByTestId("architect-finding-detail-cad-ref"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("architect-finding-detail-cad-ref-link"),
+    ).toBeNull();
+    expect(onElementRefClick).not.toHaveBeenCalled();
+  });
+
   it("dismisses the active finding via Escape and renders a close button when onClose is wired", () => {
     const finding = makeFinding();
     const onClose = vi.fn();

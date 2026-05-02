@@ -172,13 +172,20 @@ vi.mock("@workspace/site-context/client", () => ({
 // gated by `enabled: false` or rendered behind closed modals on the
 // initial paint, so a no-op stub is enough to keep the page from
 // crashing while we exercise the banner.
-vi.mock("@workspace/api-client-react", async () => {
+vi.mock("@workspace/api-client-react", async (importOriginal) => {
   // Pull `useQuery` once at factory time so the per-render hook
   // bodies below stay synchronous (an `await import` inside the
   // hook itself would make it return a Promise instead of a
   // QueryResult and crash the renderer).
   const { useQuery } = await import("@tanstack/react-query");
+  // Spread the real module so any hook the page transitively
+  // imports — e.g. the new SiteContextTab pulled in by Task #437 —
+  // resolves without a per-test mock entry. The explicit overrides
+  // below replace just the hooks this suite needs to control.
+  const actual =
+    (await importOriginal()) as Record<string, unknown>;
   return {
+    ...actual,
     // Shared engagement-page hook bag (Task #398) — provides the
     // dozen identical `useGetEngagement` / `useListEngagements` /
     // `useGetSession` / `useGetSnapshot` / `useListEngagementSubmissions`
@@ -232,6 +239,73 @@ vi.mock("@workspace/api-client-react", async () => {
       "divergence-related": "divergence-related",
       other: "other",
     } as const,
+    // Site Context tab hooks (Task #437) — the elementRef deep-link
+    // test mounts SiteContextTab, which pulls in the layer/BIM
+    // mutations + the briefing-runs list. None of them are exercised
+    // by the test, so a no-op stub returning the shape react-query
+    // expects is enough to keep the page from crashing.
+    useGenerateEngagementLayers: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    }),
+    usePushEngagementBimModel: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    }),
+    useResolveBimModelDivergence: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    }),
+    useListEngagementBriefingGenerationRuns: () =>
+      useQuery({
+        queryKey: ["listEngagementBriefingGenerationRuns"] as const,
+        queryFn: async () => [],
+        enabled: true,
+      }),
+    useGenerateEngagementBriefing: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+      isPending: false,
+      reset: vi.fn(),
+    }),
+    useGetEngagementBriefingGenerationStatus: () =>
+      useQuery({
+        queryKey: ["getEngagementBriefingGenerationStatus"] as const,
+        queryFn: async () => null,
+        enabled: false,
+      }),
+    getGetEngagementBriefingGenerationStatusQueryKey: (id: string) =>
+      ["getEngagementBriefingGenerationStatus", id] as const,
+    useGetEngagementBimModel: () =>
+      useQuery({
+        queryKey: ["getEngagementBimModel"] as const,
+        queryFn: async () => null,
+        enabled: false,
+      }),
+    useGetBimModelRefresh: () =>
+      useQuery({
+        queryKey: ["getBimModelRefresh"] as const,
+        queryFn: async () => null,
+        enabled: false,
+      }),
+    getGetBimModelRefreshQueryKey: (id: string) =>
+      ["getBimModelRefresh", id] as const,
+    getListEngagementBriefingGenerationRunsQueryKey: (id: string) =>
+      ["listEngagementBriefingGenerationRuns", id] as const,
+    getListBimModelDivergencesQueryKey: (id: string) =>
+      ["listBimModelDivergences", id] as const,
+    useListBimModelDivergences: () =>
+      useQuery({
+        queryKey: ["listBimModelDivergences"] as const,
+        queryFn: async () => [],
+        enabled: false,
+      }),
   };
 });
 
@@ -1019,6 +1093,49 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     expect(
       screen.getByTestId("findings-tab-list-filtered-empty"),
     ).toBeInTheDocument();
+  });
+
+  it("clicking the CAD elementRef link swings the page to the Site Context tab and pre-selects the element in the BIM viewer (Task #437)", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          elementRef: "door:l2-corridor-9",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    // Sanity: the panel rendered the elementRef as a clickable button
+    // (the lib/portal-ui FindingDetailPanel switches to <button> when
+    // an `onElementRefClick` is wired — that wire-up is exactly the
+    // thing this test guards against silent regression of).
+    const link = screen.getByTestId("architect-finding-detail-cad-ref-link");
+    expect(link.tagName).toBe("BUTTON");
+    fireEvent.click(link);
+    // The page swings the tab strip over to Site Context. We assert
+    // via the page URL contract (`?tab=site-context`) which is the
+    // same channel deep-links use, so a future tab-strip re-render
+    // can't mask a regression here.
+    expect(window.location.search).toContain("tab=site-context");
+    // The findings list/detail is no longer in the DOM — proves the
+    // tab actually switched, not just URL-only.
+    expect(screen.queryByTestId("findings-tab")).not.toBeInTheDocument();
+    // Flip to the 3D sub-tab so the SiteContextViewer mounts. The
+    // engagement has no ready DXF sources in this fixture, so the
+    // viewer would otherwise default to the legacy Map placeholder
+    // and the badge wouldn't render.
+    fireEvent.click(screen.getByTestId("site-context-subtab-3d"));
+    const badge = screen.getByTestId("site-context-viewer-selected-element");
+    expect(badge.textContent).toContain("door:l2-corridor-9");
+    // Clearing the badge wipes the page-level selection state, so
+    // the badge unmounts.
+    fireEvent.click(
+      screen.getByTestId("site-context-viewer-selected-element-clear"),
+    );
+    expect(
+      screen.queryByTestId("site-context-viewer-selected-element"),
+    ).not.toBeInTheDocument();
   });
 
   it("clicking 'Address with next revision' calls override with the marker comment and the row's content", () => {

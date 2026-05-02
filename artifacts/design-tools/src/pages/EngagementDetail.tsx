@@ -1817,8 +1817,14 @@ function BriefingRecentRunsPanel({
 
 function SiteContextTab({
   engagement,
+  selectedElementRef,
+  onClearSelectedElement,
 }: {
   engagement: EngagementDetailType;
+  /** CAD element ref deep-linked from the Findings tab. */
+  selectedElementRef?: string | null;
+  /** Clear handler for the selected-element badge. */
+  onClearSelectedElement?: () => void;
 }) {
   const engagementId = engagement.id;
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -2657,7 +2663,11 @@ function SiteContextTab({
             flex: 1,
           }}
         >
-          <SiteContextViewer sources={sources} />
+          <SiteContextViewer
+            sources={sources}
+            selectedElementRef={selectedElementRef}
+            onClearSelectedElement={onClearSelectedElement}
+          />
         </div>
       )}
 
@@ -4029,9 +4039,17 @@ function FindingsFilterChips({
 function FindingsTab({
   engagementId,
   initialSubmissionId,
+  onElementRefClick,
 }: {
   engagementId: string;
   initialSubmissionId: string | null;
+  /**
+   * Invoked when the architect clicks the CAD `elementRef` chip on a
+   * finding. The page wires this to swing the tab strip over to the
+   * Site Context (3D BIM) tab and pre-select the element so the
+   * "tap citation, see the wall" loop closes without manual tab juggling.
+   */
+  onElementRefClick?: (elementRef: string) => void;
 }) {
   const queryClient = useQueryClient();
   const codeLibraryBase = `${import.meta.env.BASE_URL}code-library`;
@@ -4325,6 +4343,7 @@ function FindingsTab({
           addressError={overrideError}
           onRetry={handleAddressWithRevision}
           onClose={() => setSelectedFindingId(null)}
+          onElementRefClick={onElementRefClick}
         />
       </div>
     </div>
@@ -4381,6 +4400,19 @@ export function EngagementDetail() {
   const [openSubmissionId, setOpenSubmissionId] = useState<string | null>(
     null,
   );
+  // Task #437 — CAD element ref deep-linked from a finding citation.
+  // Lifted to the page so the click on the Findings tab can swing
+  // over to the Site Context tab and the badge survives the tab
+  // switch. Cleared from the viewer's own dismiss button so the
+  // architect doesn't have to click back into Findings to drop the
+  // selection.
+  const [selectedElementRef, setSelectedElementRef] = useState<string | null>(
+    null,
+  );
+  const handleElementRefClick = (elementRef: string): void => {
+    setSelectedElementRef(elementRef);
+    setTab("site-context");
+  };
   // Auto-dismiss the banner after 8s so it stays out of the way once
   // the user has seen it. The dialog itself already closed on success,
   // so the banner is the only remaining post-submit affordance. Within
@@ -4757,7 +4789,11 @@ export function EngagementDetail() {
         )}
 
         {tab === "site-context" && (
-          <SiteContextTab engagement={engagement} />
+          <SiteContextTab
+            engagement={engagement}
+            selectedElementRef={selectedElementRef}
+            onClearSelectedElement={() => setSelectedElementRef(null)}
+          />
         )}
 
         {tab === "submissions" && (
@@ -4773,6 +4809,7 @@ export function EngagementDetail() {
           <FindingsTab
             engagementId={engagement.id}
             initialSubmissionId={latestSubmissionId}
+            onElementRefClick={handleElementRefClick}
           />
         )}
 
