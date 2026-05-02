@@ -3304,6 +3304,116 @@ export const UpdateMyProfileResponse = zod
   );
 
 /**
+ * Task #432 — architect-wide in-app notification surface for the
+design-tools side-nav inbox.
+
+Newest-first list of recent submission status changes and
+reviewer-requests across every engagement. Each row carries a
+`read` flag derived from the architect's persisted
+`lastReadAt` watermark, plus the response envelope includes an
+aggregate `unreadCount` so the side-nav badge can render
+without a follow-up call.
+
+Architect-only — anonymous and agent callers get a 401. The
+`lastReadAt` watermark is per-requestor, persisted in
+`architect_notification_reads` keyed by
+`req.session.requestor.id`.
+
+ * @summary List the architect's recent inbox notifications
+ */
+export const listMyNotificationsQueryLimitDefault = 50;
+export const listMyNotificationsQueryLimitMax = 200;
+
+export const ListMyNotificationsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listMyNotificationsQueryLimitMax)
+    .default(listMyNotificationsQueryLimitDefault)
+    .describe(
+      "Maximum number of items to return. Capped server-side at\n200; defaults to 50 when omitted.\n",
+    ),
+});
+
+export const listMyNotificationsResponseUnreadCountMin = 0;
+
+export const ListMyNotificationsResponse = zod
+  .object({
+    items: zod.array(
+      zod
+        .object({
+          id: zod
+            .string()
+            .describe("Stable atom-event id; safe to use as a React key."),
+          kind: zod.enum([
+            "submission-status-changed",
+            "reviewer-request-filed",
+          ]),
+          title: zod
+            .string()
+            .describe(
+              'Human-readable headline pre-formatted server-side so the\nFE renders the same wording it logs (e.g. \"Submission\napproved\", \"Reviewer requested briefing-source refresh\").\n',
+            ),
+          body: zod
+            .string()
+            .nullable()
+            .describe(
+              "Optional supporting text. For status-changes this is the\nreviewer's `note`; for reviewer-requests it is the\n`reason`. Null when the producing event carried no note.\n",
+            ),
+          occurredAt: zod.coerce.date(),
+          recordedAt: zod.coerce.date(),
+          read: zod
+            .boolean()
+            .describe(
+              "True when `occurredAt <= lastReadAt` for the calling\narchitect. Stamped server-side so the FE doesn't have to\nre-derive the comparison.\n",
+            ),
+          engagementId: zod
+            .string()
+            .nullable()
+            .describe(
+              "Engagement the event belongs to. Used as the deep-link\ntarget — the FE routes the row click to\n`\/engagements\/{engagementId}` (or the submission if\npresent, but the engagement detail page is the canonical\nsurface today).\n",
+            ),
+          engagementName: zod.string().nullable(),
+          submissionId: zod.string().nullable(),
+          reviewerRequestId: zod.string().nullable(),
+        })
+        .describe(
+          "One row in the architect inbox. Materialised on the fly from\nan `atom_events` row; the `kind` discriminates how to render\nthe title and what target the deep link should open.\n",
+        ),
+    ),
+    unreadCount: zod.number().min(listMyNotificationsResponseUnreadCountMin),
+    lastReadAt: zod.coerce
+      .date()
+      .nullable()
+      .describe(
+        'The architect\'s persisted read-watermark, or null when\nthey have never opened the inbox. The FE uses this for\nthe \"all caught up since …\" subtitle.\n',
+      ),
+  })
+  .describe(
+    "Wire envelope for `GET \/me\/notifications`. The `unreadCount`\nfeeds the side-nav badge directly so the FE doesn't have to\nre-tally `items` (and stays correct even when the page is\ncapped by `limit`).\n",
+  );
+
+/**
+ * Task #432 — sets `architect_notification_reads.last_read_at`
+for the calling architect to "now". Subsequent
+`GET /me/notifications` calls report `unreadCount: 0` and
+flip every existing item to `read: true` until a fresh event
+lands.
+
+Idempotent — calling twice in quick succession just bumps the
+watermark twice. No request body is required.
+
+ * @summary Bump the architect's "last viewed inbox" watermark
+ */
+export const MarkMyNotificationsReadResponse = zod
+  .object({
+    lastReadAt: zod.coerce.date(),
+  })
+  .describe(
+    "Wire envelope for `POST \/me\/notifications\/mark-read`. Returns\nthe new `lastReadAt` so the FE can splice it into the cached\nlist response without a follow-up GET.\n",
+  );
+
+/**
  * Returns whatever `req.session` the server has attached for the
 caller. Today this is derived from the dev `pr_session` cookie
 / `x-requestor` / `x-permissions` header overrides outside

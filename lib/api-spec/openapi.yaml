@@ -43,6 +43,11 @@ tags:
       Inbox + KPI strip (Reviewer V1-B / Task #426). Reviewer-only
       (audience-gated to `internal`), reads across every engagement
       a reviewer can see in a single round-trip.
+  - name: notifications
+    description: |
+      Architect-side in-app notification surface (Task #432). Newest-
+      first list of submission status changes and reviewer-requests
+      across every engagement, plus a per-architect read-watermark.
 paths:
   /healthz:
     get:
@@ -2249,6 +2254,84 @@ paths:
             declared `contentType` is checked at presigned-URL time,
             but a non-browser client can lie about it; this route
             sniffs the actual bytes before persisting `avatar_url`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /me/notifications:
+    get:
+      operationId: listMyNotifications
+      tags: [notifications]
+      summary: List the architect's recent inbox notifications
+      description: |
+        Task #432 — architect-wide in-app notification surface for the
+        design-tools side-nav inbox.
+
+        Newest-first list of recent submission status changes and
+        reviewer-requests across every engagement. Each row carries a
+        `read` flag derived from the architect's persisted
+        `lastReadAt` watermark, plus the response envelope includes an
+        aggregate `unreadCount` so the side-nav badge can render
+        without a follow-up call.
+
+        Architect-only — anonymous and agent callers get a 401. The
+        `lastReadAt` watermark is per-requestor, persisted in
+        `architect_notification_reads` keyed by
+        `req.session.requestor.id`.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: |
+            Maximum number of items to return. Capped server-side at
+            200; defaults to 50 when omitted.
+      responses:
+        "200":
+          description: Notification list with unread count and watermark
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListNotificationsResponse"
+        "401":
+          description: |
+            No `user`-kind requestor on the session — anonymous and
+            agent callers cannot view the architect inbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /me/notifications/mark-read:
+    post:
+      operationId: markMyNotificationsRead
+      tags: [notifications]
+      summary: Bump the architect's "last viewed inbox" watermark
+      description: |
+        Task #432 — sets `architect_notification_reads.last_read_at`
+        for the calling architect to "now". Subsequent
+        `GET /me/notifications` calls report `unreadCount: 0` and
+        flip every existing item to `read: true` until a fresh event
+        lands.
+
+        Idempotent — calling twice in quick succession just bumps the
+        watermark twice. No request body is required.
+      responses:
+        "200":
+          description: Updated watermark
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarkNotificationsReadResponse"
+        "401":
+          description: |
+            No `user`-kind requestor on the session — anonymous and
+            agent callers cannot mark notifications as read.
           content:
             application/json:
               schema:
@@ -8118,3 +8201,109 @@ components:
           type: integer
           minimum: 0
       required: [rescuedStuck, reapedTerminal, warnedIncompleteMirror, durationMs]
+
+    NotificationItem:
+      type: object
+      description: |
+        One row in the architect inbox. Materialised on the fly from
+        an `atom_events` row; the `kind` discriminates how to render
+        the title and what target the deep link should open.
+      properties:
+        id:
+          type: string
+          description: Stable atom-event id; safe to use as a React key.
+        kind:
+          type: string
+          enum: [submission-status-changed, reviewer-request-filed]
+        title:
+          type: string
+          description: |
+            Human-readable headline pre-formatted server-side so the
+            FE renders the same wording it logs (e.g. "Submission
+            approved", "Reviewer requested briefing-source refresh").
+        body:
+          type: string
+          nullable: true
+          description: |
+            Optional supporting text. For status-changes this is the
+            reviewer's `note`; for reviewer-requests it is the
+            `reason`. Null when the producing event carried no note.
+        occurredAt:
+          type: string
+          format: date-time
+        recordedAt:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+          description: |
+            True when `occurredAt <= lastReadAt` for the calling
+            architect. Stamped server-side so the FE doesn't have to
+            re-derive the comparison.
+        engagementId:
+          type: string
+          nullable: true
+          description: |
+            Engagement the event belongs to. Used as the deep-link
+            target — the FE routes the row click to
+            `/engagements/{engagementId}` (or the submission if
+            present, but the engagement detail page is the canonical
+            surface today).
+        engagementName:
+          type: string
+          nullable: true
+        submissionId:
+          type: string
+          nullable: true
+        reviewerRequestId:
+          type: string
+          nullable: true
+      required:
+        - id
+        - kind
+        - title
+        - body
+        - occurredAt
+        - recordedAt
+        - read
+        - engagementId
+        - engagementName
+        - submissionId
+        - reviewerRequestId
+
+    ListNotificationsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /me/notifications`. The `unreadCount`
+        feeds the side-nav badge directly so the FE doesn't have to
+        re-tally `items` (and stays correct even when the page is
+        capped by `limit`).
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationItem"
+        unreadCount:
+          type: integer
+          minimum: 0
+        lastReadAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            The architect's persisted read-watermark, or null when
+            they have never opened the inbox. The FE uses this for
+            the "all caught up since …" subtitle.
+      required: [items, unreadCount, lastReadAt]
+
+    MarkNotificationsReadResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /me/notifications/mark-read`. Returns
+        the new `lastReadAt` so the FE can splice it into the cached
+        list response without a follow-up GET.
+      properties:
+        lastReadAt:
+          type: string
+          format: date-time
+      required: [lastReadAt]

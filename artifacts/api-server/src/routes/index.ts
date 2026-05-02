@@ -26,6 +26,7 @@ import findingsRouter from "./findings";
 import reviewerRequestsRouter from "./reviewerRequests";
 import reviewerQueueRouter from "./submissions";
 import rendersRouter from "./renders";
+import notificationsRouter from "./notifications";
 
 const router: IRouter = Router();
 
@@ -107,5 +108,10 @@ router.use(reviewerQueueRouter);
 // ordering-indifferent group (line 55), so we land here matching the
 // briefing-router precedent (line 34 ordering note).
 router.use(rendersRouter);
+// Architect inbox/notification surface. Mounts under
+// `/me/notifications*`; a distinct path subtree from `meRouter`
+// (`/me/architect-pdf-header`, `/me/profile`) so ordering relative
+// to it is indifferent.
+router.use(notificationsRouter);
 
 export default router;

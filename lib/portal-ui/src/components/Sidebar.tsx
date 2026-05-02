@@ -12,6 +12,13 @@ export interface SidebarItem {
   label: string;
   href: string;
   icon?: ReactNode;
+  /**
+   * Optional trailing badge (e.g. an unread-count pill). Rendered
+   * only when the sidebar is expanded — the collapsed state shows
+   * the icon alone since the count would not fit. Pass `null` /
+   * `undefined` for items that do not need a badge.
+   */
+  badge?: ReactNode;
 }
 
 export interface SidebarGroup {
@@ -276,9 +283,22 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
                           style={{
                             overflow: "hidden",
                             textOverflow: "ellipsis",
+                            flex: 1,
                           }}
                         >
                           {item.label}
+                        </span>
+                      )}
+                      {!collapsed && item.badge !== undefined && item.badge !== null && (
+                        <span
+                          style={{
+                            marginLeft: "auto",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {item.badge}
                         </span>
                       )}
                     </Link>

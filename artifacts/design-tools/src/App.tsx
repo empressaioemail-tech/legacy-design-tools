@@ -9,6 +9,7 @@ import { CodeLibrary } from "./pages/CodeLibrary";
 import { DevAtoms } from "./pages/DevAtoms";
 import { DevAtomsProbe } from "./pages/DevAtomsProbe";
 import { Settings } from "./pages/Settings";
+import { Notifications } from "./pages/Notifications";
 import { AppShell } from "./components/AppShell";
 
 const queryClient = new QueryClient();
@@ -43,6 +44,11 @@ function Router() {
       <Route path="/settings">
         <AppShell title="Settings">
           <Settings />
+        </AppShell>
+      </Route>
+      <Route path="/notifications">
+        <AppShell title="Inbox">
+          <Notifications />
         </AppShell>
       </Route>
       <Route path="/dev/atoms">

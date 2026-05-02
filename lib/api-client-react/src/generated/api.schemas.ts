@@ -3285,6 +3285,81 @@ V1-4 (V1-5 follow-up).
   durationMs: number;
 }
 
+export type NotificationItemKind =
+  (typeof NotificationItemKind)[keyof typeof NotificationItemKind];
+
+export const NotificationItemKind = {
+  "submission-status-changed": "submission-status-changed",
+  "reviewer-request-filed": "reviewer-request-filed",
+} as const;
+
+/**
+ * One row in the architect inbox. Materialised on the fly from
+an `atom_events` row; the `kind` discriminates how to render
+the title and what target the deep link should open.
+
+ */
+export interface NotificationItem {
+  /** Stable atom-event id; safe to use as a React key. */
+  id: string;
+  kind: NotificationItemKind;
+  /** Human-readable headline pre-formatted server-side so the
+FE renders the same wording it logs (e.g. "Submission
+approved", "Reviewer requested briefing-source refresh").
+ */
+  title: string;
+  /** Optional supporting text. For status-changes this is the
+reviewer's `note`; for reviewer-requests it is the
+`reason`. Null when the producing event carried no note.
+ */
+  body: string | null;
+  occurredAt: string;
+  recordedAt: string;
+  /** True when `occurredAt <= lastReadAt` for the calling
+architect. Stamped server-side so the FE doesn't have to
+re-derive the comparison.
+ */
+  read: boolean;
+  /** Engagement the event belongs to. Used as the deep-link
+target — the FE routes the row click to
+`/engagements/{engagementId}` (or the submission if
+present, but the engagement detail page is the canonical
+surface today).
+ */
+  engagementId: string | null;
+  engagementName: string | null;
+  submissionId: string | null;
+  reviewerRequestId: string | null;
+}
+
+/**
+ * Wire envelope for `GET /me/notifications`. The `unreadCount`
+feeds the side-nav badge directly so the FE doesn't have to
+re-tally `items` (and stays correct even when the page is
+capped by `limit`).
+
+ */
+export interface ListNotificationsResponse {
+  items: NotificationItem[];
+  /** @minimum 0 */
+  unreadCount: number;
+  /** The architect's persisted read-watermark, or null when
+they have never opened the inbox. The FE uses this for
+the "all caught up since …" subtitle.
+ */
+  lastReadAt: string | null;
+}
+
+/**
+ * Wire envelope for `POST /me/notifications/mark-read`. Returns
+the new `lastReadAt` so the FE can splice it into the cached
+list response without a follow-up GET.
+
+ */
+export interface MarkNotificationsReadResponse {
+  lastReadAt: string;
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
@@ -3446,6 +3521,17 @@ export type GetAtomHistoryParams = {
    * @minimum 1
    * @maximum 50
    */
+  limit?: number;
+};
+
+export type ListMyNotificationsParams = {
+  /**
+ * Maximum number of items to return. Capped server-side at
+200; defaults to 50 when omitted.
+
+ * @minimum 1
+ * @maximum 200
+ */
   limit?: number;
 };
 

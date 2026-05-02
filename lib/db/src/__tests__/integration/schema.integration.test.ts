@@ -64,6 +64,11 @@ describe("lib/db schema integration", () => {
         // (adapter_key, lat_rounded, lng_rounded) with a TTL gate so
         // re-runs of generate-layers skip the slow upstream feeds.
         "adapter_response_cache",
+        // Per-architect "last viewed the inbox" watermark for the
+        // design-tools notification surface. One row per user-kind
+        // requestor id; bumped to "now" on POST
+        // /me/notifications/mark-read.
+        "architect_notification_reads",
         "atom_events",
         // DA-PI-5 Revit-sensor materialization tables. Listed in
         // alphabetical order to match `ORDER BY tablename` from the

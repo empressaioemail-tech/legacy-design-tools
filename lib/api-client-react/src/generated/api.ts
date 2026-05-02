@@ -63,6 +63,8 @@ import type {
   ListEngagementBriefingSourcesParams,
   ListEngagementReviewerRequestsParams,
   ListJurisdictionAtomsParams,
+  ListMyNotificationsParams,
+  ListNotificationsResponse,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
   ListReviewerQueueParams,
@@ -70,6 +72,7 @@ import type {
   ListSubmissionCommentsResponse,
   ListSubmissionFindingsResponse,
   LocalSetbackTable,
+  MarkNotificationsReadResponse,
   MatchEngagementBody,
   MatchEngagementResponse,
   OverrideFindingBody,
@@ -5091,6 +5094,217 @@ export const useUpdateMyProfile = <
   TContext
 > => {
   return useMutation(getUpdateMyProfileMutationOptions(options));
+};
+
+/**
+ * Task #432 — architect-wide in-app notification surface for the
+design-tools side-nav inbox.
+
+Newest-first list of recent submission status changes and
+reviewer-requests across every engagement. Each row carries a
+`read` flag derived from the architect's persisted
+`lastReadAt` watermark, plus the response envelope includes an
+aggregate `unreadCount` so the side-nav badge can render
+without a follow-up call.
+
+Architect-only — anonymous and agent callers get a 401. The
+`lastReadAt` watermark is per-requestor, persisted in
+`architect_notification_reads` keyed by
+`req.session.requestor.id`.
+
+ * @summary List the architect's recent inbox notifications
+ */
+export const getListMyNotificationsUrl = (
+  params?: ListMyNotificationsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/me/notifications?${stringifiedParams}`
+    : `/api/me/notifications`;
+};
+
+export const listMyNotifications = async (
+  params?: ListMyNotificationsParams,
+  options?: RequestInit,
+): Promise<ListNotificationsResponse> => {
+  return customFetch<ListNotificationsResponse>(
+    getListMyNotificationsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListMyNotificationsQueryKey = (
+  params?: ListMyNotificationsParams,
+) => {
+  return [`/api/me/notifications`, ...(params ? [params] : [])] as const;
+};
+
+export const getListMyNotificationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMyNotifications>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListMyNotificationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMyNotifications>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListMyNotificationsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMyNotifications>>
+  > = ({ signal }) =>
+    listMyNotifications(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMyNotifications>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMyNotificationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMyNotifications>>
+>;
+export type ListMyNotificationsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the architect's recent inbox notifications
+ */
+
+export function useListMyNotifications<
+  TData = Awaited<ReturnType<typeof listMyNotifications>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListMyNotificationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMyNotifications>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMyNotificationsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Task #432 — sets `architect_notification_reads.last_read_at`
+for the calling architect to "now". Subsequent
+`GET /me/notifications` calls report `unreadCount: 0` and
+flip every existing item to `read: true` until a fresh event
+lands.
+
+Idempotent — calling twice in quick succession just bumps the
+watermark twice. No request body is required.
+
+ * @summary Bump the architect's "last viewed inbox" watermark
+ */
+export const getMarkMyNotificationsReadUrl = () => {
+  return `/api/me/notifications/mark-read`;
+};
+
+export const markMyNotificationsRead = async (
+  options?: RequestInit,
+): Promise<MarkNotificationsReadResponse> => {
+  return customFetch<MarkNotificationsReadResponse>(
+    getMarkMyNotificationsReadUrl(),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getMarkMyNotificationsReadMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markMyNotificationsRead>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof markMyNotificationsRead>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["markMyNotificationsRead"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof markMyNotificationsRead>>,
+    void
+  > = () => {
+    return markMyNotificationsRead(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MarkMyNotificationsReadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof markMyNotificationsRead>>
+>;
+
+export type MarkMyNotificationsReadMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Bump the architect's "last viewed inbox" watermark
+ */
+export const useMarkMyNotificationsRead = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markMyNotificationsRead>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof markMyNotificationsRead>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getMarkMyNotificationsReadMutationOptions(options));
 };
 
 /**

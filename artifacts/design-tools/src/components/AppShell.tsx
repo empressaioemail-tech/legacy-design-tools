@@ -3,12 +3,15 @@ import { DashboardLayout } from "@workspace/portal-ui";
 import {
   useListEngagements,
   getListEngagementsQueryKey,
+  useListMyNotifications,
+  getListMyNotificationsQueryKey,
 } from "@workspace/api-client-react";
 import {
   Activity,
   BookOpen,
   Database,
   FolderOpen,
+  Inbox,
   LayoutDashboard,
   Palette,
   Search,
@@ -29,6 +32,39 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
     },
   });
   const engagements = data ?? [];
+
+  // Poll the architect inbox so the side-nav badge updates without
+  // a hard refresh. The 5s cadence matches the engagement-list
+  // poll above so a single "tab is active" signal covers both.
+  const { data: notifications } = useListMyNotifications(undefined, {
+    query: {
+      queryKey: getListMyNotificationsQueryKey(),
+      refetchInterval: 5000,
+    },
+  });
+  const unreadCount = notifications?.unreadCount ?? 0;
+  const inboxBadge =
+    unreadCount > 0 ? (
+      <span
+        data-testid="inbox-badge"
+        style={{
+          minWidth: 18,
+          height: 16,
+          padding: "0 5px",
+          borderRadius: 8,
+          background: "#C0392B",
+          color: "#FFF",
+          fontSize: 10,
+          fontWeight: 700,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          lineHeight: 1,
+        }}
+      >
+        {unreadCount > 99 ? "99+" : unreadCount}
+      </span>
+    ) : null;
 
   const projectItems = engagements.slice(0, 8).map((e) => ({
     label: e.name,
@@ -52,6 +88,12 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
           label: "Projects",
           href: "/",
           icon: <LayoutDashboard size={14} />,
+        },
+        {
+          label: "Inbox",
+          href: "/notifications",
+          icon: <Inbox size={14} />,
+          badge: inboxBadge,
         },
         {
           label: "Code Library",

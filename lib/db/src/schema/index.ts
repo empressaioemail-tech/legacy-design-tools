@@ -21,3 +21,4 @@ export * from "./findings";
 export * from "./reviewerRequests";
 export * from "./viewpointRenders";
 export * from "./renderOutputs";
+export * from "./architectNotificationReads";
