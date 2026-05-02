@@ -87,6 +87,12 @@ vi.mock("@workspace/api-client-react", () => ({
   // entries (e.g. Users & Roles) just won't render in the sidebar.
   useGetSession: () => ({ data: { permissions: [] }, isLoading: false }),
   getGetSessionQueryKey: () => ["session"],
+  // Task #444 — `useNavGroups` now reads pending reviewer-requests
+  // for the sidebar badge. Audience here is undefined so the hook
+  // is gated to `enabled: false`, but the symbol still has to
+  // resolve at module load.
+  useListMyReviewerRequests: () => ({ data: { requests: [] } }),
+  getListMyReviewerRequestsQueryKey: () => ["listMyReviewerRequests"],
   EngagementStatus: {
     active: "active",
     on_hold: "on_hold",

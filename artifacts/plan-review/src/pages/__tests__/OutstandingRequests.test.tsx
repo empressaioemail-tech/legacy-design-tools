@@ -41,7 +41,9 @@ vi.mock("@workspace/api-client-react", () => ({
 }));
 
 const { default: OutstandingRequests } = await import("../OutstandingRequests");
-const { filterNavGroups } = await import("../../components/NavGroups");
+const { filterNavGroups, useNavGroups } = await import(
+  "../../components/NavGroups"
+);
 
 function row(over: Partial<ReviewerRequestWithEngagement> & { id: string }): ReviewerRequestWithEngagement {
   return {
@@ -232,6 +234,83 @@ describe("OutstandingRequests — empty state + row rendering", () => {
     expect(screen.getByTestId("requests-not-reviewer").textContent).toContain(
       "reviewer-only",
     );
+  });
+});
+
+describe("Outstanding Requests sidebar badge (Task #444)", () => {
+  function BadgeProbe() {
+    const groups = useNavGroups();
+    const item = groups
+      .flatMap((g) => g.items)
+      .find((i) => i.href === "/requests");
+    return (
+      <div data-testid="probe">
+        <span data-testid="probe-found">{item ? "yes" : "no"}</span>
+        <span data-testid="probe-badge">{item?.badge ?? null}</span>
+      </div>
+    );
+  }
+
+  it("hides the badge when the reviewer has zero pending requests", () => {
+    hoisted.audience = "internal";
+    hoisted.requests = [];
+    render(
+      <Router>
+        <BadgeProbe />
+      </Router>,
+    );
+    expect(screen.getByTestId("probe-found").textContent).toBe("yes");
+    // Empty fragment — querying by the badge testid returns null
+    // because the helper only constructs the badge node when count > 0.
+    expect(screen.queryByTestId("nav-outstanding-requests-badge")).toBeNull();
+  });
+
+  it("renders the pending count as a pill when the reviewer has open requests", () => {
+    hoisted.audience = "internal";
+    hoisted.requests = [
+      row({ id: "req-1" }),
+      row({ id: "req-2" }),
+      row({ id: "req-3" }),
+    ];
+    render(
+      <Router>
+        <BadgeProbe />
+      </Router>,
+    );
+    const badge = screen.getByTestId("nav-outstanding-requests-badge");
+    expect(badge.textContent).toBe("3");
+  });
+
+  it("caps the rendered label at 99+ for runaway queues", () => {
+    hoisted.audience = "internal";
+    hoisted.requests = Array.from({ length: 150 }, (_, i) =>
+      row({ id: `req-${i}` }),
+    );
+    render(
+      <Router>
+        <BadgeProbe />
+      </Router>,
+    );
+    expect(
+      screen.getByTestId("nav-outstanding-requests-badge").textContent,
+    ).toBe("99+");
+  });
+
+  it("does not render the badge when the audience is not reviewer", () => {
+    hoisted.audience = "user";
+    // The endpoint would 403 for an architect — `enabled: false`
+    // short-circuits the request and the helper returns 0, so the
+    // badge stays absent even if a stale fixture leaked through.
+    hoisted.requests = [row({ id: "req-1" })];
+    render(
+      <Router>
+        <BadgeProbe />
+      </Router>,
+    );
+    // The Outstanding Requests entry itself is hidden for architects
+    // (audience filter), so there is no item, hence no badge.
+    expect(screen.getByTestId("probe-found").textContent).toBe("no");
+    expect(screen.queryByTestId("nav-outstanding-requests-badge")).toBeNull();
   });
 });
 

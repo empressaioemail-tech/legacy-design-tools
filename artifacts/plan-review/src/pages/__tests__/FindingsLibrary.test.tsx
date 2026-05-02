@@ -32,6 +32,12 @@ import { FINDINGS } from "../../data/mock";
 vi.mock("@workspace/api-client-react", () => ({
   useGetSession: () => ({ data: { permissions: [] }, isLoading: false }),
   getGetSessionQueryKey: () => ["session"],
+  // Task #444 — `useNavGroups` now reads pending reviewer-requests
+  // for the sidebar badge. Audience here is undefined so the hook
+  // is gated to `enabled: false`, but the symbol still has to
+  // resolve at module load.
+  useListMyReviewerRequests: () => ({ data: { requests: [] } }),
+  getListMyReviewerRequestsQueryKey: () => ["listMyReviewerRequests"],
 }));
 
 const { default: FindingsLibrary } = await import("../FindingsLibrary");
