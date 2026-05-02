@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "-_vt6bIEfxbgxVh3mLJnE"
+uri = "file://docs/empressa-ground-truth-report.md"
+type = "text"
+title = "Empressa Ground-Truth Report"
