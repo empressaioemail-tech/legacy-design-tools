@@ -112,8 +112,10 @@ describe("POST /api/snapshots — engagement.created auto-briefing", () => {
     );
   });
 
-  it("cleanly no-ops when the new engagement has no briefing/sources", async () => {
+  it("logs structured no-sources warning and inserts no job rows when the new engagement has no briefing", async () => {
     if (!ctx.schema) throw new Error("ctx");
+    const warnSpy = vi.spyOn(logger, "warn");
+
     const res = await request(getApp())
       .post("/api/snapshots")
       .set("x-snapshot-secret", SECRET)
@@ -131,6 +133,18 @@ describe("POST /api/snapshots — engagement.created auto-briefing", () => {
       .from(briefingGenerationJobs)
       .where(eq(briefingGenerationJobs.engagementId, res.body.engagementId));
     expect(jobs).toHaveLength(0);
+
+    const skipCall = warnSpy.mock.calls.find(
+      ([, msg]) => msg === "auto-briefing: skipped, no briefing sources yet",
+    );
+    expect(skipCall).toBeTruthy();
+    expect(skipCall![0]).toMatchObject({
+      engagementId: res.body.engagementId,
+      jurisdiction: null,
+      error: "no_briefing_sources_for_engagement",
+    });
+
+    warnSpy.mockRestore();
   });
 
   it("does not auto-trigger on the existing-engagement bind branch", async () => {

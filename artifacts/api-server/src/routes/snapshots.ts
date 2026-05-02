@@ -390,7 +390,7 @@ function fireAutoBriefingKickoff(
     }
 
     try {
-      await kickoffBriefingGeneration({
+      const result = await kickoffBriefingGeneration({
         engagementId,
         reqLog,
         onSettled: (settled) => {
@@ -407,6 +407,25 @@ function fireAutoBriefingKickoff(
           }
         },
       });
+      if (result.kind === "no_briefing_sources_for_engagement") {
+        reqLog.warn(
+          {
+            engagementId,
+            jurisdiction,
+            error: "no_briefing_sources_for_engagement",
+          },
+          "auto-briefing: skipped, no briefing sources yet",
+        );
+      } else if (result.kind === "engagement_not_found") {
+        reqLog.warn(
+          {
+            engagementId,
+            jurisdiction,
+            error: "engagement_not_found",
+          },
+          "auto-briefing: engagement disappeared before kickoff",
+        );
+      }
     } catch (err) {
       reqLog.error(
         {
