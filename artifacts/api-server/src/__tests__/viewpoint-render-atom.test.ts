@@ -75,6 +75,8 @@ describe("viewpoint-render atom (contract)", () => {
       makeBriefingSourceAtom(),
       makeMaterializableElementAtom({ db }),
       makeBriefingDivergenceAtom({ db }),
+      // V1-4 DA-RP-1: viewpoint-render composes render-output.
+      makeRenderOutputAtom(),
     ],
   });
 });

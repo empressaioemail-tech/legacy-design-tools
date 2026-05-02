@@ -67,6 +67,9 @@ const { makeNeighboringContextAtom } = await import(
 const { makeViewpointRenderAtom } = await import(
   "../atoms/viewpoint-render.atom"
 );
+const { makeRenderOutputAtom } = await import(
+  "../atoms/render-output.atom"
+);
 
 const lazyDb = new Proxy({} as typeof dbModule.db, {
   get: (_t, prop) => Reflect.get(dbModule.db as object, prop, dbModule.db),
@@ -151,6 +154,8 @@ describe("reviewer-annotation atom (contract)", () => {
       // registered alongside the existing target set.
       makeNeighboringContextAtom(),
       makeViewpointRenderAtom(),
+      // V1-4 DA-RP-1: viewpoint-render composes render-output transitively.
+      makeRenderOutputAtom(),
     ],
   });
 });
