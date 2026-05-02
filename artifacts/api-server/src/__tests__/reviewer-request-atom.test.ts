@@ -66,6 +66,8 @@ const { makeNeighboringContextAtom } = await import(
 const { makeViewpointRenderAtom } = await import(
   "../atoms/viewpoint-render.atom"
 );
+const { makeSubmissionAtom } = await import("../atoms/submission.atom");
+const { makeSheetAtom } = await import("../atoms/sheet.atom");
 
 const lazyDb = new Proxy({} as typeof dbModule.db, {
   get: (_t, prop) => Reflect.get(dbModule.db as object, prop, dbModule.db),
@@ -143,6 +145,12 @@ describe("reviewer-request atom (contract)", () => {
       makeSnapshotAtom({ db: lazyDb }),
       makeNeighboringContextAtom(),
       makeViewpointRenderAtom(),
+      // V1-2: reviewer-request → engagement → submission, and
+      // engagement → snapshot → sheet. Both leaves must be
+      // registered for validate() to succeed; sibling
+      // reviewer-annotation already registers them.
+      makeSubmissionAtom({ db: lazyDb }),
+      makeSheetAtom({ db: lazyDb }),
     ],
   });
 });
