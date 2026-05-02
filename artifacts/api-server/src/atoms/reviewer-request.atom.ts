@@ -176,11 +176,13 @@ export function makeReviewerRequestAtom(
     },
     ...(
       REVIEWER_REQUEST_TARGET_TYPES as ReadonlyArray<ReviewerRequestTargetType>
-    ).map((targetType) => ({
-      childEntityType: targetType,
-      childMode: "compact",
-      dataKey: REVIEWER_REQUEST_TARGET_DATA_KEYS[targetType],
-    })),
+    ).map(
+      (targetType): AtomComposition => ({
+        childEntityType: targetType,
+        childMode: "compact",
+        dataKey: REVIEWER_REQUEST_TARGET_DATA_KEYS[targetType],
+      }),
+    ),
   ];
 
   const registration: AtomRegistration<

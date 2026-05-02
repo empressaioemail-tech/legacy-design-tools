@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   useListEngagementReviewerRequests,
+  getListEngagementReviewerRequestsQueryKey,
   type ReviewerRequest,
   type ReviewerRequestKind,
 } from "@workspace/api-client-react";
@@ -65,6 +66,9 @@ export function ReviewerRequestsStrip({
     { status: "pending" },
     {
       query: {
+        queryKey: getListEngagementReviewerRequestsQueryKey(engagementId, {
+          status: "pending",
+        }),
         enabled: !!engagementId,
         refetchOnWindowFocus: true,
       },
