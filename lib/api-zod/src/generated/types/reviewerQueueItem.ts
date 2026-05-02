@@ -18,11 +18,11 @@ read-time (not at submit-time, unlike `jurisdiction` which is
 snapshotted into the submission row by the create route) —
 the Inbox should reflect the current engagement name even if
 the project was renamed after the package was submitted.
-`applicantFirm` is currently always null (the engagement
-schema has no applicant/firm column today, Reviewer V1-B
-ships without that field rather than inventing one); the
-property is part of the contract so adding it later is
-non-breaking.
+`applicantFirm` is read-through from the engagement's own
+`applicant_firm` column (Task #439). Null when the engagement
+has no recorded firm — legacy engagements that pre-date the
+column or new engagements where the field hasn't been filled
+in yet.
 
  */
 export interface ReviewerQueueItem {

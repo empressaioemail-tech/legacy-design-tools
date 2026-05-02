@@ -71,6 +71,12 @@ export const ListEngagementsResponseItem = zod.object({
   }),
   revitCentralGuid: zod.string().nullable(),
   revitDocumentPath: zod.string().nullable(),
+  applicantFirm: zod
+    .string()
+    .nullable()
+    .describe(
+      "Free-text applicant firm (architect \/ designer of record)\nrecorded against the engagement. Surfaced to reviewers in\nthe Plan Review Inbox row (Task #439). Null when no firm\nhas been recorded yet.\n",
+    ),
 });
 export const ListEngagementsResponse = zod.array(ListEngagementsResponseItem);
 
@@ -208,6 +214,12 @@ export const GetEngagementResponse = zod.object({
   warnings: zod.array(zod.string()).optional(),
   revitCentralGuid: zod.string().nullable(),
   revitDocumentPath: zod.string().nullable(),
+  applicantFirm: zod
+    .string()
+    .nullable()
+    .describe(
+      "Free-text applicant firm (architect \/ designer of record)\nrecorded against the engagement. Surfaced to reviewers in\nthe Plan Review Inbox row (Task #439). Null when no firm\nhas been recorded yet.\n",
+    ),
 });
 
 /**
@@ -239,6 +251,12 @@ export const UpdateEngagementBody = zod.object({
     .optional(),
   zoningCode: zod.string().optional(),
   lotAreaSqft: zod.number().nullish(),
+  applicantFirm: zod
+    .string()
+    .nullish()
+    .describe(
+      "Free-text name of the applicant firm (architect \/\ndesigner of record). Pass `null` to clear an\nexisting value. Surfaced to reviewers in the Plan\nReview Inbox row (Task #439).\n",
+    ),
 });
 
 export const UpdateEngagementResponse = zod.object({
@@ -307,6 +325,12 @@ export const UpdateEngagementResponse = zod.object({
   warnings: zod.array(zod.string()).optional(),
   revitCentralGuid: zod.string().nullable(),
   revitDocumentPath: zod.string().nullable(),
+  applicantFirm: zod
+    .string()
+    .nullable()
+    .describe(
+      "Free-text applicant firm (architect \/ designer of record)\nrecorded against the engagement. Surfaced to reviewers in\nthe Plan Review Inbox row (Task #439). Null when no firm\nhas been recorded yet.\n",
+    ),
 });
 
 /**
@@ -382,6 +406,12 @@ export const RegeocodeEngagementResponse = zod.object({
   warnings: zod.array(zod.string()).optional(),
   revitCentralGuid: zod.string().nullable(),
   revitDocumentPath: zod.string().nullable(),
+  applicantFirm: zod
+    .string()
+    .nullable()
+    .describe(
+      "Free-text applicant firm (architect \/ designer of record)\nrecorded against the engagement. Surfaced to reviewers in\nthe Plan Review Inbox row (Task #439). Null when no firm\nhas been recorded yet.\n",
+    ),
 });
 
 /**
@@ -4865,7 +4895,7 @@ export const ListReviewerQueueResponse = zod
           reviewerComment: zod.string().nullable(),
         })
         .describe(
-          "One submission row in the cross-engagement reviewer Inbox\n(`GET \/reviewer\/queue`). Joins the row to its parent\nengagement so the Inbox can render a row per submission\nwithout a follow-up `GET \/engagements\/{id}` per row.\n\n`engagementName` is denormalized off the engagement at\nread-time (not at submit-time, unlike `jurisdiction` which is\nsnapshotted into the submission row by the create route) —\nthe Inbox should reflect the current engagement name even if\nthe project was renamed after the package was submitted.\n`applicantFirm` is currently always null (the engagement\nschema has no applicant\/firm column today, Reviewer V1-B\nships without that field rather than inventing one); the\nproperty is part of the contract so adding it later is\nnon-breaking.\n",
+          "One submission row in the cross-engagement reviewer Inbox\n(`GET \/reviewer\/queue`). Joins the row to its parent\nengagement so the Inbox can render a row per submission\nwithout a follow-up `GET \/engagements\/{id}` per row.\n\n`engagementName` is denormalized off the engagement at\nread-time (not at submit-time, unlike `jurisdiction` which is\nsnapshotted into the submission row by the create route) —\nthe Inbox should reflect the current engagement name even if\nthe project was renamed after the package was submitted.\n`applicantFirm` is read-through from the engagement's own\n`applicant_firm` column (Task #439). Null when the engagement\nhas no recorded firm — legacy engagements that pre-date the\ncolumn or new engagements where the field hasn't been filled\nin yet.\n",
         ),
     ),
     counts: zod

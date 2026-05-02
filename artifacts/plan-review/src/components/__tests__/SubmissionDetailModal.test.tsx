@@ -202,6 +202,7 @@ function makeEngagement(
     },
     revitCentralGuid: null,
     revitDocumentPath: null,
+    applicantFirm: null,
     ...overrides,
   };
 }

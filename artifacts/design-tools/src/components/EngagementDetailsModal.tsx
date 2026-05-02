@@ -42,6 +42,7 @@ interface FormState {
   zoningCode: string;
   lotAreaSqft: string;
   status: (typeof STATUS_OPTIONS)[number]["value"];
+  applicantFirm: string;
 }
 
 function buildInitial(e: EngagementDetail): FormState {
@@ -55,6 +56,7 @@ function buildInitial(e: EngagementDetail): FormState {
         ? String(e.site.lotAreaSqft)
         : "",
     status: (e.status ?? "active") as FormState["status"],
+    applicantFirm: e.applicantFirm ?? "",
   };
 }
 
@@ -157,6 +159,13 @@ export function EngagementDetailsModal({
     }
     if (mode === "edit" && form.status !== engagement.status) {
       data["status"] = form.status;
+    }
+    const newFirm = form.applicantFirm.trim();
+    const currentFirm = engagement.applicantFirm ?? "";
+    if (newFirm !== currentFirm) {
+      // Send null for an explicit clear so the backend nulls the
+      // column; otherwise send the trimmed value.
+      data["applicantFirm"] = newFirm === "" ? null : newFirm;
     }
 
     if (Object.keys(data).length === 0) {
@@ -262,6 +271,21 @@ export function EngagementDetailsModal({
                 </option>
               ))}
             </select>
+          </Field>
+
+          <Field label="Applicant firm (optional)">
+            <input
+              type="text"
+              value={form.applicantFirm}
+              onChange={(e) =>
+                setForm({ ...form, applicantFirm: e.target.value })
+              }
+              disabled={submitting}
+              placeholder="e.g., Civic Design LLC"
+              className="sc-ui"
+              style={inputStyle}
+              data-testid="engagement-applicant-firm-input"
+            />
           </Field>
 
           <Field label="Zoning code (optional)">

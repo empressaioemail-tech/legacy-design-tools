@@ -60,6 +60,7 @@ async function seedEngagement(opts: {
   name?: string;
   jurisdiction?: string;
   address?: string;
+  applicantFirm?: string | null;
   submissions?: SeedSubmission[];
 }): Promise<{
   engagementId: string;
@@ -75,6 +76,7 @@ async function seedEngagement(opts: {
       nameLower: name.trim().toLowerCase(),
       jurisdiction: opts.jurisdiction ?? "Bastrop, TX",
       address: opts.address ?? "1 Reviewer Way",
+      applicantFirm: opts.applicantFirm ?? null,
       status: "active",
     })
     .returning({ id: engagements.id });
@@ -134,6 +136,7 @@ describe("GET /api/reviewer/queue", () => {
       name: "Riverside Clinic",
       jurisdiction: "Bastrop, TX",
       address: "100 River Rd",
+      applicantFirm: "Civic Design LLC",
       submissions: [
         { status: "pending", note: "AI run pending" },
         { status: "approved", note: "Done" },
@@ -182,7 +185,7 @@ describe("GET /api/reviewer/queue", () => {
       engagementName: "Riverside Clinic",
       jurisdiction: "Bastrop, TX",
       address: "100 River Rd",
-      applicantFirm: null,
+      applicantFirm: "Civic Design LLC",
     });
     expect(byEngagement[b.engagementId]).toEqual({
       engagementName: "Lost Pines Townhomes",

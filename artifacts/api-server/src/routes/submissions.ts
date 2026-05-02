@@ -87,6 +87,7 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
       // engagement state — same precedent as EngagementsList.
       jurisdiction: engagements.jurisdiction,
       address: engagements.address,
+      applicantFirm: engagements.applicantFirm,
       submittedAt: submissions.submittedAt,
       status: submissions.status,
       note: submissions.note,
@@ -131,9 +132,7 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
       engagementName: r.engagementName,
       jurisdiction: r.jurisdiction,
       address: r.address,
-      // The engagements schema has no applicant/firm column today;
-      // contract field is populated as null until that lands.
-      applicantFirm: null as string | null,
+      applicantFirm: r.applicantFirm,
       submittedAt:
         r.submittedAt instanceof Date
           ? r.submittedAt.toISOString()

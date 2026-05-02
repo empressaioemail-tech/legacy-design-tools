@@ -16,4 +16,10 @@ export type UpdateEngagementBody = {
   projectType?: ProjectType;
   zoningCode?: string;
   lotAreaSqft?: number | null;
+  /** Free-text name of the applicant firm (architect /
+designer of record). Pass `null` to clear an
+existing value. Surfaced to reviewers in the Plan
+Review Inbox row (Task #439).
+ */
+  applicantFirm?: string | null;
 };

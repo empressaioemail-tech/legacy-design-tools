@@ -43,11 +43,9 @@ function ReviewerQueueRow({ item }: { item: ReviewerQueueItem }) {
     .join("")
     .toUpperCase();
 
-  const subtitleParts = [
-    item.applicantFirm,
-    item.jurisdiction,
-    item.address,
-  ].filter((s): s is string => !!s);
+  const subtitleParts = [item.jurisdiction, item.address].filter(
+    (s): s is string => !!s,
+  );
 
   // EngagementDetail reads ?submission=&tab=note on mount to open the
   // AIR-2 modal directly to the Note tab.
@@ -72,6 +70,14 @@ function ReviewerQueueRow({ item }: { item: ReviewerQueueItem }) {
       <div className="flex flex-col min-w-0 flex-1">
         <div className="flex items-center gap-2 min-w-0">
           <div className="sc-medium truncate">{item.engagementName}</div>
+          {item.applicantFirm ? (
+            <span
+              className="sc-meta truncate text-[var(--text-secondary)]"
+              data-testid={`reviewer-queue-row-${item.submissionId}-firm`}
+            >
+              · {item.applicantFirm}
+            </span>
+          ) : null}
           <span className={`sc-pill ${pillClass} capitalize shrink-0`}>
             {pillLabel}
           </span>

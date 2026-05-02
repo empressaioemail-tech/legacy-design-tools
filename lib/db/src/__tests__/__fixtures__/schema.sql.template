@@ -198,7 +198,8 @@ CREATE TABLE @@SCHEMA@@.engagements (
     lot_area_sqft numeric,
     site_context_raw jsonb,
     revit_central_guid text,
-    revit_document_path text
+    revit_document_path text,
+    applicant_firm text
 );
 
 

@@ -137,6 +137,9 @@ function toEngagementSummary(
     snapshotCount: count,
     latestSnapshot: latest,
     site: buildSite(e),
+    revitCentralGuid: e.revitCentralGuid,
+    revitDocumentPath: e.revitDocumentPath,
+    applicantFirm: e.applicantFirm,
   };
 }
 
@@ -261,6 +264,16 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
     if (body.lotAreaSqft !== undefined) {
       update["lotAreaSqft"] =
         body.lotAreaSqft === null ? null : String(body.lotAreaSqft);
+    }
+    if (body.applicantFirm !== undefined) {
+      // Trim non-null payloads so trailing whitespace from a copy/
+      // paste doesn't pollute the reviewer Inbox row; an
+      // all-whitespace string is collapsed to null since it carries
+      // no information for triage.
+      const v = body.applicantFirm;
+      const trimmed = v === null ? null : v.trim();
+      update["applicantFirm"] =
+        trimmed === null || trimmed.length === 0 ? null : trimmed;
     }
 
     const warnings: string[] = [];

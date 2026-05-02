@@ -198,7 +198,7 @@ describe("ReviewConsole", () => {
     );
   });
 
-  it("renders applicantFirm in the row subtitle when present", () => {
+  it("renders applicantFirm next to the engagement title when present", () => {
     hoisted.queue = {
       items: [
         makeItem({
@@ -213,12 +213,29 @@ describe("ReviewConsole", () => {
       counts: { inReview: 0, awaitingAi: 1, rejected: 0, backlog: 1 },
     };
     render(<ReviewConsole />);
+    const firm = screen.getByTestId("reviewer-queue-row-sub-A-firm");
+    expect(firm).toHaveTextContent("Civic Design LLC");
     const subtitle = screen.getByTestId(
       "reviewer-queue-row-sub-A-subtitle",
     );
-    expect(subtitle).toHaveTextContent("Civic Design LLC");
     expect(subtitle).toHaveTextContent("Bastrop, TX");
     expect(subtitle).toHaveTextContent("100 River Rd");
+  });
+
+  it("omits the firm pill when applicantFirm is null", () => {
+    hoisted.queue = {
+      items: [
+        makeItem({
+          submissionId: "sub-A",
+          applicantFirm: null,
+        }),
+      ],
+      counts: { inReview: 0, awaitingAi: 1, rejected: 0, backlog: 1 },
+    };
+    render(<ReviewConsole />);
+    expect(
+      screen.queryByTestId("reviewer-queue-row-sub-A-firm"),
+    ).not.toBeInTheDocument();
   });
 
   it("filters rows by the search box", () => {

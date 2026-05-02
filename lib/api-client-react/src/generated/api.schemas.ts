@@ -78,6 +78,12 @@ export interface EngagementSummary {
   site: Site;
   revitCentralGuid: string | null;
   revitDocumentPath: string | null;
+  /** Free-text applicant firm (architect / designer of record)
+recorded against the engagement. Surfaced to reviewers in
+the Plan Review Inbox row (Task #439). Null when no firm
+has been recorded yet.
+ */
+  applicantFirm: string | null;
 }
 
 export interface EngagementDetail {
@@ -95,6 +101,12 @@ export interface EngagementDetail {
   warnings?: string[];
   revitCentralGuid: string | null;
   revitDocumentPath: string | null;
+  /** Free-text applicant firm (architect / designer of record)
+recorded against the engagement. Surfaced to reviewers in
+the Plan Review Inbox row (Task #439). Null when no firm
+has been recorded yet.
+ */
+  applicantFirm: string | null;
 }
 
 /**
@@ -201,11 +213,11 @@ read-time (not at submit-time, unlike `jurisdiction` which is
 snapshotted into the submission row by the create route) —
 the Inbox should reflect the current engagement name even if
 the project was renamed after the package was submitted.
-`applicantFirm` is currently always null (the engagement
-schema has no applicant/firm column today, Reviewer V1-B
-ships without that field rather than inventing one); the
-property is part of the contract so adding it later is
-non-breaking.
+`applicantFirm` is read-through from the engagement's own
+`applicant_firm` column (Task #439). Null when the engagement
+has no recorded firm — legacy engagements that pre-date the
+column or new engagements where the field hasn't been filled
+in yet.
 
  */
 export interface ReviewerQueueItem {
@@ -3419,6 +3431,12 @@ export type UpdateEngagementBody = {
   projectType?: ProjectType;
   zoningCode?: string;
   lotAreaSqft?: number | null;
+  /** Free-text name of the applicant firm (architect /
+designer of record). Pass `null` to clear an
+existing value. Surfaced to reviewers in the Plan
+Review Inbox row (Task #439).
+ */
+  applicantFirm?: string | null;
 };
 
 export type ListEngagementBriefingSourcesParams = {
