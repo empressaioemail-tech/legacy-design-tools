@@ -36,6 +36,12 @@ export type { RequestRefreshDialogProps } from "./components/RequestRefreshDialo
 export { RequestRefreshAffordance } from "./components/RequestRefreshAffordance";
 export type { RequestRefreshAffordanceProps } from "./components/RequestRefreshAffordance";
 
+// Task #429 — shared helper hook so the three reviewer-side
+// Request-Refresh affordances bind to the same per-engagement
+// reviewer-requests list query and disable themselves on a matching
+// pending row. See `lib/reviewerRequestPending.ts`.
+export { useReviewerRequestIsPending } from "./lib/reviewerRequestPending";
+
 // Briefing divergences — shared by design-tools (architect surface)
 // and plan-review (read-only reviewer surface). Promoted to portal-ui
 // by Wave 2 Sprint B (Task #306) so the two surfaces stay in

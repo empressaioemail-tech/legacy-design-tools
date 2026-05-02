@@ -86,6 +86,18 @@ const hoisted = vi.hoisted(() => {
     },
     divergences: [] as FakeDivergence[],
     bimModelLoading: false,
+    // Task #429 — pending reviewer-requests on the engagement.
+    // Empty by default (most tests don't care). The pending-state
+    // BIM-refresh test below pushes a row matching
+    // (refresh-bim-model, bim-model-id) before render to assert the
+    // affordance switches to the disabled "Refresh requested" state.
+    reviewerRequests: [] as Array<{
+      id: string;
+      requestKind: string;
+      targetEntityType: string;
+      targetEntityId: string;
+      status: string;
+    }>,
   };
 });
 
@@ -154,6 +166,43 @@ vi.mock("@workspace/api-client-react", async () => {
         queryKey: opts?.query?.queryKey ?? (["getSession"] as const),
         queryFn: async () => ({ audience: "reviewer", permissions: [] }),
       }),
+    // Task #429 — reviewer-side "Request BIM refresh" affordance binds
+    // to the per-engagement reviewer-requests list query so a pending
+    // request disables the button. Default mock returns an empty list,
+    // matching the "no pending request" state most tests assume; the
+    // pending-state test below reassigns the list before render.
+    getListEngagementReviewerRequestsQueryKey: (
+      engagementId: string,
+      params?: Record<string, unknown>,
+    ) => ["listEngagementReviewerRequests", engagementId, params] as const,
+    useListEngagementReviewerRequests: (
+      engagementId: string,
+      params?: Record<string, unknown>,
+      opts?: { query?: { queryKey?: readonly unknown[]; enabled?: boolean } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          ([
+            "listEngagementReviewerRequests",
+            engagementId,
+            params,
+          ] as const),
+        queryFn: async () => ({ requests: hoisted.reviewerRequests }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
+    // Task #429 — RequestRefreshDialog (mounted by the affordance)
+    // calls this mutation hook on every render, even when the
+    // dialog body is closed. Stub it out so the affordance renders
+    // without spinning up the real api-client mutation machinery.
+    useCreateEngagementReviewerRequest: () => ({
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(async () => ({ request: {} })),
+      isPending: false,
+      isError: false,
+      error: null,
+      reset: vi.fn(),
+    }),
   };
 });
 
@@ -172,6 +221,7 @@ function renderTab(
   engagementId = "eng-1",
   extraProps: {
     highlightToken?: { ref: string; nonce: number } | null;
+    audience?: "internal" | "user" | "ai";
   } = {},
 ) {
   const client = makeQueryClient();
@@ -180,7 +230,7 @@ function renderTab(
       <BimModelTab engagementId={engagementId} {...extraProps} />
     </QueryClientProvider>
   );
-  return render(node);
+  return { ...render(node), client };
 }
 
 function makeDivergence(
@@ -715,6 +765,85 @@ describe("BimModelTab — Plan Review (Task #306)", () => {
     fireEvent.click(screen.getByTestId("briefing-divergence-detail-close"));
     expect(
       screen.queryByTestId("briefing-divergence-detail-dialog"),
+    ).toBeNull();
+  });
+});
+
+/**
+ * Task #429 — reviewer-side "Request BIM refresh" affordance lives
+ * on the BIM summary card and binds to the per-engagement reviewer-
+ * requests list query so a pending request disables the button.
+ *
+ * Three gates in play:
+ *   - audience must be "internal" (reviewer session)
+ *   - `bimModel.refreshStatus === "stale"` (re-push pending) — the
+ *     `current` and `not-pushed` states have no actionable refresh
+ *   - no matching `(refresh-bim-model, bimModel.id)` row already
+ *     pending on the engagement
+ *
+ * Each test below pins one of those gates.
+ */
+describe("BimModelTab — Request BIM refresh affordance (Task #429)", () => {
+  const STALE_BIM = {
+    id: "bm-stale-1",
+    engagementId: "eng-1",
+    activeBriefingId: "br-1",
+    briefingVersion: 2,
+    materializedAt: "2026-04-01T09:00:00.000Z",
+    revitDocumentPath: null,
+    refreshStatus: "stale" as const,
+    elements: [],
+    createdAt: "2026-04-01T09:00:00.000Z",
+    updatedAt: "2026-04-01T09:00:00.000Z",
+  };
+
+  it("renders the affordance enabled for a reviewer session on a stale model with no pending request", async () => {
+    hoisted.bimModel = STALE_BIM;
+    hoisted.reviewerRequests = [];
+    renderTab("eng-1", { audience: "internal" });
+    const btn = await screen.findByTestId(
+      `request-refresh-affordance-${STALE_BIM.id}`,
+    );
+    expect(btn).toBeEnabled();
+    expect(btn).not.toHaveAttribute("data-pending");
+    expect(btn.textContent).toContain("Request refresh");
+  });
+
+  it("disables and re-labels the affordance when a matching pending request exists", async () => {
+    hoisted.bimModel = STALE_BIM;
+    hoisted.reviewerRequests = [
+      {
+        id: "rr-bim-1",
+        requestKind: "refresh-bim-model",
+        targetEntityType: "bim-model",
+        targetEntityId: STALE_BIM.id,
+        status: "pending",
+      },
+    ];
+    renderTab("eng-1", { audience: "internal" });
+    const btn = await screen.findByTestId(
+      `request-refresh-affordance-${STALE_BIM.id}`,
+    );
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("data-pending", "true");
+    expect(btn.textContent).toContain("Refresh requested");
+  });
+
+  it("does not render the affordance for non-reviewer audiences even when the model is stale", async () => {
+    hoisted.bimModel = STALE_BIM;
+    hoisted.reviewerRequests = [];
+    renderTab("eng-1", { audience: "user" });
+    expect(
+      screen.queryByTestId(`request-refresh-affordance-${STALE_BIM.id}`),
+    ).toBeNull();
+  });
+
+  it("does not render the affordance when the BIM model is current (no refresh meaningful)", async () => {
+    hoisted.bimModel = { ...STALE_BIM, refreshStatus: "current" as const };
+    hoisted.reviewerRequests = [];
+    renderTab("eng-1", { audience: "internal" });
+    expect(
+      screen.queryByTestId(`request-refresh-affordance-${STALE_BIM.id}`),
     ).toBeNull();
   });
 });

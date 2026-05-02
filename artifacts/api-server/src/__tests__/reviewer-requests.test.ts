@@ -105,14 +105,24 @@ async function listEvents(reviewerRequestId: string) {
 const SOURCE_UUID = "44444444-4444-4444-4444-444444444444";
 
 describe("GET /api/engagements/:id/reviewer-requests", () => {
-  it("403s when the caller is not architect-audience", async () => {
+  it("allows reviewer-audience callers (Task #429: reviewers read pending requests to disable affordances)", async () => {
     const { id } = await seedEngagement();
     const res = await asReviewer(
       request(getApp()).get(`/api/engagements/${id}/reviewer-requests`),
     );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ requests: [] });
+  });
+
+  it("403s when the caller is neither architect nor reviewer audience", async () => {
+    const { id } = await seedEngagement();
+    const res = await request(getApp())
+      .get(`/api/engagements/${id}/reviewer-requests`)
+      .set("x-audience", "ai")
+      .set("x-requestor", "agent:bot-1");
     expect(res.status).toBe(403);
     expect(res.body.error).toBe(
-      "reviewer_requests_require_architect_audience",
+      "reviewer_requests_require_architect_or_reviewer_audience",
     );
   });
 

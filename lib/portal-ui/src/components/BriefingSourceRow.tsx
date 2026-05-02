@@ -12,6 +12,7 @@ import { summarizeLocalPayload } from "@workspace/adapters/local/summaries";
 import { BriefingSourceDetails } from "./BriefingSourceDetails";
 import { BriefingSourceHistoryPanel } from "./BriefingSourceHistoryPanel";
 import { RequestRefreshAffordance } from "./RequestRefreshAffordance";
+import { useReviewerRequestIsPending } from "../lib/reviewerRequestPending";
 import { relativeTime } from "../lib/relativeTime";
 import {
   BRIEFING_GENERATE_LAYERS_ACTOR_LABEL,
@@ -118,6 +119,20 @@ export function BriefingSourceRow({
     audience === "internal" &&
     isAdapter &&
     rowFreshness?.verdict.isStale === true;
+  // Task #429 — bind the affordance's pending-state to the same
+  // per-engagement reviewer-requests list query that drives the
+  // architect-side strip. When a `pending` row exists for this
+  // `(refresh-briefing-source, source.id)` pair, the affordance
+  // disables itself so the reviewer doesn't file a duplicate while
+  // the architect has the open ask in front of them. The hook is
+  // gated on `showRequestRefresh` so non-stale rows / non-reviewer
+  // sessions don't fire a network request the affordance won't use.
+  const requestRefreshIsPending = useReviewerRequestIsPending(
+    engagementId,
+    "refresh-briefing-source",
+    source.id,
+    showRequestRefresh,
+  );
   const adapterSummary =
     source.sourceKind === "federal-adapter"
       ? summarizeFederalPayload(source.layerKind, source.payload)
@@ -407,6 +422,7 @@ export function BriefingSourceRow({
               targetEntityType="briefing-source"
               targetEntityId={source.id}
               targetLabel={source.layerKind}
+              pending={requestRefreshIsPending}
             />
           )}
           {!isManual && (

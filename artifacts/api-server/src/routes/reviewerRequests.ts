@@ -119,6 +119,37 @@ function requireArchitectAudience(req: Request, res: Response): boolean {
 }
 
 /**
+ * Read-side gate for the engagement-scoped reviewer-request list.
+ *
+ * Both architect (`audience === "user"`) and reviewer
+ * (`audience === "internal"`) need to read the list:
+ *
+ *   - Architect drives the `ReviewerRequestsStrip` open-queue
+ *     surface from this endpoint.
+ *   - Reviewer (Task #429) reads the same list to bind the
+ *     three Request-Refresh affordances to a "Refresh requested"
+ *     pending state — once a request exists for a target the
+ *     affordance disables itself rather than letting the reviewer
+ *     file a duplicate.
+ *
+ * Mutations stay split: only architects can dismiss (architect
+ * gate on POST `/dismiss`) and only reviewers can create (reviewer
+ * gate on POST `/`). The `audience === "ai"` path is rejected so
+ * agent traffic doesn't see the open-queue.
+ */
+function requireArchitectOrReviewerAudience(
+  req: Request,
+  res: Response,
+): boolean {
+  if (req.session.audience === "user") return false;
+  if (req.session.audience === "internal") return false;
+  res
+    .status(403)
+    .json({ error: "reviewer_requests_require_architect_or_reviewer_audience" });
+  return true;
+}
+
+/**
  * Resolve the `FindingActor` envelope to stamp on `requested_by` /
  * `dismissed_by` for an in-flight request. The route gates on a
  * session-bound requestor before insert / dismiss, so the `null`
@@ -265,7 +296,12 @@ async function loadReviewerRequest(
 router.get(
   "/engagements/:id/reviewer-requests",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireArchitectAudience(req, res)) return;
+    // Task #429 — read access is now widened from architect-only to
+    // architect-OR-reviewer so the reviewer-side Request-Refresh
+    // affordances can bind to the same per-engagement list query
+    // and disable themselves on a matching `pending` row. Mutations
+    // remain split (reviewer-only POST, architect-only dismiss).
+    if (requireArchitectOrReviewerAudience(req, res)) return;
     const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
     const params = ListEngagementReviewerRequestsParams.safeParse(req.params);
     if (!params.success) {

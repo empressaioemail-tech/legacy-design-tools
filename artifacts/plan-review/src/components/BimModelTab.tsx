@@ -3,7 +3,9 @@ import {
   BriefingDivergenceRow,
   BriefingDivergenceDetailDialog,
   BriefingDivergencesPanel,
+  RequestRefreshAffordance,
   formatRelativeMaterializedAt,
+  useReviewerRequestIsPending,
 } from "@workspace/portal-ui";
 import {
   useGetEngagementBimModel,
@@ -365,8 +367,39 @@ function MaterializableElementsList({
   );
 }
 
-function BimModelSummaryCard({ bimModel }: { bimModel: EngagementBimModel }) {
+function BimModelSummaryCard({
+  bimModel,
+  engagementId,
+  audience,
+}: {
+  bimModel: EngagementBimModel;
+  engagementId: string;
+  /**
+   * Threaded down from the SubmissionDetailModal (which itself reads
+   * the session audience on the EngagementDetail page). The Task #429
+   * "Request BIM refresh" affordance only renders for reviewer
+   * sessions (`audience === "internal"`); architect / agent
+   * audiences see the existing read-only summary card.
+   */
+  audience: "internal" | "user" | "ai";
+}) {
   const status = REFRESH_STATUS_COPY[bimModel.refreshStatus];
+  // Task #429 — reviewer-side "Request BIM refresh" gate.
+  // Limit the affordance to reviewer audience and to states where a
+  // refresh is meaningful (`stale` — re-push pending; the model is
+  // out of sync with the briefing). Showing it on `current` would
+  // ask the architect to redo work that's already in lock-step;
+  // showing it on `not-pushed` would conflate "please push for the
+  // first time" with "please refresh", a different conceptual ask
+  // outside V1-2 scope.
+  const showRequestRefresh =
+    audience === "internal" && bimModel.refreshStatus === "stale";
+  const requestRefreshIsPending = useReviewerRequestIsPending(
+    engagementId,
+    "refresh-bim-model",
+    bimModel.id,
+    showRequestRefresh,
+  );
   const toneColor =
     status.tone === "success"
       ? "var(--success-text)"
@@ -461,6 +494,36 @@ function BimModelSummaryCard({ bimModel }: { bimModel: EngagementBimModel }) {
           {bimModel.revitDocumentPath ?? "—"}
         </dd>
       </dl>
+      {/*
+        Task #429 — reviewer-side "Request BIM refresh" affordance.
+        Sits in-card under the materialized-at / briefing-version
+        block so the ask sits adjacent to the as-of timestamp the
+        reviewer is reading when they decide a refresh is warranted.
+        Caller-owns-the-gate contract: the affordance itself does
+        not check audience — `BimModelSummaryCard` does, then mounts
+        only when `audience === "internal"` and the model is stale.
+      */}
+      {showRequestRefresh && (
+        <div
+          data-testid="bim-model-summary-request-refresh-row"
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            paddingTop: 4,
+            borderTop: "1px dashed var(--border-default)",
+            marginTop: 4,
+          }}
+        >
+          <RequestRefreshAffordance
+            engagementId={engagementId}
+            requestKind="refresh-bim-model"
+            targetEntityType="bim-model"
+            targetEntityId={bimModel.id}
+            targetLabel="BIM model"
+            pending={requestRefreshIsPending}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -478,6 +541,14 @@ export interface BimModelTabProps {
    * is in flight.
    */
   highlightToken?: { ref: string; nonce: number } | null;
+  /**
+   * Task #429 — caller's session audience. The reviewer-side
+   * "Request BIM refresh" affordance on `BimModelSummaryCard` only
+   * mounts when `audience === "internal"`. Defaults to `"user"` so
+   * existing tests / non-reviewer mounts keep their current
+   * behavior without change.
+   */
+  audience?: "internal" | "user" | "ai";
 }
 
 /**
@@ -509,6 +580,7 @@ export interface BimModelTabProps {
 export function BimModelTab({
   engagementId,
   highlightToken = null,
+  audience = "user",
 }: BimModelTabProps) {
   const [activeDivergence, setActiveDivergence] =
     useState<BimModelDivergenceListEntry | null>(null);
@@ -562,7 +634,13 @@ export function BimModelTab({
         </div>
       )}
 
-      {bimModel && <BimModelSummaryCard bimModel={bimModel} />}
+      {bimModel && (
+        <BimModelSummaryCard
+          bimModel={bimModel}
+          engagementId={engagementId}
+          audience={audience}
+        />
+      )}
 
       {bimModel && (
         <BimModelViewport

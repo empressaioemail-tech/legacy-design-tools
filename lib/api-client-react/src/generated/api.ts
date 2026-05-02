@@ -7129,9 +7129,17 @@ export const useOverrideFinding = <
 
 /**
  * Returns reviewer-requests filed against the engagement,
-newest-first by `requestedAt`. Architect-only — the endpoint
-requires the `architect` audience and 403s any non-architect
-caller. Drives the architect-side `ReviewerRequestsStrip`.
+newest-first by `requestedAt`. Architect AND reviewer audiences
+can both read this list — architect drives the
+`ReviewerRequestsStrip` open queue, reviewer (Task #429) binds
+the three Request-Refresh affordances to a "Refresh requested"
+pending state so a target with an open request disables the
+affordance rather than letting the reviewer file a duplicate.
+403s any other audience (e.g. agent traffic).
+
+Mutations stay split: only reviewers can create
+(`POST /engagements/{id}/reviewer-requests`) and only architects
+can dismiss (`POST /reviewer-requests/{id}/dismiss`).
 
 The optional `status` filter narrows the result to one
 lifecycle state. The strip queries `?status=pending` to render

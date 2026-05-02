@@ -351,6 +351,7 @@ export function SubmissionDetailModal({
               <BimModelTab
                 engagementId={engagementId}
                 highlightToken={highlightToken}
+                audience={audience}
               />
             </TabsContent>
           </Tabs>
