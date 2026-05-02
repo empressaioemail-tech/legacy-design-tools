@@ -23,6 +23,7 @@ import adapterCacheRouter from "./adapterCache";
 import reviewerAnnotationsRouter from "./reviewerAnnotations";
 import submissionCommentsRouter from "./submissionComments";
 import findingsRouter from "./findings";
+import submissionEventsRouter from "./submissionEvents";
 import reviewerRequestsRouter from "./reviewerRequests";
 import reviewerQueueRouter from "./submissions";
 import rendersRouter from "./renders";
@@ -91,6 +92,10 @@ router.use(submissionCommentsRouter);
 // no path overlap with reviewer-annotations or any other router so
 // ordering is indifferent.
 router.use(findingsRouter);
+// PLR-9 — per-submission SSE live event channel + presence. Mounts
+// `/submissions/:submissionId/events`; distinct path subtree from
+// every other router so ordering is indifferent.
+router.use(submissionEventsRouter);
 // Wave 2 Sprint D / V1-2 — reviewer-request surface. Mounts under
 // /engagements/:id/reviewer-requests + /reviewer-requests/:id/dismiss.
 // engagementsRouter's `/engagements/:id` handler is a leaf and does

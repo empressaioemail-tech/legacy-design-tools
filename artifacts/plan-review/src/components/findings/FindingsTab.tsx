@@ -470,6 +470,40 @@ function FindingsSeverityGroup({
   );
 }
 
+/**
+ * PLR-9 — Inline tag showing who authored / last actioned a finding.
+ * Engine-only rows show "AI"; human-reviewer rows show the actor's
+ * displayName (or id when no profile lookup is available client-side).
+ */
+function FindingAuthorTag({ finding }: { finding: Finding }) {
+  const actor = finding.reviewerStatusBy;
+  let label: string;
+  if (!actor) {
+    label = "AI";
+  } else if (actor.kind === "user") {
+    label = actor.displayName?.trim() || actor.id;
+  } else {
+    label = actor.displayName?.trim() || actor.kind;
+  }
+  return (
+    <span
+      data-testid={`finding-row-author-${finding.id}`}
+      style={{
+        fontSize: 10,
+        color: "var(--text-secondary)",
+        fontStyle: "italic",
+      }}
+      title={
+        actor
+          ? `${actor.kind}: ${actor.displayName ?? actor.id}`
+          : "AI-produced"
+      }
+    >
+      by {label}
+    </span>
+  );
+}
+
 function FindingRow({
   finding,
   selected,
@@ -555,6 +589,24 @@ function FindingRow({
             testid={`finding-row-low-conf-${finding.id}`}
           />
         )}
+        <span
+          data-testid={`finding-row-discipline-${finding.id}`}
+          style={{
+            background: "var(--bg-input)",
+            border: "1px solid var(--border-default)",
+            color: "var(--text-secondary)",
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            padding: "1px 6px",
+            borderRadius: 3,
+          }}
+          title={`Discipline: ${finding.category}`}
+        >
+          {finding.category.replace(/-/g, " ")}
+        </span>
+        <FindingAuthorTag finding={finding} />
         <span
           data-testid={`finding-row-citation-count-${finding.id}`}
           className="sc-meta opacity-70"

@@ -91,6 +91,7 @@ import {
   getFindingLlmClient,
   getFindingLlmMode,
 } from "../lib/findingLlmClient";
+import { publishSubmissionFindingEvent } from "../lib/submissionLiveEvents";
 
 const router: IRouter = Router();
 
@@ -783,6 +784,20 @@ async function runFindingGeneration(args: {
     const history = getHistoryService();
     for (const row of persistedRows) {
       await emitFindingGeneratedEvent(history, row, generationId, reqLog);
+      // PLR-9 — fan out to any open SSE subscribers for the
+      // submission so reviewer cohorts watching the run see new
+      // rows stream in without a manual refetch.
+      publishSubmissionFindingEvent({
+        submissionId: row.submissionId,
+        type: "finding.added",
+        payload: {
+          findingId: row.atomId,
+          severity: row.severity,
+          category: row.category,
+          generationId,
+          source: "engine",
+        },
+      });
     }
 
     if (result.invalidCitations.length > 0) {
@@ -1183,6 +1198,18 @@ router.post(
         reqLog,
       );
 
+      publishSubmissionFindingEvent({
+        submissionId: finalRow.submissionId,
+        type: "finding.added",
+        payload: {
+          findingId: finalRow.atomId,
+          severity: finalRow.severity,
+          category: finalRow.category,
+          source: "human-reviewer",
+          actor,
+        },
+      });
+
       reqLog.info(
         {
           submissionId,
@@ -1331,6 +1358,15 @@ router.post(
         },
         reqLog,
       );
+      publishSubmissionFindingEvent({
+        submissionId: finalRow.submissionId,
+        type: "finding.accepted",
+        payload: {
+          findingId: finalRow.atomId,
+          previousStatus: row.status,
+          actor,
+        },
+      });
       res.json({ finding: toWire(finalRow, revisionOfAtomId) });
     } catch (err) {
       logger.error({ err, findingId }, "accept finding failed");
@@ -1396,6 +1432,15 @@ router.post(
         },
         reqLog,
       );
+      publishSubmissionFindingEvent({
+        submissionId: finalRow.submissionId,
+        type: "finding.rejected",
+        payload: {
+          findingId: finalRow.atomId,
+          previousStatus: row.status,
+          actor,
+        },
+      });
       res.json({ finding: toWire(finalRow, revisionOfAtomId) });
     } catch (err) {
       logger.error({ err, findingId }, "reject finding failed");
@@ -1520,6 +1565,16 @@ router.post(
         },
         reqLog,
       );
+      publishSubmissionFindingEvent({
+        submissionId: original.submissionId,
+        type: "finding.overridden",
+        payload: {
+          findingId: original.atomId,
+          revisionAtomId,
+          previousStatus: original.status,
+          actor,
+        },
+      });
       res.json({ finding: toWire(revisionRow, original.atomId) });
     } catch (err) {
       logger.error({ err, findingId }, "override finding failed");

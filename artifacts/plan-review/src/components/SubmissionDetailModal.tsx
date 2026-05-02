@@ -75,6 +75,8 @@ import { DecisionTab } from "./DecisionTab";
 import { EngagementContextTab } from "./EngagementContextTab";
 import { relativeTime } from "../lib/relativeTime";
 import { FindingsTab } from "./findings/FindingsTab";
+import { PresenceChips } from "./PresenceChips";
+import { useSubmissionLiveEvents } from "../lib/useSubmissionLiveEvents";
 import {
   useListSubmissionFindings,
   useListSubmissionFindingsGenerationRuns,
@@ -168,6 +170,16 @@ export function SubmissionDetailModal({
   lastCommunicatedAt = null,
 }: SubmissionDetailModalProps) {
   const isOpen = submission !== null;
+
+  // PLR-9 — open the live SSE channel while the modal is open and
+  // the caller is reviewer-audience. Drives the presence chips in
+  // the header AND invalidates the findings list query on
+  // finding.{added,accepted,rejected,overridden} so multiple
+  // reviewers see each other's accepts/rejects without a refetch.
+  const { presence, connected } = useSubmissionLiveEvents(
+    submission?.id ?? null,
+    isOpen && audience === "internal",
+  );
 
   // Internal tab state for uncontrolled mode. Defaults to the Note
   // tab per Task #305 spec — preserves the one-click read affordance
@@ -277,9 +289,19 @@ export function SubmissionDetailModal({
         }}
       >
         <DialogHeader>
-          <DialogTitle data-testid="submission-detail-modal-title">
-            Submission detail
-          </DialogTitle>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <DialogTitle data-testid="submission-detail-modal-title">
+              Submission detail
+            </DialogTitle>
+            <PresenceChips presence={presence} connected={connected} />
+          </div>
           {submission && (
             <DialogDescription data-testid="submission-detail-modal-subtitle">
               <SubmissionSummaryLine submission={submission} />
