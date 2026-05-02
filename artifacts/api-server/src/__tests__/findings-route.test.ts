@@ -26,7 +26,7 @@
  * needed.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -44,12 +44,34 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
+// V1-7: stub the codes-side retrieval at the boundary so the route's
+// retrieval call is deterministic in tests without standing up the
+// embeddings service. Pattern mirrors `engagements.test.ts:38-52` —
+// preserve the rest of the module (in particular `keyFromEngagement`,
+// which the route uses to derive the jurisdiction key the test asserts
+// against), and only override the network-shaped function under test.
+//
+// `vi.hoisted` is required because `vi.mock` calls are hoisted to the
+// top of the module by vitest's transform; without `hoisted`, the
+// factory closure would reference a `const` that has not yet been
+// initialized at hoist time.
+const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
+vi.mock("@workspace/codes", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/codes")>("@workspace/codes");
+  return {
+    ...actual,
+    retrieveAtomsForQuestion: retrieveAtomsForQuestionMock,
+  };
+});
+
 const { setupRouteTests } = await import("./setup");
 const {
   engagements,
   submissions,
   parcelBriefings,
   briefingSources,
+  materializableElements,
   findings,
   findingRuns,
   atomEvents,
@@ -59,6 +81,15 @@ const { eq, and, desc } = await import("drizzle-orm");
 let getApp: () => Express;
 setupRouteTests((g) => {
   getApp = g;
+});
+
+beforeEach(() => {
+  // Reset the retrieval stub between tests so a `mockReturnValueOnce`
+  // queued in one test doesn't leak into the next. Default behavior:
+  // return zero atoms (the V1-1 baseline). Tests that exercise the
+  // retrieval-reaches-engine path override per-call.
+  retrieveAtomsForQuestionMock.mockReset();
+  retrieveAtomsForQuestionMock.mockResolvedValue([]);
 });
 
 const REVIEWER_HEADERS = {
@@ -578,5 +609,220 @@ describe("POST /api/findings/:id/override", () => {
       .from(findings)
       .where(eq(findings.revisionOf, originalRow!.id));
     expect(revisions).toHaveLength(1);
+  });
+});
+
+// ─── V1-7: retrieval + bimElements wire-up ───────────────────────
+
+describe("V1-7 — code retrieval wired into the engine input", () => {
+  it("retrieved code atoms reach the engine and surface as [[CODE:...]] tokens on persisted findings", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { engagement, submission } = await seedEngagementSubmission(
+      "retrieval-engagement",
+    );
+    await seedBriefingForEngagement(engagement.id);
+
+    // Stub a single canned atom. The mock-mode finding fixture cites
+    // the first code-section it receives, so this id must show up
+    // verbatim in at least one persisted finding's `text`.
+    const cannedAtomId = "11111111-1111-1111-1111-111111111111";
+    retrieveAtomsForQuestionMock.mockResolvedValueOnce([
+      {
+        id: cannedAtomId,
+        sourceName: "bastrop_municode",
+        jurisdictionKey: "bastrop_tx",
+        codeBook: "MUNI_CODE",
+        edition: "Code of Ordinances (current supplement)",
+        sectionNumber: "§4.3.2.B",
+        sectionTitle: "Side Yard Setbacks",
+        body: "Side yard setback shall be 5'-0\" minimum.",
+        sourceUrl: "https://example.com/bastrop-udc-4-3-2-b",
+        score: 0.74,
+        retrievalMode: "vector",
+      },
+    ]);
+
+    const kickoff = await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(kickoff.status).toBe(202);
+    await waitForStatus(submission.id, "completed");
+
+    // The route resolved the engagement's "Bastrop, TX" jurisdiction
+    // string into the `bastrop_tx` registered key and called
+    // retrieval with K=8 against that key.
+    expect(retrieveAtomsForQuestionMock).toHaveBeenCalledTimes(1);
+    expect(retrieveAtomsForQuestionMock.mock.calls[0]![0]).toMatchObject({
+      jurisdictionKey: "bastrop_tx",
+      limit: 8,
+    });
+    // The query passed to retrieval was the briefing-narrative slice
+    // (truncated to 1500 chars). Without a generated narrative on
+    // the seed briefing, the synthesized fallback fires — assert
+    // either is non-empty.
+    const callArgs = retrieveAtomsForQuestionMock.mock.calls[0]![0] as {
+      question: string;
+    };
+    expect(typeof callArgs.question).toBe("string");
+    expect(callArgs.question.length).toBeGreaterThan(0);
+    expect(callArgs.question.length).toBeLessThanOrEqual(1500);
+
+    // The mock-mode engine fixture's blocker text inlines a
+    // [[CODE:atomId]] token for the first code-section input, and
+    // the citation validator preserves it because the resolver
+    // recognizes the canned atom id.
+    const persistedFindings = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, submission.id));
+    const blocker = persistedFindings.find((f) => f.severity === "blocker");
+    expect(blocker).toBeTruthy();
+    expect(blocker!.text).toContain(`[[CODE:${cannedAtomId}]]`);
+    // The citation also lands on the citations jsonb array.
+    const citations = blocker!.citations as Array<{
+      kind: string;
+      atomId?: string;
+    }>;
+    expect(
+      citations.some(
+        (c) => c.kind === "code-section" && c.atomId === cannedAtomId,
+      ),
+    ).toBe(true);
+  });
+
+  it("skips retrieval when the engagement's jurisdiction does not resolve to a registered key", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    // Engagement with an unrecognized jurisdiction string: keyFromEngagement
+    // walks structured city/state → freeform → address scan and returns
+    // null when nothing matches the registry.
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "no-jurisdiction-engagement",
+        nameLower: "no-jurisdiction-engagement",
+        jurisdiction: "Atlantis, Lost Continent",
+        address: "1 Trident Way, Atlantis",
+        status: "active",
+      })
+      .returning();
+    const [sub] = await ctx.schema.db
+      .insert(submissions)
+      .values({
+        engagementId: eng.id,
+        jurisdiction: "Atlantis, Lost Continent",
+      })
+      .returning();
+    await seedBriefingForEngagement(eng.id);
+
+    const kickoff = await request(getApp())
+      .post(`/api/submissions/${sub.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(kickoff.status).toBe(202);
+    await waitForStatus(sub.id, "completed");
+
+    // No jurisdiction key → no retrieval call at all (the chat-side
+    // fail-safe applies: an unrecognized locale is a true negative,
+    // we don't fabricate atoms from a different jurisdiction).
+    expect(retrieveAtomsForQuestionMock).not.toHaveBeenCalled();
+
+    // The mock fixture suppresses the blocker without a code-section
+    // input, so the surviving findings cite none either.
+    const persistedFindings = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, sub.id));
+    for (const f of persistedFindings) {
+      expect(f.text).not.toMatch(/\[\[CODE:/);
+    }
+  });
+});
+
+describe("V1-7 — materializable elements wired into the engine input", () => {
+  it("seeded materializable elements reach the engine and one finding's elementRef matches a row uuid", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { engagement, submission } = await seedEngagementSubmission(
+      "materializable-engagement",
+    );
+    const { briefing } = await seedBriefingForEngagement(engagement.id);
+
+    // Seed two materializable elements against the briefing. The
+    // mock-mode engine fixture anchors its blocker on the first
+    // bim element it receives, so the persisted blocker's
+    // `elementRef` must equal one of the seeded row uuids.
+    const matRows = await ctx.schema.db
+      .insert(materializableElements)
+      .values([
+        {
+          briefingId: briefing.id,
+          elementKind: "setback-plane",
+          label: "Front setback (15 ft)",
+          locked: true,
+        },
+        {
+          briefingId: briefing.id,
+          elementKind: "buildable-envelope",
+          label: null,
+          locked: false,
+        },
+      ])
+      .returning();
+    expect(matRows).toHaveLength(2);
+    const seededIds = new Set(matRows.map((r) => r.id));
+
+    const kickoff = await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(kickoff.status).toBe(202);
+    await waitForStatus(submission.id, "completed");
+
+    const persistedFindings = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, submission.id));
+    // At least one finding (the mock blocker) carries an elementRef
+    // that points at one of the seeded materializable-element row
+    // uuids — the route's `toBimElementInput` set `ref = row.id`.
+    const anchored = persistedFindings.filter(
+      (f) => f.elementRef && seededIds.has(f.elementRef),
+    );
+    expect(anchored.length).toBeGreaterThan(0);
+  });
+});
+
+describe("V1-7 — retrieval-failure fail-safe", () => {
+  it("a retrieval throw does not fail the run; status reaches `completed` with no code citations", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { engagement, submission } = await seedEngagementSubmission(
+      "retrieval-failure-engagement",
+    );
+    await seedBriefingForEngagement(engagement.id);
+
+    retrieveAtomsForQuestionMock.mockRejectedValueOnce(
+      new Error("simulated embedding-service outage"),
+    );
+
+    const kickoff = await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(kickoff.status).toBe(202);
+    const completed = await waitForStatus(submission.id, "completed");
+    // The run completes (warn-and-continue contract). Even though
+    // retrieval threw, the engine ran against sources alone.
+    expect(completed.body.state).toBe("completed");
+    expect(completed.body.error).toBeNull();
+
+    // Persisted findings carry no [[CODE:...]] tokens because no
+    // code-section inputs reached the engine.
+    const persistedFindings = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, submission.id));
+    for (const f of persistedFindings) {
+      expect(f.text).not.toMatch(/\[\[CODE:/);
+    }
   });
 });
