@@ -97,14 +97,14 @@ CREATE TABLE @@SCHEMA@@.briefing_sources (
     upload_original_filename text,
     upload_content_type text,
     upload_byte_size integer,
-    note text,
-    superseded_by_id uuid,
-    superseded_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
     dxf_object_path text,
     glb_object_path text,
     conversion_status text,
-    conversion_error text
+    conversion_error text,
+    note text,
+    superseded_by_id uuid,
+    superseded_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -175,8 +175,6 @@ CREATE TABLE @@SCHEMA@@.engagements (
     jurisdiction text,
     address text,
     status text DEFAULT 'active'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     latitude numeric(9,6),
     longitude numeric(9,6),
     geocoded_at timestamp with time zone,
@@ -189,7 +187,9 @@ CREATE TABLE @@SCHEMA@@.engagements (
     lot_area_sqft numeric,
     site_context_raw jsonb,
     revit_central_guid text,
-    revit_document_path text
+    revit_document_path text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -225,8 +225,6 @@ CREATE TABLE @@SCHEMA@@.materializable_elements (
 CREATE TABLE @@SCHEMA@@.parcel_briefings (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     engagement_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     section_a text,
     section_b text,
     section_c text,
@@ -245,7 +243,9 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
     prior_section_g text,
     prior_generated_at timestamp with time zone,
     prior_generated_by text,
-    generation_id uuid
+    generation_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -316,11 +316,11 @@ CREATE TABLE @@SCHEMA@@.submissions (
     jurisdiction_fips text,
     note text,
     submitted_at timestamp with time zone DEFAULT now() NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
     reviewer_comment text,
     responded_at timestamp with time zone,
-    response_recorded_at timestamp with time zone
+    response_recorded_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -331,9 +331,9 @@ CREATE TABLE @@SCHEMA@@.users (
     display_name text NOT NULL,
     email text,
     avatar_url text,
+    architect_pdf_header text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    architect_pdf_header text
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
