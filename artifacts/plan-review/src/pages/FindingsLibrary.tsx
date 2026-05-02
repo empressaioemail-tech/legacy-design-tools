@@ -3,7 +3,6 @@ import { DashboardLayout } from "@workspace/portal-ui";
 import { useNavGroups } from "../components/NavGroups";
 import { FINDINGS } from "../data/mock";
 import { DisciplineBadge } from "../components/DisciplineBadge";
-import { Link } from "wouter";
 
 type QuickFilter = "all" | "blocking" | "ai-only" | "open";
 
@@ -138,7 +137,7 @@ export default function FindingsLibrary() {
                       <td className="px-4 py-1.5 sc-medium max-w-[200px] truncate" title={f.title}>{f.title}</td>
                       <td className="px-4 py-1.5"><span className="sc-ref">{f.codeRef}</span></td>
                       <td className="px-4 py-1.5 sc-meta">{f.source === "ai-reviewer" ? "AI" : "Human"}</td>
-                      <td className="px-4 py-1.5"><Link href={`/submittals/${f.submittalId}`} className="text-[var(--cyan-text)] hover:underline text-[11px] font-medium">{f.submittalId}</Link></td>
+                      <td className="px-4 py-1.5"><span className="sc-mono-sm text-[var(--text-secondary)]">{f.submittalId}</span></td>
                       <td className="px-4 py-1.5 sc-mono-sm text-[var(--text-secondary)]">{dateStr}</td>
                       <td className="px-4 py-1.5"><span className={`sc-pill ${statusPillClass}`}>{f.status}</span></td>
                     </tr>
