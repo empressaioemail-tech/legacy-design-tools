@@ -259,16 +259,82 @@ export interface ReviewerQueueCounts {
   backlog: number;
 }
 
+export type ReviewerKpiMetricTrend =
+  | (typeof ReviewerKpiMetricTrend)[keyof typeof ReviewerKpiMetricTrend]
+  | null;
+
+export const ReviewerKpiMetricTrend = {
+  up: "up",
+  down: "down",
+} as const;
+
+/**
+ * One KPI tile in the reviewer Inbox's KPI strip. `value` is
+null when there is not yet enough data to compute the metric
+(e.g. no submissions have been responded to in the trailing
+window); the FE renders the "—" placeholder in that case.
+`trend` / `trendLabel` are null when there is not enough data
+in the prior window to compute a delta — the FE then hides
+the trend chip.
+
+Concrete shapes per metric:
+  - AVG REVIEW TIME — `value` is hours (float). Computed as
+    the mean wall-clock gap between `submittedAt` and
+    `respondedAt` over submissions whose response landed in
+    the trailing 30-day window.
+  - AI ACCURACY — `value` is a percentage 0-100. Computed as
+    `accepted / (accepted + rejected + overridden)` over
+    findings whose reviewer-status changed in the trailing
+    30-day window. `promoted-to-architect` is bucketed with
+    `accepted` (it's the reviewer agreeing the AI was right).
+  - COMPLIANCE RATE — `value` is a percentage 0-100. Computed
+    as `approved / (approved + corrections_requested +
+    rejected)` over submissions whose response landed in the
+    trailing 30-day window.
+
+Trend direction compares the current 30-day window against
+the prior 30-day window (i.e. days 31-60 ago). For AVG
+REVIEW TIME, "down" is the favorable direction (faster
+turn-around); for AI ACCURACY and COMPLIANCE RATE, "up" is
+favorable. The route does not encode "favorable" — it just
+reports whether the value moved up or down — so the FE can
+choose how to color the chip.
+
+ */
+export interface ReviewerKpiMetric {
+  value: number | null;
+  trend: ReviewerKpiMetricTrend;
+  trendLabel: string | null;
+}
+
+/**
+ * KPI tiles rendered above the reviewer Inbox queue. Computed
+across the full submissions / findings tables (NOT scoped to
+the caller's `?status=` filter) over a trailing 30-day window
+so the strip stays meaningful regardless of how the caller
+narrowed the queue.
+
+ */
+export interface ReviewerQueueKpis {
+  avgReviewTime: ReviewerKpiMetric;
+  aiAccuracy: ReviewerKpiMetric;
+  complianceRate: ReviewerKpiMetric;
+}
+
 /**
  * Response payload of `GET /reviewer/queue`. The `items` array
 is the filtered queue (newest-first); the `counts` object is
 a cross-system roll-up (NOT scoped to the filter) so the
-Inbox's KPI strip can render off the same response.
+Inbox's KPI strip can render off the same response. `kpis`
+carries the trailing-window KPI metrics (avg review time, AI
+accuracy, compliance rate) the strip renders alongside the
+backlog count.
 
  */
 export interface ReviewerQueueResponse {
   items: ReviewerQueueItem[];
   counts: ReviewerQueueCounts;
+  kpis: ReviewerQueueKpis;
 }
 
 /**

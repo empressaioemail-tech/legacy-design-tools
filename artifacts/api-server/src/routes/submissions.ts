@@ -14,11 +14,12 @@ import {
 import {
   db,
   engagements,
+  findings,
   submissions,
   SUBMISSION_STATUS_VALUES,
   type SubmissionStatus,
 } from "@workspace/db";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -125,6 +126,8 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
     backlog: byStatus.pending + byStatus.corrections_requested,
   };
 
+  const kpis = await computeReviewerKpis();
+
   res.json({
     items: itemRows.map((r) => ({
       submissionId: r.submissionId,
@@ -142,7 +145,164 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
       reviewerComment: r.reviewerComment,
     })),
     counts,
+    kpis,
   });
 });
+
+const WINDOW_DAYS = 30;
+const WINDOW_MS = WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+type KpiMetric = {
+  value: number | null;
+  trend: "up" | "down" | null;
+  trendLabel: string | null;
+};
+
+/**
+ * Build a `{value, trend, trendLabel}` triple from the current and
+ * prior window samples. `value` is null when the current window has
+ * no data; trend is null when the prior window has no data (no
+ * comparable baseline). The label always reads "X% vs prior 30d" so
+ * the FE can render it verbatim.
+ */
+function buildKpiMetric(
+  current: number | null,
+  prior: number | null,
+): KpiMetric {
+  if (current == null) {
+    return { value: null, trend: null, trendLabel: null };
+  }
+  if (prior == null || prior === 0) {
+    return { value: current, trend: null, trendLabel: null };
+  }
+  const deltaPct = ((current - prior) / prior) * 100;
+  const trend: "up" | "down" = deltaPct >= 0 ? "up" : "down";
+  const magnitude = Math.abs(deltaPct);
+  const formatted =
+    magnitude >= 10 ? Math.round(magnitude).toString() : magnitude.toFixed(1);
+  return {
+    value: current,
+    trend,
+    trendLabel: `${formatted}% vs prior ${WINDOW_DAYS}d`,
+  };
+}
+
+async function computeReviewerKpis(): Promise<{
+  avgReviewTime: KpiMetric;
+  aiAccuracy: KpiMetric;
+  complianceRate: KpiMetric;
+}> {
+  const now = new Date();
+  const windowStart = new Date(now.getTime() - WINDOW_MS);
+  const priorStart = new Date(now.getTime() - 2 * WINDOW_MS);
+
+  // AVG REVIEW TIME — mean (responded_at - submitted_at) in hours,
+  // bucketed by which 30-day window the response landed in.
+  const reviewTimeRows = await db
+    .select({
+      bucket: sql<string>`CASE
+        WHEN ${submissions.respondedAt} >= ${windowStart} THEN 'current'
+        ELSE 'prior'
+      END`,
+      avgHours: sql<string | null>`AVG(EXTRACT(EPOCH FROM (${submissions.respondedAt} - ${submissions.submittedAt})) / 3600.0)`,
+    })
+    .from(submissions)
+    .where(
+      and(
+        isNotNull(submissions.respondedAt),
+        gte(submissions.respondedAt, priorStart),
+        lt(submissions.respondedAt, now),
+      ),
+    )
+    .groupBy(sql`1`);
+
+  let avgReviewCurrent: number | null = null;
+  let avgReviewPrior: number | null = null;
+  for (const row of reviewTimeRows) {
+    const v = row.avgHours == null ? null : Number(row.avgHours);
+    if (row.bucket === "current") avgReviewCurrent = v;
+    else if (row.bucket === "prior") avgReviewPrior = v;
+  }
+
+  // COMPLIANCE RATE — approved / (approved + corrections_requested + rejected)
+  // bucketed by response window.
+  const complianceRows = await db
+    .select({
+      bucket: sql<string>`CASE
+        WHEN ${submissions.respondedAt} >= ${windowStart} THEN 'current'
+        ELSE 'prior'
+      END`,
+      approved: sql<number>`SUM(CASE WHEN ${submissions.status} = 'approved' THEN 1 ELSE 0 END)::int`,
+      total: sql<number>`COUNT(*)::int`,
+    })
+    .from(submissions)
+    .where(
+      and(
+        isNotNull(submissions.respondedAt),
+        gte(submissions.respondedAt, priorStart),
+        lt(submissions.respondedAt, now),
+        inArray(submissions.status, [
+          "approved",
+          "corrections_requested",
+          "rejected",
+        ]),
+      ),
+    )
+    .groupBy(sql`1`);
+
+  let complianceCurrent: number | null = null;
+  let compliancePrior: number | null = null;
+  for (const row of complianceRows) {
+    const total = Number(row.total);
+    if (total === 0) continue;
+    const pct = (Number(row.approved) / total) * 100;
+    if (row.bucket === "current") complianceCurrent = pct;
+    else if (row.bucket === "prior") compliancePrior = pct;
+  }
+
+  // AI ACCURACY — accepted-or-promoted / (accepted+promoted+rejected+overridden)
+  // bucketed by reviewer_status_changed_at window. `ai-produced` rows
+  // are excluded — they have not been judged yet.
+  const accuracyRows = await db
+    .select({
+      bucket: sql<string>`CASE
+        WHEN ${findings.reviewerStatusChangedAt} >= ${windowStart} THEN 'current'
+        ELSE 'prior'
+      END`,
+      accepted: sql<number>`SUM(CASE WHEN ${findings.status} IN ('accepted', 'promoted-to-architect') THEN 1 ELSE 0 END)::int`,
+      total: sql<number>`COUNT(*)::int`,
+    })
+    .from(findings)
+    .where(
+      and(
+        isNotNull(findings.reviewerStatusChangedAt),
+        gte(findings.reviewerStatusChangedAt, priorStart),
+        lt(findings.reviewerStatusChangedAt, now),
+        inArray(findings.status, [
+          "accepted",
+          "rejected",
+          "overridden",
+          "promoted-to-architect",
+        ]),
+      ),
+    )
+    .groupBy(sql`1`);
+
+  let accuracyCurrent: number | null = null;
+  let accuracyPrior: number | null = null;
+  for (const row of accuracyRows) {
+    const total = Number(row.total);
+    if (total === 0) continue;
+    const pct = (Number(row.accepted) / total) * 100;
+    if (row.bucket === "current") accuracyCurrent = pct;
+    else if (row.bucket === "prior") accuracyPrior = pct;
+  }
+
+  return {
+    avgReviewTime: buildKpiMetric(avgReviewCurrent, avgReviewPrior),
+    aiAccuracy: buildKpiMetric(accuracyCurrent, accuracyPrior),
+    complianceRate: buildKpiMetric(complianceCurrent, compliancePrior),
+  };
+}
 
 export default router;

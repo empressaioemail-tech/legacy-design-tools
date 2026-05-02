@@ -7,15 +7,20 @@
  */
 import type { ReviewerQueueCounts } from "./reviewerQueueCounts";
 import type { ReviewerQueueItem } from "./reviewerQueueItem";
+import type { ReviewerQueueKpis } from "./reviewerQueueKpis";
 
 /**
  * Response payload of `GET /reviewer/queue`. The `items` array
 is the filtered queue (newest-first); the `counts` object is
 a cross-system roll-up (NOT scoped to the filter) so the
-Inbox's KPI strip can render off the same response.
+Inbox's KPI strip can render off the same response. `kpis`
+carries the trailing-window KPI metrics (avg review time, AI
+accuracy, compliance rate) the strip renders alongside the
+backlog count.
 
  */
 export interface ReviewerQueueResponse {
   items: ReviewerQueueItem[];
   counts: ReviewerQueueCounts;
+  kpis: ReviewerQueueKpis;
 }

@@ -5,6 +5,7 @@ import { DashboardLayout } from "@workspace/portal-ui";
 import {
   useListReviewerQueue,
   getListReviewerQueueQueryKey,
+  type ReviewerKpiMetric,
   type ReviewerQueueItem,
   type ReviewerQueueResponse,
   type SubmissionStatus,
@@ -33,6 +34,40 @@ const STATUS_PILL_LABEL: Record<SubmissionStatus, string> = {
   corrections_requested: "corrections",
   rejected: "rejected",
 };
+
+function formatHours(value: number): string {
+  if (value < 1) {
+    const minutes = Math.max(1, Math.round(value * 60));
+    return `${minutes}m`;
+  }
+  if (value < 10) return `${value.toFixed(1)}h`;
+  return `${Math.round(value)}h`;
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value)}%`;
+}
+
+function kpiTileProps(
+  metric: ReviewerKpiMetric | undefined,
+  format: (v: number) => string,
+): {
+  value: string;
+  trend?: "up" | "down";
+  trendLabel?: string;
+} {
+  if (!metric || metric.value == null) return { value: "—" };
+  const props: {
+    value: string;
+    trend?: "up" | "down";
+    trendLabel?: string;
+  } = { value: format(metric.value) };
+  if (metric.trend && metric.trendLabel) {
+    props.trend = metric.trend;
+    props.trendLabel = metric.trendLabel;
+  }
+  return props;
+}
 
 function ReviewerQueueRow({ item }: { item: ReviewerQueueItem }) {
   const initials = item.engagementName
@@ -120,6 +155,7 @@ export default function ReviewConsole() {
 
   const items = queue?.items ?? [];
   const counts = queue?.counts;
+  const kpis = queue?.kpis;
 
   const [searchQuery, setSearchQuery] = useState("");
   const trimmedQuery = searchQuery.trim().toLowerCase();
@@ -183,9 +219,18 @@ export default function ReviewConsole() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiTile label="AVG REVIEW TIME" value="—" />
-          <KpiTile label="AI ACCURACY" value="—" />
-          <KpiTile label="COMPLIANCE RATE" value="—" />
+          <KpiTile
+            label="AVG REVIEW TIME"
+            {...kpiTileProps(kpis?.avgReviewTime, formatHours)}
+          />
+          <KpiTile
+            label="AI ACCURACY"
+            {...kpiTileProps(kpis?.aiAccuracy, formatPercent)}
+          />
+          <KpiTile
+            label="COMPLIANCE RATE"
+            {...kpiTileProps(kpis?.complianceRate, formatPercent)}
+          />
           <KpiTile label="BACKLOG" value={backlogValue} />
         </div>
 

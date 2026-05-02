@@ -128,6 +128,11 @@ describe("GET /api/reviewer/queue", () => {
     expect(res.body).toEqual({
       items: [],
       counts: { inReview: 0, awaitingAi: 0, rejected: 0, backlog: 0 },
+      kpis: {
+        avgReviewTime: { value: null, trend: null, trendLabel: null },
+        aiAccuracy: { value: null, trend: null, trendLabel: null },
+        complianceRate: { value: null, trend: null, trendLabel: null },
+      },
     });
   });
 

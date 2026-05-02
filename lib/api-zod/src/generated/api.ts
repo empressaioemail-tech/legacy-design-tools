@@ -4908,9 +4908,42 @@ export const ListReviewerQueueResponse = zod
       .describe(
         "Cross-system roll-up counts the reviewer Inbox renders in its\nKPI strip \/ header summary line. Computed across the entire\n`submissions` table (NOT just the filtered queue items) so\nthe strip stays meaningful regardless of the caller's\n`?status=` filter.\n\n  - `awaitingAi` — submissions in `pending`. The mock surface\n    called this \"awaiting AI\" because the AI reviewer engine\n    is the next thing that should fire on a freshly-arrived\n    package; the name is preserved here so the FE wording\n    stays consistent.\n  - `inReview` — submissions in `corrections_requested`.\n  - `rejected` — submissions in `rejected`.\n  - `backlog` — `awaitingAi + inReview`, i.e. the size of the\n    default queue. Surfaced separately so the FE doesn't have\n    to repeat the addition.\n",
       ),
+    kpis: zod
+      .object({
+        avgReviewTime: zod
+          .object({
+            value: zod.number().nullable(),
+            trend: zod.enum(["up", "down"]).nullable(),
+            trendLabel: zod.string().nullable(),
+          })
+          .describe(
+            'One KPI tile in the reviewer Inbox\'s KPI strip. `value` is\nnull when there is not yet enough data to compute the metric\n(e.g. no submissions have been responded to in the trailing\nwindow); the FE renders the \"—\" placeholder in that case.\n`trend` \/ `trendLabel` are null when there is not enough data\nin the prior window to compute a delta — the FE then hides\nthe trend chip.\n\nConcrete shapes per metric:\n  - AVG REVIEW TIME — `value` is hours (float). Computed as\n    the mean wall-clock gap between `submittedAt` and\n    `respondedAt` over submissions whose response landed in\n    the trailing 30-day window.\n  - AI ACCURACY — `value` is a percentage 0-100. Computed as\n    `accepted \/ (accepted + rejected + overridden)` over\n    findings whose reviewer-status changed in the trailing\n    30-day window. `promoted-to-architect` is bucketed with\n    `accepted` (it\'s the reviewer agreeing the AI was right).\n  - COMPLIANCE RATE — `value` is a percentage 0-100. Computed\n    as `approved \/ (approved + corrections_requested +\n    rejected)` over submissions whose response landed in the\n    trailing 30-day window.\n\nTrend direction compares the current 30-day window against\nthe prior 30-day window (i.e. days 31-60 ago). For AVG\nREVIEW TIME, \"down\" is the favorable direction (faster\nturn-around); for AI ACCURACY and COMPLIANCE RATE, \"up\" is\nfavorable. The route does not encode \"favorable\" — it just\nreports whether the value moved up or down — so the FE can\nchoose how to color the chip.\n',
+          ),
+        aiAccuracy: zod
+          .object({
+            value: zod.number().nullable(),
+            trend: zod.enum(["up", "down"]).nullable(),
+            trendLabel: zod.string().nullable(),
+          })
+          .describe(
+            'One KPI tile in the reviewer Inbox\'s KPI strip. `value` is\nnull when there is not yet enough data to compute the metric\n(e.g. no submissions have been responded to in the trailing\nwindow); the FE renders the \"—\" placeholder in that case.\n`trend` \/ `trendLabel` are null when there is not enough data\nin the prior window to compute a delta — the FE then hides\nthe trend chip.\n\nConcrete shapes per metric:\n  - AVG REVIEW TIME — `value` is hours (float). Computed as\n    the mean wall-clock gap between `submittedAt` and\n    `respondedAt` over submissions whose response landed in\n    the trailing 30-day window.\n  - AI ACCURACY — `value` is a percentage 0-100. Computed as\n    `accepted \/ (accepted + rejected + overridden)` over\n    findings whose reviewer-status changed in the trailing\n    30-day window. `promoted-to-architect` is bucketed with\n    `accepted` (it\'s the reviewer agreeing the AI was right).\n  - COMPLIANCE RATE — `value` is a percentage 0-100. Computed\n    as `approved \/ (approved + corrections_requested +\n    rejected)` over submissions whose response landed in the\n    trailing 30-day window.\n\nTrend direction compares the current 30-day window against\nthe prior 30-day window (i.e. days 31-60 ago). For AVG\nREVIEW TIME, \"down\" is the favorable direction (faster\nturn-around); for AI ACCURACY and COMPLIANCE RATE, \"up\" is\nfavorable. The route does not encode \"favorable\" — it just\nreports whether the value moved up or down — so the FE can\nchoose how to color the chip.\n',
+          ),
+        complianceRate: zod
+          .object({
+            value: zod.number().nullable(),
+            trend: zod.enum(["up", "down"]).nullable(),
+            trendLabel: zod.string().nullable(),
+          })
+          .describe(
+            'One KPI tile in the reviewer Inbox\'s KPI strip. `value` is\nnull when there is not yet enough data to compute the metric\n(e.g. no submissions have been responded to in the trailing\nwindow); the FE renders the \"—\" placeholder in that case.\n`trend` \/ `trendLabel` are null when there is not enough data\nin the prior window to compute a delta — the FE then hides\nthe trend chip.\n\nConcrete shapes per metric:\n  - AVG REVIEW TIME — `value` is hours (float). Computed as\n    the mean wall-clock gap between `submittedAt` and\n    `respondedAt` over submissions whose response landed in\n    the trailing 30-day window.\n  - AI ACCURACY — `value` is a percentage 0-100. Computed as\n    `accepted \/ (accepted + rejected + overridden)` over\n    findings whose reviewer-status changed in the trailing\n    30-day window. `promoted-to-architect` is bucketed with\n    `accepted` (it\'s the reviewer agreeing the AI was right).\n  - COMPLIANCE RATE — `value` is a percentage 0-100. Computed\n    as `approved \/ (approved + corrections_requested +\n    rejected)` over submissions whose response landed in the\n    trailing 30-day window.\n\nTrend direction compares the current 30-day window against\nthe prior 30-day window (i.e. days 31-60 ago). For AVG\nREVIEW TIME, \"down\" is the favorable direction (faster\nturn-around); for AI ACCURACY and COMPLIANCE RATE, \"up\" is\nfavorable. The route does not encode \"favorable\" — it just\nreports whether the value moved up or down — so the FE can\nchoose how to color the chip.\n',
+          ),
+      })
+      .describe(
+        "KPI tiles rendered above the reviewer Inbox queue. Computed\nacross the full submissions \/ findings tables (NOT scoped to\nthe caller's `?status=` filter) over a trailing 30-day window\nso the strip stays meaningful regardless of how the caller\nnarrowed the queue.\n",
+      ),
   })
   .describe(
-    "Response payload of `GET \/reviewer\/queue`. The `items` array\nis the filtered queue (newest-first); the `counts` object is\na cross-system roll-up (NOT scoped to the filter) so the\nInbox's KPI strip can render off the same response.\n",
+    "Response payload of `GET \/reviewer\/queue`. The `items` array\nis the filtered queue (newest-first); the `counts` object is\na cross-system roll-up (NOT scoped to the filter) so the\nInbox's KPI strip can render off the same response. `kpis`\ncarries the trailing-window KPI metrics (avg review time, AI\naccuracy, compliance rate) the strip renders alongside the\nbacklog count.\n",
   );
 
 /**
