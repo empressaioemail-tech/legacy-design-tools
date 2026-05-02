@@ -3103,6 +3103,195 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{id}/reviewer-requests:
+    get:
+      operationId: listEngagementReviewerRequests
+      tags: [reviewer-requests]
+      summary: List reviewer-requests on an engagement
+      description: |
+        Returns reviewer-requests filed against the engagement,
+        newest-first by `requestedAt`. Architect-only — the endpoint
+        requires the `architect` audience and 403s any non-architect
+        caller. Drives the architect-side `ReviewerRequestsStrip`.
+
+        The optional `status` filter narrows the result to one
+        lifecycle state. The strip queries `?status=pending` to render
+        its open queue; auditors / debug tools can omit the filter to
+        see the full history.
+
+        Resolution is implicit — when an architect runs the matching
+        domain action (refresh briefing-source / refresh bim-model /
+        regenerate briefing) the post-action hook flips a pending
+        request to `resolved` and stamps `triggeredActionEventId` to
+        the action event's id. The architect never directly "marks
+        resolved" — only `dismiss` is an explicit transition.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Engagement id.
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ReviewerRequestStatus"
+          description: |
+            Optional filter — restrict the result to requests in this
+            lifecycle state. The architect strip queries `pending`
+            for its open queue.
+      responses:
+        "200":
+          description: Newest-first list of reviewer-requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListReviewerRequestsResponse"
+        "403":
+          description: Caller is not architect-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createEngagementReviewerRequest
+      tags: [reviewer-requests]
+      summary: File a reviewer-request against an engagement
+      description: |
+        Files a free-text request from the reviewer asking the
+        architect to run one of three actions against a target atom
+        on the engagement: refresh a briefing-source, refresh a
+        bim-model, or regenerate the briefing.
+
+        The route validates that `targetEntityType` matches the
+        request kind (e.g. `refresh-briefing-source` must target a
+        `briefing-source` atom) — a malformed pairing is rejected
+        with 400 at the contract layer.
+
+        Emits the matching `reviewer-request.<kind>.requested` event
+        anchored to the new row's id. The row starts in `pending`
+        status and moves to `resolved` (implicitly, via the
+        post-action hook on the matching domain action) or
+        `dismissed` (explicitly, via
+        `POST /reviewer-requests/{id}/dismiss`).
+
+        Reviewer-only — the endpoint requires the `internal`
+        audience and 403s any non-reviewer caller.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Engagement id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReviewerRequestBody"
+      responses:
+        "201":
+          description: Reviewer-request created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewerRequestResponse"
+        "400":
+          description: |
+            Invalid request body — missing fields, oversize `reason`,
+            or a `(kind, targetEntityType)` pairing that violates the
+            kind-to-target-type contract.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /reviewer-requests/{id}/dismiss:
+    post:
+      operationId: dismissReviewerRequest
+      tags: [reviewer-requests]
+      summary: Dismiss a pending reviewer-request with a reason
+      description: |
+        Architect-side explicit dismissal of a pending reviewer-request.
+        Captures the architect's reason for not honoring the ask
+        (`dismissalReason`) and emits a
+        `reviewer-request.<kind>.dismissed` event anchored to the row.
+
+        Idempotent in spirit — dismissing an already-dismissed row
+        returns the existing dismissal envelope without re-emitting an
+        event. Dismissing a row that is already `resolved` is a 409
+        (the request was implicitly closed by a domain action; there
+        is nothing left to dismiss).
+
+        Architect-only — the endpoint requires the `architect`
+        audience and 403s any non-architect caller.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Reviewer-request id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DismissReviewerRequestBody"
+      responses:
+        "200":
+          description: Reviewer-request dismissed (or already dismissed).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewerRequestResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not architect-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Reviewer-request not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Request is already in a terminal state that bars dismissal
+            (e.g. already `resolved` via a domain action).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -6225,8 +6414,24 @@ components:
     FindingActor:
       type: object
       description: |
-        Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on
-        each reviewer mutation so the audit trail captures who acted.
+        Stable actor envelope shared by reviewer-side audit surfaces
+        (reviewer-requests, findings, eventually reviewer-annotations).
+
+        `kind` distinguishes session-bound human actors (`user`) from
+        AI/bot writes (`agent`) and infrastructure-stamped events
+        (`system`). `id` is opaque to the framework — application code
+        chooses its identity scheme (today: the upstream identity
+        layer's stable user id). `displayName` is hydrated at write
+        time so consumer surfaces (e.g. the architect's
+        ReviewerRequestsStrip) can render "Requested by Alex" without
+        a per-row roundtrip.
+
+        Promoted to a shared schema in V1-2 — was previously only a
+        TS interface in `artifacts/plan-review/src/lib/findingsMock.ts`.
+        Both V1-1 (findings) and V1-2 (reviewer-requests) consume this
+        envelope; future consumers (e.g. promoted reviewer-annotations
+        when they pick up architect-visible attribution) should import
+        from here rather than re-deriving the shape.
       properties:
         kind:
           type: string
@@ -6585,3 +6790,181 @@ components:
         - severity
         - category
         - reviewerComment
+
+
+    ReviewerRequestKind:
+      type: string
+      description: |
+        Closed enum of reviewer-request action kinds. One-to-one with
+        `ReviewerRequestTargetType` — each kind targets exactly one
+        atom type (`refresh-briefing-source` → `briefing-source`,
+        etc.), and the route layer enforces the pairing at validate
+        time.
+      enum:
+        - refresh-briefing-source
+        - refresh-bim-model
+        - regenerate-briefing
+
+    ReviewerRequestStatus:
+      type: string
+      description: |
+        Closed enum of reviewer-request lifecycle states. `pending` is
+        the initial state at insert; `dismissed` is the architect-
+        explicit reject path (carries `dismissalReason`); `resolved` is
+        set by the implicit-resolve hook when the matching domain
+        action emits its event (carries `triggeredActionEventId`).
+      enum:
+        - pending
+        - dismissed
+        - resolved
+
+    ReviewerRequestTargetType:
+      type: string
+      description: |
+        Closed enum of target atom types a reviewer-request may anchor
+        against. Mirrors `REVIEWER_REQUEST_TARGET_TYPES` in
+        `lib/db/src/schema/reviewerRequests.ts` — adding a new target
+        type requires updating both the DB-side tuple and this enum so
+        the route validator and the atom composition list stay in sync.
+      enum:
+        - briefing-source
+        - bim-model
+        - parcel-briefing
+
+    ReviewerRequest:
+      type: object
+      description: |
+        One reviewer-request row. `dismissedBy` / `dismissedAt` /
+        `dismissalReason` are populated only when `status` is
+        `dismissed`; `resolvedAt` / `triggeredActionEventId` only when
+        `status` is `resolved`.
+      properties:
+        id:
+          type: string
+        engagementId:
+          type: string
+        requestKind:
+          $ref: "#/components/schemas/ReviewerRequestKind"
+        targetEntityType:
+          $ref: "#/components/schemas/ReviewerRequestTargetType"
+        targetEntityId:
+          type: string
+        reason:
+          type: string
+        status:
+          $ref: "#/components/schemas/ReviewerRequestStatus"
+        requestedBy:
+          $ref: "#/components/schemas/FindingActor"
+        requestedAt:
+          type: string
+          format: date-time
+        dismissedBy:
+          allOf:
+            - $ref: "#/components/schemas/FindingActor"
+          nullable: true
+        dismissedAt:
+          type: string
+          format: date-time
+          nullable: true
+        dismissalReason:
+          type: string
+          nullable: true
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        triggeredActionEventId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - engagementId
+        - requestKind
+        - targetEntityType
+        - targetEntityId
+        - reason
+        - status
+        - requestedBy
+        - requestedAt
+        - dismissedBy
+        - dismissedAt
+        - dismissalReason
+        - resolvedAt
+        - triggeredActionEventId
+        - createdAt
+        - updatedAt
+
+    CreateReviewerRequestBody:
+      type: object
+      description: |
+        Request body for `POST /engagements/{id}/reviewer-requests`.
+        The `(requestKind, targetEntityType)` pair must satisfy the
+        kind-to-target-type contract defined in
+        `REVIEWER_REQUEST_KIND_TO_TARGET_TYPE` — the route validator
+        rejects mismatched pairings with 400.
+      properties:
+        requestKind:
+          $ref: "#/components/schemas/ReviewerRequestKind"
+        targetEntityType:
+          $ref: "#/components/schemas/ReviewerRequestTargetType"
+        targetEntityId:
+          type: string
+          minLength: 1
+          maxLength: 512
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 4096
+      required:
+        - requestKind
+        - targetEntityType
+        - targetEntityId
+        - reason
+
+    DismissReviewerRequestBody:
+      type: object
+      description: |
+        Request body for `POST /reviewer-requests/{id}/dismiss`. The
+        `dismissalReason` is required so the architect must commit to
+        a written rationale — empty / whitespace bodies are rejected
+        with 400.
+      properties:
+        dismissalReason:
+          type: string
+          minLength: 1
+          maxLength: 4096
+      required:
+        - dismissalReason
+
+    ReviewerRequestResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /engagements/{id}/reviewer-requests`
+        and `POST /reviewer-requests/{id}/dismiss`. Carries the
+        affected row in the same shape the list endpoint returns so
+        the FE can splice the response into cached lists without a
+        follow-up fetch.
+      properties:
+        request:
+          $ref: "#/components/schemas/ReviewerRequest"
+      required:
+        - request
+
+    ListReviewerRequestsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /engagements/{id}/reviewer-requests`.
+        Newest-first list, optionally filtered by lifecycle state.
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerRequest"
+      required:
+        - requests

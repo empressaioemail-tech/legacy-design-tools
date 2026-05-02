@@ -2272,8 +2272,24 @@ export const FindingActorKind = {
 } as const;
 
 /**
- * Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on
-each reviewer mutation so the audit trail captures who acted.
+ * Stable actor envelope shared by reviewer-side audit surfaces
+(reviewer-requests, findings, eventually reviewer-annotations).
+
+`kind` distinguishes session-bound human actors (`user`) from
+AI/bot writes (`agent`) and infrastructure-stamped events
+(`system`). `id` is opaque to the framework — application code
+chooses its identity scheme (today: the upstream identity
+layer's stable user id). `displayName` is hydrated at write
+time so consumer surfaces (e.g. the architect's
+ReviewerRequestsStrip) can render "Requested by Alex" without
+a per-row roundtrip.
+
+Promoted to a shared schema in V1-2 — was previously only a
+TS interface in `artifacts/plan-review/src/lib/findingsMock.ts`.
+Both V1-1 (findings) and V1-2 (reviewer-requests) consume this
+envelope; future consumers (e.g. promoted reviewer-annotations
+when they pick up architect-visible attribution) should import
+from here rather than re-deriving the shape.
 
  */
 export interface FindingActor {
@@ -2532,6 +2548,142 @@ export interface OverrideFindingBody {
   reviewerComment: string;
 }
 
+/**
+ * Closed enum of reviewer-request action kinds. One-to-one with
+`ReviewerRequestTargetType` — each kind targets exactly one
+atom type (`refresh-briefing-source` → `briefing-source`,
+etc.), and the route layer enforces the pairing at validate
+time.
+
+ */
+export type ReviewerRequestKind =
+  (typeof ReviewerRequestKind)[keyof typeof ReviewerRequestKind];
+
+export const ReviewerRequestKind = {
+  "refresh-briefing-source": "refresh-briefing-source",
+  "refresh-bim-model": "refresh-bim-model",
+  "regenerate-briefing": "regenerate-briefing",
+} as const;
+
+/**
+ * Closed enum of reviewer-request lifecycle states. `pending` is
+the initial state at insert; `dismissed` is the architect-
+explicit reject path (carries `dismissalReason`); `resolved` is
+set by the implicit-resolve hook when the matching domain
+action emits its event (carries `triggeredActionEventId`).
+
+ */
+export type ReviewerRequestStatus =
+  (typeof ReviewerRequestStatus)[keyof typeof ReviewerRequestStatus];
+
+export const ReviewerRequestStatus = {
+  pending: "pending",
+  dismissed: "dismissed",
+  resolved: "resolved",
+} as const;
+
+/**
+ * Closed enum of target atom types a reviewer-request may anchor
+against. Mirrors `REVIEWER_REQUEST_TARGET_TYPES` in
+`lib/db/src/schema/reviewerRequests.ts` — adding a new target
+type requires updating both the DB-side tuple and this enum so
+the route validator and the atom composition list stay in sync.
+
+ */
+export type ReviewerRequestTargetType =
+  (typeof ReviewerRequestTargetType)[keyof typeof ReviewerRequestTargetType];
+
+export const ReviewerRequestTargetType = {
+  "briefing-source": "briefing-source",
+  "bim-model": "bim-model",
+  "parcel-briefing": "parcel-briefing",
+} as const;
+
+/**
+ * One reviewer-request row. `dismissedBy` / `dismissedAt` /
+`dismissalReason` are populated only when `status` is
+`dismissed`; `resolvedAt` / `triggeredActionEventId` only when
+`status` is `resolved`.
+
+ */
+export interface ReviewerRequest {
+  id: string;
+  engagementId: string;
+  requestKind: ReviewerRequestKind;
+  targetEntityType: ReviewerRequestTargetType;
+  targetEntityId: string;
+  reason: string;
+  status: ReviewerRequestStatus;
+  requestedBy: FindingActor;
+  requestedAt: string;
+  dismissedBy: FindingActor | null;
+  dismissedAt: string | null;
+  dismissalReason: string | null;
+  resolvedAt: string | null;
+  triggeredActionEventId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Request body for `POST /engagements/{id}/reviewer-requests`.
+The `(requestKind, targetEntityType)` pair must satisfy the
+kind-to-target-type contract defined in
+`REVIEWER_REQUEST_KIND_TO_TARGET_TYPE` — the route validator
+rejects mismatched pairings with 400.
+
+ */
+export interface CreateReviewerRequestBody {
+  requestKind: ReviewerRequestKind;
+  targetEntityType: ReviewerRequestTargetType;
+  /**
+   * @minLength 1
+   * @maxLength 512
+   */
+  targetEntityId: string;
+  /**
+   * @minLength 1
+   * @maxLength 4096
+   */
+  reason: string;
+}
+
+/**
+ * Request body for `POST /reviewer-requests/{id}/dismiss`. The
+`dismissalReason` is required so the architect must commit to
+a written rationale — empty / whitespace bodies are rejected
+with 400.
+
+ */
+export interface DismissReviewerRequestBody {
+  /**
+   * @minLength 1
+   * @maxLength 4096
+   */
+  dismissalReason: string;
+}
+
+/**
+ * Wire envelope for `POST /engagements/{id}/reviewer-requests`
+and `POST /reviewer-requests/{id}/dismiss`. Carries the
+affected row in the same shape the list endpoint returns so
+the FE can splice the response into cached lists without a
+follow-up fetch.
+
+ */
+export interface ReviewerRequestResponse {
+  request: ReviewerRequest;
+}
+
+/**
+ * Wire envelope for `GET /engagements/{id}/reviewer-requests`.
+Newest-first list, optionally filtered by lifecycle state.
+
+ */
+export interface ListReviewerRequestsResponse {
+  requests: ReviewerRequest[];
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
@@ -2711,4 +2863,14 @@ anchored to this target entity id. Must be paired with
 
  */
   targetEntityId?: string;
+};
+
+export type ListEngagementReviewerRequestsParams = {
+  /**
+ * Optional filter — restrict the result to requests in this
+lifecycle state. The architect strip queries `pending`
+for its open queue.
+
+ */
+  status?: ReviewerRequestStatus;
 };
