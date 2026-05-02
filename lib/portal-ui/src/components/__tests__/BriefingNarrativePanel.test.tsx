@@ -27,6 +27,7 @@ import {
   render,
   screen,
   cleanup,
+  fireEvent,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -215,6 +216,105 @@ describe("BriefingNarrativePanel (portal-ui)", () => {
     const link = screen.getByTestId("briefing-export-pdf-button");
     expect(link.getAttribute("aria-disabled")).toBe("true");
     expect(link.getAttribute("href")).toBeNull();
+  });
+
+  it("renders all seven A–G section labels with a 'Section pending' placeholder when bodies are null (M2-A)", () => {
+    renderPanel(
+      <BriefingNarrativePanel
+        engagementId="eng-1"
+        narrative={{
+          sectionA: null,
+          sectionB: null,
+          sectionC: null,
+          sectionD: null,
+          sectionE: null,
+          sectionF: null,
+          sectionG: null,
+          generatedAt: "2026-01-02T10:00:00.000Z",
+          generatedBy: "u-arch",
+          generationId: "gen-pending",
+        } as EngagementBriefingNarrative}
+        sourceCount={1}
+        sources={[]}
+        onJumpToSource={() => {}}
+      />,
+    );
+    for (const key of ["a", "b", "c", "d", "e", "f", "g"] as const) {
+      expect(
+        screen.getByTestId(`briefing-section-${key}`),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId(`briefing-section-toggle-${key}`),
+      ).toBeInTheDocument();
+    }
+    // A and (would-be) E/B default-expand even when empty; their
+    // bodies should render the pending placeholder.
+    const pendingA = screen.getByTestId("briefing-section-pending-a");
+    expect(pendingA.textContent).toMatch(/Section pending/i);
+    // Expand a collapsed section (D) and verify it also renders the
+    // placeholder rather than being silently hidden.
+    fireEvent.click(screen.getByTestId("briefing-section-toggle-d"));
+    expect(
+      screen.getByTestId("briefing-section-pending-d").textContent,
+    ).toMatch(/Section pending/i);
+  });
+
+  it("renders an amber 'may be stale' chip on a section when one of its cited sources is upstream-stale (M2-A)", () => {
+    const cacheInfo = new Map<
+      string,
+      { upstreamFreshness: { status: "fresh" | "stale" | "unknown" } | null }
+    >([
+      [
+        "src-stale-1",
+        { upstreamFreshness: { status: "stale" } },
+      ],
+      ["src-fresh-1", { upstreamFreshness: { status: "fresh" } }],
+    ]);
+    renderPanel(
+      <BriefingNarrativePanel
+        engagementId="eng-1"
+        narrative={mkNarrative({
+          sectionD:
+            "Water main runs along {{atom|briefing-source|src-stale-1|TWDB Layer}}; sewer per {{atom|briefing-source|src-fresh-1|City GIS}}.",
+          sectionC:
+            "Standard zoning per {{atom|briefing-source|src-fresh-1|City GIS}}.",
+        })}
+        sourceCount={2}
+        sources={[
+          { id: "src-stale-1" } as never,
+          { id: "src-fresh-1" } as never,
+        ]}
+        onJumpToSource={() => {}}
+        cacheInfoBySourceId={cacheInfo}
+      />,
+    );
+    const chip = screen.getByTestId("briefing-section-stale-d");
+    expect(chip.textContent).toMatch(/1 source may be stale/i);
+    // Section C only cites a fresh source — no chip there.
+    expect(
+      screen.queryByTestId("briefing-section-stale-c"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("invokes onJumpToSource when a citation pill inside section D is clicked (M2-A)", () => {
+    const onJump = vi.fn();
+    renderPanel(
+      <BriefingNarrativePanel
+        engagementId="eng-1"
+        narrative={mkNarrative({
+          sectionD:
+            "Power served via {{atom|briefing-source|src-power|CPS Energy}}.",
+        })}
+        sourceCount={1}
+        sources={[{ id: "src-power" } as never]}
+        onJumpToSource={onJump}
+      />,
+    );
+    // Section D is collapsed by default — open it first.
+    fireEvent.click(screen.getByTestId("briefing-section-toggle-d"));
+    const pill = screen.getByTestId("briefing-citation-pill-src-power");
+    fireEvent.click(pill);
+    expect(onJump).toHaveBeenCalledWith("src-power");
   });
 
   it("flips the kickoff button label between 'Generate Briefing' and 'Regenerate Briefing'", () => {

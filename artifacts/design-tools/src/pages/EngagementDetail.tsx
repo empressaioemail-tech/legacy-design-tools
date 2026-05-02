@@ -2838,6 +2838,7 @@ function SiteContextTab({
         sources={sources}
         onJumpToSource={handleJumpToSource}
         baseUrl={import.meta.env.BASE_URL}
+        cacheInfoBySourceId={cacheInfoBySourceId}
         recentRunsSlot={
           <BriefingRecentRunsPanel
             engagementId={engagementId}

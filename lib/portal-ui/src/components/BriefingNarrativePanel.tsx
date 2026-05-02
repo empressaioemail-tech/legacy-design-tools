@@ -114,6 +114,37 @@ export interface BriefingNarrativePanelProps {
    * tests don't need to fake `import.meta.env`.
    */
   baseUrl?: string;
+  /**
+   * Optional map keyed by `briefing_sources.id`, supplied by the
+   * parent (currently `EngagementDetail`) so each A–G section can
+   * render a small amber "N source(s) may be stale" chip when one
+   * of the sources cited inside that section was served from the
+   * adapter cache and the upstream freshness verdict came back
+   * `stale`. When omitted (or no cited source is stale) no
+   * annotation is rendered. M2-A (Task #456).
+   */
+  cacheInfoBySourceId?: ReadonlyMap<
+    string,
+    {
+      upstreamFreshness?: {
+        status: "fresh" | "stale" | "unknown";
+      } | null;
+    }
+  >;
+}
+
+const BRIEFING_SOURCE_ID_RE =
+  /\{\{atom\|briefing-source\|([^|]+)\|[^}]+\}\}/g;
+
+function extractCitedSourceIds(body: string | null): string[] {
+  if (!body) return [];
+  const ids: string[] = [];
+  BRIEFING_SOURCE_ID_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = BRIEFING_SOURCE_ID_RE.exec(body)) !== null) {
+    ids.push(m[1]);
+  }
+  return ids;
 }
 
 export function BriefingNarrativePanel({
@@ -124,6 +155,7 @@ export function BriefingNarrativePanel({
   onJumpToSource,
   recentRunsSlot = null,
   baseUrl = "/",
+  cacheInfoBySourceId,
 }: BriefingNarrativePanelProps) {
   const queryClient = useQueryClient();
 
@@ -433,6 +465,15 @@ export function BriefingNarrativePanel({
             const body = pickSection(narrative, key);
             const isOpen = expanded[key];
             const isEmpty = !body || body.trim().length === 0;
+            const citedIds = extractCitedSourceIds(body);
+            const staleSourceIds = cacheInfoBySourceId
+              ? Array.from(new Set(citedIds)).filter(
+                  (id) =>
+                    cacheInfoBySourceId.get(id)?.upstreamFreshness?.status ===
+                    "stale",
+                )
+              : [];
+            const staleCount = staleSourceIds.length;
             return (
               <div
                 key={key}
@@ -465,8 +506,37 @@ export function BriefingNarrativePanel({
                   }}
                 >
                   <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        flexWrap: "wrap",
+                      }}
+                    >
                       {label}
+                      {staleCount > 0 && (
+                        <span
+                          data-testid={`briefing-section-stale-${key}`}
+                          title={
+                            "One or more cited sources were served from the adapter cache and the upstream feed has likely moved. Re-run the adapters to refresh."
+                          }
+                          style={{
+                            fontSize: 11,
+                            padding: "1px 6px",
+                            borderRadius: 4,
+                            background: "var(--warning-dim)",
+                            color: "var(--warning-text)",
+                            fontWeight: 500,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {staleCount} source
+                          {staleCount === 1 ? "" : "s"} may be stale
+                        </span>
+                      )}
                     </span>
                     <span
                       style={{ fontSize: 11, color: "var(--text-muted)" }}
@@ -496,15 +566,20 @@ export function BriefingNarrativePanel({
                       whiteSpace: "pre-wrap",
                       lineHeight: 1.5,
                       color: isEmpty ? "var(--text-muted)" : undefined,
+                      fontStyle: isEmpty ? "italic" : undefined,
                     }}
                   >
-                    {isEmpty
-                      ? "No content in this section."
-                      : renderBriefingBody(
-                          body!,
-                          knownSourceIds,
-                          onJumpToSource,
-                        )}
+                    {isEmpty ? (
+                      <span data-testid={`briefing-section-pending-${key}`}>
+                        Section pending — re-run to refresh.
+                      </span>
+                    ) : (
+                      renderBriefingBody(
+                        body!,
+                        knownSourceIds,
+                        onJumpToSource,
+                      )
+                    )}
                   </div>
                 )}
               </div>
