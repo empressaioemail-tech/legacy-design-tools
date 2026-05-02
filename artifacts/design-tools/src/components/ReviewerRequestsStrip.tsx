@@ -4,6 +4,7 @@ import {
   getListEngagementReviewerRequestsQueryKey,
   type ReviewerRequest,
   type ReviewerRequestKind,
+  type FindingActor,
 } from "@workspace/api-client-react";
 import { formatActorLabel } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
@@ -320,6 +321,261 @@ export function ReviewerRequestsStrip({
           onDismissStarted={markUserDismissed}
           onDismissed={handleDismissed}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Architect-side disclosure of reviewer-requests that have already
+ * closed (resolved by the underlying domain action OR dismissed by an
+ * architect). Closes the gap from Task #423 — once a request leaves
+ * the pending strip, this list is the only way for the architect to
+ * look back at what the request said, who closed it, when, and the
+ * dismissal reason. Collapsed by default and self-hides when there is
+ * no history to show.
+ */
+export interface ReviewerRequestsHistoryProps {
+  engagementId: string;
+}
+
+type HistoryItem = ReviewerRequest;
+
+export function ReviewerRequestsHistory({
+  engagementId,
+}: ReviewerRequestsHistoryProps) {
+  const dismissedQuery = useListEngagementReviewerRequests(
+    engagementId,
+    { status: "dismissed" },
+    {
+      query: {
+        queryKey: getListEngagementReviewerRequestsQueryKey(engagementId, {
+          status: "dismissed",
+        }),
+        enabled: !!engagementId,
+        refetchOnWindowFocus: true,
+      },
+    },
+  );
+  const resolvedQuery = useListEngagementReviewerRequests(
+    engagementId,
+    { status: "resolved" },
+    {
+      query: {
+        queryKey: getListEngagementReviewerRequestsQueryKey(engagementId, {
+          status: "resolved",
+        }),
+        enabled: !!engagementId,
+        refetchOnWindowFocus: true,
+      },
+    },
+  );
+
+  const [open, setOpen] = useState(false);
+
+  const isLoading = dismissedQuery.isLoading || resolvedQuery.isLoading;
+
+  const items = useMemo<HistoryItem[]>(() => {
+    const merged: HistoryItem[] = [
+      ...(dismissedQuery.data?.requests ?? []),
+      ...(resolvedQuery.data?.requests ?? []),
+    ];
+    merged.sort((a, b) => {
+      const aT = a.dismissedAt ?? a.resolvedAt ?? a.updatedAt;
+      const bT = b.dismissedAt ?? b.resolvedAt ?? b.updatedAt;
+      return new Date(bT).getTime() - new Date(aT).getTime();
+    });
+    return merged;
+  }, [dismissedQuery.data, resolvedQuery.data]);
+
+  // Self-hide when there is nothing to disclose. We still render
+  // during the initial load so the architect sees the disclosure
+  // affordance immediately on arrival rather than having it pop in
+  // after the network settles.
+  if (!isLoading && items.length === 0) return null;
+
+  return (
+    <div
+      className="sc-card"
+      data-testid="reviewer-requests-history"
+      data-engagement-id={engagementId}
+      style={{
+        marginBottom: 12,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <button
+        type="button"
+        className="sc-card-header sc-row-sb"
+        data-testid="reviewer-requests-history-toggle"
+        aria-expanded={open}
+        aria-controls={`reviewer-requests-history-panel-${engagementId}`}
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: "transparent",
+          border: "none",
+          width: "100%",
+          textAlign: "left",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          padding: 12,
+          color: "inherit",
+        }}
+      >
+        <span className="sc-label" style={{ letterSpacing: 0.5 }}>
+          RESOLVED / DISMISSED HISTORY
+        </span>
+        <span
+          className="sc-meta"
+          data-testid="reviewer-requests-history-count"
+          style={{ color: "var(--text-muted)", display: "inline-flex", gap: 6 }}
+        >
+          <span>{isLoading ? "…" : `${items.length} closed`}</span>
+          <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+        </span>
+      </button>
+
+      {open && (
+        <div
+          id={`reviewer-requests-history-panel-${engagementId}`}
+          data-testid="reviewer-requests-history-panel"
+        >
+          {isLoading && items.length === 0 ? (
+            <div
+              className="p-4 sc-body"
+              data-testid="reviewer-requests-history-loading"
+              style={{
+                color: "var(--text-muted)",
+                fontSize: 12,
+                padding: 12,
+                borderTop: "1px solid var(--border-subtle)",
+              }}
+            >
+              Loading history…
+            </div>
+          ) : (
+            <ul
+              data-testid="reviewer-requests-history-list"
+              style={{
+                listStyle: "none",
+                margin: 0,
+                padding: 0,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {items.map((req) => {
+                const isDismissed = req.status === "dismissed";
+                const closedAt = isDismissed
+                  ? req.dismissedAt
+                  : req.resolvedAt;
+                const closedActor: FindingActor | null = isDismissed
+                  ? req.dismissedBy ?? null
+                  : null;
+                const closedByLabel = closedActor
+                  ? formatActorLabel({
+                      kind: closedActor.kind,
+                      id: closedActor.id,
+                      displayName: closedActor.displayName ?? undefined,
+                    })
+                  : "the underlying refresh action";
+                return (
+                  <li
+                    key={req.id}
+                    data-testid={`reviewer-request-history-row-${req.id}`}
+                    data-status={req.status}
+                    style={{
+                      padding: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      borderTop: "1px solid var(--border-subtle)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        {REQUEST_KIND_LABEL[req.requestKind]}
+                      </span>
+                      <span
+                        data-testid={`reviewer-request-history-status-${req.id}`}
+                        className="sc-meta"
+                        style={{
+                          fontSize: 11,
+                          padding: "2px 8px",
+                          borderRadius: 999,
+                          background: isDismissed
+                            ? "var(--bg-input)"
+                            : "rgba(34,197,94,0.15)",
+                          color: isDismissed
+                            ? "var(--text-secondary)"
+                            : "#16a34a",
+                          border: "1px solid var(--border-subtle)",
+                          textTransform: "capitalize",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {req.status}
+                      </span>
+                    </div>
+                    <div
+                      className="sc-meta"
+                      data-testid={`reviewer-request-history-closed-${req.id}`}
+                      style={{ fontSize: 11, color: "var(--text-muted)" }}
+                    >
+                      {isDismissed ? "Dismissed" : "Resolved"} by{" "}
+                      <strong style={{ color: "var(--text-secondary)" }}>
+                        {closedByLabel}
+                      </strong>{" "}
+                      · {relativeTime(closedAt)}
+                    </div>
+                    <div
+                      className="sc-body"
+                      data-testid={`reviewer-request-history-reason-${req.id}`}
+                      style={{
+                        fontSize: 12,
+                        color: "var(--text-secondary)",
+                        whiteSpace: "pre-wrap",
+                        paddingLeft: 2,
+                      }}
+                    >
+                      {req.reason}
+                    </div>
+                    {isDismissed && req.dismissalReason && (
+                      <div
+                        data-testid={`reviewer-request-history-dismissal-reason-${req.id}`}
+                        className="sc-meta"
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                          fontStyle: "italic",
+                        }}
+                      >
+                        Dismissal reason: {req.dismissalReason}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   );

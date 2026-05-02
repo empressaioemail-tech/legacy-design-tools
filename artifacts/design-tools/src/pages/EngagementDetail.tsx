@@ -93,7 +93,10 @@ import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionRe
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
-import { ReviewerRequestsStrip } from "../components/ReviewerRequestsStrip";
+import {
+  ReviewerRequestsStrip,
+  ReviewerRequestsHistory,
+} from "../components/ReviewerRequestsStrip";
 import {
   ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
   BriefingDivergenceDetailDialog,
@@ -4546,6 +4549,14 @@ export function EngagementDetail() {
           The component is self-hiding when the queue is empty.
         */}
         <ReviewerRequestsStrip engagementId={id} />
+
+        {/*
+          Task #441 — collapsible "Resolved / Dismissed history"
+          disclosure rendered directly under the pending strip so the
+          architect can look back at requests that have already
+          closed. Self-hides when there is no history to show.
+        */}
+        <ReviewerRequestsHistory engagementId={id} />
 
         <TabBar
           active={tab}

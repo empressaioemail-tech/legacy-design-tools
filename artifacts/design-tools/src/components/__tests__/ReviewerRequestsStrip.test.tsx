@@ -49,6 +49,14 @@ const hoisted = vi.hoisted(() => ({
     | { requests: Array<Record<string, unknown>> }
     | undefined,
   listIsLoading: false,
+  dismissedListData: { requests: [] } as
+    | { requests: Array<Record<string, unknown>> }
+    | undefined,
+  dismissedIsLoading: false,
+  resolvedListData: { requests: [] } as
+    | { requests: Array<Record<string, unknown>> }
+    | undefined,
+  resolvedIsLoading: false,
   dismissMutate: vi.fn(),
   dismissIsPending: false,
   dismissOnMutate: undefined as
@@ -82,11 +90,31 @@ vi.mock("@workspace/api-client-react", async () => {
   return {
     ...actual,
     ApiError: MockApiError,
-    useListEngagementReviewerRequests: () => ({
-      data: hoisted.listData,
-      isLoading: hoisted.listIsLoading,
-      isError: false,
-    }),
+    useListEngagementReviewerRequests: (
+      _engagementId: string,
+      params?: { status?: string },
+    ) => {
+      const status = params?.status;
+      if (status === "dismissed") {
+        return {
+          data: hoisted.dismissedListData,
+          isLoading: hoisted.dismissedIsLoading,
+          isError: false,
+        };
+      }
+      if (status === "resolved") {
+        return {
+          data: hoisted.resolvedListData,
+          isLoading: hoisted.resolvedIsLoading,
+          isError: false,
+        };
+      }
+      return {
+        data: hoisted.listData,
+        isLoading: hoisted.listIsLoading,
+        isError: false,
+      };
+    },
     useDismissReviewerRequest: (opts?: {
       mutation?: {
         onMutate?: (vars: {
@@ -124,7 +152,9 @@ vi.mock("@workspace/api-client-react", async () => {
   };
 });
 
-const { ReviewerRequestsStrip } = await import("../ReviewerRequestsStrip");
+const { ReviewerRequestsStrip, ReviewerRequestsHistory } = await import(
+  "../ReviewerRequestsStrip"
+);
 
 function withQuery(node: ReactNode): { ui: ReactNode; client: QueryClient } {
   const client = new QueryClient({
@@ -195,6 +225,10 @@ describe("ReviewerRequestsStrip", () => {
   beforeEach(() => {
     hoisted.listData = undefined;
     hoisted.listIsLoading = false;
+    hoisted.dismissedListData = { requests: [] };
+    hoisted.dismissedIsLoading = false;
+    hoisted.resolvedListData = { requests: [] };
+    hoisted.resolvedIsLoading = false;
     hoisted.dismissMutate.mockReset();
     hoisted.dismissIsPending = false;
     hoisted.dismissOnMutate = undefined;
@@ -615,6 +649,186 @@ describe("ReviewerRequestsStrip", () => {
     ).toBeNull();
     expect(
       screen.getByTestId("reviewer-requests-strip-pill-dismissed"),
+    ).toBeInTheDocument();
+  });
+});
+
+/**
+ * ReviewerRequestsHistory — Task #441.
+ *
+ * Coverage:
+ *   - Self-hides when there are no resolved/dismissed requests
+ *     (post-load, both list reads return zero rows).
+ *   - Renders the disclosure shell while the list reads are still
+ *     in flight so the affordance doesn't pop in after the network
+ *     settles. Loading copy surfaces only after the user expands.
+ *   - Populated state: collapsed by default; clicking the toggle
+ *     reveals one row per closed request, newest-first across both
+ *     statuses, with status pill, who closed it, when, and the
+ *     dismissal reason for dismissed rows.
+ */
+const DISMISSED_REQUEST = {
+  ...STABLE_REQUEST,
+  id: "req-d-1",
+  status: "dismissed" as const,
+  reason: "Source PDF appears outdated.",
+  dismissedBy: {
+    kind: "user" as const,
+    id: "architect-7",
+    displayName: "Pat Architect",
+  },
+  dismissedAt: new Date("2026-04-30T14:00:00Z").toISOString(),
+  dismissalReason: "Source is current — verified yesterday.",
+  resolvedAt: null,
+  triggeredActionEventId: null,
+};
+
+const RESOLVED_REQUEST = {
+  ...STABLE_REQUEST,
+  id: "req-r-1",
+  requestKind: "regenerate-briefing" as const,
+  targetEntityType: "briefing" as const,
+  targetEntityId: "brief-uuid-1",
+  status: "resolved" as const,
+  reason: "Tone is off-brand on page 3.",
+  dismissedBy: null,
+  dismissedAt: null,
+  dismissalReason: null,
+  // Newer than the dismissed row — must sort to the top of the list.
+  resolvedAt: new Date("2026-04-30T16:00:00Z").toISOString(),
+  triggeredActionEventId: "evt-uuid-9",
+};
+
+describe("ReviewerRequestsHistory", () => {
+  beforeEach(() => {
+    hoisted.listData = undefined;
+    hoisted.listIsLoading = false;
+    hoisted.dismissedListData = { requests: [] };
+    hoisted.dismissedIsLoading = false;
+    hoisted.resolvedListData = { requests: [] };
+    hoisted.resolvedIsLoading = false;
+    hoisted.dismissMutate.mockReset();
+    hoisted.dismissIsPending = false;
+    hoisted.dismissOnMutate = undefined;
+    hoisted.dismissOnSuccess = undefined;
+    hoisted.dismissOnError = undefined;
+  });
+  afterEach(() => cleanup());
+
+  it("renders nothing when there is no resolved/dismissed history", () => {
+    const { ui } = withQuery(
+      <ReviewerRequestsHistory engagementId="eng-123" />,
+    );
+    render(ui);
+    expect(screen.queryByTestId("reviewer-requests-history")).toBeNull();
+  });
+
+  it("renders the disclosure shell while history reads are loading and surfaces the loading copy when expanded", () => {
+    hoisted.dismissedListData = undefined;
+    hoisted.resolvedListData = undefined;
+    hoisted.dismissedIsLoading = true;
+    hoisted.resolvedIsLoading = true;
+    const { ui } = withQuery(
+      <ReviewerRequestsHistory engagementId="eng-123" />,
+    );
+    render(ui);
+    const shell = screen.getByTestId("reviewer-requests-history");
+    expect(shell).toBeInTheDocument();
+    // Collapsed by default — no panel rendered yet.
+    expect(
+      screen.queryByTestId("reviewer-requests-history-panel"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("reviewer-requests-history-count"),
+    ).toHaveTextContent("…");
+    // Expand → loading copy visible.
+    fireEvent.click(screen.getByTestId("reviewer-requests-history-toggle"));
+    expect(
+      screen.getByTestId("reviewer-requests-history-loading"),
+    ).toHaveTextContent(/loading history/i);
+  });
+
+  it("is collapsed by default and reveals merged, newest-first rows on toggle with closer attribution and dismissal reason", () => {
+    hoisted.dismissedListData = { requests: [DISMISSED_REQUEST] };
+    hoisted.resolvedListData = { requests: [RESOLVED_REQUEST] };
+    const { ui } = withQuery(
+      <ReviewerRequestsHistory engagementId="eng-123" />,
+    );
+    render(ui);
+
+    // Disclosure is mounted but closed; the list is not in the DOM
+    // until the architect opts in.
+    expect(
+      screen.getByTestId("reviewer-requests-history"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("reviewer-requests-history-toggle"),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByTestId("reviewer-requests-history-list"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("reviewer-requests-history-count"),
+    ).toHaveTextContent("2 closed");
+
+    fireEvent.click(screen.getByTestId("reviewer-requests-history-toggle"));
+    expect(
+      screen.getByTestId("reviewer-requests-history-toggle"),
+    ).toHaveAttribute("aria-expanded", "true");
+
+    // Newest-first: resolvedAt 16:00 wins over dismissedAt 14:00.
+    const rows = screen
+      .getByTestId("reviewer-requests-history-list")
+      .querySelectorAll("li");
+    expect(Array.from(rows).map((r) => r.getAttribute("data-testid"))).toEqual(
+      [
+        "reviewer-request-history-row-req-r-1",
+        "reviewer-request-history-row-req-d-1",
+      ],
+    );
+
+    // Resolved row: status pill says "resolved", closer line falls
+    // back to the underlying-action attribution (no dismissedBy on a
+    // resolved row), no dismissal reason rendered.
+    expect(
+      screen.getByTestId("reviewer-request-history-status-req-r-1"),
+    ).toHaveTextContent(/resolved/i);
+    expect(
+      screen.getByTestId("reviewer-request-history-closed-req-r-1"),
+    ).toHaveTextContent(/Resolved by/i);
+    expect(
+      screen.getByTestId("reviewer-request-history-closed-req-r-1"),
+    ).toHaveTextContent(/underlying refresh action/i);
+    expect(
+      screen.queryByTestId(
+        "reviewer-request-history-dismissal-reason-req-r-1",
+      ),
+    ).toBeNull();
+
+    // Dismissed row: status pill, dismisser displayName, dismissal
+    // reason verbatim.
+    expect(
+      screen.getByTestId("reviewer-request-history-status-req-d-1"),
+    ).toHaveTextContent(/dismissed/i);
+    expect(
+      screen.getByTestId("reviewer-request-history-closed-req-d-1"),
+    ).toHaveTextContent(/Dismissed by/i);
+    expect(
+      screen.getByTestId("reviewer-request-history-closed-req-d-1"),
+    ).toHaveTextContent(/Pat Architect/i);
+    expect(
+      screen.getByTestId(
+        "reviewer-request-history-dismissal-reason-req-d-1",
+      ),
+    ).toHaveTextContent("Source is current — verified yesterday.");
+
+    // Collapse again hides the panel without unmounting the shell.
+    fireEvent.click(screen.getByTestId("reviewer-requests-history-toggle"));
+    expect(
+      screen.queryByTestId("reviewer-requests-history-list"),
+    ).toBeNull();
+    expect(
+      screen.getByTestId("reviewer-requests-history"),
     ).toBeInTheDocument();
   });
 });
