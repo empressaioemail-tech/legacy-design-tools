@@ -75,6 +75,8 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
+      - name: Install ripgrep (used by import-boundary tests)
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Enable pgvector extension

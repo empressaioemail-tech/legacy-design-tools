@@ -302,12 +302,23 @@ describe("empressa-atom import boundary", () => {
       ],
       { cwd: root, encoding: "utf8" },
     );
-    // rg exits 1 with no output when nothing matches — that's the success case.
-    if (result.status === 0 && result.stdout.trim().length > 0) {
+    // ENOENT or other spawn failure: result.error is set and status/stdout
+    // are null. Surface this as a clear error instead of a TypeError on
+    // null.trim() — the import-boundary check requires the rg binary, so
+    // the runner must have it installed (CI provisions via apt-get).
+    if (result.error) {
       throw new Error(
-        `lib/empressa-atom imports application code:\n${result.stdout}`,
+        `Could not run ripgrep for import-boundary check: ${result.error.message}. ` +
+          `Install ripgrep on this machine (apt-get install ripgrep / brew install ripgrep).`,
       );
     }
-    expect(result.status === 1 || result.stdout.trim().length === 0).toBe(true);
+    const stdout = result.stdout ?? "";
+    // rg exits 1 with no output when nothing matches — that's the success case.
+    if (result.status === 0 && stdout.trim().length > 0) {
+      throw new Error(
+        `lib/empressa-atom imports application code:\n${stdout}`,
+      );
+    }
+    expect(result.status === 1 || stdout.trim().length === 0).toBe(true);
   });
 });
