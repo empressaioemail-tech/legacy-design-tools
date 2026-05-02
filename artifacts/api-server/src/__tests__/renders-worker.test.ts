@@ -239,10 +239,10 @@ async function readOutputs(viewpointRenderId: string) {
 
 describe("runRenderPolling — still happy path", () => {
   it("walks capture → trigger → poll-rendering → poll-ready → mirror → status=ready", async () => {
-    // Narrow toFake so postgres-js / drizzle DB ops inside the polling
-    // loop run with real I/O primitives. Only setTimeout (used by the
-    // production `delay(ms)` helper) needs faking for cadence control.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Real timers — fake timers introduced a race between the test's
+    // advanceTimersByTimeAsync calls and the polling reaching its
+    // first await delay(). Polling drives itself with real 3s/5s
+    // delays; total wall-clock ~8s, well under the 20s test timeout.
     const fixture = await seedFixture();
     const row = await seedQueuedRender({
       engagementId: fixture.engagement.id,
@@ -277,9 +277,9 @@ describe("runRenderPolling — still happy path", () => {
       },
     });
 
-    // Step through polling cadence: 3s first poll → 5s second poll.
-    await vi.advanceTimersByTimeAsync(3_000);
-    await vi.advanceTimersByTimeAsync(5_000);
+    // Real-timer drive: polling does delay(3000) → first poll seeing
+    // "rendering" → delay(5000) → second poll seeing "ready" → mirror →
+    // resolve. Total ~8s real wall-clock.
     await polling;
 
     const final = await readRender(row.id);
@@ -343,7 +343,9 @@ describe("runRenderPolling — still trigger validation failure", () => {
 
 describe("runRenderPolling — elevation-set happy path", () => {
   it("captures + triggers + polls + mirrors all 4 children, persists 4 render_outputs", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Real timers (see still-happy-path comment for rationale). All
+    // 4 child polls return "ready" on the first iteration (mocked),
+    // so wall-clock is just the first delay (~3s).
     const fixture = await seedFixture();
     const row = await seedQueuedRender({
       engagementId: fixture.engagement.id,
@@ -380,7 +382,6 @@ describe("runRenderPolling — elevation-set happy path", () => {
       },
     });
 
-    await vi.advanceTimersByTimeAsync(3_000);
     await polling;
 
     const final = await readRender(row.id);
@@ -402,7 +403,9 @@ describe("runRenderPolling — elevation-set happy path", () => {
 
 describe("runRenderPolling — cancellation observed mid-poll", () => {
   it("bails when an out-of-band UPDATE flips status='cancelled' between polls", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Real timers (see still-happy-path comment for rationale). Test
+    // coordinates timing with a real-setTimeout sleep between the
+    // first poll completing and the OOB cancel UPDATE.
     const fixture = await seedFixture();
     const row = await seedQueuedRender({
       engagementId: fixture.engagement.id,
@@ -437,8 +440,11 @@ describe("runRenderPolling — cancellation observed mid-poll", () => {
       },
     });
 
-    // First poll fires after 3s — sees 'rendering', advances state.
-    await vi.advanceTimersByTimeAsync(3_000);
+    // Wait for the first poll to fire (3s delay) and complete its
+    // "rendering" state update before issuing the OOB cancel. 4s
+    // of real wall-clock gives 1s of buffer past the polling's
+    // first delay + first poll's tiny DB-op duration.
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
 
     // Out-of-band cancel (simulating POST /api/renders/:id/cancel).
     await ctx.schema!.db
@@ -446,9 +452,8 @@ describe("runRenderPolling — cancellation observed mid-poll", () => {
       .set({ status: "cancelled", completedAt: new Date() })
       .where(eq(viewpointRenders.id, row.id));
 
-    // Second poll fires after another 5s — worker reads the row,
-    // sees status='cancelled', returns without further mnml calls.
-    await vi.advanceTimersByTimeAsync(5_000);
+    // Polling waits the second 5s delay, sees status='cancelled' on
+    // its cancellation check, returns without calling mnml again.
     await polling;
 
     const final = await readRender(row.id);
