@@ -832,10 +832,71 @@ async function runFindingGeneration(args: {
       reqLog,
     );
     reqLog.error(
-      { err, submissionId, generationId },
+      { err, error: message, submissionId, generationId },
       "finding generation: failed",
     );
   }
+}
+
+/**
+ * Outcome of {@link kickoffFindingGenerationForSubmission}: either a
+ * fresh run was started, or the partial-unique index tripped because
+ * one is already in flight.
+ */
+export type FindingKickoffOutcome =
+  | { kind: "started"; generationId: string }
+  | { kind: "already_running"; generationId: string | null };
+
+/**
+ * Insert the `finding_runs` kickoff row and dispatch
+ * `runFindingGeneration` fire-and-forget. Shared by the manual
+ * generate route and the auto-trigger hook so single-flight + dispatch
+ * live in exactly one place. Caller is responsible for verifying the
+ * submission row exists; on unique-violation the helper returns
+ * `already_running` rather than throwing.
+ */
+export async function kickoffFindingGenerationForSubmission(
+  submissionId: string,
+  reqLog: typeof logger,
+): Promise<FindingKickoffOutcome> {
+  let kickoffRow: FindingRun;
+  try {
+    const inserted = await db
+      .insert(findingRuns)
+      .values({
+        submissionId,
+        state: "pending",
+      })
+      .returning();
+    kickoffRow = inserted[0]!;
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const [existing] = await db
+        .select({ id: findingRuns.id })
+        .from(findingRuns)
+        .where(eq(findingRuns.submissionId, submissionId))
+        .orderBy(desc(findingRuns.startedAt))
+        .limit(1);
+      return { kind: "already_running", generationId: existing?.id ?? null };
+    }
+    throw err;
+  }
+
+  const generationId = kickoffRow.id;
+
+  // Fire-and-forget; the row's state is what the status endpoint
+  // reads. We do not await — callers return immediately.
+  void runFindingGeneration({
+    submissionId,
+    generationId,
+    reqLog,
+  });
+
+  reqLog.info(
+    { submissionId, generationId },
+    "finding generation: kicked off",
+  );
+  return { kind: "started", generationId };
 }
 
 // ─── POST /submissions/:id/findings/generate ─────────────────────
@@ -864,51 +925,23 @@ router.post(
         return;
       }
 
-      let kickoffRow: FindingRun;
-      try {
-        const inserted = await db
-          .insert(findingRuns)
-          .values({
-            submissionId,
-            state: "pending",
-          })
-          .returning();
-        kickoffRow = inserted[0]!;
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          // Another kickoff won the single-flight race. Surface its
-          // id so the caller can poll the same job's outcome rather
-          // than retrying with a fresh generationId.
-          const [existing] = await db
-            .select({ id: findingRuns.id })
-            .from(findingRuns)
-            .where(eq(findingRuns.submissionId, submissionId))
-            .orderBy(desc(findingRuns.startedAt))
-            .limit(1);
-          res.status(409).json({
-            error: "finding_generation_already_in_flight",
-            generationId: existing?.id ?? null,
-          });
-          return;
-        }
-        throw err;
-      }
-
-      const generationId = kickoffRow.id;
-
-      // Fire-and-forget; the row's state is what the status endpoint
-      // reads. We do not await — the 202 returns immediately.
-      void runFindingGeneration({
+      const outcome = await kickoffFindingGenerationForSubmission(
         submissionId,
-        generationId,
         reqLog,
-      });
-
-      reqLog.info(
-        { submissionId, generationId },
-        "finding generation: kicked off",
       );
-      res.status(202).json({ generationId, state: "pending" });
+      if (outcome.kind === "already_running") {
+        // Another kickoff won the single-flight race. Surface its
+        // id so the caller can poll the same job's outcome rather
+        // than retrying with a fresh generationId.
+        res.status(409).json({
+          error: "finding_generation_already_in_flight",
+          generationId: outcome.generationId,
+        });
+        return;
+      }
+      res
+        .status(202)
+        .json({ generationId: outcome.generationId, state: "pending" });
     } catch (err) {
       logger.error({ err, submissionId }, "kickoff finding generation failed");
       res.status(500).json({ error: "Failed to kick off finding generation" });
