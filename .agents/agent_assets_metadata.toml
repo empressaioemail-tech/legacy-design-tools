@@ -6,3 +6,9 @@ id = "-_vt6bIEfxbgxVh3mLJnE"
 uri = "file://docs/empressa-ground-truth-report.md"
 type = "text"
 title = "Empressa Ground-Truth Report"
+
+[[outputs]]
+id = "4UH_NWsIf9A_3tFbqaOZj"
+uri = "file://docs/replit-cleanup-recon.md"
+type = "text"
+title = "Replit Cleanup Recon (Phase 0)"
