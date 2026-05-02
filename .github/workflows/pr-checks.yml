@@ -81,14 +81,25 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install Chrome for puppeteer-core
         # puppeteer-core (unlike puppeteer) does not auto-install Chrome.
-        # Use @puppeteer/browsers CLI, forcing fresh fetch of latest
-        # because older versions (transitively pulled in by
-        # puppeteer-core@24.42.0) had a broken bin field
-        # (puppeteer/puppeteer#10171). --yes skips interactive confirm
-        # in CI's non-tty shell. Pin Chrome version to what
-        # puppeteer-core@24.42.0 expects (from "Could not find Chrome"
-        # error stack). Update Chrome version when bumping puppeteer-core.
-        run: npx --yes @puppeteer/browsers@latest install chrome@147.0.7727.57
+        # Invoke @puppeteer/browsers as a library directly, bypassing
+        # CLI/bin-shim resolution issues (puppeteer/puppeteer#10171).
+        # The package is already in node_modules via puppeteer-core's
+        # transitive deps. Pin the buildId to what puppeteer-core@24.42.0
+        # expects; update when bumping puppeteer-core.
+        run: |
+          node -e "
+          const { install, Browser, detectBrowserPlatform } = require('@puppeteer/browsers');
+          const path = require('path');
+          const os = require('os');
+          install({
+            browser: Browser.CHROME,
+            buildId: '147.0.7727.57',
+            cacheDir: path.join(os.homedir(), '.cache', 'puppeteer'),
+            platform: detectBrowserPlatform(),
+          })
+          .then(b => { console.log('Installed Chrome at:', b.executablePath); })
+          .catch(e => { console.error('Install failed:', e); process.exit(1); });
+          "
       - name: Enable pgvector extension
         env:
           PGPASSWORD: postgres
