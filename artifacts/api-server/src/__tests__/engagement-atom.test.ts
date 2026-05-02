@@ -250,6 +250,8 @@ describe("engagement atom (behavior)", () => {
     registry.register(makeNeighboringContextAtom());
     registry.register(makeBriefingDivergenceAtom({ db: lazyDb }));
     registry.register(makeMaterializableElementAtom({ db: lazyDb }));
+    // V1-4 DA-RP-1: viewpoint-render composes render-output transitively.
+    registry.register(makeRenderOutputAtom());
     const atom = makeEngagementAtom({ db: lazyDb, registry });
     registry.register(atom);
     // Sanity: validate must succeed with every concrete child edge
@@ -400,6 +402,8 @@ describe("engagement atom (behavior)", () => {
     registry.register(makeNeighboringContextAtom());
     registry.register(makeBriefingDivergenceAtom({ db: lazyDb }));
     registry.register(makeMaterializableElementAtom({ db: lazyDb }));
+    // V1-4 DA-RP-1: viewpoint-render composes render-output transitively.
+    registry.register(makeRenderOutputAtom());
     const atom = makeEngagementAtom({ db: lazyDb, registry });
     registry.register(atom);
     expect(registry.validate().ok).toBe(true);
