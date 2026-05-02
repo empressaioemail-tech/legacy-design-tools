@@ -237,6 +237,130 @@ describe("POST /api/snapshots — engagement.created auto-briefing", () => {
   });
 });
 
+describe("POST /api/snapshots — auto-trigger started/already-in-flight via GUID rebind", () => {
+  it("auto-trigger transitions to started and produces a completed job row when GUID rebind lands on an engagement with prior briefing scaffolding", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const guid = "rebind-guid-success-001";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Rebind Target",
+        nameLower: "rebind target",
+        revitCentralGuid: guid,
+      })
+      .returning();
+    const [briefing] = await ctx.schema.db
+      .insert(parcelBriefings)
+      .values({ engagementId: eng.id })
+      .returning();
+    await ctx.schema.db.insert(briefingSources).values({
+      briefingId: briefing.id,
+      layerKind: "qgis-zoning",
+      sourceKind: "manual-upload",
+      provider: "City of Boulder QGIS",
+      note: "rebind seed",
+      uploadObjectPath: "/objects/zoning",
+      uploadOriginalFilename: "zoning.geojson",
+      uploadContentType: "application/geo+json",
+      uploadByteSize: 1024,
+      snapshotDate: new Date("2026-01-01T00:00:00Z"),
+    });
+
+    const res = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Rebind Project",
+        revitCentralGuid: guid,
+        sheets: [],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.engagementId).toBe(eng.id);
+    expect(res.body.autoCreated).toBe(false);
+
+    expect(kickoffSpy).toHaveBeenCalledTimes(1);
+    expect(kickoffSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ engagementId: eng.id }),
+    );
+
+    const job = await waitForJob(eng.id, "completed");
+    expect(job.briefingId).toBe(briefing.id);
+    expect(job.completedAt).toBeTruthy();
+
+    const allJobs = await ctx.schema.db
+      .select()
+      .from(briefingGenerationJobs)
+      .where(eq(briefingGenerationJobs.engagementId, eng.id));
+    expect(allJobs).toHaveLength(1);
+    expect(allJobs[0].id).toBe(job.id);
+  });
+
+  it("auto-trigger is a no-op (already_in_flight) when a prior generation is pending — no duplicate job row inserted", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const guid = "rebind-guid-inflight-001";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name: "Rebind In-Flight",
+        nameLower: "rebind in-flight",
+        revitCentralGuid: guid,
+      })
+      .returning();
+    const [briefing] = await ctx.schema.db
+      .insert(parcelBriefings)
+      .values({ engagementId: eng.id })
+      .returning();
+    await ctx.schema.db.insert(briefingSources).values({
+      briefingId: briefing.id,
+      layerKind: "qgis-zoning",
+      sourceKind: "manual-upload",
+      provider: "City of Boulder QGIS",
+      note: "in-flight seed",
+      uploadObjectPath: "/objects/zoning",
+      uploadOriginalFilename: "zoning.geojson",
+      uploadContentType: "application/geo+json",
+      uploadByteSize: 1024,
+      snapshotDate: new Date("2026-01-01T00:00:00Z"),
+    });
+    const [pending] = await ctx.schema.db
+      .insert(briefingGenerationJobs)
+      .values({
+        engagementId: eng.id,
+        briefingId: briefing.id,
+        state: "pending",
+      })
+      .returning();
+
+    const res = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Rebind In-Flight Project",
+        revitCentralGuid: guid,
+        sheets: [],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.engagementId).toBe(eng.id);
+    expect(res.body.autoCreated).toBe(false);
+
+    // Allow the void-launched auto-trigger to run to its
+    // already_in_flight outcome.
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(kickoffSpy).toHaveBeenCalledTimes(1);
+
+    const allJobs = await ctx.schema.db
+      .select()
+      .from(briefingGenerationJobs)
+      .where(eq(briefingGenerationJobs.engagementId, eng.id));
+    expect(allJobs).toHaveLength(1);
+    expect(allJobs[0].id).toBe(pending.id);
+    expect(allJobs[0].state).toBe("pending");
+  });
+});
+
 describe("kickoffBriefingGeneration — end-to-end success path", () => {
   it("auto-trigger inserts a generation-job row and runs to completion when briefing + sources exist", async () => {
     if (!ctx.schema) throw new Error("ctx");

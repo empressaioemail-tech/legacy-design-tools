@@ -367,14 +367,22 @@ async function attachSnapshot(
 }
 
 // Fire-and-forget auto-trigger of the shared briefing kickoff helper
-// on `engagement.created`. Never blocks or throws back into the ingest
-// response. Only fires when the create-new branch actually inserted a
-// new engagement (autoCreated=true).
+// on the create-new branch. Never blocks or throws back into the ingest
+// response. Fires on BOTH the clean create-new path (engagement was
+// just inserted; the kickoff helper will return
+// `no_briefing_sources_for_engagement` because the fresh engagement
+// has no briefing scaffolding yet) AND the GUID-race rebind path
+// (engagement existed already with prior briefing scaffolding; the
+// kickoff helper transitions to `started` so the architect lands on
+// the engagement detail page with Site Context populating without a
+// manual "Generate Layers" click). The single-flight unique index on
+// `briefing_generation_jobs (engagement_id) WHERE state='pending'`
+// folds a duplicate kickoff into `already_in_flight` so a manual or
+// prior automatic run that landed first is the one that wins.
 function fireAutoBriefingKickoff(
   outcome: SnapshotAttachOutcome,
   reqLog: typeof logger,
 ): void {
-  if (!outcome.result.autoCreated) return;
   const engagementId = outcome.result.engagementId;
   void (async () => {
     let jurisdiction: string | null = null;
@@ -700,7 +708,9 @@ router.post("/snapshots", async (req: Request, res: Response) => {
     await emitEngagementCreatedEvent(history, outcome, reqLog);
     // Auto-trigger briefing generation on the create-new branch so the
     // architect lands on the engagement detail page and sees Site
-    // Context populating without clicking "Generate Layers". Mirrors the
+    // Context populating without clicking "Generate Layers". Fires on
+    // both the clean create-new path and the GUID-race rebind path —
+    // see `fireAutoBriefingKickoff` for the rationale. Mirrors the
     // event-subscriber contract used by `emitEngagementCreatedEvent`:
     // fire-and-forget (`void`-launched), every error is caught and
     // logged via the same shared logger with structured fields, and
