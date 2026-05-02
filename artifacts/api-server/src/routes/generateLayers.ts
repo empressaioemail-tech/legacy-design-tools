@@ -55,6 +55,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import { logger } from "../lib/logger";
 import { createAdapterResponseCache } from "../lib/adapterCache";
+import { resolveMatchingReviewerRequests } from "../lib/reviewerRequestResolution";
 import { getHistoryService } from "../atoms/registry";
 import {
   BRIEFING_SOURCE_EVENT_TYPES,
@@ -68,6 +69,8 @@ import {
  */
 const BRIEFING_SOURCE_FETCHED_EVENT_TYPE: BriefingSourceEventType =
   BRIEFING_SOURCE_EVENT_TYPES[0];
+const BRIEFING_SOURCE_REFRESHED_EVENT_TYPE: BriefingSourceEventType =
+  BRIEFING_SOURCE_EVENT_TYPES[1];
 
 /** Distinct system actor for adapter-driven inserts. */
 const BRIEFING_ADAPTER_ACTOR = {
@@ -242,6 +245,81 @@ async function emitBriefingSourceFetchedEvent(
       },
       "briefing-source.fetched event append failed — row insert kept",
     );
+  }
+}
+
+/**
+ * V1-2 — emit a `briefing-source.refreshed` event against the
+ * SUPERSEDED row whenever a forceRefresh run replaces an existing
+ * briefing-source. Pairs with the `briefing-source.fetched` emit on
+ * the new row: `.fetched` opens the new row's lifecycle, `.refreshed`
+ * closes the old row's lifecycle.
+ *
+ * Anchoring on the superseded row's id (not the new row's) is what
+ * lets the reviewer-request implicit-resolve helper key off the
+ * UUID the reviewer originally filed against — the reviewer sees the
+ * pre-refresh row in the UI, files a request bound to that row's id,
+ * and the architect's force-refresh closes it via this emit's
+ * matching target tuple.
+ *
+ * Decision Phase 1A ask (a-ii): the atom already declared
+ * `briefing-source.refreshed` in `BRIEFING_SOURCE_EVENT_TYPES` but
+ * no producer was wired. V1-2 wires the producer here, and the
+ * implicit-resolve hook below keys off it. Returns the event id (or
+ * `null` on failure) so the caller can pass it to
+ * `resolveMatchingReviewerRequests`.
+ */
+async function emitBriefingSourceRefreshedEvent(
+  history: EventAnchoringService,
+  supersededSourceId: string,
+  newSource: BriefingSource,
+  engagementId: string,
+  adapterKey: string,
+  reqLog: typeof logger,
+): Promise<string | null> {
+  try {
+    const event = await history.appendEvent({
+      entityType: "briefing-source",
+      entityId: supersededSourceId,
+      eventType: BRIEFING_SOURCE_REFRESHED_EVENT_TYPE,
+      actor: BRIEFING_ADAPTER_ACTOR,
+      payload: {
+        briefingId: newSource.briefingId,
+        engagementId,
+        layerKind: newSource.layerKind,
+        sourceKind: newSource.sourceKind,
+        adapterKey,
+        replacedByBriefingSourceId: newSource.id,
+      },
+    });
+    reqLog.info(
+      {
+        supersededBriefingSourceId: supersededSourceId,
+        replacedByBriefingSourceId: newSource.id,
+        briefingId: newSource.briefingId,
+        engagementId,
+        layerKind: newSource.layerKind,
+        adapterKey,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "briefing-source.refreshed event appended (forceRefresh path)",
+    );
+    return event.id;
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        supersededBriefingSourceId: supersededSourceId,
+        replacedByBriefingSourceId: newSource.id,
+        briefingId: newSource.briefingId,
+        engagementId,
+        layerKind: newSource.layerKind,
+        adapterKey,
+      },
+      "briefing-source.refreshed event append failed — row insert kept",
+    );
+    return null;
   }
 }
 
@@ -592,6 +670,33 @@ router.post(
         row.outcome.adapterKey,
         reqLog,
       );
+      // V1-2 — when a forceRefresh run replaces an existing row,
+      // also emit `briefing-source.refreshed` against the SUPERSEDED
+      // row (the one the reviewer was looking at) and run the
+      // implicit-resolve hook so any pending reviewer-request keyed
+      // on that old row's id closes onto this action.
+      //
+      // Skip first-pulls (no supersededSourceId) — there is nothing
+      // to refresh and a reviewer cannot have a pending request
+      // bound to a row that didn't exist yet.
+      if (row.supersededSourceId) {
+        const refreshedEventId = await emitBriefingSourceRefreshedEvent(
+          history,
+          row.supersededSourceId,
+          row.newSource,
+          engagementId,
+          row.outcome.adapterKey,
+          reqLog,
+        );
+        if (refreshedEventId) {
+          await resolveMatchingReviewerRequests({
+            targetEntityType: "briefing-source",
+            targetEntityId: row.supersededSourceId,
+            triggeredActionEventId: refreshedEventId,
+            log: reqLog,
+          });
+        }
+      }
     }
 
     const persistedByAdapterKey = new Map<string, string>(

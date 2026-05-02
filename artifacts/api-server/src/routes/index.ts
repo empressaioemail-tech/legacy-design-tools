@@ -22,6 +22,7 @@ import localSetbacksRouter from "./localSetbacks";
 import adapterCacheRouter from "./adapterCache";
 import reviewerAnnotationsRouter from "./reviewerAnnotations";
 import findingsRouter from "./findings";
+import reviewerRequestsRouter from "./reviewerRequests";
 
 const router: IRouter = Router();
 
@@ -81,5 +82,11 @@ router.use(reviewerAnnotationsRouter);
 // no path overlap with reviewer-annotations or any other router so
 // ordering is indifferent.
 router.use(findingsRouter);
+// Wave 2 Sprint D / V1-2 — reviewer-request surface. Mounts under
+// /engagements/:id/reviewer-requests + /reviewer-requests/:id/dismiss.
+// engagementsRouter's `/engagements/:id` handler is a leaf and does
+// not match the longer `/engagements/:id/reviewer-requests` path,
+// so mount ordering relative to engagementsRouter is indifferent.
+router.use(reviewerRequestsRouter);
 
 export default router;

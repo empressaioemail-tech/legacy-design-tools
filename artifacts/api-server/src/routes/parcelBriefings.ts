@@ -91,6 +91,7 @@ import {
 } from "../lib/briefingLlmClient";
 import { resolveKeepPerEngagement } from "../lib/briefingGenerationJobsSweep";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { resolveMatchingReviewerRequests } from "../lib/reviewerRequestResolution";
 import {
   DEFAULT_BRIEFING_PDF_HEADER,
   renderBriefingPdf,
@@ -1382,6 +1383,7 @@ async function emitParcelBriefingGeneratedEvent(
   const eventType = wasRegeneration
     ? PARCEL_BRIEFING_REGENERATED_EVENT_TYPE
     : PARCEL_BRIEFING_GENERATED_EVENT_TYPE;
+  let appendedEventId: string | null = null;
   try {
     const event = await history.appendEvent({
       entityType: "parcel-briefing",
@@ -1398,6 +1400,7 @@ async function emitParcelBriefingGeneratedEvent(
         wasRegeneration,
       },
     });
+    appendedEventId = event.id;
     reqLog.info(
       {
         briefingId: briefing.id,
@@ -1418,6 +1421,21 @@ async function emitParcelBriefingGeneratedEvent(
       },
       "parcel-briefing generation event append failed — row update kept",
     );
+  }
+
+  // V1-2 implicit-resolve hook: a `parcel-briefing.regenerated` emit
+  // closes every `pending` reviewer-request whose target tuple matches
+  // this engagement's parcel-briefing. Skip the first-generation case
+  // (`!wasRegeneration`) — there's nothing to "regenerate" so any
+  // pending request the architect could be honoring would have been
+  // filed against a non-existent briefing. Best-effort.
+  if (wasRegeneration && appendedEventId) {
+    await resolveMatchingReviewerRequests({
+      targetEntityType: "parcel-briefing",
+      targetEntityId: briefing.engagementId,
+      triggeredActionEventId: appendedEventId,
+      log: reqLog,
+    });
   }
   // DA-PI-5: emit one `materializable-element.identified` event per
   // requirement extracted from sections C/D/F. The atom is registered
