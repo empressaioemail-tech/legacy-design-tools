@@ -788,14 +788,16 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     )!;
     expect(wireFema.id).toBe(newFema.id);
 
-    // briefing-source.fetched event was emitted only for the new
-    // FEMA row (one event from this scoped run), in addition to
-    // the 3 emitted by the seed run.
+    // briefing-source events from this scoped run:
+    //   - 1 .fetched on the new FEMA row (created)
+    //   - 1 .refreshed on the SUPERSEDED FEMA row (V1-2 — anchors
+    //     the implicit-resolve hook's triggered_action_event_id)
+    // ...in addition to the 3 .fetched emitted by the seed run = 5.
     const evRows = await ctx.schema.db
       .select()
       .from(atomEvents)
       .where(eq(atomEvents.entityType, "briefing-source"));
-    expect(evRows).toHaveLength(4);
+    expect(evRows).toHaveLength(5);
     const newFemaEvents = evRows.filter((e) => e.entityId === newFema.id);
     expect(newFemaEvents).toHaveLength(1);
     expect(newFemaEvents[0]!.actor).toEqual({
