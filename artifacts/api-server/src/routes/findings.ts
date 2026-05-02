@@ -49,7 +49,7 @@ import {
   type Submission,
   type BriefingSource,
 } from "@workspace/db";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import {
   AcceptFindingParams,
   GenerateSubmissionFindingsBody,
@@ -800,6 +800,12 @@ router.get(
       // Resolve revisionOf → atom id for each row in one pass. A
       // separate query batch keeps the wire shape decoupled from
       // the row's internal uuid pk.
+      //
+      // Narrow the SELECT to only the row uuids actually referenced by
+      // the listed rows' `revision_of` columns — the original
+      // implementation scanned the entire `findings` table with no
+      // WHERE clause, which would unboundedly read across all tenants
+      // once findings start accumulating in production.
       const revisionOfMap = new Map<string, string>();
       const revisionRowIds = rows
         .map((r) => r.revisionOf)
@@ -807,7 +813,8 @@ router.get(
       if (revisionRowIds.length > 0) {
         const originals = await db
           .select({ id: findings.id, atomId: findings.atomId })
-          .from(findings);
+          .from(findings)
+          .where(inArray(findings.id, revisionRowIds));
         for (const o of originals) {
           revisionOfMap.set(o.id, o.atomId);
         }
@@ -876,10 +883,14 @@ router.get(
  * Compute the next status from a current status. Returns null when
  * the transition is forbidden (route maps null → 409).
  *
- * Locked transitions per Phase 1A:
+ * Locked transitions per Phase 1A (refined post-review for override):
  *   - accept  : ai-produced → accepted; accepted → accepted (refresh)
  *   - reject  : ai-produced → rejected; rejected → rejected (refresh)
- *   - override: any non-overridden state can be overridden
+ *   - override: any state EXCEPT `overridden` can be overridden. A
+ *     finding can only be overridden ONCE; a second override returns
+ *     409 `finding_already_overridden`. Reviewers act on the revision
+ *     row (status="overridden") via accept/reject just like any other
+ *     row — the revision is the new "head" the FE renders.
  */
 function nextStatusForAccept(current: string): "accepted" | null {
   if (current === "ai-produced" || current === "accepted") return "accepted";
@@ -1047,6 +1058,24 @@ router.post(
       const original = await loadFindingByAtomId(findingId);
       if (!original) {
         res.status(404).json({ error: "finding_not_found" });
+        return;
+      }
+
+      // Single-revision rule: a finding can only be overridden ONCE
+      // (Empressa post-review decision — multiple sibling revisions
+      // pointing at the same `revision_of` would muddy the audit
+      // trail). 409 + a wire-stable error code so clients can
+      // surface a "this finding has already been overridden" hint.
+      if (original.status === "overridden") {
+        reqLog.info(
+          { findingId: original.id, atomId: original.atomId },
+          "override blocked: row already overridden",
+        );
+        res.status(409).json({
+          error: "finding_already_overridden",
+          message:
+            "This finding has already been overridden. The original cannot be overridden again.",
+        });
         return;
       }
 

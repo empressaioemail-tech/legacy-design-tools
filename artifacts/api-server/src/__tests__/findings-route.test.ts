@@ -516,4 +516,68 @@ describe("POST /api/findings/:id/override", () => {
       revisionAtomId: revision.id,
     });
   });
+
+  it("returns 409 when overriding an already-overridden finding", async () => {
+    // Empressa post-review decision: a finding can only be overridden
+    // ONCE. Multiple sibling revisions pointing at the same
+    // `revision_of` would muddy the audit trail. Second override on
+    // the original returns 409 + `finding_already_overridden`.
+    if (!ctx.schema) throw new Error("ctx");
+    const { engagement, submission } = await seedEngagementSubmission(
+      "double-override-engagement",
+    );
+    await seedBriefingForEngagement(engagement.id);
+
+    await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    await waitForStatus(submission.id, "completed");
+
+    const list = await request(getApp())
+      .get(`/api/submissions/${submission.id}/findings`)
+      .set(REVIEWER_HEADERS);
+    const target = list.body.findings[0];
+    const originalAtomId = target.id;
+
+    const overrideBody = {
+      text: "Reviewer-authored revision text that is comfortably long enough to survive the discard rule.",
+      severity: "concern" as const,
+      category: "other" as const,
+      reviewerComment: "First override.",
+    };
+
+    // First override succeeds — original is now `overridden`.
+    const first = await request(getApp())
+      .post(`/api/findings/${originalAtomId}/override`)
+      .send(overrideBody)
+      .set(REVIEWER_HEADERS);
+    expect(first.status).toBe(200);
+
+    // Second override on the same original is a 409. The route loads
+    // the row, sees status === "overridden", and rejects before
+    // opening the transaction (so no sibling revision is created).
+    const second = await request(getApp())
+      .post(`/api/findings/${originalAtomId}/override`)
+      .send({ ...overrideBody, reviewerComment: "Second override." })
+      .set(REVIEWER_HEADERS);
+    expect(second.status).toBe(409);
+    expect(second.body.error).toBe("finding_already_overridden");
+
+    // Verify only ONE revision row was inserted (post-condition for
+    // the single-revision rule). We count rows whose `revision_of`
+    // points at the original's row pk; the wire surface only carries
+    // the atom-id form, so resolve the original's row pk via a quick
+    // lookup.
+    const [originalRow] = await ctx.schema.db
+      .select({ id: findings.id })
+      .from(findings)
+      .where(eq(findings.atomId, originalAtomId));
+    expect(originalRow).toBeDefined();
+    const revisions = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.revisionOf, originalRow!.id));
+    expect(revisions).toHaveLength(1);
+  });
 });
