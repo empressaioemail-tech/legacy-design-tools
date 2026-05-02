@@ -66,6 +66,9 @@ const { makeNeighboringContextAtom } = await import(
 const { makeViewpointRenderAtom } = await import(
   "../atoms/viewpoint-render.atom"
 );
+const { makeRenderOutputAtom } = await import(
+  "../atoms/render-output.atom"
+);
 const { makeSubmissionAtom } = await import("../atoms/submission.atom");
 const { makeSheetAtom } = await import("../atoms/sheet.atom");
 
@@ -145,6 +148,8 @@ describe("reviewer-request atom (contract)", () => {
       makeSnapshotAtom({ db: lazyDb }),
       makeNeighboringContextAtom(),
       makeViewpointRenderAtom(),
+      // V1-4 DA-RP-1: viewpoint-render composes render-output transitively.
+      makeRenderOutputAtom(),
       // V1-2: reviewer-request → engagement → submission, and
       // engagement → snapshot → sheet. Both leaves must be
       // registered for validate() to succeed; sibling
