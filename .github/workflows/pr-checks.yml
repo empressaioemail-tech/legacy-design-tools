@@ -87,7 +87,7 @@ jobs:
         # transitive deps. Pin the buildId to what puppeteer-core@24.42.0
         # expects; update when bumping puppeteer-core.
         run: |
-          node -e "
+          pnpm --filter @workspace/api-server exec node -e "
           const { install, Browser, detectBrowserPlatform } = require('@puppeteer/browsers');
           const path = require('path');
           const os = require('os');
