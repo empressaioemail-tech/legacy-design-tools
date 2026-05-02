@@ -1,7 +1,10 @@
 /**
  * GET /api/briefing-sources/:id/glb — DA-MV-1 viewer bytes endpoint.
  *
- * Pins the four shapes the SiteContextViewer relies on:
+ * Pins the five shapes the SiteContextViewer relies on:
+ *   - 403 when the caller is not architect-audience (V1-3 audience
+ *     gate; the rest of the cases require the dev-only
+ *     `x-audience: internal` header to bypass the gate);
  *   - 200 streams `model/gltf-binary` with a stable SHA-1 ETag and the
  *     `public, max-age=86400, immutable` cache header;
  *   - 304 when `If-None-Match` matches the stored bytes' ETag;
@@ -67,6 +70,16 @@ beforeEach(() => {
   getObjectEntityBytesMock.mockResolvedValue(FAKE_GLB_BYTES);
 });
 
+/**
+ * Send the dev-only `x-audience: internal` header so the architect-
+ * audience guard on the GLB route lets the request through. Mirrors
+ * the helper in `bim-models.test.ts`. The default applicant session
+ * (no header) lands a 403 — covered by the dedicated test below.
+ */
+function asArchitect<T extends { set: (h: string, v: string) => T }>(req: T): T {
+  return req.set("x-audience", "internal");
+}
+
 async function seedSource(opts: {
   conversionStatus: "pending" | "converting" | "ready" | "failed" | "dxf-only";
   glbObjectPath: string | null;
@@ -105,13 +118,31 @@ async function seedSource(opts: {
 }
 
 describe("GET /api/briefing-sources/:id/glb", () => {
+  it("403s when the caller is not architect-audience (default applicant session)", async () => {
+    // No `x-audience: internal` header → the request lands as the
+    // anonymous applicant default the sessionMiddleware emits, and
+    // the architect-scoped guard refuses to surface the bytes
+    // (V1-3). The handler must short-circuit before the row lookup,
+    // so the storage mock should never be called.
+    const id = await seedSource({
+      conversionStatus: "ready",
+      glbObjectPath: "/objects/glb-ready",
+    });
+    const res = await request(getApp()).get(`/api/briefing-sources/${id}/glb`);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("briefing_source_requires_architect_audience");
+    expect(getObjectEntityBytesMock).not.toHaveBeenCalled();
+  });
+
   it("200 streams model/gltf-binary with SHA-1 ETag + immutable cache header", async () => {
     const id = await seedSource({
       conversionStatus: "ready",
       glbObjectPath: "/objects/glb-ready",
     });
 
-    const res = await request(getApp()).get(`/api/briefing-sources/${id}/glb`);
+    const res = await asArchitect(
+      request(getApp()).get(`/api/briefing-sources/${id}/glb`),
+    );
 
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toBe("model/gltf-binary");
@@ -133,9 +164,9 @@ describe("GET /api/briefing-sources/:id/glb", () => {
       glbObjectPath: "/objects/glb-ready",
     });
 
-    const res = await request(getApp())
-      .get(`/api/briefing-sources/${id}/glb`)
-      .set("If-None-Match", EXPECTED_ETAG);
+    const res = await asArchitect(
+      request(getApp()).get(`/api/briefing-sources/${id}/glb`),
+    ).set("If-None-Match", EXPECTED_ETAG);
 
     expect(res.status).toBe(304);
     // Body is empty per spec on 304.
@@ -148,16 +179,18 @@ describe("GET /api/briefing-sources/:id/glb", () => {
       glbObjectPath: "/objects/glb-ready",
     });
 
-    const res = await request(getApp())
-      .get(`/api/briefing-sources/${id}/glb`)
-      .set("If-None-Match", '"stale-etag"');
+    const res = await asArchitect(
+      request(getApp()).get(`/api/briefing-sources/${id}/glb`),
+    ).set("If-None-Match", '"stale-etag"');
     expect(res.status).toBe(200);
     expect(res.headers["etag"]).toBe(EXPECTED_ETAG);
   });
 
   it("404 briefing_source_not_found when the row id is unknown", async () => {
-    const res = await request(getApp()).get(
-      `/api/briefing-sources/00000000-0000-0000-0000-000000000000/glb`,
+    const res = await asArchitect(
+      request(getApp()).get(
+        `/api/briefing-sources/00000000-0000-0000-0000-000000000000/glb`,
+      ),
     );
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("briefing_source_not_found");
@@ -179,8 +212,8 @@ describe("GET /api/briefing-sources/:id/glb", () => {
         conversionStatus: status,
         glbObjectPath: glbPath === "/objects/dxf-source" ? null : glbPath,
       });
-      const res = await request(getApp()).get(
-        `/api/briefing-sources/${id}/glb`,
+      const res = await asArchitect(
+        request(getApp()).get(`/api/briefing-sources/${id}/glb`),
       );
       expect(res.status).toBe(404);
       expect(res.body.error).toBe("glb_not_ready");
@@ -193,7 +226,9 @@ describe("GET /api/briefing-sources/:id/glb", () => {
       conversionStatus: "ready",
       glbObjectPath: null,
     });
-    const res = await request(getApp()).get(`/api/briefing-sources/${id}/glb`);
+    const res = await asArchitect(
+      request(getApp()).get(`/api/briefing-sources/${id}/glb`),
+    );
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("glb_not_ready");
   });
@@ -206,7 +241,9 @@ describe("GET /api/briefing-sources/:id/glb", () => {
     getObjectEntityBytesMock.mockReset();
     getObjectEntityBytesMock.mockRejectedValueOnce(new ObjectNotFoundErrorClass());
 
-    const res = await request(getApp()).get(`/api/briefing-sources/${id}/glb`);
+    const res = await asArchitect(
+      request(getApp()).get(`/api/briefing-sources/${id}/glb`),
+    );
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("glb_bytes_missing");
   });

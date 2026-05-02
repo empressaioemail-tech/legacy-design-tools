@@ -61,6 +61,7 @@ import {
 } from "@workspace/server-actor-ids";
 import type { Logger } from "pino";
 import { logger } from "../lib/logger";
+import { requireArchitectAudience } from "../lib/audienceGuards";
 import { getHistoryService } from "../atoms/registry";
 import {
   REVIEWER_ANNOTATION_EVENT_TYPES,
@@ -92,26 +93,18 @@ type _EmittedEventTypesAreDeclared =
   : never;
 
 /**
- * Reviewer-only audience gate. Mirrors `requireArchitectAudience` in
- * `routes/bimModels.ts`: the `sessionMiddleware` fails closed in
- * production, so an audience check here is the gate that keeps
- * reviewer scratch notes inside the reviewer-facing surface.
- *
- * Reviewer-equivalent in the existing audience taxonomy is
- * `audience: "internal"` (see `engagementEvents.ts` and
- * `bimModels.ts`); when a dedicated reviewer audience lands, this
- * guard becomes a one-line widening.
- *
- * Returns `true` once the guard sent a 403 so the caller can early-
- * return.
+ * Per-file 403 error string for the reviewer-audience gate. The
+ * shared guard in `lib/audienceGuards.ts` takes the error string as
+ * a parameter so each surface attributes its own 403; this constant
+ * pins the value the existing test suite asserts on
+ * (`reviewer-annotations.test.ts`). Reviewer-equivalent in the
+ * existing audience taxonomy is `audience: "internal"` (same check
+ * the `bim-models` and `briefing-sources` GLB surfaces apply); when
+ * a dedicated reviewer audience lands, this becomes a one-line
+ * widening at the call sites.
  */
-function requireReviewerAudience(req: Request, res: Response): boolean {
-  if (req.session.audience === "internal") return false;
-  res
-    .status(403)
-    .json({ error: "reviewer_annotations_require_internal_audience" });
-  return true;
-}
+const REVIEWER_ANNOTATION_AUDIENCE_ERROR =
+  "reviewer_annotations_require_internal_audience";
 
 /**
  * Identify the reviewer making the request. The route gates on a
@@ -239,7 +232,9 @@ async function loadSubmission(submissionId: string) {
 router.get(
   "/submissions/:submissionId/reviewer-annotations",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, REVIEWER_ANNOTATION_AUDIENCE_ERROR)) {
+      return;
+    }
     const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
     const params = ListReviewerAnnotationsParams.safeParse(req.params);
     if (!params.success) {
@@ -285,7 +280,9 @@ router.get(
 router.post(
   "/submissions/:submissionId/reviewer-annotations",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, REVIEWER_ANNOTATION_AUDIENCE_ERROR)) {
+      return;
+    }
     const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
     const params = CreateReviewerAnnotationParams.safeParse(req.params);
     if (!params.success) {
@@ -401,7 +398,9 @@ router.post(
 router.patch(
   "/submissions/:submissionId/reviewer-annotations/:annotationId",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, REVIEWER_ANNOTATION_AUDIENCE_ERROR)) {
+      return;
+    }
     const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
     const params = UpdateReviewerAnnotationParams.safeParse(req.params);
     if (!params.success) {
@@ -468,7 +467,9 @@ router.patch(
 router.post(
   "/submissions/:submissionId/reviewer-annotations/promote",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, REVIEWER_ANNOTATION_AUDIENCE_ERROR)) {
+      return;
+    }
     const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
     const params = PromoteReviewerAnnotationsParams.safeParse(req.params);
     if (!params.success) {

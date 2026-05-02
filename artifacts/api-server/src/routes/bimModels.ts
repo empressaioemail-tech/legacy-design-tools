@@ -69,6 +69,7 @@ import {
   ObjectStorageService,
   ObjectNotFoundError,
 } from "../lib/objectStorage";
+import { requireArchitectAudience } from "../lib/audienceGuards";
 import type { EventAnchoringService } from "@workspace/empressa-atom";
 import {
   BIM_MODEL_PUSH_ACTOR_ID,
@@ -452,29 +453,17 @@ function computeElementDiff(
 }
 
 /**
- * Engagement-scoped guard for architect-facing bim-model routes.
+ * Per-file 403 error string for the architect-audience gate. The
+ * shared guard in `lib/audienceGuards.ts` takes the error string as
+ * a parameter so each route file can attribute a 403 back to its
+ * own surface; this constant pins the value the existing test
+ * suite asserts on (`bim-models.test.ts`).
  *
- * The bim-model row carries the engagement's Revit binding (active
- * briefing pointer, materialized-at timestamp, optional Revit
- * document path). Per the security review on Task #166, none of
- * those fields should be visible to an anonymous applicant — the
- * `sessionMiddleware` fails closed in production and serves
- * `audience: "user"` to every unverified caller, so an audience
- * check here is the gate that keeps Revit details inside the
- * architect-facing surface. Returns `true` once the guard sent a
- * 403 so the caller can early-return.
- *
- * The S2S divergence route is exempt: it carries its own
- * HMAC-SHA256 trust contract and runs as a system actor, not a
+ * The S2S divergence route is exempt from the gate: it carries its
+ * own HMAC-SHA256 trust contract and runs as a system actor, not a
  * browser session.
  */
-function requireArchitectAudience(req: Request, res: Response): boolean {
-  if (req.session.audience === "internal") return false;
-  res
-    .status(403)
-    .json({ error: "bim_model_requires_architect_audience" });
-  return true;
-}
+const BIM_MODEL_AUDIENCE_ERROR = "bim_model_requires_architect_audience";
 
 /**
  * Load the active briefing's `updatedAt` (if any) for a bim-model.
@@ -836,16 +825,18 @@ function objectStorage(): ObjectStorageService {
  * which is what the reviewer expects when they jump to a terrain / setback
  * / neighbor-mass element from a finding.
  *
- * Auth posture: deliberately matches `/briefing-sources/:id/glb` — no
- * audience gate. The bytes are content-addressed by the row id (a uuid) and
- * carry geometry only (no Revit-binding metadata that would need the
- * architect-audience guard the other bim-model routes apply). An applicant
- * who knows a row id can fetch the bytes; we accept that since it matches
- * the existing precedent and the row id is unguessable.
+ * Auth posture: gated by `requireArchitectAudience`, matching the rest of
+ * `bimModels.ts`. Per the security review on V1-3, content-addressing the
+ * bytes by row id is not sufficient — the row id is leaked in the briefing
+ * payload alongside the engagement context, and an applicant who reaches
+ * that payload should not be able to fetch the materialized geometry. The
+ * gate is the same audience check the parent `bim-model` GET applies; the
+ * divergence S2S route remains exempt because of its HMAC contract.
  */
 router.get(
   "/materializable-elements/:id/glb",
   async (req: Request, res: Response) => {
+    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = GetMaterializableElementGlbParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_materializable_element_id" });
@@ -915,7 +906,7 @@ router.get(
 router.get(
   "/engagements/:id/bim-model",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = GetEngagementBimModelParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_engagement_id" });
@@ -955,7 +946,7 @@ router.get(
 router.post(
   "/engagements/:id/bim-model",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = PushEngagementBimModelParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_engagement_id" });
@@ -1075,7 +1066,7 @@ router.post(
 router.get(
   "/bim-models/:id/refresh",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = GetBimModelRefreshParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_bim_model_id" });
@@ -1173,7 +1164,7 @@ router.get(
 router.get(
   "/bim-models/:id/divergences",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = ListBimModelDivergencesParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_bim_model_id" });
@@ -1276,7 +1267,7 @@ router.get(
 router.post(
   "/bim-models/:id/divergences/:divergenceId/resolve",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res)) return;
+    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = ResolveBimModelDivergenceParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_divergence_path" });
