@@ -1679,7 +1679,11 @@ export type KickoffBriefingOutcome =
   | { kind: "started"; generationId: string; sourceCount: number };
 
 // Shared kickoff helper used by the manual HTTP route and the
-// `engagement.created` auto-trigger subscriber. Never throws.
+// `engagement.created` auto-trigger subscriber. Returns a discriminated
+// outcome for the expected business cases; unique-violation races are
+// folded into `already_in_flight`. Other unexpected DB/setup failures
+// are rethrown so the manual route returns 500 and the auto wrapper can
+// log + swallow them.
 // `onSettled` (optional) fires once the void-launched runner finalizes
 // the job row, so callers can observe terminal state without polling.
 export async function kickoffBriefingGeneration(args: {
