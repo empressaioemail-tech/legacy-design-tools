@@ -516,9 +516,12 @@ async function persistTerminalState(
  * atom event.
  *
  * The kickoff route invokes this with `void runRenderPolling(...)` and
- * returns 202 to the architect immediately.
+ * returns 202 to the architect immediately. Exported so integration
+ * tests can await it directly (rather than racing an HTTP poll
+ * against the fire-and-forget Promise) — the production path still
+ * uses the void-call form.
  */
-async function runRenderPolling(args: {
+export async function runRenderPolling(args: {
   viewpointRenderId: string;
   body: KickoffBody;
 }): Promise<void> {
