@@ -80,15 +80,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Chrome via puppeteer postinstall
-        # The workspace uses `puppeteer` (not puppeteer-core), which has
-        # a postinstall script (`node install.mjs`) that downloads Chrome
-        # to ~/.cache/puppeteer. `puppeteer` IS in onlyBuiltDependencies
-        # in pnpm-workspace.yaml, but pnpm install --frozen-lockfile in
-        # CI doesn't trigger the postinstall when packages come from cache.
-        # `pnpm rebuild puppeteer` force-runs the postinstall, which
-        # downloads Chrome at the version pinned by puppeteer's
-        # bundled config (matches what puppeteer-core launches at runtime).
-        run: pnpm rebuild puppeteer
+        # `puppeteer` (not puppeteer-core) is a direct dep of
+        # @workspace/api-server, with a postinstall script (install.mjs)
+        # that downloads Chrome to ~/.cache/puppeteer. CI's pnpm install
+        # --frozen-lockfile is NOT executing this postinstall (3.9s install
+        # time, no Chrome download in logs), and `pnpm rebuild puppeteer`
+        # in pnpm v10 only triggers native-compile rebuilds, not pure-JS
+        # postinstalls. Workaround: run install.mjs directly. The script
+        # is a real file at artifacts/api-server/node_modules/puppeteer/install.mjs
+        # (not a pnpm symlink internal) because puppeteer is a direct dep.
+        # Node's module resolution from that script's directory finds
+        # @puppeteer/browsers in puppeteer's own node_modules subtree.
+        run: |
+          cd artifacts/api-server
+          node node_modules/puppeteer/install.mjs
       - name: Enable pgvector extension
         env:
           PGPASSWORD: postgres
