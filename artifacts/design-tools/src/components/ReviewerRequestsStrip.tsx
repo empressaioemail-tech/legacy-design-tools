@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useListEngagementReviewerRequests,
   getListEngagementReviewerRequestsQueryKey,
@@ -10,43 +10,12 @@ import { relativeTime } from "../lib/relativeTime";
 import { DismissReviewerRequestDialog } from "./DismissReviewerRequestDialog";
 
 /**
- * Wave 2 Sprint D / V1-2 — architect-side queue of pending reviewer-
- * requests filed against an engagement.
- *
- * Mounted on `EngagementDetail.tsx` above the existing tab content
- * so the architect always sees the open queue regardless of which
- * tab is active. Hidden when the queue is empty (zero pending) so
- * an idle engagement doesn't carry empty visual weight.
- *
- * Resolution flow:
- *   - The architect clicks "Dismiss" → DismissReviewerRequestDialog
- *     captures a reason and POSTs `/reviewer-requests/:id/dismiss`.
- *   - The architect runs the underlying domain action (refresh
- *     briefing-source / refresh bim-model / regenerate briefing) on
- *     its own surface — the implicit-resolve hook in
- *     `lib/reviewerRequestResolution.ts` flips the matching pending
- *     request to `resolved` and the strip drops the row on the next
- *     query invalidation.
- *
- * Design choices:
- *   - "Pending only" filter is the only mode V1-2 ships. A future
- *     "Resolved" / "Dismissed" history disclosure can land later
- *     without changing the wire shape (the route already supports
- *     `?status=` filtering).
- *   - The strip queries with `refetchOnWindowFocus` enabled so an
- *     architect coming back to the tab after running an action sees
- *     the queue update without a manual reload — pairs with the
- *     route handler's invalidation hook (which fires on the
- *     architect's next click anyway, but the focus refetch tightens
- *     the loop for the "I just refreshed in another tab" case).
- *   - Mirror the design language of the existing
- *     `BriefingRecentRunsPanel` — single card, same chrome, per-row
- *     muted secondary text.
- *
- * Architect-only by route gate (the `useListEngagementReviewerRequests`
- * hook hits an architect-audience endpoint). The component itself is
- * audience-agnostic in design-tools — surfaces that mount it elsewhere
- * inherit the audience contract from the route.
+ * Architect-side queue of pending reviewer-requests filed against an
+ * engagement. Hidden when there are zero pending requests (and no
+ * transient confirmation pill in flight). Surfaces a "Request
+ * dismissed" pill after a user dismiss and a "Resolved by your
+ * refresh" pill when the polled list shrinks because the backend
+ * implicit-resolved a request.
  */
 export interface ReviewerRequestsStripProps {
   engagementId: string;
@@ -57,6 +26,17 @@ const REQUEST_KIND_LABEL: Record<ReviewerRequestKind, string> = {
   "refresh-bim-model": "Refresh BIM model",
   "regenerate-briefing": "Regenerate briefing",
 };
+
+const PILL_VISIBLE_MS = 5000;
+// How long an architect-driven dismiss is remembered for the
+// implicit-resolve diff. Comfortably longer than PILL_VISIBLE_MS so a
+// slow server confirmation can't race the diff into a false-positive
+// "resolved by your refresh" pill.
+const RECENT_DISMISS_MEMORY_MS = 15_000;
+
+type StripPill =
+  | { kind: "dismissed"; at: number }
+  | { kind: "implicit-resolved"; count: number; at: number };
 
 export function ReviewerRequestsStrip({
   engagementId,
@@ -77,13 +57,86 @@ export function ReviewerRequestsStrip({
   const [dismissTarget, setDismissTarget] = useState<ReviewerRequest | null>(
     null,
   );
+  const [pill, setPill] = useState<StripPill | null>(null);
+
+  // IDs the architect just dismissed (id → timestamp). Set inside
+  // the dialog's onMutate via `markUserDismissed` BEFORE the
+  // optimistic cache write so the diff effect, which runs on the
+  // next render, sees the mark.
+  const recentlyDismissedRef = useRef<Map<string, number>>(new Map());
+  const previousIdsRef = useRef<Set<string> | null>(null);
 
   const requests = query.data?.requests ?? [];
 
-  // Empty queue = render nothing. The architect's idle engagement
-  // shouldn't carry a "0 pending" placeholder — the strip exists to
-  // surface action items, and "no action items" is the normal case.
-  if (!query.isLoading && requests.length === 0) return null;
+  const currentIds = useMemo(
+    () => new Set(requests.map((r) => r.id)),
+    [requests],
+  );
+
+  // Detect backend implicit-resolves: rows that vanished from the
+  // pending list without an in-strip user dismiss were closed by the
+  // route's implicit-resolve hook.
+  useEffect(() => {
+    if (query.isLoading) return;
+    const prev = previousIdsRef.current;
+    if (prev === null) {
+      previousIdsRef.current = currentIds;
+      return;
+    }
+    const removed: string[] = [];
+    for (const id of prev) {
+      if (!currentIds.has(id)) removed.push(id);
+    }
+    previousIdsRef.current = currentIds;
+    if (removed.length === 0) return;
+
+    const now = Date.now();
+    const fresh = new Map<string, number>();
+    for (const [id, ts] of recentlyDismissedRef.current) {
+      if (now - ts < RECENT_DISMISS_MEMORY_MS) fresh.set(id, ts);
+    }
+    recentlyDismissedRef.current = fresh;
+
+    const externallyResolved = removed.filter((id) => !fresh.has(id));
+    if (externallyResolved.length === 0) return;
+
+    setPill({
+      kind: "implicit-resolved",
+      count: externallyResolved.length,
+      at: now,
+    });
+  }, [currentIds, query.isLoading]);
+
+  useEffect(() => {
+    if (!pill) return;
+    const remaining = Math.max(0, PILL_VISIBLE_MS - (Date.now() - pill.at));
+    const timer = window.setTimeout(() => {
+      setPill((current) => (current === pill ? null : current));
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [pill]);
+
+  const markUserDismissed = (req: ReviewerRequest) => {
+    recentlyDismissedRef.current.set(req.id, Date.now());
+  };
+
+  const handleDismissed = (_req: ReviewerRequest) => {
+    setPill({ kind: "dismissed", at: Date.now() });
+  };
+
+  // Stay mounted while a pill is visible OR a dismiss dialog is
+  // open. Keeping the dialog mounted matters for last-row optimistic
+  // dismisses: `requests` goes empty between onMutate and onSuccess,
+  // and unmounting the dialog mid-flight would strand a server error
+  // with no inline surface to render to.
+  if (
+    !query.isLoading &&
+    requests.length === 0 &&
+    !pill &&
+    !dismissTarget
+  ) {
+    return null;
+  }
 
   return (
     <div
@@ -102,18 +155,56 @@ export function ReviewerRequestsStrip({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 8,
         }}
       >
         <span className="sc-label" style={{ letterSpacing: 0.5 }}>
           REVIEWER REQUESTS
         </span>
-        <span
-          className="sc-meta"
-          data-testid="reviewer-requests-strip-count"
-          style={{ color: "var(--text-muted)" }}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
         >
-          {query.isLoading ? "…" : `${requests.length} pending`}
-        </span>
+          {pill && (
+            <span
+              data-testid={`reviewer-requests-strip-pill-${pill.kind}`}
+              role="status"
+              aria-live="polite"
+              className="sc-meta"
+              style={{
+                fontSize: 11,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background:
+                  pill.kind === "dismissed"
+                    ? "var(--bg-input)"
+                    : "rgba(34,197,94,0.15)",
+                color:
+                  pill.kind === "dismissed"
+                    ? "var(--text-secondary)"
+                    : "#16a34a",
+                border: "1px solid var(--border-subtle)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {pill.kind === "dismissed"
+                ? "Request dismissed"
+                : pill.count === 1
+                  ? "1 request resolved by your refresh"
+                  : `${pill.count} requests resolved by your refresh`}
+            </span>
+          )}
+          <span
+            className="sc-meta"
+            data-testid="reviewer-requests-strip-count"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {query.isLoading ? "…" : `${requests.length} pending`}
+          </span>
+        </div>
       </div>
 
       {query.isLoading && requests.length === 0 ? (
@@ -123,7 +214,7 @@ export function ReviewerRequestsStrip({
         >
           Loading reviewer requests…
         </div>
-      ) : (
+      ) : requests.length === 0 ? null : (
         <ul
           style={{
             listStyle: "none",
@@ -226,6 +317,8 @@ export function ReviewerRequestsStrip({
           request={dismissTarget}
           isOpen={true}
           onClose={() => setDismissTarget(null)}
+          onDismissStarted={markUserDismissed}
+          onDismissed={handleDismissed}
         />
       )}
     </div>
