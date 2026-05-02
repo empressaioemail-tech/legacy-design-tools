@@ -79,7 +79,12 @@ describe("lib/db schema integration", () => {
         "code_atom_sources",
         "code_atoms",
         "engagements",
-        "findings_code_atoms",
+        // V1-1 / AIR-1 — finding atom row + producing-run row.
+        // Supersedes the deleted `findings_code_atoms` placeholder
+        // join (citation atomIds are now stored verbatim on
+        // `findings.citations` jsonb per recon decision Ask #2).
+        "finding_runs",
+        "findings",
         "materializable_elements",
         "parcel_briefings",
         // Spec 307 / Task #307 — reviewer scratch-note surface anchored

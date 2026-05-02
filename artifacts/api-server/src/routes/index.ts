@@ -21,6 +21,7 @@ import generateLayersRouter from "./generateLayers";
 import localSetbacksRouter from "./localSetbacks";
 import adapterCacheRouter from "./adapterCache";
 import reviewerAnnotationsRouter from "./reviewerAnnotations";
+import findingsRouter from "./findings";
 
 const router: IRouter = Router();
 
@@ -75,5 +76,10 @@ router.use(adapterCacheRouter);
 // Mounts under /submissions/:submissionId/reviewer-annotations; no
 // path overlap with any existing router so ordering is indifferent.
 router.use(reviewerAnnotationsRouter);
+// V1-1 / AIR-1 — findings surface. Mounts under
+// /submissions/:submissionId/findings* and /findings/:findingId/*;
+// no path overlap with reviewer-annotations or any other router so
+// ordering is indifferent.
+router.use(findingsRouter);
 
 export default router;
