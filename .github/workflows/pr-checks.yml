@@ -80,7 +80,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Chrome for puppeteer-core
-        run: pnpm exec puppeteer browsers install chrome
+        # puppeteer-core (unlike puppeteer) does not auto-install Chrome.
+        # The @puppeteer/browsers CLI is the canonical installer. Pin the
+        # version to match what puppeteer-core@24.42.0 expects (visible
+        # in any "Could not find Chrome" error stack trace). Update this
+        # version when bumping puppeteer-core.
+        run: npx @puppeteer/browsers install chrome@147.0.7727.57
       - name: Enable pgvector extension
         env:
           PGPASSWORD: postgres
