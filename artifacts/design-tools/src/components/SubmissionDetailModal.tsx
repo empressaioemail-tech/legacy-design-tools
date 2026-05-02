@@ -9,6 +9,7 @@ import {
   type AtomSummary,
   type SubmissionStatus,
 } from "@workspace/api-client-react";
+import { ReviewerComment } from "@workspace/portal-ui";
 import { relativeTime } from "../lib/relativeTime";
 import { backfillAnnotation } from "../lib/submissionBackfill";
 import { friendlyAgentLabel } from "../lib/actorLabel";
@@ -173,6 +174,7 @@ export function SubmissionDetailModal(props: SubmissionDetailModalProps) {
     submittedAt?: string;
     respondedAt?: string | null;
     responseRecordedAt?: string | null;
+    reviewerComment?: string | null;
     found?: boolean;
     statusHistory?: SubmissionStatusHistoryEntry[];
   };
@@ -363,6 +365,29 @@ export function SubmissionDetailModal(props: SubmissionDetailModalProps) {
                   </div>
                 )}
               </Section>
+
+              {typed.reviewerComment && (
+                <Section label="REVIEWER COMMENT">
+                  <ReviewerComment
+                    submissionId={submissionId ?? ""}
+                    comment={typed.reviewerComment}
+                  />
+                  {typed.respondedAt && (
+                    <span
+                      className="sc-meta"
+                      data-testid="submission-detail-reviewer-responded-at"
+                      title={new Date(typed.respondedAt).toLocaleString()}
+                      style={{
+                        color: "var(--text-secondary)",
+                        fontSize: 11,
+                        marginTop: 4,
+                      }}
+                    >
+                      Responded {relativeTime(typed.respondedAt)}
+                    </span>
+                  )}
+                </Section>
+              )}
 
               <Section label="RELATED EVENT">
                 <RelatedEventBlock
