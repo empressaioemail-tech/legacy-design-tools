@@ -282,6 +282,25 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
 );
 
 
+-- Name: render_outputs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.render_outputs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    viewpoint_render_id uuid NOT NULL,
+    role text NOT NULL,
+    format text NOT NULL,
+    resolution text,
+    size_bytes integer,
+    duration_seconds integer,
+    source_url text NOT NULL,
+    mirrored_object_key text,
+    mnml_output_id text,
+    thumbnail_url text,
+    seed integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: reviewer_annotations; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.reviewer_annotations (
@@ -395,6 +414,30 @@ CREATE TABLE @@SCHEMA@@.users (
 );
 
 
+-- Name: viewpoint_renders; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.viewpoint_renders (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    briefing_id uuid,
+    briefing_atom_event_id text,
+    bim_model_id uuid,
+    bim_model_atom_event_id text,
+    kind text NOT NULL,
+    request_payload jsonb NOT NULL,
+    status text NOT NULL,
+    mnml_job_id text,
+    mnml_jobs jsonb,
+    error_code text,
+    error_message text,
+    error_details jsonb,
+    requested_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone
+);
+
+
 -- Name: adapter_response_cache adapter_response_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.adapter_response_cache
@@ -503,6 +546,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_pkey PRIMARY KEY (id);
 
 
+-- Name: render_outputs render_outputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.render_outputs
+    ADD CONSTRAINT render_outputs_pkey PRIMARY KEY (id);
+
+
 -- Name: reviewer_annotations reviewer_annotations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
@@ -537,6 +586,12 @@ ALTER TABLE ONLY @@SCHEMA@@.submissions
 
 ALTER TABLE ONLY @@SCHEMA@@.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+-- Name: viewpoint_renders viewpoint_renders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
+    ADD CONSTRAINT viewpoint_renders_pkey PRIMARY KEY (id);
 
 
 -- Name: adapter_response_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
@@ -689,6 +744,16 @@ CREATE INDEX materializable_elements_kind_idx ON @@SCHEMA@@.materializable_eleme
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
+-- Name: render_outputs_render_role_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX render_outputs_render_role_uniq ON @@SCHEMA@@.render_outputs USING btree (viewpoint_render_id, role);
+
+
+-- Name: render_outputs_viewpoint_render_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX render_outputs_viewpoint_render_idx ON @@SCHEMA@@.render_outputs USING btree (viewpoint_render_id);
+
+
 -- Name: reviewer_annotations_parent_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX reviewer_annotations_parent_idx ON @@SCHEMA@@.reviewer_annotations USING btree (parent_annotation_id);
@@ -742,6 +807,16 @@ CREATE INDEX submissions_engagement_idx ON @@SCHEMA@@.submissions USING btree (e
 -- Name: submissions_submitted_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX submissions_submitted_at_idx ON @@SCHEMA@@.submissions USING btree (submitted_at);
+
+
+-- Name: viewpoint_renders_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX viewpoint_renders_engagement_created_idx ON @@SCHEMA@@.viewpoint_renders USING btree (engagement_id, created_at);
+
+
+-- Name: viewpoint_renders_status_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX viewpoint_renders_status_idx ON @@SCHEMA@@.viewpoint_renders USING btree (status);
 
 
 -- Name: bim_models bim_models_active_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -858,6 +933,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
 
 
+-- Name: render_outputs render_outputs_viewpoint_render_id_viewpoint_renders_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.render_outputs
+    ADD CONSTRAINT render_outputs_viewpoint_render_id_viewpoint_renders_id_fk FOREIGN KEY (viewpoint_render_id) REFERENCES @@SCHEMA@@.viewpoint_renders(id) ON DELETE CASCADE;
+
+
 -- Name: reviewer_annotations reviewer_annotations_parent_annotation_id_reviewer_annotations_; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
@@ -898,6 +979,24 @@ ALTER TABLE ONLY @@SCHEMA@@.snapshots
 
 ALTER TABLE ONLY @@SCHEMA@@.submissions
     ADD CONSTRAINT submissions_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: viewpoint_renders viewpoint_renders_bim_model_id_bim_models_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
+    ADD CONSTRAINT viewpoint_renders_bim_model_id_bim_models_id_fk FOREIGN KEY (bim_model_id) REFERENCES @@SCHEMA@@.bim_models(id) ON DELETE SET NULL;
+
+
+-- Name: viewpoint_renders viewpoint_renders_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
+    ADD CONSTRAINT viewpoint_renders_briefing_id_parcel_briefings_id_fk FOREIGN KEY (briefing_id) REFERENCES @@SCHEMA@@.parcel_briefings(id) ON DELETE SET NULL;
+
+
+-- Name: viewpoint_renders viewpoint_renders_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
+    ADD CONSTRAINT viewpoint_renders_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 
