@@ -2756,6 +2756,353 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /submissions/{submissionId}/findings:
+    get:
+      operationId: listSubmissionFindings
+      tags: [findings]
+      summary: List the AI-produced findings for a submission
+      description: |
+        Returns the current set of findings for a submission, newest
+        first, after every reviewer mutation has been applied. The list
+        includes overridden originals (status `overridden` with
+        `revisionOf == null`) AND their revision rows
+        (`revisionOf == originalAtomId`) so the FE drill-in can show
+        the audit pair. AI-produced rows the engine emitted but a
+        reviewer never touched carry status `ai-produced`.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current findings list (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSubmissionFindingsResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/findings/generate:
+    post:
+      operationId: generateSubmissionFindings
+      tags: [findings]
+      summary: Kick off AI compliance-checker generation against a submission
+      description: |
+        Asynchronously runs the AIR-1 finding engine
+        (`@workspace/finding-engine`): reads the submission's parent
+        engagement's current `briefing_sources`, retrieves a
+        jurisdiction-scoped top-K of `code_atoms`, calls the LLM (or
+        the deterministic mock when `AIR_FINDING_LLM_MODE=mock`),
+        validates every citation token resolves to a known atom, and
+        persists the surviving findings into `findings` rows scoped to
+        the submission.
+
+        Returns `202 Accepted` with a `generationId`; clients poll
+        `GET /submissions/{id}/findings/status` until the job's
+        `state` flips from `pending` to `completed` or `failed`.
+
+        Single-flight: a generation already in flight for this
+        submission is a 409 — the caller should poll the in-flight
+        job's id rather than queueing a fresh run.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateSubmissionFindingsBody"
+      responses:
+        "202":
+          description: Generation kicked off; poll status for completion.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateSubmissionFindingsResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            A generation for this submission is already in flight.
+            Poll `/findings/status` and retry once it settles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/findings/status:
+    get:
+      operationId: getSubmissionFindingsGenerationStatus
+      tags: [findings]
+      summary: Poll the most recent finding-generation job
+      description: |
+        Returns the most recent generation job's outcome for the
+        submission so the UI can poll until the run settles. Job state
+        is persisted in `finding_runs` (one row per kickoff), so it
+        survives api-server restarts and stays coherent across
+        multiple instances. The persisted findings on
+        `GET /submissions/{id}/findings` remain the source of truth
+        for the list itself; this endpoint is the mechanism the UI
+        uses to know when the list has landed.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current job state for the submission.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionFindingsGenerationStatusResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/findings/runs:
+    get:
+      operationId: listSubmissionFindingsGenerationRuns
+      tags: [findings]
+      summary: List the most recent finding-generation attempts
+      description: |
+        Returns the most recent finding-generation job rows for the
+        submission, ordered by `startedAt` DESC. Capped at the same
+        per-submission keep value the sweep uses (default 5,
+        overridable via `FINDING_RUNS_KEEP_PER_SUBMISSION`) so the API
+        and the sweep cannot drift.
+
+        Surfaces what `GET /findings/status` deliberately collapses to
+        a single row: an auditor investigating a regression needs the
+        prior attempts' outcomes (state, timestamps, error,
+        invalidCitationCount, discardedFindingCount) without SSHing
+        into the database.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recent generation attempts, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionFindingsGenerationRunsResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /findings/{findingId}/accept:
+    post:
+      operationId: acceptFinding
+      tags: [findings]
+      summary: Mark a finding as accepted by the reviewer
+      description: |
+        Stamps the finding's status to `accepted` plus the reviewer
+        attribution (`reviewerStatusBy`, `reviewerStatusChangedAt`).
+        The original AI-produced text is preserved in place — accept
+        does not edit the body. Emits `finding.accepted` on the
+        finding's history chain.
+
+        Idempotent: re-accepting an already-accepted finding refreshes
+        the reviewer attribution timestamp. Acceptance from the
+        `overridden` or `rejected` state is a 409 — use override to
+        change a previously-actioned finding.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: findingId
+          in: path
+          required: true
+          description: The finding's atom id (`finding:{submissionId}:{ulid}`).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated finding wire envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Finding not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Finding's current status forbids accepting.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /findings/{findingId}/reject:
+    post:
+      operationId: rejectFinding
+      tags: [findings]
+      summary: Mark a finding as rejected by the reviewer
+      description: |
+        Stamps the finding's status to `rejected` plus reviewer
+        attribution. Emits `finding.rejected` on the finding's
+        history chain.
+
+        Idempotent: re-rejecting refreshes the reviewer timestamp.
+        Rejection from `overridden` is a 409.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: findingId
+          in: path
+          required: true
+          description: The finding's atom id (`finding:{submissionId}:{ulid}`).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated finding wire envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Finding not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Finding's current status forbids rejecting.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /findings/{findingId}/override:
+    post:
+      operationId: overrideFinding
+      tags: [findings]
+      summary: Override a finding with a reviewer-authored revision
+      description: |
+        Creates a NEW finding row containing the reviewer's revised
+        text/severity/category, with `revisionOf` pointing back at the
+        original. The original is preserved in place with status
+        `overridden` so the drill-in's "See AI's original" affordance
+        keeps reading it. Both writes commit in one transaction.
+        Emits `finding.overridden` on the original's history chain.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: findingId
+          in: path
+          required: true
+          description: The finding's atom id (`finding:{submissionId}:{ulid}`).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OverrideFindingBody"
+      responses:
+        "200":
+          description: |
+            Updated finding wire envelope — the response carries the
+            NEW revision row (with `revisionOf` set), not the
+            superseded original. Callers refetch the list to see
+            both rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingResponse"
+        "400":
+          description: Invalid override body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Finding not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -5840,3 +6187,401 @@ components:
         - promoted
         - alreadyPromoted
         - unknown
+
+    FindingSeverity:
+      type: string
+      enum: [blocker, concern, advisory]
+      description: |
+        AIR-1 severity rubric (locked v1, see findingsMock.ts:41):
+          - blocker  — code violation requiring resolution before approval
+          - concern  — ambiguity or risk
+          - advisory — preference / coordination note
+
+    FindingCategory:
+      type: string
+      enum:
+        - setback
+        - height
+        - coverage
+        - egress
+        - use
+        - overlay-conflict
+        - divergence-related
+        - other
+      description: |
+        FIXED v1 category enum (findingsMock.ts:48-56). Adding a
+        category is an event-modeled schema change, not a silent
+        extension — keep this in lock-step with the schema-side enum.
+
+    FindingStatus:
+      type: string
+      enum: [ai-produced, accepted, rejected, overridden, promoted-to-architect]
+      description: |
+        Reviewer-state lifecycle. `ai-produced` is the engine's
+        initial value; the accept / reject / override routes flip it.
+        `promoted-to-architect` is reserved for a future "promote
+        finding into a jurisdiction reply" endpoint.
+
+    FindingActor:
+      type: object
+      description: |
+        Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on
+        each reviewer mutation so the audit trail captures who acted.
+      properties:
+        kind:
+          type: string
+          enum: [user, agent, system]
+        id:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+      required:
+        - kind
+        - id
+
+    FindingCodeCitation:
+      type: object
+      description: Inline citation referencing a code-section atom.
+      properties:
+        kind:
+          type: string
+          enum: [code-section]
+        atomId:
+          type: string
+          description: |
+            The atom id used in `[[CODE:<atomId>]]` tokens. Must
+            resolve against the engine's reference block at
+            generation time; unresolved tokens are stripped from
+            `text` and reflected on the run row's
+            `invalidCitationCount`.
+      required:
+        - kind
+        - atomId
+
+    FindingSourceCitation:
+      type: object
+      description: Inline citation referencing a briefing-source row.
+      properties:
+        kind:
+          type: string
+          enum: [briefing-source]
+        id:
+          type: string
+        label:
+          type: string
+          description: |
+            Human-readable label used inside the inline token
+            `{{atom|briefing-source|<id>|<label>}}`. Echoed on the
+            citation pill the FE renders.
+      required:
+        - kind
+        - id
+        - label
+
+    FindingCitation:
+      oneOf:
+        - $ref: "#/components/schemas/FindingCodeCitation"
+        - $ref: "#/components/schemas/FindingSourceCitation"
+      discriminator:
+        propertyName: kind
+
+    FindingSourceRef:
+      type: object
+      description: |
+        Pointer at the single backing briefing source for a finding.
+        Distinct from the `citations` array (which can carry many).
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+      required:
+        - id
+        - label
+
+    Finding:
+      type: object
+      description: |
+        One AIR-1 compliance finding. Wire shape mirrors
+        `findingsMock.ts:82-103` so the V1-6 frontend swap is a
+        single-file change. The `id` field is the public atom id
+        (`finding:{submissionId}:{rowUuid}`) — see
+        lib/db/src/schema/findings.ts column docs for the row pk vs
+        atom id split.
+      properties:
+        id:
+          type: string
+          description: |
+            Public atom id. Carries the prefix grammar
+            `finding:{submissionId}:{ulid}` so URL deep-links can
+            derive the parent submission without a server round-trip.
+        submissionId:
+          type: string
+        severity:
+          $ref: "#/components/schemas/FindingSeverity"
+        category:
+          $ref: "#/components/schemas/FindingCategory"
+        status:
+          $ref: "#/components/schemas/FindingStatus"
+        text:
+          type: string
+          description: |
+            Free-text body containing inline citation tokens. The
+            engine's validator has already stripped any token whose
+            id failed to resolve.
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/FindingCitation"
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        lowConfidence:
+          type: boolean
+          description: True iff the engine deemed this below the 0.6 threshold.
+        reviewerStatusBy:
+          oneOf:
+            - $ref: "#/components/schemas/FindingActor"
+          nullable: true
+        reviewerStatusChangedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewerComment:
+          type: string
+          nullable: true
+        elementRef:
+          type: string
+          nullable: true
+          description: |
+            Opaque BIM-element pointer the FE drill-in resolves to
+            a viewport selection (e.g. `wall:north-side-l2`).
+        sourceRef:
+          oneOf:
+            - $ref: "#/components/schemas/FindingSourceRef"
+          nullable: true
+        aiGeneratedAt:
+          type: string
+          format: date-time
+          description: |
+            When the engine produced the finding. Stamped at engine
+            time, not at row insert.
+        revisionOf:
+          type: string
+          nullable: true
+          description: |
+            On override revisions, the original AI finding's atom id.
+            Null on AI-produced and never-overridden rows.
+      required:
+        - id
+        - submissionId
+        - severity
+        - category
+        - status
+        - text
+        - citations
+        - confidence
+        - lowConfidence
+        - reviewerStatusBy
+        - reviewerStatusChangedAt
+        - reviewerComment
+        - elementRef
+        - sourceRef
+        - aiGeneratedAt
+        - revisionOf
+
+    FindingResponse:
+      type: object
+      description: |
+        Single-finding wire envelope returned by accept / reject /
+        override.
+      properties:
+        finding:
+          $ref: "#/components/schemas/Finding"
+      required:
+        - finding
+
+    ListSubmissionFindingsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /submissions/{id}/findings`. Includes
+        every row scoped to the submission — AI-produced, reviewer-
+        actioned, and override revisions alike. Sorting is the FE's
+        responsibility (severity then aiGeneratedAt; helper
+        `compareFindings` in findingsMock.ts:533-538).
+      properties:
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Finding"
+      required:
+        - findings
+
+    GenerateSubmissionFindingsBody:
+      type: object
+      description: |
+        Optional body for `POST /submissions/{id}/findings/generate`.
+        Forward-looking — the V1-1 baseline ignores fields and always
+        runs a fresh full generation. Documented here so callers can
+        adopt the wire shape before regenerate semantics land.
+      properties:
+        regenerate:
+          type: boolean
+          description: |
+            When true, signals an explicit redo. Currently
+            informational — the route always runs a fresh generation.
+
+    GenerateSubmissionFindingsResponse:
+      type: object
+      description: |
+        202 envelope returned by `POST /submissions/{id}/findings/generate`.
+        The job is identified by `generationId`; clients should poll
+        `/findings/status` until `state` reaches a terminal value,
+        then refetch `GET /findings` to read the persisted list.
+      properties:
+        generationId:
+          type: string
+          description: Opaque id for this generation job.
+        state:
+          type: string
+          enum: [pending, completed, failed]
+          description: Initial state — almost always `pending` on the 202.
+      required:
+        - generationId
+        - state
+
+    SubmissionFindingsGenerationStatusResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /submissions/{id}/findings/status`.
+        State is persisted in `finding_runs`; the endpoint reads the
+        most recent row by `submission_id` ordered by `started_at`
+        DESC. Returns `idle` when no kickoff has ever run.
+      properties:
+        generationId:
+          type: string
+          nullable: true
+        state:
+          type: string
+          enum: [idle, pending, completed, failed]
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        invalidCitationCount:
+          type: integer
+          nullable: true
+        invalidCitations:
+          type: array
+          nullable: true
+          items:
+            type: string
+        discardedFindingCount:
+          type: integer
+          nullable: true
+          description: |
+            Number of findings the engine produced that the discard
+            rule (no surviving citations + no elementRef OR text too
+            short) dropped entirely. Distinct dimension from
+            `invalidCitationCount` — see findingRuns.ts column docs.
+            Null while pending.
+      required:
+        - generationId
+        - state
+        - startedAt
+        - completedAt
+        - error
+        - invalidCitationCount
+        - invalidCitations
+        - discardedFindingCount
+
+    SubmissionFindingsGenerationRun:
+      type: object
+      description: |
+        One historical finding-generation attempt for a submission.
+        Same shape as the status response minus the `idle` enum
+        entry (idle = absence of a row, represented by omission).
+      properties:
+        generationId:
+          type: string
+        state:
+          type: string
+          enum: [pending, completed, failed]
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        invalidCitationCount:
+          type: integer
+          nullable: true
+        invalidCitations:
+          type: array
+          nullable: true
+          items:
+            type: string
+        discardedFindingCount:
+          type: integer
+          nullable: true
+      required:
+        - generationId
+        - state
+        - startedAt
+        - completedAt
+        - error
+        - invalidCitationCount
+        - invalidCitations
+        - discardedFindingCount
+
+    SubmissionFindingsGenerationRunsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /submissions/{id}/findings/runs`.
+        `runs` is the most recent attempts (newest first), capped by
+        the sweep's per-submission keep value.
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubmissionFindingsGenerationRun"
+      required:
+        - runs
+
+    OverrideFindingBody:
+      type: object
+      description: |
+        Body for `POST /findings/{id}/override`. Mirrors
+        `OverrideFindingPayload` at findingsMock.ts:409-415. Atomic:
+        the route stamps the original `overridden` and inserts the
+        new revision in one transaction.
+      properties:
+        text:
+          type: string
+          description: Reviewer-authored finding body.
+        severity:
+          $ref: "#/components/schemas/FindingSeverity"
+        category:
+          $ref: "#/components/schemas/FindingCategory"
+        reviewerComment:
+          type: string
+          description: Optional explanation of why the AI's original was wrong.
+      required:
+        - text
+        - severity
+        - category
+        - reviewerComment

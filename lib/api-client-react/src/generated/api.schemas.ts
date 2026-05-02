@@ -2209,6 +2209,329 @@ export interface PromoteReviewerAnnotationsResponse {
   unknown: string[];
 }
 
+/**
+ * AIR-1 severity rubric (locked v1, see findingsMock.ts:41):
+  - blocker  — code violation requiring resolution before approval
+  - concern  — ambiguity or risk
+  - advisory — preference / coordination note
+
+ */
+export type FindingSeverity =
+  (typeof FindingSeverity)[keyof typeof FindingSeverity];
+
+export const FindingSeverity = {
+  blocker: "blocker",
+  concern: "concern",
+  advisory: "advisory",
+} as const;
+
+/**
+ * FIXED v1 category enum (findingsMock.ts:48-56). Adding a
+category is an event-modeled schema change, not a silent
+extension — keep this in lock-step with the schema-side enum.
+
+ */
+export type FindingCategory =
+  (typeof FindingCategory)[keyof typeof FindingCategory];
+
+export const FindingCategory = {
+  setback: "setback",
+  height: "height",
+  coverage: "coverage",
+  egress: "egress",
+  use: "use",
+  "overlay-conflict": "overlay-conflict",
+  "divergence-related": "divergence-related",
+  other: "other",
+} as const;
+
+/**
+ * Reviewer-state lifecycle. `ai-produced` is the engine's
+initial value; the accept / reject / override routes flip it.
+`promoted-to-architect` is reserved for a future "promote
+finding into a jurisdiction reply" endpoint.
+
+ */
+export type FindingStatus = (typeof FindingStatus)[keyof typeof FindingStatus];
+
+export const FindingStatus = {
+  "ai-produced": "ai-produced",
+  accepted: "accepted",
+  rejected: "rejected",
+  overridden: "overridden",
+  "promoted-to-architect": "promoted-to-architect",
+} as const;
+
+export type FindingActorKind =
+  (typeof FindingActorKind)[keyof typeof FindingActorKind];
+
+export const FindingActorKind = {
+  user: "user",
+  agent: "agent",
+  system: "system",
+} as const;
+
+/**
+ * Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on
+each reviewer mutation so the audit trail captures who acted.
+
+ */
+export interface FindingActor {
+  kind: FindingActorKind;
+  id: string;
+  displayName?: string | null;
+}
+
+export type FindingCodeCitationKind =
+  (typeof FindingCodeCitationKind)[keyof typeof FindingCodeCitationKind];
+
+export const FindingCodeCitationKind = {
+  "code-section": "code-section",
+} as const;
+
+/**
+ * Inline citation referencing a code-section atom.
+ */
+export interface FindingCodeCitation {
+  kind: FindingCodeCitationKind;
+  /** The atom id used in `[[CODE:<atomId>]]` tokens. Must
+resolve against the engine's reference block at
+generation time; unresolved tokens are stripped from
+`text` and reflected on the run row's
+`invalidCitationCount`.
+ */
+  atomId: string;
+}
+
+export type FindingSourceCitationKind =
+  (typeof FindingSourceCitationKind)[keyof typeof FindingSourceCitationKind];
+
+export const FindingSourceCitationKind = {
+  "briefing-source": "briefing-source",
+} as const;
+
+/**
+ * Inline citation referencing a briefing-source row.
+ */
+export interface FindingSourceCitation {
+  kind: FindingSourceCitationKind;
+  id: string;
+  /** Human-readable label used inside the inline token
+`{{atom|briefing-source|<id>|<label>}}`. Echoed on the
+citation pill the FE renders.
+ */
+  label: string;
+}
+
+export type FindingCitation = FindingCodeCitation | FindingSourceCitation;
+
+/**
+ * Pointer at the single backing briefing source for a finding.
+Distinct from the `citations` array (which can carry many).
+
+ */
+export interface FindingSourceRef {
+  id: string;
+  label: string;
+}
+
+/**
+ * One AIR-1 compliance finding. Wire shape mirrors
+`findingsMock.ts:82-103` so the V1-6 frontend swap is a
+single-file change. The `id` field is the public atom id
+(`finding:{submissionId}:{rowUuid}`) — see
+lib/db/src/schema/findings.ts column docs for the row pk vs
+atom id split.
+
+ */
+export interface Finding {
+  /** Public atom id. Carries the prefix grammar
+`finding:{submissionId}:{ulid}` so URL deep-links can
+derive the parent submission without a server round-trip.
+ */
+  id: string;
+  submissionId: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  status: FindingStatus;
+  /** Free-text body containing inline citation tokens. The
+engine's validator has already stripped any token whose
+id failed to resolve.
+ */
+  text: string;
+  citations: FindingCitation[];
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  confidence: number;
+  /** True iff the engine deemed this below the 0.6 threshold. */
+  lowConfidence: boolean;
+  reviewerStatusBy: FindingActor | null;
+  reviewerStatusChangedAt: string | null;
+  reviewerComment: string | null;
+  /** Opaque BIM-element pointer the FE drill-in resolves to
+a viewport selection (e.g. `wall:north-side-l2`).
+ */
+  elementRef: string | null;
+  sourceRef: FindingSourceRef | null;
+  /** When the engine produced the finding. Stamped at engine
+time, not at row insert.
+ */
+  aiGeneratedAt: string;
+  /** On override revisions, the original AI finding's atom id.
+Null on AI-produced and never-overridden rows.
+ */
+  revisionOf: string | null;
+}
+
+/**
+ * Single-finding wire envelope returned by accept / reject /
+override.
+
+ */
+export interface FindingResponse {
+  finding: Finding;
+}
+
+/**
+ * Wire envelope for `GET /submissions/{id}/findings`. Includes
+every row scoped to the submission — AI-produced, reviewer-
+actioned, and override revisions alike. Sorting is the FE's
+responsibility (severity then aiGeneratedAt; helper
+`compareFindings` in findingsMock.ts:533-538).
+
+ */
+export interface ListSubmissionFindingsResponse {
+  findings: Finding[];
+}
+
+/**
+ * Optional body for `POST /submissions/{id}/findings/generate`.
+Forward-looking — the V1-1 baseline ignores fields and always
+runs a fresh full generation. Documented here so callers can
+adopt the wire shape before regenerate semantics land.
+
+ */
+export interface GenerateSubmissionFindingsBody {
+  /** When true, signals an explicit redo. Currently
+informational — the route always runs a fresh generation.
+ */
+  regenerate?: boolean;
+}
+
+/**
+ * Initial state — almost always `pending` on the 202.
+ */
+export type GenerateSubmissionFindingsResponseState =
+  (typeof GenerateSubmissionFindingsResponseState)[keyof typeof GenerateSubmissionFindingsResponseState];
+
+export const GenerateSubmissionFindingsResponseState = {
+  pending: "pending",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+/**
+ * 202 envelope returned by `POST /submissions/{id}/findings/generate`.
+The job is identified by `generationId`; clients should poll
+`/findings/status` until `state` reaches a terminal value,
+then refetch `GET /findings` to read the persisted list.
+
+ */
+export interface GenerateSubmissionFindingsResponse {
+  /** Opaque id for this generation job. */
+  generationId: string;
+  /** Initial state — almost always `pending` on the 202. */
+  state: GenerateSubmissionFindingsResponseState;
+}
+
+export type SubmissionFindingsGenerationStatusResponseState =
+  (typeof SubmissionFindingsGenerationStatusResponseState)[keyof typeof SubmissionFindingsGenerationStatusResponseState];
+
+export const SubmissionFindingsGenerationStatusResponseState = {
+  idle: "idle",
+  pending: "pending",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+/**
+ * Wire envelope for `GET /submissions/{id}/findings/status`.
+State is persisted in `finding_runs`; the endpoint reads the
+most recent row by `submission_id` ordered by `started_at`
+DESC. Returns `idle` when no kickoff has ever run.
+
+ */
+export interface SubmissionFindingsGenerationStatusResponse {
+  generationId: string | null;
+  state: SubmissionFindingsGenerationStatusResponseState;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  invalidCitationCount: number | null;
+  invalidCitations: string[] | null;
+  /** Number of findings the engine produced that the discard
+rule (no surviving citations + no elementRef OR text too
+short) dropped entirely. Distinct dimension from
+`invalidCitationCount` — see findingRuns.ts column docs.
+Null while pending.
+ */
+  discardedFindingCount: number | null;
+}
+
+export type SubmissionFindingsGenerationRunState =
+  (typeof SubmissionFindingsGenerationRunState)[keyof typeof SubmissionFindingsGenerationRunState];
+
+export const SubmissionFindingsGenerationRunState = {
+  pending: "pending",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+/**
+ * One historical finding-generation attempt for a submission.
+Same shape as the status response minus the `idle` enum
+entry (idle = absence of a row, represented by omission).
+
+ */
+export interface SubmissionFindingsGenerationRun {
+  generationId: string;
+  state: SubmissionFindingsGenerationRunState;
+  startedAt: string;
+  completedAt: string | null;
+  error: string | null;
+  invalidCitationCount: number | null;
+  invalidCitations: string[] | null;
+  discardedFindingCount: number | null;
+}
+
+/**
+ * Wire envelope for `GET /submissions/{id}/findings/runs`.
+`runs` is the most recent attempts (newest first), capped by
+the sweep's per-submission keep value.
+
+ */
+export interface SubmissionFindingsGenerationRunsResponse {
+  runs: SubmissionFindingsGenerationRun[];
+}
+
+/**
+ * Body for `POST /findings/{id}/override`. Mirrors
+`OverrideFindingPayload` at findingsMock.ts:409-415. Atomic:
+the route stamps the original `overridden` and inserts the
+new revision in one transaction.
+
+ */
+export interface OverrideFindingBody {
+  /** Reviewer-authored finding body. */
+  text: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  /** Optional explanation of why the AI's original was wrong. */
+  reviewerComment: string;
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;

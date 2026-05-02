@@ -40,10 +40,13 @@ import type {
   EngagementSummary,
   ErrorResponse,
   ExportEngagementBriefingPdfParams,
+  FindingResponse,
   GenerateBriefingBody,
   GenerateBriefingResponse,
   GenerateEngagementLayersParams,
   GenerateLayersResponse,
+  GenerateSubmissionFindingsBody,
+  GenerateSubmissionFindingsResponse,
   GetAtomHistoryParams,
   GetAtomSummaryParams,
   GetSnapshotSheetHistoryParams,
@@ -55,9 +58,11 @@ import type {
   ListJurisdictionAtomsParams,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
+  ListSubmissionFindingsResponse,
   LocalSetbackTable,
   MatchEngagementBody,
   MatchEngagementResponse,
+  OverrideFindingBody,
   PromoteReviewerAnnotationsBody,
   PromoteReviewerAnnotationsResponse,
   PushBimModelBody,
@@ -77,6 +82,8 @@ import type {
   SnapshotReceipt,
   SnapshotSheetHistoryResponse,
   SnapshotSummary,
+  SubmissionFindingsGenerationRunsResponse,
+  SubmissionFindingsGenerationStatusResponse,
   SubmissionReceipt,
   SubmissionResponse,
   UpdateEngagementBody,
@@ -6159,4 +6166,738 @@ export const usePromoteReviewerAnnotations = <
   TContext
 > => {
   return useMutation(getPromoteReviewerAnnotationsMutationOptions(options));
+};
+
+/**
+ * Returns the current set of findings for a submission, newest
+first, after every reviewer mutation has been applied. The list
+includes overridden originals (status `overridden` with
+`revisionOf == null`) AND their revision rows
+(`revisionOf == originalAtomId`) so the FE drill-in can show
+the audit pair. AI-produced rows the engine emitted but a
+reviewer never touched carry status `ai-produced`.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary List the AI-produced findings for a submission
+ */
+export const getListSubmissionFindingsUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/findings`;
+};
+
+export const listSubmissionFindings = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<ListSubmissionFindingsResponse> => {
+  return customFetch<ListSubmissionFindingsResponse>(
+    getListSubmissionFindingsUrl(submissionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListSubmissionFindingsQueryKey = (submissionId: string) => {
+  return [`/api/submissions/${submissionId}/findings`] as const;
+};
+
+export const getListSubmissionFindingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSubmissionFindings>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionFindings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListSubmissionFindingsQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSubmissionFindings>>
+  > = ({ signal }) =>
+    listSubmissionFindings(submissionId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSubmissionFindings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSubmissionFindingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSubmissionFindings>>
+>;
+export type ListSubmissionFindingsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the AI-produced findings for a submission
+ */
+
+export function useListSubmissionFindings<
+  TData = Awaited<ReturnType<typeof listSubmissionFindings>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionFindings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSubmissionFindingsQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Asynchronously runs the AIR-1 finding engine
+(`@workspace/finding-engine`): reads the submission's parent
+engagement's current `briefing_sources`, retrieves a
+jurisdiction-scoped top-K of `code_atoms`, calls the LLM (or
+the deterministic mock when `AIR_FINDING_LLM_MODE=mock`),
+validates every citation token resolves to a known atom, and
+persists the surviving findings into `findings` rows scoped to
+the submission.
+
+Returns `202 Accepted` with a `generationId`; clients poll
+`GET /submissions/{id}/findings/status` until the job's
+`state` flips from `pending` to `completed` or `failed`.
+
+Single-flight: a generation already in flight for this
+submission is a 409 — the caller should poll the in-flight
+job's id rather than queueing a fresh run.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Kick off AI compliance-checker generation against a submission
+ */
+export const getGenerateSubmissionFindingsUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/findings/generate`;
+};
+
+export const generateSubmissionFindings = async (
+  submissionId: string,
+  generateSubmissionFindingsBody?: GenerateSubmissionFindingsBody,
+  options?: RequestInit,
+): Promise<GenerateSubmissionFindingsResponse> => {
+  return customFetch<GenerateSubmissionFindingsResponse>(
+    getGenerateSubmissionFindingsUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(generateSubmissionFindingsBody),
+    },
+  );
+};
+
+export const getGenerateSubmissionFindingsMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSubmissionFindings>>,
+    TError,
+    { submissionId: string; data: BodyType<GenerateSubmissionFindingsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateSubmissionFindings>>,
+  TError,
+  { submissionId: string; data: BodyType<GenerateSubmissionFindingsBody> },
+  TContext
+> => {
+  const mutationKey = ["generateSubmissionFindings"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateSubmissionFindings>>,
+    { submissionId: string; data: BodyType<GenerateSubmissionFindingsBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return generateSubmissionFindings(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateSubmissionFindingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateSubmissionFindings>>
+>;
+export type GenerateSubmissionFindingsMutationBody =
+  BodyType<GenerateSubmissionFindingsBody>;
+export type GenerateSubmissionFindingsMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Kick off AI compliance-checker generation against a submission
+ */
+export const useGenerateSubmissionFindings = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSubmissionFindings>>,
+    TError,
+    { submissionId: string; data: BodyType<GenerateSubmissionFindingsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateSubmissionFindings>>,
+  TError,
+  { submissionId: string; data: BodyType<GenerateSubmissionFindingsBody> },
+  TContext
+> => {
+  return useMutation(getGenerateSubmissionFindingsMutationOptions(options));
+};
+
+/**
+ * Returns the most recent generation job's outcome for the
+submission so the UI can poll until the run settles. Job state
+is persisted in `finding_runs` (one row per kickoff), so it
+survives api-server restarts and stays coherent across
+multiple instances. The persisted findings on
+`GET /submissions/{id}/findings` remain the source of truth
+for the list itself; this endpoint is the mechanism the UI
+uses to know when the list has landed.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Poll the most recent finding-generation job
+ */
+export const getGetSubmissionFindingsGenerationStatusUrl = (
+  submissionId: string,
+) => {
+  return `/api/submissions/${submissionId}/findings/status`;
+};
+
+export const getSubmissionFindingsGenerationStatus = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<SubmissionFindingsGenerationStatusResponse> => {
+  return customFetch<SubmissionFindingsGenerationStatusResponse>(
+    getGetSubmissionFindingsGenerationStatusUrl(submissionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetSubmissionFindingsGenerationStatusQueryKey = (
+  submissionId: string,
+) => {
+  return [`/api/submissions/${submissionId}/findings/status`] as const;
+};
+
+export const getGetSubmissionFindingsGenerationStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSubmissionFindingsGenerationStatus>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSubmissionFindingsGenerationStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetSubmissionFindingsGenerationStatusQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSubmissionFindingsGenerationStatus>>
+  > = ({ signal }) =>
+    getSubmissionFindingsGenerationStatus(submissionId, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSubmissionFindingsGenerationStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSubmissionFindingsGenerationStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSubmissionFindingsGenerationStatus>>
+>;
+export type GetSubmissionFindingsGenerationStatusQueryError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Poll the most recent finding-generation job
+ */
+
+export function useGetSubmissionFindingsGenerationStatus<
+  TData = Awaited<ReturnType<typeof getSubmissionFindingsGenerationStatus>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSubmissionFindingsGenerationStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSubmissionFindingsGenerationStatusQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns the most recent finding-generation job rows for the
+submission, ordered by `startedAt` DESC. Capped at the same
+per-submission keep value the sweep uses (default 5,
+overridable via `FINDING_RUNS_KEEP_PER_SUBMISSION`) so the API
+and the sweep cannot drift.
+
+Surfaces what `GET /findings/status` deliberately collapses to
+a single row: an auditor investigating a regression needs the
+prior attempts' outcomes (state, timestamps, error,
+invalidCitationCount, discardedFindingCount) without SSHing
+into the database.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary List the most recent finding-generation attempts
+ */
+export const getListSubmissionFindingsGenerationRunsUrl = (
+  submissionId: string,
+) => {
+  return `/api/submissions/${submissionId}/findings/runs`;
+};
+
+export const listSubmissionFindingsGenerationRuns = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<SubmissionFindingsGenerationRunsResponse> => {
+  return customFetch<SubmissionFindingsGenerationRunsResponse>(
+    getListSubmissionFindingsGenerationRunsUrl(submissionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListSubmissionFindingsGenerationRunsQueryKey = (
+  submissionId: string,
+) => {
+  return [`/api/submissions/${submissionId}/findings/runs`] as const;
+};
+
+export const getListSubmissionFindingsGenerationRunsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSubmissionFindingsGenerationRuns>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionFindingsGenerationRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListSubmissionFindingsGenerationRunsQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSubmissionFindingsGenerationRuns>>
+  > = ({ signal }) =>
+    listSubmissionFindingsGenerationRuns(submissionId, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSubmissionFindingsGenerationRuns>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSubmissionFindingsGenerationRunsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSubmissionFindingsGenerationRuns>>
+>;
+export type ListSubmissionFindingsGenerationRunsQueryError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the most recent finding-generation attempts
+ */
+
+export function useListSubmissionFindingsGenerationRuns<
+  TData = Awaited<ReturnType<typeof listSubmissionFindingsGenerationRuns>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionFindingsGenerationRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSubmissionFindingsGenerationRunsQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Stamps the finding's status to `accepted` plus the reviewer
+attribution (`reviewerStatusBy`, `reviewerStatusChangedAt`).
+The original AI-produced text is preserved in place — accept
+does not edit the body. Emits `finding.accepted` on the
+finding's history chain.
+
+Idempotent: re-accepting an already-accepted finding refreshes
+the reviewer attribution timestamp. Acceptance from the
+`overridden` or `rejected` state is a 409 — use override to
+change a previously-actioned finding.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Mark a finding as accepted by the reviewer
+ */
+export const getAcceptFindingUrl = (findingId: string) => {
+  return `/api/findings/${findingId}/accept`;
+};
+
+export const acceptFinding = async (
+  findingId: string,
+  options?: RequestInit,
+): Promise<FindingResponse> => {
+  return customFetch<FindingResponse>(getAcceptFindingUrl(findingId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAcceptFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptFinding>>,
+    TError,
+    { findingId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acceptFinding>>,
+  TError,
+  { findingId: string },
+  TContext
+> => {
+  const mutationKey = ["acceptFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acceptFinding>>,
+    { findingId: string }
+  > = (props) => {
+    const { findingId } = props ?? {};
+
+    return acceptFinding(findingId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcceptFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acceptFinding>>
+>;
+
+export type AcceptFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Mark a finding as accepted by the reviewer
+ */
+export const useAcceptFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptFinding>>,
+    TError,
+    { findingId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof acceptFinding>>,
+  TError,
+  { findingId: string },
+  TContext
+> => {
+  return useMutation(getAcceptFindingMutationOptions(options));
+};
+
+/**
+ * Stamps the finding's status to `rejected` plus reviewer
+attribution. Emits `finding.rejected` on the finding's
+history chain.
+
+Idempotent: re-rejecting refreshes the reviewer timestamp.
+Rejection from `overridden` is a 409.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Mark a finding as rejected by the reviewer
+ */
+export const getRejectFindingUrl = (findingId: string) => {
+  return `/api/findings/${findingId}/reject`;
+};
+
+export const rejectFinding = async (
+  findingId: string,
+  options?: RequestInit,
+): Promise<FindingResponse> => {
+  return customFetch<FindingResponse>(getRejectFindingUrl(findingId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRejectFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectFinding>>,
+    TError,
+    { findingId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof rejectFinding>>,
+  TError,
+  { findingId: string },
+  TContext
+> => {
+  const mutationKey = ["rejectFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof rejectFinding>>,
+    { findingId: string }
+  > = (props) => {
+    const { findingId } = props ?? {};
+
+    return rejectFinding(findingId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RejectFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof rejectFinding>>
+>;
+
+export type RejectFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Mark a finding as rejected by the reviewer
+ */
+export const useRejectFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectFinding>>,
+    TError,
+    { findingId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof rejectFinding>>,
+  TError,
+  { findingId: string },
+  TContext
+> => {
+  return useMutation(getRejectFindingMutationOptions(options));
+};
+
+/**
+ * Creates a NEW finding row containing the reviewer's revised
+text/severity/category, with `revisionOf` pointing back at the
+original. The original is preserved in place with status
+`overridden` so the drill-in's "See AI's original" affordance
+keeps reading it. Both writes commit in one transaction.
+Emits `finding.overridden` on the original's history chain.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Override a finding with a reviewer-authored revision
+ */
+export const getOverrideFindingUrl = (findingId: string) => {
+  return `/api/findings/${findingId}/override`;
+};
+
+export const overrideFinding = async (
+  findingId: string,
+  overrideFindingBody: OverrideFindingBody,
+  options?: RequestInit,
+): Promise<FindingResponse> => {
+  return customFetch<FindingResponse>(getOverrideFindingUrl(findingId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(overrideFindingBody),
+  });
+};
+
+export const getOverrideFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof overrideFinding>>,
+    TError,
+    { findingId: string; data: BodyType<OverrideFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof overrideFinding>>,
+  TError,
+  { findingId: string; data: BodyType<OverrideFindingBody> },
+  TContext
+> => {
+  const mutationKey = ["overrideFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof overrideFinding>>,
+    { findingId: string; data: BodyType<OverrideFindingBody> }
+  > = (props) => {
+    const { findingId, data } = props ?? {};
+
+    return overrideFinding(findingId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type OverrideFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof overrideFinding>>
+>;
+export type OverrideFindingMutationBody = BodyType<OverrideFindingBody>;
+export type OverrideFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Override a finding with a reviewer-authored revision
+ */
+export const useOverrideFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof overrideFinding>>,
+    TError,
+    { findingId: string; data: BodyType<OverrideFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof overrideFinding>>,
+  TError,
+  { findingId: string; data: BodyType<OverrideFindingBody> },
+  TContext
+> => {
+  return useMutation(getOverrideFindingMutationOptions(options));
 };

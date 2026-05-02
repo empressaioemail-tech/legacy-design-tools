@@ -3871,3 +3871,741 @@ export const PromoteReviewerAnnotationsResponse = zod
   .describe(
     "Wire envelope for the multi-promote endpoint. `promoted` carries\nevery annotation row that flipped from reviewer-only to\npromoted on this call (idempotent: already-promoted ids land in\n`alreadyPromoted` instead). `unknown` reports any ids in the\nrequest body that did not resolve to an annotation under the\nsubmission so the caller can surface the mismatch.\n",
   );
+
+/**
+ * Returns the current set of findings for a submission, newest
+first, after every reviewer mutation has been applied. The list
+includes overridden originals (status `overridden` with
+`revisionOf == null`) AND their revision rows
+(`revisionOf == originalAtomId`) so the FE drill-in can show
+the audit pair. AI-produced rows the engine emitted but a
+reviewer never touched carry status `ai-produced`.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary List the AI-produced findings for a submission
+ */
+export const ListSubmissionFindingsParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const listSubmissionFindingsResponseFindingsItemConfidenceMin = 0;
+export const listSubmissionFindingsResponseFindingsItemConfidenceMax = 1;
+
+export const ListSubmissionFindingsResponse = zod
+  .object({
+    findings: zod.array(
+      zod
+        .object({
+          id: zod
+            .string()
+            .describe(
+              "Public atom id. Carries the prefix grammar\n`finding:{submissionId}:{ulid}` so URL deep-links can\nderive the parent submission without a server round-trip.\n",
+            ),
+          submissionId: zod.string(),
+          severity: zod
+            .enum(["blocker", "concern", "advisory"])
+            .describe(
+              "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+            ),
+          category: zod
+            .enum([
+              "setback",
+              "height",
+              "coverage",
+              "egress",
+              "use",
+              "overlay-conflict",
+              "divergence-related",
+              "other",
+            ])
+            .describe(
+              "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+            ),
+          status: zod
+            .enum([
+              "ai-produced",
+              "accepted",
+              "rejected",
+              "overridden",
+              "promoted-to-architect",
+            ])
+            .describe(
+              'Reviewer-state lifecycle. `ai-produced` is the engine\'s\ninitial value; the accept \/ reject \/ override routes flip it.\n`promoted-to-architect` is reserved for a future \"promote\nfinding into a jurisdiction reply\" endpoint.\n',
+            ),
+          text: zod
+            .string()
+            .describe(
+              "Free-text body containing inline citation tokens. The\nengine's validator has already stripped any token whose\nid failed to resolve.\n",
+            ),
+          citations: zod.array(
+            zod.union([
+              zod
+                .object({
+                  kind: zod.enum(["code-section"]),
+                  atomId: zod
+                    .string()
+                    .describe(
+                      "The atom id used in `[[CODE:<atomId>]]` tokens. Must\nresolve against the engine's reference block at\ngeneration time; unresolved tokens are stripped from\n`text` and reflected on the run row's\n`invalidCitationCount`.\n",
+                    ),
+                })
+                .describe("Inline citation referencing a code-section atom."),
+              zod
+                .object({
+                  kind: zod.enum(["briefing-source"]),
+                  id: zod.string(),
+                  label: zod
+                    .string()
+                    .describe(
+                      "Human-readable label used inside the inline token\n`{{atom|briefing-source|<id>|<label>}}`. Echoed on the\ncitation pill the FE renders.\n",
+                    ),
+                })
+                .describe("Inline citation referencing a briefing-source row."),
+            ]),
+          ),
+          confidence: zod
+            .number()
+            .min(listSubmissionFindingsResponseFindingsItemConfidenceMin)
+            .max(listSubmissionFindingsResponseFindingsItemConfidenceMax),
+          lowConfidence: zod
+            .boolean()
+            .describe(
+              "True iff the engine deemed this below the 0.6 threshold.",
+            ),
+          reviewerStatusBy: zod
+            .object({
+              kind: zod.enum(["user", "agent", "system"]),
+              id: zod.string(),
+              displayName: zod.string().nullish(),
+            })
+            .describe(
+              "Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on\neach reviewer mutation so the audit trail captures who acted.\n",
+            )
+            .nullable(),
+          reviewerStatusChangedAt: zod.coerce.date().nullable(),
+          reviewerComment: zod.string().nullable(),
+          elementRef: zod
+            .string()
+            .nullable()
+            .describe(
+              "Opaque BIM-element pointer the FE drill-in resolves to\na viewport selection (e.g. `wall:north-side-l2`).\n",
+            ),
+          sourceRef: zod
+            .object({
+              id: zod.string(),
+              label: zod.string(),
+            })
+            .describe(
+              "Pointer at the single backing briefing source for a finding.\nDistinct from the `citations` array (which can carry many).\n",
+            )
+            .nullable(),
+          aiGeneratedAt: zod.coerce
+            .date()
+            .describe(
+              "When the engine produced the finding. Stamped at engine\ntime, not at row insert.\n",
+            ),
+          revisionOf: zod
+            .string()
+            .nullable()
+            .describe(
+              "On override revisions, the original AI finding's atom id.\nNull on AI-produced and never-overridden rows.\n",
+            ),
+        })
+        .describe(
+          "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/submissions\/{id}\/findings`. Includes\nevery row scoped to the submission — AI-produced, reviewer-\nactioned, and override revisions alike. Sorting is the FE's\nresponsibility (severity then aiGeneratedAt; helper\n`compareFindings` in findingsMock.ts:533-538).\n",
+  );
+
+/**
+ * Asynchronously runs the AIR-1 finding engine
+(`@workspace/finding-engine`): reads the submission's parent
+engagement's current `briefing_sources`, retrieves a
+jurisdiction-scoped top-K of `code_atoms`, calls the LLM (or
+the deterministic mock when `AIR_FINDING_LLM_MODE=mock`),
+validates every citation token resolves to a known atom, and
+persists the surviving findings into `findings` rows scoped to
+the submission.
+
+Returns `202 Accepted` with a `generationId`; clients poll
+`GET /submissions/{id}/findings/status` until the job's
+`state` flips from `pending` to `completed` or `failed`.
+
+Single-flight: a generation already in flight for this
+submission is a 409 — the caller should poll the in-flight
+job's id rather than queueing a fresh run.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Kick off AI compliance-checker generation against a submission
+ */
+export const GenerateSubmissionFindingsParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const GenerateSubmissionFindingsBody = zod
+  .object({
+    regenerate: zod
+      .boolean()
+      .optional()
+      .describe(
+        "When true, signals an explicit redo. Currently\ninformational — the route always runs a fresh generation.\n",
+      ),
+  })
+  .describe(
+    "Optional body for `POST \/submissions\/{id}\/findings\/generate`.\nForward-looking — the V1-1 baseline ignores fields and always\nruns a fresh full generation. Documented here so callers can\nadopt the wire shape before regenerate semantics land.\n",
+  );
+
+/**
+ * Returns the most recent generation job's outcome for the
+submission so the UI can poll until the run settles. Job state
+is persisted in `finding_runs` (one row per kickoff), so it
+survives api-server restarts and stays coherent across
+multiple instances. The persisted findings on
+`GET /submissions/{id}/findings` remain the source of truth
+for the list itself; this endpoint is the mechanism the UI
+uses to know when the list has landed.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Poll the most recent finding-generation job
+ */
+export const GetSubmissionFindingsGenerationStatusParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const GetSubmissionFindingsGenerationStatusResponse = zod
+  .object({
+    generationId: zod.string().nullable(),
+    state: zod.enum(["idle", "pending", "completed", "failed"]),
+    startedAt: zod.coerce.date().nullable(),
+    completedAt: zod.coerce.date().nullable(),
+    error: zod.string().nullable(),
+    invalidCitationCount: zod.number().nullable(),
+    invalidCitations: zod.array(zod.string()).nullable(),
+    discardedFindingCount: zod
+      .number()
+      .nullable()
+      .describe(
+        "Number of findings the engine produced that the discard\nrule (no surviving citations + no elementRef OR text too\nshort) dropped entirely. Distinct dimension from\n`invalidCitationCount` — see findingRuns.ts column docs.\nNull while pending.\n",
+      ),
+  })
+  .describe(
+    "Wire envelope for `GET \/submissions\/{id}\/findings\/status`.\nState is persisted in `finding_runs`; the endpoint reads the\nmost recent row by `submission_id` ordered by `started_at`\nDESC. Returns `idle` when no kickoff has ever run.\n",
+  );
+
+/**
+ * Returns the most recent finding-generation job rows for the
+submission, ordered by `startedAt` DESC. Capped at the same
+per-submission keep value the sweep uses (default 5,
+overridable via `FINDING_RUNS_KEEP_PER_SUBMISSION`) so the API
+and the sweep cannot drift.
+
+Surfaces what `GET /findings/status` deliberately collapses to
+a single row: an auditor investigating a regression needs the
+prior attempts' outcomes (state, timestamps, error,
+invalidCitationCount, discardedFindingCount) without SSHing
+into the database.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary List the most recent finding-generation attempts
+ */
+export const ListSubmissionFindingsGenerationRunsParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const ListSubmissionFindingsGenerationRunsResponse = zod
+  .object({
+    runs: zod.array(
+      zod
+        .object({
+          generationId: zod.string(),
+          state: zod.enum(["pending", "completed", "failed"]),
+          startedAt: zod.coerce.date(),
+          completedAt: zod.coerce.date().nullable(),
+          error: zod.string().nullable(),
+          invalidCitationCount: zod.number().nullable(),
+          invalidCitations: zod.array(zod.string()).nullable(),
+          discardedFindingCount: zod.number().nullable(),
+        })
+        .describe(
+          "One historical finding-generation attempt for a submission.\nSame shape as the status response minus the `idle` enum\nentry (idle = absence of a row, represented by omission).\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/submissions\/{id}\/findings\/runs`.\n`runs` is the most recent attempts (newest first), capped by\nthe sweep's per-submission keep value.\n",
+  );
+
+/**
+ * Stamps the finding's status to `accepted` plus the reviewer
+attribution (`reviewerStatusBy`, `reviewerStatusChangedAt`).
+The original AI-produced text is preserved in place — accept
+does not edit the body. Emits `finding.accepted` on the
+finding's history chain.
+
+Idempotent: re-accepting an already-accepted finding refreshes
+the reviewer attribution timestamp. Acceptance from the
+`overridden` or `rejected` state is a 409 — use override to
+change a previously-actioned finding.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Mark a finding as accepted by the reviewer
+ */
+export const AcceptFindingParams = zod.object({
+  findingId: zod.coerce
+    .string()
+    .describe("The finding's atom id (`finding:{submissionId}:{ulid}`)."),
+});
+
+export const acceptFindingResponseFindingConfidenceMin = 0;
+export const acceptFindingResponseFindingConfidenceMax = 1;
+
+export const AcceptFindingResponse = zod
+  .object({
+    finding: zod
+      .object({
+        id: zod
+          .string()
+          .describe(
+            "Public atom id. Carries the prefix grammar\n`finding:{submissionId}:{ulid}` so URL deep-links can\nderive the parent submission without a server round-trip.\n",
+          ),
+        submissionId: zod.string(),
+        severity: zod
+          .enum(["blocker", "concern", "advisory"])
+          .describe(
+            "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+          ),
+        category: zod
+          .enum([
+            "setback",
+            "height",
+            "coverage",
+            "egress",
+            "use",
+            "overlay-conflict",
+            "divergence-related",
+            "other",
+          ])
+          .describe(
+            "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+          ),
+        status: zod
+          .enum([
+            "ai-produced",
+            "accepted",
+            "rejected",
+            "overridden",
+            "promoted-to-architect",
+          ])
+          .describe(
+            'Reviewer-state lifecycle. `ai-produced` is the engine\'s\ninitial value; the accept \/ reject \/ override routes flip it.\n`promoted-to-architect` is reserved for a future \"promote\nfinding into a jurisdiction reply\" endpoint.\n',
+          ),
+        text: zod
+          .string()
+          .describe(
+            "Free-text body containing inline citation tokens. The\nengine's validator has already stripped any token whose\nid failed to resolve.\n",
+          ),
+        citations: zod.array(
+          zod.union([
+            zod
+              .object({
+                kind: zod.enum(["code-section"]),
+                atomId: zod
+                  .string()
+                  .describe(
+                    "The atom id used in `[[CODE:<atomId>]]` tokens. Must\nresolve against the engine's reference block at\ngeneration time; unresolved tokens are stripped from\n`text` and reflected on the run row's\n`invalidCitationCount`.\n",
+                  ),
+              })
+              .describe("Inline citation referencing a code-section atom."),
+            zod
+              .object({
+                kind: zod.enum(["briefing-source"]),
+                id: zod.string(),
+                label: zod
+                  .string()
+                  .describe(
+                    "Human-readable label used inside the inline token\n`{{atom|briefing-source|<id>|<label>}}`. Echoed on the\ncitation pill the FE renders.\n",
+                  ),
+              })
+              .describe("Inline citation referencing a briefing-source row."),
+          ]),
+        ),
+        confidence: zod
+          .number()
+          .min(acceptFindingResponseFindingConfidenceMin)
+          .max(acceptFindingResponseFindingConfidenceMax),
+        lowConfidence: zod
+          .boolean()
+          .describe("True iff the engine deemed this below the 0.6 threshold."),
+        reviewerStatusBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on\neach reviewer mutation so the audit trail captures who acted.\n",
+          )
+          .nullable(),
+        reviewerStatusChangedAt: zod.coerce.date().nullable(),
+        reviewerComment: zod.string().nullable(),
+        elementRef: zod
+          .string()
+          .nullable()
+          .describe(
+            "Opaque BIM-element pointer the FE drill-in resolves to\na viewport selection (e.g. `wall:north-side-l2`).\n",
+          ),
+        sourceRef: zod
+          .object({
+            id: zod.string(),
+            label: zod.string(),
+          })
+          .describe(
+            "Pointer at the single backing briefing source for a finding.\nDistinct from the `citations` array (which can carry many).\n",
+          )
+          .nullable(),
+        aiGeneratedAt: zod.coerce
+          .date()
+          .describe(
+            "When the engine produced the finding. Stamped at engine\ntime, not at row insert.\n",
+          ),
+        revisionOf: zod
+          .string()
+          .nullable()
+          .describe(
+            "On override revisions, the original AI finding's atom id.\nNull on AI-produced and never-overridden rows.\n",
+          ),
+      })
+      .describe(
+        "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
+      ),
+  })
+  .describe(
+    "Single-finding wire envelope returned by accept \/ reject \/\noverride.\n",
+  );
+
+/**
+ * Stamps the finding's status to `rejected` plus reviewer
+attribution. Emits `finding.rejected` on the finding's
+history chain.
+
+Idempotent: re-rejecting refreshes the reviewer timestamp.
+Rejection from `overridden` is a 409.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Mark a finding as rejected by the reviewer
+ */
+export const RejectFindingParams = zod.object({
+  findingId: zod.coerce
+    .string()
+    .describe("The finding's atom id (`finding:{submissionId}:{ulid}`)."),
+});
+
+export const rejectFindingResponseFindingConfidenceMin = 0;
+export const rejectFindingResponseFindingConfidenceMax = 1;
+
+export const RejectFindingResponse = zod
+  .object({
+    finding: zod
+      .object({
+        id: zod
+          .string()
+          .describe(
+            "Public atom id. Carries the prefix grammar\n`finding:{submissionId}:{ulid}` so URL deep-links can\nderive the parent submission without a server round-trip.\n",
+          ),
+        submissionId: zod.string(),
+        severity: zod
+          .enum(["blocker", "concern", "advisory"])
+          .describe(
+            "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+          ),
+        category: zod
+          .enum([
+            "setback",
+            "height",
+            "coverage",
+            "egress",
+            "use",
+            "overlay-conflict",
+            "divergence-related",
+            "other",
+          ])
+          .describe(
+            "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+          ),
+        status: zod
+          .enum([
+            "ai-produced",
+            "accepted",
+            "rejected",
+            "overridden",
+            "promoted-to-architect",
+          ])
+          .describe(
+            'Reviewer-state lifecycle. `ai-produced` is the engine\'s\ninitial value; the accept \/ reject \/ override routes flip it.\n`promoted-to-architect` is reserved for a future \"promote\nfinding into a jurisdiction reply\" endpoint.\n',
+          ),
+        text: zod
+          .string()
+          .describe(
+            "Free-text body containing inline citation tokens. The\nengine's validator has already stripped any token whose\nid failed to resolve.\n",
+          ),
+        citations: zod.array(
+          zod.union([
+            zod
+              .object({
+                kind: zod.enum(["code-section"]),
+                atomId: zod
+                  .string()
+                  .describe(
+                    "The atom id used in `[[CODE:<atomId>]]` tokens. Must\nresolve against the engine's reference block at\ngeneration time; unresolved tokens are stripped from\n`text` and reflected on the run row's\n`invalidCitationCount`.\n",
+                  ),
+              })
+              .describe("Inline citation referencing a code-section atom."),
+            zod
+              .object({
+                kind: zod.enum(["briefing-source"]),
+                id: zod.string(),
+                label: zod
+                  .string()
+                  .describe(
+                    "Human-readable label used inside the inline token\n`{{atom|briefing-source|<id>|<label>}}`. Echoed on the\ncitation pill the FE renders.\n",
+                  ),
+              })
+              .describe("Inline citation referencing a briefing-source row."),
+          ]),
+        ),
+        confidence: zod
+          .number()
+          .min(rejectFindingResponseFindingConfidenceMin)
+          .max(rejectFindingResponseFindingConfidenceMax),
+        lowConfidence: zod
+          .boolean()
+          .describe("True iff the engine deemed this below the 0.6 threshold."),
+        reviewerStatusBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on\neach reviewer mutation so the audit trail captures who acted.\n",
+          )
+          .nullable(),
+        reviewerStatusChangedAt: zod.coerce.date().nullable(),
+        reviewerComment: zod.string().nullable(),
+        elementRef: zod
+          .string()
+          .nullable()
+          .describe(
+            "Opaque BIM-element pointer the FE drill-in resolves to\na viewport selection (e.g. `wall:north-side-l2`).\n",
+          ),
+        sourceRef: zod
+          .object({
+            id: zod.string(),
+            label: zod.string(),
+          })
+          .describe(
+            "Pointer at the single backing briefing source for a finding.\nDistinct from the `citations` array (which can carry many).\n",
+          )
+          .nullable(),
+        aiGeneratedAt: zod.coerce
+          .date()
+          .describe(
+            "When the engine produced the finding. Stamped at engine\ntime, not at row insert.\n",
+          ),
+        revisionOf: zod
+          .string()
+          .nullable()
+          .describe(
+            "On override revisions, the original AI finding's atom id.\nNull on AI-produced and never-overridden rows.\n",
+          ),
+      })
+      .describe(
+        "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
+      ),
+  })
+  .describe(
+    "Single-finding wire envelope returned by accept \/ reject \/\noverride.\n",
+  );
+
+/**
+ * Creates a NEW finding row containing the reviewer's revised
+text/severity/category, with `revisionOf` pointing back at the
+original. The original is preserved in place with status
+`overridden` so the drill-in's "See AI's original" affordance
+keeps reading it. Both writes commit in one transaction.
+Emits `finding.overridden` on the original's history chain.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Override a finding with a reviewer-authored revision
+ */
+export const OverrideFindingParams = zod.object({
+  findingId: zod.coerce
+    .string()
+    .describe("The finding's atom id (`finding:{submissionId}:{ulid}`)."),
+});
+
+export const OverrideFindingBody = zod
+  .object({
+    text: zod.string().describe("Reviewer-authored finding body."),
+    severity: zod
+      .enum(["blocker", "concern", "advisory"])
+      .describe(
+        "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+      ),
+    category: zod
+      .enum([
+        "setback",
+        "height",
+        "coverage",
+        "egress",
+        "use",
+        "overlay-conflict",
+        "divergence-related",
+        "other",
+      ])
+      .describe(
+        "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+      ),
+    reviewerComment: zod
+      .string()
+      .describe("Optional explanation of why the AI's original was wrong."),
+  })
+  .describe(
+    "Body for `POST \/findings\/{id}\/override`. Mirrors\n`OverrideFindingPayload` at findingsMock.ts:409-415. Atomic:\nthe route stamps the original `overridden` and inserts the\nnew revision in one transaction.\n",
+  );
+
+export const overrideFindingResponseFindingConfidenceMin = 0;
+export const overrideFindingResponseFindingConfidenceMax = 1;
+
+export const OverrideFindingResponse = zod
+  .object({
+    finding: zod
+      .object({
+        id: zod
+          .string()
+          .describe(
+            "Public atom id. Carries the prefix grammar\n`finding:{submissionId}:{ulid}` so URL deep-links can\nderive the parent submission without a server round-trip.\n",
+          ),
+        submissionId: zod.string(),
+        severity: zod
+          .enum(["blocker", "concern", "advisory"])
+          .describe(
+            "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+          ),
+        category: zod
+          .enum([
+            "setback",
+            "height",
+            "coverage",
+            "egress",
+            "use",
+            "overlay-conflict",
+            "divergence-related",
+            "other",
+          ])
+          .describe(
+            "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+          ),
+        status: zod
+          .enum([
+            "ai-produced",
+            "accepted",
+            "rejected",
+            "overridden",
+            "promoted-to-architect",
+          ])
+          .describe(
+            'Reviewer-state lifecycle. `ai-produced` is the engine\'s\ninitial value; the accept \/ reject \/ override routes flip it.\n`promoted-to-architect` is reserved for a future \"promote\nfinding into a jurisdiction reply\" endpoint.\n',
+          ),
+        text: zod
+          .string()
+          .describe(
+            "Free-text body containing inline citation tokens. The\nengine's validator has already stripped any token whose\nid failed to resolve.\n",
+          ),
+        citations: zod.array(
+          zod.union([
+            zod
+              .object({
+                kind: zod.enum(["code-section"]),
+                atomId: zod
+                  .string()
+                  .describe(
+                    "The atom id used in `[[CODE:<atomId>]]` tokens. Must\nresolve against the engine's reference block at\ngeneration time; unresolved tokens are stripped from\n`text` and reflected on the run row's\n`invalidCitationCount`.\n",
+                  ),
+              })
+              .describe("Inline citation referencing a code-section atom."),
+            zod
+              .object({
+                kind: zod.enum(["briefing-source"]),
+                id: zod.string(),
+                label: zod
+                  .string()
+                  .describe(
+                    "Human-readable label used inside the inline token\n`{{atom|briefing-source|<id>|<label>}}`. Echoed on the\ncitation pill the FE renders.\n",
+                  ),
+              })
+              .describe("Inline citation referencing a briefing-source row."),
+          ]),
+        ),
+        confidence: zod
+          .number()
+          .min(overrideFindingResponseFindingConfidenceMin)
+          .max(overrideFindingResponseFindingConfidenceMax),
+        lowConfidence: zod
+          .boolean()
+          .describe("True iff the engine deemed this below the 0.6 threshold."),
+        reviewerStatusBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on\neach reviewer mutation so the audit trail captures who acted.\n",
+          )
+          .nullable(),
+        reviewerStatusChangedAt: zod.coerce.date().nullable(),
+        reviewerComment: zod.string().nullable(),
+        elementRef: zod
+          .string()
+          .nullable()
+          .describe(
+            "Opaque BIM-element pointer the FE drill-in resolves to\na viewport selection (e.g. `wall:north-side-l2`).\n",
+          ),
+        sourceRef: zod
+          .object({
+            id: zod.string(),
+            label: zod.string(),
+          })
+          .describe(
+            "Pointer at the single backing briefing source for a finding.\nDistinct from the `citations` array (which can carry many).\n",
+          )
+          .nullable(),
+        aiGeneratedAt: zod.coerce
+          .date()
+          .describe(
+            "When the engine produced the finding. Stamped at engine\ntime, not at row insert.\n",
+          ),
+        revisionOf: zod
+          .string()
+          .nullable()
+          .describe(
+            "On override revisions, the original AI finding's atom id.\nNull on AI-produced and never-overridden rows.\n",
+          ),
+      })
+      .describe(
+        "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
+      ),
+  })
+  .describe(
+    "Single-finding wire envelope returned by accept \/ reject \/\noverride.\n",
+  );
