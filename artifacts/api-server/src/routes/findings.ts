@@ -39,17 +39,25 @@ import {
 } from "express";
 import {
   db,
+  engagements,
   findings,
   findingRuns,
   submissions,
   parcelBriefings,
   briefingSources,
+  materializableElements,
   type Finding,
   type FindingRun,
   type Submission,
   type BriefingSource,
+  type MaterializableElement,
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import {
+  keyFromEngagement,
+  retrieveAtomsForQuestion,
+  type RetrievedAtom,
+} from "@workspace/codes";
 import {
   AcceptFindingParams,
   GenerateSubmissionFindingsBody,
@@ -63,6 +71,7 @@ import {
 } from "@workspace/api-zod";
 import {
   generateFindings,
+  type BimElementInput,
   type BriefingSourceInput,
   type CodeSectionInput,
   type EngineFinding,
@@ -139,6 +148,26 @@ function resolveKeepPerSubmission(): number {
   if (!Number.isFinite(n) || n <= 0) return DEFAULT_KEEP_PER_SUBMISSION;
   return n;
 }
+
+/**
+ * Top-K cap for the per-submission code-atom retrieval that feeds the
+ * finding engine's `<reference_code_atoms>` block. Matches `chat.ts`'s
+ * `MAX_RETRIEVED_ATOMS = 8` precedent (the original V1-1 implementation
+ * notes claimed K=12 — that was wrong; the chat path has always been 8,
+ * and V1-7 Phase 1A confirmed alignment).
+ */
+const MAX_FINDING_RETRIEVED_ATOMS = 8;
+
+/**
+ * Hard cap on the briefing-narrative excerpt used as the retrieval
+ * query. The full A–G narrative can run multiple KB; embedding models
+ * accept long inputs but a tighter window keeps the embedding focused
+ * on the parcel-specific signal at the top of the narrative
+ * (executive summary + threshold issues), which is where vector
+ * relevance is concentrated for the kinds of compliance questions the
+ * engine surfaces.
+ */
+const RETRIEVAL_QUERY_MAX_CHARS = 1500;
 
 interface FindingActorWire {
   kind: "user" | "agent" | "system";
@@ -278,21 +307,85 @@ function toEngineSourceInput(s: BriefingSource): BriefingSourceInput {
 }
 
 /**
- * Resolve the engine's input bundle for a given submission. The
- * route layer does this synchronously before kicking off the async
- * run so an obvious "no engagement / no briefing" gap fails fast as
- * a 400 rather than burning a run.
+ * Project a {@link RetrievedAtom} into the engine's `CodeSectionInput`.
  *
- * V1-1 baseline: code-section atomIds are intentionally NOT
- * retrieved here — the AIR-1 implementation notes left retrieval
- * out of the v1 surface. The engine still works (mock mode emits
- * the deterministic fixture against whatever sources are passed),
- * and a follow-up commit will wire `lib/codes/retrieval` once
- * Empressa approves the retrieval policy.
+ * The engine's `<reference_code_atoms>` block is the resolver allow-list
+ * the citation validator strips against — every `[[CODE:atomId]]` token
+ * the model emits must point at one of these `atomId` values. The
+ * `label` follows the chat-side fallback chain
+ * (`sectionNumber → sectionTitle → codeBook`, with the title appended
+ * for context when both are present); the `snippet` is the atom's full
+ * body, which the prompt assembler in
+ * `lib/finding-engine/src/prompt.ts` truncates to
+ * `PROMPT_CODE_SNIPPET_MAX_CHARS` before serialization.
  */
-async function resolveEngineInputs(submissionId: string): Promise<{
+function toCodeSectionInput(a: RetrievedAtom): CodeSectionInput {
+  const ref = a.sectionNumber ?? a.sectionTitle ?? a.codeBook;
+  const label = a.sectionTitle && a.sectionNumber
+    ? `${ref} — ${a.sectionTitle}`
+    : ref;
+  return {
+    atomId: a.id,
+    label,
+    snippet: a.body,
+  };
+}
+
+/**
+ * Project a `materializable_elements` row into the engine's
+ * `BimElementInput`.
+ *
+ * `ref` is the row's uuid pk (Phase 1A decision Ask #3 — raw uuid is
+ * the wire shape; the FE drill-in resolves uuid → element via
+ * existing `/bim-models/...` routes). The mock fixture at
+ * `findingsMock.ts:170` uses a typed pointer like `"wall:north-side-l2"`
+ * but that was illustrative shorthand — real wire is the uuid.
+ *
+ * `label` falls back to `elementKind` when no operator-authored label
+ * exists. `description` carries the lock state so the prompt can
+ * surface "advisory" elements differently from "locked" geometry the
+ * architect may not modify without a divergence event.
+ */
+function toBimElementInput(row: MaterializableElement): BimElementInput {
+  return {
+    ref: row.id,
+    label: row.label ?? row.elementKind,
+    description: row.locked
+      ? `${row.elementKind} (locked)`
+      : `${row.elementKind} (advisory)`,
+  };
+}
+
+/**
+ * Resolve the engine's input bundle for a given submission. Loads the
+ * submission's engagement, the engagement's parcel-briefing (and
+ * narrative), the briefing's current sources + materializable
+ * elements, and a jurisdiction-scoped top-K of code atoms.
+ *
+ * V1-7 wired in `codeSections` (retrieved via `lib/codes/retrieval`)
+ * and `bimElements` (from `materializable_elements`) — V1-1 had
+ * passed `[]` for both. The retrieval call is wrapped in try/catch
+ * (warn-and-continue) so a transient embedding-service or DB hiccup
+ * cannot fail the in-flight generation; mirrors the chat.ts fail-safe
+ * at routes/chat.ts:607-612.
+ *
+ * Returns empty arrays for the new fields when the prerequisite data
+ * is missing:
+ *   - `codeSections: []` when the engagement's jurisdiction does not
+ *     resolve to a registered key (no warmup configured for this
+ *     locale → no atoms in our corpus to retrieve from)
+ *   - `bimElements: []` when no parcel-briefing exists yet (the
+ *     materializable-element rows hang off briefing_id, so without a
+ *     briefing there is nothing to surface).
+ */
+async function resolveEngineInputs(
+  submissionId: string,
+  log: typeof logger,
+): Promise<{
   briefingNarrative: string | undefined;
   sources: BriefingSource[];
+  codeSections: CodeSectionInput[];
+  bimElements: BimElementInput[];
 }> {
   const subRows = await db
     .select({ engagementId: submissions.engagementId })
@@ -300,7 +393,34 @@ async function resolveEngineInputs(submissionId: string): Promise<{
     .where(eq(submissions.id, submissionId))
     .limit(1);
   const sub = subRows[0];
-  if (!sub) return { briefingNarrative: undefined, sources: [] };
+  if (!sub) {
+    return {
+      briefingNarrative: undefined,
+      sources: [],
+      codeSections: [],
+      bimElements: [],
+    };
+  }
+
+  // Load the engagement so we can resolve its jurisdiction key for
+  // retrieval. Same key-resolution chain chat.ts uses (structured
+  // city/state → freeform jurisdiction → address scan), so a
+  // submission against an engagement with a recognized location
+  // gets the same atoms here as that engagement's chat turns would.
+  const engRows = await db
+    .select()
+    .from(engagements)
+    .where(eq(engagements.id, sub.engagementId))
+    .limit(1);
+  const engagement = engRows[0];
+  const jurisdictionKey = engagement
+    ? keyFromEngagement({
+        jurisdictionCity: engagement.jurisdictionCity,
+        jurisdictionState: engagement.jurisdictionState,
+        jurisdiction: engagement.jurisdiction,
+        address: engagement.address,
+      })
+    : null;
 
   const briefingRows = await db
     .select()
@@ -308,39 +428,122 @@ async function resolveEngineInputs(submissionId: string): Promise<{
     .where(eq(parcelBriefings.engagementId, sub.engagementId))
     .limit(1);
   const briefing = briefingRows[0];
-  if (!briefing) return { briefingNarrative: undefined, sources: [] };
 
   // Pull the briefing's narrative if one has been generated; the
-  // engine excerpts it inside the `<briefing>` block.
-  const narrativeFragments: string[] = [];
-  for (const section of [
-    briefing.sectionA,
-    briefing.sectionB,
-    briefing.sectionC,
-    briefing.sectionD,
-    briefing.sectionE,
-    briefing.sectionF,
-    briefing.sectionG,
-  ]) {
-    if (section) narrativeFragments.push(section);
+  // engine excerpts it inside the `<briefing>` block. Doubles as the
+  // retrieval query below — the briefing is the richest semantic
+  // signal we have for "what compliance issues might this submission
+  // surface?".
+  let briefingNarrative: string | undefined;
+  if (briefing) {
+    const narrativeFragments: string[] = [];
+    for (const section of [
+      briefing.sectionA,
+      briefing.sectionB,
+      briefing.sectionC,
+      briefing.sectionD,
+      briefing.sectionE,
+      briefing.sectionF,
+      briefing.sectionG,
+    ]) {
+      if (section) narrativeFragments.push(section);
+    }
+    if (narrativeFragments.length > 0) {
+      briefingNarrative = narrativeFragments.join("\n\n");
+    }
   }
-  const briefingNarrative =
-    narrativeFragments.length > 0
-      ? narrativeFragments.join("\n\n")
-      : undefined;
 
   // Current (non-superseded) sources for the engagement's briefing.
-  const sources = await db
-    .select()
-    .from(briefingSources)
-    .where(
-      and(
-        eq(briefingSources.briefingId, briefing.id),
-        isNull(briefingSources.supersededAt),
-      ),
-    );
+  const sources = briefing
+    ? await db
+        .select()
+        .from(briefingSources)
+        .where(
+          and(
+            eq(briefingSources.briefingId, briefing.id),
+            isNull(briefingSources.supersededAt),
+          ),
+        )
+    : [];
 
-  return { briefingNarrative, sources };
+  // V1-7: code-atom retrieval. Skip entirely when the engagement has
+  // no recognized jurisdiction (the `code_atoms` corpus is keyed on
+  // `jurisdictionKey`; without a key there is nothing to retrieve and
+  // the lexical-fallback path would just return []). The synthesized
+  // fallback query handles the briefing-not-yet-generated case so a
+  // submission can still get code context from the corpus.
+  let codeSections: CodeSectionInput[] = [];
+  if (jurisdictionKey) {
+    const fallbackQuery =
+      `Compliance review for ${
+        engagement?.name ?? `submission ${submissionId}`
+      } in ${engagement?.jurisdiction ?? "unknown jurisdiction"}.`;
+    const rawQuery = briefingNarrative ?? fallbackQuery;
+    const query =
+      rawQuery.length > RETRIEVAL_QUERY_MAX_CHARS
+        ? rawQuery.slice(0, RETRIEVAL_QUERY_MAX_CHARS)
+        : rawQuery;
+    try {
+      const atoms = await retrieveAtomsForQuestion({
+        jurisdictionKey,
+        question: query,
+        limit: MAX_FINDING_RETRIEVED_ATOMS,
+        logger: log,
+      });
+      codeSections = atoms.map(toCodeSectionInput);
+      log.info(
+        {
+          submissionId,
+          jurisdictionKey,
+          retrievedCount: codeSections.length,
+          queryLength: query.length,
+          queryFromBriefing: briefingNarrative !== undefined,
+        },
+        "finding generation: retrieval populated codeSections",
+      );
+    } catch (err) {
+      // Warn-and-continue: a transient retrieval failure should not
+      // burn an entire run. The engine will produce findings against
+      // sources + briefing narrative alone (mock mode) or skip code
+      // citations against a degraded reference block (anthropic mode
+      // — tokens cite only briefing-source ids, code citations get
+      // stripped by the validator).
+      log.warn(
+        { err, submissionId, jurisdictionKey },
+        "finding generation: code retrieval failed — continuing without code context",
+      );
+    }
+  } else {
+    log.info(
+      { submissionId },
+      "finding generation: no jurisdiction key resolved — skipping code retrieval",
+    );
+  }
+
+  // V1-7: materializable-element load. Hangs off the briefing row,
+  // not the bim-model row (the schema's FK is to `parcel_briefings`).
+  // Skipped when no briefing exists — there is nothing for the engine
+  // to anchor `elementRef` against. No K-cap because the seven
+  // element kinds + per-engagement bound (Spec 53 §4) keep this list
+  // small in practice; if growth becomes a concern, a cap can be
+  // added without touching the engine surface.
+  let bimElements: BimElementInput[] = [];
+  if (briefing) {
+    try {
+      const matRows = await db
+        .select()
+        .from(materializableElements)
+        .where(eq(materializableElements.briefingId, briefing.id));
+      bimElements = matRows.map(toBimElementInput);
+    } catch (err) {
+      log.warn(
+        { err, submissionId, briefingId: briefing.id },
+        "finding generation: materializable-element load failed — continuing without bim elements",
+      );
+    }
+  }
+
+  return { briefingNarrative, sources, codeSections, bimElements };
 }
 
 /**
@@ -513,7 +716,7 @@ async function runFindingGeneration(args: {
 }): Promise<void> {
   const { submissionId, generationId, reqLog } = args;
   try {
-    const inputs = await resolveEngineInputs(submissionId);
+    const inputs = await resolveEngineInputs(submissionId, reqLog);
     const client = await getFindingLlmClient();
     const mode = getFindingLlmMode();
     reqLog.info(
@@ -522,6 +725,8 @@ async function runFindingGeneration(args: {
         generationId,
         mode,
         sourceCount: inputs.sources.length,
+        codeSectionCount: inputs.codeSections.length,
+        bimElementCount: inputs.bimElements.length,
         hasNarrative: !!inputs.briefingNarrative,
       },
       "finding generation: engine call starting",
@@ -537,7 +742,6 @@ async function runFindingGeneration(args: {
       throw new Error(`submission row vanished mid-generation: ${submissionId}`);
     }
 
-    const codeSections: CodeSectionInput[] = [];
     const result: GenerateFindingsResult = await generateFindings(
       {
         submission: {
@@ -548,8 +752,8 @@ async function runFindingGeneration(args: {
         },
         briefingNarrative: inputs.briefingNarrative,
         sources: inputs.sources.map(toEngineSourceInput),
-        codeSections,
-        bimElements: [],
+        codeSections: inputs.codeSections,
+        bimElements: inputs.bimElements,
       },
       {
         mode,
