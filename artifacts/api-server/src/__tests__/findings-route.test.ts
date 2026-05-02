@@ -771,6 +771,28 @@ describe("V1-7 — materializable elements wired into the engine input", () => {
     expect(matRows).toHaveLength(2);
     const seededIds = new Set(matRows.map((r) => r.id));
 
+    // Stage one retrieval atom so the engine receives a non-empty
+    // codeSections list. The mock generator gates blocker and
+    // concern findings on `firstCode`; without this, only the
+    // advisory fires, and the advisory always sets elementRef:null.
+    // The concern fires with elementRef = bimElements[1].ref =
+    // the second seeded materializable-element row uuid.
+    retrieveAtomsForQuestionMock.mockResolvedValueOnce([
+      {
+        id: "22222222-2222-2222-2222-222222222222",
+        sourceName: "bastrop_municode",
+        jurisdictionKey: "bastrop_tx",
+        codeBook: "MUNI_CODE",
+        edition: "Code of Ordinances (current supplement)",
+        sectionNumber: "§4.3.2.B",
+        sectionTitle: "Side Yard Setbacks",
+        body: "Side yard setback shall be 5'-0\" minimum.",
+        sourceUrl: "https://example.com/bastrop-udc-4-3-2-b",
+        score: 0.74,
+        retrievalMode: "vector",
+      },
+    ]);
+
     const kickoff = await request(getApp())
       .post(`/api/submissions/${submission.id}/findings/generate`)
       .send({})
