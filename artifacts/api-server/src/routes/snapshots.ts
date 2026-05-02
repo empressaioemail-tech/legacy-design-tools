@@ -366,28 +366,10 @@ async function attachSnapshot(
   });
 }
 
-/**
- * Fire-and-forget auto-trigger of the shared briefing kickoff helper
- * for a freshly-created engagement. Mirrors the contract used by
- * {@link emitEngagementCreatedEvent} and {@link fireGeocodeAndWarmup}:
- * the call is `void`-launched so the snapshot-ingest response is not
- * blocked, every failure path (the helper's discriminated outcomes,
- * any thrown error from the helper itself) is caught and logged with
- * structured fields `{ engagementId, jurisdiction, error? }`, and
- * nothing surfaces back to the originating request. The auto-trigger
- * only fires for the actual create-new branch (autoCreated=true) —
- * the GUID-race rebind binds to an existing engagement that already
- * has its own briefing lifecycle owned by an earlier ingest.
- *
- * `kickoffBriefingGeneration` is the same code path the manual
- * `POST /briefing/generate` route runs, so a freshly-created
- * engagement that has no `parcel_briefings` row yet (the common case
- * — there are no sources at create time) lands the
- * `no_briefing_sources_for_engagement` outcome and exits cleanly. As
- * upstream sprints land the source-creation hooks (DA-PI-2 / DA-PI-4
- * adapter writes), the same auto-trigger will start producing real
- * narratives without any change here.
- */
+// Fire-and-forget auto-trigger of the shared briefing kickoff helper
+// on `engagement.created`. Never blocks or throws back into the ingest
+// response. Only fires when the create-new branch actually inserted a
+// new engagement (autoCreated=true).
 function fireAutoBriefingKickoff(
   outcome: SnapshotAttachOutcome,
   reqLog: typeof logger,
@@ -395,115 +377,41 @@ function fireAutoBriefingKickoff(
   if (!outcome.result.autoCreated) return;
   const engagementId = outcome.result.engagementId;
   void (async () => {
-    // Best-effort lookup of the engagement's jurisdiction for log
-    // structured fields. The row was just inserted by the ingest, so
-    // jurisdiction is typically null at this instant — the async
-    // geocoder warmup populates it later. We still project the column
-    // so any path that does have a value (e.g. the test seed inserts a
-    // jurisdiction directly) shows up in the structured log.
-    let jurisdictionForLog: string | null = null;
+    let jurisdiction: string | null = null;
     try {
       const [row] = await db
-        .select({
-          jurisdiction: engagements.jurisdiction,
-          jurisdictionCity: engagements.jurisdictionCity,
-          jurisdictionState: engagements.jurisdictionState,
-        })
+        .select({ jurisdiction: engagements.jurisdiction })
         .from(engagements)
         .where(eq(engagements.id, engagementId))
         .limit(1);
-      if (row) {
-        jurisdictionForLog =
-          row.jurisdiction ??
-          ([row.jurisdictionCity, row.jurisdictionState]
-            .filter((s): s is string => typeof s === "string" && s.length > 0)
-            .join(", ") ||
-            null);
-      }
+      jurisdiction = row?.jurisdiction ?? null;
     } catch {
-      // Lookup is observability-only — keep going with null.
+      // observability-only
     }
 
     try {
-      const result = await kickoffBriefingGeneration({
+      await kickoffBriefingGeneration({
         engagementId,
         reqLog,
-        // Subscriber that fires once the async runner finalizes the
-        // job row. The runner itself catches engine failures and
-        // logs them keyed by `engagementId/briefingId/generationId`,
-        // but the auto-trigger contract requires a structured
-        // `{ engagementId, jurisdiction, error }` log on the
-        // engagement.created path so operators can grep auto-trigger
-        // failures without correlating across engagement+briefing
-        // ids first. We log on `failed` and on `completed` so the
-        // wiring is observable end-to-end.
         onSettled: (settled) => {
           if (settled.state === "failed") {
             reqLog.error(
               {
                 engagementId,
-                jurisdiction: jurisdictionForLog,
+                jurisdiction,
                 generationId: settled.generationId,
                 error: settled.error ?? "unknown engine failure",
               },
               "auto-briefing: generation failed",
             );
-          } else {
-            reqLog.info(
-              {
-                engagementId,
-                jurisdiction: jurisdictionForLog,
-                generationId: settled.generationId,
-              },
-              "auto-briefing: generation completed",
-            );
           }
         },
       });
-      switch (result.kind) {
-        case "started":
-          reqLog.info(
-            {
-              engagementId,
-              jurisdiction: jurisdictionForLog,
-              generationId: result.generationId,
-              sourceCount: result.sourceCount,
-            },
-            "auto-briefing: kicked off on engagement.created",
-          );
-          return;
-        case "no_briefing_sources_for_engagement":
-          // Expected on a freshly-created engagement — there are no
-          // sources at create time. Logged at debug so the wiring is
-          // observable without filling production logs.
-          reqLog.debug(
-            { engagementId, jurisdiction: jurisdictionForLog },
-            "auto-briefing: skipped, no briefing sources yet",
-          );
-          return;
-        case "already_in_flight":
-          reqLog.info(
-            {
-              engagementId,
-              jurisdiction: jurisdictionForLog,
-              generationId: result.generationId,
-            },
-            "auto-briefing: skipped, manual kickoff already in flight",
-          );
-          return;
-        case "engagement_not_found":
-          // Race against an extremely fast deletion. Nothing to do.
-          reqLog.warn(
-            { engagementId, jurisdiction: jurisdictionForLog },
-            "auto-briefing: engagement disappeared before kickoff",
-          );
-          return;
-      }
     } catch (err) {
       reqLog.error(
         {
           engagementId,
-          jurisdiction: jurisdictionForLog,
+          jurisdiction,
           error: (err as Error).message ?? String(err),
         },
         "auto-briefing: kickoff failed",

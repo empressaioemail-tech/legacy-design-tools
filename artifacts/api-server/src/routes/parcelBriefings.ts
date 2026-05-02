@@ -1670,43 +1670,21 @@ async function runBriefingGeneration(args: {
   }
 }
 
-/**
- * Outcome of {@link kickoffBriefingGeneration}. Mirrors the response
- * vocabulary of the manual kickoff route — `engagement_not_found`,
- * `no_briefing_sources_for_engagement`, `already_in_flight`, `started`
- * — so the HTTP handler can map outcomes back to its existing 404 /
- * 400 / 409 / 202 status codes, and the auto-trigger subscriber in
- * `routes/snapshots.ts` can log + swallow the same set without
- * inventing parallel error names.
- */
+// Outcomes mirror the manual route's 404/400/409/202 response set so
+// both call sites can share the same vocabulary.
 export type KickoffBriefingOutcome =
   | { kind: "engagement_not_found" }
   | { kind: "no_briefing_sources_for_engagement" }
   | { kind: "already_in_flight"; generationId: string | null }
   | { kind: "started"; generationId: string; sourceCount: number };
 
-/**
- * Shared kickoff helper. Looks up the engagement's parcel briefing,
- * loads its current sources, inserts a `briefing_generation_jobs`
- * row, and `void`-launches {@link runBriefingGeneration}. Both the
- * manual HTTP route and the `engagement.created` auto-trigger
- * subscriber call this so the two entry points stay in lock-step
- * (same single-flight guard, same engine wrapping, same persist /
- * event path). Never throws — the discriminated outcome is the only
- * channel callers should rely on.
- */
+// Shared kickoff helper used by the manual HTTP route and the
+// `engagement.created` auto-trigger subscriber. Never throws.
+// `onSettled` (optional) fires once the void-launched runner finalizes
+// the job row, so callers can observe terminal state without polling.
 export async function kickoffBriefingGeneration(args: {
   engagementId: string;
   reqLog: typeof logger;
-  /**
-   * Optional subscriber notified once the async {@link runBriefingGeneration}
-   * settles. Receives the terminal job state (`completed` | `failed`) and
-   * the engine error message when it failed. The auto-trigger subscriber
-   * uses this to emit a structured `auto-briefing: generation failed` log
-   * with `{ engagementId, jurisdiction, error }`; the manual HTTP route
-   * leaves it unset so the existing in-runner log stays the only signal.
-   * Subscriber failures are swallowed so they cannot poison the runner.
-   */
   onSettled?: (settled: {
     state: "completed" | "failed";
     generationId: string;
@@ -1737,16 +1715,8 @@ export async function kickoffBriefingGeneration(args: {
     return { kind: "no_briefing_sources_for_engagement" };
   }
 
-  // Single-flight guard: a generation already in flight for this
-  // engagement is a 409, not a "queue another one" because the
-  // engine call is non-trivial and the result would race the
-  // first run's persist. Enforced by the partial unique index on
-  // `briefing_generation_jobs (engagement_id) WHERE state =
-  // 'pending'` — a concurrent kickoff that races past our pre-check
-  // still trips the constraint and the catch below maps that into
-  // the same `already_in_flight` outcome a caller would see for a
-  // stale poll. The auto-trigger subscriber relies on this branch
-  // to no-op cleanly when it races a manual kickoff.
+  // Single-flight guard via partial unique index on
+  // `briefing_generation_jobs (engagement_id) WHERE state='pending'`.
   let kickoffRow: BriefingGenerationJob;
   try {
     const inserted = await db
@@ -1775,11 +1745,8 @@ export async function kickoffBriefingGeneration(args: {
   }
   const generationId = kickoffRow.id;
 
-  // Fire-and-forget. The job row's state is what the status
-  // endpoint reads. We do not await — callers return immediately.
-  // When `onSettled` is wired (auto-trigger subscriber), we wrap
-  // the runner so the subscriber sees the terminal job row even
-  // though the runner itself never re-throws engine failures.
+  // Fire-and-forget. Callers return immediately; the job row's
+  // state is what the status endpoint reads.
   void (async () => {
     await runBriefingGeneration({
       engagementId,
@@ -1799,23 +1766,20 @@ export async function kickoffBriefingGeneration(args: {
         .from(briefingGenerationJobs)
         .where(eq(briefingGenerationJobs.id, generationId))
         .limit(1);
-      if (!terminal) return;
-      if (terminal.state !== "completed" && terminal.state !== "failed") {
-        // Defensive: the runner always finalizes to one of these
-        // states. If something has left the row pending we do not
-        // notify — the subscriber would not have an actionable
-        // outcome to log.
-        return;
+      if (
+        terminal &&
+        (terminal.state === "completed" || terminal.state === "failed")
+      ) {
+        await onSettled({
+          state: terminal.state,
+          generationId,
+          error: terminal.error ?? null,
+        });
       }
-      await onSettled({
-        state: terminal.state,
-        generationId,
-        error: terminal.error ?? null,
-      });
     } catch (err) {
       reqLog.warn(
         { err, engagementId, generationId },
-        "briefing generation: onSettled subscriber threw (swallowed)",
+        "briefing generation: onSettled subscriber threw",
       );
     }
   })();
