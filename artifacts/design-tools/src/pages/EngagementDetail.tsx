@@ -3,6 +3,8 @@ import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ApiError,
+  FindingCategory,
+  FindingSeverity,
   useGenerateEngagementLayers,
   useGetBimModelRefresh,
   useGetEngagement,
@@ -347,6 +349,119 @@ function writeRecentRunsOpenToUrl(next: boolean): void {
   }
   window.history.replaceState(null, "", url.toString());
 }
+
+/**
+ * Findings-tab filter chips URL state (Task #436).
+ *
+ * The Findings tab can grow long on big submissions, so the architect
+ * needs to narrow by severity bucket, finding category, or
+ * addressed/unaddressed status. The active filter set is mirrored into
+ * the URL the same way the `?tab=` and backfill-filter params are
+ * (replaceState, defaults omitted) so a deep-link survives a refresh.
+ *
+ * Three params are reflected:
+ *   - `severity=blocker|concern|advisory` — single severity bucket.
+ *     Omitted when "all".
+ *   - `category=<FindingCategory>` — single category. Omitted when
+ *     "all". The allow-list is derived from the generated
+ *     `FindingCategory` enum so adding a category in the API spec
+ *     automatically widens the accepted values without touching this
+ *     parser.
+ *   - `showAddressed=false` — hide addressed (overridden) findings.
+ *     Omitted when the default (show all rows) is active.
+ */
+const FINDINGS_SEVERITY_QUERY_PARAM = "severity";
+const FINDINGS_CATEGORY_QUERY_PARAM = "category";
+const FINDINGS_SHOW_ADDRESSED_QUERY_PARAM = "showAddressed";
+
+type FindingsSeverityFilter = "all" | FindingSeverity;
+type FindingsCategoryFilter = "all" | FindingCategory;
+
+function isFindingSeverity(raw: string): raw is FindingSeverity {
+  return Object.prototype.hasOwnProperty.call(FindingSeverity, raw);
+}
+
+function isFindingCategory(raw: string): raw is FindingCategory {
+  return Object.prototype.hasOwnProperty.call(FindingCategory, raw);
+}
+
+function readFindingsSeverityFilterFromUrl(): FindingsSeverityFilter {
+  if (typeof window === "undefined") return "all";
+  const raw = new URLSearchParams(window.location.search).get(
+    FINDINGS_SEVERITY_QUERY_PARAM,
+  );
+  if (raw && isFindingSeverity(raw)) return raw;
+  return "all";
+}
+
+function writeFindingsSeverityFilterToUrl(next: FindingsSeverityFilter): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (next === "all") {
+    url.searchParams.delete(FINDINGS_SEVERITY_QUERY_PARAM);
+  } else {
+    url.searchParams.set(FINDINGS_SEVERITY_QUERY_PARAM, next);
+  }
+  window.history.replaceState(null, "", url.toString());
+}
+
+function readFindingsCategoryFilterFromUrl(): FindingsCategoryFilter {
+  if (typeof window === "undefined") return "all";
+  const raw = new URLSearchParams(window.location.search).get(
+    FINDINGS_CATEGORY_QUERY_PARAM,
+  );
+  if (raw && isFindingCategory(raw)) return raw;
+  return "all";
+}
+
+function writeFindingsCategoryFilterToUrl(next: FindingsCategoryFilter): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (next === "all") {
+    url.searchParams.delete(FINDINGS_CATEGORY_QUERY_PARAM);
+  } else {
+    url.searchParams.set(FINDINGS_CATEGORY_QUERY_PARAM, next);
+  }
+  window.history.replaceState(null, "", url.toString());
+}
+
+function readFindingsShowAddressedFromUrl(): boolean {
+  if (typeof window === "undefined") return true;
+  const raw = new URLSearchParams(window.location.search).get(
+    FINDINGS_SHOW_ADDRESSED_QUERY_PARAM,
+  );
+  if (raw === "false") return false;
+  return true;
+}
+
+function writeFindingsShowAddressedToUrl(next: boolean): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (next) {
+    url.searchParams.delete(FINDINGS_SHOW_ADDRESSED_QUERY_PARAM);
+  } else {
+    url.searchParams.set(FINDINGS_SHOW_ADDRESSED_QUERY_PARAM, "false");
+  }
+  window.history.replaceState(null, "", url.toString());
+}
+
+const FINDINGS_SEVERITY_CHIP_LABELS: Record<FindingsSeverityFilter, string> = {
+  all: "All severities",
+  blocker: "Blocker",
+  concern: "Concern",
+  advisory: "Advisory",
+};
+
+const FINDINGS_CATEGORY_CHIP_LABELS: Record<FindingCategory, string> = {
+  setback: "Setback",
+  height: "Height",
+  coverage: "Coverage",
+  egress: "Egress",
+  use: "Use",
+  "overlay-conflict": "Overlay conflict",
+  "divergence-related": "Divergence",
+  other: "Other",
+};
 
 function TabBar({
   active,
@@ -3727,6 +3842,128 @@ function SubmissionsTab({
  * the row's status flips to `overridden` (which dims it via
  * {@link FindingsList}'s addressed branch) without a manual reload.
  */
+/**
+ * Filter chip strip rendered above the FindingsList (Task #436).
+ *
+ * Three independent groups: severity bucket (single-select with "All"),
+ * finding category (single-select with "All"), and a Show addressed
+ * toggle. Each chip carries a `data-active` attribute so the test
+ * file can assert which one is currently selected without depending
+ * on visual styling. The category list is derived from the generated
+ * `FindingCategory` enum so adding a category in the API spec
+ * automatically widens the chip row.
+ */
+function FindingsFilterChips({
+  severityFilter,
+  onSeverityChange,
+  categoryFilter,
+  onCategoryChange,
+  showAddressed,
+  onShowAddressedChange,
+}: {
+  severityFilter: FindingsSeverityFilter;
+  onSeverityChange: (next: FindingsSeverityFilter) => void;
+  categoryFilter: FindingsCategoryFilter;
+  onCategoryChange: (next: FindingsCategoryFilter) => void;
+  showAddressed: boolean;
+  onShowAddressedChange: (next: boolean) => void;
+}) {
+  const severityOptions: FindingsSeverityFilter[] = [
+    "all",
+    "blocker",
+    "concern",
+    "advisory",
+  ];
+  const categoryOptions: FindingsCategoryFilter[] = [
+    "all",
+    ...(Object.keys(FindingCategory) as FindingCategory[]),
+  ];
+  const chipStyle = (active: boolean): React.CSSProperties => ({
+    padding: "3px 10px",
+    borderRadius: 999,
+    border: active
+      ? "1px solid var(--cyan)"
+      : "1px solid var(--border-default)",
+    background: active ? "var(--cyan-accent-bg)" : "transparent",
+    color: active ? "var(--cyan)" : "var(--text-secondary)",
+    fontSize: 11,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  });
+  return (
+    <div
+      data-testid="findings-tab-filters"
+      className="sc-card p-3"
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <div
+        data-testid="findings-tab-filters-severity"
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}
+      >
+        <span className="sc-label" style={{ minWidth: 72 }}>
+          SEVERITY
+        </span>
+        {severityOptions.map((opt) => {
+          const active = severityFilter === opt;
+          return (
+            <button
+              key={opt}
+              type="button"
+              data-testid={`findings-tab-filter-severity-${opt}`}
+              data-active={active ? "true" : "false"}
+              onClick={() => onSeverityChange(opt)}
+              style={chipStyle(active)}
+            >
+              {FINDINGS_SEVERITY_CHIP_LABELS[opt]}
+            </button>
+          );
+        })}
+      </div>
+      <div
+        data-testid="findings-tab-filters-category"
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}
+      >
+        <span className="sc-label" style={{ minWidth: 72 }}>
+          CATEGORY
+        </span>
+        {categoryOptions.map((opt) => {
+          const active = categoryFilter === opt;
+          return (
+            <button
+              key={opt}
+              type="button"
+              data-testid={`findings-tab-filter-category-${opt}`}
+              data-active={active ? "true" : "false"}
+              onClick={() => onCategoryChange(opt)}
+              style={chipStyle(active)}
+            >
+              {opt === "all" ? "All categories" : FINDINGS_CATEGORY_CHIP_LABELS[opt]}
+            </button>
+          );
+        })}
+      </div>
+      <div
+        data-testid="findings-tab-filters-addressed"
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}
+      >
+        <span className="sc-label" style={{ minWidth: 72 }}>
+          ADDRESSED
+        </span>
+        <button
+          type="button"
+          data-testid="findings-tab-filter-show-addressed"
+          data-active={!showAddressed ? "true" : "false"}
+          aria-pressed={!showAddressed}
+          onClick={() => onShowAddressedChange(!showAddressed)}
+          style={chipStyle(!showAddressed)}
+        >
+          {showAddressed ? "Show addressed" : "Hide addressed"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FindingsTab({
   engagementId,
   initialSubmissionId,
@@ -3776,6 +4013,29 @@ function FindingsTab({
     setSelectedFindingId(null);
   }, [selectedSubmissionId]);
 
+  // Filter chips state (Task #436). Mirrored to the URL via the
+  // helpers above so a deep-link survives a refresh, matching the
+  // ?tab= and backfill-filter conventions.
+  const [severityFilter, setSeverityFilterState] =
+    useState<FindingsSeverityFilter>(() => readFindingsSeverityFilterFromUrl());
+  const setSeverityFilter = (next: FindingsSeverityFilter): void => {
+    setSeverityFilterState(next);
+    writeFindingsSeverityFilterToUrl(next);
+  };
+  const [categoryFilter, setCategoryFilterState] =
+    useState<FindingsCategoryFilter>(() => readFindingsCategoryFilterFromUrl());
+  const setCategoryFilter = (next: FindingsCategoryFilter): void => {
+    setCategoryFilterState(next);
+    writeFindingsCategoryFilterToUrl(next);
+  };
+  const [showAddressed, setShowAddressedState] = useState<boolean>(() =>
+    readFindingsShowAddressedFromUrl(),
+  );
+  const setShowAddressed = (next: boolean): void => {
+    setShowAddressedState(next);
+    writeFindingsShowAddressedToUrl(next);
+  };
+
   const findingsQueryKey = selectedSubmissionId
     ? getListSubmissionFindingsQueryKey(selectedSubmissionId)
     : (["findings", "none"] as const);
@@ -3791,22 +4051,49 @@ function FindingsTab({
   });
   const findings = findingsData?.findings ?? [];
 
-  // Auto-select the highest-severity row when the list resolves so
-  // the right pane is never blank if there is anything to triage.
+  // Apply the active filter chips (Task #436) before handing the list
+  // to FindingsList. The "X unaddressed of Y" counter above keeps
+  // reading from the unfiltered list so the architect always sees
+  // the submission's true size, even when the filters are narrow.
+  const filteredFindings = useMemo<Finding[]>(() => {
+    return findings.filter((f) => {
+      if (severityFilter !== "all" && f.severity !== severityFilter) {
+        return false;
+      }
+      if (categoryFilter !== "all" && f.category !== categoryFilter) {
+        return false;
+      }
+      if (!showAddressed && f.status === "overridden") return false;
+      return true;
+    });
+  }, [findings, severityFilter, categoryFilter, showAddressed]);
+
+  // Auto-select the highest-severity row in the filtered list when it
+  // resolves so the right pane is never blank if there is anything to
+  // triage. Re-runs when the filter set changes — if the active row
+  // gets filtered out we fall through to the next visible blocker.
   useEffect(() => {
-    if (selectedFindingId !== null) return;
-    if (findings.length === 0) return;
-    const sorted = [...findings].sort((a, b) => {
+    if (selectedFindingId !== null) {
+      const stillVisible = filteredFindings.some(
+        (f) => f.id === selectedFindingId,
+      );
+      if (stillVisible) return;
+    }
+    if (filteredFindings.length === 0) {
+      if (selectedFindingId !== null) setSelectedFindingId(null);
+      return;
+    }
+    const sorted = [...filteredFindings].sort((a, b) => {
       const order = { blocker: 0, concern: 1, advisory: 2 } as const;
       const delta = order[a.severity] - order[b.severity];
       if (delta !== 0) return delta;
       return Date.parse(a.aiGeneratedAt) - Date.parse(b.aiGeneratedAt);
     });
     setSelectedFindingId(sorted[0].id);
-  }, [findings, selectedFindingId]);
+  }, [filteredFindings, selectedFindingId]);
 
   const selectedFinding =
-    findings.find((f) => f.id === selectedFindingId) ?? null;
+    filteredFindings.find((f) => f.id === selectedFindingId) ?? null;
 
   const overrideMutation = useOverrideFinding();
   const [overrideError, setOverrideError] = useState<string | null>(null);
@@ -3910,6 +4197,15 @@ function FindingsTab({
         </span>
       </div>
 
+      <FindingsFilterChips
+        severityFilter={severityFilter}
+        onSeverityChange={setSeverityFilter}
+        categoryFilter={categoryFilter}
+        onCategoryChange={setCategoryFilter}
+        showAddressed={showAddressed}
+        onShowAddressedChange={setShowAddressed}
+      />
+
       <div
         className="grid"
         style={{
@@ -3943,9 +4239,16 @@ function FindingsTab({
             >
               No findings on this submission.
             </div>
+          ) : filteredFindings.length === 0 ? (
+            <div
+              className="sc-prose opacity-60 p-4"
+              data-testid="findings-tab-list-filtered-empty"
+            >
+              No findings match the active filters.
+            </div>
           ) : (
             <FindingsList
-              findings={findings}
+              findings={filteredFindings}
               selectedFindingId={selectedFindingId}
               onSelect={setSelectedFindingId}
             />

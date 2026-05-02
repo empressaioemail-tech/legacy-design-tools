@@ -213,6 +213,25 @@ vi.mock("@workspace/api-client-react", async () => {
       }),
     // Findings tab (Task #421): capture the override mutation.
     useOverrideFinding: makeCapturingMutationHook(overrideFinding),
+    // Filter chips (Task #436) consume the generated enums for the
+    // URL allow-list and chip labels — re-export the literal shape
+    // here so the page module's `Object.keys(FindingCategory)` /
+    // `hasOwnProperty(FindingSeverity, raw)` checks survive the mock.
+    FindingSeverity: {
+      blocker: "blocker",
+      concern: "concern",
+      advisory: "advisory",
+    } as const,
+    FindingCategory: {
+      setback: "setback",
+      height: "height",
+      coverage: "coverage",
+      egress: "egress",
+      use: "use",
+      "overlay-conflict": "overlay-conflict",
+      "divergence-related": "divergence-related",
+      other: "other",
+    } as const,
   };
 });
 
@@ -808,6 +827,169 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
       screen.getByTestId(
         "architect-finding-detail-finding:sub-latest:blocker",
       ),
+    ).toBeInTheDocument();
+  });
+
+  it("filters the list by severity chip and updates the URL", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({ id: "finding:sub-latest:blocker", severity: "blocker" }),
+        findingFixture({ id: "finding:sub-latest:concern", severity: "concern" }),
+        findingFixture({ id: "finding:sub-latest:advisory", severity: "advisory" }),
+      ]),
+    });
+    gotoFindingsTab();
+    fireEvent.click(
+      screen.getByTestId("findings-tab-filter-severity-concern"),
+    );
+    const list = screen.getByTestId("architect-findings-list");
+    const rows = within(list)
+      .getAllByRole("listitem")
+      .map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual([
+      "architect-findings-row-finding:sub-latest:concern",
+    ]);
+    expect(window.location.search).toBe("?tab=findings&severity=concern");
+    // Active chip carries the data-active marker.
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-severity-concern")
+        .getAttribute("data-active"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-severity-all")
+        .getAttribute("data-active"),
+    ).toBe("false");
+  });
+
+  it("filters the list by category chip and updates the URL", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          category: "egress",
+        }),
+        findingFixture({
+          id: "finding:sub-latest:02",
+          severity: "blocker",
+          category: "setback",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    fireEvent.click(
+      screen.getByTestId("findings-tab-filter-category-setback"),
+    );
+    const list = screen.getByTestId("architect-findings-list");
+    const rows = within(list)
+      .getAllByRole("listitem")
+      .map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual(["architect-findings-row-finding:sub-latest:02"]);
+    expect(window.location.search).toBe("?tab=findings&category=setback");
+  });
+
+  it("hides addressed findings when the Addressed toggle is flipped off and updates the URL", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:open",
+          severity: "blocker",
+        }),
+        findingFixture({
+          id: "finding:sub-latest:done",
+          severity: "concern",
+          status: "overridden",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    // Both rows visible by default.
+    expect(
+      within(screen.getByTestId("architect-findings-list"))
+        .getAllByRole("listitem")
+        .map((r) => r.getAttribute("data-testid")),
+    ).toEqual([
+      "architect-findings-row-finding:sub-latest:open",
+      "architect-findings-row-finding:sub-latest:done",
+    ]);
+    fireEvent.click(screen.getByTestId("findings-tab-filter-show-addressed"));
+    expect(
+      within(screen.getByTestId("architect-findings-list"))
+        .getAllByRole("listitem")
+        .map((r) => r.getAttribute("data-testid")),
+    ).toEqual(["architect-findings-row-finding:sub-latest:open"]);
+    expect(window.location.search).toBe(
+      "?tab=findings&showAddressed=false",
+    );
+  });
+
+  it("hydrates filter state from the URL on first paint", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?tab=findings&severity=concern&category=egress&showAddressed=false",
+    );
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:match",
+          severity: "concern",
+          category: "egress",
+        }),
+        findingFixture({
+          id: "finding:sub-latest:miss",
+          severity: "blocker",
+          category: "egress",
+        }),
+        findingFixture({
+          id: "finding:sub-latest:done",
+          severity: "concern",
+          category: "egress",
+          status: "overridden",
+        }),
+      ]),
+    });
+    // No need to click the tab — it was deep-linked via ?tab=findings.
+    expect(screen.getByTestId("findings-tab")).toBeInTheDocument();
+    const rows = within(screen.getByTestId("architect-findings-list"))
+      .getAllByRole("listitem")
+      .map((r) => r.getAttribute("data-testid"));
+    expect(rows).toEqual(["architect-findings-row-finding:sub-latest:match"]);
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-severity-concern")
+        .getAttribute("data-active"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-category-egress")
+        .getAttribute("data-active"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId("findings-tab-filter-show-addressed")
+        .getAttribute("data-active"),
+    ).toBe("true");
+  });
+
+  it("renders the filtered-empty state when no finding matches the active filters", () => {
+    renderPage({
+      seed: seedSubmissionsWithFindings([
+        findingFixture({
+          id: "finding:sub-latest:01",
+          severity: "blocker",
+          category: "egress",
+        }),
+      ]),
+    });
+    gotoFindingsTab();
+    fireEvent.click(
+      screen.getByTestId("findings-tab-filter-category-setback"),
+    );
+    expect(
+      screen.getByTestId("findings-tab-list-filtered-empty"),
     ).toBeInTheDocument();
   });
 
