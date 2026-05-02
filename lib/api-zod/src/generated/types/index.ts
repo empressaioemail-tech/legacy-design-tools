@@ -50,6 +50,7 @@ export * from "./createEngagementSubmissionBody";
 export * from "./createReviewerAnnotationBody";
 export * from "./createReviewerRequestBody";
 export * from "./createSubmissionCommentBody";
+export * from "./createSubmissionFindingBody";
 export * from "./createUserBody";
 export * from "./dismissReviewerRequestBody";
 export * from "./domainRenderKind";

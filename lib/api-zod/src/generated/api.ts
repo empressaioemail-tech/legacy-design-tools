@@ -4093,6 +4093,75 @@ export const CreateSubmissionCommentBody = zod
   );
 
 /**
+ * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
+finding the AI engine missed without re-running generation.
+Persists with `status="ai-produced"` (so accept/reject/override
+work the same as engine rows), `confidence=1.0`, and a
+reviewer-attributed actor on `reviewerStatusBy` so the wire
+shape is consistent with the AI surface — the FE distinguishes
+manual rows by the `reviewerStatusBy.kind === "user"` actor on
+an otherwise-untouched row.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Manually add a reviewer-authored finding to a submission
+ */
+export const CreateSubmissionFindingParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const CreateSubmissionFindingBody = zod
+  .object({
+    title: zod
+      .string()
+      .min(1)
+      .describe("Required short headline for the finding."),
+    description: zod
+      .string()
+      .nullish()
+      .describe("Optional long-form context appended after the title."),
+    severity: zod
+      .enum(["blocker", "concern", "advisory"])
+      .describe(
+        "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+      ),
+    category: zod
+      .enum([
+        "setback",
+        "height",
+        "coverage",
+        "egress",
+        "use",
+        "overlay-conflict",
+        "divergence-related",
+        "other",
+      ])
+      .describe(
+        "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+      ),
+    codeCitation: zod
+      .string()
+      .nullish()
+      .describe(
+        "Optional code-section atom id. Persisted as a\n`code-section` citation. Not validated against the\ncorpus — manual rows are reviewer-trusted.\n",
+      ),
+    sourceCitation: zod
+      .object({
+        id: zod.string(),
+        label: zod.string(),
+      })
+      .nullish()
+      .describe("Optional briefing-source pointer."),
+    elementRef: zod
+      .string()
+      .nullish()
+      .describe("Optional BIM element pointer."),
+  })
+  .describe(
+    "Body for `POST \/submissions\/{id}\/findings` (manual reviewer\nadd). `title` is the headline; optional `description`\nappends long-form context. `severity` and `category` mirror\nthe AI surface so manual rows render in the same severity\nbucket and filter chips. Optional `codeCitation` and\n`sourceCitation` populate the citations array; optional\n`elementRef` anchors a BIM-element pointer.\n",
+  );
+
+/**
  * Returns the current set of findings for a submission, newest
 first, after every reviewer mutation has been applied. The list
 includes overridden originals (status `overridden` with

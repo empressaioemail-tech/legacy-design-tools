@@ -2959,6 +2959,59 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   /submissions/{submissionId}/findings:
+    post:
+      operationId: createSubmissionFinding
+      tags: [findings]
+      summary: Manually add a reviewer-authored finding to a submission
+      description: |
+        Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
+        finding the AI engine missed without re-running generation.
+        Persists with `status="ai-produced"` (so accept/reject/override
+        work the same as engine rows), `confidence=1.0`, and a
+        reviewer-attributed actor on `reviewerStatusBy` so the wire
+        shape is consistent with the AI surface — the FE distinguishes
+        manual rows by the `reviewerStatusBy.kind === "user"` actor on
+        an otherwise-untouched row.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubmissionFindingBody"
+      responses:
+        "201":
+          description: The newly created reviewer-authored finding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingResponse"
+        "400":
+          description: Invalid manual-finding body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
     get:
       operationId: listSubmissionFindings
       tags: [findings]
@@ -7792,6 +7845,49 @@ components:
             $ref: "#/components/schemas/SubmissionFindingsGenerationRun"
       required:
         - runs
+
+    CreateSubmissionFindingBody:
+      type: object
+      description: |
+        Body for `POST /submissions/{id}/findings` (manual reviewer
+        add). `title` is the headline; optional `description`
+        appends long-form context. `severity` and `category` mirror
+        the AI surface so manual rows render in the same severity
+        bucket and filter chips. Optional `codeCitation` and
+        `sourceCitation` populate the citations array; optional
+        `elementRef` anchors a BIM-element pointer.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Required short headline for the finding.
+        description:
+          type: string
+          nullable: true
+          description: Optional long-form context appended after the title.
+        severity:
+          $ref: "#/components/schemas/FindingSeverity"
+        category:
+          $ref: "#/components/schemas/FindingCategory"
+        codeCitation:
+          type: string
+          nullable: true
+          description: |
+            Optional code-section atom id. Persisted as a
+            `code-section` citation. Not validated against the
+            corpus — manual rows are reviewer-trusted.
+        sourceCitation:
+          $ref: "#/components/schemas/FindingSourceRef"
+          nullable: true
+          description: Optional briefing-source pointer.
+        elementRef:
+          type: string
+          nullable: true
+          description: Optional BIM element pointer.
+      required:
+        - title
+        - severity
+        - category
 
     OverrideFindingBody:
       type: object

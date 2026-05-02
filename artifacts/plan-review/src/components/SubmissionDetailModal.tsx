@@ -342,6 +342,7 @@ export function SubmissionDetailModal({
                 selectedFindingId={selectedFindingId}
                 onSelectFinding={onSelectFinding ?? (() => {})}
                 onShowInViewer={handleShowInViewer}
+                audience={audience}
               />
             </TabsContent>
             <TabsContent

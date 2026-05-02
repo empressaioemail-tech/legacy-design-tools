@@ -178,6 +178,13 @@ export type { EngagementContextPanelProps } from "./components/EngagementContext
 export { ParcelZoningCard } from "./components/ParcelZoningCard";
 export type { ParcelZoningCardProps } from "./components/ParcelZoningCard";
 
+// Reviewer-side low-confidence chip — extracted in Task #427 so the
+// FindingsTab row in plan-review and any future architect-preview
+// surface render the identical "Low conf" pill against the same
+// `Model confidence NN%` tooltip copy.
+export { LowConfidencePill } from "./components/LowConfidencePill";
+export type { LowConfidencePillProps } from "./components/LowConfidencePill";
+
 // Architect-side AIR-1 findings surfaces (Task #421 / V1-1 / V1-7).
 export {
   FindingsList,

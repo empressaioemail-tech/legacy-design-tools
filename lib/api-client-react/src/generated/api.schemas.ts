@@ -2753,6 +2753,37 @@ export interface SubmissionFindingsGenerationRunsResponse {
 }
 
 /**
+ * Body for `POST /submissions/{id}/findings` (manual reviewer
+add). `title` is the headline; optional `description`
+appends long-form context. `severity` and `category` mirror
+the AI surface so manual rows render in the same severity
+bucket and filter chips. Optional `codeCitation` and
+`sourceCitation` populate the citations array; optional
+`elementRef` anchors a BIM-element pointer.
+
+ */
+export interface CreateSubmissionFindingBody {
+  /**
+   * Required short headline for the finding.
+   * @minLength 1
+   */
+  title: string;
+  /** Optional long-form context appended after the title. */
+  description?: string | null;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  /** Optional code-section atom id. Persisted as a
+`code-section` citation. Not validated against the
+corpus — manual rows are reviewer-trusted.
+ */
+  codeCitation?: string | null;
+  /** Optional briefing-source pointer. */
+  sourceCitation?: FindingSourceRef | null;
+  /** Optional BIM element pointer. */
+  elementRef?: string | null;
+}
+
+/**
  * Body for `POST /findings/{id}/override`. Mirrors
 `OverrideFindingPayload` at findingsMock.ts:409-415. Atomic:
 the route stamps the original `overridden` and inserts the

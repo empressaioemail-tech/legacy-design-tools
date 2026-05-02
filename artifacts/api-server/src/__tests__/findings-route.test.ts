@@ -614,6 +614,94 @@ describe("POST /api/findings/:id/override", () => {
 
 // ─── V1-7: retrieval + bimElements wire-up ───────────────────────
 
+describe("POST /api/submissions/:id/findings (manual-add, Task #427)", () => {
+  it("creates a reviewer-attributed finding with status='ai-produced' and confidence=1", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { submission } = await seedEngagementSubmission(
+      "manual-add-engagement",
+    );
+    const res = await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings`)
+      .send({
+        title: "Setback violation",
+        description: "Manually filed finding the engine missed about chapter 19.3 setbacks.",
+        severity: "blocker",
+        category: "setback",
+      })
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(201);
+    expect(res.body.finding).toBeDefined();
+    expect(res.body.finding.status).toBe("ai-produced");
+    expect(res.body.finding.confidence).toBe(1);
+    expect(res.body.finding.severity).toBe("blocker");
+    expect(res.body.finding.category).toBe("setback");
+    expect(res.body.finding.reviewerStatusBy?.kind).toBe("user");
+
+    // Persisted row matches the wire shape.
+    const rows = await ctx.schema.db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, submission.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("ai-produced");
+    expect(Number(rows[0].confidence)).toBe(1);
+
+    // A `finding.generated` event was emitted against the new atom.
+    const events = await ctx.schema.db
+      .select()
+      .from(atomEvents)
+      .where(
+        and(
+          eq(atomEvents.entityType, "finding"),
+          eq(atomEvents.entityId, rows[0].atomId),
+          eq(atomEvents.eventType, "finding.generated"),
+        ),
+      );
+    expect(events).toHaveLength(1);
+    expect(
+      (events[0].payload as { source?: string }).source,
+    ).toBe("human-reviewer");
+  });
+
+  it("403s on the applicant audience", async () => {
+    const { submission } = await seedEngagementSubmission(
+      "manual-add-403-engagement",
+    );
+    const res = await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings`)
+      .send({
+        title: "Applicant attempt to file a finding.",
+        severity: "concern",
+        category: "other",
+      })
+      .set({ "x-audience": "user", "x-requestor": "user:applicant-1" });
+    expect(res.status).toBe(403);
+  });
+
+  it("400s on empty text", async () => {
+    const { submission } = await seedEngagementSubmission(
+      "manual-add-400-engagement",
+    );
+    const res = await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings`)
+      .send({ title: "   ", severity: "concern", category: "other" })
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(400);
+  });
+
+  it("404s on a missing submission", async () => {
+    const res = await request(getApp())
+      .post(`/api/submissions/00000000-0000-4000-8000-000000000000/findings`)
+      .send({
+        title: "Doesn't matter — submission missing.",
+        severity: "concern",
+        category: "other",
+      })
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("V1-7 — code retrieval wired into the engine input", () => {
   it("retrieved code atoms reach the engine and surface as [[CODE:...]] tokens on persisted findings", async () => {
     if (!ctx.schema) throw new Error("ctx");

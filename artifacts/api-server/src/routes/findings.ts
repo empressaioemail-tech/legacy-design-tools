@@ -60,6 +60,8 @@ import {
 } from "@workspace/codes";
 import {
   AcceptFindingParams,
+  CreateSubmissionFindingBody,
+  CreateSubmissionFindingParams,
   GenerateSubmissionFindingsBody,
   GenerateSubmissionFindingsParams,
   GetSubmissionFindingsGenerationStatusParams,
@@ -1063,6 +1065,139 @@ router.get(
     } catch (err) {
       logger.error({ err, submissionId }, "list submission findings failed");
       res.status(500).json({ error: "Failed to list findings" });
+    }
+  },
+);
+
+// ─── POST /submissions/:id/findings (manual-add) ───
+//
+// Reviewer adds a finding the AI engine missed. Persists with
+// `status="ai-produced"` (so accept/reject/override transitions
+// behave identically to engine rows), `confidence=1.0` (the row is
+// reviewer-trusted), and reviewer attribution stamped on
+// `reviewerStatusBy` so consumers can distinguish a manual row from
+// an untouched engine row by the actor's `kind === "user"`.
+
+router.post(
+  "/submissions/:submissionId/findings",
+  async (req: Request, res: Response): Promise<void> => {
+    if (requireReviewerAudience(req, res)) return;
+    const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+    const params = CreateSubmissionFindingParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "invalid_submission_id" });
+      return;
+    }
+    const body = CreateSubmissionFindingBody.safeParse(req.body);
+    if (!body.success) {
+      res.status(400).json({ error: "invalid_create_finding_body" });
+      return;
+    }
+    const submissionId = params.data.submissionId;
+    const actor = actorFromRequest(req);
+    if (!actor) {
+      res.status(400).json({ error: "missing_session_requestor" });
+      return;
+    }
+
+    try {
+      const sub = await loadSubmission(submissionId);
+      if (!sub) {
+        res.status(404).json({ error: "submission_not_found" });
+        return;
+      }
+
+      const title = body.data.title.trim();
+      if (title.length === 0) {
+        res.status(400).json({ error: "invalid_create_finding_body" });
+        return;
+      }
+      const description = body.data.description?.trim() ?? "";
+      const text = description.length > 0 ? `${title}\n\n${description}` : title;
+
+      const newUlid =
+        Date.now().toString(36).toUpperCase() +
+        Math.random().toString(36).slice(2, 10).toUpperCase();
+      const atomId = `finding:${submissionId}:${newUlid}`;
+
+      const citations: FindingCitation[] = [];
+      if (body.data.codeCitation) {
+        citations.push({
+          kind: "code-section",
+          atomId: body.data.codeCitation,
+        });
+      }
+      if (body.data.sourceCitation) {
+        citations.push({
+          kind: "briefing-source",
+          id: body.data.sourceCitation.id,
+          label: body.data.sourceCitation.label,
+        });
+      }
+
+      const now = new Date();
+      const [row] = await db
+        .insert(findings)
+        .values({
+          atomId,
+          submissionId,
+          severity: body.data.severity,
+          category: body.data.category,
+          status: "ai-produced",
+          text,
+          citations: citations as unknown as Record<string, unknown>[],
+          confidence: "1",
+          lowConfidence: false,
+          reviewerStatusBy: actor as unknown as Record<string, unknown>,
+          reviewerStatusChangedAt: now,
+          elementRef: body.data.elementRef ?? null,
+          sourceRef:
+            (body.data.sourceCitation as unknown as Record<
+              string,
+              unknown
+            > | null) ?? null,
+          aiGeneratedAt: now,
+        })
+        .returning();
+      const finalRow = row!;
+
+      // Emit a `finding.generated` event so the per-finding history
+      // chain has an origin entry, with the reviewer as the actor —
+      // distinguishes manual-add provenance from engine-added rows.
+      await emitFindingMutationEvent(
+        getHistoryService(),
+        {
+          finding: finalRow,
+          eventType: FINDING_GENERATED_EVENT_TYPE,
+          actor,
+          payload: {
+            findingId: finalRow.id,
+            atomId: finalRow.atomId,
+            submissionId: finalRow.submissionId,
+            severity: finalRow.severity,
+            category: finalRow.category,
+            confidence: 1,
+            source: "human-reviewer",
+          },
+        },
+        reqLog,
+      );
+
+      reqLog.info(
+        {
+          submissionId,
+          findingId: finalRow.id,
+          atomId: finalRow.atomId,
+        },
+        "manual finding created",
+      );
+      res.status(201).json({ finding: toWire(finalRow, null) });
+    } catch (err) {
+      logger.error(
+        { err, submissionId },
+        "create manual finding failed",
+      );
+      res.status(500).json({ error: "Failed to create finding" });
     }
   },
 );

@@ -34,6 +34,7 @@ import type {
   CreateReviewerAnnotationBody,
   CreateReviewerRequestBody,
   CreateSubmissionCommentBody,
+  CreateSubmissionFindingBody,
   CreateUserBody,
   DismissReviewerRequestBody,
   EngagementBimModelResponse,
@@ -6611,6 +6612,108 @@ export const useCreateSubmissionComment = <
   TContext
 > => {
   return useMutation(getCreateSubmissionCommentMutationOptions(options));
+};
+
+/**
+ * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
+finding the AI engine missed without re-running generation.
+Persists with `status="ai-produced"` (so accept/reject/override
+work the same as engine rows), `confidence=1.0`, and a
+reviewer-attributed actor on `reviewerStatusBy` so the wire
+shape is consistent with the AI surface — the FE distinguishes
+manual rows by the `reviewerStatusBy.kind === "user"` actor on
+an otherwise-untouched row.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Manually add a reviewer-authored finding to a submission
+ */
+export const getCreateSubmissionFindingUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/findings`;
+};
+
+export const createSubmissionFinding = async (
+  submissionId: string,
+  createSubmissionFindingBody: CreateSubmissionFindingBody,
+  options?: RequestInit,
+): Promise<FindingResponse> => {
+  return customFetch<FindingResponse>(
+    getCreateSubmissionFindingUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createSubmissionFindingBody),
+    },
+  );
+};
+
+export const getCreateSubmissionFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionFinding>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createSubmissionFinding>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionFindingBody> },
+  TContext
+> => {
+  const mutationKey = ["createSubmissionFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createSubmissionFinding>>,
+    { submissionId: string; data: BodyType<CreateSubmissionFindingBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return createSubmissionFinding(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateSubmissionFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createSubmissionFinding>>
+>;
+export type CreateSubmissionFindingMutationBody =
+  BodyType<CreateSubmissionFindingBody>;
+export type CreateSubmissionFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Manually add a reviewer-authored finding to a submission
+ */
+export const useCreateSubmissionFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSubmissionFinding>>,
+    TError,
+    { submissionId: string; data: BodyType<CreateSubmissionFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createSubmissionFinding>>,
+  TError,
+  { submissionId: string; data: BodyType<CreateSubmissionFindingBody> },
+  TContext
+> => {
+  return useMutation(getCreateSubmissionFindingMutationOptions(options));
 };
 
 /**

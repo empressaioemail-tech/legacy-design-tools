@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useOverrideFinding,
+  FindingAlreadyOverriddenError,
+  listSubmissionFindingsKey,
   type Finding,
+  type FindingActor,
   type FindingCategory,
   type FindingSeverity,
   FINDING_CATEGORY_LABELS,
   FINDING_SEVERITY_LABELS,
 } from "../../lib/findingsApi";
+import { formatActorLabel } from "@workspace/portal-ui";
 
 const SEVERITY_OPTIONS: FindingSeverity[] = ["blocker", "concern", "advisory"];
 const CATEGORY_OPTIONS: FindingCategory[] = [
@@ -36,8 +41,23 @@ export function OverrideFindingModal({
   const [category, setCategory] = useState<FindingCategory>(finding.category);
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // 409 surfaces a structured conflict block (resolved-by + when)
+  // alongside the inline `error` row so the reviewer can see WHO
+  // beat them to it without parsing the message string.
+  const [conflict, setConflict] = useState<
+    | { resolvedBy: FindingActor | null; resolvedAt: string | null }
+    | null
+  >(null);
 
   const override = useOverrideFinding(finding.submissionId);
+  const queryClient = useQueryClient();
+
+  const handleRefresh = () => {
+    void queryClient.invalidateQueries({
+      queryKey: listSubmissionFindingsKey(finding.submissionId),
+    });
+    onClose();
+  };
 
   useEffect(() => {
     setText(finding.text);
@@ -45,6 +65,7 @@ export function OverrideFindingModal({
     setCategory(finding.category);
     setComment("");
     setError(null);
+    setConflict(null);
   }, [finding]);
 
   // Escape closes the modal — same convention as the design-tools
@@ -60,6 +81,7 @@ export function OverrideFindingModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setConflict(null);
     const trimmed = text.trim();
     if (!trimmed) {
       setError("Finding text can't be empty.");
@@ -75,6 +97,14 @@ export function OverrideFindingModal({
       });
       onOverridden(revision);
     } catch (err) {
+      if (err instanceof FindingAlreadyOverriddenError) {
+        setConflict({
+          resolvedBy: err.resolvedBy,
+          resolvedAt: err.resolvedAt,
+        });
+        setError(err.message);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Failed to override finding.");
     }
   };
@@ -250,7 +280,53 @@ export function OverrideFindingModal({
             />
           </label>
 
-          {error && (
+          {conflict && (
+            <div
+              role="alert"
+              data-testid="override-finding-conflict"
+              style={{
+                color: "var(--warning-text)",
+                fontSize: 12,
+                background: "var(--warning-dim)",
+                padding: "8px 10px",
+                borderRadius: 4,
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>
+                Already overridden
+              </span>
+              <span>
+                This finding was already actioned by{" "}
+                {conflict.resolvedBy
+                  ? formatActorLabel({
+                      ...conflict.resolvedBy,
+                      displayName:
+                        conflict.resolvedBy.displayName ?? undefined,
+                    })
+                  : "another reviewer"}
+                {conflict.resolvedAt
+                  ? ` at ${new Date(conflict.resolvedAt).toLocaleString()}`
+                  : ""}
+                .
+              </span>
+              <div>
+                <button
+                  type="button"
+                  className="sc-btn-ghost"
+                  onClick={handleRefresh}
+                  data-testid="override-finding-conflict-refresh"
+                  style={{ fontSize: 11, padding: "2px 8px" }}
+                >
+                  Refresh findings
+                </button>
+              </div>
+            </div>
+          )}
+
+          {error && !conflict && (
             <div
               role="alert"
               data-testid="override-finding-error"

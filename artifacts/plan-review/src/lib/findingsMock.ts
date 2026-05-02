@@ -4,7 +4,7 @@
  * Production code MUST NOT import from this module directly — it
  * imports from `./findingsApi` instead. That barrel is the single
  * swap point for the AIR-1 backend wiring (see `./findingsApi.ts`
- * top-of-file comment for the full procedure and Task #341 for
+ * top-of-file comment for the full procedure and the follow-up for
  * context).
  *
  * What still lives here:
@@ -415,11 +415,43 @@ export interface OverrideFindingPayload {
 }
 
 /**
+ * Structured error thrown by `useOverrideFinding` when the targeted
+ * finding has already been overridden. Mirrors the server's 409
+ * envelope (`finding_already_overridden`) so the FE can render an
+ * inline conflict note with attribution and a refresh affordance
+ * instead of a generic toast.
+ */
+export class FindingAlreadyOverriddenError extends Error {
+  readonly code = "finding_already_overridden" as const;
+  readonly status = 409 as const;
+  readonly resolvedBy: FindingActor | null;
+  readonly resolvedAt: string | null;
+  constructor(args: {
+    message?: string;
+    resolvedBy: FindingActor | null;
+    resolvedAt: string | null;
+  }) {
+    super(
+      args.message ??
+        "This finding has already been overridden. The original cannot be overridden again.",
+    );
+    this.name = "FindingAlreadyOverriddenError";
+    this.resolvedBy = args.resolvedBy;
+    this.resolvedAt = args.resolvedAt;
+  }
+}
+
+/**
  * Override creates a NEW finding atom (cid changes / new id) with
  * `revisionOf` pointing back at the original AI finding. The
  * original is preserved in-place with status="overridden" so the
  * drill-in's "See AI's original" affordance can still surface it
  * for audit. Mirrors AIR-1's planned override semantics.
+ *
+ * Single-revision rule: a finding can only be overridden ONCE. A
+ * second attempt throws {@link FindingAlreadyOverriddenError} so the
+ * FE can render an inline 409 message rather than swallowing the
+ * conflict.
  */
 export function useOverrideFinding(
   submissionId: string,
@@ -429,6 +461,15 @@ export function useOverrideFinding(
   return useMutation<Finding, unknown, OverrideFindingPayload, FindingMutateContext>({
     mutationFn: async (payload) => {
       const now = new Date().toISOString();
+      // 409 check before any write — mirror the server's behavior.
+      const list = findingsBySubmission.get(submissionId) ?? [];
+      const target = list.find((f) => f.id === payload.findingId);
+      if (target && target.status === "overridden") {
+        throw new FindingAlreadyOverriddenError({
+          resolvedBy: target.reviewerStatusBy,
+          resolvedAt: target.reviewerStatusChangedAt,
+        });
+      }
       let revision: Finding | null = null;
       updateFinding(submissionId, payload.findingId, (original) => {
         const supersededOriginal: Finding = {
@@ -455,6 +496,87 @@ export function useOverrideFinding(
       qc.invalidateQueries({ queryKey: listSubmissionFindingsKey(submissionId) });
       if (!revision) throw new Error("Finding not found");
       return revision;
+    },
+    ...(options ?? {}),
+  });
+}
+
+/**
+ * Manual-add payload. Mirrors the wire of
+ * `POST /api/submissions/:id/findings`. The server composes the
+ * persisted `text` body as `title` + blank line + `description` when
+ * a description is provided, so callers should send the headline as
+ * `title` and any longer narrative as `description`.
+ */
+export interface CreateSubmissionFindingPayload {
+  title: string;
+  description?: string | null;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  codeCitation?: string | null;
+  sourceCitation?: { id: string; label: string } | null;
+  elementRef?: string | null;
+}
+
+export function useCreateSubmissionFinding(
+  submissionId: string,
+  options?: UseMutationOptions<
+    Finding,
+    unknown,
+    CreateSubmissionFindingPayload,
+    FindingMutateContext
+  >,
+) {
+  const qc = useQueryClient();
+  return useMutation<
+    Finding,
+    unknown,
+    CreateSubmissionFindingPayload,
+    FindingMutateContext
+  >({
+    mutationFn: async (payload) => {
+      const title = payload.title.trim();
+      if (!title) throw new Error("Title is required.");
+      const description = payload.description?.trim() ?? "";
+      const text = description ? `${title}\n\n${description}` : title;
+      const now = new Date().toISOString();
+      const citations: FindingCitation[] = [];
+      if (payload.codeCitation) {
+        citations.push({ kind: "code-section", atomId: payload.codeCitation });
+      }
+      if (payload.sourceCitation) {
+        citations.push({
+          kind: "briefing-source",
+          id: payload.sourceCitation.id,
+          label: payload.sourceCitation.label,
+        });
+      }
+      const created: Finding = {
+        id: findingId(submissionId),
+        submissionId,
+        severity: payload.severity,
+        category: payload.category,
+        status: "ai-produced",
+        text,
+        citations,
+        confidence: 1,
+        lowConfidence: false,
+        reviewerStatusBy: {
+          kind: "user",
+          id: "reviewer-current",
+          displayName: "Reviewer",
+        },
+        reviewerStatusChangedAt: now,
+        reviewerComment: null,
+        elementRef: payload.elementRef ?? null,
+        sourceRef: payload.sourceCitation ?? null,
+        aiGeneratedAt: now,
+        revisionOf: null,
+      };
+      const prior = findingsBySubmission.get(submissionId) ?? [];
+      findingsBySubmission.set(submissionId, [created, ...prior]);
+      qc.invalidateQueries({ queryKey: listSubmissionFindingsKey(submissionId) });
+      return created;
     },
     ...(options ?? {}),
   });
