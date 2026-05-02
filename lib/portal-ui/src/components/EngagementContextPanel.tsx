@@ -90,6 +90,15 @@ export interface EngagementContextPanelProps {
    */
   engagementId: string;
   /**
+   * Wave 2 Sprint D / V1-2 — caller's session audience. Forwarded
+   * to {@link BriefingSourceRow} so its reviewer-side
+   * `RequestRefreshAffordance` renders only when the caller is a
+   * reviewer (`"internal"`). Defaults to `"user"` so existing
+   * callers that don't pass anything keep their current behavior
+   * (affordance hidden) without change.
+   */
+  audience?: "internal" | "user" | "ai";
+  /**
    * Optional — id of the briefing generation that produced the BIM
    * model attached to the submission the reviewer is investigating.
    * Forwarded to {@link BriefingRecentRunsPanel} so the matching
@@ -174,6 +183,7 @@ function tierForSource(
 
 export function EngagementContextPanel({
   engagementId,
+  audience = "user",
   producingGenerationId,
   renderPriorSnapshotHeader,
   renderPriorNarrativeDiff,
@@ -258,6 +268,7 @@ export function EngagementContextPanel({
       <ParcelBriefingCard briefing={briefing} />
       <BriefingSourcesSection
         engagementId={engagementId}
+        audience={audience}
         sources={briefing.sources}
       />
       <NarrativeSection
@@ -386,9 +397,11 @@ function ParcelBriefingCard({ briefing }: { briefing: EngagementBriefing }) {
  */
 function BriefingSourcesSection({
   engagementId,
+  audience,
   sources,
 }: {
   engagementId: string;
+  audience: "internal" | "user" | "ai";
   sources: EngagementBriefingSource[];
 }) {
   const grouped = useMemo(() => {
@@ -439,6 +452,7 @@ function BriefingSourcesSection({
             <TierGroup
               key={tier}
               engagementId={engagementId}
+              audience={audience}
               tier={tier}
               sources={grouped[tier]}
             />
@@ -451,10 +465,12 @@ function BriefingSourcesSection({
 
 function TierGroup({
   engagementId,
+  audience,
   tier,
   sources,
 }: {
   engagementId: string;
+  audience: "internal" | "user" | "ai";
   tier: SourceTier;
   sources: EngagementBriefingSource[];
 }) {
@@ -502,6 +518,7 @@ function TierGroup({
             <BriefingSourceRow
               engagementId={engagementId}
               source={source}
+              audience={audience}
               readOnly
             />
           </li>
