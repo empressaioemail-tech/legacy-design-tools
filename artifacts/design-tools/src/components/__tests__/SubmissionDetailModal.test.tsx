@@ -29,6 +29,7 @@ import {
   cleanup,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createQueryKeyStubs } from "@workspace/portal-ui/test-utils";
 
 const hoisted = vi.hoisted(() => {
@@ -49,12 +50,15 @@ const hoisted = vi.hoisted(() => {
 vi.mock("@workspace/api-client-react", () => ({
   useGetAtomSummary: () => hoisted.summary ?? { isLoading: true },
   useGetAtomHistory: () => hoisted.history ?? { isLoading: true },
+  useListSubmissionComments: () => ({ data: { comments: [] }, isLoading: false, isError: false }),
+  useCreateSubmissionComment: () => ({ mutate: () => {}, isPending: false, isError: false }),
   // Task #382: shared query-key stub helper. The standard
   // `getGet*QueryKey` → `[<name without "get" prefix and "QueryKey"
   // suffix, lowered>, ...args]` shape matches what the modal expects.
   ...createQueryKeyStubs([
     "getGetAtomSummaryQueryKey",
     "getGetAtomHistoryQueryKey",
+    "getListSubmissionCommentsQueryKey",
   ] as const),
 }));
 
@@ -68,7 +72,12 @@ function setHistory(value: typeof hoisted.history) {
 }
 
 function renderModal(node: ReactNode) {
-  return render(<>{node}</>);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>{node}</QueryClientProvider>,
+  );
 }
 
 beforeEach(() => {
