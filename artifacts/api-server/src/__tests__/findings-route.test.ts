@@ -62,9 +62,8 @@ setupRouteTests((g) => {
 });
 
 const REVIEWER_HEADERS = {
-  "x-test-audience": "internal",
-  "x-test-requestor-kind": "user",
-  "x-test-requestor-id": "reviewer-test",
+  "x-audience": "internal",
+  "x-requestor": "user:reviewer-test",
 };
 
 async function seedEngagementSubmission(name = "Findings Test Engagement") {
