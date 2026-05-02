@@ -16,26 +16,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─────────────────────────────────────────────────────────────────────
-// Puppeteer mock — hoisted by vi.mock before module under test loads.
+// Puppeteer mock — vi.hoisted() so the shared mocks exist by the
+// time vi.mock's factory runs. Without hoisting, vi.mock fires
+// before the const declarations and the factory sees an
+// uninitialized binding ("Cannot access 'mockLaunch' before
+// initialization").
 // ─────────────────────────────────────────────────────────────────────
 
-const mockPage = {
-  setViewport: vi.fn(),
-  on: vi.fn(),
-  setContent: vi.fn(),
-  waitForFunction: vi.fn(),
-  evaluate: vi.fn(),
-  screenshot: vi.fn(),
-  close: vi.fn(),
-};
-
-const mockBrowser = {
-  connected: true,
-  newPage: vi.fn(async () => mockPage),
-  close: vi.fn(),
-};
-
-const mockLaunch = vi.fn(async () => mockBrowser as unknown as object);
+const { mockPage, mockBrowser, mockLaunch } = vi.hoisted(() => {
+  const mockPage = {
+    setViewport: vi.fn(),
+    on: vi.fn(),
+    setContent: vi.fn(),
+    waitForFunction: vi.fn(),
+    evaluate: vi.fn(),
+    screenshot: vi.fn(),
+    close: vi.fn(),
+  };
+  const mockBrowser = {
+    connected: true,
+    newPage: vi.fn(async () => mockPage),
+    close: vi.fn(),
+  };
+  const mockLaunch = vi.fn(async () => mockBrowser as unknown as object);
+  return { mockPage, mockBrowser, mockLaunch };
+});
 
 vi.mock("puppeteer", () => ({
   default: { launch: mockLaunch },
