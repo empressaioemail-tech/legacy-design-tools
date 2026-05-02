@@ -32,6 +32,7 @@ import { makeBimModelAtom } from "./bim-model.atom";
 import { makeMaterializableElementAtom } from "./materializable-element.atom";
 import { makeBriefingDivergenceAtom } from "./briefing-divergence.atom";
 import { makeReviewerAnnotationAtom } from "./reviewer-annotation.atom";
+import { makeReviewerRequestAtom } from "./reviewer-request.atom";
 import { makeViewpointRenderAtom } from "./viewpoint-render.atom";
 import { makeRenderOutputAtom } from "./render-output.atom";
 import { makeFindingAtom } from "./finding.atom";
@@ -174,6 +175,17 @@ export function getAtomRegistry(): AtomRegistry {
   // populated at lookup time. Registered after every target so the
   // boot-log tail makes the dependency order obvious.
   registry.register(makeReviewerAnnotationAtom({ db, history }));
+  // Wave 2 Sprint D / V1-2 — reviewer-fired requests for architect-side
+  // action (refresh briefing-source / refresh bim-model / regenerate
+  // briefing). Composes the engagement parent + the three potential
+  // target atom types declaratively; only the target matching the row's
+  // `target_entity_type` is populated at lookup time. Resolution is
+  // implicit via the matching domain action's atom-history event,
+  // hooked by `lib/reviewerRequestResolution.ts`. Registered after the
+  // target atoms (briefing-source, bim-model, parcel-briefing) and
+  // after reviewer-annotation so the boot-log tail surfaces both
+  // reviewer-side atoms together.
+  registry.register(makeReviewerRequestAtom({ db, history }));
   // DA-RP-0 mnml.ai render-pipeline atoms — shape-only, no DB lookup
   // yet. Both registered before any consumer references their slugs;
   // `register()` itself does not care about order, but the boot-log

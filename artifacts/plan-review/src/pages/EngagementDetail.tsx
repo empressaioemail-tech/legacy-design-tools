@@ -530,6 +530,7 @@ export default function EngagementDetail() {
         onTabChange={handleTabChange}
         onSelectFinding={handleSelectFinding}
         onClose={closeSubmissionModal}
+        audience={audience}
       />
 
       {engagement && (
@@ -962,6 +963,7 @@ function OpenSubmissionModalRenderer({
   onTabChange,
   onSelectFinding,
   onClose,
+  audience,
 }: {
   engagementId: string;
   openSubmissionId: string | null;
@@ -970,6 +972,7 @@ function OpenSubmissionModalRenderer({
   onTabChange: (tab: SubmissionDetailTab) => void;
   onSelectFinding: (id: string | null) => void;
   onClose: () => void;
+  audience: "internal" | "user" | "ai";
 }) {
   const { data: submissions } = useListEngagementSubmissions(engagementId, {
     query: {
@@ -989,6 +992,7 @@ function OpenSubmissionModalRenderer({
       onTabChange={onTabChange}
       onSelectFinding={onSelectFinding}
       onClose={onClose}
+      audience={audience}
     />
   );
 }

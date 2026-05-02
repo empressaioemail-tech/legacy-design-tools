@@ -31,7 +31,9 @@ import type {
   CreateBriefingSourceBody,
   CreateEngagementSubmissionBody,
   CreateReviewerAnnotationBody,
+  CreateReviewerRequestBody,
   CreateUserBody,
+  DismissReviewerRequestBody,
   EngagementBimModelResponse,
   EngagementBriefingResponse,
   EngagementBriefingSourcesResponse,
@@ -55,9 +57,11 @@ import type {
   ListBimModelDivergencesResponse,
   ListCodeAtomsParams,
   ListEngagementBriefingSourcesParams,
+  ListEngagementReviewerRequestsParams,
   ListJurisdictionAtomsParams,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
+  ListReviewerRequestsResponse,
   ListSubmissionFindingsResponse,
   LocalSetbackTable,
   MatchEngagementBody,
@@ -74,6 +78,7 @@ import type {
   RetrievalProbeBody,
   RetrievalProbeResponse,
   ReviewerAnnotationResponse,
+  ReviewerRequestResponse,
   Session,
   SheetSummary,
   SheetUploadResponse,
@@ -6900,4 +6905,361 @@ export const useOverrideFinding = <
   TContext
 > => {
   return useMutation(getOverrideFindingMutationOptions(options));
+};
+
+/**
+ * Returns reviewer-requests filed against the engagement,
+newest-first by `requestedAt`. Architect-only — the endpoint
+requires the `architect` audience and 403s any non-architect
+caller. Drives the architect-side `ReviewerRequestsStrip`.
+
+The optional `status` filter narrows the result to one
+lifecycle state. The strip queries `?status=pending` to render
+its open queue; auditors / debug tools can omit the filter to
+see the full history.
+
+Resolution is implicit — when an architect runs the matching
+domain action (refresh briefing-source / refresh bim-model /
+regenerate briefing) the post-action hook flips a pending
+request to `resolved` and stamps `triggeredActionEventId` to
+the action event's id. The architect never directly "marks
+resolved" — only `dismiss` is an explicit transition.
+
+ * @summary List reviewer-requests on an engagement
+ */
+export const getListEngagementReviewerRequestsUrl = (
+  id: string,
+  params?: ListEngagementReviewerRequestsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${id}/reviewer-requests?${stringifiedParams}`
+    : `/api/engagements/${id}/reviewer-requests`;
+};
+
+export const listEngagementReviewerRequests = async (
+  id: string,
+  params?: ListEngagementReviewerRequestsParams,
+  options?: RequestInit,
+): Promise<ListReviewerRequestsResponse> => {
+  return customFetch<ListReviewerRequestsResponse>(
+    getListEngagementReviewerRequestsUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementReviewerRequestsQueryKey = (
+  id: string,
+  params?: ListEngagementReviewerRequestsParams,
+) => {
+  return [
+    `/api/engagements/${id}/reviewer-requests`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListEngagementReviewerRequestsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementReviewerRequests>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: ListEngagementReviewerRequestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementReviewerRequests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListEngagementReviewerRequestsQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementReviewerRequests>>
+  > = ({ signal }) =>
+    listEngagementReviewerRequests(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementReviewerRequests>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementReviewerRequestsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementReviewerRequests>>
+>;
+export type ListEngagementReviewerRequestsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List reviewer-requests on an engagement
+ */
+
+export function useListEngagementReviewerRequests<
+  TData = Awaited<ReturnType<typeof listEngagementReviewerRequests>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  params?: ListEngagementReviewerRequestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementReviewerRequests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementReviewerRequestsQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Files a free-text request from the reviewer asking the
+architect to run one of three actions against a target atom
+on the engagement: refresh a briefing-source, refresh a
+bim-model, or regenerate the briefing.
+
+The route validates that `targetEntityType` matches the
+request kind (e.g. `refresh-briefing-source` must target a
+`briefing-source` atom) — a malformed pairing is rejected
+with 400 at the contract layer.
+
+Emits the matching `reviewer-request.<kind>.requested` event
+anchored to the new row's id. The row starts in `pending`
+status and moves to `resolved` (implicitly, via the
+post-action hook on the matching domain action) or
+`dismissed` (explicitly, via
+`POST /reviewer-requests/{id}/dismiss`).
+
+Reviewer-only — the endpoint requires the `internal`
+audience and 403s any non-reviewer caller.
+
+ * @summary File a reviewer-request against an engagement
+ */
+export const getCreateEngagementReviewerRequestUrl = (id: string) => {
+  return `/api/engagements/${id}/reviewer-requests`;
+};
+
+export const createEngagementReviewerRequest = async (
+  id: string,
+  createReviewerRequestBody: CreateReviewerRequestBody,
+  options?: RequestInit,
+): Promise<ReviewerRequestResponse> => {
+  return customFetch<ReviewerRequestResponse>(
+    getCreateEngagementReviewerRequestUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createReviewerRequestBody),
+    },
+  );
+};
+
+export const getCreateEngagementReviewerRequestMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagementReviewerRequest>>,
+    TError,
+    { id: string; data: BodyType<CreateReviewerRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createEngagementReviewerRequest>>,
+  TError,
+  { id: string; data: BodyType<CreateReviewerRequestBody> },
+  TContext
+> => {
+  const mutationKey = ["createEngagementReviewerRequest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createEngagementReviewerRequest>>,
+    { id: string; data: BodyType<CreateReviewerRequestBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return createEngagementReviewerRequest(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateEngagementReviewerRequestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createEngagementReviewerRequest>>
+>;
+export type CreateEngagementReviewerRequestMutationBody =
+  BodyType<CreateReviewerRequestBody>;
+export type CreateEngagementReviewerRequestMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary File a reviewer-request against an engagement
+ */
+export const useCreateEngagementReviewerRequest = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagementReviewerRequest>>,
+    TError,
+    { id: string; data: BodyType<CreateReviewerRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createEngagementReviewerRequest>>,
+  TError,
+  { id: string; data: BodyType<CreateReviewerRequestBody> },
+  TContext
+> => {
+  return useMutation(
+    getCreateEngagementReviewerRequestMutationOptions(options),
+  );
+};
+
+/**
+ * Architect-side explicit dismissal of a pending reviewer-request.
+Captures the architect's reason for not honoring the ask
+(`dismissalReason`) and emits a
+`reviewer-request.<kind>.dismissed` event anchored to the row.
+
+Idempotent in spirit — dismissing an already-dismissed row
+returns the existing dismissal envelope without re-emitting an
+event. Dismissing a row that is already `resolved` is a 409
+(the request was implicitly closed by a domain action; there
+is nothing left to dismiss).
+
+Architect-only — the endpoint requires the `architect`
+audience and 403s any non-architect caller.
+
+ * @summary Dismiss a pending reviewer-request with a reason
+ */
+export const getDismissReviewerRequestUrl = (id: string) => {
+  return `/api/reviewer-requests/${id}/dismiss`;
+};
+
+export const dismissReviewerRequest = async (
+  id: string,
+  dismissReviewerRequestBody: DismissReviewerRequestBody,
+  options?: RequestInit,
+): Promise<ReviewerRequestResponse> => {
+  return customFetch<ReviewerRequestResponse>(
+    getDismissReviewerRequestUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(dismissReviewerRequestBody),
+    },
+  );
+};
+
+export const getDismissReviewerRequestMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dismissReviewerRequest>>,
+    TError,
+    { id: string; data: BodyType<DismissReviewerRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof dismissReviewerRequest>>,
+  TError,
+  { id: string; data: BodyType<DismissReviewerRequestBody> },
+  TContext
+> => {
+  const mutationKey = ["dismissReviewerRequest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof dismissReviewerRequest>>,
+    { id: string; data: BodyType<DismissReviewerRequestBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return dismissReviewerRequest(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DismissReviewerRequestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof dismissReviewerRequest>>
+>;
+export type DismissReviewerRequestMutationBody =
+  BodyType<DismissReviewerRequestBody>;
+export type DismissReviewerRequestMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Dismiss a pending reviewer-request with a reason
+ */
+export const useDismissReviewerRequest = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dismissReviewerRequest>>,
+    TError,
+    { id: string; data: BodyType<DismissReviewerRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof dismissReviewerRequest>>,
+  TError,
+  { id: string; data: BodyType<DismissReviewerRequestBody> },
+  TContext
+> => {
+  return useMutation(getDismissReviewerRequestMutationOptions(options));
 };

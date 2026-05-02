@@ -100,6 +100,14 @@ export interface SubmissionDetailModalProps {
   selectedFindingId?: string | null;
   onTabChange?: (tab: SubmissionDetailTab) => void;
   onSelectFinding?: (id: string | null) => void;
+  /**
+   * Wave 2 Sprint D / V1-2 — caller's session audience. Forwarded
+   * to {@link EngagementContextPanel} so `BriefingSourceRow` can
+   * render the reviewer-side `RequestRefreshAffordance` only for
+   * `"internal"` callers. Defaults to `"user"` so existing tests
+   * and any non-reviewer-audience consumer keep current behavior.
+   */
+  audience?: "internal" | "user" | "ai";
 }
 
 const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
@@ -117,6 +125,7 @@ export function SubmissionDetailModal({
   selectedFindingId = null,
   onTabChange,
   onSelectFinding,
+  audience = "user",
 }: SubmissionDetailModalProps) {
   const isOpen = submission !== null;
 
@@ -288,6 +297,7 @@ export function SubmissionDetailModal({
               />
               <EngagementContextPanel
                 engagementId={engagementId}
+                audience={audience}
                 renderPriorSnapshotHeader={({
                   runGenerationId,
                   priorNarrative,

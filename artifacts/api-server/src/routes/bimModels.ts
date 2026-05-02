@@ -79,6 +79,7 @@ import {
 } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
 import { hydrateActors } from "../lib/userLookup";
+import { resolveMatchingReviewerRequests } from "../lib/reviewerRequestResolution";
 import { getHistoryService } from "../atoms/registry";
 import {
   BIM_MODEL_EVENT_TYPES,
@@ -577,7 +578,7 @@ async function emitBimModelEvent(
   bm: BimModel,
   payload: Record<string, unknown>,
   reqLog: typeof logger,
-): Promise<void> {
+): Promise<string | null> {
   try {
     const event = await history.appendEvent({
       entityType: "bim-model",
@@ -601,11 +602,13 @@ async function emitBimModelEvent(
       },
       `${eventType} event appended`,
     );
+    return event.id;
   } catch (err) {
     reqLog.error(
       { err, bimModelId: bm.id, engagementId: bm.engagementId, eventType },
       `${eventType} event append failed — row write kept`,
     );
+    return null;
   }
 }
 
@@ -1100,7 +1103,7 @@ router.get(
       // calls on focus; the timeline preserves a row per poll so an
       // operator can reconstruct when the architect saw the stale
       // badge vs. the current pill.
-      await emitBimModelEvent(
+      const refreshedEventId = await emitBimModelEvent(
         getHistoryService(),
         BIM_MODEL_REFRESHED_EVENT_TYPE,
         bm,
@@ -1120,6 +1123,18 @@ router.get(
         },
         reqLog,
       );
+
+      // V1-2 implicit-resolve hook: a `bim-model.refreshed` emit closes
+      // every `pending` reviewer-request whose target tuple matches
+      // this bim-model. Best-effort — never fails the in-flight poll.
+      if (refreshedEventId) {
+        await resolveMatchingReviewerRequests({
+          targetEntityType: "bim-model",
+          targetEntityId: bm.id,
+          triggeredActionEventId: refreshedEventId,
+          log: reqLog,
+        });
+      }
 
       res.json({
         bimModelId: bm.id,

@@ -11,6 +11,7 @@ import { summarizeStatePayload } from "@workspace/adapters/state/summaries";
 import { summarizeLocalPayload } from "@workspace/adapters/local/summaries";
 import { BriefingSourceDetails } from "./BriefingSourceDetails";
 import { BriefingSourceHistoryPanel } from "./BriefingSourceHistoryPanel";
+import { RequestRefreshAffordance } from "./RequestRefreshAffordance";
 import { relativeTime } from "../lib/relativeTime";
 import {
   BRIEFING_GENERATE_LAYERS_ACTOR_LABEL,
@@ -18,6 +19,7 @@ import {
   CONVERSION_STATUS_STYLE,
   SOURCE_KIND_BADGE_LABEL,
   computeBriefingSourceRange,
+  evaluateRowFreshness,
   extractAdapterKeyFromProvider,
   formatBriefingSourceRangeShort,
   formatByteSize,
@@ -66,6 +68,19 @@ export interface BriefingSourceRowProps {
    * / history surfaces without the mutations.
    */
   readOnly?: boolean;
+  /**
+   * Wave 2 Sprint D / V1-2 — caller's session audience. When
+   * `"internal"` AND the row is `readOnly` AND the row's snapshot
+   * is stale per `evaluateRowFreshness`, the row renders the
+   * `RequestRefreshAffordance` so the reviewer can file a refresh
+   * request against the architect.
+   *
+   * Defaults to `"user"` so existing architect call sites
+   * (audience="user", readOnly=false) keep their current behavior
+   * without change. Reviewer call sites (plan-review) must pass
+   * `audience="internal"` explicitly.
+   */
+  audience?: "internal" | "user" | "ai";
 }
 
 export function BriefingSourceRow({
@@ -78,6 +93,7 @@ export function BriefingSourceRow({
   rerunStaleAdapterError = null,
   rerunStaleAdapterSuccessAt = null,
   readOnly = false,
+  audience = "user",
 }: BriefingSourceRowProps) {
   const isManual = source.sourceKind === "manual-upload";
   const isAdapter = isAdapterSourceKind(source.sourceKind);
@@ -87,6 +103,21 @@ export function BriefingSourceRow({
     onRefreshLayer !== null &&
     source.sourceKind === "federal-adapter" &&
     adapterKeyForRefresh !== null;
+  // V1-2 reviewer-side affordance gate. Computed at row scope so the
+  // affordance can render adjacent to the architect's "Refresh this
+  // layer" sibling under a single conditional. The freshness probe
+  // is the same pure helper `BriefingSourceDetails` calls in its
+  // ProvenanceFooter — kept independent so the row can decide to
+  // render without waiting for the footer to mount.
+  const rowFreshness = useMemo(
+    () => evaluateRowFreshness(source),
+    [source.layerKind, source.snapshotDate],
+  );
+  const showRequestRefresh =
+    readOnly &&
+    audience === "internal" &&
+    isAdapter &&
+    rowFreshness?.verdict.isStale === true;
   const adapterSummary =
     source.sourceKind === "federal-adapter"
       ? summarizeFederalPayload(source.layerKind, source.payload)
@@ -368,6 +399,15 @@ export function BriefingSourceRow({
             >
               {isRefreshing ? "Refreshing…" : "Refresh this layer"}
             </button>
+          )}
+          {showRequestRefresh && (
+            <RequestRefreshAffordance
+              engagementId={engagementId}
+              requestKind="refresh-briefing-source"
+              targetEntityType="briefing-source"
+              targetEntityId={source.id}
+              targetLabel={source.layerKind}
+            />
           )}
           {!isManual && (
             <button

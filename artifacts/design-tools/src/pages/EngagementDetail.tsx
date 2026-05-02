@@ -86,6 +86,7 @@ import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionRe
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
+import { ReviewerRequestsStrip } from "../components/ReviewerRequestsStrip";
 import {
   BriefingDivergenceDetailDialog,
   BriefingDivergenceRow as PortalBriefingDivergenceRow,
@@ -3867,6 +3868,14 @@ export function EngagementDetail() {
             </button>
           </div>
         </div>
+
+        {/*
+          Wave 2 Sprint D / V1-2 — architect-side queue of pending
+          reviewer-requests on this engagement. Mounted above TabBar
+          so the queue is visible regardless of which tab is active.
+          The component is self-hiding when the queue is empty.
+        */}
+        <ReviewerRequestsStrip engagementId={id} />
 
         <TabBar active={tab} onChange={setTab} />
 

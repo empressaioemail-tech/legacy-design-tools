@@ -8,8 +8,24 @@
 import type { FindingActorKind } from "./findingActorKind";
 
 /**
- * Mirrors `FindingActor` from findingsMock.ts:76-80. Stamped on
-each reviewer mutation so the audit trail captures who acted.
+ * Stable actor envelope shared by reviewer-side audit surfaces
+(reviewer-requests, findings, eventually reviewer-annotations).
+
+`kind` distinguishes session-bound human actors (`user`) from
+AI/bot writes (`agent`) and infrastructure-stamped events
+(`system`). `id` is opaque to the framework — application code
+chooses its identity scheme (today: the upstream identity
+layer's stable user id). `displayName` is hydrated at write
+time so consumer surfaces (e.g. the architect's
+ReviewerRequestsStrip) can render "Requested by Alex" without
+a per-row roundtrip.
+
+Promoted to a shared schema in V1-2 — was previously only a
+TS interface in `artifacts/plan-review/src/lib/findingsMock.ts`.
+Both V1-1 (findings) and V1-2 (reviewer-requests) consume this
+envelope; future consumers (e.g. promoted reviewer-annotations
+when they pick up architect-visible attribution) should import
+from here rather than re-deriving the shape.
 
  */
 export interface FindingActor {

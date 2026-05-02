@@ -19,6 +19,18 @@ export type { ReviewerAnnotationAffordanceProps } from "./components/ReviewerAnn
 export { ReviewerAnnotationPanel } from "./components/ReviewerAnnotationPanel";
 export type { ReviewerAnnotationPanelProps } from "./components/ReviewerAnnotationPanel";
 
+// Wave 2 Sprint D / V1-2 — reviewer-side affordance for filing a
+// "please refresh" request against a stale target atom. The dialog
+// is the free-text reason capture; the affordance is the small
+// inline button that opens it. Both are reviewer-only by deployment
+// context (the parent gates render on `audience === "internal"`),
+// kept audience-agnostic in portal-ui so the components stay
+// reusable when a future audience model lands.
+export { RequestRefreshDialog } from "./components/RequestRefreshDialog";
+export type { RequestRefreshDialogProps } from "./components/RequestRefreshDialog";
+export { RequestRefreshAffordance } from "./components/RequestRefreshAffordance";
+export type { RequestRefreshAffordanceProps } from "./components/RequestRefreshAffordance";
+
 // Briefing divergences — shared by design-tools (architect surface)
 // and plan-review (read-only reviewer surface). Promoted to portal-ui
 // by Wave 2 Sprint B (Task #306) so the two surfaces stay in
@@ -116,6 +128,7 @@ export {
   briefingSourceHistoryTierStorageKey,
   computeBriefingSourceRange,
   diffBriefingSourceFields,
+  evaluateRowFreshness,
   extractAdapterKeyFromProvider,
   formatBriefingDiffValue,
   formatBriefingSourceRangeShort,
@@ -125,6 +138,8 @@ export {
   isAdapterSourceKind,
   isBriefingSourceRangeStale,
   useBriefingSourceHistoryTier,
+  type ProvenanceTier,
+  type SnapshotFreshnessVerdict,
 } from "./lib/briefingSourceHelpers";
 
 // Composite read-only briefing surface used by the plan-review

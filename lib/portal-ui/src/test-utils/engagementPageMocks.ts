@@ -172,5 +172,29 @@ export async function makeEngagementPageMockHooks(
       }),
     useCreateEngagementSubmission: noopMutationHook,
     useRecordSubmissionResponse: noopMutationHook,
+    // V1-2 — ReviewerRequestsStrip mounts in EngagementDetail above
+    // the TabBar, so every engagement-page test now needs the
+    // reviewer-requests hook + its query-key helper. Default to an
+    // empty `requests: []` payload — the strip's zero-state branch
+    // (`if (requests.length === 0) return null`) keeps it invisible
+    // unless a specific test overrides this hook.
+    getListEngagementReviewerRequestsQueryKey: (
+      id: string,
+      params?: Record<string, unknown>,
+    ) =>
+      [
+        `/api/engagements/${id}/reviewer-requests`,
+        ...(params ? [params] : []),
+      ] as const,
+    useListEngagementReviewerRequests: (
+      id: string,
+      _params?: Record<string, unknown>,
+      opts?: { query?: { enabled?: boolean } },
+    ) =>
+      useQuery({
+        queryKey: ["listEngagementReviewerRequests", id],
+        queryFn: async () => ({ requests: [] }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
   };
 }

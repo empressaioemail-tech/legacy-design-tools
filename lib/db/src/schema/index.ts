@@ -17,3 +17,4 @@ export * from "./adapterResponseCache";
 export * from "./reviewerAnnotations";
 export * from "./findingRuns";
 export * from "./findings";
+export * from "./reviewerRequests";

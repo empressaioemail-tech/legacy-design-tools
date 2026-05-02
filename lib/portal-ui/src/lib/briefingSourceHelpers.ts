@@ -1,5 +1,53 @@
 import { useEffect, useState } from "react";
 import type { EngagementBriefingSource } from "@workspace/api-client-react";
+import { evaluateFederalSnapshotFreshness } from "@workspace/adapters/federal/summaries";
+import { evaluateLocalSnapshotFreshness } from "@workspace/adapters/local/summaries";
+import { evaluateStateSnapshotFreshness } from "@workspace/adapters/state/summaries";
+
+/**
+ * Tier the freshness verdict was sourced from. Drives data-testid
+ * suffixes (e2e assertions) and the per-tier rerun-affordance shape.
+ */
+export type ProvenanceTier = "federal" | "state" | "local";
+
+/**
+ * Verdict shape every tier evaluator returns. `isStale === true` is
+ * the gate the V1-2 reviewer-side `RequestRefreshAffordance` keys
+ * off — when no tier matches the row's layerKind, the row is not a
+ * candidate for the affordance and the gate is implicitly false.
+ */
+export interface SnapshotFreshnessVerdict {
+  ageMonths: number;
+  thresholdMonths: number;
+  isStale: boolean;
+}
+
+/**
+ * Pure helper: probe each tier's snapshot-freshness evaluator in
+ * order (federal → state → local) and return the first non-null
+ * verdict, tagged with the tier that owned it. Returns `null` when
+ * no tier matches the row's `layerKind` or the snapshot date is
+ * missing / malformed / future-dated — callers gate the stale-badge
+ * + reviewer-side request-refresh affordance on a non-null verdict
+ * with `isStale === true`.
+ *
+ * Exposed so the row-level `BriefingSourceRow` and the footer-level
+ * `BriefingSourceDetails` can both compute the verdict independently
+ * (V1-2 Phase 1A decision (d-ii) — keeps the row's affordance render
+ * condition close at hand without prop-drilling).
+ */
+export function evaluateRowFreshness(
+  source: EngagementBriefingSource,
+): { tier: ProvenanceTier; verdict: SnapshotFreshnessVerdict } | null {
+  const snap = source.snapshotDate as unknown as string | null | undefined;
+  const fed = evaluateFederalSnapshotFreshness(source.layerKind, snap);
+  if (fed) return { tier: "federal", verdict: fed };
+  const st = evaluateStateSnapshotFreshness(source.layerKind, snap);
+  if (st) return { tier: "state", verdict: st };
+  const loc = evaluateLocalSnapshotFreshness(source.layerKind, snap);
+  if (loc) return { tier: "local", verdict: loc };
+  return null;
+}
 
 export function formatByteSize(bytes: number | null): string {
   if (bytes === null) return "";

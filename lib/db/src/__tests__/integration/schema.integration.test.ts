@@ -91,6 +91,11 @@ describe("lib/db schema integration", () => {
         // per (submission, target atom) tuple. Reviewer-only until the
         // bulk-promote endpoint flips `promoted_at`.
         "reviewer_annotations",
+        // Wave 2 Sprint D / V1-2 — reviewer-fired requests for
+        // architect-side action (refresh briefing-source / refresh
+        // bim-model / regenerate briefing). Resolved implicitly by
+        // the matching domain action's atom-history event.
+        "reviewer_requests",
         "sheets",
         "snapshots",
         "submissions",
