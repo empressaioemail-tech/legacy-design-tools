@@ -18,3 +18,5 @@ export * from "./reviewerAnnotations";
 export * from "./findingRuns";
 export * from "./findings";
 export * from "./reviewerRequests";
+export * from "./viewpointRenders";
+export * from "./renderOutputs";
