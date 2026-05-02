@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   type Finding,
   type FindingCitation,
@@ -89,6 +89,36 @@ export function FindingDetailPanel({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, finding]);
+
+  // Inline auto-dismissing success indicator shown when the override
+  // mutation transitions from in-flight → settled without an error.
+  // Mirrors SubmissionRecordedBanner's 8s auto-dismiss pattern so the
+  // architect gets a brief, non-blocking confirmation that "Address with
+  // next revision" actually landed before the row dims.
+  const [showAddressedConfirmation, setShowAddressedConfirmation] =
+    useState(false);
+  const wasAddressingRef = useRef(false);
+  useEffect(() => {
+    if (
+      wasAddressingRef.current &&
+      !isAddressing &&
+      !addressError &&
+      finding
+    ) {
+      setShowAddressedConfirmation(true);
+    }
+    wasAddressingRef.current = isAddressing;
+  }, [isAddressing, addressError, finding]);
+  // Hide the confirmation when the selection changes so it does not
+  // bleed across findings.
+  useEffect(() => {
+    setShowAddressedConfirmation(false);
+  }, [finding?.id]);
+  useEffect(() => {
+    if (!showAddressedConfirmation) return;
+    const t = setTimeout(() => setShowAddressedConfirmation(false), 8000);
+    return () => clearTimeout(t);
+  }, [showAddressedConfirmation]);
 
   if (!finding) {
     return (
@@ -240,11 +270,31 @@ export function FindingDetailPanel({
         className="sc-card-footer sc-row-sb"
         style={{ padding: "10px 12px" }}
       >
-        <span className="sc-meta" style={{ opacity: 0.6, fontSize: 10 }}>
-          {addressed
-            ? "This finding has been addressed."
-            : "Use the next revision to clear this finding from the list."}
-        </span>
+        {showAddressedConfirmation ? (
+          <span
+            role="status"
+            aria-live="polite"
+            data-testid={`${testIdPrefix}-addressed-confirmation`}
+            className="sc-meta"
+            style={{
+              fontSize: 11,
+              color: "var(--info-text)",
+              fontWeight: 600,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
+            <span aria-hidden>✓</span>
+            Marked addressed in next revision
+          </span>
+        ) : (
+          <span className="sc-meta" style={{ opacity: 0.6, fontSize: 10 }}>
+            {addressed
+              ? "This finding has been addressed."
+              : "Use the next revision to clear this finding from the list."}
+          </span>
+        )}
         <button
           type="button"
           className="sc-btn-primary"

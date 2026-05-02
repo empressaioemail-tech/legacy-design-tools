@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { act, render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Finding } from "@workspace/api-client-react";
 import { FindingDetailPanel } from "../FindingDetailPanel";
 
@@ -34,6 +34,21 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
 
 describe("FindingDetailPanel", () => {
   afterEach(() => cleanup());
+
+  it("does not show the addressed-confirmation indicator before any override attempt", () => {
+    const finding = makeFinding();
+    render(
+      <FindingDetailPanel
+        finding={finding}
+        codeLibraryBase="/design-tools/code-library"
+        onAddressWithRevision={() => {}}
+        isAddressing={false}
+      />,
+    );
+    expect(
+      screen.queryByTestId("architect-finding-detail-addressed-confirmation"),
+    ).toBeNull();
+  });
 
   it("renders the empty state when finding is null", () => {
     render(
@@ -204,6 +219,132 @@ describe("FindingDetailPanel", () => {
     );
     fireEvent.click(screen.getByTestId("architect-finding-detail-retry"));
     expect(onRetry).toHaveBeenCalledWith(finding);
+  });
+
+  describe("addressed-confirmation indicator", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("appears when isAddressing transitions true → false with no error and auto-dismisses after 8s", () => {
+      const finding = makeFinding();
+      const { rerender } = render(
+        <FindingDetailPanel
+          finding={finding}
+          codeLibraryBase="/design-tools/code-library"
+          onAddressWithRevision={() => {}}
+          isAddressing={true}
+        />,
+      );
+      expect(
+        screen.queryByTestId(
+          "architect-finding-detail-addressed-confirmation",
+        ),
+      ).toBeNull();
+
+      // Mutation settles successfully — finding flips to overridden.
+      rerender(
+        <FindingDetailPanel
+          finding={makeFinding({ status: "overridden" })}
+          codeLibraryBase="/design-tools/code-library"
+          onAddressWithRevision={() => {}}
+          isAddressing={false}
+        />,
+      );
+      const indicator = screen.getByTestId(
+        "architect-finding-detail-addressed-confirmation",
+      );
+      expect(indicator.textContent).toContain("Marked addressed");
+      expect(indicator.getAttribute("role")).toBe("status");
+      expect(indicator.getAttribute("aria-live")).toBe("polite");
+
+      act(() => {
+        vi.advanceTimersByTime(7999);
+      });
+      expect(
+        screen.queryByTestId(
+          "architect-finding-detail-addressed-confirmation",
+        ),
+      ).not.toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(2);
+      });
+      expect(
+        screen.queryByTestId(
+          "architect-finding-detail-addressed-confirmation",
+        ),
+      ).toBeNull();
+    });
+
+    it("does not appear when the override settles with an error", () => {
+      const finding = makeFinding();
+      const { rerender } = render(
+        <FindingDetailPanel
+          finding={finding}
+          codeLibraryBase="/design-tools/code-library"
+          onAddressWithRevision={() => {}}
+          isAddressing={true}
+        />,
+      );
+      rerender(
+        <FindingDetailPanel
+          finding={finding}
+          codeLibraryBase="/design-tools/code-library"
+          onAddressWithRevision={() => {}}
+          isAddressing={false}
+          addressError="Override failed: 503"
+        />,
+      );
+      expect(
+        screen.queryByTestId(
+          "architect-finding-detail-addressed-confirmation",
+        ),
+      ).toBeNull();
+    });
+
+    it("clears the indicator when the user navigates to a different finding", () => {
+      const a = makeFinding({ id: "finding:sub-1:01" });
+      const b = makeFinding({ id: "finding:sub-1:02" });
+      const { rerender } = render(
+        <FindingDetailPanel
+          finding={a}
+          codeLibraryBase="/design-tools/code-library"
+          onAddressWithRevision={() => {}}
+          isAddressing={true}
+        />,
+      );
+      rerender(
+        <FindingDetailPanel
+          finding={a}
+          codeLibraryBase="/design-tools/code-library"
+          onAddressWithRevision={() => {}}
+          isAddressing={false}
+        />,
+      );
+      expect(
+        screen.queryByTestId(
+          "architect-finding-detail-addressed-confirmation",
+        ),
+      ).not.toBeNull();
+
+      rerender(
+        <FindingDetailPanel
+          finding={b}
+          codeLibraryBase="/design-tools/code-library"
+          onAddressWithRevision={() => {}}
+          isAddressing={false}
+        />,
+      );
+      expect(
+        screen.queryByTestId(
+          "architect-finding-detail-addressed-confirmation",
+        ),
+      ).toBeNull();
+    });
   });
 
   it("dismisses the active finding via Escape and renders a close button when onClose is wired", () => {
