@@ -373,53 +373,140 @@ describe("FindingsTab (AIR-2)", () => {
     expect(screen.queryByTestId("findings-manual-add")).toBeNull();
   });
 
-  it("manual-add disclosure files a new ai-produced row attributed to the reviewer", async () => {
+  it("manual-add disclosure POSTs to the create endpoint and refreshes the list on success", async () => {
+    // The create hook is wired to the real generated client which
+    // calls `fetch`. Stub `fetch` so the assertion runs against the
+    // wire body we actually send and the success path collapses the
+    // disclosure + invalidates the list.
     __seedFindingsForTests("sub-add", []);
-    render(<ControlledTab submissionId="sub-add" />, { wrapper });
-    fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
-    fireEvent.change(screen.getByTestId("findings-manual-add-title"), {
-      target: { value: "Manually filed code-19.3 setback issue." },
-    });
-    fireEvent.change(screen.getByTestId("findings-manual-add-description"), {
-      target: { value: "North wall encroaches by 0.4m." },
-    });
-    fireEvent.change(screen.getByTestId("findings-manual-add-code-citation"), {
-      target: { value: "code:zoning-19.3.2" },
-    });
-    fireEvent.change(screen.getByTestId("findings-manual-add-element-ref"), {
-      target: { value: "wall:north-side-l2" },
-    });
-    fireEvent.change(screen.getByTestId("findings-manual-add-severity"), {
-      target: { value: "blocker" },
-    });
-    fireEvent.change(screen.getByTestId("findings-manual-add-category"), {
-      target: { value: "setback" },
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("findings-manual-add-submit"));
-    });
-    await waitFor(() => {
-      expect(__peekFindingsForTests("sub-add").length).toBe(1);
-    });
-    const row = __peekFindingsForTests("sub-add")[0];
-    expect(row.status).toBe("ai-produced");
-    expect(row.confidence).toBe(1);
-    expect(row.severity).toBe("blocker");
-    expect(row.category).toBe("setback");
-    expect(row.text).toBe(
-      "Manually filed code-19.3 setback issue.\n\nNorth wall encroaches by 0.4m.",
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        expect(url).toBe("/api/submissions/sub-add/findings");
+        expect(init?.method).toBe("POST");
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        expect(body).toEqual({
+          title: "Manually filed code-19.3 setback issue.",
+          description: "North wall encroaches by 0.4m.",
+          severity: "blocker",
+          category: "setback",
+          codeCitation: "code:zoning-19.3.2",
+          sourceCitation: null,
+          elementRef: "wall:north-side-l2",
+        });
+        return new Response(
+          JSON.stringify({
+            finding: {
+              id: "finding:sub-add:server-1",
+              submissionId: "sub-add",
+              severity: "blocker",
+              category: "setback",
+              status: "ai-produced",
+              text: "Manually filed code-19.3 setback issue.\n\nNorth wall encroaches by 0.4m.",
+              citations: [
+                { kind: "code-section", atomId: "code:zoning-19.3.2" },
+              ],
+              confidence: 1,
+              lowConfidence: false,
+              reviewerStatusBy: {
+                kind: "user",
+                id: "reviewer-current",
+                displayName: "Reviewer",
+              },
+              reviewerStatusChangedAt: "2026-04-30T12:00:00.000Z",
+              reviewerComment: null,
+              elementRef: "wall:north-side-l2",
+              sourceRef: null,
+              aiGeneratedAt: "2026-04-30T12:00:00.000Z",
+              revisionOf: null,
+            },
+          }),
+          {
+            status: 201,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      },
     );
-    expect(row.elementRef).toBe("wall:north-side-l2");
-    expect(
-      row.citations.some(
-        (c) => c.kind === "code-section" && c.atomId === "code:zoning-19.3.2",
+    try {
+      render(<ControlledTab submissionId="sub-add" />, { wrapper });
+      fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
+      fireEvent.change(screen.getByTestId("findings-manual-add-title"), {
+        target: { value: "Manually filed code-19.3 setback issue." },
+      });
+      fireEvent.change(
+        screen.getByTestId("findings-manual-add-description"),
+        { target: { value: "North wall encroaches by 0.4m." } },
+      );
+      fireEvent.change(
+        screen.getByTestId("findings-manual-add-code-citation"),
+        { target: { value: "code:zoning-19.3.2" } },
+      );
+      fireEvent.change(
+        screen.getByTestId("findings-manual-add-element-ref"),
+        { target: { value: "wall:north-side-l2" } },
+      );
+      fireEvent.change(screen.getByTestId("findings-manual-add-severity"), {
+        target: { value: "blocker" },
+      });
+      fireEvent.change(screen.getByTestId("findings-manual-add-category"), {
+        target: { value: "setback" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("findings-manual-add-submit"));
+      });
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalled();
+      });
+      // Disclosure auto-collapses on success — form is gone.
+      await waitFor(() => {
+        expect(screen.queryByTestId("findings-manual-add-title")).toBeNull();
+      });
+      // The server-returned finding renders in the list without a
+      // manual reload — the create hook bridges the row into the
+      // mock store and invalidates the list query.
+      expect(
+        await screen.findByTestId("finding-row-finding:sub-add:server-1"),
+      ).toBeTruthy();
+      const stored = __peekFindingsForTests("sub-add");
+      expect(stored.length).toBe(1);
+      expect(stored[0].id).toBe("finding:sub-add:server-1");
+      expect(stored[0].reviewerStatusBy?.kind).toBe("user");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("manual-add disclosure renders the server's structured error code inline", async () => {
+    __seedFindingsForTests("sub-err", []);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: "invalid_create_finding_body" }),
+        { status: 400, headers: { "content-type": "application/json" } },
       ),
-    ).toBe(true);
-    expect(row.reviewerStatusBy?.kind).toBe("user");
-    // Disclosure auto-collapses on success — form is gone.
-    await waitFor(() => {
-      expect(screen.queryByTestId("findings-manual-add-title")).toBeNull();
-    });
+    );
+    try {
+      render(<ControlledTab submissionId="sub-err" />, { wrapper });
+      fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
+      fireEvent.change(screen.getByTestId("findings-manual-add-title"), {
+        target: { value: "Bad row." },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("findings-manual-add-submit"));
+      });
+      const alert = await screen.findByTestId("findings-manual-add-error");
+      // Friendly mapping of the server's structured `error` code.
+      expect(alert.textContent).toContain("required fields are missing");
+      // Form stays open so the reviewer can correct the inputs.
+      expect(screen.getByTestId("findings-manual-add-title")).toBeTruthy();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it("surfaces a 409 conflict block with refresh button when overriding an already-overridden finding", async () => {

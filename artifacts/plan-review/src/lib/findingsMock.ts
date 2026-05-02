@@ -117,6 +117,21 @@ export interface FindingRun {
 const findingsBySubmission = new Map<string, Finding[]>();
 const runsBySubmission = new Map<string, FindingRun[]>();
 
+/**
+ * Bridge for the partial-swap state in `findingsApi.ts`: the manual-
+ * add hook now POSTs through the real backend, but the list hook
+ * still reads from this in-memory map. Pushing the server-returned
+ * row in here lets the existing list query refetch render the new
+ * finding without a manual reload. Will be deleted when
+ * `useListSubmissionFindings` itself is swapped to the generated
+ * GET hook.
+ */
+export function mockUpsertFinding(submissionId: string, finding: Finding): void {
+  const prior = findingsBySubmission.get(submissionId) ?? [];
+  const filtered = prior.filter((f) => f.id !== finding.id);
+  findingsBySubmission.set(submissionId, [finding, ...filtered]);
+}
+
 function makeUlid(): string {
   // Crockford-base32-ish stub. The real AIR-1 ulid format is fine
   // here — we only need uniqueness + a stable shape for the

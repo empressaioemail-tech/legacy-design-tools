@@ -5,6 +5,7 @@ import {
   useGenerateSubmissionFindings,
   useFindingsGenerationPolling,
   useCreateSubmissionFinding,
+  describeCreateFindingError,
   compareFindings,
   FINDING_CATEGORY_LABELS,
   FINDING_SEVERITY_LABELS,
@@ -692,7 +693,7 @@ function ManualAddFindingDisclosure({
       reset();
       setOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add finding.");
+      setError(describeCreateFindingError(err));
     }
   };
 
