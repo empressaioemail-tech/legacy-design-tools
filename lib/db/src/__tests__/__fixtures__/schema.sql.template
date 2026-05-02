@@ -193,14 +193,47 @@ CREATE TABLE @@SCHEMA@@.engagements (
 );
 
 
--- Name: findings_code_atoms; Type: TABLE; Schema: public; Owner: -
+-- Name: finding_runs; Type: TABLE; Schema: public; Owner: -
 
-CREATE TABLE @@SCHEMA@@.findings_code_atoms (
+CREATE TABLE @@SCHEMA@@.finding_runs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    finding_id uuid NOT NULL,
-    atom_id uuid NOT NULL,
-    role text DEFAULT 'supports'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    submission_id uuid NOT NULL,
+    state text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    error text,
+    invalid_citation_count integer,
+    invalid_citations text[],
+    discarded_finding_count integer
+);
+
+
+-- Name: findings; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.findings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    atom_id text NOT NULL,
+    submission_id uuid NOT NULL,
+    severity text NOT NULL,
+    category text NOT NULL,
+    status text DEFAULT 'ai-produced'::text NOT NULL,
+    text text NOT NULL,
+    citations jsonb DEFAULT '[]'::jsonb NOT NULL,
+    confidence numeric NOT NULL,
+    low_confidence boolean DEFAULT false NOT NULL,
+    reviewer_status_by jsonb,
+    reviewer_status_changed_at timestamp with time zone,
+    reviewer_comment text,
+    element_ref text,
+    source_ref jsonb,
+    ai_generated_at timestamp with time zone DEFAULT now() NOT NULL,
+    revision_of uuid,
+    finding_run_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT findings_category_check CHECK ((category = ANY (ARRAY['setback'::text, 'height'::text, 'coverage'::text, 'egress'::text, 'use'::text, 'overlay-conflict'::text, 'divergence-related'::text, 'other'::text]))),
+    CONSTRAINT findings_severity_check CHECK ((severity = ANY (ARRAY['blocker'::text, 'concern'::text, 'advisory'::text]))),
+    CONSTRAINT findings_status_check CHECK ((status = ANY (ARRAY['ai-produced'::text, 'accepted'::text, 'rejected'::text, 'overridden'::text, 'promoted-to-architect'::text])))
 );
 
 
@@ -415,10 +448,16 @@ ALTER TABLE ONLY @@SCHEMA@@.engagements
     ADD CONSTRAINT engagements_pkey PRIMARY KEY (id);
 
 
--- Name: findings_code_atoms findings_code_atoms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: finding_runs finding_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
-ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
-    ADD CONSTRAINT findings_code_atoms_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY @@SCHEMA@@.finding_runs
+    ADD CONSTRAINT finding_runs_pkey PRIMARY KEY (id);
+
+
+-- Name: findings findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.findings
+    ADD CONSTRAINT findings_pkey PRIMARY KEY (id);
 
 
 -- Name: materializable_elements materializable_elements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -584,14 +623,24 @@ CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (n
 CREATE UNIQUE INDEX engagements_revit_central_guid_uniq ON @@SCHEMA@@.engagements USING btree (revit_central_guid) WHERE (revit_central_guid IS NOT NULL);
 
 
--- Name: findings_code_atoms_atom_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: finding_runs_pending_per_submission_uniq; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX findings_code_atoms_atom_idx ON @@SCHEMA@@.findings_code_atoms USING btree (atom_id);
+CREATE UNIQUE INDEX finding_runs_pending_per_submission_uniq ON @@SCHEMA@@.finding_runs USING btree (submission_id) WHERE (state = 'pending'::text);
 
 
--- Name: findings_code_atoms_finding_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: finding_runs_submission_started_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX findings_code_atoms_finding_idx ON @@SCHEMA@@.findings_code_atoms USING btree (finding_id);
+CREATE INDEX finding_runs_submission_started_idx ON @@SCHEMA@@.finding_runs USING btree (submission_id, started_at);
+
+
+-- Name: findings_atom_id_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX findings_atom_id_uniq ON @@SCHEMA@@.findings USING btree (atom_id);
+
+
+-- Name: findings_submission_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree (submission_id, created_at);
 
 
 -- Name: materializable_elements_briefing_idx; Type: INDEX; Schema: public; Owner: -
@@ -720,10 +769,28 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
     ADD CONSTRAINT code_atoms_source_id_code_atom_sources_id_fk FOREIGN KEY (source_id) REFERENCES @@SCHEMA@@.code_atom_sources(id) ON DELETE CASCADE;
 
 
--- Name: findings_code_atoms findings_code_atoms_atom_id_code_atoms_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: finding_runs finding_runs_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
-ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
-    ADD CONSTRAINT findings_code_atoms_atom_id_code_atoms_id_fk FOREIGN KEY (atom_id) REFERENCES @@SCHEMA@@.code_atoms(id) ON DELETE CASCADE;
+ALTER TABLE ONLY @@SCHEMA@@.finding_runs
+    ADD CONSTRAINT finding_runs_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
+
+
+-- Name: findings findings_finding_run_id_finding_runs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.findings
+    ADD CONSTRAINT findings_finding_run_id_finding_runs_id_fk FOREIGN KEY (finding_run_id) REFERENCES @@SCHEMA@@.finding_runs(id) ON DELETE SET NULL;
+
+
+-- Name: findings findings_revision_of_findings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.findings
+    ADD CONSTRAINT findings_revision_of_findings_id_fk FOREIGN KEY (revision_of) REFERENCES @@SCHEMA@@.findings(id) ON DELETE SET NULL;
+
+
+-- Name: findings findings_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.findings
+    ADD CONSTRAINT findings_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
 
 
 -- Name: materializable_elements materializable_elements_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
