@@ -79,27 +79,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install Chrome for puppeteer-core
-        # puppeteer-core (unlike puppeteer) does not auto-install Chrome.
-        # Invoke @puppeteer/browsers as a library directly, bypassing
-        # CLI/bin-shim resolution issues (puppeteer/puppeteer#10171).
-        # The package is already in node_modules via puppeteer-core's
-        # transitive deps. Pin the buildId to what puppeteer-core@24.42.0
-        # expects; update when bumping puppeteer-core.
-        run: |
-          pnpm --filter @workspace/api-server exec node -e "
-          const { install, Browser, detectBrowserPlatform } = require('@puppeteer/browsers');
-          const path = require('path');
-          const os = require('os');
-          install({
-            browser: Browser.CHROME,
-            buildId: '147.0.7727.57',
-            cacheDir: path.join(os.homedir(), '.cache', 'puppeteer'),
-            platform: detectBrowserPlatform(),
-          })
-          .then(b => { console.log('Installed Chrome at:', b.executablePath); })
-          .catch(e => { console.error('Install failed:', e); process.exit(1); });
-          "
+      - name: Install Chrome via puppeteer postinstall
+        # The workspace uses `puppeteer` (not puppeteer-core), which has
+        # a postinstall script (`node install.mjs`) that downloads Chrome
+        # to ~/.cache/puppeteer. `puppeteer` IS in onlyBuiltDependencies
+        # in pnpm-workspace.yaml, but pnpm install --frozen-lockfile in
+        # CI doesn't trigger the postinstall when packages come from cache.
+        # `pnpm rebuild puppeteer` force-runs the postinstall, which
+        # downloads Chrome at the version pinned by puppeteer's
+        # bundled config (matches what puppeteer-core launches at runtime).
+        run: pnpm rebuild puppeteer
       - name: Enable pgvector extension
         env:
           PGPASSWORD: postgres
