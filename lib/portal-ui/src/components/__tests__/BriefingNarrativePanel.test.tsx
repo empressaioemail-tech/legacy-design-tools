@@ -317,6 +317,44 @@ describe("BriefingNarrativePanel (portal-ui)", () => {
     expect(onJump).toHaveBeenCalledWith("src-power");
   });
 
+  it("renders markdown formatting (bullets + bold) alongside an inline citation pill (Task #467)", () => {
+    renderPanel(
+      <BriefingNarrativePanel
+        engagementId="eng-1"
+        narrative={mkNarrative({
+          sectionD: [
+            "**Utilities snapshot**",
+            "",
+            "- Water main runs along {{atom|briefing-source|src-water|TWDB Layer}}.",
+            "- *Sewer* per record drawings.",
+          ].join("\n"),
+        })}
+        sourceCount={1}
+        sources={[{ id: "src-water" } as never]}
+        onJumpToSource={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("briefing-section-toggle-d"));
+    const body = screen.getByTestId("briefing-section-body-d");
+    // Bold + italic actually rendered as semantic tags rather than
+    // raw asterisks.
+    expect(body.querySelector("strong")?.textContent).toBe(
+      "Utilities snapshot",
+    );
+    expect(body.querySelector("em")?.textContent).toBe("Sewer");
+    expect(body.textContent).not.toContain("**");
+    // The hyphenated lines collapsed into a single <ul> with two
+    // <li>s rather than literal "- " prefixes.
+    const ul = body.querySelector("ul");
+    expect(ul).not.toBeNull();
+    expect(ul!.querySelectorAll("li")).toHaveLength(2);
+    expect(body.textContent).not.toMatch(/^- /m);
+    // The citation pill still renders inside the first list item
+    // and stays clickable / scoped to the right source id.
+    const pill = screen.getByTestId("briefing-citation-pill-src-water");
+    expect(ul!.contains(pill)).toBe(true);
+  });
+
   it("flips the kickoff button label between 'Generate Briefing' and 'Regenerate Briefing'", () => {
     const { rerender } = renderPanel(
       <BriefingNarrativePanel

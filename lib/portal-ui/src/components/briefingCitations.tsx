@@ -224,6 +224,215 @@ export function renderBriefingBody(
 }
 
 /**
+ * Inline markdown formatter for plain-text fragments inside a
+ * briefing section body. Handles `**bold**`, `*italic*`, and
+ * `_italic_` with a single left-to-right pass; deliberately does
+ * NOT touch citation tokens (those are split out by
+ * {@link renderBriefingMarkdown} before this is ever called).
+ *
+ * The grammar is intentionally tiny — the briefing engine prompt
+ * only encourages bullets, bold, and the occasional italic, so we
+ * don't pull in a full markdown parser. Unmatched markers (e.g. a
+ * lone `*` that never closes) are emitted as literal text so the
+ * narrative is never silently mangled.
+ */
+function renderInlineMarkdown(text: string, keyBase: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let buf = "";
+  let i = 0;
+  let k = 0;
+  const flushBuf = () => {
+    if (buf.length > 0) {
+      out.push(buf);
+      buf = "";
+    }
+  };
+  while (i < text.length) {
+    if (text.startsWith("**", i)) {
+      const end = text.indexOf("**", i + 2);
+      if (end !== -1 && end > i + 2) {
+        flushBuf();
+        out.push(
+          <strong key={`${keyBase}-b-${k++}`}>
+            {renderInlineMarkdown(text.slice(i + 2, end), `${keyBase}-b${k}`)}
+          </strong>,
+        );
+        i = end + 2;
+        continue;
+      }
+    }
+    const ch = text[i];
+    if (ch === "*" || ch === "_") {
+      const end = text.indexOf(ch, i + 1);
+      if (end !== -1 && end > i + 1) {
+        const inner = text.slice(i + 1, end);
+        // Skip if the inner contains the marker char (would be a
+        // nested unmatched run) or any whitespace right after the
+        // opener / before the closer (looks like a literal asterisk
+        // mid-sentence rather than emphasis).
+        if (!/^\s|\s$/.test(inner)) {
+          flushBuf();
+          out.push(<em key={`${keyBase}-i-${k++}`}>{inner}</em>);
+          i = end + 1;
+          continue;
+        }
+      }
+    }
+    buf += ch;
+    i++;
+  }
+  flushBuf();
+  return out;
+}
+
+/**
+ * Block + inline markdown renderer for an A–G briefing section
+ * body. Splits the body into paragraphs, headings, and bullet /
+ * numbered lists; within each block, splits text by the same
+ * citation tokens {@link renderBriefingBody} understands and runs
+ * {@link renderInlineMarkdown} on the surviving plain-text
+ * fragments. The result is a single React fragment safe to drop
+ * into a flow container — the caller no longer needs
+ * `white-space: pre-wrap` because line breaks are now structural.
+ *
+ * Supported block syntax:
+ *   - `# ` … `###### ` headings (rendered small to fit inside the
+ *     section card; we never want a section body to compete with
+ *     the section's own label).
+ *   - `- `, `* `, or `+ ` bullet items (consecutive lines collapse
+ *     into one `<ul>`).
+ *   - `1. `, `2. `, … numbered items (consecutive lines collapse
+ *     into one `<ol>`).
+ *   - Blank lines separate paragraphs.
+ */
+export function renderBriefingMarkdown(
+  body: string,
+  knownSourceIds: ReadonlySet<string>,
+  onJump: (id: string) => void,
+): ReactNode {
+  const renderInline = (text: string, keyBase: string): ReactNode[] => {
+    const segments = renderBriefingBody(text, knownSourceIds, onJump);
+    const out: ReactNode[] = [];
+    let segIdx = 0;
+    for (const seg of segments) {
+      if (typeof seg === "string") {
+        out.push(...renderInlineMarkdown(seg, `${keyBase}-s${segIdx++}`));
+      } else {
+        out.push(seg);
+      }
+    }
+    return out;
+  };
+
+  const lines = body.split(/\r?\n/);
+  const blocks: ReactNode[] = [];
+  let paraLines: string[] = [];
+  let listItems: string[] | null = null;
+  let listOrdered = false;
+  let key = 0;
+
+  const flushPara = () => {
+    if (paraLines.length === 0) return;
+    const text = paraLines.join(" ");
+    blocks.push(
+      <p
+        key={`p-${key++}`}
+        style={{ margin: "0 0 8px 0" }}
+      >
+        {renderInline(text, `p${key}`)}
+      </p>,
+    );
+    paraLines = [];
+  };
+
+  const flushList = () => {
+    if (!listItems || listItems.length === 0) {
+      listItems = null;
+      return;
+    }
+    const items = listItems;
+    const ordered = listOrdered;
+    const k = key++;
+    const listStyle = {
+      margin: "0 0 8px 0",
+      paddingLeft: 20,
+    } as const;
+    blocks.push(
+      ordered ? (
+        <ol key={`ol-${k}`} style={listStyle}>
+          {items.map((it, i) => (
+            <li key={i}>{renderInline(it, `ol${k}-${i}`)}</li>
+          ))}
+        </ol>
+      ) : (
+        <ul key={`ul-${k}`} style={listStyle}>
+          {items.map((it, i) => (
+            <li key={i}>{renderInline(it, `ul${k}-${i}`)}</li>
+          ))}
+        </ul>
+      ),
+    );
+    listItems = null;
+  };
+
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      flushPara();
+      flushList();
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed);
+    if (heading) {
+      flushPara();
+      flushList();
+      const k = key++;
+      blocks.push(
+        <div
+          key={`h-${k}`}
+          style={{
+            margin: "8px 0 4px 0",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          {renderInline(heading[2], `h${k}`)}
+        </div>,
+      );
+      continue;
+    }
+    const bullet = /^[-*+]\s+(.*)$/.exec(trimmed);
+    if (bullet) {
+      flushPara();
+      if (listItems && listOrdered) flushList();
+      if (!listItems) {
+        listItems = [];
+        listOrdered = false;
+      }
+      listItems.push(bullet[1]);
+      continue;
+    }
+    const numbered = /^(\d+)\.\s+(.*)$/.exec(trimmed);
+    if (numbered) {
+      flushPara();
+      if (listItems && !listOrdered) flushList();
+      if (!listItems) {
+        listItems = [];
+        listOrdered = true;
+      }
+      listItems.push(numbered[2]);
+      continue;
+    }
+    flushList();
+    paraLines.push(trimmed);
+  }
+  flushPara();
+  flushList();
+
+  return <>{blocks}</>;
+}
+
+/**
  * Imperative scroll-and-flash helper used by the narrative panel's
  * citation pills. Looks the row up by the stable
  * `data-testid="briefing-source-<id>"` attribute the SiteContextTab

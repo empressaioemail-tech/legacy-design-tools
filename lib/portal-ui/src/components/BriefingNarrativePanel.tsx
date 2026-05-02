@@ -19,7 +19,7 @@ import {
 import { formatBriefingActor } from "@workspace/briefing-diff";
 import {
   BriefingInvalidCitationPill,
-  renderBriefingBody,
+  renderBriefingMarkdown,
 } from "./briefingCitations";
 
 type BriefingSectionKey = "a" | "b" | "c" | "d" | "e" | "f" | "g";
@@ -563,7 +563,6 @@ export function BriefingNarrativePanel({
                     style={{
                       fontSize: 13,
                       padding: "0 12px 12px 12px",
-                      whiteSpace: "pre-wrap",
                       lineHeight: 1.5,
                       color: isEmpty ? "var(--text-muted)" : undefined,
                       fontStyle: isEmpty ? "italic" : undefined,
@@ -574,7 +573,7 @@ export function BriefingNarrativePanel({
                         Section pending — re-run to refresh.
                       </span>
                     ) : (
-                      renderBriefingBody(
+                      renderBriefingMarkdown(
                         body!,
                         knownSourceIds,
                         onJumpToSource,

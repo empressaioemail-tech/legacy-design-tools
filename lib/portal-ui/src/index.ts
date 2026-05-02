@@ -121,6 +121,7 @@ export {
   BriefingCodeAtomPill,
   BriefingInvalidCitationPill,
   renderBriefingBody,
+  renderBriefingMarkdown,
   scrollToBriefingSource,
 } from "./components/briefingCitations";
 export {
