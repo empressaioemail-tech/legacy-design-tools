@@ -1,8 +1,9 @@
 /**
  * MockMnmlClient — covers the deterministic-output shape per render
- * kind, the queued → rendering → ready transition curve, the
- * `alwaysFail` failure-branch affordance, the cancel happy path, and
- * the unknown-renderId error path.
+ * kind (Spec 54 v2 §6.5: archdiffusion → 1 url; video → 1 url, no
+ * thumbnail), the queued → rendering → ready transition curve, the
+ * `alwaysFail` failure-branch affordance, the unknown-renderId
+ * error path, and the `remainingCredits` simulation.
  *
  * The transition tests use an injected clock (the `now` option) so
  * the suite stays deterministic and fast — no real `setTimeout`
@@ -14,89 +15,107 @@
 import { describe, expect, it } from "vitest";
 import { MockMnmlClient } from "../mockClient";
 import { MnmlError } from "../types";
-import type {
-  ElevationRenderRequest,
-  ExteriorOrbitVideoRequest,
-  StillRenderRequest,
-} from "../types";
+import type { ArchDiffusionRequest, VideoAiRequest } from "../types";
 
-const STILL: StillRenderRequest = {
-  kind: "still",
-  cameraPosition: { x: 0, y: 0, z: 0 },
-  cameraTarget: { x: 1, y: 0, z: 0 },
-  fieldOfView: 35,
-  resolution: "1920x1080",
+const ARCHDIFFUSION_STILL: ArchDiffusionRequest = {
+  kind: "archdiffusion",
+  image: new Blob([new Uint8Array([0xff, 0xd8, 0xff])]),
+  prompt: "a small modern home on a hillside, photoreal",
+  expertName: "exterior",
+  renderStyle: "photoreal",
+  expertParams: {
+    camera_angle: "eye_level",
+    camera_direction: "front",
+  },
 };
 
-const ELEVATION: ElevationRenderRequest = {
-  kind: "elevation",
-  buildingCenter: { x: 0, y: 0, z: 0 },
-  cameraDistance: 30,
-  cameraHeight: 5,
-  resolution: "3840x2160",
+const ARCHDIFFUSION_ELEVATION_NORTH: ArchDiffusionRequest = {
+  kind: "archdiffusion",
+  image: new Blob([new Uint8Array([0xff, 0xd8, 0xff])]),
+  prompt: "north elevation of the same home",
+  expertName: "exterior",
+  renderStyle: "photoreal",
+  expertParams: {
+    camera_angle: "elevation",
+    camera_direction: "back",
+  },
 };
 
-const VIDEO: ExteriorOrbitVideoRequest = {
+const VIDEO: VideoAiRequest = {
   kind: "video",
-  pathKind: "exterior-orbit",
-  durationSeconds: 30,
-  resolution: "1920x1080",
-  framerate: 30,
+  image: new Blob([new Uint8Array([0xff, 0xd8, 0xff])]),
+  prompt: "slow horizontal camera move across the home",
+  duration: 10,
+  movementType: "horizontal",
+  direction: "right",
 };
 
 describe("MockMnmlClient — deterministic outputs", () => {
-  it("returns one primary png output for a still render", async () => {
+  it("returns one archdiffusion url on a still render", async () => {
     const client = new MockMnmlClient({ readyAfterMs: 0 });
-    const { renderId } = await client.triggerRender(STILL);
+    const { renderId } = await client.triggerRender(ARCHDIFFUSION_STILL);
     const status = await client.getRenderStatus(renderId);
     expect(status.status).toBe("ready");
-    expect(status.outputs).toHaveLength(1);
-    expect(status.outputs![0]!.role).toBe("primary");
-    expect(status.outputs![0]!.format).toBe("png");
-    expect(status.outputs![0]!.url).toContain("mnml.ai/mock/still");
-    expect(status.outputs![0]!.resolution).toBe("1920x1080");
+    expect(status.outputUrls).toHaveLength(1);
+    expect(status.outputUrls![0]).toContain("mnml.ai/mock/archdiffusion");
+    expect(status.seed).toBe(12345);
   });
 
-  it("returns four cardinal elevation outputs for an elevation render", async () => {
+  it("returns one archdiffusion url on each elevation-set member call", async () => {
+    // Spec 54 v2 §6.2: elevation-set fan-out lives in the api-server
+    // route (4 separate triggerRender calls). The mock itself stays
+    // single-call — each call returns 1 archdiffusion url. Role
+    // tagging happens route-side based on the camera_direction.
     const client = new MockMnmlClient({ readyAfterMs: 0 });
-    const { renderId } = await client.triggerRender(ELEVATION);
+    const { renderId } = await client.triggerRender(
+      ARCHDIFFUSION_ELEVATION_NORTH,
+    );
     const status = await client.getRenderStatus(renderId);
     expect(status.status).toBe("ready");
-    const roles = status.outputs!.map((o) => o.role).sort();
-    expect(roles).toEqual([
-      "elevation-east",
-      "elevation-north",
-      "elevation-south",
-      "elevation-west",
-    ]);
-    for (const out of status.outputs!) {
-      expect(out.format).toBe("png");
-      expect(out.resolution).toBe("3840x2160");
-      expect(out.url).toContain("mnml.ai/mock/elevation");
-    }
+    expect(status.outputUrls).toHaveLength(1);
+    expect(status.outputUrls![0]).toContain("mnml.ai/mock/archdiffusion");
   });
 
-  it("returns video-primary + video-thumbnail for a video render", async () => {
+  it("returns one video url on a video render (no thumbnail)", async () => {
+    // Spec 54 v2 §6.5: mock returns one video url; the video-
+    // thumbnail render-output role is server-synthesized post-`ready`
+    // by the api-server route via ffmpeg first-frame extraction, NOT
+    // by the mock or the http client.
     const client = new MockMnmlClient({ readyAfterMs: 0 });
     const { renderId } = await client.triggerRender(VIDEO);
     const status = await client.getRenderStatus(renderId);
     expect(status.status).toBe("ready");
-    expect(status.outputs).toHaveLength(2);
-    const primary = status.outputs!.find((o) => o.role === "video-primary");
-    expect(primary).toBeTruthy();
-    expect(primary!.format).toBe("mp4");
-    expect(primary!.durationSeconds).toBe(30);
-    expect(primary!.thumbnailUrl).toContain("video-thumbnail");
-    const thumb = status.outputs!.find((o) => o.role === "video-thumbnail");
-    expect(thumb).toBeTruthy();
-    expect(thumb!.format).toBe("png");
+    expect(status.outputUrls).toHaveLength(1);
+    expect(status.outputUrls![0]).toContain("mnml.ai/mock/video");
+    expect(status.outputUrls![0]).toContain(".mp4");
   });
 
   it("uses fixedRenderId when provided", async () => {
     const client = new MockMnmlClient({ fixedRenderId: "render-abc-123" });
-    const result = await client.triggerRender(STILL);
+    const result = await client.triggerRender(ARCHDIFFUSION_STILL);
     expect(result.renderId).toBe("render-abc-123");
-    expect(result.status).toBe("queued");
+  });
+});
+
+describe("MockMnmlClient — remainingCredits simulation (Spec 54 v2 §4)", () => {
+  it("decrements 3 credits per archdiffusion trigger", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100 });
+    const a = await client.triggerRender(ARCHDIFFUSION_STILL);
+    expect(a.remainingCredits).toBe(97);
+    const b = await client.triggerRender(ARCHDIFFUSION_STILL);
+    expect(b.remainingCredits).toBe(94);
+  });
+
+  it("decrements 10 credits per video trigger", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100 });
+    const result = await client.triggerRender(VIDEO);
+    expect(result.remainingCredits).toBe(90);
+  });
+
+  it("defaults the starting balance to 1000 when not pinned", async () => {
+    const client = new MockMnmlClient();
+    const { remainingCredits } = await client.triggerRender(ARCHDIFFUSION_STILL);
+    expect(remainingCredits).toBe(997);
   });
 });
 
@@ -107,7 +126,7 @@ describe("MockMnmlClient — queued → rendering → ready transition", () => {
       readyAfterMs: 200,
       now: () => now,
     });
-    const { renderId } = await client.triggerRender(STILL);
+    const { renderId } = await client.triggerRender(ARCHDIFFUSION_STILL);
 
     // t=0 → queued
     expect((await client.getRenderStatus(renderId)).status).toBe("queued");
@@ -128,7 +147,7 @@ describe("MockMnmlClient — queued → rendering → ready transition", () => {
     now = 1_200;
     const ready = await client.getRenderStatus(renderId);
     expect(ready.status).toBe("ready");
-    expect(ready.outputs).toBeDefined();
+    expect(ready.outputUrls).toBeDefined();
   });
 
   it("statusForElapsed maps elapsed → state per the half-half rule", () => {
@@ -143,50 +162,37 @@ describe("MockMnmlClient — queued → rendering → ready transition", () => {
 
   it("walks the transition against the real Date.now() default", async () => {
     const client = new MockMnmlClient({ readyAfterMs: 30 });
-    const { renderId } = await client.triggerRender(STILL);
+    const { renderId } = await client.triggerRender(ARCHDIFFUSION_STILL);
     const initial = await client.getRenderStatus(renderId);
     expect(initial.status).toBe("queued");
     await new Promise((resolve) => setTimeout(resolve, 60));
     const after = await client.getRenderStatus(renderId);
     expect(after.status).toBe("ready");
-    expect(after.outputs).toBeDefined();
+    expect(after.outputUrls).toBeDefined();
   });
 });
 
-describe("MockMnmlClient — failure + cancel + unknown-id paths", () => {
-  it("alwaysFail flips the terminal status to failed", async () => {
+describe("MockMnmlClient — failure + unknown-id paths", () => {
+  it("alwaysFail flips the terminal status to failed (MOCK_FORCED)", async () => {
     const client = new MockMnmlClient({
       alwaysFail: true,
       readyAfterMs: 0,
     });
-    const { renderId } = await client.triggerRender(STILL);
+    const { renderId } = await client.triggerRender(ARCHDIFFUSION_STILL);
     const status = await client.getRenderStatus(renderId);
     expect(status.status).toBe("failed");
-    expect(status.error?.code).toBe("internal_error");
+    expect(status.error?.code).toBe("MOCK_FORCED");
     expect(status.error?.message).toContain("forced failure");
   });
 
-  it("cancelRender flips status to cancelled even after ready time", async () => {
-    let now = 0;
-    const client = new MockMnmlClient({
-      readyAfterMs: 100,
-      now: () => now,
-    });
-    const { renderId } = await client.triggerRender(STILL);
-    const cancelled = await client.cancelRender(renderId);
-    expect(cancelled.status).toBe("cancelled");
-
-    // Even at t > readyAfterMs the cancelled flag wins.
-    now = 1_000;
-    const status = await client.getRenderStatus(renderId);
-    expect(status.status).toBe("cancelled");
-  });
-
-  it("throws MnmlError(invalid_scene) for an unknown renderId", async () => {
+  it("throws MnmlError(not_found) for an unknown renderId", async () => {
     const client = new MockMnmlClient();
     await expect(client.getRenderStatus("nope")).rejects.toBeInstanceOf(
       MnmlError,
     );
-    await expect(client.cancelRender("nope")).rejects.toBeInstanceOf(MnmlError);
+    await expect(client.getRenderStatus("nope")).rejects.toMatchObject({
+      kind: "not_found",
+      code: "UNKNOWN_RENDER_ID",
+    });
   });
 });

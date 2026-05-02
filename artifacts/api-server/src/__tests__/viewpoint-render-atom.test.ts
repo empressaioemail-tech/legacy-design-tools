@@ -75,16 +75,19 @@ describe("viewpoint-render atom (contract)", () => {
       makeBriefingSourceAtom(),
       makeMaterializableElementAtom({ db }),
       makeBriefingDivergenceAtom({ db }),
+      // V1-4 DA-RP-1: viewpoint-render composes render-output.
+      makeRenderOutputAtom(),
     ],
   });
 });
 
 describe("viewpoint-render atom (registration shape)", () => {
-  it("declares the Spec 54 §3 event vocabulary", () => {
+  it("declares the Spec 54 §3 event vocabulary plus V1-4 audit event", () => {
     const atom = makeViewpointRenderAtom();
     expect(atom.eventTypes).toEqual([...VIEWPOINT_RENDER_EVENT_TYPES]);
-    // Sanity: the eight Spec 54 §3 event types are all present.
-    expect(atom.eventTypes).toHaveLength(8);
+    // Eight Spec 54 §3 event types + the V1-4 Phase 1A
+    // `unexpected-output-shape` audit event = 9.
+    expect(atom.eventTypes).toHaveLength(9);
   });
 
   it("declares all five render modes per Spec 20 §10", () => {

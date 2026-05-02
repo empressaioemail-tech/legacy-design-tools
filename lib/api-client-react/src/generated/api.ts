@@ -23,6 +23,7 @@ import type {
   BimModelRefreshResponse,
   BriefingGenerationRunsResponse,
   BriefingGenerationStatusResponse,
+  CancelRenderResponse,
   ChatErrorResponse,
   ChatRequest,
   CodeAtomDetail,
@@ -54,6 +55,8 @@ import type {
   GetSnapshotSheetHistoryParams,
   HealthStatus,
   JurisdictionSummary,
+  KickoffRenderBody,
+  KickoffRenderResponse,
   ListBimModelDivergencesResponse,
   ListCodeAtomsParams,
   ListEngagementBriefingSourcesParams,
@@ -72,6 +75,9 @@ import type {
   PushBimModelBody,
   RecordBimModelDivergenceBody,
   RecordSubmissionResponseBody,
+  RenderDetailResponse,
+  RenderListResponse,
+  RendersSweepResponse,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResolveBimModelDivergenceResponse,
@@ -7262,4 +7268,489 @@ export const useDismissReviewerRequest = <
   TContext
 > => {
   return useMutation(getDismissReviewerRequestMutationOptions(options));
+};
+
+/**
+ * Synchronous up to row insert + 202 response; the polling
+worker (capture → trigger → poll → mirror → terminal) runs
+fire-and-forget. Body is a discriminated union by `kind`:
+
+  - `still`         — single image. 1 archDiffusion-v43 call.
+  - `elevation-set` — north / east / south / west. 4 archDiff
+                      calls fanned out by the route, persisted
+                      as ONE viewpoint_renders parent row +
+                      4 render_outputs children.
+  - `video`         — single 5- or 10-second Kling clip.
+
+Architect-audience-only. Behind `RENDERS_PROD_ENABLED` in
+production (returns 503 with `renders_preview_disabled` until
+the operator flips the flag). The body MUST include `glbUrl`
+— V1-4 does not resolve the bim-model row's GLB pointer
+server-side (V1-5 follow-up).
+
+ * @summary Kick off a mnml.ai render for an engagement
+ */
+export const getKickoffRenderUrl = (id: string) => {
+  return `/api/engagements/${id}/renders`;
+};
+
+export const kickoffRender = async (
+  id: string,
+  kickoffRenderBody: KickoffRenderBody,
+  options?: RequestInit,
+): Promise<KickoffRenderResponse> => {
+  return customFetch<KickoffRenderResponse>(getKickoffRenderUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(kickoffRenderBody),
+  });
+};
+
+export const getKickoffRenderMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRender>>,
+    TError,
+    { id: string; data: BodyType<KickoffRenderBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof kickoffRender>>,
+  TError,
+  { id: string; data: BodyType<KickoffRenderBody> },
+  TContext
+> => {
+  const mutationKey = ["kickoffRender"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof kickoffRender>>,
+    { id: string; data: BodyType<KickoffRenderBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return kickoffRender(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type KickoffRenderMutationResult = NonNullable<
+  Awaited<ReturnType<typeof kickoffRender>>
+>;
+export type KickoffRenderMutationBody = BodyType<KickoffRenderBody>;
+export type KickoffRenderMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Kick off a mnml.ai render for an engagement
+ */
+export const useKickoffRender = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRender>>,
+    TError,
+    { id: string; data: BodyType<KickoffRenderBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof kickoffRender>>,
+  TError,
+  { id: string; data: BodyType<KickoffRenderBody> },
+  TContext
+> => {
+  return useMutation(getKickoffRenderMutationOptions(options));
+};
+
+/**
+ * Returns up to 100 most-recent renders ordered by `createdAt`
+DESC. Architect-audience-only. No pagination in V1-4 — the
+architect's render history is small enough that the cap is
+not user-visible. Pagination is a V1-5 follow-up if the cap
+becomes a constraint.
+
+ * @summary List renders for an engagement (newest first)
+ */
+export const getListEngagementRendersUrl = (id: string) => {
+  return `/api/engagements/${id}/renders`;
+};
+
+export const listEngagementRenders = async (
+  id: string,
+  options?: RequestInit,
+): Promise<RenderListResponse> => {
+  return customFetch<RenderListResponse>(getListEngagementRendersUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListEngagementRendersQueryKey = (id: string) => {
+  return [`/api/engagements/${id}/renders`] as const;
+};
+
+export const getListEngagementRendersQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementRenders>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementRenders>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListEngagementRendersQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementRenders>>
+  > = ({ signal }) => listEngagementRenders(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementRenders>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementRendersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementRenders>>
+>;
+export type ListEngagementRendersQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List renders for an engagement (newest first)
+ */
+
+export function useListEngagementRenders<
+  TData = Awaited<ReturnType<typeof listEngagementRenders>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementRenders>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementRendersQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns the row's status (`queued | rendering | ready |
+failed | cancelled`), the upstream-snapshot atom_event_ids
+(freshness anchors per Spec 54 §6), the per-direction
+in-flight tracking JSONB for `elevation-set` parents
+(`mnmlJobs`), and the child `render_outputs` rows projected
+for FE consumption. Architect-audience-only.
+
+No mnml call from this handler — the polling worker advances
+state. Clients poll this endpoint while non-terminal.
+
+ * @summary Get one render's status + outputs
+ */
+export const getGetRenderUrl = (id: string) => {
+  return `/api/renders/${id}`;
+};
+
+export const getRender = async (
+  id: string,
+  options?: RequestInit,
+): Promise<RenderDetailResponse> => {
+  return customFetch<RenderDetailResponse>(getGetRenderUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRenderQueryKey = (id: string) => {
+  return [`/api/renders/${id}`] as const;
+};
+
+export const getGetRenderQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRender>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRender>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRenderQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getRender>>> = ({
+    signal,
+  }) => getRender(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getRender>>, TError, TData> & {
+    queryKey: QueryKey;
+  };
+};
+
+export type GetRenderQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRender>>
+>;
+export type GetRenderQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get one render's status + outputs
+ */
+
+export function useGetRender<
+  TData = Awaited<ReturnType<typeof getRender>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRender>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRenderQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Server-side cancellation. mnml.ai has no public cancel API
+(Spec 54 v2 §6.1) — this endpoint flips the row status to
+`cancelled` and the polling worker checks status before each
+poll iteration and bails. Outputs already mirrored before
+cancellation persist as artifacts of the partial run.
+
+Returns 409 when the render is already in a terminal state
+(`ready | failed | cancelled`) — those cannot be re-cancelled.
+
+ * @summary Cancel a queued or rendering render
+ */
+export const getCancelRenderUrl = (id: string) => {
+  return `/api/renders/${id}/cancel`;
+};
+
+export const cancelRender = async (
+  id: string,
+  options?: RequestInit,
+): Promise<CancelRenderResponse> => {
+  return customFetch<CancelRenderResponse>(getCancelRenderUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getCancelRenderMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelRender>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof cancelRender>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["cancelRender"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof cancelRender>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return cancelRender(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CancelRenderMutationResult = NonNullable<
+  Awaited<ReturnType<typeof cancelRender>>
+>;
+
+export type CancelRenderMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Cancel a queued or rendering render
+ */
+export const useCancelRender = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof cancelRender>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof cancelRender>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getCancelRenderMutationOptions(options));
+};
+
+/**
+ * Three buckets:
+
+  1. Stuck-render rescue — rows in `queued`/`rendering`
+     older than the rescue threshold are flipped to `failed`
+     with `error_code='polling_timeout_sweep'`.
+  2. Old terminal reap — `failed`/`cancelled` rows older
+     than the retention window are DELETEd. `ready` rows
+     are NEVER reaped.
+  3. Incomplete-mirror warning — `ready` rows whose
+     `render_outputs` carry NULL `mirroredObjectKey` are
+     surfaced via warn logs (no auto-heal in V1-4).
+
+Auth: shared-secret header `x-renders-admin-secret` ↔
+`RENDERS_ADMIN_SECRET` env var. Cloud Scheduler / Replit
+cron / k8s CronJob configures the schedule outside the
+api-server. Returns 503 when the env var is unset (sweep
+is opt-in per environment).
+
+ * @summary Cron-invoked maintenance sweep over renders
+ */
+export const getRunRendersSweepUrl = () => {
+  return `/api/admin/renders/sweep`;
+};
+
+export const runRendersSweep = async (
+  options?: RequestInit,
+): Promise<RendersSweepResponse> => {
+  return customFetch<RendersSweepResponse>(getRunRendersSweepUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRunRendersSweepMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runRendersSweep>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof runRendersSweep>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["runRendersSweep"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof runRendersSweep>>,
+    void
+  > = () => {
+    return runRendersSweep(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RunRendersSweepMutationResult = NonNullable<
+  Awaited<ReturnType<typeof runRendersSweep>>
+>;
+
+export type RunRendersSweepMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Cron-invoked maintenance sweep over renders
+ */
+export const useRunRendersSweep = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runRendersSweep>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof runRendersSweep>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getRunRendersSweepMutationOptions(options));
 };

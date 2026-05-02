@@ -79,6 +79,9 @@ const { makeNeighboringContextAtom } = await import(
 const { makeBriefingDivergenceAtom } = await import(
   "../atoms/briefing-divergence.atom"
 );
+const { makeRenderOutputAtom } = await import(
+  "../atoms/render-output.atom"
+);
 const { makeMaterializableElementAtom } = await import(
   "../atoms/materializable-element.atom"
 );
@@ -166,6 +169,9 @@ describe("engagement atom (contract)", () => {
       // registered for `validate()` to succeed.
       makeBriefingDivergenceAtom({ db: lazyDb }),
       makeMaterializableElementAtom({ db: lazyDb }),
+      // V1-4 DA-RP-1: viewpoint-render (already registered above)
+      // composes render-output transitively.
+      makeRenderOutputAtom(),
     ],
   });
 });
@@ -244,6 +250,8 @@ describe("engagement atom (behavior)", () => {
     registry.register(makeNeighboringContextAtom());
     registry.register(makeBriefingDivergenceAtom({ db: lazyDb }));
     registry.register(makeMaterializableElementAtom({ db: lazyDb }));
+    // V1-4 DA-RP-1: viewpoint-render composes render-output transitively.
+    registry.register(makeRenderOutputAtom());
     const atom = makeEngagementAtom({ db: lazyDb, registry });
     registry.register(atom);
     // Sanity: validate must succeed with every concrete child edge
@@ -394,6 +402,8 @@ describe("engagement atom (behavior)", () => {
     registry.register(makeNeighboringContextAtom());
     registry.register(makeBriefingDivergenceAtom({ db: lazyDb }));
     registry.register(makeMaterializableElementAtom({ db: lazyDb }));
+    // V1-4 DA-RP-1: viewpoint-render composes render-output transitively.
+    registry.register(makeRenderOutputAtom());
     const atom = makeEngagementAtom({ db: lazyDb, registry });
     registry.register(atom);
     expect(registry.validate().ok).toBe(true);

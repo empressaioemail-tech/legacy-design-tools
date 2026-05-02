@@ -1,43 +1,33 @@
 /**
- * Barrel for `@workspace/mnml-client`. The package exposes:
+ * Barrel for `@workspace/mnml-client` v2. The package exposes:
  *
- *   - {@link MnmlClient} — the pluggable interface Spec 54 §5 names
+ *   - {@link MnmlClient} — the pluggable interface Spec 54 v2 §6.1 names
  *   - {@link MockMnmlClient} / {@link HttpMnmlClient} — the two implementations
  *   - {@link createMnmlClient} — env-driven factory (mode = mock | http)
  *   - {@link getMnmlClient} / {@link setMnmlClient} — lazy singleton + test override
  *   - {@link validateMnmlEnvAtBoot} — boot-time fail-fast for http mode
  *   - {@link MnmlError} + {@link RenderRequest} + {@link RenderStatusResult} types
  *
- * The client is wired but NOT invoked anywhere in the api-server in
- * v1 — DA-RP-1 wires the trigger endpoint that actually consumes it.
+ * The client is wired into api-server boot via {@link validateMnmlEnvAtBoot}
+ * but is not yet consumed by any route — DA-RP-1 (V1-4) wires the trigger
+ * endpoint that actually invokes {@link MnmlClient.triggerRender} from a
+ * request handler.
  */
 
 export {
   MnmlError,
   noopMnmlLogger,
-  type CancelRenderResult,
-  type ElevationRenderRequest,
-  type ExteriorOrbitVideoRequest,
-  type FlyOverVideoRequest,
-  type InteriorWalkthroughVideoRequest,
+  type ArchDiffusionRequest,
   type MnmlClient,
-  type MnmlErrorCode,
+  type MnmlErrorKind,
   type MnmlLogger,
-  type RenderOutput,
-  type RenderOutputFormat,
   type RenderOutputRole,
   type RenderRequest,
   type RenderStatus,
   type RenderStatusResult,
-  type StillRenderRequest,
   type TimeOfDay,
   type TriggerRenderResult,
-  type Vec3,
-  type VideoDurationSeconds,
-  type VideoFramerate,
-  type VideoPathKind,
-  type VideoRenderRequest,
-  type VideoWaypoint,
+  type VideoAiRequest,
   type Weather,
 } from "./types";
 
@@ -54,3 +44,12 @@ export {
   type CreateMnmlClientOptions,
   type MnmlRenderMode,
 } from "./factory";
+
+export {
+  RENDER_COST_CREDITS,
+  actualDebitedCredits,
+  estimateRenderCost,
+  type DomainRenderKind,
+  type RenderCostBreakdownEntry,
+  type RenderCostEstimate,
+} from "./cost";

@@ -92,6 +92,15 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // the implicit-resolve hook can verify a known starting state
   // without piggy-backing on the engagements truncate.
   "reviewer_requests",
+  // V1-4 / DA-RP-1 (Spec 54 v2) — mnml.ai render rows. `render_outputs`
+  // cascades off `viewpoint_renders` which cascades off `engagements`,
+  // so the engagements truncate above clears them transitively — but
+  // listing them explicitly keeps the "if a route writes to it, it's
+  // in this list" invariant honest and means a future test that seeds
+  // render rows without going through engagements still gets a clean
+  // slate.
+  "viewpoint_renders",
+  "render_outputs",
 ];
 
 /**

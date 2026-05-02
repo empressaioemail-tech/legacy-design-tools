@@ -78,6 +78,9 @@ const { makeViewpointRenderAtom } = await import(
 const { makeNeighboringContextAtom } = await import(
   "../atoms/neighboring-context.atom"
 );
+const { makeRenderOutputAtom } = await import(
+  "../atoms/render-output.atom"
+);
 
 const lazyDb = new Proxy({} as typeof dbModule.db, {
   get: (_t, prop) => Reflect.get(dbModule.db as object, prop, dbModule.db),
@@ -239,6 +242,8 @@ describe("bim-model atom (contract)", () => {
       // are already in this list above).
       makeViewpointRenderAtom(),
       makeNeighboringContextAtom(),
+      // V1-4 DA-RP-1: viewpoint-render composes render-output.
+      makeRenderOutputAtom(),
     ],
   });
 });

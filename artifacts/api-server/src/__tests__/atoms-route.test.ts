@@ -685,6 +685,7 @@ describe("GET /api/atoms/catalog", () => {
       "parcel-briefing",
       "bim-model",
       "neighboring-context",
+      "render-output",
     ]);
 
     const renderOutput = byType.get("render-output");

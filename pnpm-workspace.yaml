@@ -46,6 +46,7 @@ minimumReleaseAgeExclude:
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
+  - ffmpeg-static
   - msw
   - puppeteer
   - unrs-resolver

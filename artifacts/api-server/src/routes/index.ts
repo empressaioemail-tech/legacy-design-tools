@@ -23,6 +23,7 @@ import adapterCacheRouter from "./adapterCache";
 import reviewerAnnotationsRouter from "./reviewerAnnotations";
 import findingsRouter from "./findings";
 import reviewerRequestsRouter from "./reviewerRequests";
+import rendersRouter from "./renders";
 
 const router: IRouter = Router();
 
@@ -88,5 +89,14 @@ router.use(findingsRouter);
 // not match the longer `/engagements/:id/reviewer-requests` path,
 // so mount ordering relative to engagementsRouter is indifferent.
 router.use(reviewerRequestsRouter);
+// V1-4 / DA-RP-1 — mnml.ai renders. Mounts under
+// /engagements/:id/renders (kickoff + list) and top-level /renders/:id
+// (status + cancel). The /engagements/:id/renders path is more
+// specific than engagementsRouter's /engagements/:id parametric
+// handler, so this register must come before engagementsRouter — but
+// engagementsRouter is already registered above the bottom-of-file
+// ordering-indifferent group (line 55), so we land here matching the
+// briefing-router precedent (line 34 ordering note).
+router.use(rendersRouter);
 
 export default router;
