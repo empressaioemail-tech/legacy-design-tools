@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:14
+        image: pgvector/pgvector:pg14
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -77,6 +77,11 @@ jobs:
             ${{ runner.os }}-pnpm-store-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Enable pgvector extension
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
       - name: Push database schema
         run: pnpm --filter @workspace/db run push
       - name: Run tests
