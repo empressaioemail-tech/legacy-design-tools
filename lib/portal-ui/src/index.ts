@@ -152,6 +152,12 @@ export {
 export { EngagementContextPanel } from "./components/EngagementContextPanel";
 export type { EngagementContextPanelProps } from "./components/EngagementContextPanel";
 
+// Headline Parcel & Zoning summary card on the Site tab — Task #424.
+// Replaces the long-standing "Coming soon" placeholder with the same
+// parcel-id / zoning / overlays / provenance the briefing surfaces.
+export { ParcelZoningCard } from "./components/ParcelZoningCard";
+export type { ParcelZoningCardProps } from "./components/ParcelZoningCard";
+
 export {
   initTheme,
   setTheme,

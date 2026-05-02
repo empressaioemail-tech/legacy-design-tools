@@ -91,6 +91,7 @@ import {
   BriefingDivergenceDetailDialog,
   BriefingDivergenceRow as PortalBriefingDivergenceRow,
   BriefingDivergencesPanel as PortalBriefingDivergencesPanel,
+  ParcelZoningCard,
   ReviewerComment,
   SiteContextViewer,
   SubmissionRecordedBanner,
@@ -430,6 +431,19 @@ function SiteTab({
   const site = engagement.site;
   const geocode = site?.geocode ?? null;
 
+  // Task #424 — pull the parcel briefing so the Parcel & Zoning card
+  // can surface real data (parcel id, zoning, overlays, provenance)
+  // instead of the long-standing "Coming soon" placeholder. Driven
+  // off the same hook used elsewhere on the page so the cache stays
+  // shared with the Site Context tab.
+  const briefingQuery = useGetEngagementBriefing(engagement.id, {
+    query: {
+      queryKey: getGetEngagementBriefingQueryKey(engagement.id),
+      enabled: !!engagement.id,
+    },
+  });
+  const briefing = briefingQuery.data?.briefing ?? null;
+
   const locationRows: Array<{ label: string; value: React.ReactNode }> = [
     { label: "Address", value: site?.address ?? "—" },
     {
@@ -502,7 +516,7 @@ function SiteTab({
                   opacity: 0.8,
                 }}
               >
-                <div>Add an address to see this project on a map.</div>
+                <div>Add an address to plot this project on the map.</div>
                 <button className="sc-btn-primary" onClick={onAddAddress}>
                   Add address
                 </button>
@@ -526,17 +540,13 @@ function SiteTab({
           </div>
         </div>
 
-        <div className="sc-card flex flex-col">
-          <div className="sc-card-header">
-            <span className="sc-label">PARCEL & ZONING</span>
-          </div>
-          <div className="p-4">
-            <div className="sc-prose opacity-70" style={{ fontSize: 12.5 }}>
-              Coming soon — automatic parcel boundaries and zoning summaries
-              will appear here once we integrate county GIS.
-            </div>
-          </div>
-        </div>
+        <ParcelZoningCard
+          hasGeocode={!!geocode}
+          zoningCodeFromSite={site?.zoningCode ?? null}
+          lotAreaSqftFromSite={site?.lotAreaSqft ?? null}
+          briefing={briefing}
+          siteContextHref={`/engagements/${engagement.id}?tab=site-context`}
+        />
       </div>
     </div>
   );

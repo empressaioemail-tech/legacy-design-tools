@@ -104,6 +104,15 @@ const hoisted = vi.hoisted(() => {
       reviewerComment: string | null;
       respondedAt: string | null;
     }>,
+    // Briefing payload consumed by the Site tab's `ParcelZoningCard`.
+    briefing: null as null | {
+      id: string;
+      engagementId: string;
+      createdAt: string;
+      updatedAt: string;
+      sources: Array<Record<string, unknown>>;
+      narrative: null;
+    },
   };
 });
 
@@ -148,6 +157,11 @@ vi.mock("@workspace/site-context/client", () => ({
 // initial paint, so a no-op stub is enough to keep the page from
 // crashing while we exercise the banner.
 vi.mock("@workspace/api-client-react", async () => {
+  // Pull `useQuery` once at factory time so the per-render hook
+  // bodies below stay synchronous (an `await import` inside the
+  // hook itself would make it return a Promise instead of a
+  // QueryResult and crash the renderer).
+  const { useQuery } = await import("@tanstack/react-query");
   return {
     // Shared engagement-page hook bag (Task #398) — provides the
     // dozen identical `useGetEngagement` / `useListEngagements` /
@@ -167,6 +181,20 @@ vi.mock("@workspace/api-client-react", async () => {
     // options so the dialog's `onSubmitted` chain can be driven
     // synchronously from each test.
     useCreateEngagementSubmission: makeCapturingMutationHook(submit),
+    // Site-tab `ParcelZoningCard` reads the briefing via this hook.
+    getGetEngagementBriefingQueryKey: (id: string) =>
+      ["getEngagementBriefing", id] as const,
+    useGetEngagementBriefing: (
+      id: string,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["getEngagementBriefing", id] as const),
+        queryFn: async () =>
+          hoisted.briefing ? { briefing: hoisted.briefing } : null,
+        enabled: opts?.query?.enabled ?? true,
+      }),
   };
 });
 
@@ -209,6 +237,13 @@ function renderPage() {
   );
   client.setQueryData(["listEngagements"], [{ ...hoisted.engagement }]);
   client.setQueryData(["getSession"], { permissions: [] as string[] });
+  // Pre-seed the briefing cache so the Site-tab card paints
+  // synchronously on mount.
+  if (hoisted.briefing) {
+    client.setQueryData(["getEngagementBriefing", hoisted.engagement.id], {
+      briefing: hoisted.briefing,
+    });
+  }
   const node: ReactNode = (
     <QueryClientProvider client={client}>
       <EngagementDetail />
@@ -236,6 +271,7 @@ beforeEach(() => {
     revitDocumentPath: null,
   };
   hoisted.submissions = [];
+  hoisted.briefing = null;
   submit.reset();
   // Reset URL state — the page reads the active tab from
   // `?tab=…` once on mount via `useState(() => readTabFromUrl())`,
@@ -436,5 +472,157 @@ describe("EngagementDetail submission banner (Task #126)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// Site-tab `ParcelZoningCard` — Bastrop populated + Boston fallback.
+function gotoSiteTab() {
+  fireEvent.click(screen.getByRole("button", { name: "Site" }));
+}
+
+describe("EngagementDetail Site tab parcel & zoning card", () => {
+  it("renders the populated ParcelZoningCard for a Bastrop engagement", () => {
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      jurisdiction: "Bastrop County, TX",
+      address: "123 Cedar Way, Bastrop, TX",
+      site: {
+        geocode: { latitude: 30.1105, longitude: -97.3153 },
+      },
+    };
+    hoisted.briefing = {
+      id: "brf-1",
+      engagementId: hoisted.engagement.id,
+      createdAt: "2026-04-16T00:00:00.000Z",
+      updatedAt: "2026-04-16T00:00:00.000Z",
+      narrative: null,
+      sources: [
+        {
+          id: "src-parcel",
+          layerKind: "bastrop-tx-parcels",
+          sourceKind: "local-adapter",
+          provider: "Bastrop County GIS",
+          snapshotDate: "2026-04-20T00:00:00.000Z",
+          note: null,
+          uploadObjectPath: "",
+          uploadOriginalFilename: "",
+          uploadContentType: "",
+          uploadByteSize: 0,
+          dxfObjectPath: null,
+          glbObjectPath: null,
+          conversionStatus: null,
+          conversionError: null,
+          payload: {
+            kind: "parcel",
+            parcel: {
+              attributes: { PARCEL_ID: "R12345", ACRES: 0.5 },
+            },
+          },
+          createdAt: "2026-04-20T00:00:00.000Z",
+          supersededAt: null,
+          supersededById: null,
+        },
+        {
+          id: "src-zoning",
+          layerKind: "bastrop-tx-zoning",
+          sourceKind: "local-adapter",
+          provider: "Bastrop County Zoning",
+          snapshotDate: "2026-04-18T00:00:00.000Z",
+          note: null,
+          uploadObjectPath: "",
+          uploadOriginalFilename: "",
+          uploadContentType: "",
+          uploadByteSize: 0,
+          dxfObjectPath: null,
+          glbObjectPath: null,
+          conversionStatus: null,
+          conversionError: null,
+          payload: {
+            kind: "zoning",
+            zoning: {
+              attributes: {
+                ZONING: "R-1",
+                ZONE_DESC: "Single-Family Residential",
+              },
+            },
+          },
+          createdAt: "2026-04-18T00:00:00.000Z",
+          supersededAt: null,
+          supersededById: null,
+        },
+        {
+          id: "src-flood",
+          layerKind: "bastrop-tx-floodplain",
+          sourceKind: "local-adapter",
+          provider: "Bastrop County GIS",
+          snapshotDate: "2026-04-19T00:00:00.000Z",
+          note: null,
+          uploadObjectPath: "",
+          uploadOriginalFilename: "",
+          uploadContentType: "",
+          uploadByteSize: 0,
+          dxfObjectPath: null,
+          glbObjectPath: null,
+          conversionStatus: null,
+          conversionError: null,
+          payload: {
+            kind: "floodplain",
+            inMappedFloodplain: true,
+            features: [{ attributes: { FLD_ZONE: "AE" } }],
+          },
+          createdAt: "2026-04-19T00:00:00.000Z",
+          supersededAt: null,
+          supersededById: null,
+        },
+      ],
+    };
+
+    renderPage();
+    gotoSiteTab();
+
+    const card = screen.getByTestId("parcel-zoning-card");
+    expect(card).toHaveAttribute("data-state", "populated");
+    expect(within(card).getByText("R12345")).toBeInTheDocument();
+    expect(
+      within(card).getByText(/R-1.*Single-Family Residential/),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByText(/In mapped floodplain \(Zone AE\)/i),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByTestId("parcel-zoning-card-provenance"),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to the friendly unsupported-jurisdiction copy for a Boston engagement", () => {
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      jurisdiction: "Boston, MA",
+      address: "1 City Hall Sq, Boston, MA",
+      site: {
+        geocode: { latitude: 42.3601, longitude: -71.0589 },
+      },
+    };
+    // Briefing exists but no local adapter coverage for Boston.
+    hoisted.briefing = {
+      id: "brf-1",
+      engagementId: hoisted.engagement.id,
+      createdAt: "2026-04-16T00:00:00.000Z",
+      updatedAt: "2026-04-16T00:00:00.000Z",
+      narrative: null,
+      sources: [],
+    };
+
+    renderPage();
+    gotoSiteTab();
+
+    const card = screen.getByTestId("parcel-zoning-card");
+    expect(card).toHaveAttribute("data-state", "unsupported");
+    expect(
+      within(card).getByTestId("parcel-zoning-card-unsupported-message"),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByTestId("parcel-zoning-card-site-context-link"),
+    ).toBeInTheDocument();
   });
 });
