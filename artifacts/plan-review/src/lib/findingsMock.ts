@@ -483,6 +483,19 @@ export function __seedFindingsForTests(
 }
 
 /**
+ * Test/dev hook to seed finding runs (e.g. a `failed` row produced
+ * by the auto-trigger added in Task #447) without going through the
+ * generation flow. Inserted newest-first to match the ordering the
+ * `/findings/runs` endpoint returns.
+ */
+export function __seedRunsForTests(
+  submissionId: string,
+  runs: FindingRun[],
+): void {
+  runsBySubmission.set(submissionId, runs);
+}
+
+/**
  * Test-only synchronous accessor (the React Query layer caches a
  * snapshot but we want the live store for assertions about
  * reviewer-status mutations).

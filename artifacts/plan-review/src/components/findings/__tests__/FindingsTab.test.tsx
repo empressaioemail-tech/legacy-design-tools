@@ -44,8 +44,10 @@ import { FindingsTab } from "../FindingsTab";
 import {
   __resetFindingsMockForTests,
   __seedFindingsForTests,
+  __seedRunsForTests,
   __peekFindingsForTests,
   type Finding,
+  type FindingRun,
 } from "../../../lib/findingsMock";
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -212,6 +214,70 @@ describe("FindingsTab (AIR-2)", () => {
     expect(revision).toBeDefined();
     expect(revision?.text).toBe("Reviewer rewrite of finding.");
     expect(revision?.reviewerComment).toBe("Original conflated two issues.");
+  });
+
+  it("surfaces an auto-trigger failure badge when the most recent run is failed (Task #450)", async () => {
+    // Simulate the state Task #447's auto-trigger leaves behind on
+    // engine error: a `failed` finding_runs row with no findings on
+    // the submission. Reviewers must see a distinct alert + a
+    // re-run action instead of the bare "no findings yet" empty
+    // state.
+    const failedRun: FindingRun = {
+      generationId: "frun_auto_failed_1",
+      state: "failed",
+      startedAt: "2026-04-30T11:55:00.000Z",
+      completedAt: "2026-04-30T11:55:02.000Z",
+      error: "engine_unreachable",
+      invalidCitationCount: 0,
+      discardedFindingCount: 0,
+    };
+    __seedRunsForTests("sub-auto-fail", [failedRun]);
+    render(<ControlledTab submissionId="sub-auto-fail" />, { wrapper });
+
+    const badge = await screen.findByTestId("findings-auto-failure-badge");
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute("role")).toBe("alert");
+    expect(badge.textContent).toContain("AI plan review failed");
+    expect(
+      screen.getByTestId("findings-auto-failure-detail").textContent,
+    ).toContain("engine_unreachable");
+
+    // The empty state still renders below — the badge is the new
+    // hint, not a replacement for the existing CTA.
+    expect(screen.getByTestId("findings-empty-state")).toBeTruthy();
+
+    // Clicking the re-run action calls the existing manual generate
+    // mutation. The mock resolves it into the deterministic fixture
+    // which clears the failure badge (latest run is now `completed`).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("findings-auto-failure-rerun"));
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("findings-auto-failure-badge")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("findings-group-blocker")).toBeTruthy();
+    });
+  });
+
+  it("does not show the auto-failure badge when the latest run is completed (Task #450)", async () => {
+    __seedRunsForTests("sub-completed", [
+      {
+        generationId: "frun_ok_1",
+        state: "completed",
+        startedAt: "2026-04-30T11:55:00.000Z",
+        completedAt: "2026-04-30T11:55:02.000Z",
+        error: null,
+        invalidCitationCount: 0,
+        discardedFindingCount: 0,
+      },
+    ]);
+    __seedFindingsForTests("sub-completed", [
+      fakeFinding({ id: "finding:sub-completed:1", submissionId: "sub-completed" }),
+    ]);
+    render(<ControlledTab submissionId="sub-completed" />, { wrapper });
+    await screen.findByTestId("finding-row-finding:sub-completed:1");
+    expect(screen.queryByTestId("findings-auto-failure-badge")).toBeNull();
   });
 
   it("disables the 3D viewer button when no onShowInViewer host is wired (Task #343)", async () => {

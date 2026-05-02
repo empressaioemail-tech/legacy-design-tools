@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   useListSubmissionFindings,
+  useListSubmissionFindingsGenerationRuns,
   useGenerateSubmissionFindings,
   useFindingsGenerationPolling,
   compareFindings,
@@ -119,6 +120,8 @@ export function FindingsTab({
           overflow: "auto",
         }}
       >
+        <FindingsAutoFailureBadge submissionId={submissionId} />
+
         <FindingsRunsPanel
           submissionId={submissionId}
           hasExistingFindings={hasAnyFindings}
@@ -242,6 +245,80 @@ function toggleSet<T>(prev: Set<T>, value: T): Set<T> {
   if (next.has(value)) next.delete(value);
   else next.add(value);
   return next;
+}
+
+/**
+ * Surfaces a distinct alert when the most recent generation run is
+ * `failed` — typically produced by the auto-trigger added in Task
+ * #447, which records `finding_runs.state="failed"` on engine error
+ * but otherwise leaves reviewers staring at "no findings yet" with
+ * no hint that the AI tried and failed (Task #450).
+ *
+ * The "Re-run AI plan review" action calls the same manual generate
+ * endpoint reviewers use elsewhere (`useGenerateSubmissionFindings`)
+ * so a successful retry clears the badge by inserting a new
+ * `pending` → `completed` row at the head of the runs list.
+ */
+function FindingsAutoFailureBadge({ submissionId }: { submissionId: string }) {
+  const runsQuery = useListSubmissionFindingsGenerationRuns(submissionId);
+  const generate = useGenerateSubmissionFindings(submissionId);
+  const live = useFindingsGenerationPolling(
+    submissionId,
+    generate.isPending || runsQuery.data?.runs?.[0]?.state === "pending",
+  );
+  const latestRun = runsQuery.data?.runs?.[0] ?? null;
+  const isPending =
+    generate.isPending || live?.state === "pending";
+  if (!latestRun || latestRun.state !== "failed") return null;
+  return (
+    <div
+      role="alert"
+      data-testid="findings-auto-failure-badge"
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12,
+        padding: "10px 12px",
+        border: "1px solid var(--danger-border, var(--danger-text))",
+        background: "var(--danger-dim)",
+        borderRadius: 6,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--danger-text)",
+          }}
+        >
+          AI plan review failed
+        </div>
+        <div
+          data-testid="findings-auto-failure-detail"
+          style={{
+            fontSize: 12,
+            color: "var(--danger-text)",
+            marginTop: 2,
+            wordBreak: "break-word",
+          }}
+        >
+          {latestRun.error
+            ? `The most recent attempt failed: ${latestRun.error}`
+            : "The most recent automatic attempt failed. Re-run to try again."}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="sc-btn-primary"
+        onClick={() => generate.mutate()}
+        disabled={isPending}
+        data-testid="findings-auto-failure-rerun"
+      >
+        {isPending ? "Re-running…" : "Re-run AI plan review"}
+      </button>
+    </div>
+  );
 }
 
 function FindingsEmptyState({ submissionId }: { submissionId: string }) {
