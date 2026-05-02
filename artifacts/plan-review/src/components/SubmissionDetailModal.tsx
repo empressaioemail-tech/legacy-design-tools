@@ -75,6 +75,11 @@ import { DecisionTab } from "./DecisionTab";
 import { EngagementContextTab } from "./EngagementContextTab";
 import { relativeTime } from "../lib/relativeTime";
 import { FindingsTab } from "./findings/FindingsTab";
+import {
+  useListSubmissionFindings,
+  useListSubmissionFindingsGenerationRuns,
+  type FindingRun,
+} from "../lib/findingsApi";
 import type { SubmissionDetailTab } from "../lib/findingUrl";
 
 export interface SubmissionDetailModalProps {
@@ -121,6 +126,18 @@ export interface SubmissionDetailModalProps {
    * `<Link>` for non-controlled callers / tests.
    */
   onOpenSubmission?: (submissionId: string) => void;
+  /** Optional Communicate-button handler. Disabled when omitted. */
+  onCommunicate?: () => void;
+  /**
+   * Optional Decide-button handler. When omitted, the button falls
+   * back to switching the modal to the existing Decision tab.
+   */
+  onDecide?: () => void;
+  /**
+   * Optional last comment-letter timestamp for the Communicate
+   * status pill. When omitted, the pill renders "Never sent".
+   */
+  lastCommunicatedAt?: string | null;
 }
 
 const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
@@ -128,6 +145,12 @@ const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
   approved: "Approved",
   corrections_requested: "Corrections requested",
   rejected: "Rejected",
+};
+
+const RUN_STATE_LABELS: Record<FindingRun["state"], string> = {
+  pending: "Running",
+  completed: "Completed",
+  failed: "Failed",
 };
 
 export function SubmissionDetailModal({
@@ -140,6 +163,9 @@ export function SubmissionDetailModal({
   onSelectFinding,
   audience = "user",
   onOpenSubmission,
+  onCommunicate,
+  onDecide,
+  lastCommunicatedAt = null,
 }: SubmissionDetailModalProps) {
   const isOpen = submission !== null;
 
@@ -195,6 +221,33 @@ export function SubmissionDetailModal({
     if (!isOpen) setHighlightToken(null);
   }, [isOpen]);
 
+  const setActiveTab = (next: SubmissionDetailTab) => {
+    if (isControlled) {
+      onTabChange?.(next);
+    } else {
+      setInternalTab(next);
+    }
+  };
+
+  const handleReview = () => {
+    setActiveTab("findings");
+    if (typeof window !== "undefined") {
+      // Defer to rAF so the tab-switch render commits before the
+      // lookup; the Run-AI button lives inside FindingsRunsPanel.
+      window.requestAnimationFrame(() => {
+        const node = document.querySelector<HTMLElement>(
+          '[data-testid="findings-runs-generate"]',
+        );
+        if (node) {
+          node.scrollIntoView({ behavior: "smooth", block: "center" });
+          node.focus();
+        }
+      });
+    }
+  };
+
+  const handleDecide = onDecide ?? (() => setActiveTab("decision"));
+
   const handleShowInViewer = (elementRef: string) => {
     nextHighlightNonceRef.current += 1;
     setHighlightToken({
@@ -235,16 +288,20 @@ export function SubmissionDetailModal({
         </DialogHeader>
 
         {submission && (
+          <SubmissionActionHeader
+            submission={submission}
+            onReview={handleReview}
+            onCommunicate={onCommunicate}
+            onDecide={handleDecide}
+            decideHandlerProvided={onDecide != null}
+            lastCommunicatedAt={lastCommunicatedAt}
+          />
+        )}
+
+        {submission && (
           <Tabs
             value={activeTab}
-            onValueChange={(v) => {
-              const next = v as SubmissionDetailTab;
-              if (isControlled) {
-                onTabChange?.(next);
-              } else {
-                setInternalTab(next);
-              }
-            }}
+            onValueChange={(v) => setActiveTab(v as SubmissionDetailTab)}
             data-testid="submission-detail-modal-tabs"
           >
             <TabsList data-testid="submission-detail-modal-tabs-list">
@@ -426,6 +483,141 @@ export function SubmissionDetailModal({
          */}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Unified Review / Communicate / Decide button surface that sits
+ * above the modal's tabs. Each button shows a status pill driven
+ * off the existing findings / runs / submission-status data.
+ */
+function SubmissionActionHeader({
+  submission,
+  onReview,
+  onCommunicate,
+  onDecide,
+  decideHandlerProvided,
+  lastCommunicatedAt,
+}: {
+  submission: EngagementSubmissionSummary;
+  onReview: () => void;
+  onCommunicate?: () => void;
+  onDecide: () => void;
+  decideHandlerProvided: boolean;
+  lastCommunicatedAt: string | null;
+}) {
+  const findingsQuery = useListSubmissionFindings(submission.id);
+  const runsQuery = useListSubmissionFindingsGenerationRuns(submission.id);
+  const findingsCount = findingsQuery.data?.length ?? 0;
+  const latestRun = runsQuery.data?.runs?.[0] ?? null;
+  const findingsLabel = findingsCount === 1 ? "1 finding" : `${findingsCount} findings`;
+  const reviewPill = latestRun
+    ? `${findingsLabel} · ${RUN_STATE_LABELS[latestRun.state]}`
+    : `${findingsLabel} · Not yet run`;
+
+  const communicatePill = lastCommunicatedAt
+    ? `Sent ${relativeTime(lastCommunicatedAt)}`
+    : "Never sent";
+
+  const decidePill =
+    SUBMISSION_STATUS_LABELS[submission.status] ?? submission.status;
+
+  const communicateDisabled = onCommunicate == null;
+  const decideTitle = decideHandlerProvided
+    ? "Record verdict"
+    : "Open Decision tab";
+
+  return (
+    <div
+      data-testid="submission-action-header"
+      style={{
+        display: "flex",
+        gap: 8,
+        padding: "8px 0",
+        borderBottom: "1px solid var(--border-subtle)",
+        marginBottom: 4,
+      }}
+    >
+      <ActionHeaderButton
+        testId="submission-action-review"
+        label="Review"
+        statusLabel={reviewPill}
+        statusTestId="submission-action-review-status"
+        onClick={onReview}
+        title="Jump to AI compliance findings"
+      />
+      <ActionHeaderButton
+        testId="submission-action-communicate"
+        label="Communicate"
+        statusLabel={communicatePill}
+        statusTestId="submission-action-communicate-status"
+        onClick={onCommunicate ?? (() => {})}
+        disabled={communicateDisabled}
+        title="Compose comment letter"
+      />
+      <ActionHeaderButton
+        testId="submission-action-decide"
+        label="Decide"
+        statusLabel={decidePill}
+        statusTestId="submission-action-decide-status"
+        onClick={onDecide}
+        title={decideTitle}
+      />
+    </div>
+  );
+}
+
+function ActionHeaderButton({
+  testId,
+  label,
+  statusLabel,
+  statusTestId,
+  onClick,
+  disabled,
+  title,
+}: {
+  testId: string;
+  label: string;
+  statusLabel: string;
+  statusTestId: string;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        gap: 2,
+        padding: "8px 12px",
+        border: "1px solid var(--border-default)",
+        borderRadius: 6,
+        background: disabled
+          ? "var(--surface-1, transparent)"
+          : "var(--surface-1, transparent)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.55 : 1,
+        textAlign: "left",
+      }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+        {label}
+      </span>
+      <span
+        data-testid={statusTestId}
+        style={{ fontSize: 11, color: "var(--text-secondary)" }}
+      >
+        {statusLabel}
+      </span>
+    </button>
   );
 }
 

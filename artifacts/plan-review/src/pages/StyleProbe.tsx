@@ -2,24 +2,9 @@ import { DashboardLayout } from "@workspace/portal-ui";
 import { useNavGroups } from "../components/NavGroups";
 import { KpiTile } from "../components/KpiTile";
 import { DisciplineBadge } from "../components/DisciplineBadge";
-import { FindingCard } from "../components/FindingCard";
-import { Finding } from "../data/mock";
 
 export default function StyleProbe() {
   const navGroups = useNavGroups();
-  const dummyFinding: Finding = {
-    id: "F-PROBE-001",
-    submittalId: "SUB-PROBE",
-    discipline: "architectural",
-    severity: "blocking",
-    source: "ai-reviewer",
-    title: "Egress door swing direction",
-    detail: "Door 104B swings against the direction of egress travel.",
-    codeRef: "IBC §1010.1.2",
-    edition: "IBC 2021",
-    identifiedAt: new Date().toISOString(),
-    status: "open"
-  };
 
   return (
     <DashboardLayout
@@ -77,14 +62,6 @@ export default function StyleProbe() {
                 <span className="sc-pill sc-pill-blue">info</span>
               </div>
             </div>
-          </div>
-        </section>
-
-        {/* Finding Card */}
-        <section className="space-y-4">
-          <h2 className="text-xl font-bold font-['Oxygen'] text-[var(--text-primary)]">Finding Card Example</h2>
-          <div className="max-w-sm">
-            <FindingCard finding={dummyFinding} />
           </div>
         </section>
 

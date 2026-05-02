@@ -692,4 +692,91 @@ describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () =>
     expect(subtitle.textContent).toContain("Boulder, CO");
     expect(subtitle.textContent).toContain("just now");
   });
+
+  describe("SubmissionActionHeader", () => {
+    it("renders the three-button header with status pills", async () => {
+      renderModal();
+      const header = await screen.findByTestId("submission-action-header");
+      expect(header).toBeInTheDocument();
+      expect(
+        within(header).getByTestId("submission-action-review"),
+      ).toBeInTheDocument();
+      expect(
+        within(header).getByTestId("submission-action-communicate"),
+      ).toBeInTheDocument();
+      expect(
+        within(header).getByTestId("submission-action-decide"),
+      ).toBeInTheDocument();
+      expect(
+        within(header).getByTestId("submission-action-review-status").textContent,
+      ).toMatch(/findings/i);
+      expect(
+        within(header).getByTestId("submission-action-communicate-status")
+          .textContent,
+      ).toMatch(/Never sent/i);
+      expect(
+        within(header).getByTestId("submission-action-decide-status").textContent,
+      ).toMatch(/Pending/i);
+    });
+
+    it("Review button switches the active tab to Findings", async () => {
+      const user = userEvent.setup();
+      renderModal();
+      await user.click(await screen.findByTestId("submission-action-review"));
+      expect(
+        await screen.findByTestId("findings-tab-mock"),
+      ).toBeInTheDocument();
+    });
+
+    it("Communicate button is disabled when no handler is provided", async () => {
+      renderModal();
+      const btn = await screen.findByTestId("submission-action-communicate");
+      expect(btn).toBeDisabled();
+    });
+
+    it("Communicate button fires the supplied handler when wired", async () => {
+      const user = userEvent.setup();
+      const onCommunicate = vi.fn();
+      render(
+        <QueryClientProvider client={makeQueryClient()}>
+          <SubmissionDetailModal
+            submission={baseSubmission}
+            engagementId="eng-1"
+            onClose={() => {}}
+            onCommunicate={onCommunicate}
+          />
+        </QueryClientProvider>,
+      );
+      await user.click(
+        await screen.findByTestId("submission-action-communicate"),
+      );
+      expect(onCommunicate).toHaveBeenCalledTimes(1);
+    });
+
+    it("Decide button falls back to opening the Decision tab when no handler is wired", async () => {
+      const user = userEvent.setup();
+      renderModal();
+      await user.click(await screen.findByTestId("submission-action-decide"));
+      expect(
+        await screen.findByTestId("decision-tab-mock"),
+      ).toBeInTheDocument();
+    });
+
+    it("Decide button fires the supplied handler when wired", async () => {
+      const user = userEvent.setup();
+      const onDecide = vi.fn();
+      render(
+        <QueryClientProvider client={makeQueryClient()}>
+          <SubmissionDetailModal
+            submission={baseSubmission}
+            engagementId="eng-1"
+            onClose={() => {}}
+            onDecide={onDecide}
+          />
+        </QueryClientProvider>,
+      );
+      await user.click(await screen.findByTestId("submission-action-decide"));
+      expect(onDecide).toHaveBeenCalledTimes(1);
+    });
+  });
 });
