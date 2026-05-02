@@ -428,6 +428,37 @@ function fireAutoBriefingKickoff(
       const result = await kickoffBriefingGeneration({
         engagementId,
         reqLog,
+        // Subscriber that fires once the async runner finalizes the
+        // job row. The runner itself catches engine failures and
+        // logs them keyed by `engagementId/briefingId/generationId`,
+        // but the auto-trigger contract requires a structured
+        // `{ engagementId, jurisdiction, error }` log on the
+        // engagement.created path so operators can grep auto-trigger
+        // failures without correlating across engagement+briefing
+        // ids first. We log on `failed` and on `completed` so the
+        // wiring is observable end-to-end.
+        onSettled: (settled) => {
+          if (settled.state === "failed") {
+            reqLog.error(
+              {
+                engagementId,
+                jurisdiction: jurisdictionForLog,
+                generationId: settled.generationId,
+                error: settled.error ?? "unknown engine failure",
+              },
+              "auto-briefing: generation failed",
+            );
+          } else {
+            reqLog.info(
+              {
+                engagementId,
+                jurisdiction: jurisdictionForLog,
+                generationId: settled.generationId,
+              },
+              "auto-briefing: generation completed",
+            );
+          }
+        },
       });
       switch (result.kind) {
         case "started":

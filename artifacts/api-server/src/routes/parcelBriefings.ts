@@ -1698,8 +1698,22 @@ export type KickoffBriefingOutcome =
 export async function kickoffBriefingGeneration(args: {
   engagementId: string;
   reqLog: typeof logger;
+  /**
+   * Optional subscriber notified once the async {@link runBriefingGeneration}
+   * settles. Receives the terminal job state (`completed` | `failed`) and
+   * the engine error message when it failed. The auto-trigger subscriber
+   * uses this to emit a structured `auto-briefing: generation failed` log
+   * with `{ engagementId, jurisdiction, error }`; the manual HTTP route
+   * leaves it unset so the existing in-runner log stays the only signal.
+   * Subscriber failures are swallowed so they cannot poison the runner.
+   */
+  onSettled?: (settled: {
+    state: "completed" | "failed";
+    generationId: string;
+    error: string | null;
+  }) => void | Promise<void>;
 }): Promise<KickoffBriefingOutcome> {
-  const { engagementId, reqLog } = args;
+  const { engagementId, reqLog, onSettled } = args;
   const eng = await db
     .select({ id: engagements.id })
     .from(engagements)
@@ -1763,14 +1777,48 @@ export async function kickoffBriefingGeneration(args: {
 
   // Fire-and-forget. The job row's state is what the status
   // endpoint reads. We do not await — callers return immediately.
-  void runBriefingGeneration({
-    engagementId,
-    briefingId: briefing.id,
-    generationId,
-    generatedBy: BRIEFING_ENGINE_GENERATED_BY,
-    sources,
-    reqLog,
-  });
+  // When `onSettled` is wired (auto-trigger subscriber), we wrap
+  // the runner so the subscriber sees the terminal job row even
+  // though the runner itself never re-throws engine failures.
+  void (async () => {
+    await runBriefingGeneration({
+      engagementId,
+      briefingId: briefing.id,
+      generationId,
+      generatedBy: BRIEFING_ENGINE_GENERATED_BY,
+      sources,
+      reqLog,
+    });
+    if (!onSettled) return;
+    try {
+      const [terminal] = await db
+        .select({
+          state: briefingGenerationJobs.state,
+          error: briefingGenerationJobs.error,
+        })
+        .from(briefingGenerationJobs)
+        .where(eq(briefingGenerationJobs.id, generationId))
+        .limit(1);
+      if (!terminal) return;
+      if (terminal.state !== "completed" && terminal.state !== "failed") {
+        // Defensive: the runner always finalizes to one of these
+        // states. If something has left the row pending we do not
+        // notify — the subscriber would not have an actionable
+        // outcome to log.
+        return;
+      }
+      await onSettled({
+        state: terminal.state,
+        generationId,
+        error: terminal.error ?? null,
+      });
+    } catch (err) {
+      reqLog.warn(
+        { err, engagementId, generationId },
+        "briefing generation: onSettled subscriber threw (swallowed)",
+      );
+    }
+  })();
 
   reqLog.info(
     {

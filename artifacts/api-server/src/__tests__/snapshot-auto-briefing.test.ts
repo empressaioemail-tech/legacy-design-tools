@@ -62,6 +62,27 @@ vi.mock("@workspace/codes", async () => {
   };
 });
 
+// Briefing-engine mock that the engine-failure test below flips on.
+// Default behavior delegates to the real mock generator so the rest
+// of the suite (which never reaches the engine because no briefing
+// row exists) is unaffected.
+const generateBriefingMock = vi.hoisted(() =>
+  vi.fn(async (..._args: unknown[]) => {
+    throw new Error("generateBriefing default mock — should not be reached");
+  }),
+);
+vi.mock("@workspace/briefing-engine", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/briefing-engine")>(
+      "@workspace/briefing-engine",
+    );
+  return {
+    ...actual,
+    generateBriefing: (...args: Parameters<typeof actual.generateBriefing>) =>
+      generateBriefingMock(...args),
+  };
+});
+
 // Wrap `kickoffBriefingGeneration` in a spy that defaults to the real
 // implementation. Tests can override per-case via `mockImplementationOnce`
 // to force a throw without touching the manual-route's tests. The mock
@@ -86,10 +107,14 @@ vi.mock("../routes/parcelBriefings", async () => {
 });
 
 const { setupRouteTests } = await import("./setup");
-const { engagements, briefingGenerationJobs, parcelBriefings } = await import(
-  "@workspace/db"
-);
+const {
+  engagements,
+  briefingGenerationJobs,
+  parcelBriefings,
+  briefingSources,
+} = await import("@workspace/db");
 const { eq } = await import("drizzle-orm");
+const { logger } = await import("../lib/logger");
 
 const SECRET = process.env["SNAPSHOT_SECRET"]!;
 
@@ -199,6 +224,71 @@ describe("POST /api/snapshots — engagement.created auto-briefing", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(kickoffSpy).not.toHaveBeenCalled();
+  });
+
+  it("structured `auto-briefing: generation failed` log fires when the async runner reports a failed terminal state", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const errorSpy = vi.spyOn(logger, "error");
+    // Override the helper to simulate a successful kickoff (a real
+    // briefing-generation job row was inserted and the runner is
+    // executing) followed by an asynchronous failed terminal state.
+    // The snapshot.ts subscriber's `onSettled` callback is what we
+    // are exercising here — it must emit a structured
+    // `{ engagementId, jurisdiction, error }` log so operators can
+    // grep auto-trigger failures without first correlating across
+    // engagement+briefing ids.
+    kickoffSpy.mockImplementationOnce(async (args) => {
+      // Fire the subscriber on a microtask so the kickoff path
+      // returns to the snapshot-ingest response first — this
+      // mirrors the real helper, where onSettled fires after the
+      // void-launched runner finalizes the job row.
+      queueMicrotask(() => {
+        void args.onSettled?.({
+          state: "failed",
+          generationId: "00000000-0000-0000-0000-000000000fa1",
+          error: "simulated adapter timeout",
+        });
+      });
+      return {
+        kind: "started",
+        generationId: "00000000-0000-0000-0000-000000000fa1",
+        sourceCount: 1,
+      };
+    });
+
+    const res = await request(getApp())
+      .post("/api/snapshots")
+      .set("x-snapshot-secret", SECRET)
+      .send({
+        createNewEngagement: true,
+        projectName: "Engine-Fails Project",
+        sheets: [],
+      });
+    expect(res.status).toBe(201);
+
+    // Allow the queued microtask + async logger call to settle.
+    await new Promise((r) => setTimeout(r, 100));
+
+    const failedCall = errorSpy.mock.calls.find(
+      ([, msg]) => msg === "auto-briefing: generation failed",
+    );
+    expect(failedCall, "expected a structured generation-failed log").toBeTruthy();
+    expect(failedCall![0]).toMatchObject({
+      engagementId: res.body.engagementId,
+      jurisdiction: null,
+      generationId: "00000000-0000-0000-0000-000000000fa1",
+      error: "simulated adapter timeout",
+    });
+
+    // Engagement still in place — failure on the briefing side never
+    // unwinds the engagement creation.
+    const engs = await ctx.schema.db
+      .select()
+      .from(engagements)
+      .where(eq(engagements.id, res.body.engagementId));
+    expect(engs).toHaveLength(1);
+
+    errorSpy.mockRestore();
   });
 
   it("a failing kickoff is caught — engagement stays created, no briefing rows surface, snapshot ingest still returns 201", async () => {
