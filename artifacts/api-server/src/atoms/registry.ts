@@ -127,17 +127,24 @@ export function getHistoryService(): EventAnchoringService {
  *     (submission, briefing-source, materializable-element,
  *     briefing-divergence, sheet, parcel-briefing); only the matching
  *     target edge is populated at lookup time.
- *   - `viewpoint-render` (DA-RP-0, shape-only) — the render the
- *     architect requested from mnml.ai for an engagement that has a
- *     `parcel-briefing` and a `bim-model`; composes `engagement`,
- *     `parcel-briefing` (briefingAtRender), `bim-model`
- *     (bimModelAtRender), and `neighboring-context`
- *     (neighboringContextAtRender, optional). All four edges concrete.
- *     The renders persistence layer ships in DA-RP-1.
- *   - `render-output` (DA-RP-0, shape-only) — a single output file
- *     produced by a `viewpoint-render` (e.g. one of an elevation set's
- *     four images, the mp4 of a video render); composes
- *     `viewpoint-render` (concrete). Persistence ships in DA-RP-1.
+ *   - `viewpoint-render` (V1-4 / DA-RP-1, DB-backed per Spec 54 v2
+ *     §6.2) — the render the architect requested from mnml.ai for an
+ *     engagement that has a `parcel-briefing` and a `bim-model`;
+ *     composes `engagement`, `parcel-briefing` (briefingAtRender),
+ *     `bim-model` (bimModelAtRender), `neighboring-context`
+ *     (neighboringContextAtRender, optional), AND `render-output`
+ *     (many, dataKey `outputs`). `contextSummary` reads from the
+ *     `viewpoint_renders` table and surfaces a per-edge freshness
+ *     verdict by comparing the snapshot atom_event_ids to each
+ *     upstream's current latestEvent.id (Spec 54 §6 mechanic).
+ *   - `render-output` (V1-4 / DA-RP-1, DB-backed per Spec 54 v2 §3)
+ *     — a single output file produced by a `viewpoint-render` (e.g.
+ *     one of an elevation set's four images, the mp4 of a video
+ *     render, or the ffmpeg-synthesized thumbnail); composes its
+ *     parent `viewpoint-render` (concrete). `contextSummary` reads
+ *     from the `render_outputs` table and surfaces both
+ *     `sourceUrl` (mnml's ephemeral) and `mirroredObjectKey` (our
+ *     durable) per Spec 54 v2 §6.3.
  */
 export function getAtomRegistry(): AtomRegistry {
   if (_registry) return _registry;
@@ -186,13 +193,14 @@ export function getAtomRegistry(): AtomRegistry {
   // after reviewer-annotation so the boot-log tail surfaces both
   // reviewer-side atoms together.
   registry.register(makeReviewerRequestAtom({ db, history }));
-  // DA-RP-0 mnml.ai render-pipeline atoms — shape-only, no DB lookup
-  // yet. Both registered before any consumer references their slugs;
-  // `register()` itself does not care about order, but the boot-log
-  // tail surfaces the dependency order naturally (render-output
-  // composes viewpoint-render).
-  registry.register(makeViewpointRenderAtom({ history }));
-  registry.register(makeRenderOutputAtom({ history }));
+  // V1-4 / DA-RP-1 mnml.ai render-pipeline atoms — DB-backed per
+  // Spec 54 v2 §6.2-§6.3. Both factories now receive `db` for the
+  // `viewpoint_renders` / `render_outputs` row lookups and `registry`
+  // so `resolveComposition` can synthesize child AtomReferences for
+  // every declared edge (upstream singletons + the many-cardinality
+  // `outputs` back-edge on viewpoint-render).
+  registry.register(makeViewpointRenderAtom({ db, history, registry }));
+  registry.register(makeRenderOutputAtom({ db, history, registry }));
   // V1-1 / AIR-1 — finding atom registers AFTER submission +
   // briefing-source (its concrete-edge children) so the boot-log tail
   // surfaces the dependency order naturally. The `code-section` edge

@@ -1,54 +1,62 @@
 /**
- * The `render-output` atom registration — DA-RP-0 sprint, shape-only.
+ * The `render-output` atom registration — V1-4 / DA-RP-1.
  *
- * Per Spec 54 §3, a *render output* is a single output file produced by
- * a viewpoint-render — decoupled from `viewpoint-render` so an
- * elevation set's four images can each be addressed individually, and
- * so video frames or alternate resolutions can be added later without
- * changing the parent atom. Identity is render-scoped + monotonic:
+ * Per Spec 54 v2 §3, a *render output* is a single output file
+ * produced by a `viewpoint-render`: the primary still for a `still`
+ * parent, one of four cardinal images for an `elevation-set` parent,
+ * the mp4 for a `video` parent, or the server-synthesized thumbnail
+ * for the same. Identity is the `render_outputs.id` PK.
  *
- *   render-output:{viewpointRenderId}:{ulid}
+ * V1-4 replaces DA-RP-0's shape-only registration with the DB-backed
+ * implementation: `contextSummary` reads the row from
+ * `render_outputs`, hydrates the typed payload (role, format,
+ * resolution, sizeBytes, durationSeconds, sourceUrl,
+ * mirroredObjectKey, …), and runs `resolveComposition` over the
+ * single back-edge to the parent viewpoint-render.
  *
- * Sprint scope (DA-RP-0) is registration-only. The render_outputs
- * persistence layer, the streaming download endpoint, and the gallery
- * UI all land in DA-RP-1+. Until then `contextSummary` returns the
- * not-found envelope, mirroring `briefing-source.atom.ts`'s pre-DA-PI-1B
- * placeholder pattern.
+ * Composition (Spec 54 v2 §3): one parent edge, the
+ * `viewpoint-render` row this output belongs to. Concrete (not
+ * `forwardRef`); `viewpoint-render` registers in the same V1-4
+ * sprint.
  *
- * Composition (Spec 54 §3):
+ * Role discriminator (Spec 54 v2 §6.5 — note v2's `elevation-{n,e,s,w}`
+ * naming, NOT v1's `elevation-{north,east,south,west}`):
  *
- *   - `viewpoint-render` (1, required)
+ *   - `primary`         — the single output of a `still` parent
+ *   - `elevation-n/e/s/w` — the four outputs of an `elevation-set`
+ *                          parent (route-tagged from
+ *                          camera_direction)
+ *   - `video-primary`   — the mp4 from a `video` parent
+ *   - `video-thumbnail` — the ffmpeg-synthesized first-frame from
+ *                          the same parent
  *
- * Concrete (not `forwardRef`) — `viewpoint-render` registers alongside
- * this atom in the same DA-RP-0 sprint so the boot validator finds it.
+ * URL handling: `sourceUrl` is mnml's CDN address (ephemeral —
+ * documented as expiring); `mirroredObjectKey` is our durable object-
+ * storage key. The route's poll handler writes both in the same
+ * transaction that marks the parent `ready`.
  *
- * Role discriminator: each render-output carries a `role` per Spec 54 §3
- * — `"primary"` for stills, `"elevation-{north|east|south|west}"` for
- * an elevation set's four images, and `"video-primary"` /
- * `"video-thumbnail"` for video renders. The discriminator surfaces in
- * Layer 2 typed payload `subtype` once the persistence layer ships in
- * DA-RP-1; in DA-RP-0 it's documented on the typed-payload interface
- * but not exercised in the not-found envelope.
- *
- * supportedModes is **all five** per Spec 20 §10 anti-pattern (Spec 54
- * §3 lists "compact, card, expanded" as the modes the spec author
- * considered primary; that is a renderer concern, not an atom-contract
- * concern). `defaultMode: "compact"` per Spec 54 §3's
- * "compact (thumbnail in galleries)" presentation guidance — a
- * render-output primarily appears as a thumbnail in its parent
- * viewpoint-render's gallery / output list.
- *
- * Event types per Spec 54 §3.
- *
- * VDA wrapping (`wrapForStorage`) intentionally not invoked — matches
- * the snapshot/engagement convention.
+ * supportedModes is **all five** per Spec 20 §10 anti-pattern.
+ * `defaultMode: "compact"` per Spec 54 §3 — render-outputs primarily
+ * appear as thumbnails in their parent viewpoint-render's gallery.
  */
 
+import { eq } from "drizzle-orm";
 import {
+  db,
+  renderOutputs,
+  type RenderOutput as RenderOutputRow,
+} from "@workspace/db";
+import {
+  resolveComposition,
+  type AnyAtomRegistration,
   type AtomComposition,
+  type AtomReference,
   type AtomRegistration,
+  type CompositionRegistryView,
   type ContextSummary,
   type EventAnchoringService,
+  type KeyMetric,
+  type Scope,
 } from "@workspace/empressa-atom";
 
 /** Hard cap on the prose summary. */
@@ -68,9 +76,7 @@ export type RenderOutputSupportedModes =
 
 /**
  * Single source of truth for render-output-domain event types per
- * Spec 54 §3. Producers (the persisted-output writer, the streaming
- * download endpoint's audit-log emit, the regeneration flow) wire
- * these in DA-RP-1+.
+ * Spec 54 v2 §3.
  */
 export const RENDER_OUTPUT_EVENT_TYPES = [
   "render-output.persisted",
@@ -82,43 +88,64 @@ export type RenderOutputEventType =
   (typeof RENDER_OUTPUT_EVENT_TYPES)[number];
 
 /**
- * Per Spec 54 §3, `role` discriminates the slot a render-output fills
- * inside its parent viewpoint-render. Documented here so DA-RP-1's
- * persistence layer has the canonical vocabulary inline; the not-found
- * envelope DA-RP-0 ships does not exercise the field.
+ * Per Spec 54 v2 §6.5, `role` discriminates the slot a render-output
+ * fills inside its parent viewpoint-render. The v2 naming uses the
+ * compact `elevation-{n,e,s,w}` form (NOT the v1 `elevation-north`
+ * form); the api-server's render_outputs.role column persists this
+ * literal. Mirrors the {@link RenderOutputRole} type exported from
+ * `@workspace/mnml-client` — kept here as a duplicate constant
+ * primarily so the typed-payload doc surface stays self-describing
+ * without a cross-package import in the .atom file's frontmatter.
  */
 export type RenderOutputRole =
   | "primary"
-  | "elevation-north"
-  | "elevation-east"
-  | "elevation-south"
-  | "elevation-west"
+  | "elevation-n"
+  | "elevation-e"
+  | "elevation-s"
+  | "elevation-w"
   | "video-primary"
   | "video-thumbnail";
 
-/**
- * Typed payload returned by `render-output`'s `contextSummary.typed`.
- * Only `id` + `found` populated in DA-RP-0; the full Layer 3 surface
- * (role, format, resolution, durationSeconds, sizeBytes, downloadUrl,
- * thumbnailUrl, mnmlOutputId) lands with the render_outputs table in
- * DA-RP-1.
- */
 export interface RenderOutputTypedPayload {
   id: string;
   found: boolean;
+  viewpointRenderId?: string;
   role?: RenderOutputRole;
-}
-
-export interface RenderOutputAtomDeps {
-  history?: EventAnchoringService;
+  format?: string;
+  resolution?: string | null;
+  sizeBytes?: number | null;
+  durationSeconds?: number | null;
+  /** mnml's ephemeral URL — present for support / debugging only. */
+  sourceUrl?: string;
+  /** Our durable object-storage key. NULL during the brief unmirrored window. */
+  mirroredObjectKey?: string | null;
+  mnmlOutputId?: string | null;
+  thumbnailUrl?: string | null;
+  seed?: number | null;
+  createdAt?: string;
 }
 
 /**
- * Build the render-output atom registration. Shape-only in DA-RP-0.
+ * Dependencies of {@link makeRenderOutputAtom}. Same shape as
+ * `ViewpointRenderAtomDeps` — `db` is required for the row lookup,
+ * `registry` is needed to run `resolveComposition` over the parent
+ * edge, `history` is best-effort optional.
+ */
+export interface RenderOutputAtomDeps {
+  db?: typeof db;
+  history?: EventAnchoringService;
+  registry?: CompositionRegistryView;
+}
+
+/**
+ * Build the render-output atom registration. Mirrors the
+ * `parcel-briefing.atom.ts` resolveDb / lazy-DB pattern.
  */
 export function makeRenderOutputAtom(
   deps: RenderOutputAtomDeps = {},
 ): AtomRegistration<"render-output", RenderOutputSupportedModes> {
+  const resolveDb = () => deps.db ?? db;
+
   const composition: ReadonlyArray<AtomComposition> = [
     {
       childEntityType: "viewpoint-render",
@@ -139,7 +166,7 @@ export function makeRenderOutputAtom(
     eventTypes: RENDER_OUTPUT_EVENT_TYPES,
     async contextSummary(
       entityId: string,
-      _scope,
+      _scope: Scope,
     ): Promise<ContextSummary<"render-output">> {
       let latestEventId = "";
       let latestEventAt = new Date(0).toISOString();
@@ -159,24 +186,124 @@ export function makeRenderOutputAtom(
         }
       }
 
+      let row: RenderOutputRow | undefined;
+      try {
+        const found = await resolveDb()
+          .select()
+          .from(renderOutputs)
+          .where(eq(renderOutputs.id, entityId))
+          .limit(1);
+        row = found[0];
+      } catch {
+        // Fall through to not-found envelope.
+      }
+
+      if (!row) {
+        const proseRaw =
+          `Render output ${entityId} could not be found. The output ` +
+          `may have been deleted with its parent render, or the id may ` +
+          `be from a stale reference.`;
+        const prose =
+          proseRaw.length > RENDER_OUTPUT_PROSE_MAX_CHARS
+            ? proseRaw.slice(0, RENDER_OUTPUT_PROSE_MAX_CHARS - 1) + "…"
+            : proseRaw;
+        return {
+          prose,
+          typed: {
+            id: entityId,
+            found: false,
+          } satisfies RenderOutputTypedPayload as unknown as Record<
+            string,
+            unknown
+          >,
+          keyMetrics: [],
+          relatedAtoms: [],
+          historyProvenance: { latestEventId, latestEventAt },
+          scopeFiltered: false,
+        };
+      }
+
+      // resolveComposition — single parent edge to viewpoint-render.
+      const parentRef: AtomReference = {
+        kind: "atom",
+        entityType: "render-output",
+        entityId: row.id,
+      };
+      const relatedAtoms: AtomReference[] = [];
+      if (deps.registry) {
+        const resolved = resolveComposition(
+          registration as unknown as AnyAtomRegistration,
+          parentRef,
+          { viewpointRender: { id: row.viewpointRenderId } },
+          deps.registry,
+        );
+        if (resolved.ok) {
+          for (const child of resolved.children) {
+            relatedAtoms.push(child.reference);
+          }
+        }
+      }
+
+      const keyMetrics: KeyMetric[] = [
+        { label: "role", value: row.role },
+        { label: "format", value: row.format },
+      ];
+      if (row.resolution) {
+        keyMetrics.push({ label: "resolution", value: row.resolution });
+      }
+      if (row.sizeBytes !== null) {
+        keyMetrics.push({
+          label: "size",
+          value: row.sizeBytes,
+          unit: "bytes",
+        });
+      }
+      if (row.durationSeconds !== null) {
+        keyMetrics.push({
+          label: "duration",
+          value: row.durationSeconds,
+          unit: "seconds",
+        });
+      }
+      keyMetrics.push({
+        label: "mirrored",
+        value: row.mirroredObjectKey ? "true" : "false",
+      });
+
       const proseRaw =
-        `Render output ${entityId} is registered as a catalog atom but the render-outputs ` +
-        `persistence layer is not wired yet (ships with the mnml.ai pipeline in DA-RP-1). ` +
-        `The composition edge to viewpoint-render and the Spec 54 §3 event vocabulary are ` +
-        `declared so producers and the inline-reference resolver can recognize this type.`;
+        `Render output ${row.id} (role=${row.role}, format=${row.format}` +
+        (row.resolution ? `, resolution=${row.resolution}` : "") +
+        `).` +
+        (row.mirroredObjectKey
+          ? ` Mirrored to object storage at ${row.mirroredObjectKey}.`
+          : ` Not yet mirrored — mnml URL is ephemeral.`);
       const prose =
         proseRaw.length > RENDER_OUTPUT_PROSE_MAX_CHARS
           ? proseRaw.slice(0, RENDER_OUTPUT_PROSE_MAX_CHARS - 1) + "…"
           : proseRaw;
 
+      const typed = {
+        id: row.id,
+        found: true,
+        viewpointRenderId: row.viewpointRenderId,
+        role: row.role as RenderOutputRole,
+        format: row.format,
+        resolution: row.resolution,
+        sizeBytes: row.sizeBytes,
+        durationSeconds: row.durationSeconds,
+        sourceUrl: row.sourceUrl,
+        mirroredObjectKey: row.mirroredObjectKey,
+        mnmlOutputId: row.mnmlOutputId,
+        thumbnailUrl: row.thumbnailUrl,
+        seed: row.seed,
+        createdAt: row.createdAt.toISOString(),
+      } satisfies RenderOutputTypedPayload;
+
       return {
         prose,
-        typed: { id: entityId, found: false } as unknown as Record<
-          string,
-          unknown
-        >,
-        keyMetrics: [],
-        relatedAtoms: [],
+        typed: typed as unknown as Record<string, unknown>,
+        keyMetrics,
+        relatedAtoms,
         historyProvenance: { latestEventId, latestEventAt },
         scopeFiltered: false,
       };

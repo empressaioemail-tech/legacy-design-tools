@@ -34,7 +34,12 @@
  */
 
 import { desc, eq } from "drizzle-orm";
-import { engagements, snapshots, submissions } from "@workspace/db";
+import {
+  engagements,
+  snapshots,
+  submissions,
+  viewpointRenders,
+} from "@workspace/db";
 import {
   resolveComposition,
   type AnyAtomRegistration,
@@ -291,6 +296,23 @@ export function makeEngagementAtom(
         .where(eq(submissions.engagementId, row.id))
         .orderBy(desc(submissions.submittedAt));
 
+      // V1-4 / DA-RP-1: load child viewpoint-render rows so the
+      // `renders` composition edge declared at line ~213 surfaces
+      // real children. Pre-V1-4 the edge was declared but
+      // `parentData["renders"]` was intentionally left unpopulated
+      // (the `viewpoint_renders` table did not exist yet);
+      // `resolveComposition` produced zero children for the absent
+      // key. With the table landed in V1-4 Step 2 we project just
+      // the id column — id is what `resolveComposition` picks up via
+      // its id-candidate lookup; the rest of the row's fields belong
+      // to the viewpoint-render atom's own `contextSummary`, not the
+      // engagement's.
+      const renderRows = await deps.db
+        .select({ id: viewpointRenders.id })
+        .from(viewpointRenders)
+        .where(eq(viewpointRenders.engagementId, row.id))
+        .orderBy(desc(viewpointRenders.createdAt));
+
       // Composition resolution: hand the snapshot rows to the framework
       // so `relatedAtoms` is what `resolveComposition` produces, not a
       // hand-rolled list. Mirrors the pattern in `snapshot.atom.ts`.
@@ -312,7 +334,11 @@ export function makeEngagementAtom(
         const resolved = resolveComposition(
           registration as unknown as AnyAtomRegistration,
           parentRef,
-          { snapshots: snapshotRows, submissions: submissionRows },
+          {
+            snapshots: snapshotRows,
+            submissions: submissionRows,
+            renders: renderRows,
+          },
           deps.registry,
         );
         if (resolved.ok) {
