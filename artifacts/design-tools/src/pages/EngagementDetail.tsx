@@ -5,11 +5,13 @@ import {
   ApiError,
   FindingCategory,
   FindingSeverity,
+  useGenerateEngagementBriefing,
   useGenerateEngagementLayers,
   useGetBimModelRefresh,
   useGetEngagement,
   useGetEngagementBimModel,
   useGetEngagementBriefing,
+  useGetEngagementBriefingGenerationStatus,
   useGetSnapshot,
   useListEngagementBriefingGenerationRuns,
   useListEngagementSubmissions,
@@ -21,6 +23,7 @@ import {
   getGetBimModelRefreshQueryKey,
   getGetEngagementBimModelQueryKey,
   getGetEngagementBriefingQueryKey,
+  getGetEngagementBriefingGenerationStatusQueryKey,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
   getListBimModelDivergencesQueryKey,
@@ -1951,6 +1954,82 @@ function SiteContextTab({
       },
     },
   });
+  // Poll briefing-generation status so the auto-triggered run is
+  // visible as it progresses. Mirrors BriefingNarrativePanel's cadence.
+  const [watchingBriefingStatus, setWatchingBriefingStatus] = useState(true);
+  const regenerateBriefingMutation = useGenerateEngagementBriefing({
+    mutation: {
+      onSuccess: () => {
+        setWatchingBriefingStatus(true);
+        void queryClient.invalidateQueries({
+          queryKey:
+            getGetEngagementBriefingGenerationStatusQueryKey(engagementId),
+        });
+        void queryClient.invalidateQueries({
+          queryKey:
+            getListEngagementBriefingGenerationRunsQueryKey(engagementId),
+        });
+      },
+    },
+  });
+  const briefingStatusQuery = useGetEngagementBriefingGenerationStatus(
+    engagementId,
+    {
+      query: {
+        queryKey:
+          getGetEngagementBriefingGenerationStatusQueryKey(engagementId),
+        refetchInterval: watchingBriefingStatus ? 2000 : false,
+        refetchOnWindowFocus: false,
+      },
+    },
+  );
+  // `state === null` ⇒ first request has not settled yet; keep polling.
+  // Treating undefined data as a terminal state would disarm the poll
+  // before the initial response lands.
+  const briefingStatusState = briefingStatusQuery.data?.state ?? null;
+  // While the very first /briefing/status response is in flight we
+  // also treat the page as "a job may be running" so the idle button
+  // is suppressed and the loading affordance stands in for it. This
+  // closes the brief window where an in-flight auto-trigger would
+  // otherwise paint a clickable Generate Layers CTA.
+  const isBriefingStatusUnknown =
+    briefingStatusState === null && briefingStatusQuery.isLoading;
+  const isBriefingJobPending = briefingStatusState === "pending";
+  const showBriefingProgress =
+    isBriefingJobPending || isBriefingStatusUnknown;
+  const briefingJobError =
+    briefingStatusState === "failed"
+      ? (briefingStatusQuery.data?.error ?? "Briefing generation failed.")
+      : null;
+  const lastBriefingStatusRef = useRef<
+    "pending" | "completed" | "failed" | "idle" | null
+  >(briefingStatusState);
+  useEffect(() => {
+    const prev = lastBriefingStatusRef.current;
+    if (
+      prev === "pending" &&
+      (briefingStatusState === "completed" || briefingStatusState === "failed")
+    ) {
+      void queryClient.invalidateQueries({
+        queryKey: getGetEngagementBriefingQueryKey(engagementId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey:
+          getListEngagementBriefingGenerationRunsQueryKey(engagementId),
+      });
+      setWatchingBriefingStatus(false);
+    }
+    if (
+      briefingStatusState !== null &&
+      briefingStatusState !== "pending" &&
+      watchingBriefingStatus &&
+      prev !== "pending"
+    ) {
+      setWatchingBriefingStatus(false);
+    }
+    lastBriefingStatusRef.current = briefingStatusState;
+  }, [briefingStatusState, queryClient, engagementId, watchingBriefingStatus]);
+
   const [lastOutcomes, setLastOutcomes] = useState<GenerateLayersOutcome[]>([]);
   // Task #229 — wall-clock instant the most recent Generate Layers
   // run resolved on the client. `null` until the first successful
@@ -2246,25 +2325,125 @@ function SiteContextTab({
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            type="button"
-            className="sc-btn"
-            onClick={() => generateMutation.mutate({ id: engagementId })}
-            // Out-of-pilot engagements pre-empt the click entirely
-            // (Task #189). The pre-flight already knows the server
-            // would 422, so disabling the button removes the wasted
-            // round-trip and the tooltip explains the dead-end
-            // before the architect hovers over the banner below.
-            disabled={generateMutation.isPending || !eligibility.isInPilot}
-            data-testid="generate-layers-button"
-            title={
-              eligibility.isInPilot
-                ? "Run every applicable federal/state/local adapter and persist the results as briefing sources."
-                : eligibility.message
-            }
-          >
-            {generateMutation.isPending ? "Generating…" : "Generate Layers"}
-          </button>
+          {showBriefingProgress ? (
+            <span
+              data-testid="briefing-generation-progress"
+              role="status"
+              aria-live="polite"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                color: "var(--text-muted)",
+                padding: "6px 10px",
+              }}
+              title="The briefing engine is generating Site Context for this engagement."
+            >
+              <span
+                aria-hidden="true"
+                data-testid="briefing-generation-progress-spinner"
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  border: "1.5px solid currentColor",
+                  borderRightColor: "transparent",
+                  display: "inline-block",
+                  animation:
+                    "sc-briefing-generation-spin 0.8s linear infinite",
+                }}
+              />
+              <span>Site Context loading…</span>
+              <style>{`@keyframes sc-briefing-generation-spin { to { transform: rotate(360deg); } }`}</style>
+            </span>
+          ) : briefingJobError ? (
+            <span
+              data-testid="briefing-generation-error"
+              role="alert"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 12,
+                color: "var(--danger-text, #b91c1c)",
+                background: "var(--danger-dim, #fef2f2)",
+                border: "1px solid var(--danger-border, #fecaca)",
+                borderRadius: 4,
+                padding: "4px 8px",
+              }}
+            >
+              <span data-testid="briefing-generation-error-message">
+                Site Context failed to load: {briefingJobError}
+              </span>
+              <button
+                type="button"
+                className="sc-btn-link"
+                data-testid="briefing-generation-error-retry"
+                onClick={() => {
+                  // Retry the briefing-generation job itself (not the
+                  // layers run). removeQueries on the cached status so
+                  // the stale terminal-failed value can't disarm the
+                  // watcher before the next status fetch lands.
+                  setWatchingBriefingStatus(true);
+                  queryClient.removeQueries({
+                    queryKey:
+                      getGetEngagementBriefingGenerationStatusQueryKey(
+                        engagementId,
+                      ),
+                  });
+                  regenerateBriefingMutation.mutate({
+                    id: engagementId,
+                    data: { regenerate: true },
+                  });
+                }}
+                disabled={regenerateBriefingMutation.isPending}
+                style={{
+                  fontSize: 12,
+                  background: "transparent",
+                  border: "none",
+                  color: "inherit",
+                  textDecoration: "underline",
+                  cursor: regenerateBriefingMutation.isPending
+                    ? "not-allowed"
+                    : "pointer",
+                  padding: 0,
+                }}
+              >
+                Retry
+              </button>
+            </span>
+          ) : null}
+          {!showBriefingProgress && (
+            <button
+              type="button"
+              className="sc-btn"
+              onClick={() => {
+                setWatchingBriefingStatus(true);
+                queryClient.removeQueries({
+                  queryKey:
+                    getGetEngagementBriefingGenerationStatusQueryKey(
+                      engagementId,
+                    ),
+                });
+                generateMutation.mutate({ id: engagementId });
+              }}
+              // Out-of-pilot engagements pre-empt the click entirely
+              // (Task #189). The pre-flight already knows the server
+              // would 422, so disabling the button removes the wasted
+              // round-trip and the tooltip explains the dead-end
+              // before the architect hovers over the banner below.
+              disabled={generateMutation.isPending || !eligibility.isInPilot}
+              data-testid="generate-layers-button"
+              title={
+                eligibility.isInPilot
+                  ? "Run every applicable federal/state/local adapter and persist the results as briefing sources."
+                  : eligibility.message
+              }
+            >
+              {generateMutation.isPending ? "Generating…" : "Generate Layers"}
+            </button>
+          )}
           {/*
            * Task #204 — "Force refresh" runs the same Generate Layers
            * mutation but with `?forceRefresh=true`, which makes the
@@ -2277,24 +2456,39 @@ function SiteContextTab({
           <button
             type="button"
             className="sc-btn-link"
-            onClick={() =>
+            onClick={() => {
+              setWatchingBriefingStatus(true);
+              queryClient.removeQueries({
+                queryKey:
+                  getGetEngagementBriefingGenerationStatusQueryKey(
+                    engagementId,
+                  ),
+              });
               generateMutation.mutate({
                 id: engagementId,
                 params: { forceRefresh: true },
-              })
-            }
-            disabled={generateMutation.isPending}
+              });
+            }}
+            disabled={generateMutation.isPending || showBriefingProgress}
             data-testid="generate-layers-force-refresh-button"
-            title="Re-run every adapter live, bypassing the federal-adapter response cache for this one run."
+            title={
+              showBriefingProgress
+                ? "Site Context is currently loading — Force refresh will be available once it completes."
+                : "Re-run every adapter live, bypassing the federal-adapter response cache for this one run."
+            }
             style={{
               fontSize: 12,
               color: "var(--text-link, var(--cyan, #06b6d4))",
               background: "transparent",
               border: "none",
               padding: "2px 4px",
-              cursor: generateMutation.isPending ? "not-allowed" : "pointer",
+              cursor:
+                generateMutation.isPending || showBriefingProgress
+                  ? "not-allowed"
+                  : "pointer",
               textDecoration: "underline",
-              opacity: generateMutation.isPending ? 0.5 : 1,
+              opacity:
+                generateMutation.isPending || showBriefingProgress ? 0.5 : 1,
             }}
           >
             Force refresh
