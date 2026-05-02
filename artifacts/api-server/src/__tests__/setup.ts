@@ -86,6 +86,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // truncating the table doesn't trip a cascade chain.
   "findings",
   "finding_runs",
+  // Wave 2 Sprint D / V1-2 — reviewer-request rows. Cascades off
+  // `engagements`, but listed explicitly per the "if a route writes
+  // to it, it's in this list" invariant — and so suites that test
+  // the implicit-resolve hook can verify a known starting state
+  // without piggy-backing on the engagements truncate.
+  "reviewer_requests",
 ];
 
 /**
