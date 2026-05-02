@@ -6,6 +6,7 @@ import {
   BRIEFING_ENGINE_ACTOR_ID,
   BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
   ENGAGEMENT_EDIT_ACTOR_ID,
+  FINDING_ENGINE_ACTOR_ID,
   REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID,
   REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,
   SNAPSHOT_INGEST_ACTOR_ID,
@@ -63,6 +64,8 @@ export const FRIENDLY_AGENT_LABELS: Readonly<Record<string, string>> = {
   // the raw `reviewer-annotation-author` slug in the audit trail).
   [REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID]: "Reviewer annotation author",
   [REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID]: "Reviewer annotation promotion",
+  // V1-1 / AIR-1 — finding-engine generation events.
+  [FINDING_ENGINE_ACTOR_ID]: "Finding engine",
 };
 
 /**

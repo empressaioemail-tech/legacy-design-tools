@@ -19,6 +19,7 @@
     "@workspace/codes": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/empressa-atom": "workspace:*",
+    "@workspace/finding-engine": "workspace:*",
     "@workspace/integrations-anthropic-ai": "workspace:*",
     "@workspace/mnml-client": "workspace:*",
     "@workspace/server-actor-ids": "workspace:*",

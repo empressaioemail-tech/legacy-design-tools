@@ -214,6 +214,9 @@ importers:
       '@workspace/empressa-atom':
         specifier: workspace:*
         version: link:../../lib/empressa-atom
+      '@workspace/finding-engine':
+        specifier: workspace:*
+        version: link:../../lib/finding-engine
       '@workspace/integrations-anthropic-ai':
         specifier: workspace:*
         version: link:../../lib/integrations-anthropic-ai
@@ -1285,6 +1288,34 @@ importers:
       pg:
         specifier: ^8.20.0
         version: 8.20.0
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+
+  lib/finding-engine:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.78.0
+        version: 0.78.0(zod@4.3.6)
+      '@workspace/briefing-engine':
+        specifier: workspace:*
+        version: link:../briefing-engine
+      '@workspace/db':
+        specifier: workspace:*
+        version: link:../db
+      '@workspace/integrations-anthropic-ai':
+        specifier: workspace:*
+        version: link:../integrations-anthropic-ai
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.3.5
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
       typescript:
         specifier: ~5.9.2
         version: 5.9.3

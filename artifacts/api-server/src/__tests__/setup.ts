@@ -79,6 +79,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // explicitly per the "if a route writes to it, it's in this list"
   // invariant.
   "reviewer_annotations",
+  // V1-1 / AIR-1 — finding row + its producing-run row. Both
+  // cascade off `submissions`, but listed explicitly per the
+  // "if a route writes to it, it's in this list" invariant. `findings`
+  // also has a `revision_of` self-FK with `ON DELETE SET NULL`, so
+  // truncating the table doesn't trip a cascade chain.
+  "findings",
+  "finding_runs",
 ];
 
 /**

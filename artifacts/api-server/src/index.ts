@@ -4,6 +4,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { bootstrapAtomRegistry } from "./atoms/registry";
 import { validateConverterEnvAtBoot } from "./lib/converterClient";
+import { validateFindingEngineEnvAtBoot } from "./lib/findingLlmClient";
 
 const rawPort = process.env["PORT"];
 
@@ -60,6 +61,21 @@ try {
   logger.error(
     { err },
     "mnml.ai env validation failed — refusing to start",
+  );
+  process.exit(1);
+}
+
+// Fail-fast on misconfigured finding-engine env (V1-1 / AIR-1): when
+// AIR_FINDING_LLM_MODE=anthropic we require the AI Integrations
+// Anthropic env vars. Mock mode is the default and boots clean with
+// no env config. Same try/catch + process.exit(1) pattern as above
+// because pino + the background sweepers are already running.
+try {
+  validateFindingEngineEnvAtBoot();
+} catch (err) {
+  logger.error(
+    { err },
+    "finding-engine env validation failed — refusing to start",
   );
   process.exit(1);
 }

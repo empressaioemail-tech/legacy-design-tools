@@ -34,6 +34,7 @@ import { makeBriefingDivergenceAtom } from "./briefing-divergence.atom";
 import { makeReviewerAnnotationAtom } from "./reviewer-annotation.atom";
 import { makeViewpointRenderAtom } from "./viewpoint-render.atom";
 import { makeRenderOutputAtom } from "./render-output.atom";
+import { makeFindingAtom } from "./finding.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -180,6 +181,12 @@ export function getAtomRegistry(): AtomRegistry {
   // composes viewpoint-render).
   registry.register(makeViewpointRenderAtom({ history }));
   registry.register(makeRenderOutputAtom({ history }));
+  // V1-1 / AIR-1 — finding atom registers AFTER submission +
+  // briefing-source (its concrete-edge children) so the boot-log tail
+  // surfaces the dependency order naturally. The `code-section` edge
+  // is forwardRef because the Code Library catalog atom is not yet
+  // registered (mirrors parcel-briefing.atom.ts).
+  registry.register(makeFindingAtom({ db, history }));
   _registry = registry;
   return registry;
 }

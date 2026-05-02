@@ -76,6 +76,15 @@ export const REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID =
   "reviewer-annotation-promote";
 
 /**
+ * V1-1 / AIR-1 finding-engine path — `routes/findings.ts`. Stamped
+ * on `finding.generated` events when the engine emits a finding row.
+ * Reviewer-driven mutations (`finding.accepted` / `.rejected` /
+ * `.overridden`) carry the session-bound requestor instead, so this
+ * id only shows up on the engine-produced events.
+ */
+export const FINDING_ENGINE_ACTOR_ID = "finding-engine";
+
+/**
  * Every stable server-side actor id, in declaration order. Consumers
  * iterate this array (e.g. the design-tools actorLabel test) to assert
  * each emitted id has a matching operator-facing label, so a new server
@@ -99,6 +108,7 @@ export const SERVER_ACTOR_IDS = [
   BRIEFING_ENGINE_ACTOR_ID,
   REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID,
   REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,
+  FINDING_ENGINE_ACTOR_ID,
 ] as const;
 
 /** Literal-id union of {@link SERVER_ACTOR_IDS}. */
