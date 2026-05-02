@@ -2494,9 +2494,23 @@ function SiteContextTab({
               background: "var(--danger-dim)",
               padding: 8,
               borderRadius: 4,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
             }}
           >
-            {lastGenerateError}
+            <span>{lastGenerateError}</span>
+            <button
+              type="button"
+              className="sc-btn"
+              data-testid="generate-layers-retry-button"
+              onClick={() => generateMutation.mutate({ id: engagementId })}
+              disabled={generateMutation.isPending}
+              style={{ flexShrink: 0 }}
+            >
+              {generateMutation.isPending ? "Retrying…" : "Retry"}
+            </button>
           </div>
         )
       )}

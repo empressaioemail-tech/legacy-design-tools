@@ -239,6 +239,20 @@ vi.mock("@workspace/api-client-react", async () => {
     // test can synthesize an ApiError and fire `onError` directly,
     // bypassing the real fetch round-trip.
     useGenerateEngagementLayers: makeCapturingMutationHook(generate),
+    // AppShell (Task #432) polls the architect-inbox unread count to
+    // paint a badge in the side-nav; without an inert stub here the
+    // entire page mount throws on first render. The badge is
+    // irrelevant to every Site Context assertion below.
+    getListMyNotificationsQueryKey: () => ["listMyNotifications"],
+    useListMyNotifications: (
+      _params: unknown,
+      opts?: { query?: { queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ?? (["listMyNotifications"] as const),
+        queryFn: async () => ({ unreadCount: 0, notifications: [] }),
+      }),
     // PushToRevitAffordance is mounted inside SiteContextTab and
     // pulls these three hooks on every render. None of them affect
     // the empty-pilot banner under test, so we hand back inert
@@ -662,6 +676,81 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     expect(alert).toHaveTextContent("Failed to run adapters");
     expect(
       screen.queryByTestId("generate-layers-no-adapters-banner"),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * Task #455 (M2-B / M-A3) — when Generate Layers fails on a generic
+   * (non-422) error, the alert must include an inline Retry button so
+   * an architect recovers from a FEMA NFHL / USGS NED hiccup with a
+   * single click instead of scrolling back up to the top-level
+   * Generate Layers control. Clicking it must re-fire the same
+   * mutation with the engagement id and no `forceRefresh` (the
+   * failure is presumed transient, not a stale cache).
+   */
+  it("renders a Retry button on the generic error alert and re-fires the mutation on click", () => {
+    renderPage();
+
+    act(() => {
+      generate.capturedOptions!.mutation!.onError!(
+        makeApiErrorLike(500, {
+          error: "internal_error",
+          message: "Failed to run adapters",
+        }),
+        { id: hoisted.engagement.id },
+        undefined,
+      );
+    });
+
+    const alert = screen.getByTestId("generate-layers-error");
+    const retry = within(alert).getByTestId("generate-layers-retry-button");
+    expect(retry).toBeEnabled();
+
+    // The mutation spy should have only the user-driven retry click
+    // recorded — the initial failure was synthesized via
+    // `onError`, not by actually invoking `mutate`.
+    generate.mutate.mockClear();
+    fireEvent.click(retry);
+    expect(generate.mutate).toHaveBeenCalledTimes(1);
+    const [vars] = generate.mutate.mock.calls[0];
+    expect(vars).toEqual({ id: hoisted.engagement.id });
+    // No `params: { forceRefresh: true }` — Retry intentionally
+    // re-runs without busting the cache because the failure is
+    // presumed transient (network blip, upstream timeout) rather
+    // than a stale-cache problem.
+    expect(vars).not.toHaveProperty("params");
+  });
+
+  /**
+   * Task #455 (M2-B / M-A3) — the empty-pilot 422 path already has
+   * its own "Upload site context source" CTA (Task #177), so the
+   * Retry button must not appear there. A duplicate retry would just
+   * re-issue the same 422 against the same un-pilot jurisdiction;
+   * the only forward path is the upload modal.
+   */
+  it("does not render a Retry button on the 422 empty-pilot banner", () => {
+    renderPage();
+
+    act(() => {
+      generate.capturedOptions!.mutation!.onError!(
+        makeApiErrorLike(422, {
+          error: "no_applicable_adapters",
+          message:
+            'No adapters configured for jurisdiction "CO" / "Boulder".',
+        }),
+        { id: hoisted.engagement.id },
+        undefined,
+      );
+    });
+
+    expect(
+      screen.getByTestId("generate-layers-no-adapters-banner"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("generate-layers-error"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("generate-layers-retry-button"),
     ).not.toBeInTheDocument();
   });
 });
