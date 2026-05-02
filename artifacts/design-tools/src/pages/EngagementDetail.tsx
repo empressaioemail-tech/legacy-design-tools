@@ -125,7 +125,7 @@ import {
 import { scrollToBriefingSource } from "@workspace/portal-ui";
 
 const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
-  active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },
+  active: { bg: "var(--cyan-accent-bg)", color: "var(--cyan)" },
   on_hold: { bg: "var(--warning-dim)", color: "var(--warning)" },
   archived: { bg: "var(--bg-input)", color: "var(--text-muted)" },
 };
@@ -3207,10 +3207,10 @@ function BackfillFilterChips({
               cursor: "pointer",
               border: "1px solid",
               borderColor: isActive
-                ? "rgba(0,180,216,0.55)"
+                ? "var(--cyan-accent-border)"
                 : "var(--border-default)",
               background: isActive
-                ? "rgba(0,180,216,0.15)"
+                ? "var(--cyan-accent-bg)"
                 : "transparent",
               color: isActive ? "var(--cyan)" : "var(--text-secondary)",
               transition: "color 0.12s, background 0.12s, border-color 0.12s",

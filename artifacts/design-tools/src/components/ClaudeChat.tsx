@@ -263,7 +263,7 @@ export function ClaudeChat({
                       textTransform: "uppercase",
                       padding: "2px 6px",
                       borderRadius: 3,
-                      background: "rgba(0,180,216,0.15)",
+                      background: "var(--cyan-accent-bg)",
                       color: "var(--cyan)",
                       border: "1px solid var(--cyan)",
                     }}
@@ -285,7 +285,7 @@ export function ClaudeChat({
                       textTransform: "uppercase",
                       padding: "2px 6px",
                       borderRadius: 3,
-                      background: "rgba(0,180,216,0.15)",
+                      background: "var(--cyan-accent-bg)",
                       color: "var(--cyan)",
                       border: "1px solid var(--cyan)",
                     }}
@@ -354,7 +354,7 @@ export function ClaudeChat({
                       className="inline-block ml-2 w-1.5 h-1.5 rounded-full sc-dot-pulse"
                       style={{
                         background: "var(--cyan)",
-                        boxShadow: "0 0 7px rgba(0,180,216,0.75)",
+                        boxShadow: "0 0 7px var(--cyan-accent-glow)",
                       }}
                     />
                   )}
@@ -393,7 +393,7 @@ export function ClaudeChat({
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 6,
-                    background: "rgba(0,180,216,0.15)",
+                    background: "var(--cyan-accent-bg)",
                     color: "var(--cyan)",
                     fontSize: 11,
                     letterSpacing: "0.04em",
@@ -522,7 +522,7 @@ export function ClaudeChat({
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
-                  background: "rgba(0,180,216,0.15)",
+                  background: "var(--cyan-accent-bg)",
                   color: "var(--cyan)",
                   fontSize: 11,
                   letterSpacing: "0.04em",
@@ -632,7 +632,7 @@ export function ClaudeChat({
                     : "pointer",
                 background:
                   pickerOpen || focusSnapshotIds.length > 0
-                    ? "rgba(0,180,216,0.15)"
+                    ? "var(--cyan-accent-bg)"
                     : "transparent",
                 border: `1px solid ${
                   pickerOpen || focusSnapshotIds.length > 0
@@ -686,7 +686,7 @@ export function ClaudeChat({
                 cursor:
                   !hasSnapshots || streaming ? "not-allowed" : "pointer",
                 background: snapshotFocus
-                  ? "rgba(0,180,216,0.15)"
+                  ? "var(--cyan-accent-bg)"
                   : "transparent",
                 border: `1px solid ${snapshotFocus ? "var(--cyan)" : "var(--border-default)"}`,
                 color: snapshotFocus ? "var(--cyan)" : "var(--text-secondary)",
