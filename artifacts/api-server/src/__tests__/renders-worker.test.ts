@@ -239,7 +239,10 @@ async function readOutputs(viewpointRenderId: string) {
 
 describe("runRenderPolling — still happy path", () => {
   it("walks capture → trigger → poll-rendering → poll-ready → mirror → status=ready", async () => {
-    vi.useFakeTimers();
+    // Narrow toFake so postgres-js / drizzle DB ops inside the polling
+    // loop run with real I/O primitives. Only setTimeout (used by the
+    // production `delay(ms)` helper) needs faking for cadence control.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const fixture = await seedFixture();
     const row = await seedQueuedRender({
       engagementId: fixture.engagement.id,
@@ -340,7 +343,7 @@ describe("runRenderPolling — still trigger validation failure", () => {
 
 describe("runRenderPolling — elevation-set happy path", () => {
   it("captures + triggers + polls + mirrors all 4 children, persists 4 render_outputs", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const fixture = await seedFixture();
     const row = await seedQueuedRender({
       engagementId: fixture.engagement.id,
@@ -399,7 +402,7 @@ describe("runRenderPolling — elevation-set happy path", () => {
 
 describe("runRenderPolling — cancellation observed mid-poll", () => {
   it("bails when an out-of-band UPDATE flips status='cancelled' between polls", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const fixture = await seedFixture();
     const row = await seedQueuedRender({
       engagementId: fixture.engagement.id,
