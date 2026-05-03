@@ -5,6 +5,7 @@ import {
   BIM_MODEL_REFRESH_ACTOR_ID,
   BRIEFING_ENGINE_ACTOR_ID,
   BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
+  CLASSIFIER_ACTOR_ID,
   DECISION_RECORDED_ACTOR_ID,
   ENGAGEMENT_EDIT_ACTOR_ID,
   FINDING_ENGINE_ACTOR_ID,
@@ -72,6 +73,11 @@ export const FRIENDLY_AGENT_LABELS: Readonly<Record<string, string>> = {
   // not carry a session-bound reviewer requestor id; the audience
   // guard normally ensures the event attributes to the reviewer.
   [DECISION_RECORDED_ACTOR_ID]: "Reviewer decision",
+  // Track 1 — auto-classifier path (lib/classifySubmission.ts).
+  // Stamped on submission.classified / submission-classification.set
+  // when the LLM-backed classifier runs on submission.created;
+  // reviewer reclassifications carry the session-bound requestor.
+  [CLASSIFIER_ACTOR_ID]: "Submission classifier",
 };
 
 /**

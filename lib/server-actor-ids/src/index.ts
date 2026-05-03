@@ -100,13 +100,6 @@ export const DECISION_RECORDED_ACTOR_ID = "decision-recorded";
  * when the LLM-backed classifier runs on `submission.created`. Reviewer
  * reclassifications carry the session-bound requestor instead, so this
  * id only shows up on the auto-classifier path.
- *
- * NOTE: intentionally NOT yet added to {@link SERVER_ACTOR_IDS} — the
- * design-tools `actorLabel` test enforces a 1:1 mapping between that
- * registry array and `FRIENDLY_AGENT_LABELS` in `lib/portal-ui`, which
- * is FE-owned. FE follow-up: add the matching label entry AND add this
- * constant to {@link SERVER_ACTOR_IDS} in the same commit so the
- * tripwire stays intact.
  */
 export const CLASSIFIER_ACTOR_ID = "classifier";
 
@@ -136,6 +129,7 @@ export const SERVER_ACTOR_IDS = [
   REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,
   FINDING_ENGINE_ACTOR_ID,
   DECISION_RECORDED_ACTOR_ID,
+  CLASSIFIER_ACTOR_ID,
 ] as const;
 
 /** Literal-id union of {@link SERVER_ACTOR_IDS}. */
