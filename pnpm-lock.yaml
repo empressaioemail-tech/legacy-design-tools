@@ -208,6 +208,9 @@ importers:
       '@workspace/codes':
         specifier: workspace:*
         version: link:../../lib/codes
+      '@workspace/comment-letter':
+        specifier: workspace:*
+        version: link:../../lib/comment-letter
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db

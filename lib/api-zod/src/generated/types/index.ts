@@ -55,6 +55,8 @@ export * from "./createSubmissionFindingBody";
 export * from "./createUserBody";
 export * from "./dismissReviewerRequestBody";
 export * from "./domainRenderKind";
+export * from "./draftSubmissionCommunicationResponse";
+export * from "./draftSubmissionCommunicationResponseFallbackReason";
 export * from "./elevationSetJob";
 export * from "./elevationSetJobCameraDirection";
 export * from "./elevationSetJobError";

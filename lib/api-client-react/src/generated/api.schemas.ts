@@ -2527,6 +2527,62 @@ export interface SubmissionCommunicationResponse {
 }
 
 /**
+ * Reason the deterministic body was kept. Null when
+`polished` is true.
+
+ */
+export type DraftSubmissionCommunicationResponseFallbackReason =
+  | (typeof DraftSubmissionCommunicationResponseFallbackReason)[keyof typeof DraftSubmissionCommunicationResponseFallbackReason]
+  | null;
+
+export const DraftSubmissionCommunicationResponseFallbackReason = {
+  no_open_findings: "no_open_findings",
+  empty_completion: "empty_completion",
+  missing_citations: "missing_citations",
+  completer_error: "completer_error",
+} as const;
+
+/**
+ * Wire envelope for `POST /submissions/{submissionId}/communications/draft`.
+Carries the LLM-polished comment letter plus the deterministic
+skeleton and the open-finding atom-id snapshot so the FE
+composer can render the polished body to the reviewer and
+send the audited atom-id list verbatim.
+
+ */
+export interface DraftSubmissionCommunicationResponse {
+  /** Subject line (deterministic — the polish step never
+rewrites it so reviewer-side regex search across sent
+letters stays stable).
+ */
+  subject: string;
+  /** The body the FE should seed the editor with. When
+`polished` is true this is the LLM rewrite; when false
+this is the deterministic skeleton (server-side guard
+rejected the polish or the call to Anthropic failed).
+ */
+  body: string;
+  /** True when the LLM polish actually replaced the
+deterministic body. False when the polish was skipped
+(zero open findings) or rolled back to the deterministic
+skeleton — see `fallbackReason`.
+ */
+  polished: boolean;
+  /** Reason the deterministic body was kept. Null when
+`polished` is true.
+ */
+  fallbackReason: DraftSubmissionCommunicationResponseFallbackReason;
+  /** Snapshot of the open-finding atom ids the draft was
+assembled from. The FE forwards this list verbatim to
+the create-communication endpoint so the audit trail can
+reproduce what the architect was told.
+ */
+  findingAtomIds: string[];
+  /** Open-finding count (length of `findingAtomIds`). */
+  findingCount: number;
+}
+
+/**
  * Wire envelope for `GET /submissions/{submissionId}/communications`.
 Newest-first list — index 0 is the most recently sent
 comment letter (drives the SubmissionDetailModal's "Last

@@ -38,6 +38,7 @@ import type {
   CreateSubmissionFindingBody,
   CreateUserBody,
   DismissReviewerRequestBody,
+  DraftSubmissionCommunicationResponse,
   EngagementBimModelResponse,
   EngagementBriefingResponse,
   EngagementBriefingSourcesResponse,
@@ -6938,6 +6939,115 @@ export function useListSubmissionSheets<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Builds the deterministic comment-letter skeleton for the
+submission's open findings (`@workspace/comment-letter`,
+`assembleCommentLetter`) and runs it through an Anthropic
+polish pass before returning. The skeleton subject + body
+and the open-finding atom-id snapshot are returned alongside
+the polished body so the FE composer can show "polished"
+status and still send the audited atom-id list when the
+reviewer hits Send.
+
+The polish step is guarded server-side: if the model returns
+text whose `[[CODE:...]]` / `{{atom|...}}` token multiset
+diverges from the deterministic skeleton — or the call to
+Anthropic fails — the deterministic body is returned with
+`polished: false` and a structured `fallbackReason`. Callers
+can render the fallback reason for diagnostic visibility but
+the body is always safe to send as-is.
+
+Reviewer-only (`audience: "internal"`). Idempotent — does NOT
+persist anything; the actual send still flows through
+`POST /submissions/{submissionId}/communications`.
+
+ * @summary Generate an LLM-polished AI comment-letter draft
+ */
+export const getDraftSubmissionCommunicationUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/communications/draft`;
+};
+
+export const draftSubmissionCommunication = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<DraftSubmissionCommunicationResponse> => {
+  return customFetch<DraftSubmissionCommunicationResponse>(
+    getDraftSubmissionCommunicationUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getDraftSubmissionCommunicationMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof draftSubmissionCommunication>>,
+    TError,
+    { submissionId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof draftSubmissionCommunication>>,
+  TError,
+  { submissionId: string },
+  TContext
+> => {
+  const mutationKey = ["draftSubmissionCommunication"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof draftSubmissionCommunication>>,
+    { submissionId: string }
+  > = (props) => {
+    const { submissionId } = props ?? {};
+
+    return draftSubmissionCommunication(submissionId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DraftSubmissionCommunicationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof draftSubmissionCommunication>>
+>;
+
+export type DraftSubmissionCommunicationMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Generate an LLM-polished AI comment-letter draft
+ */
+export const useDraftSubmissionCommunication = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof draftSubmissionCommunication>>,
+    TError,
+    { submissionId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof draftSubmissionCommunication>>,
+  TError,
+  { submissionId: string },
+  TContext
+> => {
+  return useMutation(getDraftSubmissionCommunicationMutationOptions(options));
+};
 
 /**
  * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a

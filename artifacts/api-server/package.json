@@ -17,6 +17,7 @@
     "@workspace/briefing-engine": "workspace:*",
     "@workspace/briefing-pdf-tokens": "workspace:*",
     "@workspace/codes": "workspace:*",
+    "@workspace/comment-letter": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/empressa-atom": "workspace:*",
     "@workspace/finding-engine": "workspace:*",

@@ -23,16 +23,26 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
   db,
+  engagements,
+  findings,
   submissions,
   submissionCommunications,
   type SubmissionCommunication,
 } from "@workspace/db";
+import type { FindingCategory, FindingSeverity } from "@workspace/finding-engine";
 import { desc, eq } from "drizzle-orm";
 import {
   CreateSubmissionCommunicationBody,
   CreateSubmissionCommunicationParams,
+  DraftSubmissionCommunicationParams,
   ListSubmissionCommunicationsParams,
 } from "@workspace/api-zod";
+import {
+  polishCommentLetter,
+  type CommentLetterFinding,
+  type CommentLetterFindingStatus,
+} from "@workspace/comment-letter";
+import { anthropic } from "@workspace/integrations-anthropic-ai";
 import type { Logger } from "pino";
 import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";
@@ -89,6 +99,172 @@ async function loadSubmission(submissionId: string) {
     .limit(1);
   return rows[0] ?? null;
 }
+
+/**
+ * Project a `findings` row into the shape the comment-letter assembler
+ * (`@workspace/comment-letter`) consumes. The lib's `CommentLetterFinding`
+ * is intentionally a narrow subset of the wire `Finding` so this projection
+ * stays an obvious 1:1 — no derived fields, no aggregation, just a
+ * column-pick plus the open-finding status filter.
+ *
+ * `id` is the public atom id (NOT the row uuid) so the audited
+ * `findingAtomIds` snapshot the FE later forwards to the create-
+ * communication endpoint matches what the assembler grouped under.
+ */
+function findingsRowToCommentLetterInput(
+  rows: ReadonlyArray<typeof findings.$inferSelect>,
+): CommentLetterFinding[] {
+  return rows.map((row) => ({
+    id: row.atomId,
+    severity: row.severity as FindingSeverity,
+    category: row.category as FindingCategory,
+    status: row.status as CommentLetterFindingStatus,
+    text: row.text,
+    elementRef: row.elementRef ?? null,
+  }));
+}
+
+/**
+ * Resolve a reviewer-facing jurisdiction label for the comment-letter
+ * `Re:` line. Mirrors the precedence the FE used to compute on its own
+ * (`jurisdictionCity, jurisdictionState` → `jurisdiction` freeform →
+ * the fallback "the jurisdiction") so existing letters keep reading
+ * the same after the polish endpoint takes over context derivation.
+ */
+function resolveJurisdictionLabel(
+  eng: typeof engagements.$inferSelect | null,
+): string {
+  if (!eng) return "the jurisdiction";
+  const city = eng.jurisdictionCity?.trim();
+  const state = eng.jurisdictionState?.trim();
+  if (city && state) return `${city}, ${state}`;
+  if (city) return city;
+  if (state) return state;
+  const free = eng.jurisdiction?.trim();
+  if (free && free.length > 0) return free;
+  return "the jurisdiction";
+}
+
+/**
+ * Anthropic-backed completer wired into the `polishCommentLetter`
+ * citation-preserving polish step. Uses the same `claude-sonnet-4-6`
+ * model the chat route does (`routes/chat.ts:748`) so capacity tuning
+ * stays consolidated.
+ *
+ * Concatenates every `text` content block in the response (the SDK
+ * splits long completions across multiple blocks) and trims the
+ * result. Errors propagate so `polishCommentLetter` can stamp the
+ * `completer_error` fallback reason.
+ */
+async function anthropicPolishCompleter(args: {
+  system: string;
+  user: string;
+}): Promise<string> {
+  const resp = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 4096,
+    system: args.system,
+    messages: [{ role: "user", content: args.user }],
+  });
+  const text = resp.content
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("");
+  return text.trim();
+}
+
+router.post(
+  "/submissions/:submissionId/communications/draft",
+  async (req: Request, res: Response): Promise<void> => {
+    if (requireReviewerAudience(req, res)) return;
+    const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
+    const params = DraftSubmissionCommunicationParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "invalid_path_params" });
+      return;
+    }
+    const submissionId = params.data.submissionId;
+
+    // Load the submission + parent engagement together so the polish
+    // step has the addressee + jurisdiction context the deterministic
+    // assembler stamps into the `To:` / `Re:` headers. A failed engagement
+    // lookup is not fatal — `resolveJurisdictionLabel` falls back to a
+    // generic label and `applicantFirm` is nullable on the schema.
+    const subRows = await db
+      .select({
+        id: submissions.id,
+        engagementId: submissions.engagementId,
+        submittedAt: submissions.submittedAt,
+      })
+      .from(submissions)
+      .where(eq(submissions.id, submissionId))
+      .limit(1);
+    const sub = subRows[0];
+    if (!sub) {
+      res.status(404).json({ error: "submission_not_found" });
+      return;
+    }
+
+    const engRows = await db
+      .select()
+      .from(engagements)
+      .where(eq(engagements.id, sub.engagementId))
+      .limit(1);
+    const eng = engRows[0] ?? null;
+
+    const findingRows = await db
+      .select()
+      .from(findings)
+      .where(eq(findings.submissionId, submissionId))
+      .orderBy(desc(findings.createdAt));
+
+    const input = {
+      findings: findingsRowToCommentLetterInput(findingRows),
+      context: {
+        jurisdictionLabel: resolveJurisdictionLabel(eng),
+        applicantFirm: eng?.applicantFirm ?? null,
+        submittedAt: sub.submittedAt.toISOString(),
+      },
+    };
+
+    const polished = await polishCommentLetter(input, anthropicPolishCompleter);
+
+    // Snapshot the open-finding atom-id list the assembler used so the
+    // FE can forward it verbatim to the create-communication endpoint.
+    // Mirrors the FE's pre-existing filter on `ai-produced` / `accepted`.
+    const findingAtomIds = input.findings
+      .filter((f) => f.status === "ai-produced" || f.status === "accepted")
+      .map((f) => f.id);
+
+    if (polished.fallbackReason && polished.fallbackReason !== "no_open_findings") {
+      reqLog.warn(
+        {
+          submissionId,
+          fallbackReason: polished.fallbackReason,
+          findingCount: polished.findingCount,
+        },
+        "comment-letter polish fell back to deterministic skeleton",
+      );
+    } else {
+      reqLog.info(
+        {
+          submissionId,
+          polished: polished.polished,
+          findingCount: polished.findingCount,
+        },
+        "comment-letter draft generated",
+      );
+    }
+
+    res.json({
+      subject: polished.subject,
+      body: polished.body,
+      polished: polished.polished,
+      fallbackReason: polished.fallbackReason,
+      findingAtomIds,
+      findingCount: polished.findingCount,
+    });
+  },
+);
 
 router.get(
   "/submissions/:submissionId/communications",

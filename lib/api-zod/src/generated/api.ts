@@ -4232,6 +4232,75 @@ export const ListSubmissionSheetsResponse = zod.array(
 );
 
 /**
+ * Builds the deterministic comment-letter skeleton for the
+submission's open findings (`@workspace/comment-letter`,
+`assembleCommentLetter`) and runs it through an Anthropic
+polish pass before returning. The skeleton subject + body
+and the open-finding atom-id snapshot are returned alongside
+the polished body so the FE composer can show "polished"
+status and still send the audited atom-id list when the
+reviewer hits Send.
+
+The polish step is guarded server-side: if the model returns
+text whose `[[CODE:...]]` / `{{atom|...}}` token multiset
+diverges from the deterministic skeleton — or the call to
+Anthropic fails — the deterministic body is returned with
+`polished: false` and a structured `fallbackReason`. Callers
+can render the fallback reason for diagnostic visibility but
+the body is always safe to send as-is.
+
+Reviewer-only (`audience: "internal"`). Idempotent — does NOT
+persist anything; the actual send still flows through
+`POST /submissions/{submissionId}/communications`.
+
+ * @summary Generate an LLM-polished AI comment-letter draft
+ */
+export const DraftSubmissionCommunicationParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const DraftSubmissionCommunicationResponse = zod
+  .object({
+    subject: zod
+      .string()
+      .describe(
+        "Subject line (deterministic — the polish step never\nrewrites it so reviewer-side regex search across sent\nletters stays stable).\n",
+      ),
+    body: zod
+      .string()
+      .describe(
+        "The body the FE should seed the editor with. When\n`polished` is true this is the LLM rewrite; when false\nthis is the deterministic skeleton (server-side guard\nrejected the polish or the call to Anthropic failed).\n",
+      ),
+    polished: zod
+      .boolean()
+      .describe(
+        "True when the LLM polish actually replaced the\ndeterministic body. False when the polish was skipped\n(zero open findings) or rolled back to the deterministic\nskeleton — see `fallbackReason`.\n",
+      ),
+    fallbackReason: zod
+      .enum([
+        "no_open_findings",
+        "empty_completion",
+        "missing_citations",
+        "completer_error",
+      ])
+      .nullable()
+      .describe(
+        "Reason the deterministic body was kept. Null when\n`polished` is true.\n",
+      ),
+    findingAtomIds: zod
+      .array(zod.string())
+      .describe(
+        "Snapshot of the open-finding atom ids the draft was\nassembled from. The FE forwards this list verbatim to\nthe create-communication endpoint so the audit trail can\nreproduce what the architect was told.\n",
+      ),
+    findingCount: zod
+      .number()
+      .describe("Open-finding count (length of `findingAtomIds`)."),
+  })
+  .describe(
+    "Wire envelope for `POST \/submissions\/{submissionId}\/communications\/draft`.\nCarries the LLM-polished comment letter plus the deterministic\nskeleton and the open-finding atom-id snapshot so the FE\ncomposer can render the polished body to the reviewer and\nsend the audited atom-id list verbatim.\n",
+  );
+
+/**
  * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
 finding the AI engine missed without re-running generation.
 Persists with `status="ai-produced"` (so accept/reject/override

@@ -3112,6 +3112,58 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /submissions/{submissionId}/communications/draft:
+    post:
+      operationId: draftSubmissionCommunication
+      tags: [communications]
+      summary: Generate an LLM-polished AI comment-letter draft
+      description: |
+        Builds the deterministic comment-letter skeleton for the
+        submission's open findings (`@workspace/comment-letter`,
+        `assembleCommentLetter`) and runs it through an Anthropic
+        polish pass before returning. The skeleton subject + body
+        and the open-finding atom-id snapshot are returned alongside
+        the polished body so the FE composer can show "polished"
+        status and still send the audited atom-id list when the
+        reviewer hits Send.
+
+        The polish step is guarded server-side: if the model returns
+        text whose `[[CODE:...]]` / `{{atom|...}}` token multiset
+        diverges from the deterministic skeleton — or the call to
+        Anthropic fails — the deterministic body is returned with
+        `polished: false` and a structured `fallbackReason`. Callers
+        can render the fallback reason for diagnostic visibility but
+        the body is always safe to send as-is.
+
+        Reviewer-only (`audience: "internal"`). Idempotent — does NOT
+        persist anything; the actual send still flows through
+        `POST /submissions/{submissionId}/communications`.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Polished (or deterministic-fallback) draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DraftSubmissionCommunicationResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /submissions/{submissionId}/findings:
     post:
       operationId: createSubmissionFinding
@@ -7790,6 +7842,66 @@ components:
           $ref: "#/components/schemas/SubmissionCommunication"
       required:
         - communication
+
+    DraftSubmissionCommunicationResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /submissions/{submissionId}/communications/draft`.
+        Carries the LLM-polished comment letter plus the deterministic
+        skeleton and the open-finding atom-id snapshot so the FE
+        composer can render the polished body to the reviewer and
+        send the audited atom-id list verbatim.
+      properties:
+        subject:
+          type: string
+          description: |
+            Subject line (deterministic — the polish step never
+            rewrites it so reviewer-side regex search across sent
+            letters stays stable).
+        body:
+          type: string
+          description: |
+            The body the FE should seed the editor with. When
+            `polished` is true this is the LLM rewrite; when false
+            this is the deterministic skeleton (server-side guard
+            rejected the polish or the call to Anthropic failed).
+        polished:
+          type: boolean
+          description: |
+            True when the LLM polish actually replaced the
+            deterministic body. False when the polish was skipped
+            (zero open findings) or rolled back to the deterministic
+            skeleton — see `fallbackReason`.
+        fallbackReason:
+          type: string
+          nullable: true
+          enum:
+            - no_open_findings
+            - empty_completion
+            - missing_citations
+            - completer_error
+          description: |
+            Reason the deterministic body was kept. Null when
+            `polished` is true.
+        findingAtomIds:
+          type: array
+          description: |
+            Snapshot of the open-finding atom ids the draft was
+            assembled from. The FE forwards this list verbatim to
+            the create-communication endpoint so the audit trail can
+            reproduce what the architect was told.
+          items:
+            type: string
+        findingCount:
+          type: integer
+          description: Open-finding count (length of `findingAtomIds`).
+      required:
+        - subject
+        - body
+        - polished
+        - fallbackReason
+        - findingAtomIds
+        - findingCount
 
     ListSubmissionCommunicationsResponse:
       type: object

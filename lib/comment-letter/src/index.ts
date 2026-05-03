@@ -207,3 +207,201 @@ export function assembleCommentLetter(
   const subject = `Plan review comments — ${input.context.jurisdictionLabel}`;
   return { subject, body, findingCount: open.length };
 }
+
+/**
+ * Inline citation token grammars the assembler must preserve verbatim
+ * across the LLM polish step. The two productions are:
+ *
+ *   `[[CODE:<atomId>]]`              — the finding-engine code-atom
+ *                                       reference.
+ *   `{{atom|<entityType>|<entityId>|<label>}}` — the empressa-atom
+ *                                       inline reference (kept in
+ *                                       sync with `INLINE_ATOM_REGEX`
+ *                                       in `@workspace/empressa-atom`).
+ *
+ * Both regexes are `g`-flagged; callers must reset `lastIndex` before
+ * each scan because `extractCitationTokens` does so internally.
+ */
+const CODE_CITATION_REGEX = /\[\[CODE:[^\]]+\]\]/g;
+const ATOM_CITATION_REGEX = /\{\{atom\|[^|]+\|[^|]+\|[^}]+\}\}/g;
+
+/**
+ * Extract the multiset of citation tokens (`[[CODE:...]]` and
+ * `{{atom|...}}`) from a body so the polish step can verify the LLM
+ * didn't drop, mutate, or duplicate any of them. Returned as a sorted
+ * count map so equality comparison is order-insensitive (the LLM is
+ * free to reorder paragraphs but must keep the same set + counts).
+ */
+export function extractCitationTokens(body: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const re of [CODE_CITATION_REGEX, ATOM_CITATION_REGEX]) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body)) !== null) {
+      counts.set(m[0], (counts.get(m[0]) ?? 0) + 1);
+    }
+    re.lastIndex = 0;
+  }
+  return counts;
+}
+
+function citationCountsEqual(
+  a: Map<string, number>,
+  b: Map<string, number>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [tok, n] of a) {
+    if (b.get(tok) !== n) return false;
+  }
+  return true;
+}
+
+/**
+ * System prompt seed used by the LLM polish step. Pulled out as a
+ * named export so the api-server route can reuse it verbatim and so
+ * a downstream prompt-evaluation harness can exercise it without
+ * re-implementing the wording.
+ */
+export const COMMENT_LETTER_POLISH_SYSTEM_PROMPT: string = [
+  "You are a senior plan-review code official polishing a draft comment letter that will be sent to the architect of record.",
+  "Rewrite the body so it reads as a professional, courteous letter while keeping the same comments, the same severities, and the same factual claims.",
+  "You MUST preserve every inline citation token EXACTLY as written, byte-for-byte. The two grammars are `[[CODE:<atomId>]]` and `{{atom|<entityType>|<entityId>|<label>}}`. Do not rename, drop, duplicate, paraphrase, or wrap them in additional markup — they are machine-resolved downstream.",
+  "Keep the markdown structure: the `To:` and `Re:` header lines, the `## <Discipline>` and `### <Page label>` section headings, and the bullet list grouping. You may reword bullet text and add bridging sentences inside a section, but every bullet must stay attached to the same heading group it came from and must keep its `**<Severity>**` prefix.",
+  "Do not introduce new findings, new code citations, fabricated dates, or commitments the deterministic skeleton did not already make.",
+  "Output ONLY the polished markdown letter body. Do not wrap it in a code fence, do not add commentary before or after, and do not include the subject line.",
+].join("\n\n");
+
+/**
+ * Build the user-message payload for the polish call. Keeps the
+ * deterministic skeleton as the single source of truth and surfaces
+ * the structured context so the LLM has the metadata it needs (firm
+ * name, jurisdiction, submission date) without having to re-derive
+ * it from the body.
+ */
+export function buildCommentLetterPolishUserPrompt(
+  skeleton: AssembledCommentLetter,
+  context: CommentLetterContext,
+): string {
+  const addressee = context.applicantFirm ?? "Architect of record";
+  return [
+    "Polish the following comment-letter draft. Return only the rewritten markdown body.",
+    "",
+    "## Context",
+    `- Addressee: ${addressee}`,
+    `- Jurisdiction: ${context.jurisdictionLabel}`,
+    `- Submission date: ${context.submittedAt}`,
+    `- Open finding count: ${skeleton.findingCount}`,
+    "",
+    "## Draft body",
+    skeleton.body.trimEnd(),
+  ].join("\n");
+}
+
+/**
+ * Caller-supplied LLM completer. Receives the system + user prompts
+ * the polish step assembled and resolves to the model's raw text
+ * output. Intentionally agnostic of the underlying SDK so the api-
+ * server can wire Anthropic in production while tests inject a
+ * deterministic stub.
+ */
+export type CommentLetterPolishCompleter = (args: {
+  system: string;
+  user: string;
+}) => Promise<string>;
+
+export interface PolishedCommentLetter extends AssembledCommentLetter {
+  /**
+   * Whether the LLM polish actually replaced the deterministic body.
+   * False when the polish step was skipped (no open findings) or the
+   * citation-preservation guard rejected the model output and the
+   * deterministic skeleton was used as the safe fallback.
+   */
+  polished: boolean;
+  /**
+   * Reason the deterministic body was kept. Null when `polished` is
+   * true. Useful for the caller to log degraded-mode operation.
+   */
+  fallbackReason:
+    | null
+    | "no_open_findings"
+    | "empty_completion"
+    | "missing_citations"
+    | "completer_error";
+}
+
+function stripWrappingCodeFence(s: string): string {
+  const trimmed = s.trim();
+  if (!trimmed.startsWith("```")) return s;
+  // Drop the opening fence (and optional language tag) + the trailing fence.
+  const firstNl = trimmed.indexOf("\n");
+  if (firstNl < 0) return s;
+  const withoutOpen = trimmed.slice(firstNl + 1);
+  const closeIdx = withoutOpen.lastIndexOf("```");
+  if (closeIdx < 0) return s;
+  return withoutOpen.slice(0, closeIdx);
+}
+
+/**
+ * Run the deterministic skeleton through an LLM polish pass. The
+ * function is the single place that owns the citation-preservation
+ * guard: if the completer returns text whose `[[CODE:...]]` /
+ * `{{atom|...}}` multiset diverges from the skeleton's, the polish
+ * is rejected and the deterministic body is returned unchanged so
+ * the audit trail can never lose a citation.
+ *
+ * Skips the polish entirely (and reports `fallbackReason:
+ * "no_open_findings"`) when the skeleton has zero open findings —
+ * the no-comments letter is a single fixed sentence and not worth
+ * a round-trip.
+ */
+export async function polishCommentLetter(
+  input: AssembleCommentLetterInput,
+  completer: CommentLetterPolishCompleter,
+): Promise<PolishedCommentLetter> {
+  const skeleton = assembleCommentLetter(input);
+  if (skeleton.findingCount === 0) {
+    return { ...skeleton, polished: false, fallbackReason: "no_open_findings" };
+  }
+
+  const expected = extractCitationTokens(skeleton.body);
+  const user = buildCommentLetterPolishUserPrompt(skeleton, input.context);
+
+  let completion: string;
+  try {
+    completion = await completer({
+      system: COMMENT_LETTER_POLISH_SYSTEM_PROMPT,
+      user,
+    });
+  } catch {
+    return { ...skeleton, polished: false, fallbackReason: "completer_error" };
+  }
+
+  const cleaned = stripWrappingCodeFence(completion).trim();
+  if (cleaned.length === 0) {
+    return { ...skeleton, polished: false, fallbackReason: "empty_completion" };
+  }
+
+  const got = extractCitationTokens(cleaned);
+  if (!citationCountsEqual(expected, got)) {
+    return {
+      ...skeleton,
+      polished: false,
+      fallbackReason: "missing_citations",
+    };
+  }
+
+  // Normalize trailing whitespace the same way the deterministic
+  // assembler does so downstream consumers (PDF renderer, email
+  // composer) see a single trailing newline regardless of the polish
+  // path the body took.
+  const polishedBody =
+    cleaned.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+
+  return {
+    subject: skeleton.subject,
+    body: polishedBody,
+    findingCount: skeleton.findingCount,
+    polished: true,
+    fallbackReason: null,
+  };
+}
