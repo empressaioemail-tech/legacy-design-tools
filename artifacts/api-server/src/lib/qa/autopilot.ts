@@ -49,6 +49,7 @@ import { QA_SUITES, type QaSuite } from "./suites";
 import { runSuiteToCompletion, type RunOutcome } from "./runner";
 import { classifyRunLog, type ClassifiedFinding } from "./classifier";
 import { pickFixers, gitRevertPaths } from "./fixers";
+import { suggestDiffForFinding } from "./diffSuggester";
 
 let activeAutopilotRunId: string | null = null;
 
@@ -207,6 +208,12 @@ async function executeAutopilotRun(
 
       failing += 1;
       needsReview += persistedFindings.length;
+
+      // No safe fixer applied — for each remaining `needs-review`
+      // finding, try to populate `suggestedDiff` so the dashboard can
+      // surface a copy-paste patch hint. The suggester is proposal-
+      // only; it never writes to the working tree.
+      await populateSuggestedDiffs(persistedFindings, suiteResult.findings);
     }
 
     await db
@@ -367,6 +374,64 @@ async function runFixer(
     .returning();
   if (!row) throw new Error("Failed to insert autopilot_fix_actions row");
   return row;
+}
+
+/**
+ * For each persisted `app-code` (or `unknown`) finding still tagged
+ * `needs-review`, call the diff suggester and write the result to
+ * `autopilot_findings.suggestedDiff`. Skips findings whose category
+ * is auto-fix-eligible (snapshot, codegen-stale, lint, fixture) or
+ * which already have a suggested diff. The suggester never throws —
+ * any error is logged and that finding is left blank.
+ *
+ * Empty/blank diffs are NOT persisted — we only write a value when
+ * the suggester returns a real candidate patch.
+ *
+ * Safety: the suggester is read-only by contract. We only write the
+ * resulting string to the DB; we never apply the patch to disk. The
+ * `writeDiff` hook is exposed for tests so the orchestration logic
+ * can be exercised without a real DB.
+ */
+export async function populateSuggestedDiffs(
+  persisted: ReadonlyArray<AutopilotFinding>,
+  classified: ReadonlyArray<ClassifiedFinding>,
+  opts: { writeDiff?: (id: string, diff: string) => Promise<void> } = {},
+): Promise<void> {
+  const writeDiff =
+    opts.writeDiff ??
+    (async (id: string, diff: string) => {
+      await db
+        .update(autopilotFindings)
+        .set({ suggestedDiff: diff })
+        .where(eq(autopilotFindings.id, id));
+    });
+  for (let i = 0; i < persisted.length; i += 1) {
+    const row = persisted[i];
+    if (!row) continue;
+    if (row.category !== "app-code" && row.category !== "unknown") continue;
+    if (row.suggestedDiff && row.suggestedDiff.length > 0) continue;
+    // The classified array is the same length and order as persisted
+    // (see persistFindings), so we can pair by index.
+    const source = classified[i] ?? {
+      testName: row.testName,
+      filePath: row.filePath,
+      line: row.line,
+      errorExcerpt: row.errorExcerpt,
+      category: row.category,
+      severity: row.severity,
+      plainSummary: row.plainSummary,
+    };
+    try {
+      const diff = await suggestDiffForFinding(source);
+      if (!diff || diff.trim().length === 0) continue;
+      await writeDiff(row.id, diff);
+    } catch (err) {
+      logger.warn(
+        { err, findingId: row.id },
+        "autopilot: suggestDiffForFinding threw — leaving suggestedDiff blank",
+      );
+    }
+  }
 }
 
 /**

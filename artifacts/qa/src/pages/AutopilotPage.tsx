@@ -30,7 +30,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { formatDuration, formatRelative, formatTimestamp } from "@/lib/format";
-import { Loader2 } from "lucide-react";
+import { Loader2, Copy, Check } from "lucide-react";
 
 /**
  * Autopilot Findings Report (Task #482).
@@ -370,6 +370,12 @@ function FindingRow({
       <pre className="mt-2 max-h-40 overflow-auto rounded border bg-slate-950 p-2 text-[11px] text-slate-100 whitespace-pre-wrap break-words">
         {finding.errorExcerpt || "(no excerpt)"}
       </pre>
+      {finding.suggestedDiff ? (
+        <SuggestedDiff
+          findingId={finding.id}
+          diff={finding.suggestedDiff}
+        />
+      ) : null}
       {fixActions.length > 0 ? (
         <div className="mt-2 space-y-1">
           {fixActions.map((a) => (
@@ -398,5 +404,85 @@ function FindingRow({
         </div>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * Read-only suggested-patch view with a "Copy patch" button.
+ *
+ * Safety: this component never applies the diff to disk. The patch is
+ * a proposal — the user copies it and runs `git apply` themselves.
+ */
+function SuggestedDiff({
+  findingId,
+  diff,
+}: {
+  findingId: string;
+  diff: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        typeof navigator.clipboard.writeText === "function"
+      ) {
+        await navigator.clipboard.writeText(diff);
+      } else if (typeof document !== "undefined") {
+        const ta = document.createElement("textarea");
+        ta.value = diff;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "absolute";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2_000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div
+      className="mt-2 rounded border bg-white"
+      data-testid={`autopilot-suggested-diff-${findingId}`}
+    >
+      <div className="flex items-center justify-between border-b px-2 py-1">
+        <div className="flex items-center gap-2 text-[11px] font-medium text-slate-700">
+          <Badge className="bg-emerald-100 text-emerald-900 text-[10px] uppercase">
+            suggested patch
+          </Badge>
+          <span className="text-muted-foreground">
+            proposal only — never auto-applied
+          </span>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={copy}
+          className="h-6 px-2 text-[11px]"
+          data-testid={`autopilot-copy-diff-${findingId}`}
+        >
+          {copied ? (
+            <>
+              <Check className="mr-1 h-3 w-3" /> Copied
+            </>
+          ) : (
+            <>
+              <Copy className="mr-1 h-3 w-3" /> Copy patch
+            </>
+          )}
+        </Button>
+      </div>
+      <pre className="max-h-56 overflow-auto p-2 text-[11px] text-slate-900 whitespace-pre-wrap break-words">
+        {diff}
+      </pre>
+    </div>
   );
 }

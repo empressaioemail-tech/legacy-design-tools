@@ -15,6 +15,7 @@ import type { QaSuite } from "../lib/qa/suites";
 
 const vitestSuite: QaSuite = {
   id: "demo",
+  app: "api-server",
   label: "Demo",
   kind: "vitest",
   command: "pnpm",
