@@ -568,3 +568,130 @@ describe("PATCH /api/me/profile — round-trip", () => {
     );
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/*                Track 1 — PATCH /api/me/disciplines coverage                 */
+/* -------------------------------------------------------------------------- */
+
+describe("PATCH /api/me/disciplines — auth gate", () => {
+  it("rejects anonymous callers with 401", async () => {
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .send({ disciplines: ["building"] });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects agent-kind requestors with 401", async () => {
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .set("x-requestor", "agent:my-agent")
+      .send({ disciplines: ["building"] });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("PATCH /api/me/disciplines — UpdateMyDisciplinesBody validation (post-codegen)", () => {
+  it("rejects an unknown discipline value with 400", async () => {
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .set("x-requestor", "user:reviewer-validation")
+      .send({ disciplines: ["building", "not-a-real-discipline"] });
+    expect(res.status).toBe(400);
+    expect(typeof res.body.error).toBe("string");
+  });
+
+  it("rejects a missing disciplines key with 400", async () => {
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .set("x-requestor", "user:reviewer-validation")
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a non-array disciplines value with 400", async () => {
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .set("x-requestor", "user:reviewer-validation")
+      .send({ disciplines: "building" });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("PATCH /api/me/disciplines — round-trip", () => {
+  it("persists the disciplines and returns the full User envelope", async () => {
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .set("x-requestor", "user:reviewer-roundtrip")
+      .send({
+        disciplines: ["building", "fire-life-safety", "accessibility"],
+      });
+    expect(res.status).toBe(200);
+    // Full User envelope (matches /me/architect-pdf-header pattern):
+    // id, displayName, email, avatarUrl, architectPdfHeader,
+    // disciplines, createdAt, updatedAt.
+    expect(res.body).toMatchObject({
+      id: "reviewer-roundtrip",
+      disciplines: ["building", "fire-life-safety", "accessibility"],
+    });
+    expect(typeof res.body.displayName).toBe("string");
+    expect("email" in res.body).toBe(true);
+    expect("avatarUrl" in res.body).toBe(true);
+    expect("architectPdfHeader" in res.body).toBe(true);
+    expect(typeof res.body.createdAt).toBe("string");
+    expect(typeof res.body.updatedAt).toBe("string");
+  });
+
+  it("accepts an empty array as a legitimate clear-all-assignments self-edit", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    // Seed disciplines so we can verify the clear actually persists.
+    await db.insert(users).values({
+      id: "reviewer-clear",
+      displayName: "Clear Reviewer",
+      disciplines: ["building", "electrical"],
+    });
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .set("x-requestor", "user:reviewer-clear")
+      .send({ disciplines: [] });
+    expect(res.status).toBe(200);
+    expect(res.body.disciplines).toEqual([]);
+    const after = await db
+      .select({ disciplines: users.disciplines })
+      .from(users)
+      .where(eq(users.id, "reviewer-clear"));
+    expect(after[0]?.disciplines).toEqual([]);
+  });
+
+  it("de-duplicates repeated values before persisting (preserving first-seen order)", async () => {
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .set("x-requestor", "user:reviewer-dedupe")
+      .send({
+        disciplines: ["building", "fire-life-safety", "building"],
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.disciplines).toEqual(["building", "fire-life-safety"]);
+  });
+
+  it("upserts a profile row on the way in for a never-before-seen reviewer", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    const before = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, "reviewer-fresh"));
+    expect(before).toHaveLength(0);
+    const res = await request(getApp())
+      .patch("/api/me/disciplines")
+      .set("x-requestor", "user:reviewer-fresh")
+      .send({ disciplines: ["mechanical"] });
+    expect(res.status).toBe(200);
+    expect(res.body.disciplines).toEqual(["mechanical"]);
+    const after = await db
+      .select({ id: users.id, disciplines: users.disciplines })
+      .from(users)
+      .where(eq(users.id, "reviewer-fresh"));
+    expect(after[0]?.disciplines).toEqual(["mechanical"]);
+  });
+});

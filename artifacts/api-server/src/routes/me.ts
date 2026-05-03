@@ -52,10 +52,8 @@ import { db, users } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import {
   UpdateMyArchitectPdfHeaderBody,
+  UpdateMyDisciplinesBody,
   UpdateMyProfileBody,
-  PLAN_REVIEW_DISCIPLINE_VALUES,
-  isPlanReviewDiscipline,
-  type PlanReviewDiscipline,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 import { ensureUserProfile } from "../lib/userProfiles";
@@ -333,10 +331,20 @@ router.patch("/me/profile", async (req: Request, res: Response) => {
  *
  * Accepts `{ disciplines: PlanReviewDiscipline[] }`; rejects unknown
  * enum values with a 400. Empty array is allowed (clears the
- * reviewer's discipline scope; FE falls back to "Show all"). Hand-
- * written validation rather than a generated `UpdateMyDisciplinesBody`
- * because CT lands the regenerated zod schema in a follow-up — until
- * then this surface keeps the FE-driven default-filter UX unblocked.
+ * reviewer's discipline scope; FE falls back to "Show all").
+ *
+ * Validates against the generated `UpdateMyDisciplinesBody` zod
+ * schema from `@workspace/api-zod` — the spec is authoritative; this
+ * route is the wire endpoint that mirrors it. The earlier hand-rolled
+ * validation has been retired now that CT's regenerated schema is
+ * available. The schema dedupes via `.array()` semantics not at all,
+ * so we still de-duplicate inline before persisting (an array with
+ * `["building","building"]` would otherwise round-trip as a duplicate
+ * value in the DB column).
+ *
+ * Returns the full `User` envelope (matches `/me/architect-pdf-header`
+ * and `/me/profile` patterns) so the FE can update its profile-cached
+ * state without a follow-up GET.
  */
 router.patch("/me/disciplines", async (req: Request, res: Response) => {
   const requestor = req.session?.requestor;
@@ -347,34 +355,29 @@ router.patch("/me/disciplines", async (req: Request, res: Response) => {
     return;
   }
 
-  const body = req.body as { disciplines?: unknown } | undefined;
-  if (!body || !Array.isArray(body.disciplines)) {
-    res.status(400).json({
-      error: "Body must be { disciplines: PlanReviewDiscipline[] }",
-    });
+  const parsed = UpdateMyDisciplinesBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
     return;
   }
-  const out: PlanReviewDiscipline[] = [];
-  const seen = new Set<PlanReviewDiscipline>();
-  for (const v of body.disciplines) {
-    if (!isPlanReviewDiscipline(v)) {
-      res.status(400).json({
-        error: `Unknown discipline; must be one of: ${PLAN_REVIEW_DISCIPLINE_VALUES.join(
-          ", ",
-        )}`,
-      });
-      return;
-    }
+
+  // De-duplicate the array — the schema accepts duplicates (zod's
+  // `.array()` doesn't enforce uniqueness) but the column should
+  // never carry repeats. Preserve the caller's order so the round-
+  // trip is stable.
+  const seen = new Set<string>();
+  const next: typeof parsed.data.disciplines = [];
+  for (const v of parsed.data.disciplines) {
     if (seen.has(v)) continue;
     seen.add(v);
-    out.push(v);
+    next.push(v);
   }
 
   try {
     await ensureUserProfile(requestor.id);
     const [row] = await db
       .update(users)
-      .set({ disciplines: out, updatedAt: new Date() })
+      .set({ disciplines: next, updatedAt: new Date() })
       .where(eq(users.id, requestor.id))
       .returning();
     if (!row) {
