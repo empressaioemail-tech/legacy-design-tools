@@ -26,3 +26,5 @@ export * from "./architectNotificationReads";
 export * from "./cannedFindings";
 export * from "./qaRuns";
 export * from "./qaChecklistResults";
+export * from "./decisionPdfArtifacts";
+export * from "./permitCounters";

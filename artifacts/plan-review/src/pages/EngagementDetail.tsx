@@ -1035,6 +1035,12 @@ function OpenSubmissionModalRenderer({
     },
   );
   const lastCommunicatedAt = commsData?.communications?.[0]?.sentAt ?? null;
+  // PLR-11 — pick the most-recent communication that has a
+  // back-filled PDF; the row at index 0 may have been written before
+  // the render finished (or with a render failure) so fall through
+  // to the first row that does have one.
+  const lastCommunicatedPdfId =
+    commsData?.communications?.find((c) => c.pdfObjectPath)?.id ?? null;
   const [composerOpen, setComposerOpen] = useState(false);
 
   // PLR-6 / Task #460 — Decide modal mount. Reviewer-only: gated on
@@ -1062,6 +1068,7 @@ function OpenSubmissionModalRenderer({
         onOpenSubmission={onOpenSubmission}
         onCommunicate={isReviewer ? () => setComposerOpen(true) : undefined}
         lastCommunicatedAt={lastCommunicatedAt}
+        lastCommunicatedPdfId={lastCommunicatedPdfId}
         onDecide={onDecide}
       />
       {isReviewer && (

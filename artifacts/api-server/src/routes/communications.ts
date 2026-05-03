@@ -25,12 +25,16 @@ import {
   db,
   engagements,
   findings,
+  sheets,
+  snapshots,
   submissions,
   submissionCommunications,
   type SubmissionCommunication,
 } from "@workspace/db";
 import type { FindingCategory, FindingSeverity } from "@workspace/finding-engine";
-import { desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, lte } from "drizzle-orm";
+import { renderCommentLetter } from "@workspace/plan-review-pdf";
+import { ObjectStorageService } from "../lib/objectStorage";
 import {
   CreateSubmissionCommunicationBody,
   CreateSubmissionCommunicationParams,
@@ -63,6 +67,13 @@ interface SubmissionCommunicationWire {
   recipientUserIds: string[];
   sentBy: { kind: "user" | "agent" | "system"; id: string; displayName?: string | null };
   sentAt: string;
+  /**
+   * `/objects/<uuid>` path of the rendered comment-letter PDF, or
+   * null when the render hasn't completed (or failed). Surfaced so
+   * the FE composer can offer an inline download link without a
+   * follow-up presence check (PLR-11).
+   */
+  pdfObjectPath: string | null;
 }
 
 function toStringArray(value: unknown): string[] {
@@ -82,7 +93,74 @@ function toWire(row: SubmissionCommunication): SubmissionCommunicationWire {
     recipientUserIds: toStringArray(row.recipientUserIds),
     sentBy,
     sentAt: row.sentAt.toISOString(),
+    pdfObjectPath: row.pdfObjectPath ?? null,
   };
+}
+
+let cachedObjectStorageComm: ObjectStorageService | null = null;
+function getObjectStorageComm(): ObjectStorageService {
+  if (!cachedObjectStorageComm) {
+    cachedObjectStorageComm = new ObjectStorageService();
+  }
+  return cachedObjectStorageComm;
+}
+
+const LETTER_PDF_TENANT_NAME = "City of Empressa";
+
+/**
+ * Resolve the page-label → issued-PDF page-number map so the
+ * comment-letter renderer can hyperlink each page-label heading
+ * back into the issued plan set. Mirrors the snapshot resolver in
+ * `routes/sheets.ts` so the page numbering matches the issued PDF
+ * the decisions route stamped (sheets are appended in `sortOrder`
+ * ascending, which is exactly what `renderStampedPlanSet` consumes).
+ */
+async function loadPageLabelToIssuedPage(
+  submissionId: string,
+): Promise<Map<string, number>> {
+  const subRows = await db
+    .select({
+      engagementId: submissions.engagementId,
+      submittedAt: submissions.submittedAt,
+    })
+    .from(submissions)
+    .where(eq(submissions.id, submissionId))
+    .limit(1);
+  const sub = subRows[0];
+  if (!sub) return new Map();
+  let snapRows = await db
+    .select({ id: snapshots.id })
+    .from(snapshots)
+    .where(
+      and(
+        eq(snapshots.engagementId, sub.engagementId),
+        lte(snapshots.receivedAt, sub.submittedAt),
+      ),
+    )
+    .orderBy(desc(snapshots.receivedAt))
+    .limit(1);
+  if (snapRows.length === 0) {
+    snapRows = await db
+      .select({ id: snapshots.id })
+      .from(snapshots)
+      .where(eq(snapshots.engagementId, sub.engagementId))
+      .orderBy(asc(snapshots.receivedAt))
+      .limit(1);
+  }
+  const snap = snapRows[0];
+  if (!snap) return new Map();
+  const sheetRows = await db
+    .select({ sheetNumber: sheets.sheetNumber })
+    .from(sheets)
+    .where(eq(sheets.snapshotId, snap.id))
+    .orderBy(asc(sheets.sortOrder));
+  const map = new Map<string, number>();
+  sheetRows.forEach((row, idx) => {
+    if (!map.has(row.sheetNumber)) {
+      map.set(row.sheetNumber, idx + 1);
+    }
+  });
+  return map;
 }
 
 function requireReviewerAudience(req: Request, res: Response): boolean {
@@ -93,7 +171,7 @@ function requireReviewerAudience(req: Request, res: Response): boolean {
 
 async function loadSubmission(submissionId: string) {
   const rows = await db
-    .select({ id: submissions.id })
+    .select({ id: submissions.id, engagementId: submissions.engagementId })
     .from(submissions)
     .where(eq(submissions.id, submissionId))
     .limit(1);
@@ -355,9 +433,80 @@ router.post(
       return;
     }
 
-    // Append `communication-event.sent` against the new row's atom id.
-    // Best-effort — a transient history outage cannot fail the send,
-    // matching the surrounding finding-mutation pattern.
+    // PLR-11: render the comment-letter PDF from the actual sent
+    // body (the source of truth) BEFORE emitting the event so the
+    // pdfArtifactRef lands on the same `communication-event.sent`
+    // payload. Render is best-effort: failure leaves pdfArtifactRef
+    // null and the row is kept.
+    let updated: SubmissionCommunication = row;
+    let pdfArtifactRef: string | null = null;
+    try {
+      const findingRows = await db
+        .select()
+        .from(findings)
+        .where(eq(findings.submissionId, sub.id));
+      const findingsById = new Map(findingRows.map((f) => [f.atomId, f]));
+      const cited = body.data.findingAtomIds
+        .map((id) => findingsById.get(id))
+        .filter((f): f is NonNullable<typeof f> => Boolean(f))
+        .map((f) => ({
+          id: f.atomId,
+          severity: f.severity as FindingSeverity,
+          category: f.category as FindingCategory,
+          status: f.status as CommentLetterFindingStatus,
+          text: f.text,
+          elementRef: f.elementRef ?? null,
+        }));
+
+      const engRows = await db
+        .select()
+        .from(engagements)
+        .where(eq(engagements.id, sub.engagementId))
+        .limit(1);
+      const eng = engRows[0] ?? null;
+      const addressLines: string[] = [];
+      if (eng?.address) addressLines.push(eng.address);
+      const cityState = [eng?.jurisdictionCity, eng?.jurisdictionState]
+        .filter((s): s is string => Boolean(s))
+        .join(", ");
+      if (cityState) addressLines.push(cityState);
+
+      const pageMap = await loadPageLabelToIssuedPage(sub.id);
+
+      const bytes = await renderCommentLetter({
+        tenantName: LETTER_PDF_TENANT_NAME,
+        tenantAddressLines: addressLines,
+        subject: row.subject,
+        body: row.body,
+        recipientName: eng?.applicantFirm ?? null,
+        sentAt: row.sentAt,
+        issuedPlanSetUrl: `/api/submissions/${sub.id}/issued-pdf`,
+        pageLabelToIssuedPage: pageMap,
+        findings: cited,
+      });
+      pdfArtifactRef = await getObjectStorageComm()
+        .uploadObjectEntityFromBuffer(Buffer.from(bytes), "application/pdf");
+      const [back] = await db
+        .update(submissionCommunications)
+        .set({ pdfObjectPath: pdfArtifactRef })
+        .where(eq(submissionCommunications.id, row.id))
+        .returning();
+      if (back) updated = back;
+      reqLog.info(
+        { communicationId: row.id, pdfArtifactRef },
+        "comment-letter PDF rendered and persisted",
+      );
+    } catch (err) {
+      reqLog.error(
+        { err, communicationId: row.id },
+        "comment-letter PDF render/upload failed — row kept",
+      );
+    }
+
+    // Append `communication-event.sent` (best-effort). The
+    // pdfArtifactRef lives on the row as derived state — the atom's
+    // contextSummary surfaces it; keeping it off the event payload
+    // means the chain hash doesn't need a back-fill rewrite.
     try {
       await getHistoryService().appendEvent({
         entityType: "communication-event",
@@ -384,19 +533,63 @@ router.post(
         { submissionId: sub.id, communicationId: row.id },
         "comment letter persisted with no recipients — outbound dispatch skipped",
       );
-    } else {
-      reqLog.info(
-        {
-          submissionId: sub.id,
-          communicationId: row.id,
-          recipientCount: body.data.recipientUserIds.length,
-          findingCount: body.data.findingAtomIds.length,
-        },
-        "comment letter persisted; outbound email dispatch deferred (no mail pipeline)",
-      );
     }
 
-    res.status(201).json({ communication: toWire(row) });
+    res.status(201).json({ communication: toWire(updated) });
+  },
+);
+
+/**
+ * PLR-11 — `GET /communications/:id/pdf`. Streams the rendered
+ * comment-letter PDF from object storage. 404 when the row exists
+ * but the render hadn't completed (or failed), so the FE can hide
+ * the link until the back-fill lands.
+ *
+ * Reviewer-only — same audience guard as the rest of this surface.
+ */
+router.get(
+  "/communications/:id/pdf",
+  async (req: Request, res: Response): Promise<void> => {
+    if (requireReviewerAudience(req, res)) return;
+    const id = String(req.params["id"] ?? "");
+    if (!id) {
+      res.status(400).json({ error: "missing_id" });
+      return;
+    }
+    const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
+    const rows = await db
+      .select()
+      .from(submissionCommunications)
+      .where(eq(submissionCommunications.id, id))
+      .limit(1);
+    const row = rows[0];
+    if (!row) {
+      res.status(404).json({ error: "communication_not_found" });
+      return;
+    }
+    if (!row.pdfObjectPath) {
+      res.status(404).json({ error: "comment_letter_pdf_not_found" });
+      return;
+    }
+    try {
+      const bytes = await getObjectStorageComm().getObjectEntityBytes(
+        row.pdfObjectPath,
+      );
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Length", String(bytes.length));
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="comment-letter-${id}.pdf"`,
+      );
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.end(bytes);
+    } catch (err) {
+      reqLog.error(
+        { err, communicationId: id, objectPath: row.pdfObjectPath },
+        "comment-letter PDF object fetch failed",
+      );
+      res.status(404).json({ error: "comment_letter_pdf_not_found" });
+    }
   },
 );
 

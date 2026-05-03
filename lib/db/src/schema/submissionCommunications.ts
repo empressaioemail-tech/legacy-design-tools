@@ -63,6 +63,15 @@ export const submissionCommunications = pgTable(
     sentAt: timestamp("sent_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    /**
+     * `/objects/<uuid>` path of the rendered comment-letter PDF
+     * (PLR-11). Populated by the create-communication route after
+     * the row commits; nullable so a transient PDF-render failure
+     * does not block the send (the row + history event are still
+     * authoritative). The serve route streams the bytes from object
+     * storage by re-resolving this path via `ObjectStorageService`.
+     */
+    pdfObjectPath: text("pdf_object_path"),
   },
   (t) => ({
     submissionIdx: index("submission_communications_submission_idx").on(

@@ -61,6 +61,8 @@ export interface CommunicationEventTypedPayload {
   recipientCount?: number;
   findingCount?: number;
   sentAt?: string;
+  /** PLR-11 — `/objects/<uuid>` of the rendered comment-letter PDF. */
+  pdfArtifactRef?: string | null;
 }
 
 export interface CommunicationEventAtomDeps {
@@ -172,6 +174,7 @@ export function makeCommunicationEventAtom(
         recipientCount: recipientIds.length,
         findingCount: findingIds.length,
         sentAt: row.sentAt.toISOString(),
+        pdfArtifactRef: row.pdfObjectPath ?? null,
       };
 
       if (!latestEventId) {

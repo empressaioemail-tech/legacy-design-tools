@@ -87,6 +87,9 @@ describe("lib/db schema integration", () => {
         "code_atom_fetch_queue",
         "code_atom_sources",
         "code_atoms",
+        // PLR-11 — derived-state side table for the issued plan-set
+        // PDF (one row per recorded approval event).
+        "decision_pdf_artifacts",
         "engagements",
         // V1-1 / AIR-1 — finding atom row + producing-run row.
         // Supersedes the deleted `findings_code_atoms` placeholder
@@ -96,6 +99,11 @@ describe("lib/db schema integration", () => {
         "findings",
         "materializable_elements",
         "parcel_briefings",
+        // PLR-11 — atomic tenant-scoped permit-number counter.
+        "permit_counters",
+        // Task #481 — QA Dashboard checklist runs and per-item results.
+        "qa_checklist_results",
+        "qa_runs",
         "render_outputs",
         // Spec 307 / Task #307 — reviewer scratch-note surface anchored
         // per (submission, target atom) tuple. Reviewer-only until the

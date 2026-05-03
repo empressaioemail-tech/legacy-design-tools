@@ -7024,6 +7024,202 @@ export function useListSubmissionSheets<
 }
 
 /**
+ * PLR-11 — streams the rendered issued plan-set PDF for the
+submission. The PDF is rendered + persisted to object storage
+whenever a reviewer records an `approve` /
+`approve_with_conditions` verdict via
+`POST /submissions/{submissionId}/decisions`; this endpoint
+404s when no approve verdict has been recorded yet (the FE
+hides the download link in that state).
+
+Reviewer-only (`audience: "internal"`).
+
+ * @summary Stream the city-seal-stamped issued plan-set PDF
+ */
+export const getDownloadIssuedPlanSetPdfUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/issued-pdf`;
+};
+
+export const downloadIssuedPlanSetPdf = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getDownloadIssuedPlanSetPdfUrl(submissionId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getDownloadIssuedPlanSetPdfQueryKey = (submissionId: string) => {
+  return [`/api/submissions/${submissionId}/issued-pdf`] as const;
+};
+
+export const getDownloadIssuedPlanSetPdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof downloadIssuedPlanSetPdf>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadIssuedPlanSetPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getDownloadIssuedPlanSetPdfQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof downloadIssuedPlanSetPdf>>
+  > = ({ signal }) =>
+    downloadIssuedPlanSetPdf(submissionId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof downloadIssuedPlanSetPdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type DownloadIssuedPlanSetPdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof downloadIssuedPlanSetPdf>>
+>;
+export type DownloadIssuedPlanSetPdfQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Stream the city-seal-stamped issued plan-set PDF
+ */
+
+export function useDownloadIssuedPlanSetPdf<
+  TData = Awaited<ReturnType<typeof downloadIssuedPlanSetPdf>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadIssuedPlanSetPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getDownloadIssuedPlanSetPdfQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * PLR-11 — streams the comment-letter PDF rendered when the
+reviewer hit Send on the Communicate composer. 404 when the
+row exists but the back-fill render hadn't completed yet (or
+failed). Reviewer-only (`audience: "internal"`).
+
+ * @summary Stream the rendered comment-letter PDF
+ */
+export const getDownloadCommentLetterPdfUrl = (id: string) => {
+  return `/api/communications/${id}/pdf`;
+};
+
+export const downloadCommentLetterPdf = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getDownloadCommentLetterPdfUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getDownloadCommentLetterPdfQueryKey = (id: string) => {
+  return [`/api/communications/${id}/pdf`] as const;
+};
+
+export const getDownloadCommentLetterPdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof downloadCommentLetterPdf>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadCommentLetterPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getDownloadCommentLetterPdfQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof downloadCommentLetterPdf>>
+  > = ({ signal }) =>
+    downloadCommentLetterPdf(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof downloadCommentLetterPdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type DownloadCommentLetterPdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof downloadCommentLetterPdf>>
+>;
+export type DownloadCommentLetterPdfQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Stream the rendered comment-letter PDF
+ */
+
+export function useDownloadCommentLetterPdf<
+  TData = Awaited<ReturnType<typeof downloadCommentLetterPdf>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadCommentLetterPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getDownloadCommentLetterPdfQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * Builds the deterministic comment-letter skeleton for the
 submission's open findings (`@workspace/comment-letter`,
 `assembleCommentLetter`) and runs it through an Anthropic

@@ -1162,6 +1162,18 @@ export interface Decision {
   comment: string | null;
   recordedAt: string;
   recordedBy: DecisionRecordedBy;
+  /** PLR-11 — `/objects/<uuid>` of the city-seal-stamped issued
+plan-set PDF rendered with this verdict. Null on
+non-approval verdicts and on render/upload failure. The
+FE gates the "Download stamped PDF" link on this being
+non-null.
+ */
+  pdfArtifactRef: string | null;
+  /** PLR-11 — tenant-scoped permit number stamped on the
+issued PDF (e.g. `EMP-2026-0001`). Null when no PDF was
+rendered.
+ */
+  permitNumber: string | null;
 }
 
 /**
@@ -2588,6 +2600,13 @@ captured on the parent engagement.
   recipientUserIds: string[];
   sentBy: FindingActor;
   sentAt: string;
+  /** `/objects/<uuid>` path of the rendered comment-letter PDF
+(PLR-11). Null when the render hasn't completed (or
+failed). The FE composer surfaces a download link when
+populated; the bytes are streamed by `GET
+/communications/{id}/pdf`.
+ */
+  pdfObjectPath: string | null;
 }
 
 /**

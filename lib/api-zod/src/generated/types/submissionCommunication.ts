@@ -32,4 +32,11 @@ captured on the parent engagement.
   recipientUserIds: string[];
   sentBy: FindingActor;
   sentAt: Date;
+  /** `/objects/<uuid>` path of the rendered comment-letter PDF
+(PLR-11). Null when the render hasn't completed (or
+failed). The FE composer surfaces a download link when
+populated; the bytes are streamed by `GET
+/communications/{id}/pdf`.
+ */
+  pdfObjectPath: string | null;
 }

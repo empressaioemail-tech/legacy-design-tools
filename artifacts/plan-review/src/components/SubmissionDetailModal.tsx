@@ -66,9 +66,11 @@ import {
   BriefingPriorNarrativeDiff,
   BriefingPriorSnapshotHeader,
 } from "@workspace/briefing-prior-snapshot";
-import type {
-  EngagementSubmissionSummary,
-  SubmissionStatus,
+import {
+  useListSubmissionDecisions,
+  getListSubmissionDecisionsQueryKey,
+  type EngagementSubmissionSummary,
+  type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { BimModelTab } from "./BimModelTab";
 import { SheetsTab } from "./sheets/SheetsTab";
@@ -136,6 +138,13 @@ export interface SubmissionDetailModalProps {
    * status pill. When omitted, the pill renders "Never sent".
    */
   lastCommunicatedAt?: string | null;
+  /**
+   * Communication-id of the most-recent comment letter that has a
+   * back-filled `pdfObjectPath`. PLR-11: when populated, the
+   * Communicate pill renders an inline `Download PDF` link to
+   * `GET /communications/{id}/pdf`.
+   */
+  lastCommunicatedPdfId?: string | null;
 }
 
 const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
@@ -164,6 +173,7 @@ export function SubmissionDetailModal({
   onCommunicate,
   onDecide,
   lastCommunicatedAt = null,
+  lastCommunicatedPdfId = null,
 }: SubmissionDetailModalProps) {
   const isOpen = submission !== null;
 
@@ -313,6 +323,8 @@ export function SubmissionDetailModal({
             onDecide={handleDecide}
             decideHandlerProvided={onDecide != null}
             lastCommunicatedAt={lastCommunicatedAt}
+            lastCommunicatedPdfId={lastCommunicatedPdfId}
+            audience={audience}
           />
         )}
 
@@ -519,6 +531,8 @@ function SubmissionActionHeader({
   onDecide,
   decideHandlerProvided,
   lastCommunicatedAt,
+  lastCommunicatedPdfId,
+  audience,
 }: {
   submission: EngagementSubmissionSummary;
   onReview: () => void;
@@ -526,6 +540,8 @@ function SubmissionActionHeader({
   onDecide: () => void;
   decideHandlerProvided: boolean;
   lastCommunicatedAt: string | null;
+  lastCommunicatedPdfId: string | null;
+  audience: NonNullable<SubmissionDetailModalProps["audience"]>;
 }) {
   const findingsQuery = useListSubmissionFindings(submission.id);
   const runsQuery = useListSubmissionFindingsGenerationRuns(submission.id);
@@ -542,6 +558,31 @@ function SubmissionActionHeader({
 
   const decidePill =
     SUBMISSION_STATUS_LABELS[submission.status] ?? submission.status;
+
+  // PLR-11 — surface the rendered PDF download links inline on the
+  // header pills. Reviewer-only: the download endpoints are gated
+  // by the `internal` audience guard server-side, and the
+  // architect/applicant audiences shouldn't see internal artifacts.
+  const baseUrl = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+  const showReviewerPdfLinks = audience === "internal";
+  const issuedPdfHref = showReviewerPdfLinks
+    ? `${baseUrl}/api/submissions/${submission.id}/issued-pdf`
+    : null;
+  // PLR-11: gate on artifact presence — the latest decision must
+  // carry a non-null `pdfArtifactRef`. Status alone isn't sufficient
+  // because a render/upload failure leaves status=approved but no PDF.
+  const decisionsQuery = useListSubmissionDecisions(submission.id, {
+    query: {
+      enabled: showReviewerPdfLinks,
+      queryKey: getListSubmissionDecisionsQueryKey(submission.id),
+    },
+  });
+  const issuedPdfAvailable =
+    (decisionsQuery.data?.items ?? []).some((d) => d.pdfArtifactRef != null);
+  const commentLetterPdfHref =
+    showReviewerPdfLinks && lastCommunicatedPdfId
+      ? `${baseUrl}/api/communications/${lastCommunicatedPdfId}/pdf`
+      : null;
 
   const communicateDisabled = onCommunicate == null;
   const decideDisabled = !decideHandlerProvided;
@@ -576,6 +617,9 @@ function SubmissionActionHeader({
         onClick={onCommunicate ?? (() => {})}
         disabled={communicateDisabled}
         title="Compose comment letter"
+        downloadHref={commentLetterPdfHref}
+        downloadLabel="Download letter PDF"
+        downloadTestId="submission-action-communicate-pdf"
       />
       <ActionHeaderButton
         testId="submission-action-decide"
@@ -585,6 +629,9 @@ function SubmissionActionHeader({
         onClick={onDecide ?? (() => {})}
         disabled={decideDisabled}
         title={decideTitle}
+        downloadHref={issuedPdfAvailable ? issuedPdfHref : null}
+        downloadLabel="Download stamped PDF"
+        downloadTestId="submission-action-decide-pdf"
       />
     </div>
   );
@@ -598,6 +645,9 @@ function ActionHeaderButton({
   onClick,
   disabled,
   title,
+  downloadHref,
+  downloadLabel,
+  downloadTestId,
 }: {
   testId: string;
   label: string;
@@ -606,41 +656,78 @@ function ActionHeaderButton({
   onClick: () => void;
   disabled?: boolean;
   title?: string;
+  /**
+   * PLR-11 — when present, render an inline anchor below the status
+   * pill that links to the rendered PDF. The anchor stops click
+   * propagation so it doesn't also fire the surrounding button's
+   * `onClick` (we wrap the button in a column to keep the legacy
+   * keyboard / aria semantics).
+   */
+  downloadHref?: string | null;
+  downloadLabel?: string;
+  downloadTestId?: string;
 }) {
   return (
-    <button
-      type="button"
-      data-testid={testId}
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
+    <div
       style={{
         flex: 1,
         display: "flex",
         flexDirection: "column",
-        alignItems: "flex-start",
         gap: 2,
-        padding: "8px 12px",
-        border: "1px solid var(--border-default)",
-        borderRadius: 6,
-        background: disabled
-          ? "var(--surface-1, transparent)"
-          : "var(--surface-1, transparent)",
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-        textAlign: "left",
       }}
     >
-      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-        {label}
-      </span>
-      <span
-        data-testid={statusTestId}
-        style={{ fontSize: 11, color: "var(--text-secondary)" }}
+      <button
+        type="button"
+        data-testid={testId}
+        onClick={onClick}
+        disabled={disabled}
+        title={title}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-start",
+          gap: 2,
+          padding: "8px 12px",
+          border: "1px solid var(--border-default)",
+          borderRadius: 6,
+          background: disabled
+            ? "var(--surface-1, transparent)"
+            : "var(--surface-1, transparent)",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.55 : 1,
+          textAlign: "left",
+        }}
       >
-        {statusLabel}
-      </span>
-    </button>
+        <span
+          style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}
+        >
+          {label}
+        </span>
+        <span
+          data-testid={statusTestId}
+          style={{ fontSize: 11, color: "var(--text-secondary)" }}
+        >
+          {statusLabel}
+        </span>
+      </button>
+      {downloadHref ? (
+        <a
+          href={downloadHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid={downloadTestId}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            fontSize: 11,
+            padding: "2px 12px",
+            color: "var(--accent, #2962ff)",
+            textDecoration: "underline",
+          }}
+        >
+          {downloadLabel ?? "Download PDF"}
+        </a>
+      ) : null}
+    </div>
   );
 }
 

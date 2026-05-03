@@ -3196,6 +3196,86 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /submissions/{submissionId}/issued-pdf:
+    get:
+      operationId: downloadIssuedPlanSetPdf
+      tags: [decisions]
+      summary: Stream the city-seal-stamped issued plan-set PDF
+      description: |
+        PLR-11 — streams the rendered issued plan-set PDF for the
+        submission. The PDF is rendered + persisted to object storage
+        whenever a reviewer records an `approve` /
+        `approve_with_conditions` verdict via
+        `POST /submissions/{submissionId}/decisions`; this endpoint
+        404s when no approve verdict has been recorded yet (the FE
+        hides the download link in that state).
+
+        Reviewer-only (`audience: "internal"`).
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Issued plan-set PDF stream.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "403":
+          description: Caller is not on the internal (reviewer) audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: |
+            Submission has no approve verdict on file (no PDF rendered).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /communications/{id}/pdf:
+    get:
+      operationId: downloadCommentLetterPdf
+      tags: [communications]
+      summary: Stream the rendered comment-letter PDF
+      description: |
+        PLR-11 — streams the comment-letter PDF rendered when the
+        reviewer hit Send on the Communicate composer. 404 when the
+        row exists but the back-fill render hadn't completed yet (or
+        failed). Reviewer-only (`audience: "internal"`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Comment-letter PDF stream.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "403":
+          description: Caller is not on the internal (reviewer) audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Communication row or PDF missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /submissions/{submissionId}/communications/draft:
     post:
       operationId: draftSubmissionCommunication
@@ -6272,6 +6352,22 @@ components:
             id:
               type: string
           required: [kind, id]
+        pdfArtifactRef:
+          type: string
+          nullable: true
+          description: |
+            PLR-11 — `/objects/<uuid>` of the city-seal-stamped issued
+            plan-set PDF rendered with this verdict. Null on
+            non-approval verdicts and on render/upload failure. The
+            FE gates the "Download stamped PDF" link on this being
+            non-null.
+        permitNumber:
+          type: string
+          nullable: true
+          description: |
+            PLR-11 — tenant-scoped permit number stamped on the
+            issued PDF (e.g. `EMP-2026-0001`). Null when no PDF was
+            rendered.
       required:
         - id
         - submissionId
@@ -6279,6 +6375,8 @@ components:
         - comment
         - recordedAt
         - recordedBy
+        - pdfArtifactRef
+        - permitNumber
 
     ListDecisionsResponse:
       type: object
@@ -8329,6 +8427,15 @@ components:
         sentAt:
           type: string
           format: date-time
+        pdfObjectPath:
+          type: string
+          nullable: true
+          description: |
+            `/objects/<uuid>` path of the rendered comment-letter PDF
+            (PLR-11). Null when the render hasn't completed (or
+            failed). The FE composer surfaces a download link when
+            populated; the bytes are streamed by `GET
+            /communications/{id}/pdf`.
       required:
         - id
         - atomId
@@ -8339,6 +8446,7 @@ components:
         - recipientUserIds
         - sentBy
         - sentAt
+        - pdfObjectPath
 
     CreateSubmissionCommunicationBody:
       type: object

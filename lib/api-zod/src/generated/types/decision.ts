@@ -25,4 +25,16 @@ export interface Decision {
   comment: string | null;
   recordedAt: Date;
   recordedBy: DecisionRecordedBy;
+  /** PLR-11 — `/objects/<uuid>` of the city-seal-stamped issued
+plan-set PDF rendered with this verdict. Null on
+non-approval verdicts and on render/upload failure. The
+FE gates the "Download stamped PDF" link on this being
+non-null.
+ */
+  pdfArtifactRef: string | null;
+  /** PLR-11 — tenant-scoped permit number stamped on the
+issued PDF (e.g. `EMP-2026-0001`). Null when no PDF was
+rendered.
+ */
+  permitNumber: string | null;
 }

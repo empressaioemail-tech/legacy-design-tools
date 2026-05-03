@@ -3872,6 +3872,18 @@ export const ListSubmissionDecisionsResponse = zod
             kind: zod.enum(["user", "agent", "system"]),
             id: zod.string(),
           }),
+          pdfArtifactRef: zod
+            .string()
+            .nullable()
+            .describe(
+              'PLR-11 — `\/objects\/<uuid>` of the city-seal-stamped issued\nplan-set PDF rendered with this verdict. Null on\nnon-approval verdicts and on render\/upload failure. The\nFE gates the \"Download stamped PDF\" link on this being\nnon-null.\n',
+            ),
+          permitNumber: zod
+            .string()
+            .nullable()
+            .describe(
+              "PLR-11 — tenant-scoped permit number stamped on the\nissued PDF (e.g. `EMP-2026-0001`). Null when no PDF was\nrendered.\n",
+            ),
         })
         .describe(
           "One recorded decision-event for a submission. `id` is the\ndecision's stable uuid (also the `entityId` of the matching\n`decision-event` atom). `recordedAt` is the event's\n`occurredAt`; `recordedBy` is the actor recorded against the\nevent (the session-bound reviewer when one is attached, or\nthe dedicated `decision-recorded` system actor as a defensive\nfallback).\n",
@@ -4331,6 +4343,12 @@ export const ListSubmissionCommunicationsResponse = zod
               "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
             ),
           sentAt: zod.coerce.date(),
+          pdfObjectPath: zod
+            .string()
+            .nullable()
+            .describe(
+              "`\/objects\/<uuid>` path of the rendered comment-letter PDF\n(PLR-11). Null when the render hasn't completed (or\nfailed). The FE composer surfaces a download link when\npopulated; the bytes are streamed by `GET\n\/communications\/{id}\/pdf`.\n",
+            ),
         })
         .describe(
           "One row in `submission_communications` — an AI-drafted\ncomment letter the reviewer sent for a submission (PLR-5).\nAppend-only; neither subject nor body is mutable after\ninsert. `atomId` is the public id used for empressa-atom\nhistory lookups (`communication-event:{submissionId}:{rowId}`).\n",
@@ -4445,6 +4463,35 @@ export const ListSubmissionSheetsResponseItem = zod.object({
 export const ListSubmissionSheetsResponse = zod.array(
   ListSubmissionSheetsResponseItem,
 );
+
+/**
+ * PLR-11 — streams the rendered issued plan-set PDF for the
+submission. The PDF is rendered + persisted to object storage
+whenever a reviewer records an `approve` /
+`approve_with_conditions` verdict via
+`POST /submissions/{submissionId}/decisions`; this endpoint
+404s when no approve verdict has been recorded yet (the FE
+hides the download link in that state).
+
+Reviewer-only (`audience: "internal"`).
+
+ * @summary Stream the city-seal-stamped issued plan-set PDF
+ */
+export const DownloadIssuedPlanSetPdfParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+/**
+ * PLR-11 — streams the comment-letter PDF rendered when the
+reviewer hit Send on the Communicate composer. 404 when the
+row exists but the back-fill render hadn't completed yet (or
+failed). Reviewer-only (`audience: "internal"`).
+
+ * @summary Stream the rendered comment-letter PDF
+ */
+export const DownloadCommentLetterPdfParams = zod.object({
+  id: zod.coerce.string(),
+});
 
 /**
  * Builds the deterministic comment-letter skeleton for the

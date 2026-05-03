@@ -52,6 +52,9 @@
       "path": "./lib/comment-letter"
     },
     {
+      "path": "./lib/plan-review-pdf"
+    },
+    {
       "path": "./lib/integrations-anthropic-ai"
     },
     {

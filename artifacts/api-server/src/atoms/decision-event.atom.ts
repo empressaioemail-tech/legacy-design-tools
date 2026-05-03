@@ -26,7 +26,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { atomEvents } from "@workspace/db";
+import { atomEvents, decisionPdfArtifacts } from "@workspace/db";
 import type {
   AtomReference,
   AtomRegistration,
@@ -94,6 +94,15 @@ export interface DecisionWire {
   comment: string | null;
   recordedAt: string;
   recordedBy: { kind: "user" | "agent" | "system"; id: string };
+  /**
+   * `/objects/<uuid>` of the city-seal-stamped issued plan-set PDF
+   * rendered with this verdict (PLR-11). Null on non-approval
+   * verdicts and on render/upload failure — the FE gates the
+   * "Download stamped PDF" link on this being non-null.
+   */
+  pdfArtifactRef: string | null;
+  /** Tenant-scoped permit number stamped on the issued PDF (or null). */
+  permitNumber: string | null;
 }
 
 export interface DecisionEventTypedPayload {
@@ -104,6 +113,10 @@ export interface DecisionEventTypedPayload {
   comment?: string | null;
   recordedAt?: string;
   recordedBy?: { kind: "user" | "agent" | "system"; id: string };
+  /** PLR-11 — derived from `decision_pdf_artifacts`; null until rendered. */
+  pdfArtifactRef?: string | null;
+  permitNumber?: string | null;
+  approverName?: string | null;
 }
 
 export interface DecisionEventAtomDeps {
@@ -224,6 +237,17 @@ export function makeDecisionEventAtom(
           ]
         : [];
 
+      const artifactRows = await deps.db
+        .select({
+          pdfArtifactRef: decisionPdfArtifacts.pdfArtifactRef,
+          permitNumber: decisionPdfArtifacts.permitNumber,
+          approverName: decisionPdfArtifacts.approverName,
+        })
+        .from(decisionPdfArtifacts)
+        .where(eq(decisionPdfArtifacts.decisionId, entityId))
+        .limit(1);
+      const artifact = artifactRows[0];
+
       const typed: DecisionEventTypedPayload = {
         id: row.entityId,
         found: true,
@@ -235,6 +259,9 @@ export function makeDecisionEventAtom(
           kind: actor.kind as "user" | "agent" | "system",
           id: actor.id,
         },
+        pdfArtifactRef: artifact?.pdfArtifactRef ?? null,
+        permitNumber: artifact?.permitNumber ?? null,
+        approverName: artifact?.approverName ?? null,
       };
 
       return {
