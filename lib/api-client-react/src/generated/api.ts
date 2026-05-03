@@ -155,6 +155,7 @@ import type {
   UpdateCannedFindingBody,
   UpdateEngagementBody,
   UpdateMyArchitectPdfHeaderBody,
+  UpdateMyDisciplinesBody,
   UpdateMyProfileBody,
   UpdateQaAutopilotSettingsBody,
   UpdateQaChecklistItemBody,
@@ -5002,6 +5003,115 @@ export const useUpdateMyArchitectPdfHeader = <
   TContext
 > => {
   return useMutation(getUpdateMyArchitectPdfHeaderMutationOptions(options));
+};
+
+/**
+ * PLR-v2 Track 1 — lets the session's current `user`-kind
+requestor replace their own `users.disciplines` array. The
+Settings / "My disciplines" surface wires this up so a reviewer
+can self-assign or revise their reviewer-discipline scope
+without having to ask an admin to `PATCH /users/{id}` (which
+requires the `users:manage` claim — reviewers do not have it).
+
+Self-edit only — there is no `users:manage` admin gate, but
+the request must carry a `user`-kind requestor (anonymous /
+agent sessions get a 401). The row id always comes from
+`req.session.requestor.id`, so a malicious payload that
+smuggles another user's id cannot reach `users.id = <other>`.
+
+Replacement semantics: the request body's `disciplines` array
+replaces the existing column outright. To clear all
+assignments, pass `disciplines: []` — that's a legitimate
+self-edit (a reviewer rotating off plan-review duty).
+
+Returns the full updated `User` envelope (mirroring
+`/me/architect-pdf-header` and `/me/profile`) so the FE can
+update its profile-cached state without a follow-up
+`GET /users/{id}` round trip.
+
+ * @summary Update the current reviewer's own plan-review discipline assignments
+ */
+export const getUpdateMyDisciplinesUrl = () => {
+  return `/api/me/disciplines`;
+};
+
+export const updateMyDisciplines = async (
+  updateMyDisciplinesBody: UpdateMyDisciplinesBody,
+  options?: RequestInit,
+): Promise<User> => {
+  return customFetch<User>(getUpdateMyDisciplinesUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateMyDisciplinesBody),
+  });
+};
+
+export const getUpdateMyDisciplinesMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyDisciplines>>,
+    TError,
+    { data: BodyType<UpdateMyDisciplinesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyDisciplines>>,
+  TError,
+  { data: BodyType<UpdateMyDisciplinesBody> },
+  TContext
+> => {
+  const mutationKey = ["updateMyDisciplines"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyDisciplines>>,
+    { data: BodyType<UpdateMyDisciplinesBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateMyDisciplines(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyDisciplinesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyDisciplines>>
+>;
+export type UpdateMyDisciplinesMutationBody = BodyType<UpdateMyDisciplinesBody>;
+export type UpdateMyDisciplinesMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update the current reviewer's own plan-review discipline assignments
+ */
+export const useUpdateMyDisciplines = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyDisciplines>>,
+    TError,
+    { data: BodyType<UpdateMyDisciplinesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyDisciplines>>,
+  TError,
+  { data: BodyType<UpdateMyDisciplinesBody> },
+  TContext
+> => {
+  return useMutation(getUpdateMyDisciplinesMutationOptions(options));
 };
 
 /**

@@ -41,16 +41,12 @@ who have not yet been assigned. Drives the Inbox default
 filter ("show only my disciplines") and the FindingsTab
 default-discipline picker.
 
-Admin-write-only: only callers with the `users:manage`
-permission claim can update this column via
-`PATCH /users/{id}` (or via a future admin surface). The
-user themselves cannot self-assign.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required (defaulting to
-`[]` for legacy rows) once every row is backfilled.
+Admins can edit any user's `disciplines` via
+`PATCH /users/{id}` (gated on the `users:manage` claim).
+Reviewers can self-edit via `PATCH /me/disciplines` —
+self-edit only, no admin gate.
  */
-  disciplines?: PlanReviewDiscipline[];
+  disciplines: PlanReviewDiscipline[];
   createdAt: Date;
   updatedAt: Date;
 }

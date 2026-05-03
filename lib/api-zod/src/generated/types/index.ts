@@ -338,6 +338,7 @@ export * from "./submissionStatus";
 export * from "./updateCannedFindingBody";
 export * from "./updateEngagementBody";
 export * from "./updateMyArchitectPdfHeaderBody";
+export * from "./updateMyDisciplinesBody";
 export * from "./updateMyProfileBody";
 export * from "./updateQaAutopilotSettingsBody";
 export * from "./updateQaChecklistItemBody";

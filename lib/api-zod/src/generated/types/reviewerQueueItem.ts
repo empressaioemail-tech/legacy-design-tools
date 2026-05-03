@@ -43,29 +43,17 @@ export interface ReviewerQueueItem {
 (project type, plan-review disciplines, applicable code
 books). Null when the AI auto-classifier has not yet run
 or when the submission predates the feature.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required once every row
-is backfilled.
  */
-  classification?: SubmissionClassification | null;
+  classification: SubmissionClassification | null;
   /** PLR-v2 Track 1 — counts of findings on this submission
 bucketed by severity (blockers / concerns / advisory) +
 total. Drives the triage strip's severity rollup chip on
 the Inbox.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required once every row
-is backfilled.
  */
-  severityRollup?: ReviewerSeverityRollup;
+  severityRollup: ReviewerSeverityRollup;
   /** PLR-v2 Track 1 — prior-submission roll-up for this
 submission's applicant firm. Drives the triage strip's
 applicant-history pill + hovercard.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required once every row
-is backfilled.
  */
-  applicantHistory?: ApplicantHistory;
+  applicantHistory: ApplicantHistory;
 }

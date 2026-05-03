@@ -2213,6 +2213,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /me/disciplines:
+    patch:
+      operationId: updateMyDisciplines
+      tags: [users]
+      summary: Update the current reviewer's own plan-review discipline assignments
+      description: |
+        PLR-v2 Track 1 — lets the session's current `user`-kind
+        requestor replace their own `users.disciplines` array. The
+        Settings / "My disciplines" surface wires this up so a reviewer
+        can self-assign or revise their reviewer-discipline scope
+        without having to ask an admin to `PATCH /users/{id}` (which
+        requires the `users:manage` claim — reviewers do not have it).
+
+        Self-edit only — there is no `users:manage` admin gate, but
+        the request must carry a `user`-kind requestor (anonymous /
+        agent sessions get a 401). The row id always comes from
+        `req.session.requestor.id`, so a malicious payload that
+        smuggles another user's id cannot reach `users.id = <other>`.
+
+        Replacement semantics: the request body's `disciplines` array
+        replaces the existing column outright. To clear all
+        assignments, pass `disciplines: []` — that's a legitimate
+        self-edit (a reviewer rotating off plan-review duty).
+
+        Returns the full updated `User` envelope (mirroring
+        `/me/architect-pdf-header` and `/me/profile`) so the FE can
+        update its profile-cached state without a follow-up
+        `GET /users/{id}` round trip.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMyDisciplinesBody"
+      responses:
+        "200":
+          description: Updated user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: |
+            Invalid request body — including unknown
+            `PlanReviewDiscipline` values (closed-set enforced
+            server-side).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: |
+            No `user`-kind requestor on the session — anonymous and
+            agent callers cannot self-edit a profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /me/profile:
     patch:
       operationId: updateMyProfile
@@ -5933,10 +5992,6 @@ components:
             (project type, plan-review disciplines, applicable code
             books). Null when the AI auto-classifier has not yet run
             or when the submission predates the feature.
-
-            **Optional in Pass A** (CT contract-first lock); BE's
-            implementation PR flips this to required once every row
-            is backfilled.
         severityRollup:
           oneOf:
             - $ref: "#/components/schemas/ReviewerSeverityRollup"
@@ -5945,10 +6000,6 @@ components:
             bucketed by severity (blockers / concerns / advisory) +
             total. Drives the triage strip's severity rollup chip on
             the Inbox.
-
-            **Optional in Pass A** (CT contract-first lock); BE's
-            implementation PR flips this to required once every row
-            is backfilled.
         applicantHistory:
           oneOf:
             - $ref: "#/components/schemas/ApplicantHistory"
@@ -5956,10 +6007,6 @@ components:
             PLR-v2 Track 1 — prior-submission roll-up for this
             submission's applicant firm. Drives the triage strip's
             applicant-history pill + hovercard.
-
-            **Optional in Pass A** (CT contract-first lock); BE's
-            implementation PR flips this to required once every row
-            is backfilled.
       required:
         - submissionId
         - engagementId
@@ -5971,6 +6018,9 @@ components:
         - status
         - note
         - reviewerComment
+        - classification
+        - severityRollup
+        - applicantHistory
 
     SubmissionClassification:
       type: object
@@ -7646,14 +7696,10 @@ components:
             filter ("show only my disciplines") and the FindingsTab
             default-discipline picker.
 
-            Admin-write-only: only callers with the `users:manage`
-            permission claim can update this column via
-            `PATCH /users/{id}` (or via a future admin surface). The
-            user themselves cannot self-assign.
-
-            **Optional in Pass A** (CT contract-first lock); BE's
-            implementation PR flips this to required (defaulting to
-            `[]` for legacy rows) once every row is backfilled.
+            Admins can edit any user's `disciplines` via
+            `PATCH /users/{id}` (gated on the `users:manage` claim).
+            Reviewers can self-edit via `PATCH /me/disciplines` —
+            self-edit only, no admin gate.
         createdAt:
           type: string
           format: date-time
@@ -7666,6 +7712,7 @@ components:
         - email
         - avatarUrl
         - architectPdfHeader
+        - disciplines
         - createdAt
         - updatedAt
 
@@ -7758,6 +7805,25 @@ components:
           type: string
           nullable: true
 
+    UpdateMyDisciplinesBody:
+      type: object
+      description: |
+        Body for `PATCH /me/disciplines`. Replaces the caller's
+        `users.disciplines` array outright. `disciplines: []` is a
+        legitimate self-edit (clearing all assignments — e.g. a
+        reviewer rotating off plan-review duty).
+
+        Server-side: values are de-duplicated and validated against the
+        closed `PlanReviewDiscipline` set; an unknown value is a 400.
+      properties:
+        disciplines:
+          type: array
+          minItems: 0
+          items:
+            $ref: "#/components/schemas/PlanReviewDiscipline"
+      required:
+        - disciplines
+
     RequestUploadUrlBody:
       type: object
       description: |
@@ -7832,9 +7898,26 @@ components:
           enum: [user, agent]
         id:
           type: string
+        disciplines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanReviewDiscipline"
+          description: |
+            PLR-v2 Track 1 — the requestor's reviewer-discipline
+            assignments, surfaced on the session envelope so the FE's
+            Inbox default-filter and FindingsTab default-discipline
+            picker don't need to round-trip
+            `useGetUser(session.requestor.id)` on every render.
+
+            Hydrated server-side from `users.disciplines` for
+            `kind: 'user'` requestors; empty array for `kind: 'agent'`
+            / `system`. The `User.disciplines` column remains the
+            source of truth — this is a denormalized read-side
+            convenience.
       required:
         - kind
         - id
+        - disciplines
 
     Session:
       type: object
@@ -9661,10 +9744,6 @@ components:
             wire shape stays narrow. Read `aiGenerated` to decide
             whether to render the AI-badge; read `aiGeneratedAt`
             only for "when did this row land" formatting.
-
-            **Optional in Pass A** (CT contract-first lock); BE's
-            implementation PR flips this to required once every row
-            is backfilled.
         acceptedByReviewerId:
           type: string
           nullable: true
@@ -9677,9 +9756,6 @@ components:
 
             Read together with `acceptedAt` and `acceptedBy` — the
             three fields move as a tuple.
-
-            **Optional in Pass A**; BE's implementation PR flips this
-            to required.
         acceptedAt:
           type: string
           format: date-time
@@ -9688,9 +9764,6 @@ components:
             PLR-v2 Track 1 — ISO timestamp of when the AI finding was
             accepted by a reviewer; null otherwise. Paired with
             `acceptedByReviewerId` and `acceptedBy`.
-
-            **Optional in Pass A**; BE's implementation PR flips this
-            to required.
         acceptedBy:
           oneOf:
             - $ref: "#/components/schemas/FindingActor"
@@ -9705,9 +9778,6 @@ components:
             Null when `acceptedAt` is null. Otherwise carries the
             same actor data as `reviewerStatusBy` (the existing
             status-change attribution).
-
-            **Optional in Pass A**; BE's implementation PR flips this
-            to required.
       required:
         - id
         - submissionId
@@ -9725,6 +9795,10 @@ components:
         - sourceRef
         - aiGeneratedAt
         - revisionOf
+        - aiGenerated
+        - acceptedByReviewerId
+        - acceptedAt
+        - acceptedBy
 
     FindingResponse:
       type: object

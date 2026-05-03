@@ -510,31 +510,19 @@ export interface ReviewerQueueItem {
 (project type, plan-review disciplines, applicable code
 books). Null when the AI auto-classifier has not yet run
 or when the submission predates the feature.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required once every row
-is backfilled.
  */
-  classification?: SubmissionClassification | null;
+  classification: SubmissionClassification | null;
   /** PLR-v2 Track 1 — counts of findings on this submission
 bucketed by severity (blockers / concerns / advisory) +
 total. Drives the triage strip's severity rollup chip on
 the Inbox.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required once every row
-is backfilled.
  */
-  severityRollup?: ReviewerSeverityRollup;
+  severityRollup: ReviewerSeverityRollup;
   /** PLR-v2 Track 1 — prior-submission roll-up for this
 submission's applicant firm. Drives the triage strip's
 applicant-history pill + hovercard.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required once every row
-is backfilled.
  */
-  applicantHistory?: ApplicantHistory;
+  applicantHistory: ApplicantHistory;
 }
 
 /**
@@ -1698,16 +1686,12 @@ who have not yet been assigned. Drives the Inbox default
 filter ("show only my disciplines") and the FindingsTab
 default-discipline picker.
 
-Admin-write-only: only callers with the `users:manage`
-permission claim can update this column via
-`PATCH /users/{id}` (or via a future admin surface). The
-user themselves cannot self-assign.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required (defaulting to
-`[]` for legacy rows) once every row is backfilled.
+Admins can edit any user's `disciplines` via
+`PATCH /users/{id}` (gated on the `users:manage` claim).
+Reviewers can self-edit via `PATCH /me/disciplines` —
+self-edit only, no admin gate.
  */
-  disciplines?: PlanReviewDiscipline[];
+  disciplines: PlanReviewDiscipline[];
   createdAt: string;
   updatedAt: string;
 }
@@ -1777,6 +1761,21 @@ export interface UpdateMyProfileBody {
   displayName?: string;
   email?: string | null;
   avatarUrl?: string | null;
+}
+
+/**
+ * Body for `PATCH /me/disciplines`. Replaces the caller's
+`users.disciplines` array outright. `disciplines: []` is a
+legitimate self-edit (clearing all assignments — e.g. a
+reviewer rotating off plan-review duty).
+
+Server-side: values are de-duplicated and validated against the
+closed `PlanReviewDiscipline` set; an unknown value is a 400.
+
+ */
+export interface UpdateMyDisciplinesBody {
+  /** @minItems 0 */
+  disciplines: PlanReviewDiscipline[];
 }
 
 export type RequestUploadUrlBodyContentType =
@@ -1851,6 +1850,19 @@ auth lands: the verified subject id from the auth provider).
 export interface SessionRequestor {
   kind: SessionRequestorKind;
   id: string;
+  /** PLR-v2 Track 1 — the requestor's reviewer-discipline
+assignments, surfaced on the session envelope so the FE's
+Inbox default-filter and FindingsTab default-discipline
+picker don't need to round-trip
+`useGetUser(session.requestor.id)` on every render.
+
+Hydrated server-side from `users.disciplines` for
+`kind: 'user'` requestors; empty array for `kind: 'agent'`
+/ `system`. The `User.disciplines` column remains the
+source of truth — this is a denormalized read-side
+convenience.
+ */
+  disciplines: PlanReviewDiscipline[];
 }
 
 export type SessionAudience =
@@ -3145,12 +3157,8 @@ ones — for those it carries the row's createdAt) so the
 wire shape stays narrow. Read `aiGenerated` to decide
 whether to render the AI-badge; read `aiGeneratedAt`
 only for "when did this row land" formatting.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required once every row
-is backfilled.
  */
-  aiGenerated?: boolean;
+  aiGenerated: boolean;
   /** PLR-v2 Track 1 — when an AI-generated finding was accepted
 by a reviewer, this carries the reviewer's user id; null
 otherwise. Drives the AI-badge persistence flow ("AI
@@ -3159,19 +3167,13 @@ does not vanish on accept.
 
 Read together with `acceptedAt` and `acceptedBy` — the
 three fields move as a tuple.
-
-**Optional in Pass A**; BE's implementation PR flips this
-to required.
  */
-  acceptedByReviewerId?: string | null;
+  acceptedByReviewerId: string | null;
   /** PLR-v2 Track 1 — ISO timestamp of when the AI finding was
 accepted by a reviewer; null otherwise. Paired with
 `acceptedByReviewerId` and `acceptedBy`.
-
-**Optional in Pass A**; BE's implementation PR flips this
-to required.
  */
-  acceptedAt?: string | null;
+  acceptedAt: string | null;
   /** PLR-v2 Track 1 — actor envelope for the reviewer who
 accepted an AI-generated finding. Reuses the existing
 `FindingActor` shape so the FE can render
@@ -3181,11 +3183,8 @@ user-profile fetch.
 Null when `acceptedAt` is null. Otherwise carries the
 same actor data as `reviewerStatusBy` (the existing
 status-change attribution).
-
-**Optional in Pass A**; BE's implementation PR flips this
-to required.
  */
-  acceptedBy?: FindingActor | null;
+  acceptedBy: FindingActor | null;
 }
 
 /**

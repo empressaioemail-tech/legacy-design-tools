@@ -71,12 +71,8 @@ ones — for those it carries the row's createdAt) so the
 wire shape stays narrow. Read `aiGenerated` to decide
 whether to render the AI-badge; read `aiGeneratedAt`
 only for "when did this row land" formatting.
-
-**Optional in Pass A** (CT contract-first lock); BE's
-implementation PR flips this to required once every row
-is backfilled.
  */
-  aiGenerated?: boolean;
+  aiGenerated: boolean;
   /** PLR-v2 Track 1 — when an AI-generated finding was accepted
 by a reviewer, this carries the reviewer's user id; null
 otherwise. Drives the AI-badge persistence flow ("AI
@@ -85,19 +81,13 @@ does not vanish on accept.
 
 Read together with `acceptedAt` and `acceptedBy` — the
 three fields move as a tuple.
-
-**Optional in Pass A**; BE's implementation PR flips this
-to required.
  */
-  acceptedByReviewerId?: string | null;
+  acceptedByReviewerId: string | null;
   /** PLR-v2 Track 1 — ISO timestamp of when the AI finding was
 accepted by a reviewer; null otherwise. Paired with
 `acceptedByReviewerId` and `acceptedBy`.
-
-**Optional in Pass A**; BE's implementation PR flips this
-to required.
  */
-  acceptedAt?: Date | null;
+  acceptedAt: Date | null;
   /** PLR-v2 Track 1 — actor envelope for the reviewer who
 accepted an AI-generated finding. Reuses the existing
 `FindingActor` shape so the FE can render
@@ -107,9 +97,6 @@ user-profile fetch.
 Null when `acceptedAt` is null. Otherwise carries the
 same actor data as `reviewerStatusBy` (the existing
 status-change attribution).
-
-**Optional in Pass A**; BE's implementation PR flips this
-to required.
  */
-  acceptedBy?: FindingActor | null;
+  acceptedBy: FindingActor | null;
 }
