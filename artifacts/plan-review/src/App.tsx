@@ -10,6 +10,9 @@ import Sheets from "./pages/Sheets";
 import Users from "./pages/Users";
 import CannedFindings from "./pages/CannedFindings";
 import OutstandingRequests from "./pages/OutstandingRequests";
+import InReview from "./pages/InReview";
+import Approved from "./pages/Approved";
+import Rejected from "./pages/Rejected";
 import ComingSoon from "./pages/ComingSoon";
 import { RequirePermission } from "./components/permissions";
 
@@ -27,10 +30,9 @@ function Router() {
       <Route path="/sheets" component={Sheets} />
       <Route path="/style-probe" component={StyleProbe} />
       
-      {/* Other routes from nav groups */}
-      <Route path="/in-review" component={ComingSoon} />
-      <Route path="/approved" component={ComingSoon} />
-      <Route path="/rejected" component={ComingSoon} />
+      <Route path="/in-review" component={InReview} />
+      <Route path="/approved" component={Approved} />
+      <Route path="/rejected" component={Rejected} />
       <Route path="/compliance" component={ComingSoon} />
       <Route path="/firms" component={ComingSoon} />
       <Route path="/projects" component={ComingSoon} />

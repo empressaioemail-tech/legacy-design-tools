@@ -49,9 +49,9 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   { label: "SUBMITTALS", items: [
       { label: "Inbox", href: "/" },
       { label: "Engagements", href: "/engagements" },
-      { label: "In Review", href: "/in-review" },
-      { label: "Approved", href: "/approved" },
-      { label: "Rejected", href: "/rejected" },
+      { label: "In Review", href: "/in-review", requiresAudience: "internal" },
+      { label: "Approved", href: "/approved", requiresAudience: "internal" },
+      { label: "Rejected", href: "/rejected", requiresAudience: "internal" },
       { label: "Sheets", href: "/sheets" },
   ]},
   { label: "MY WORK", items: [
