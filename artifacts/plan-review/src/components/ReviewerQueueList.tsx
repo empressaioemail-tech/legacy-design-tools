@@ -7,6 +7,7 @@ import {
 } from "@workspace/api-client-react";
 import { relativeTime } from "../lib/relativeTime";
 import { setDevSessionAudience } from "../lib/devSession";
+import { ReviewerQueueTriageStrip } from "./ReviewerQueueTriageStrip";
 
 const STATUS_PILL_CLASS: Record<SubmissionStatus, string> = {
   pending: "sc-pill-cyan",
@@ -84,6 +85,18 @@ export function ReviewerQueueRow({ item }: { item: ReviewerQueueItem }) {
             </span>
           )}
         </div>
+        {(item.classification ||
+          item.severityRollup ||
+          item.applicantHistory) && (
+          <div className="mt-1.5">
+            <ReviewerQueueTriageStrip
+              classification={item.classification}
+              severityRollup={item.severityRollup}
+              applicantHistory={item.applicantHistory}
+              testIdPrefix={`reviewer-queue-row-${item.submissionId}-triage`}
+            />
+          </div>
+        )}
       </div>
 
       <div
@@ -121,6 +134,28 @@ export function filterReviewerQueueItems(
   });
 }
 
+/**
+ * Track 1 — narrow the queue to only those submissions whose
+ * `classification.disciplines` intersect the chip-bar selection.
+ * When the bar is showing all (`isShowingAll === true`) the filter
+ * is a no-op. Items without a classification are kept when showing
+ * all and dropped when narrowing — Pass A's contract-first lock
+ * leaves classification optional, but a reviewer who has narrowed
+ * by discipline almost certainly does NOT want unclassified rows
+ * polluting their feed.
+ */
+export function filterReviewerQueueItemsByDisciplines(
+  items: ReadonlyArray<ReviewerQueueItem>,
+  selected: ReadonlySet<string>,
+  isShowingAll: boolean,
+): ReviewerQueueItem[] {
+  if (isShowingAll) return items.slice();
+  return items.filter((it) => {
+    const disciplines = it.classification?.disciplines ?? [];
+    return disciplines.some((d) => selected.has(d));
+  });
+}
+
 interface ReviewerQueueListProps {
   items: ReadonlyArray<ReviewerQueueItem>;
   isLoading: boolean;
@@ -136,6 +171,18 @@ interface ReviewerQueueListProps {
   error?: unknown;
   searchQuery?: string;
   emptyMessage?: string;
+  /**
+   * Track 1 — true when the empty queue is *attributable to the
+   * discipline chip-bar narrowing* (parent already applied the
+   * filter and saw zero rows; pre-filter count was non-zero). Drives
+   * the filter-attributable empty-state copy and the inline "Show
+   * all" affordance. False / undefined → fall back to `emptyMessage`.
+   */
+  emptyDueToDisciplineFilter?: boolean;
+  /** Click handler for the inline "Show all" button on the filter-attributable empty state. */
+  onShowAllDisciplines?: () => void;
+  /** Comma-joined human-readable list of the active disciplines (for the empty-state copy). */
+  selectedDisciplinesLabel?: string;
 }
 
 function isAudienceMismatchError(error: unknown): boolean {
@@ -154,6 +201,9 @@ export function ReviewerQueueList({
   error,
   searchQuery = "",
   emptyMessage = "No submissions awaiting review. The AI Reviewer is monitoring intake.",
+  emptyDueToDisciplineFilter = false,
+  onShowAllDisciplines,
+  selectedDisciplinesLabel,
 }: ReviewerQueueListProps) {
   if (isLoading) {
     return (
@@ -199,6 +249,33 @@ export function ReviewerQueueList({
     );
   }
   if (items.length === 0) {
+    if (emptyDueToDisciplineFilter) {
+      const disciplinesLabel = selectedDisciplinesLabel ?? "your disciplines";
+      return (
+        <div
+          className="p-8 text-center sc-body flex flex-col items-center gap-2"
+          data-testid="review-queue-empty-discipline-filter"
+        >
+          <div>{`No submissions in ${disciplinesLabel} today.`}</div>
+          {onShowAllDisciplines ? (
+            <button
+              type="button"
+              className="sc-link sc-mono-sm"
+              data-testid="review-queue-empty-discipline-show-all"
+              onClick={onShowAllDisciplines}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--cyan-text)",
+                cursor: "pointer",
+              }}
+            >
+              Show all
+            </button>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div
         className="p-8 text-center sc-body"
