@@ -209,6 +209,36 @@ describe("USGS NED elevation adapter", () => {
     expect(outcomes[0].result?.tier).toBe("federal");
   });
 
+  it("sends only the EPQS-supported query params (no wkid / includeDate)", async () => {
+    // EPQS v1 rejects `wkid` / `includeDate` with HTTP 400.
+    const fetchImpl = vi.fn(async () => jsonResponse(epqsElevationFeet));
+    await runAdapters({
+      adapters: [usgsNedAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const calledUrl = String(fetchImpl.mock.calls[0][0]);
+    expect(calledUrl).toMatch(/[?&]x=-109\.5498\b/);
+    expect(calledUrl).toMatch(/[?&]y=38\.5733\b/);
+    expect(calledUrl).toMatch(/[?&]units=Feet\b/);
+    expect(calledUrl).toMatch(/[?&]output=json\b/);
+    expect(calledUrl).not.toMatch(/[?&]wkid=/);
+    expect(calledUrl).not.toMatch(/[?&]includeDate=/);
+  });
+
+  it("translates a deterministic HTTP 400 into an `upstream-error` failed outcome (no retry)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ error: "invalid URL" }, 400),
+    );
+    const outcomes = await runAdapters({
+      adapters: [usgsNedAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(outcomes[0].status).toBe("failed");
+    expect(outcomes[0].error?.code).toBe("upstream-error");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts the legacy stringified `value` shape", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(epqsStringValue));
     const outcomes = await runAdapters({
@@ -291,6 +321,29 @@ describe("EPA EJScreen adapter", () => {
     expect(outcomes[0].error?.code).toBe("upstream-error");
     expect(outcomes[0].error?.message).toMatch(/geometry/);
   });
+
+  it("targets the broker3 endpoint (legacy `.aspx` deprecated 2023)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(ejscreenBlockGroup));
+    await runAdapters({
+      adapters: [epaEjscreenAdapter],
+      context: { ...bastrop, fetchImpl },
+    });
+    const calledUrl = String(fetchImpl.mock.calls[0][0]);
+    expect(calledUrl).toContain("ejscreenRESTbroker3.aspx");
+  });
+
+  it("retries a transient HTTP 503 from the broker before succeeding", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({}, 503))
+      .mockResolvedValueOnce(jsonResponse(ejscreenBlockGroup));
+    const outcomes = await runAdapters({
+      adapters: [epaEjscreenAdapter],
+      context: { ...bastrop, fetchImpl },
+    });
+    expect(outcomes[0].status).toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("FCC broadband adapter", () => {
@@ -332,6 +385,35 @@ describe("FCC broadband adapter", () => {
     expect(payload.providerCount).toBe(0);
     expect(payload.fastestDownstreamMbps).toBeNull();
     expect(outcomes[0].result?.note).toMatch(/no fixed-broadband/i);
+  });
+
+  it("hits the BDC v2 location/availability endpoint with lat+lng", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(fccBroadbandFeatures));
+    await runAdapters({
+      adapters: [fccBroadbandAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    const calledUrl = String(fetchImpl.mock.calls[0][0]);
+    expect(calledUrl).toContain("broadbandmap.fcc.gov");
+    expect(calledUrl).toContain("/published/location/availability");
+    expect(calledUrl).toMatch(/[?&]lat=38\.5733\b/);
+    expect(calledUrl).toMatch(/[?&]lng=-109\.5498\b/);
+    // The old broken path produced `/feature/0/query`; guard against
+    // any regression that brings it back.
+    expect(calledUrl).not.toContain("/feature/0/query");
+  });
+
+  it("retries an FCC HTTP 502 once before succeeding on the second attempt", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ msg: "bad gateway" }, 502))
+      .mockResolvedValueOnce(jsonResponse(fccBroadbandFeatures));
+    const outcomes = await runAdapters({
+      adapters: [fccBroadbandAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(outcomes[0].status).toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
 

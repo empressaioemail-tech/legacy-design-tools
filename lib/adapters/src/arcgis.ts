@@ -13,7 +13,10 @@
  *     "successful" empty response;
  *   - normalizes the resulting feature list to a small subset
  *     (`attributes` + `geometry`) so adapters don't depend on the full
- *     ArcGIS schema.
+ *     ArcGIS schema;
+ *   - retries transient upstream failures (HTTP 408/429/5xx, network
+ *     resets) via {@link fetchWithRetry} so a single ArcGIS hiccup
+ *     doesn't paint the row red.
  *
  * It does NOT handle paginated responses (the `exceededTransferLimit`
  * flag) — every adapter in this sprint queries by point intersection,
@@ -21,6 +24,7 @@
  */
 
 import { AdapterRunError } from "./types";
+import { fetchWithRetry } from "./retry";
 
 export interface ArcGisPointQueryInput {
   serviceUrl: string;
@@ -34,6 +38,12 @@ export interface ArcGisPointQueryInput {
   inSpatialReference?: number;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  /**
+   * Friendly upstream label used in retry / failure messages — e.g.
+   * "FEMA NFHL" or "Grand County, UT GIS parcels". Defaults to
+   * "ArcGIS" so legacy callers keep the historical wording.
+   */
+  upstreamLabel?: string;
 }
 
 export interface ArcGisFeature {
@@ -52,13 +62,14 @@ export interface ArcGisQueryResult {
 /**
  * Query an ArcGIS service layer for features intersecting the given
  * point. Throws an {@link AdapterRunError} on any deterministic upstream
- * failure (HTTP non-2xx, ArcGIS error envelope, malformed JSON).
+ * failure (HTTP non-2xx after retries, ArcGIS error envelope, malformed
+ * JSON).
  */
 export async function arcgisPointQuery(
   input: ArcGisPointQueryInput,
 ): Promise<ArcGisQueryResult> {
-  const fetchFn = input.fetchImpl ?? fetch;
   const sr = input.inSpatialReference ?? 4326;
+  const label = input.upstreamLabel ?? "ArcGIS";
   const url = new URL(`${input.serviceUrl.replace(/\/$/, "")}/query`);
   url.searchParams.set("f", "json");
   url.searchParams.set(
@@ -78,20 +89,19 @@ export async function arcgisPointQuery(
     input.returnGeometry ? "true" : "false",
   );
 
-  let res: Response;
-  try {
-    res = await fetchFn(url.toString(), { signal: input.signal });
-  } catch (err) {
-    // Surface as `network-error` so the runner translates uniformly.
-    throw new AdapterRunError(
-      "network-error",
-      `ArcGIS request failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+  const { response: res, attempts } = await fetchWithRetry(
+    url.toString(),
+    { signal: input.signal },
+    {
+      fetchImpl: input.fetchImpl,
+      signal: input.signal,
+      upstreamLabel: label,
+    },
+  );
   if (!res.ok) {
     throw new AdapterRunError(
       "upstream-error",
-      `ArcGIS responded with HTTP ${res.status}`,
+      `${label} responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
     );
   }
 
@@ -101,13 +111,13 @@ export async function arcgisPointQuery(
   } catch (err) {
     throw new AdapterRunError(
       "parse-error",
-      `ArcGIS response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
+      `${label} response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
   if (!json || typeof json !== "object") {
     throw new AdapterRunError(
       "parse-error",
-      "ArcGIS response was not a JSON object",
+      `${label} response was not a JSON object`,
     );
   }
   // ArcGIS surfaces in-band errors as `{ error: { code, message } }`
@@ -118,7 +128,7 @@ export async function arcgisPointQuery(
   if (errorEnv) {
     throw new AdapterRunError(
       "upstream-error",
-      `ArcGIS error ${errorEnv.code ?? "?"}: ${errorEnv.message ?? "unknown"}`,
+      `${label} error ${errorEnv.code ?? "?"}: ${errorEnv.message ?? "unknown"}`,
     );
   }
 
@@ -126,7 +136,7 @@ export async function arcgisPointQuery(
   if (!Array.isArray(featuresRaw)) {
     throw new AdapterRunError(
       "parse-error",
-      "ArcGIS response missing `features` array",
+      `${label} response missing \`features\` array`,
     );
   }
   const features: ArcGisFeature[] = featuresRaw.map((f) => {

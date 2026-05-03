@@ -1,10 +1,14 @@
 /**
  * Grand County, UT (Moab) local adapters.
  *
- * Grand County publishes parcels and zoning through its own ArcGIS
- * server at `https://gis.grandcountyutah.net/arcgis/rest/services/...`.
- * Roads are not consistently published on the county server, so the
- * roads adapter falls back to OpenStreetMap's Overpass API when the
+ * Grand County publishes parcels, zoning, and roads through its own
+ * ArcGIS server at `https://gis.grandcountyutah.net/server/rest/services/Public/...`
+ * (re-rooted from the legacy `/arcgis/...` tree). All calls go
+ * through {@link fetchWithRetry} so a single county-GIS hiccup
+ * (HTTP 408/429/5xx or a fetch reset) is retried before we surface
+ * the row as failed.
+ *
+ * Roads adapter falls back to OpenStreetMap's Overpass API when the
  * primary endpoint returns nothing or fails — per locked decision #2
  * ("fall back to OSM if county GIS isn't usable").
  *
@@ -21,17 +25,49 @@ import {
   type AdapterContext,
   type AdapterResult,
 } from "../types";
+import { fetchWithRetry } from "../retry";
 
+/**
+ * Grand County GIS — service URLs as published in the county's REST
+ * directory at https://gis.grandcountyutah.net/server/rest/services .
+ * Each entry points at the layer index that backs the spatial query
+ * (the `/0` layer of the corresponding feature service).
+ */
 const GRAND_COUNTY_ENDPOINTS = {
   parcels:
-    "https://gis.grandcountyutah.net/arcgis/rest/services/Cadastral/Parcels/MapServer/0",
+    "https://gis.grandcountyutah.net/server/rest/services/Public/Parcels/MapServer/0",
   zoning:
-    "https://gis.grandcountyutah.net/arcgis/rest/services/LandUse/Zoning/MapServer/0",
+    "https://gis.grandcountyutah.net/server/rest/services/Public/Zoning/MapServer/0",
   roads:
-    "https://gis.grandcountyutah.net/arcgis/rest/services/Transportation/Roads/MapServer/0",
+    "https://gis.grandcountyutah.net/server/rest/services/Public/Roads/MapServer/0",
 } as const;
 
 const OSM_OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+const OSM_OVERPASS_LABEL = "OSM Overpass";
+
+/**
+ * Per-adapter timeout override (ms) for the Grand County roads
+ * adapter. Sized to cover two full Overpass attempts at the
+ * server-side `[timeout:25]` plus backoff between them:
+ *   25s (attempt 1, e.g. HTTP 408 at the upstream timeout)
+ *   + ~2s backoff
+ *   + 25s (attempt 2)
+ *   ≈ 52s worst case, with headroom.
+ * Pairs with `OVERPASS_MAX_ATTEMPTS = 2` below — together the two
+ * constants keep the runner budget and retry policy mathematically
+ * consistent so a slow first failure can still complete the retry.
+ */
+const GRAND_COUNTY_ROADS_TIMEOUT_MS = 60_000;
+
+/** Overpass server-side `[timeout:N]` directive in seconds. */
+const OVERPASS_QL_TIMEOUT_SEC = 25;
+
+/**
+ * Max Overpass attempts (initial + retries). Capped at 2 so the
+ * worst-case wall time fits inside {@link GRAND_COUNTY_ROADS_TIMEOUT_MS}
+ * — 3 attempts of 25s each would blow the runner budget.
+ */
+const OVERPASS_MAX_ATTEMPTS = 2;
 
 /**
  * Freshness windows for the Grand County, UT (Moab) adapters, in
@@ -86,6 +122,7 @@ export const grandCountyParcelsAdapter: Adapter = {
       returnGeometry: true,
       fetchImpl: ctx.fetchImpl,
       signal: ctx.signal,
+      upstreamLabel: "Grand County, UT GIS parcels",
     });
     if (result.features.length === 0) {
       throw new AdapterRunError(
@@ -125,6 +162,7 @@ export const grandCountyZoningAdapter: Adapter = {
       returnGeometry: true,
       fetchImpl: ctx.fetchImpl,
       signal: ctx.signal,
+      upstreamLabel: "Grand County, UT GIS zoning",
     });
     if (result.features.length === 0) {
       throw new AdapterRunError(
@@ -154,6 +192,10 @@ export const grandCountyRoadsAdapter: Adapter = {
   layerKind: "grand-county-ut-roads",
   provider: "Grand County, UT GIS / OpenStreetMap (fallback)",
   jurisdictionGate: { local: "grand-county-ut" },
+  // Widen the runner's per-adapter timeout for this adapter only —
+  // Overpass needs more than the 15s default to reply (see
+  // GRAND_COUNTY_ROADS_TIMEOUT_MS docstring).
+  timeoutMs: GRAND_COUNTY_ROADS_TIMEOUT_MS,
   appliesTo: grandCountyApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     // Try the county GIS first.
@@ -166,6 +208,7 @@ export const grandCountyRoadsAdapter: Adapter = {
         returnGeometry: false,
         fetchImpl: ctx.fetchImpl,
         signal: ctx.signal,
+        upstreamLabel: "Grand County, UT GIS roads",
       });
       if (result.features.length > 0) {
         return {
@@ -189,32 +232,42 @@ export const grandCountyRoadsAdapter: Adapter = {
   },
 };
 
-async function runOsmRoadsFallback(
+/**
+ * Overpass roads fallback. Exported only for unit tests so the retry
+ * + timeout behaviour can be exercised directly without going through
+ * the county-GIS-fails-first ladder. Production callers use the
+ * adapter's `run()` instead.
+ */
+export async function runOsmRoadsFallback(
   ctx: AdapterContext,
   adapter: Adapter,
 ): Promise<AdapterResult> {
-  const fetchFn = ctx.fetchImpl ?? fetch;
-  // Overpass: highways within 100m of the point.
+  // The runner enforces this adapter's per-call budget via
+  // `Adapter.timeoutMs` (`GRAND_COUNTY_ROADS_TIMEOUT_MS`), sized to
+  // cover Overpass's own `[timeout:25]` directive plus one retry.
+  // Forward the runner's signal verbatim so a caller-driven cancel
+  // still wins and we don't double-cap with a tighter local deadline.
   const radius = 100;
-  const query = `[out:json][timeout:10];way(around:${radius},${ctx.parcel.latitude},${ctx.parcel.longitude})[highway];out body geom 50;`;
-  let res: Response;
-  try {
-    res = await fetchFn(OSM_OVERPASS_URL, {
+  const query = `[out:json][timeout:${OVERPASS_QL_TIMEOUT_SEC}];way(around:${radius},${ctx.parcel.latitude},${ctx.parcel.longitude})[highway];out body geom 50;`;
+  const { response: res, attempts } = await fetchWithRetry(
+    OSM_OVERPASS_URL,
+    {
       method: "POST",
       body: query,
       headers: { "Content-Type": "text/plain" },
       signal: ctx.signal,
-    });
-  } catch (err) {
-    throw new AdapterRunError(
-      "network-error",
-      `OSM Overpass request failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+    },
+    {
+      fetchImpl: ctx.fetchImpl,
+      signal: ctx.signal,
+      upstreamLabel: OSM_OVERPASS_LABEL,
+      maxAttempts: OVERPASS_MAX_ATTEMPTS,
+    },
+  );
   if (!res.ok) {
     throw new AdapterRunError(
       "upstream-error",
-      `OSM Overpass returned HTTP ${res.status}`,
+      `OSM Overpass returned HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
     );
   }
   let json: unknown;

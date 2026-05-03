@@ -2,15 +2,19 @@
  * EPA EJScreen — federal environmental-justice screening adapter.
  *
  * EPA EJScreen publishes block-group level environmental + demographic
- * indicators. The public broker endpoint at
- * `https://ejscreen.epa.gov/mapper/ejscreenRESTbroker.aspx` accepts a
- * point geometry and returns a JSON envelope with the indicators for
+ * indicators. The current public broker endpoint is
+ * `https://ejscreen.epa.gov/mapper/ejscreenRESTbroker3.aspx` (the
+ * legacy `ejscreenRESTbroker.aspx` was deprecated in 2023). It accepts
+ * a point geometry and returns a JSON envelope with the indicators for
  * the enclosing block group (population, demographic index, key
  * pollution percentiles).
  *
  * The broker's response shape is awkward (it nests the indicators
  * inside `data.main` as named fields) so we surface the raw envelope
  * verbatim plus a normalized subset the briefing engine reads first.
+ *
+ * Calls go through {@link fetchWithRetry} so transient broker
+ * hiccups are not surfaced as a hard failure on the first try.
  */
 
 import {
@@ -19,9 +23,11 @@ import {
   type AdapterContext,
   type AdapterResult,
 } from "../types";
+import { fetchWithRetry } from "../retry";
 
 const EPA_EJSCREEN_BROKER =
-  "https://ejscreen.epa.gov/mapper/ejscreenRESTbroker.aspx";
+  "https://ejscreen.epa.gov/mapper/ejscreenRESTbroker3.aspx";
+const EPA_EJSCREEN_LABEL = "EPA EJScreen";
 
 /**
  * Freshness window for the EPA EJScreen snapshot.
@@ -52,37 +58,37 @@ export const epaEjscreenAdapter: Adapter = {
   jurisdictionGate: {},
   appliesTo: federalApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
-    const fetchFn = ctx.fetchImpl ?? fetch;
     const url = new URL(EPA_EJSCREEN_BROKER);
     url.searchParams.set("namespace", "EJScreen");
     url.searchParams.set(
       "geometry",
       JSON.stringify({
+        spatialReference: { wkid: 4326 },
         x: ctx.parcel.longitude,
         y: ctx.parcel.latitude,
-        spatialReference: { wkid: 4326 },
       }),
     );
-    // 1 meter buffer keeps the API's required `distance` happy without
-    // pulling in a neighborhood we did not ask for.
+    // Broker3 contract: distance in `unit` (9035 = meters). 1m keeps
+    // the lookup pinned to the enclosing block group without pulling
+    // adjacent geographies.
     url.searchParams.set("distance", "1");
     url.searchParams.set("unit", "9035");
     url.searchParams.set("areatype", "blockgroup");
     url.searchParams.set("f", "pjson");
 
-    let res: Response;
-    try {
-      res = await fetchFn(url.toString(), { signal: ctx.signal });
-    } catch (err) {
-      throw new AdapterRunError(
-        "network-error",
-        `EJScreen request failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    const { response: res, attempts } = await fetchWithRetry(
+      url.toString(),
+      { signal: ctx.signal },
+      {
+        fetchImpl: ctx.fetchImpl,
+        signal: ctx.signal,
+        upstreamLabel: EPA_EJSCREEN_LABEL,
+      },
+    );
     if (!res.ok) {
       throw new AdapterRunError(
         "upstream-error",
-        `EJScreen responded with HTTP ${res.status}`,
+        `EPA EJScreen responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
       );
     }
     let json: unknown;
@@ -91,19 +97,22 @@ export const epaEjscreenAdapter: Adapter = {
     } catch (err) {
       throw new AdapterRunError(
         "parse-error",
-        `EJScreen response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
+        `EPA EJScreen response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
     if (!json || typeof json !== "object") {
       throw new AdapterRunError(
         "parse-error",
-        "EJScreen response was not a JSON object",
+        "EPA EJScreen response was not a JSON object",
       );
     }
     // Broker surfaces failures inline as `{ error: "..." }`.
     const errMsg = (json as { error?: unknown }).error;
     if (typeof errMsg === "string" && errMsg.length > 0) {
-      throw new AdapterRunError("upstream-error", `EJScreen error: ${errMsg}`);
+      throw new AdapterRunError(
+        "upstream-error",
+        `EPA EJScreen error: ${errMsg}`,
+      );
     }
     const data =
       ((json as { data?: unknown }).data as { main?: unknown } | undefined) ??

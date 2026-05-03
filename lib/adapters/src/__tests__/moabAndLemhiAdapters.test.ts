@@ -98,6 +98,77 @@ describe("Moab / Grand County UT adapter chain", () => {
     expect(payload.source).toBe("osm");
     expect(outcomes[0].result?.provider).toMatch(/OpenStreetMap/i);
   });
+
+  it("declares a roads-adapter timeout floor wide enough for two Overpass attempts", async () => {
+    // Two attempts at the upstream's `[timeout:25]` plus backoff
+    // should comfortably fit in the configured budget.
+    expect(grandCountyRoadsAdapter.timeoutMs).toBeGreaterThanOrEqual(50_000);
+  });
+
+  it("completes the Overpass fallback when the first attempt 408s after 25s and the second succeeds near the upstream timeout", async () => {
+    // Production-failure shape: Overpass hits its own server-side
+    // `[timeout:25]` and returns HTTP 408 at ~25s, then the retry
+    // succeeds at ~25s. Total ~50s — would be killed by the legacy
+    // 15s runner default, but the adapter's timeout floor keeps the
+    // window open.
+    vi.useFakeTimers();
+    try {
+      let overpassCalls = 0;
+      const sleep = (ms: number): Promise<void> =>
+        new Promise((resolve) => setTimeout(resolve, ms));
+      const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("overpass")) {
+          overpassCalls += 1;
+          await sleep(25_000);
+          if (overpassCalls === 1) {
+            return new Response("upstream timeout", { status: 408 });
+          }
+          return jsonResponse(osmRoadsResponse);
+        }
+        return jsonResponse(arcgisEmpty);
+      });
+      const promise = runAdapters({
+        adapters: [grandCountyRoadsAdapter],
+        context: { ...moab, fetchImpl, timeoutMs: 15_000 },
+      });
+      await vi.advanceTimersByTimeAsync(55_000);
+      const outcomes = await promise;
+      expect(outcomes[0].status).toBe("ok");
+      expect(overpassCalls).toBe(2);
+      const payload = outcomes[0].result?.payload as { source: string };
+      expect(payload.source).toBe("osm");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries an immediate Overpass HTTP 408 before completing the OSM fallback", async () => {
+    // First call hits the county GIS (empty -> triggers OSM fallback);
+    // the next two calls hit Overpass — the first returns 408, the
+    // second returns the recorded OSM body. The adapter must retry
+    // the 408 instead of surfacing it as a hard failure.
+    let overpassCalls = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("overpass")) {
+        overpassCalls += 1;
+        if (overpassCalls === 1) {
+          return new Response("upstream timeout", { status: 408 });
+        }
+        return jsonResponse(osmRoadsResponse);
+      }
+      return jsonResponse(arcgisEmpty);
+    });
+    const outcomes = await runAdapters({
+      adapters: [grandCountyRoadsAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(outcomes[0].status).toBe("ok");
+    expect(overpassCalls).toBe(2);
+    const payload = outcomes[0].result?.payload as { source: string };
+    expect(payload.source).toBe("osm");
+  });
 });
 
 describe("Salmon / Lemhi County ID adapter chain", () => {

@@ -14,6 +14,11 @@
  * The service occasionally returns the elevation value as a string
  * (older deployments) or `-1000000` as a sentinel for "no data at this
  * point". We normalize both into `elevationFeet: number | null`.
+ *
+ * The v1 EPQS contract accepts only `x`, `y`, `units`, and `output`
+ * — sending `wkid` or `includeDate` causes HTTP 400. Calls go through
+ * {@link fetchWithRetry} so a transient EPQS hiccup is not surfaced
+ * as a hard failure on the first try.
  */
 
 import {
@@ -22,8 +27,10 @@ import {
   type AdapterContext,
   type AdapterResult,
 } from "../types";
+import { fetchWithRetry } from "../retry";
 
 const USGS_EPQS_ENDPOINT = "https://epqs.nationalmap.gov/v1/json";
+const USGS_EPQS_LABEL = "USGS EPQS";
 
 /** EPQS sentinel for "raster has no value at this point". */
 const EPQS_NODATA_SENTINEL = -1_000_000;
@@ -58,27 +65,27 @@ export const usgsNedAdapter: Adapter = {
   jurisdictionGate: {},
   appliesTo: federalApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
-    const fetchFn = ctx.fetchImpl ?? fetch;
     const url = new URL(USGS_EPQS_ENDPOINT);
     url.searchParams.set("x", String(ctx.parcel.longitude));
     url.searchParams.set("y", String(ctx.parcel.latitude));
     url.searchParams.set("units", "Feet");
-    url.searchParams.set("wkid", "4326");
-    url.searchParams.set("includeDate", "false");
+    // Explicit `output=json` is the contract; the path's `/v1/json`
+    // suffix is sticky but EPQS still validates the param when set.
+    url.searchParams.set("output", "json");
 
-    let res: Response;
-    try {
-      res = await fetchFn(url.toString(), { signal: ctx.signal });
-    } catch (err) {
-      throw new AdapterRunError(
-        "network-error",
-        `USGS EPQS request failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    const { response: res, attempts } = await fetchWithRetry(
+      url.toString(),
+      { signal: ctx.signal },
+      {
+        fetchImpl: ctx.fetchImpl,
+        signal: ctx.signal,
+        upstreamLabel: USGS_EPQS_LABEL,
+      },
+    );
     if (!res.ok) {
       throw new AdapterRunError(
         "upstream-error",
-        `USGS EPQS responded with HTTP ${res.status}`,
+        `USGS EPQS responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
       );
     }
     let json: unknown;

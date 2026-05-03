@@ -152,7 +152,14 @@ async function runOne(
     }
   }
 
-  const timeoutMs = context.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Per-adapter timeout: max(runner default, adapter override) so a
+  // longer caller-provided budget still wins and adapters can only
+  // widen, never tighten, the per-call window.
+  const baseTimeoutMs = context.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs =
+    typeof adapter.timeoutMs === "number" && adapter.timeoutMs > baseTimeoutMs
+      ? adapter.timeoutMs
+      : baseTimeoutMs;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   // Plumb the caller's signal through too — if the request handler
@@ -271,7 +278,7 @@ function toAdapterError(
   ) {
     return {
       code: "timeout",
-      message: `Adapter exceeded ${timeoutMs}ms and was cancelled.`,
+      message: `Adapter exceeded ${timeoutMs}ms and was cancelled. Use Force refresh to retry.`,
     };
   }
   if (err instanceof Error) {
@@ -279,9 +286,17 @@ function toAdapterError(
     // failure becomes `network-error`, everything else is `unknown`.
     const looksLikeFetch =
       err.name === "TypeError" || /fetch|network|ENOTFOUND|ECONN/i.test(err.message);
+    const baseMsg = err.message || "Adapter run failed";
+    // Avoid double-suffixing when an inner adapter (e.g. via
+    // fetchWithRetry) has already appended the call-to-action.
+    const message = /Force refresh/i.test(baseMsg)
+      ? baseMsg
+      : looksLikeFetch
+        ? `${baseMsg} Use Force refresh to retry.`
+        : baseMsg;
     return {
       code: looksLikeFetch ? "network-error" : "unknown",
-      message: err.message || "Adapter run failed",
+      message,
     };
   }
   return { code: "unknown", message: "Adapter run failed (non-Error throw)" };

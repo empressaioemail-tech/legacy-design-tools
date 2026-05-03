@@ -1,30 +1,31 @@
 /**
- * FCC Form 477 / National Broadband Map — federal broadband-availability
+ * FCC Broadband Data Collection (BDC) — federal broadband-availability
  * adapter.
  *
- * The FCC publishes census-block level fixed-broadband availability via
- * the National Broadband Map's public ArcGIS feature service. We query
- * the layer by point intersection and pull the deployed-technology +
- * max-downstream-Mbps fields per provider record. The adapter rolls
- * those rows up into one summary payload (number of providers, fastest
- * downstream / upstream tier seen) plus the raw rows so the briefing
- * engine can drill in.
+ * Uses the documented BDC v2 "availability at coordinate" JSON
+ * endpoint, which accepts a lat/lng and returns one row per
+ * fixed-broadband provider serving the BDC fabric location. The call
+ * goes through {@link fetchWithRetry} so a transient FCC blip is
+ * retried before we surface a row as failed. Output payload shape is
+ * unchanged from prior revisions so downstream readers keep working.
  */
 
-import { arcgisPointQuery } from "../arcgis";
 import {
+  AdapterRunError,
   type Adapter,
   type AdapterContext,
   type AdapterResult,
 } from "../types";
+import { fetchWithRetry } from "../retry";
 
 /**
- * FCC fixed-broadband deployment layer (Form 477 successor — National
- * Broadband Map fabric). The map server URL is documented at
- * https://broadbandmap.fcc.gov/data-download.
+ * BDC v2 published JSON endpoint. Documented at
+ * https://broadbandmap.fcc.gov/data-download/nationwide-data — the
+ * "location availability" lookup.
  */
-const FCC_BROADBAND_LAYER =
-  "https://broadbandmap.fcc.gov/nbm/map/api/published/v1/location/area/feature/0";
+const FCC_BDC_AVAILABILITY_ENDPOINT =
+  "https://broadbandmap.fcc.gov/nbm/map/api/published/location/availability";
+const FCC_BROADBAND_LABEL = "FCC National Broadband Map";
 
 /**
  * Freshness window for the FCC National Broadband Map snapshot.
@@ -54,22 +55,101 @@ interface FccProviderRow {
   isResidential: boolean | null;
 }
 
+/** Coerce a number from either a number or stringified-number field. */
+function pickNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function pickString(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/**
+ * Translate one BDC availability row (or one ArcGIS feature attribute
+ * bag, kept for backward-compat with any cached envelopes still in
+ * the ArcGIS shape) into the normalized provider record the briefing
+ * engine consumes.
+ *
+ * BDC v2 ships fields like `brand_name`, `technology` /
+ * `technology_code`, `max_advertised_download_speed`,
+ * `max_advertised_upload_speed`, and `low_latency`. The legacy ArcGIS
+ * shape used `BrandName`, `TechCode`, `MaxAdDown`, `MaxAdUp`,
+ * `LowLatency`, `Residential`. We accept both so a partial rollout
+ * (or a cached row from before this task landed) keeps decoding.
+ */
 function toProviderRow(attrs: Record<string, unknown>): FccProviderRow {
+  const provider =
+    pickString(attrs.brand_name) ??
+    pickString(attrs.BrandName) ??
+    pickString(attrs.provider_name);
+  const technologyCode =
+    pickNumber(attrs.technology_code) ??
+    pickNumber(attrs.TechCode) ??
+    pickNumber(attrs.technology);
+  const down =
+    pickNumber(attrs.max_advertised_download_speed) ??
+    pickNumber(attrs.MaxAdDown) ??
+    pickNumber(attrs.max_down);
+  const up =
+    pickNumber(attrs.max_advertised_upload_speed) ??
+    pickNumber(attrs.MaxAdUp) ??
+    pickNumber(attrs.max_up);
+  let isResidential: boolean | null = null;
+  if (typeof attrs.low_latency === "boolean") isResidential = attrs.low_latency;
+  else if (typeof attrs.LowLatency === "boolean") isResidential = attrs.LowLatency;
+  else if (typeof attrs.Residential === "number") isResidential = attrs.Residential === 1;
+  else if (typeof attrs.residential === "number") isResidential = attrs.residential === 1;
   return {
-    provider: typeof attrs.BrandName === "string" ? attrs.BrandName : null,
-    technologyCode:
-      typeof attrs.TechCode === "number" ? attrs.TechCode : null,
-    maxAdvertisedDownstreamMbps:
-      typeof attrs.MaxAdDown === "number" ? attrs.MaxAdDown : null,
-    maxAdvertisedUpstreamMbps:
-      typeof attrs.MaxAdUp === "number" ? attrs.MaxAdUp : null,
-    isResidential:
-      typeof attrs.LowLatency === "boolean"
-        ? attrs.LowLatency
-        : typeof attrs.Residential === "number"
-          ? attrs.Residential === 1
-          : null,
+    provider,
+    technologyCode,
+    maxAdvertisedDownstreamMbps: down,
+    maxAdvertisedUpstreamMbps: up,
+    isResidential,
   };
+}
+
+/**
+ * Walk the BDC envelope's nested shapes and return the flat list of
+ * provider attribute bags. BDC v2 returns `{ data: [...] }` for the
+ * primary contract; we also accept `{ providers: [...] }` and the
+ * legacy ArcGIS `{ features: [{ attributes: {...} }] }` envelope so
+ * cached rows and any future contract shifts both decode.
+ */
+function extractProviderAttrs(
+  envelope: unknown,
+): Record<string, unknown>[] {
+  if (!envelope || typeof envelope !== "object") return [];
+  const env = envelope as {
+    data?: unknown;
+    providers?: unknown;
+    features?: unknown;
+  };
+  if (Array.isArray(env.data)) {
+    return env.data.filter(
+      (r): r is Record<string, unknown> =>
+        Boolean(r) && typeof r === "object",
+    );
+  }
+  if (Array.isArray(env.providers)) {
+    return env.providers.filter(
+      (r): r is Record<string, unknown> =>
+        Boolean(r) && typeof r === "object",
+    );
+  }
+  if (Array.isArray(env.features)) {
+    return env.features
+      .map((f) => (f as { attributes?: unknown }).attributes)
+      .filter(
+        (a): a is Record<string, unknown> =>
+          Boolean(a) && typeof a === "object",
+      );
+  }
+  return [];
 }
 
 export const fccBroadbandAdapter: Adapter = {
@@ -81,17 +161,36 @@ export const fccBroadbandAdapter: Adapter = {
   jurisdictionGate: {},
   appliesTo: federalApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
-    const result = await arcgisPointQuery({
-      serviceUrl: FCC_BROADBAND_LAYER,
-      latitude: ctx.parcel.latitude,
-      longitude: ctx.parcel.longitude,
-      outFields:
-        "BrandName,TechCode,MaxAdDown,MaxAdUp,LowLatency,Residential",
-      returnGeometry: false,
-      fetchImpl: ctx.fetchImpl,
-      signal: ctx.signal,
-    });
-    if (result.features.length === 0) {
+    const url = new URL(FCC_BDC_AVAILABILITY_ENDPOINT);
+    url.searchParams.set("lat", String(ctx.parcel.latitude));
+    url.searchParams.set("lng", String(ctx.parcel.longitude));
+
+    const { response: res, attempts } = await fetchWithRetry(
+      url.toString(),
+      { signal: ctx.signal, headers: { Accept: "application/json" } },
+      {
+        fetchImpl: ctx.fetchImpl,
+        signal: ctx.signal,
+        upstreamLabel: FCC_BROADBAND_LABEL,
+      },
+    );
+    if (!res.ok) {
+      throw new AdapterRunError(
+        "upstream-error",
+        `FCC National Broadband Map responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
+      );
+    }
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch (err) {
+      throw new AdapterRunError(
+        "parse-error",
+        `FCC NBM response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const rows = extractProviderAttrs(json);
+    if (rows.length === 0) {
       return {
         adapterKey: this.adapterKey,
         tier: this.tier,
@@ -109,9 +208,7 @@ export const fccBroadbandAdapter: Adapter = {
         note: "FCC reports no fixed-broadband deployment at this location.",
       };
     }
-    const providers = result.features.map((f) =>
-      toProviderRow(f.attributes),
-    );
+    const providers = rows.map(toProviderRow);
     const downs = providers
       .map((p) => p.maxAdvertisedDownstreamMbps)
       .filter((n): n is number => typeof n === "number");

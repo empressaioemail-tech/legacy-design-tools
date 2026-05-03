@@ -219,6 +219,14 @@ export interface Adapter {
   };
   appliesTo(ctx: AdapterContext): boolean;
   /**
+   * Optional adapter-specific timeout floor (ms). The runner takes
+   * `max(adapter.timeoutMs, context.timeoutMs)` so known-slow
+   * upstreams (e.g. OSM Overpass with its server-side `[timeout:25]`
+   * directive) can widen the per-adapter budget past the runner
+   * default. Leave unset for the common case.
+   */
+  readonly timeoutMs?: number;
+  /**
    * Run the adapter. Throws `AdapterRunError` for handled failure modes
    * — the runner translates the throw into an {@link AdapterRunOutcome}
    * with `status: "failed"`. Anything else propagates so the runner can
