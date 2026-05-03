@@ -23,8 +23,9 @@ querystring round-trips cleanly.
  */
   embedded?: ListCodeAtomsEmbedded;
   /**
- * Case-insensitive substring match against `sectionNumber` OR
-`sectionTitle`. Trimmed; empty string is treated as no filter.
+ * Case-insensitive substring match against `sectionNumber`,
+`sectionTitle`, OR `body` (the full code text). Trimmed;
+empty string is treated as no filter.
 
  */
   q?: string;

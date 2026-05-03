@@ -121,7 +121,9 @@ describe("GET /api/codes/jurisdictions", () => {
 
 describe("POST /api/codes/warmup/:key", () => {
   it("404s when the jurisdiction key is not registered", async () => {
-    const res = await request(getApp()).post("/api/codes/warmup/nowhere_xx");
+    const res = await request(getApp())
+      .post("/api/codes/warmup/nowhere_xx")
+      .set("x-audience", "internal");
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "Unknown jurisdiction" });
   });
@@ -150,9 +152,9 @@ describe("POST /api/codes/warmup/:key", () => {
       },
     ];
 
-    const res = await request(getApp()).post(
-      "/api/codes/warmup/grand_county_ut",
-    );
+    const res = await request(getApp())
+      .post("/api/codes/warmup/grand_county_ut")
+      .set("x-audience", "internal");
     expect(res.status).toBe(200);
     expect(res.body.jurisdictionKey).toBe("grand_county_ut");
     // 2 books × 2 entries each = 4 enqueued.
@@ -396,6 +398,19 @@ describe("GET /api/codes/atoms (global inspector list)", () => {
     expect(refs).toEqual(["R301.2.1", "R301.2.WIND.X"]);
   });
 
+  it("free-text q matches the body column, not just section number/title", async () => {
+    await seedInspectorFixture();
+    // "roof body" appears only in the body field of section 503.2 — its
+    // section number and title contain neither token — so a match here
+    // proves the q filter reaches the body column.
+    const res = await request(getApp()).get(
+      "/api/codes/atoms?q=" + encodeURIComponent("roof body"),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(1);
+    expect(res.body.items[0].sectionNumber).toBe("503.2");
+  });
+
   it("paginates via limit + offset and reports the unfiltered total", async () => {
     await seedInspectorFixture();
     const page1 = await request(getApp()).get(
@@ -428,6 +443,41 @@ describe("GET /api/codes/atoms (global inspector list)", () => {
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(0);
     expect(res.body.items).toEqual([]);
+  });
+});
+
+describe("audience guards on mutation routes", () => {
+  it("403s POST /api/codes/warmup/:key for the applicant audience", async () => {
+    const res = await request(getApp())
+      .post("/api/codes/warmup/grand_county_ut")
+      .set("x-audience", "user");
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({
+      error: "codes_warmup_requires_internal_audience",
+    });
+  });
+
+  it("403s POST /api/codes/embeddings/backfill for the applicant audience", async () => {
+    const res = await request(getApp())
+      .post("/api/codes/embeddings/backfill")
+      .set("x-audience", "user");
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({
+      error: "codes_backfill_requires_internal_audience",
+    });
+  });
+
+  it("allows POST /api/codes/embeddings/backfill for the internal audience (empty queue)", async () => {
+    const res = await request(getApp())
+      .post("/api/codes/embeddings/backfill")
+      .set("x-audience", "internal");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      scanned: 0,
+      embedded: 0,
+      failed: 0,
+      remaining: 0,
+    });
   });
 });
 
@@ -652,7 +702,9 @@ describe("GET /api/codes/jurisdictions/:key/atoms", () => {
         sourceUrl: url,
       },
     ];
-    await request(getApp()).post("/api/codes/warmup/grand_county_ut");
+    await request(getApp())
+      .post("/api/codes/warmup/grand_county_ut")
+      .set("x-audience", "internal");
 
     // Unfiltered: all three drained atoms (synchronous warmup pulls 3).
     const all = await request(getApp()).get(
@@ -691,9 +743,9 @@ describe("GET /api/codes/jurisdictions/:key/atoms", () => {
     sourceMocks.listTocImpl = async () => [];
     sourceMocks.fetchSectionImpl = async () => [];
 
-    const res = await request(getApp()).post(
-      "/api/codes/warmup/grand_county_ut",
-    );
+    const res = await request(getApp())
+      .post("/api/codes/warmup/grand_county_ut")
+      .set("x-audience", "internal");
     expect(res.status).toBe(200);
     expect(res.body.enqueued).toBe(0);
     expect(Array.isArray(res.body.discoveryErrors)).toBe(true);
@@ -725,7 +777,9 @@ describe("GET /api/codes/jurisdictions/:key/atoms", () => {
       },
     ];
 
-    await request(getApp()).post("/api/codes/warmup/grand_county_ut");
+    await request(getApp())
+      .post("/api/codes/warmup/grand_county_ut")
+      .set("x-audience", "internal");
 
     const list = await request(getApp()).get(
       "/api/codes/jurisdictions/grand_county_ut/atoms",

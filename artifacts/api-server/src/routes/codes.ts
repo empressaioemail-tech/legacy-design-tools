@@ -13,6 +13,11 @@ import {
   listJurisdictions,
 } from "@workspace/codes";
 import { logger } from "../lib/logger";
+import { requireArchitectAudience } from "../lib/audienceGuards";
+
+const CODES_WARMUP_AUDIENCE_ERROR = "codes_warmup_requires_internal_audience";
+const CODES_BACKFILL_AUDIENCE_ERROR =
+  "codes_backfill_requires_internal_audience";
 
 const router: IRouter = Router();
 
@@ -214,9 +219,10 @@ router.get(
     const embeddedRaw = req.query.embedded;
     const embeddedFilter =
       embeddedRaw === "true" ? true : embeddedRaw === "false" ? false : null;
-    // q: free-text substring match against sectionNumber OR sectionTitle.
-    // Trimmed; empty after trim → no filter. Wrapped in %...% server-side
-    // so the caller doesn't have to worry about escaping wildcards.
+    // q: free-text substring match against sectionNumber OR sectionTitle
+    // OR body (full code text). Trimmed; empty after trim → no filter.
+    // Wrapped in %...% server-side so the caller doesn't have to worry
+    // about escaping wildcards.
     const qRaw = req.query.q ? String(req.query.q).trim() : "";
     const qFilter = qRaw.length > 0 ? qRaw : null;
 
@@ -236,12 +242,14 @@ router.get(
       if (embeddedFilter === false) conditions.push(isNull(codeAtoms.embedding));
       if (qFilter) {
         const pattern = `%${qFilter}%`;
-        // ilike for case-insensitive substring; OR across the two text
-        // columns operators are most likely to inspect.
+        // ilike for case-insensitive substring; OR across section number,
+        // title, and body so reviewers can search the full code text — not
+        // just the headings.
         conditions.push(
           or(
             ilike(codeAtoms.sectionNumber, pattern),
             ilike(codeAtoms.sectionTitle, pattern),
+            ilike(codeAtoms.body, pattern),
           )!,
         );
       }
@@ -479,6 +487,8 @@ router.get(
 router.post(
   "/codes/warmup/:key",
   async (req: Request, res: Response): Promise<void> => {
+    if (requireArchitectAudience(req, res, CODES_WARMUP_AUDIENCE_ERROR))
+      return;
     const key = String(req.params.key ?? "");
     if (!getJurisdiction(key)) {
       res.status(404).json({ error: "Unknown jurisdiction" });
@@ -518,6 +528,8 @@ router.post(
 router.post(
   "/codes/embeddings/backfill",
   async (req: Request, res: Response): Promise<void> => {
+    if (requireArchitectAudience(req, res, CODES_BACKFILL_AUDIENCE_ERROR))
+      return;
     const limit = Math.min(
       Math.max(Number(req.query.limit ?? 200) || 200, 1),
       1000,

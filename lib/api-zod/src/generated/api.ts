@@ -2906,7 +2906,7 @@ export const ListCodeAtomsQueryParams = zod.object({
     .string()
     .optional()
     .describe(
-      "Case-insensitive substring match against `sectionNumber` OR\n`sectionTitle`. Trimmed; empty string is treated as no filter.\n",
+      "Case-insensitive substring match against `sectionNumber`,\n`sectionTitle`, OR `body` (the full code text). Trimmed;\nempty string is treated as no filter.\n",
     ),
   limit: zod.coerce
     .number()
@@ -3045,6 +3045,38 @@ export const WarmupJurisdictionResponse = zod.object({
       'Per-book discovery-phase failures (missing source row, listToc\nthrew, etc). Empty array on success. Surfaced to the UI so the\n\"warmup discovered nothing\" silent-failure case is debuggable\nfrom the browser.\n',
     ),
 });
+
+/**
+ * Embeds atoms whose `embedding` column IS NULL, in chunks of 64.
+Bounded by `?limit=` (default 200, hard cap 1000). Safe to call
+repeatedly. Returns counts the UI can show inline; `remaining`
+reports the post-run count of un-embedded atoms across all
+jurisdictions so the caller can disable the action when it
+reaches zero.
+
+ * @summary One-shot backfill — embed any atoms still missing a vector
+ */
+export const backfillCodeEmbeddingsQueryLimitDefault = 200;
+export const backfillCodeEmbeddingsQueryLimitMax = 1000;
+
+export const BackfillCodeEmbeddingsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(backfillCodeEmbeddingsQueryLimitMax)
+    .default(backfillCodeEmbeddingsQueryLimitDefault),
+});
+
+export const BackfillCodeEmbeddingsResponse = zod
+  .object({
+    scanned: zod.number(),
+    embedded: zod.number(),
+    failed: zod.number(),
+    remaining: zod.number(),
+  })
+  .describe(
+    "Result of `POST \/codes\/embeddings\/backfill`. `scanned` is how many\nrows the run picked up (bounded by the request's `limit`),\n`embedded` is how many succeeded, `failed` is how many threw or\nhad a missing vector, and `remaining` is the post-run count of\natoms still missing an embedding across all jurisdictions.\n",
+  );
 
 /**
  * Operator-facing diagnostic backing the `/dev/atoms/probe` page. Runs the

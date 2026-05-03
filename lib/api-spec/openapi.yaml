@@ -1810,8 +1810,9 @@ paths:
           in: query
           required: false
           description: |
-            Case-insensitive substring match against `sectionNumber` OR
-            `sectionTitle`. Trimmed; empty string is treated as no filter.
+            Case-insensitive substring match against `sectionNumber`,
+            `sectionTitle`, OR `body` (the full code text). Trimmed;
+            empty string is treated as no filter.
           schema:
             type: string
         - name: limit
@@ -1929,6 +1930,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /codes/embeddings/backfill:
+    post:
+      operationId: backfillCodeEmbeddings
+      tags: [codes]
+      summary: One-shot backfill — embed any atoms still missing a vector
+      description: |
+        Embeds atoms whose `embedding` column IS NULL, in chunks of 64.
+        Bounded by `?limit=` (default 200, hard cap 1000). Safe to call
+        repeatedly. Returns counts the UI can show inline; `remaining`
+        reports the post-run count of un-embedded atoms across all
+        jurisdictions so the caller can disable the action when it
+        reaches zero.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 200
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Backfill result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmbeddingsBackfillResult"
 
   /dev/atoms/retrieve:
     post:
@@ -7792,6 +7822,29 @@ components:
         - startedAt
         - completedAt
         - lastError
+
+    EmbeddingsBackfillResult:
+      type: object
+      description: |
+        Result of `POST /codes/embeddings/backfill`. `scanned` is how many
+        rows the run picked up (bounded by the request's `limit`),
+        `embedded` is how many succeeded, `failed` is how many threw or
+        had a missing vector, and `remaining` is the post-run count of
+        atoms still missing an embedding across all jurisdictions.
+      properties:
+        scanned:
+          type: integer
+        embedded:
+          type: integer
+        failed:
+          type: integer
+        remaining:
+          type: integer
+      required:
+        - scanned
+        - embedded
+        - failed
+        - remaining
 
     MaterializableElementKind:
       type: string

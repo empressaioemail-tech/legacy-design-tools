@@ -19,6 +19,7 @@ import type {
 import type {
   AtomHistoryResponse,
   AtomSummary,
+  BackfillCodeEmbeddingsParams,
   BimModelDivergenceResponse,
   BimModelRefreshResponse,
   BriefingGenerationRunsResponse,
@@ -42,6 +43,7 @@ import type {
   Decision,
   DismissReviewerRequestBody,
   DraftSubmissionCommunicationResponse,
+  EmbeddingsBackfillResult,
   EngagementBimModelResponse,
   EngagementBriefingResponse,
   EngagementBriefingSourcesResponse,
@@ -4325,6 +4327,114 @@ export const useWarmupJurisdiction = <
   TContext
 > => {
   return useMutation(getWarmupJurisdictionMutationOptions(options));
+};
+
+/**
+ * Embeds atoms whose `embedding` column IS NULL, in chunks of 64.
+Bounded by `?limit=` (default 200, hard cap 1000). Safe to call
+repeatedly. Returns counts the UI can show inline; `remaining`
+reports the post-run count of un-embedded atoms across all
+jurisdictions so the caller can disable the action when it
+reaches zero.
+
+ * @summary One-shot backfill — embed any atoms still missing a vector
+ */
+export const getBackfillCodeEmbeddingsUrl = (
+  params?: BackfillCodeEmbeddingsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/codes/embeddings/backfill?${stringifiedParams}`
+    : `/api/codes/embeddings/backfill`;
+};
+
+export const backfillCodeEmbeddings = async (
+  params?: BackfillCodeEmbeddingsParams,
+  options?: RequestInit,
+): Promise<EmbeddingsBackfillResult> => {
+  return customFetch<EmbeddingsBackfillResult>(
+    getBackfillCodeEmbeddingsUrl(params),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getBackfillCodeEmbeddingsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof backfillCodeEmbeddings>>,
+    TError,
+    { params?: BackfillCodeEmbeddingsParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof backfillCodeEmbeddings>>,
+  TError,
+  { params?: BackfillCodeEmbeddingsParams },
+  TContext
+> => {
+  const mutationKey = ["backfillCodeEmbeddings"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof backfillCodeEmbeddings>>,
+    { params?: BackfillCodeEmbeddingsParams }
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return backfillCodeEmbeddings(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BackfillCodeEmbeddingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof backfillCodeEmbeddings>>
+>;
+
+export type BackfillCodeEmbeddingsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary One-shot backfill — embed any atoms still missing a vector
+ */
+export const useBackfillCodeEmbeddings = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof backfillCodeEmbeddings>>,
+    TError,
+    { params?: BackfillCodeEmbeddingsParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof backfillCodeEmbeddings>>,
+  TError,
+  { params?: BackfillCodeEmbeddingsParams },
+  TContext
+> => {
+  return useMutation(getBackfillCodeEmbeddingsMutationOptions(options));
 };
 
 /**

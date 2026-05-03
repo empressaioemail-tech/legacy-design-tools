@@ -1940,6 +1940,21 @@ export interface WarmupStatus {
 }
 
 /**
+ * Result of `POST /codes/embeddings/backfill`. `scanned` is how many
+rows the run picked up (bounded by the request's `limit`),
+`embedded` is how many succeeded, `failed` is how many threw or
+had a missing vector, and `remaining` is the post-run count of
+atoms still missing an embedding across all jurisdictions.
+
+ */
+export interface EmbeddingsBackfillResult {
+  scanned: number;
+  embedded: number;
+  failed: number;
+  remaining: number;
+}
+
+/**
  * DA-PI-5 / Spec 51a §2.4 — the seven element kinds the C# Revit
 add-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on
 the api-server `converterClient` so a materializable element
@@ -4547,8 +4562,9 @@ querystring round-trips cleanly.
  */
   embedded?: ListCodeAtomsEmbedded;
   /**
- * Case-insensitive substring match against `sectionNumber` OR
-`sectionTitle`. Trimmed; empty string is treated as no filter.
+ * Case-insensitive substring match against `sectionNumber`,
+`sectionTitle`, OR `body` (the full code text). Trimmed;
+empty string is treated as no filter.
 
  */
   q?: string;
@@ -4570,6 +4586,14 @@ export const ListCodeAtomsEmbedded = {
   true: "true",
   false: "false",
 } as const;
+
+export type BackfillCodeEmbeddingsParams = {
+  /**
+   * @minimum 1
+   * @maximum 1000
+   */
+  limit?: number;
+};
 
 export type GetAtomSummaryParams = {
   /**
