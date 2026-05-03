@@ -31,7 +31,15 @@ const hoisted = vi.hoisted(() => ({
   isError: false,
 }));
 
+class MockApiError extends Error {
+  readonly name = "ApiError";
+  constructor(public readonly status: number) {
+    super(`mock api error ${status}`);
+  }
+}
+
 vi.mock("@workspace/api-client-react", () => ({
+  ApiError: MockApiError,
   useListReviewerQueue: () => ({
     data: hoisted.queue,
     isLoading: hoisted.isLoading,

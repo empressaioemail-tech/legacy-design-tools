@@ -57,7 +57,7 @@ function kpiTileProps(
 export default function ReviewConsole() {
   const navGroups = useNavGroups();
 
-  const { data, isLoading, isError } = useListReviewerQueue(undefined, {
+  const { data, isLoading, isError, error } = useListReviewerQueue(undefined, {
     query: { queryKey: getListReviewerQueueQueryKey() },
   });
   const queue: ReviewerQueueResponse | undefined = data;
@@ -75,9 +75,15 @@ export default function ReviewConsole() {
 
   const queueCount = items.length;
 
-  const inReview = counts?.inReview ?? 0;
-  const awaitingAi = counts?.awaitingAi ?? 0;
-  const rejected = counts?.rejected ?? 0;
+  // When the queue request hasn't returned successful counts yet
+  // (still loading, or any non-2xx — including the audience-mismatch
+  // 403), render "—" placeholders for the in review / awaiting AI /
+  // rejected counters instead of silently rendering 0. The architect
+  // who just submitted should be able to tell at a glance that the
+  // tiles haven't loaded vs. that the queue is genuinely empty.
+  const inReview = counts != null ? String(counts.inReview) : "—";
+  const awaitingAi = counts != null ? String(counts.awaitingAi) : "—";
+  const rejected = counts != null ? String(counts.rejected) : "—";
   // Render the dash while loading so the tile doesn't flash from "—"
   // to "0" to a real value on the second pass.
   const backlogValue =
@@ -144,6 +150,7 @@ export default function ReviewConsole() {
                 items={items}
                 isLoading={isLoading}
                 isError={isError}
+                error={error}
                 searchQuery={searchQuery}
               />
             </div>

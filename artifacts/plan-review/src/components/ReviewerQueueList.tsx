@@ -1,10 +1,12 @@
 import { Link } from "wouter";
 import { ChevronRight } from "lucide-react";
-import type {
-  ReviewerQueueItem,
-  SubmissionStatus,
+import {
+  ApiError,
+  type ReviewerQueueItem,
+  type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { relativeTime } from "../lib/relativeTime";
+import { setDevSessionAudience } from "../lib/devSession";
 
 const STATUS_PILL_CLASS: Record<SubmissionStatus, string> = {
   pending: "sc-pill-cyan",
@@ -123,14 +125,33 @@ interface ReviewerQueueListProps {
   items: ReadonlyArray<ReviewerQueueItem>;
   isLoading: boolean;
   isError: boolean;
+  /**
+   * The error thrown by the underlying React Query call, when
+   * available. Used to distinguish a 403 audience-mismatch (the
+   * caller's session isn't `internal`) from a generic load failure
+   * — the former gets a focused empty state with a one-click
+   * switch-to-reviewer affordance instead of the generic
+   * "Couldn't load…" copy. See Task #504.
+   */
+  error?: unknown;
   searchQuery?: string;
   emptyMessage?: string;
+}
+
+function isAudienceMismatchError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403;
+}
+
+function handleSwitchToReviewer() {
+  setDevSessionAudience("internal");
+  window.location.reload();
 }
 
 export function ReviewerQueueList({
   items,
   isLoading,
   isError,
+  error,
   searchQuery = "",
   emptyMessage = "No submissions awaiting review. The AI Reviewer is monitoring intake.",
 }: ReviewerQueueListProps) {
@@ -145,6 +166,29 @@ export function ReviewerQueueList({
     );
   }
   if (isError) {
+    if (isAudienceMismatchError(error)) {
+      return (
+        <div
+          className="p-8 text-center sc-body flex flex-col items-center gap-3"
+          data-testid="review-queue-audience-mismatch"
+        >
+          <div>
+            You're signed in as an architect — switch to reviewer to see the
+            queue.
+          </div>
+          {!import.meta.env.PROD ? (
+            <button
+              type="button"
+              className="sc-btn-primary"
+              data-testid="review-queue-switch-to-reviewer"
+              onClick={handleSwitchToReviewer}
+            >
+              Switch to reviewer
+            </button>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div
         className="p-8 text-center sc-body"

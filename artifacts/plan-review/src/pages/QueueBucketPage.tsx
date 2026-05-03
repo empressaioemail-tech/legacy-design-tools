@@ -45,7 +45,7 @@ export default function QueueBucketPage({
     [status, order],
   );
 
-  const { data, isLoading, isError } = useListReviewerQueue(params, {
+  const { data, isLoading, isError, error } = useListReviewerQueue(params, {
     query: {
       queryKey: getListReviewerQueueQueryKey(params),
       enabled,
@@ -125,6 +125,7 @@ export default function QueueBucketPage({
                 items={items}
                 isLoading={isLoading}
                 isError={isError}
+                error={error}
                 searchQuery={searchQuery}
                 emptyMessage={emptyMessage}
               />

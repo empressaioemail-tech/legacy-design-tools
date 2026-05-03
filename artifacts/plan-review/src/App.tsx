@@ -16,6 +16,7 @@ import Rejected from "./pages/Rejected";
 import ComplianceEngine from "./pages/ComplianceEngine";
 import ComingSoon from "./pages/ComingSoon";
 import { RequirePermission, RequireAudience } from "./components/permissions";
+import { DevSessionSwitcher } from "./components/DevSessionSwitcher";
 
 const queryClient = new QueryClient();
 
@@ -93,6 +94,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
         <Router />
+        <DevSessionSwitcher />
       </WouterRouter>
     </QueryClientProvider>
   );
