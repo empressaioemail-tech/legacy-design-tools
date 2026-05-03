@@ -39,6 +39,8 @@ import { makeFindingAtom } from "./finding.atom";
 import { makeCommunicationEventAtom } from "./communication-event.atom";
 import { makeDecisionEventAtom } from "./decision-event.atom";
 import { makeSubmissionClassificationAtom } from "./submission-classification.atom";
+import { setClassifierLogger } from "@workspace/submission-classifier";
+import { logger as pinoLogger } from "../lib/logger";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -239,6 +241,15 @@ export function getAtomRegistry(): AtomRegistry {
 export function bootstrapAtomRegistry(
   logger: BootstrapAtomsLogger,
 ): AtomRegistry {
+  // Track 1 — wire the classifier's internal logger to the same pino
+  // instance the rest of the api-server uses so the boot-time mode
+  // line ("classification LLM client wired to ...") flows through the
+  // structured-log pipeline. Default in the lib is silent; this is the
+  // one-time hook the dispatch approved (Q1). We pass the pino logger
+  // directly (not the narrow `BootstrapAtomsLogger` parameter) because
+  // the classifier lib needs `warn` too — keeping the bootstrap's
+  // logger-shape minimal lets the test path keep passing `console`.
+  setClassifierLogger(pinoLogger);
   const registry = getAtomRegistry();
   const result = registry.validate();
   if (!result.ok) {

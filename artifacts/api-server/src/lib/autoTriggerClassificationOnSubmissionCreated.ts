@@ -15,7 +15,10 @@
  */
 
 import type { logger as Logger } from "./logger";
-import { classifySubmission, upsertAutoClassification } from "./classifySubmission";
+import {
+  classifySubmission,
+  upsertAutoClassification,
+} from "@workspace/submission-classifier";
 import { getHistoryService } from "../atoms/registry";
 
 export function autoTriggerClassificationOnSubmissionCreated(

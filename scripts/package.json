@@ -21,7 +21,7 @@
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/empressa-atom": "workspace:*",
-    "@workspace/integrations-anthropic-ai": "workspace:*",
+    "@workspace/submission-classifier": "workspace:*",
     "drizzle-orm": "catalog:"
   },
   "devDependencies": {

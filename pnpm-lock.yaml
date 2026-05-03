@@ -235,6 +235,9 @@ importers:
       '@workspace/site-context':
         specifier: workspace:*
         version: link:../../lib/site-context
+      '@workspace/submission-classifier':
+        specifier: workspace:*
+        version: link:../../lib/submission-classifier
       busboy:
         specifier: ^1.6.0
         version: 1.6.0
@@ -1743,6 +1746,40 @@ importers:
         specifier: ~5.9.2
         version: 5.9.3
 
+  lib/submission-classifier:
+    dependencies:
+      '@workspace/api-zod':
+        specifier: workspace:*
+        version: link:../api-zod
+      '@workspace/db':
+        specifier: workspace:*
+        version: link:../db
+      '@workspace/empressa-atom':
+        specifier: workspace:*
+        version: link:../empressa-atom
+      '@workspace/integrations-anthropic-ai':
+        specifier: workspace:*
+        version: link:../integrations-anthropic-ai
+      '@workspace/server-actor-ids':
+        specifier: workspace:*
+        version: link:../server-actor-ids
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.3.5
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+
   scripts:
     dependencies:
       '@google-cloud/storage':
@@ -1757,9 +1794,9 @@ importers:
       '@workspace/empressa-atom':
         specifier: workspace:*
         version: link:../lib/empressa-atom
-      '@workspace/integrations-anthropic-ai':
+      '@workspace/submission-classifier':
         specifier: workspace:*
-        version: link:../lib/integrations-anthropic-ai
+        version: link:../lib/submission-classifier
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)

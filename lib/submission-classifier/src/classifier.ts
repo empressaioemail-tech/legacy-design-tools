@@ -1,8 +1,8 @@
 /**
- * Submission auto-classifier (Track 1).
+ * Submission auto-classifier core (Track 1).
  *
- * Reads the latest snapshot's sheet rows for the engagement parented to
- * the given submission, gathers their metadata + extracted
+ * Reads the latest snapshot's sheet rows for the engagement parented
+ * to the given submission, gathers their metadata + extracted
  * `content_body` text, and asks the LLM (Claude Sonnet 4.5 in
  * production, deterministic mock in dev/CI) to emit:
  *   - `projectType`        — one short label (free text)
@@ -10,13 +10,15 @@
  *   - `applicableCodeBooks`— free-text array (e.g. "IBC 2021")
  *   - `confidence`         — 0..1
  *
- * Persists the result via `upsertSubmissionClassification` (auto path) or
- * `reclassifySubmission` (reviewer path) — both functions emit the
- * appropriate atom-events as a side-effect.
+ * Mock-mode behavior: returns `EMPTY_CLASSIFICATION` (empty
+ * disciplines + codes, null project type and confidence) so dev / CI
+ * rows are recognizably auto-tagged but never falsely confident.
  *
- * Mock-mode behavior: returns a deterministic classification with empty
- * disciplines + codes and `confidence = null`, so dev/CI rows are
- * recognizably auto-tagged but never falsely confident.
+ * Failure handling: every LLM-call exception, parse error, or
+ * input-gather throw collapses to `EMPTY_CLASSIFICATION` rather than
+ * propagating, because the live caller is a fire-and-forget hook on
+ * `submission.created` and the backfill is a one-shot operator
+ * script — neither can afford a transient failure to cascade.
  */
 
 import { eq, desc } from "drizzle-orm";
@@ -25,43 +27,23 @@ import {
   submissions,
   snapshots,
   sheets,
-  submissionClassifications,
-  type SubmissionClassification,
 } from "@workspace/db";
 import {
-  PLAN_REVIEW_DISCIPLINE_VALUES,
   type PlanReviewDiscipline,
   isPlanReviewDiscipline,
 } from "@workspace/api-zod";
-import type { EventAnchoringService } from "@workspace/empressa-atom";
-import type { logger as Logger } from "./logger";
-import { getClassificationLlmClient } from "./classificationLlmClient";
 import {
-  classificationAtomId,
-  SUBMISSION_CLASSIFICATION_EVENT_TYPES,
-} from "../atoms/submission-classification.atom";
-import { CLASSIFIER_ACTOR_ID } from "@workspace/server-actor-ids";
-
-/** Hard cap on the cover-sheet text we hand to the model. */
-export const CLASSIFIER_PROMPT_TEXT_MAX_CHARS = 8000;
-
-/** Pinned model — mirrors finding-engine / sheet-content-extractor. */
-export const CLASSIFIER_ANTHROPIC_MODEL = "claude-sonnet-4-5";
-
-/** Token budget for the classifier response. */
-export const CLASSIFIER_ANTHROPIC_MAX_TOKENS = 800;
-
-const CLASSIFIER_SYSTEM_PROMPT = [
-  "You are a triage assistant for a building-department plan-review queue.",
-  "Given the cover-sheet text and sheet metadata of an architectural plan",
-  "submission, return a JSON object with exactly these keys:",
-  '  "projectType"         (short kebab-case label, e.g. "commercial-tenant-improvement")',
-  '  "disciplines"         (subset of: building, electrical, mechanical, plumbing,',
-  "                         residential, fire-life-safety, accessibility)",
-  '  "applicableCodeBooks" (array of code-book labels, e.g. ["IBC 2021","NEC 2020"])',
-  '  "confidence"          (number between 0 and 1)',
-  "Return ONLY the JSON object — no preamble, no markdown fences.",
-].join(" ");
+  CLASSIFIER_ANTHROPIC_MAX_TOKENS,
+  CLASSIFIER_ANTHROPIC_MODEL,
+  CLASSIFIER_PROMPT_TEXT_MAX_CHARS,
+  CLASSIFIER_SYSTEM_PROMPT,
+} from "./constants";
+import { getClassificationLlmClient } from "./llmClient";
+import {
+  EMPTY_CLASSIFICATION,
+  type ClassificationResult,
+  type ClassifierLogger,
+} from "./types";
 
 /** Minimal subset of the Anthropic SDK shape we depend on. */
 interface AnthropicLikeClient {
@@ -71,26 +53,6 @@ interface AnthropicLikeClient {
     }>;
   };
 }
-
-/** Stable system actor for auto-classifier writes. */
-export const CLASSIFIER_AUTO_ACTOR = {
-  kind: "system" as const,
-  id: CLASSIFIER_ACTOR_ID,
-};
-
-export interface ClassificationResult {
-  projectType: string | null;
-  disciplines: PlanReviewDiscipline[];
-  applicableCodeBooks: string[];
-  confidence: number | null;
-}
-
-const EMPTY_CLASSIFICATION: ClassificationResult = {
-  projectType: null,
-  disciplines: [],
-  applicableCodeBooks: [],
-  confidence: null,
-};
 
 /**
  * Gather the cover-sheet text + sheet metadata for a submission. Reads
@@ -150,7 +112,7 @@ export async function gatherClassifierInputText(
  */
 export async function classifySubmission(
   submissionId: string,
-  reqLog: typeof Logger,
+  reqLog: ClassifierLogger,
   dbInstance: typeof ProdDb = ProdDb,
 ): Promise<ClassificationResult> {
   const client = (await getClassificationLlmClient()) as
@@ -213,7 +175,7 @@ export async function classifySubmission(
  */
 export function parseClassificationResponse(
   raw: string,
-  reqLog: typeof Logger,
+  reqLog: ClassifierLogger,
   submissionId: string,
 ): ClassificationResult {
   const start = raw.indexOf("{");
@@ -265,122 +227,12 @@ export function parseClassificationResponse(
     applicableCodeBooks.push(trimmed);
   }
   let confidence: number | null = null;
-  if (typeof obj["confidence"] === "number" && Number.isFinite(obj["confidence"])) {
+  if (
+    typeof obj["confidence"] === "number" &&
+    Number.isFinite(obj["confidence"])
+  ) {
     const c = obj["confidence"] as number;
     if (c >= 0 && c <= 1) confidence = c;
   }
   return { projectType, disciplines, applicableCodeBooks, confidence };
-}
-
-/**
- * Persist the auto-classifier's output. Idempotent: if a row already
- * exists for the submission, this is a no-op (the auto pass should not
- * overwrite a reviewer correction that already landed). Returns the
- * resulting row, or `null` if no write happened (existing reviewer
- * row preserved).
- *
- * Emits two events on a write:
- *   - `submission-classification.set` against the classification atom
- *   - `submission.classified` against the submission entity
- */
-export async function upsertAutoClassification(
-  submissionId: string,
-  result: ClassificationResult,
-  history: EventAnchoringService,
-  reqLog: typeof Logger,
-  dbInstance: typeof ProdDb = ProdDb,
-): Promise<SubmissionClassification | null> {
-  const existing = await dbInstance
-    .select()
-    .from(submissionClassifications)
-    .where(eq(submissionClassifications.submissionId, submissionId))
-    .limit(1);
-  if (existing[0]) {
-    reqLog.info(
-      { submissionId, source: existing[0].source },
-      "auto classification skipped — row already exists",
-    );
-    return null;
-  }
-  const now = new Date();
-  const [row] = await dbInstance
-    .insert(submissionClassifications)
-    .values({
-      submissionId,
-      projectType: result.projectType,
-      disciplines: result.disciplines,
-      applicableCodeBooks: result.applicableCodeBooks,
-      confidence:
-        result.confidence == null ? null : String(result.confidence),
-      source: "auto",
-      classifiedBy: null,
-      classifiedAt: now,
-      updatedAt: now,
-    })
-    .returning();
-  if (!row) {
-    throw new Error("submission_classifications insert returned no row");
-  }
-  await emitClassificationEvents(history, {
-    submissionId,
-    classificationAtomId: classificationAtomId(submissionId),
-    eventName: "submission.classified",
-    actor: CLASSIFIER_AUTO_ACTOR,
-    payload: {
-      projectType: row.projectType,
-      disciplines: row.disciplines,
-      applicableCodeBooks: row.applicableCodeBooks,
-      confidence: row.confidence == null ? null : Number(row.confidence),
-      source: row.source,
-    },
-    reqLog,
-  });
-  return row;
-}
-
-/**
- * Emit the matched pair of events for a classification write:
- *   - `submission-classification.set` on the classification atom
- *   - `submission.classified` OR `submission.reclassified` on the
- *      submission entity (caller picks via `eventName`).
- */
-export async function emitClassificationEvents(
-  history: EventAnchoringService,
-  params: {
-    submissionId: string;
-    classificationAtomId: string;
-    eventName: "submission.classified" | "submission.reclassified";
-    actor: { kind: "user" | "agent" | "system"; id: string };
-    payload: Record<string, unknown>;
-    reqLog: typeof Logger;
-  },
-): Promise<void> {
-  try {
-    await history.appendEvent({
-      entityType: "submission-classification",
-      entityId: params.classificationAtomId,
-      eventType: SUBMISSION_CLASSIFICATION_EVENT_TYPES[0],
-      actor: params.actor,
-      payload: params.payload,
-    });
-  } catch (err) {
-    params.reqLog.error(
-      { err, submissionId: params.submissionId },
-      "submission-classification.set event append failed",
-    );
-  }
-  try {
-    await history.appendEvent({
-      entityType: "submission",
-      entityId: params.submissionId,
-      eventType: params.eventName,
-      actor: params.actor,
-      payload: params.payload,
-    });
-  } catch (err) {
-    params.reqLog.error(
-      { err, submissionId: params.submissionId, eventName: params.eventName },
-      "submission lifecycle event append failed",
-    );
-  }
 }
