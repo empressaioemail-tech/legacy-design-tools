@@ -17,10 +17,7 @@ import {
   FINDING_CATEGORY_LABELS,
   FINDING_SEVERITY_LABELS,
 } from "../lib/findingsApi";
-
-// PLR-10 admin curation page. `TENANT_ID` is the placeholder tenant the
-// library is keyed by until session-bound tenant resolution lands.
-const TENANT_ID = "default";
+import { useSessionTenantId } from "../lib/session";
 
 const DISCIPLINES: CannedFindingDiscipline[] = [
   "building",
@@ -63,7 +60,20 @@ export default function CannedFindingsPage() {
     }),
     [discipline, includeArchived],
   );
-  const listQuery = useListCannedFindings(TENANT_ID, params);
+  // PLR-10 — tenant id now comes from the authenticated session so a
+  // future multi-tenant deployment scopes the library per-install
+  // instead of every tenant sharing one `"default"` keyring. The
+  // server enforces the same scoping (path `:tenantId` must match
+  // `req.session.tenantId`) for defense-in-depth. Suppress the
+  // request until the session resolves so the first paint never
+  // briefly aims at an empty / wrong tenant.
+  const tenantId = useSessionTenantId();
+  const listQuery = useListCannedFindings(tenantId ?? "", params, {
+    query: {
+      enabled: !!tenantId,
+      queryKey: getListCannedFindingsQueryKey(tenantId ?? "", params),
+    },
+  });
 
   // Invalidate every list-canned-findings query for this tenant by
   // matching on the URL prefix the generated queryKey starts with.
@@ -71,7 +81,8 @@ export default function CannedFindingsPage() {
   // `[urlWithSearch]`, so a `predicate` that matches on the URL prefix
   // catches every (discipline, includeArchived) variant.
   const invalidate = () => {
-    const prefix = getListCannedFindingsQueryKey(TENANT_ID)[0];
+    if (!tenantId) return Promise.resolve();
+    const prefix = getListCannedFindingsQueryKey(tenantId)[0];
     return qc.invalidateQueries({
       predicate: (q) => {
         const k0 = q.queryKey[0];
@@ -175,23 +186,25 @@ export default function CannedFindingsPage() {
               key={row.id}
               row={row}
               onEdit={() => setEditing(row)}
-              onArchive={() =>
-                archive.mutate({ tenantId: TENANT_ID, cannedFindingId: row.id })
-              }
-              onUnarchive={() =>
+              onArchive={() => {
+                if (!tenantId) return;
+                archive.mutate({ tenantId, cannedFindingId: row.id });
+              }}
+              onUnarchive={() => {
+                if (!tenantId) return;
                 update.mutate({
-                  tenantId: TENANT_ID,
+                  tenantId,
                   cannedFindingId: row.id,
                   data: { archivedAt: null },
-                })
-              }
+                });
+              }}
             />
           ))}
         </div>
 
-        {(creating || editing) && (
+        {tenantId && (creating || editing) && (
           <CannedFindingEditor
-            tenantId={TENANT_ID}
+            tenantId={tenantId}
             existing={editing}
             onClose={() => {
               setEditing(null);

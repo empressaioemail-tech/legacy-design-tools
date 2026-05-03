@@ -3654,6 +3654,11 @@ export const GetSessionResponse = zod
         "The actor on whose behalf the request is being made. `kind`\ndistinguishes a human user from a machine agent; `id` is opaque\nto the framework (today: dev cookie ids like `u1`; once real\nauth lands: the verified subject id from the auth provider).\n",
       ),
     permissions: zod.array(zod.string()),
+    tenantId: zod
+      .string()
+      .describe(
+        'The tenant the session belongs to. Used by the FE to scope\ntenant-keyed libraries (e.g. canned findings) without\nhard-coding a tenant id. Anonymous applicant sessions and\nthe production fail-closed default fall back to the\n`\"default\"` tenant until a real auth layer mints a verified\ntenant claim. The api-server also enforces this on\ntenant-scoped routes (the path `:tenantId` must match the\nsession tenant) so a client cannot cross-read another\ntenant\'s library.\n',
+      ),
   })
   .describe(
     'The session attached to the current request by\n`middlewares\/session.ts`. Frontends consume this to gate\nadmin-only UI — e.g. the \"Users & Roles\" sidebar entry only\nrenders for sessions whose `permissions` include\n`users:manage`. In production the server returns the\nanonymous-applicant default until a real auth layer lands.\n',

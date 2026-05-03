@@ -30,6 +30,12 @@ router.get("/session", (req: Request, res: Response) => {
     // always-present (the schema marks it required for the same
     // reason). Internally `SessionUser.permissions` is optional.
     permissions: s.permissions ? Array.from(s.permissions) : [],
+    // Always include the session tenant so the FE can scope
+    // tenant-keyed libraries (e.g. canned findings) without
+    // hard-coding a tenant id. The middleware always populates
+    // `tenantId`, defaulting to `DEFAULT_TENANT_ID` for anonymous /
+    // production sessions, so this is never undefined.
+    tenantId: s.tenantId,
   });
 });
 

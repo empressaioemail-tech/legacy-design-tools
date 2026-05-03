@@ -78,6 +78,31 @@ export function useSessionAudience(): {
   return { audience: data?.audience ?? null, isLoading };
 }
 
+/**
+ * Tenant the current session belongs to. Returns `null` while the
+ * session request is in flight so callers that key tenant-scoped
+ * queries off this value can skip firing until the real id is known
+ * — avoids briefly aiming the request at the wrong tenant when a
+ * future auth layer mints a non-`"default"` claim. The server
+ * always populates `tenantId` (defaulting to `"default"` for
+ * anonymous / production sessions), so this returns a non-null
+ * string once the session resolves.
+ *
+ * Shares the `Infinity` cache settings with `useSessionPermissions`
+ * so it does not double-fetch on routes that already gate on
+ * permissions.
+ */
+export function useSessionTenantId(): string | null {
+  const { data } = useGetSession({
+    query: {
+      queryKey: getGetSessionQueryKey(),
+      staleTime: Number.POSITIVE_INFINITY,
+      gcTime: Number.POSITIVE_INFINITY,
+    },
+  });
+  return data?.tenantId ?? null;
+}
+
 export type PermissionStatus = "loading" | "granted" | "denied";
 
 /**

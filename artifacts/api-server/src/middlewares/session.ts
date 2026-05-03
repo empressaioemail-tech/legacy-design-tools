@@ -58,7 +58,24 @@ export interface SessionUser {
   audience: "internal" | "user" | "ai";
   requestor?: { kind: "user" | "agent"; id: string };
   permissions?: ReadonlyArray<string>;
+  /**
+   * Tenant the session belongs to. Tenant-scoped routes
+   * (e.g. canned findings) compare this against any path-supplied
+   * `:tenantId` so a client cannot cross-read another tenant's data.
+   * Defaults to {@link DEFAULT_TENANT_ID} for the anonymous applicant
+   * and the production fail-closed session until a real auth layer
+   * mints a verified tenant claim.
+   */
+  tenantId: string;
 }
+
+/**
+ * Single-tenant fallback used everywhere we have no verified tenant
+ * claim yet — production fail-closed sessions, the anonymous applicant
+ * default, and dev cookies that don't supply a tenant. Mirrors the
+ * value the canned-finding seed data is keyed by.
+ */
+export const DEFAULT_TENANT_ID = "default";
 
 // Augment Express's global Request shape so route handlers can read
 // `req.session` without a per-call cast. Using the global `Express`
@@ -88,7 +105,10 @@ export const SESSION_COOKIE = "pr_session";
  * cookie. Locked to applicant audience so an unauthenticated caller can
  * never see internal-only fields (Revit binding, etc.).
  */
-const ANONYMOUS_APPLICANT: SessionUser = Object.freeze({ audience: "user" });
+const ANONYMOUS_APPLICANT: SessionUser = Object.freeze({
+  audience: "user",
+  tenantId: DEFAULT_TENANT_ID,
+});
 
 /**
  * Decode the `pr_session` cookie body. Returns `null` for missing /
@@ -115,7 +135,12 @@ function parseSessionCookie(raw: unknown): SessionUser | null {
   if (audience !== "internal" && audience !== "user" && audience !== "ai") {
     return null;
   }
-  const session: SessionUser = { audience };
+  const tenantRaw = obj["tenantId"];
+  const tenantId =
+    typeof tenantRaw === "string" && tenantRaw.length > 0
+      ? tenantRaw
+      : DEFAULT_TENANT_ID;
+  const session: SessionUser = { audience, tenantId };
 
   const requestor = obj["requestor"];
   if (requestor && typeof requestor === "object") {
@@ -179,6 +204,11 @@ function applyDevOverrides(base: SessionUser, req: Request): SessionUser {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
     if (perms.length > 0) next = { ...next, permissions: perms };
+  }
+
+  const tenantHdr = req.header("x-tenant-id");
+  if (typeof tenantHdr === "string" && tenantHdr.length > 0) {
+    next = { ...next, tenantId: tenantHdr };
   }
 
   return next;

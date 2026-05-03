@@ -21,4 +21,15 @@ export interface Session {
   audience: SessionAudience;
   requestor?: SessionRequestor;
   permissions: string[];
+  /** The tenant the session belongs to. Used by the FE to scope
+tenant-keyed libraries (e.g. canned findings) without
+hard-coding a tenant id. Anonymous applicant sessions and
+the production fail-closed default fall back to the
+`"default"` tenant until a real auth layer mints a verified
+tenant claim. The api-server also enforces this on
+tenant-scoped routes (the path `:tenantId` must match the
+session tenant) so a client cannot cross-read another
+tenant's library.
+ */
+  tenantId: string;
 }

@@ -30,6 +30,7 @@ import {
   type CannedFinding,
   type CannedFindingDiscipline,
 } from "@workspace/api-client-react";
+import { useSessionTenantId } from "../../lib/session";
 
 export type FindingsTabAudience = "internal" | "user" | "ai";
 
@@ -1125,7 +1126,6 @@ function truncateText(text: string, max: number): string {
 export { SEVERITY_ORDER };
 
 
-const CANNED_PICKER_TENANT_ID = "default";
 const CANNED_PICKER_DISCIPLINES: Array<CannedFindingDiscipline | "all"> = [
   "all",
   "building",
@@ -1173,16 +1173,18 @@ function CannedFindingPicker({
     () => (discipline === "all" ? undefined : { discipline }),
     [discipline],
   );
+  // PLR-10 — tenant id now comes from the authenticated session so
+  // the picker scopes per-install instead of every reviewer sharing
+  // one `"default"` library. The api-server enforces the same
+  // scoping for defense-in-depth (see `routes/cannedFindings.ts`).
+  const tenantId = useSessionTenantId();
   const listQuery = useListCannedFindings(
-    CANNED_PICKER_TENANT_ID,
+    tenantId ?? "",
     params,
     {
       query: {
-        enabled: open,
-        queryKey: getListCannedFindingsQueryKey(
-          CANNED_PICKER_TENANT_ID,
-          params,
-        ),
+        enabled: open && !!tenantId,
+        queryKey: getListCannedFindingsQueryKey(tenantId ?? "", params),
       },
     },
   );

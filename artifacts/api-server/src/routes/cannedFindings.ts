@@ -47,6 +47,27 @@ function requireReviewerAudience(req: Request, res: Response): boolean {
   return true;
 }
 
+/**
+ * Defense-in-depth: the path `:tenantId` is client-supplied, so even
+ * after a reviewer audience check a logged-in reviewer for tenant A
+ * could otherwise read tenant B's library by typing the URL directly.
+ * Reject when the session carries a tenant claim that disagrees with
+ * the path. The session middleware always populates `tenantId`
+ * (`DEFAULT_TENANT_ID` for anonymous / production fail-closed
+ * sessions), so this is a strict equality check rather than a
+ * "tenant present?" gate.
+ */
+function requireSessionTenantMatch(
+  req: Request,
+  res: Response,
+  pathTenantId: string,
+): boolean {
+  const sessionTenant = req.session.tenantId;
+  if (sessionTenant === pathTenantId) return false;
+  res.status(403).json({ error: "tenant_mismatch" });
+  return true;
+}
+
 const DISCIPLINES = ["building", "fire", "zoning", "civil"] as const;
 type Discipline = (typeof DISCIPLINES)[number];
 function isDiscipline(v: unknown): v is Discipline {
@@ -104,6 +125,7 @@ router.get(
       res.status(400).json({ error: "invalid_tenant_id" });
       return;
     }
+    if (requireSessionTenantMatch(req, res, tenantId)) return;
     const disciplineRaw = req.query.discipline;
     let discipline: Discipline | null = null;
     if (typeof disciplineRaw === "string" && disciplineRaw.length > 0) {
@@ -141,6 +163,7 @@ router.post(
       res.status(400).json({ error: "invalid_tenant_id" });
       return;
     }
+    if (requireSessionTenantMatch(req, res, tenantId)) return;
     const body = CreateCannedFindingBody.safeParse(req.body);
     if (!body.success) {
       res.status(400).json({ error: "invalid_create_canned_finding_body" });
@@ -183,6 +206,7 @@ router.patch(
       res.status(400).json({ error: "invalid_path" });
       return;
     }
+    if (requireSessionTenantMatch(req, res, tenantId)) return;
     const body = UpdateCannedFindingBody.safeParse(req.body);
     if (!body.success) {
       res.status(400).json({ error: "invalid_update_canned_finding_body" });
@@ -239,6 +263,7 @@ router.delete(
       res.status(400).json({ error: "invalid_path" });
       return;
     }
+    if (requireSessionTenantMatch(req, res, tenantId)) return;
     try {
       // Idempotent: if already archived, return the existing row unchanged.
       const existing = await db
