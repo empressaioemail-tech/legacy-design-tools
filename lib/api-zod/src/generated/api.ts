@@ -7370,6 +7370,212 @@ export const GetQaAutopilotRunResponse = zod.object({
 });
 
 /**
+ * Lets reviewers verify that the configured webhook is wired up
+without waiting for a real red sweep. Returns the upstream
+status code and a short message. Returns 412 if no webhook is
+currently configured.
+
+ * @summary POST a synthetic payload to the configured notify webhook
+ */
+export const SendQaAutopilotNotificationTestResponse = zod.object({
+  ok: zod.boolean(),
+  status: zod
+    .number()
+    .nullable()
+    .describe("Upstream HTTP status code, or null on transport error."),
+  message: zod.string(),
+});
+
+/**
+ * @summary List triage items, optionally filtered by status
+ */
+export const ListQaTriageItemsQueryParams = zod.object({
+  status: zod.enum(["open", "sent", "done"]).optional(),
+});
+
+export const ListQaTriageItemsResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      sourceKind: zod.enum([
+        "autopilot_finding",
+        "run",
+        "suite_failure",
+        "checklist_item",
+      ]),
+      sourceId: zod.string(),
+      sourceRunId: zod.string().nullable(),
+      suiteId: zod.string().nullable(),
+      title: zod.string(),
+      severity: zod.enum(["info", "warning", "error"]),
+      excerpt: zod.string(),
+      suggestedNextStep: zod.string(),
+      status: zod.enum(["open", "sent", "done"]),
+      createdAt: zod.coerce.date(),
+      sentAt: zod.coerce.date().nullable(),
+      doneAt: zod.coerce.date().nullable(),
+    }),
+  ),
+  counts: zod.object({
+    open: zod.number(),
+    sent: zod.number(),
+    done: zod.number(),
+    total: zod.number(),
+  }),
+});
+
+/**
+ * @summary Add an item to the triage queue
+ */
+export const createQaTriageItemBodySourceIdMax = 256;
+
+export const createQaTriageItemBodySourceRunIdMax = 256;
+
+export const createQaTriageItemBodySuiteIdMax = 128;
+
+export const createQaTriageItemBodyTitleMax = 512;
+
+export const createQaTriageItemBodyExcerptMax = 8000;
+
+export const createQaTriageItemBodySuggestedNextStepMax = 2000;
+
+export const CreateQaTriageItemBody = zod.object({
+  sourceKind: zod.enum([
+    "autopilot_finding",
+    "run",
+    "suite_failure",
+    "checklist_item",
+  ]),
+  sourceId: zod.string().min(1).max(createQaTriageItemBodySourceIdMax),
+  sourceRunId: zod.string().max(createQaTriageItemBodySourceRunIdMax).nullish(),
+  suiteId: zod.string().max(createQaTriageItemBodySuiteIdMax).nullish(),
+  title: zod.string().min(1).max(createQaTriageItemBodyTitleMax),
+  severity: zod.enum(["info", "warning", "error"]).optional(),
+  excerpt: zod.string().max(createQaTriageItemBodyExcerptMax).optional(),
+  suggestedNextStep: zod
+    .string()
+    .max(createQaTriageItemBodySuggestedNextStepMax)
+    .optional(),
+});
+
+/**
+ * @summary Move an item between lanes (open / sent / done)
+ */
+export const UpdateQaTriageItemParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const UpdateQaTriageItemBody = zod.object({
+  status: zod.enum(["open", "sent", "done"]),
+});
+
+export const UpdateQaTriageItemResponse = zod.object({
+  id: zod.string().uuid(),
+  sourceKind: zod.enum([
+    "autopilot_finding",
+    "run",
+    "suite_failure",
+    "checklist_item",
+  ]),
+  sourceId: zod.string(),
+  sourceRunId: zod.string().nullable(),
+  suiteId: zod.string().nullable(),
+  title: zod.string(),
+  severity: zod.enum(["info", "warning", "error"]),
+  excerpt: zod.string(),
+  suggestedNextStep: zod.string(),
+  status: zod.enum(["open", "sent", "done"]),
+  createdAt: zod.coerce.date(),
+  sentAt: zod.coerce.date().nullable(),
+  doneAt: zod.coerce.date().nullable(),
+});
+
+/**
+ * @summary Permanently remove a triage item
+ */
+export const DeleteQaTriageItemParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const DeleteQaTriageItemResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary Bulk move triage items between lanes
+ */
+
+export const BulkUpdateQaTriageItemsBody = zod.object({
+  ids: zod.array(zod.string().uuid()).min(1),
+  status: zod.enum(["open", "sent", "done"]),
+});
+
+export const BulkUpdateQaTriageItemsResponse = zod.object({
+  updated: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      sourceKind: zod.enum([
+        "autopilot_finding",
+        "run",
+        "suite_failure",
+        "checklist_item",
+      ]),
+      sourceId: zod.string(),
+      sourceRunId: zod.string().nullable(),
+      suiteId: zod.string().nullable(),
+      title: zod.string(),
+      severity: zod.enum(["info", "warning", "error"]),
+      excerpt: zod.string(),
+      suggestedNextStep: zod.string(),
+      status: zod.enum(["open", "sent", "done"]),
+      createdAt: zod.coerce.date(),
+      sentAt: zod.coerce.date().nullable(),
+      doneAt: zod.coerce.date().nullable(),
+    }),
+  ),
+});
+
+/**
+ * Returns a single well-formatted markdown brief that bundles the
+requested triage items (or every Open item, if `ids` is omitted).
+Does not mutate state — the caller is expected to follow up with
+a bulk-patch to move items into the `sent` lane after the
+copy/download succeeds client-side.
+
+ * @summary Render the markdown brief for a set of triage items
+ */
+export const BundleQaTriageItemsBody = zod.object({
+  ids: zod.array(zod.string().uuid()).optional(),
+});
+
+export const BundleQaTriageItemsResponse = zod.object({
+  markdown: zod.string(),
+  items: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      sourceKind: zod.enum([
+        "autopilot_finding",
+        "run",
+        "suite_failure",
+        "checklist_item",
+      ]),
+      sourceId: zod.string(),
+      sourceRunId: zod.string().nullable(),
+      suiteId: zod.string().nullable(),
+      title: zod.string(),
+      severity: zod.enum(["info", "warning", "error"]),
+      excerpt: zod.string(),
+      suggestedNextStep: zod.string(),
+      status: zod.enum(["open", "sent", "done"]),
+      createdAt: zod.coerce.date(),
+      sentAt: zod.coerce.date().nullable(),
+      doneAt: zod.coerce.date().nullable(),
+    }),
+  ),
+  count: zod.number(),
+});
+
+/**
  * @summary List manual QA checklists with their persisted item results
  */
 export const ListQaChecklistsResponse = zod.object({

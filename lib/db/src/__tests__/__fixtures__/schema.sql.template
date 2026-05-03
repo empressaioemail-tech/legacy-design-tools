@@ -433,6 +433,28 @@ CREATE TABLE @@SCHEMA@@.qa_settings (
 );
 
 
+-- Name: qa_triage_items; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.qa_triage_items (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    source_kind text NOT NULL,
+    source_id text NOT NULL,
+    source_run_id text,
+    suite_id text,
+    title text NOT NULL,
+    severity text DEFAULT 'error'::text NOT NULL,
+    excerpt text DEFAULT ''::text NOT NULL,
+    suggested_next_step text DEFAULT ''::text NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    sent_at timestamp with time zone,
+    done_at timestamp with time zone,
+    CONSTRAINT qa_triage_items_severity_check CHECK ((severity = ANY (ARRAY['info'::text, 'warning'::text, 'error'::text]))),
+    CONSTRAINT qa_triage_items_source_kind_check CHECK ((source_kind = ANY (ARRAY['autopilot_finding'::text, 'run'::text, 'suite_failure'::text, 'checklist_item'::text]))),
+    CONSTRAINT qa_triage_items_status_check CHECK ((status = ANY (ARRAY['open'::text, 'sent'::text, 'done'::text])))
+);
+
+
 -- Name: render_outputs; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.render_outputs (
@@ -793,6 +815,12 @@ ALTER TABLE ONLY @@SCHEMA@@.qa_settings
     ADD CONSTRAINT qa_settings_pkey PRIMARY KEY (key);
 
 
+-- Name: qa_triage_items qa_triage_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.qa_triage_items
+    ADD CONSTRAINT qa_triage_items_pkey PRIMARY KEY (id);
+
+
 -- Name: render_outputs render_outputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.render_outputs
@@ -1042,6 +1070,16 @@ CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USIN
 -- Name: qa_runs_suite_started_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX qa_runs_suite_started_idx ON @@SCHEMA@@.qa_runs USING btree (suite_id, started_at);
+
+
+-- Name: qa_triage_items_source_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX qa_triage_items_source_idx ON @@SCHEMA@@.qa_triage_items USING btree (source_kind, source_id);
+
+
+-- Name: qa_triage_items_status_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX qa_triage_items_status_idx ON @@SCHEMA@@.qa_triage_items USING btree (status, created_at);
 
 
 -- Name: render_outputs_render_role_uniq; Type: INDEX; Schema: public; Owner: -

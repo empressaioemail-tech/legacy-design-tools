@@ -7,7 +7,9 @@ import SuitesPage from "@/pages/SuitesPage";
 import HistoryPage from "@/pages/HistoryPage";
 import ChecklistsPage from "@/pages/ChecklistsPage";
 import AutopilotPage from "@/pages/AutopilotPage";
+import TriagePage from "@/pages/TriagePage";
 import { AutopilotBanner } from "@/components/AutopilotBanner";
+import { useTriageCounts } from "@/components/triage";
 import { Beaker } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,15 +19,18 @@ const queryClient = new QueryClient({
   },
 });
 
-const NAV: Array<{ path: string; label: string }> = [
+const NAV: Array<{ path: string; label: string; key?: "triage" }> = [
   { path: "/", label: "Suites" },
   { path: "/autopilot", label: "Autopilot" },
+  { path: "/triage", label: "Triage", key: "triage" },
   { path: "/history", label: "Run history" },
   { path: "/checklists", label: "Manual checklists" },
 ];
 
 function Shell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
+  const triageQuery = useTriageCounts();
+  const triageOpen = triageQuery.data?.counts.open ?? 0;
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b bg-white">
@@ -60,6 +65,19 @@ function Shell({ children }: { children: React.ReactNode }) {
                   data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                 >
                   {item.label}
+                  {item.key === "triage" && triageOpen > 0 ? (
+                    <span
+                      className={cn(
+                        "ml-1.5 inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 text-[10px] font-semibold",
+                        active
+                          ? "bg-white/20 text-white"
+                          : "bg-rose-100 text-rose-800",
+                      )}
+                      data-testid="nav-triage-badge"
+                    >
+                      {triageOpen}
+                    </span>
+                  ) : null}
                 </Link>
               );
             })}
@@ -80,6 +98,7 @@ function Router() {
       <Switch>
         <Route path="/" component={SuitesPage} />
         <Route path="/autopilot" component={AutopilotPage} />
+        <Route path="/triage" component={TriagePage} />
         <Route path="/history" component={HistoryPage} />
         <Route path="/checklists" component={ChecklistsPage} />
         <Route component={NotFound} />

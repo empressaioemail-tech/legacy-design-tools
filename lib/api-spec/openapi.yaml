@@ -5055,6 +5055,172 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /qa/autopilot/notifications/test:
+    post:
+      operationId: sendQaAutopilotNotificationTest
+      tags: [qa]
+      summary: POST a synthetic payload to the configured notify webhook
+      description: |
+        Lets reviewers verify that the configured webhook is wired up
+        without waiting for a real red sweep. Returns the upstream
+        status code and a short message. Returns 412 if no webhook is
+        currently configured.
+      responses:
+        "200":
+          description: Webhook posted (does not necessarily mean upstream returned 2xx)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaAutopilotNotificationTestResult"
+        "412":
+          description: No webhook configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /qa/triage:
+    get:
+      operationId: listQaTriageItems
+      tags: [qa]
+      summary: List triage items, optionally filtered by status
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/QaTriageStatus"
+      responses:
+        "200":
+          description: Triage items grouped by lane
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaTriageListResponse"
+    post:
+      operationId: createQaTriageItem
+      tags: [qa]
+      summary: Add an item to the triage queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateQaTriageItemBody"
+      responses:
+        "201":
+          description: Item created (or returned existing if dedupe matched)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaTriageItem"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /qa/triage/{id}:
+    patch:
+      operationId: updateQaTriageItem
+      tags: [qa]
+      summary: Move an item between lanes (open / sent / done)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateQaTriageItemBody"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaTriageItem"
+        "404":
+          description: Item not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteQaTriageItem
+      tags: [qa]
+      summary: Permanently remove a triage item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deletion acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaResetResponse"
+        "404":
+          description: Item not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /qa/triage/bulk:
+    patch:
+      operationId: bulkUpdateQaTriageItems
+      tags: [qa]
+      summary: Bulk move triage items between lanes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkUpdateQaTriageItemsBody"
+      responses:
+        "200":
+          description: Updated items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaTriageBulkResult"
+
+  /qa/triage/bundle:
+    post:
+      operationId: bundleQaTriageItems
+      tags: [qa]
+      summary: Render the markdown brief for a set of triage items
+      description: |
+        Returns a single well-formatted markdown brief that bundles the
+        requested triage items (or every Open item, if `ids` is omitted).
+        Does not mutate state — the caller is expected to follow up with
+        a bulk-patch to move items into the `sent` lane after the
+        copy/download succeeds client-side.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BundleQaTriageItemsBody"
+      responses:
+        "200":
+          description: Markdown bundle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaTriageBundleResponse"
+
   /qa/checklists:
     get:
       operationId: listQaChecklists
@@ -11144,3 +11310,185 @@ components:
         startedAt:
           type: string
           format: date-time
+
+    QaAutopilotNotificationTestResult:
+      type: object
+      required: [ok, status, message]
+      properties:
+        ok:
+          type: boolean
+        status:
+          type: integer
+          nullable: true
+          description: Upstream HTTP status code, or null on transport error.
+        message:
+          type: string
+
+    QaTriageSourceKind:
+      type: string
+      enum: [autopilot_finding, run, suite_failure, checklist_item]
+
+    QaTriageStatus:
+      type: string
+      enum: [open, sent, done]
+
+    QaTriageSeverity:
+      type: string
+      enum: [info, warning, error]
+
+    QaTriageItem:
+      type: object
+      required:
+        [
+          id,
+          sourceKind,
+          sourceId,
+          sourceRunId,
+          suiteId,
+          title,
+          severity,
+          excerpt,
+          suggestedNextStep,
+          status,
+          createdAt,
+          sentAt,
+          doneAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sourceKind:
+          $ref: "#/components/schemas/QaTriageSourceKind"
+        sourceId:
+          type: string
+        sourceRunId:
+          type: string
+          nullable: true
+        suiteId:
+          type: string
+          nullable: true
+        title:
+          type: string
+        severity:
+          $ref: "#/components/schemas/QaTriageSeverity"
+        excerpt:
+          type: string
+        suggestedNextStep:
+          type: string
+        status:
+          $ref: "#/components/schemas/QaTriageStatus"
+        createdAt:
+          type: string
+          format: date-time
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        doneAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    QaTriageListResponse:
+      type: object
+      required: [items, counts]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaTriageItem"
+        counts:
+          type: object
+          required: [open, sent, done, total]
+          properties:
+            open:
+              type: integer
+            sent:
+              type: integer
+            done:
+              type: integer
+            total:
+              type: integer
+
+    CreateQaTriageItemBody:
+      type: object
+      required: [sourceKind, sourceId, title]
+      properties:
+        sourceKind:
+          $ref: "#/components/schemas/QaTriageSourceKind"
+        sourceId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        sourceRunId:
+          type: string
+          maxLength: 256
+          nullable: true
+        suiteId:
+          type: string
+          maxLength: 128
+          nullable: true
+        title:
+          type: string
+          minLength: 1
+          maxLength: 512
+        severity:
+          $ref: "#/components/schemas/QaTriageSeverity"
+        excerpt:
+          type: string
+          maxLength: 8000
+        suggestedNextStep:
+          type: string
+          maxLength: 2000
+
+    UpdateQaTriageItemBody:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/QaTriageStatus"
+
+    BulkUpdateQaTriageItemsBody:
+      type: object
+      required: [ids, status]
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+        status:
+          $ref: "#/components/schemas/QaTriageStatus"
+
+    QaTriageBulkResult:
+      type: object
+      required: [updated]
+      properties:
+        updated:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaTriageItem"
+
+    BundleQaTriageItemsBody:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    QaTriageBundleResponse:
+      type: object
+      required: [markdown, items, count]
+      properties:
+        markdown:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaTriageItem"
+        count:
+          type: integer

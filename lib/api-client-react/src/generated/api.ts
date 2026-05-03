@@ -24,6 +24,8 @@ import type {
   BimModelRefreshResponse,
   BriefingGenerationRunsResponse,
   BriefingGenerationStatusResponse,
+  BulkUpdateQaTriageItemsBody,
+  BundleQaTriageItemsBody,
   CancelRenderResponse,
   CannedFindingResponse,
   ChatErrorResponse,
@@ -34,6 +36,7 @@ import type {
   CreateBriefingSourceBody,
   CreateCannedFindingBody,
   CreateEngagementSubmissionBody,
+  CreateQaTriageItemBody,
   CreateReviewerAnnotationBody,
   CreateReviewerRequestBody,
   CreateSubmissionCommentBody,
@@ -84,6 +87,7 @@ import type {
   ListNotificationsResponse,
   ListQaAutopilotRunsParams,
   ListQaRunsParams,
+  ListQaTriageItemsParams,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
   ListReviewerQueueParams,
@@ -99,6 +103,7 @@ import type {
   PromoteReviewerAnnotationsBody,
   PromoteReviewerAnnotationsResponse,
   PushBimModelBody,
+  QaAutopilotNotificationTestResult,
   QaAutopilotRunDetail,
   QaAutopilotRunListResponse,
   QaAutopilotRunReceipt,
@@ -111,6 +116,10 @@ import type {
   QaRunListResponse,
   QaRunReceipt,
   QaSuiteListResponse,
+  QaTriageBulkResult,
+  QaTriageBundleResponse,
+  QaTriageItem,
+  QaTriageListResponse,
   RecordBimModelDivergenceBody,
   RecordDecisionBody,
   RenderDetailResponse,
@@ -146,6 +155,7 @@ import type {
   UpdateMyProfileBody,
   UpdateQaAutopilotSettingsBody,
   UpdateQaChecklistItemBody,
+  UpdateQaTriageItemBody,
   UpdateReviewerAnnotationBody,
   UpdateUserBody,
   UploadSnapshotSheetsBody,
@@ -11254,6 +11264,631 @@ export function useGetQaAutopilotRun<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Lets reviewers verify that the configured webhook is wired up
+without waiting for a real red sweep. Returns the upstream
+status code and a short message. Returns 412 if no webhook is
+currently configured.
+
+ * @summary POST a synthetic payload to the configured notify webhook
+ */
+export const getSendQaAutopilotNotificationTestUrl = () => {
+  return `/api/qa/autopilot/notifications/test`;
+};
+
+export const sendQaAutopilotNotificationTest = async (
+  options?: RequestInit,
+): Promise<QaAutopilotNotificationTestResult> => {
+  return customFetch<QaAutopilotNotificationTestResult>(
+    getSendQaAutopilotNotificationTestUrl(),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getSendQaAutopilotNotificationTestMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendQaAutopilotNotificationTest>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendQaAutopilotNotificationTest>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["sendQaAutopilotNotificationTest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendQaAutopilotNotificationTest>>,
+    void
+  > = () => {
+    return sendQaAutopilotNotificationTest(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendQaAutopilotNotificationTestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendQaAutopilotNotificationTest>>
+>;
+
+export type SendQaAutopilotNotificationTestMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary POST a synthetic payload to the configured notify webhook
+ */
+export const useSendQaAutopilotNotificationTest = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendQaAutopilotNotificationTest>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendQaAutopilotNotificationTest>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(
+    getSendQaAutopilotNotificationTestMutationOptions(options),
+  );
+};
+
+/**
+ * @summary List triage items, optionally filtered by status
+ */
+export const getListQaTriageItemsUrl = (params?: ListQaTriageItemsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/qa/triage?${stringifiedParams}`
+    : `/api/qa/triage`;
+};
+
+export const listQaTriageItems = async (
+  params?: ListQaTriageItemsParams,
+  options?: RequestInit,
+): Promise<QaTriageListResponse> => {
+  return customFetch<QaTriageListResponse>(getListQaTriageItemsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListQaTriageItemsQueryKey = (
+  params?: ListQaTriageItemsParams,
+) => {
+  return [`/api/qa/triage`, ...(params ? [params] : [])] as const;
+};
+
+export const getListQaTriageItemsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listQaTriageItems>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListQaTriageItemsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listQaTriageItems>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListQaTriageItemsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listQaTriageItems>>
+  > = ({ signal }) => listQaTriageItems(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listQaTriageItems>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListQaTriageItemsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listQaTriageItems>>
+>;
+export type ListQaTriageItemsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List triage items, optionally filtered by status
+ */
+
+export function useListQaTriageItems<
+  TData = Awaited<ReturnType<typeof listQaTriageItems>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListQaTriageItemsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listQaTriageItems>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListQaTriageItemsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Add an item to the triage queue
+ */
+export const getCreateQaTriageItemUrl = () => {
+  return `/api/qa/triage`;
+};
+
+export const createQaTriageItem = async (
+  createQaTriageItemBody: CreateQaTriageItemBody,
+  options?: RequestInit,
+): Promise<QaTriageItem> => {
+  return customFetch<QaTriageItem>(getCreateQaTriageItemUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createQaTriageItemBody),
+  });
+};
+
+export const getCreateQaTriageItemMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createQaTriageItem>>,
+    TError,
+    { data: BodyType<CreateQaTriageItemBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createQaTriageItem>>,
+  TError,
+  { data: BodyType<CreateQaTriageItemBody> },
+  TContext
+> => {
+  const mutationKey = ["createQaTriageItem"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createQaTriageItem>>,
+    { data: BodyType<CreateQaTriageItemBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createQaTriageItem(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateQaTriageItemMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createQaTriageItem>>
+>;
+export type CreateQaTriageItemMutationBody = BodyType<CreateQaTriageItemBody>;
+export type CreateQaTriageItemMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Add an item to the triage queue
+ */
+export const useCreateQaTriageItem = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createQaTriageItem>>,
+    TError,
+    { data: BodyType<CreateQaTriageItemBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createQaTriageItem>>,
+  TError,
+  { data: BodyType<CreateQaTriageItemBody> },
+  TContext
+> => {
+  return useMutation(getCreateQaTriageItemMutationOptions(options));
+};
+
+/**
+ * @summary Move an item between lanes (open / sent / done)
+ */
+export const getUpdateQaTriageItemUrl = (id: string) => {
+  return `/api/qa/triage/${id}`;
+};
+
+export const updateQaTriageItem = async (
+  id: string,
+  updateQaTriageItemBody: UpdateQaTriageItemBody,
+  options?: RequestInit,
+): Promise<QaTriageItem> => {
+  return customFetch<QaTriageItem>(getUpdateQaTriageItemUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateQaTriageItemBody),
+  });
+};
+
+export const getUpdateQaTriageItemMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateQaTriageItem>>,
+    TError,
+    { id: string; data: BodyType<UpdateQaTriageItemBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateQaTriageItem>>,
+  TError,
+  { id: string; data: BodyType<UpdateQaTriageItemBody> },
+  TContext
+> => {
+  const mutationKey = ["updateQaTriageItem"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateQaTriageItem>>,
+    { id: string; data: BodyType<UpdateQaTriageItemBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateQaTriageItem(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateQaTriageItemMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateQaTriageItem>>
+>;
+export type UpdateQaTriageItemMutationBody = BodyType<UpdateQaTriageItemBody>;
+export type UpdateQaTriageItemMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Move an item between lanes (open / sent / done)
+ */
+export const useUpdateQaTriageItem = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateQaTriageItem>>,
+    TError,
+    { id: string; data: BodyType<UpdateQaTriageItemBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateQaTriageItem>>,
+  TError,
+  { id: string; data: BodyType<UpdateQaTriageItemBody> },
+  TContext
+> => {
+  return useMutation(getUpdateQaTriageItemMutationOptions(options));
+};
+
+/**
+ * @summary Permanently remove a triage item
+ */
+export const getDeleteQaTriageItemUrl = (id: string) => {
+  return `/api/qa/triage/${id}`;
+};
+
+export const deleteQaTriageItem = async (
+  id: string,
+  options?: RequestInit,
+): Promise<QaResetResponse> => {
+  return customFetch<QaResetResponse>(getDeleteQaTriageItemUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteQaTriageItemMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteQaTriageItem>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteQaTriageItem>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteQaTriageItem"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteQaTriageItem>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteQaTriageItem(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteQaTriageItemMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteQaTriageItem>>
+>;
+
+export type DeleteQaTriageItemMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Permanently remove a triage item
+ */
+export const useDeleteQaTriageItem = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteQaTriageItem>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteQaTriageItem>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteQaTriageItemMutationOptions(options));
+};
+
+/**
+ * @summary Bulk move triage items between lanes
+ */
+export const getBulkUpdateQaTriageItemsUrl = () => {
+  return `/api/qa/triage/bulk`;
+};
+
+export const bulkUpdateQaTriageItems = async (
+  bulkUpdateQaTriageItemsBody: BulkUpdateQaTriageItemsBody,
+  options?: RequestInit,
+): Promise<QaTriageBulkResult> => {
+  return customFetch<QaTriageBulkResult>(getBulkUpdateQaTriageItemsUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bulkUpdateQaTriageItemsBody),
+  });
+};
+
+export const getBulkUpdateQaTriageItemsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkUpdateQaTriageItems>>,
+    TError,
+    { data: BodyType<BulkUpdateQaTriageItemsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof bulkUpdateQaTriageItems>>,
+  TError,
+  { data: BodyType<BulkUpdateQaTriageItemsBody> },
+  TContext
+> => {
+  const mutationKey = ["bulkUpdateQaTriageItems"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof bulkUpdateQaTriageItems>>,
+    { data: BodyType<BulkUpdateQaTriageItemsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return bulkUpdateQaTriageItems(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BulkUpdateQaTriageItemsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof bulkUpdateQaTriageItems>>
+>;
+export type BulkUpdateQaTriageItemsMutationBody =
+  BodyType<BulkUpdateQaTriageItemsBody>;
+export type BulkUpdateQaTriageItemsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Bulk move triage items between lanes
+ */
+export const useBulkUpdateQaTriageItems = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bulkUpdateQaTriageItems>>,
+    TError,
+    { data: BodyType<BulkUpdateQaTriageItemsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof bulkUpdateQaTriageItems>>,
+  TError,
+  { data: BodyType<BulkUpdateQaTriageItemsBody> },
+  TContext
+> => {
+  return useMutation(getBulkUpdateQaTriageItemsMutationOptions(options));
+};
+
+/**
+ * Returns a single well-formatted markdown brief that bundles the
+requested triage items (or every Open item, if `ids` is omitted).
+Does not mutate state — the caller is expected to follow up with
+a bulk-patch to move items into the `sent` lane after the
+copy/download succeeds client-side.
+
+ * @summary Render the markdown brief for a set of triage items
+ */
+export const getBundleQaTriageItemsUrl = () => {
+  return `/api/qa/triage/bundle`;
+};
+
+export const bundleQaTriageItems = async (
+  bundleQaTriageItemsBody?: BundleQaTriageItemsBody,
+  options?: RequestInit,
+): Promise<QaTriageBundleResponse> => {
+  return customFetch<QaTriageBundleResponse>(getBundleQaTriageItemsUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bundleQaTriageItemsBody),
+  });
+};
+
+export const getBundleQaTriageItemsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bundleQaTriageItems>>,
+    TError,
+    { data: BodyType<BundleQaTriageItemsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof bundleQaTriageItems>>,
+  TError,
+  { data: BodyType<BundleQaTriageItemsBody> },
+  TContext
+> => {
+  const mutationKey = ["bundleQaTriageItems"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof bundleQaTriageItems>>,
+    { data: BodyType<BundleQaTriageItemsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return bundleQaTriageItems(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BundleQaTriageItemsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof bundleQaTriageItems>>
+>;
+export type BundleQaTriageItemsMutationBody = BodyType<BundleQaTriageItemsBody>;
+export type BundleQaTriageItemsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Render the markdown brief for a set of triage items
+ */
+export const useBundleQaTriageItems = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof bundleQaTriageItems>>,
+    TError,
+    { data: BodyType<BundleQaTriageItemsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof bundleQaTriageItems>>,
+  TError,
+  { data: BodyType<BundleQaTriageItemsBody> },
+  TContext
+> => {
+  return useMutation(getBundleQaTriageItemsMutationOptions(options));
+};
 
 /**
  * @summary List manual QA checklists with their persisted item results

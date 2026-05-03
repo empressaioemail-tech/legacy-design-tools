@@ -4,8 +4,17 @@ import {
   type Request,
   type Response,
 } from "express";
-import { db, qaRuns, qaChecklistResults } from "@workspace/db";
-import { and, desc, eq } from "drizzle-orm";
+import {
+  db,
+  qaRuns,
+  qaChecklistResults,
+  qaTriageItems,
+  QA_TRIAGE_SOURCE_KIND_VALUES,
+  QA_TRIAGE_STATUS_VALUES,
+  QA_TRIAGE_SEVERITY_VALUES,
+  type QaTriageItem,
+} from "@workspace/db";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { logger } from "../lib/logger";
 import { QA_SUITES, getSuiteById } from "../lib/qa/suites";
@@ -37,7 +46,9 @@ import {
   getAutopilotNotifyPublic,
   assertSafeWebhookUrl,
   WebhookValidationError,
+  getAutopilotNotifySettings,
 } from "../lib/qa/settings";
+import { renderTriageBundle } from "../lib/qa/triageBundle";
 
 const router: IRouter = Router();
 
@@ -545,6 +556,269 @@ router.get("/qa/autopilot/runs/:runId", async (req: Request, res: Response) => {
       startedAt: a.startedAt.toISOString(),
       finishedAt: a.finishedAt ? a.finishedAt.toISOString() : null,
     })),
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Notifications test (Task #503)
+// -----------------------------------------------------------------------------
+
+router.post(
+  "/qa/autopilot/notifications/test",
+  async (req: Request, res: Response) => {
+    const settings = await getAutopilotNotifySettings();
+    if (!settings.webhook) {
+      res.status(412).json({
+        error: "no_webhook_configured",
+        message: "Configure a notification webhook before sending a test.",
+      });
+      return;
+    }
+    const payload = {
+      source: "qa-autopilot",
+      kind: "test",
+      summary: "Test payload from QA dashboard.",
+      sentAt: new Date().toISOString(),
+      text: ":wave: QA dashboard webhook test — receiving end is wired up.",
+    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const resp = await fetch(settings.webhook, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      res.json({
+        ok: resp.ok,
+        status: resp.status,
+        message: resp.ok
+          ? `Webhook returned ${resp.status}.`
+          : `Webhook returned non-2xx (${resp.status}).`,
+      });
+    } catch (err) {
+      req.log.warn({ err }, "qa: notify test webhook threw");
+      res.json({
+        ok: false,
+        status: null,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+);
+
+// -----------------------------------------------------------------------------
+// Triage queue (Task #503)
+// -----------------------------------------------------------------------------
+
+function serializeTriageItem(row: QaTriageItem): Record<string, unknown> {
+  return {
+    id: row.id,
+    sourceKind: row.sourceKind,
+    sourceId: row.sourceId,
+    sourceRunId: row.sourceRunId,
+    suiteId: row.suiteId,
+    title: row.title,
+    severity: row.severity,
+    excerpt: row.excerpt,
+    suggestedNextStep: row.suggestedNextStep,
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+    sentAt: row.sentAt ? row.sentAt.toISOString() : null,
+    doneAt: row.doneAt ? row.doneAt.toISOString() : null,
+  };
+}
+
+router.get("/qa/triage", async (req: Request, res: Response) => {
+  const statusParam = typeof req.query["status"] === "string" ? req.query["status"] : null;
+  const allowed = QA_TRIAGE_STATUS_VALUES as readonly string[];
+  const filter = statusParam && allowed.includes(statusParam) ? statusParam : null;
+  const rows = await db
+    .select()
+    .from(qaTriageItems)
+    .where(filter ? eq(qaTriageItems.status, filter) : undefined)
+    .orderBy(desc(qaTriageItems.createdAt));
+  // Counts always reflect the full table so the badge is honest even
+  // when the caller asks for a single lane.
+  const allRows = filter
+    ? await db.select().from(qaTriageItems)
+    : rows;
+  const counts = { open: 0, sent: 0, done: 0, total: allRows.length };
+  for (const r of allRows) {
+    if (r.status === "open") counts.open += 1;
+    else if (r.status === "sent") counts.sent += 1;
+    else if (r.status === "done") counts.done += 1;
+  }
+  res.json({ items: rows.map(serializeTriageItem), counts });
+});
+
+const CreateTriageBody = z.object({
+  sourceKind: z.enum(QA_TRIAGE_SOURCE_KIND_VALUES),
+  sourceId: z.string().min(1).max(256),
+  sourceRunId: z.string().max(256).nullable().optional(),
+  suiteId: z.string().max(128).nullable().optional(),
+  title: z.string().min(1).max(512),
+  severity: z.enum(QA_TRIAGE_SEVERITY_VALUES).optional(),
+  excerpt: z.string().max(8000).optional(),
+  suggestedNextStep: z.string().max(2000).optional(),
+});
+
+router.post("/qa/triage", async (req: Request, res: Response) => {
+  const parsed = CreateTriageBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "invalid_body", issues: parsed.error.issues });
+    return;
+  }
+  const data = parsed.data;
+  // Dedupe: if there's already an Open item with the same source kind +
+  // source id, return it instead of stacking duplicates.
+  const [existing] = await db
+    .select()
+    .from(qaTriageItems)
+    .where(
+      and(
+        eq(qaTriageItems.sourceKind, data.sourceKind),
+        eq(qaTriageItems.sourceId, data.sourceId),
+        eq(qaTriageItems.status, "open"),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    res.status(201).json(serializeTriageItem(existing));
+    return;
+  }
+  const [row] = await db
+    .insert(qaTriageItems)
+    .values({
+      sourceKind: data.sourceKind,
+      sourceId: data.sourceId,
+      sourceRunId: data.sourceRunId ?? null,
+      suiteId: data.suiteId ?? null,
+      title: data.title,
+      severity: data.severity ?? "error",
+      excerpt: data.excerpt ?? "",
+      suggestedNextStep: data.suggestedNextStep ?? "",
+      status: "open",
+    })
+    .returning();
+  if (!row) {
+    res.status(500).json({ error: "insert_failed" });
+    return;
+  }
+  res.status(201).json(serializeTriageItem(row));
+});
+
+const UpdateTriageBody = z.object({
+  status: z.enum(QA_TRIAGE_STATUS_VALUES),
+});
+
+function timestampsForStatus(status: (typeof QA_TRIAGE_STATUS_VALUES)[number]): {
+  sentAt: Date | null;
+  doneAt: Date | null;
+} {
+  const now = new Date();
+  if (status === "sent") return { sentAt: now, doneAt: null };
+  if (status === "done") return { sentAt: null, doneAt: now };
+  return { sentAt: null, doneAt: null };
+}
+
+const BulkUpdateBody = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  status: z.enum(QA_TRIAGE_STATUS_VALUES),
+});
+
+router.patch("/qa/triage/bulk", async (req: Request, res: Response) => {
+  const parsed = BulkUpdateBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "invalid_body", issues: parsed.error.issues });
+    return;
+  }
+  const ts = timestampsForStatus(parsed.data.status);
+  const rows = await db
+    .update(qaTriageItems)
+    .set({
+      status: parsed.data.status,
+      sentAt: ts.sentAt,
+      doneAt: ts.doneAt,
+    })
+    .where(inArray(qaTriageItems.id, parsed.data.ids))
+    .returning();
+  res.json({ updated: rows.map(serializeTriageItem) });
+});
+
+router.patch("/qa/triage/:id", async (req: Request, res: Response) => {
+  const id = String(req.params.id ?? "").trim();
+  const parsed = UpdateTriageBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "invalid_body", issues: parsed.error.issues });
+    return;
+  }
+  const ts = timestampsForStatus(parsed.data.status);
+  const [row] = await db
+    .update(qaTriageItems)
+    .set({
+      status: parsed.data.status,
+      sentAt: ts.sentAt,
+      doneAt: ts.doneAt,
+    })
+    .where(eq(qaTriageItems.id, id))
+    .returning();
+  if (!row) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json(serializeTriageItem(row));
+});
+
+router.delete("/qa/triage/:id", async (req: Request, res: Response) => {
+  const id = String(req.params.id ?? "").trim();
+  const deleted = await db
+    .delete(qaTriageItems)
+    .where(eq(qaTriageItems.id, id))
+    .returning({ id: qaTriageItems.id });
+  if (deleted.length === 0) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+const BundleBody = z.object({
+  ids: z.array(z.string().uuid()).optional(),
+});
+
+router.post("/qa/triage/bundle", async (req: Request, res: Response) => {
+  const parsed = BundleBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "invalid_body", issues: parsed.error.issues });
+    return;
+  }
+  const rows = parsed.data.ids && parsed.data.ids.length > 0
+    ? await db
+        .select()
+        .from(qaTriageItems)
+        .where(inArray(qaTriageItems.id, parsed.data.ids))
+        .orderBy(desc(qaTriageItems.createdAt))
+    : await db
+        .select()
+        .from(qaTriageItems)
+        .where(eq(qaTriageItems.status, "open"))
+        .orderBy(desc(qaTriageItems.createdAt));
+
+  const baseUrl = (() => {
+    const domains = process.env["REPLIT_DOMAINS"];
+    if (!domains) return null;
+    const host = domains.split(",")[0]?.trim();
+    return host ? `https://${host}` : null;
+  })();
+  const markdown = renderTriageBundle(rows, { baseUrl });
+  res.json({
+    markdown,
+    items: rows.map(serializeTriageItem),
+    count: rows.length,
   });
 });
 

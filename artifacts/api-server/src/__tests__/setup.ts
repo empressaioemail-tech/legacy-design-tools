@@ -133,6 +133,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "autopilot_runs",
   "autopilot_findings",
   "autopilot_fix_actions",
+  // Task #503 — QA triage queue. No FK to anything, so listed
+  // explicitly per the "if a route writes to it, it's in this list"
+  // invariant.
+  "qa_triage_items",
   // Task #482 / #484 — QA dashboard kv (autopilot toggle + notify
   // settings). No FK to anything, so the engagements truncate above
   // does not clear it. qa-autopilot-notify.test.ts seeds it directly.

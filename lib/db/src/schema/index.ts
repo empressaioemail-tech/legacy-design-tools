@@ -32,3 +32,4 @@ export * from "./qaSettings";
 export * from "./autopilotRuns";
 export * from "./autopilotFindings";
 export * from "./autopilotFixActions";
+export * from "./qaTriageItems";

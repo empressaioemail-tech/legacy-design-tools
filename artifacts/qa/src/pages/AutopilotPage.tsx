@@ -4,6 +4,7 @@ import {
   useGetQaAutopilotRun,
   useListQaAutopilotRuns,
   useUpdateQaAutopilotSettings,
+  useSendQaAutopilotNotificationTest,
   getGetQaAutopilotStateQueryKey,
   getGetQaAutopilotRunQueryKey,
   getListQaAutopilotRunsQueryKey,
@@ -14,6 +15,7 @@ import {
   type QaAutopilotFixAction,
   type QaAutopilotRunSummary,
 } from "@workspace/api-client-react";
+import { AddToTriageButton } from "@/components/triage";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
@@ -180,6 +182,19 @@ function RunDetail({ runId }: { runId: string }) {
   const [filter, setFilter] = useState<FilterMode>("all");
 
   const detail = detailQuery.data;
+
+  const counts = useMemo(() => {
+    const c = { all: 0, failing: 0, "needs-review": 0, "auto-fixed": 0 };
+    if (!detail) return c;
+    for (const f of detail.findings) {
+      c.all += 1;
+      if (f.autoFixStatus === "auto-fixed") c["auto-fixed"] += 1;
+      else c.failing += 1;
+      if (f.autoFixStatus === "needs-review") c["needs-review"] += 1;
+    }
+    return c;
+  }, [detail]);
+
   const findingsBySuite = useMemo(() => {
     if (!detail) return new Map<string, QaAutopilotFinding[]>();
     const map = new Map<string, QaAutopilotFinding[]>();
@@ -238,36 +253,48 @@ function RunDetail({ runId }: { runId: string }) {
             current={filter}
             value="all"
             onClick={setFilter}
-            label="All"
+            label={`All (${counts.all})`}
           />
           <FilterButton
             current={filter}
             value="failing"
             onClick={setFilter}
-            label="Failing"
+            label={`Failing (${counts.failing})`}
           />
           <FilterButton
             current={filter}
             value="needs-review"
             onClick={setFilter}
-            label="Needs review"
+            label={`Needs review (${counts["needs-review"]})`}
           />
           <FilterButton
             current={filter}
             value="auto-fixed"
             onClick={setFilter}
-            label="Auto-fixed"
+            label={`Auto-fixed (${counts["auto-fixed"]})`}
           />
         </div>
         <Separator />
         {findingsBySuite.size === 0 ? (
-          <div className="rounded-md border bg-emerald-50 p-4 text-sm text-emerald-900">
-            {filter === "all"
-              ? detail.run.status === "running"
+          filter === "all" ? (
+            <div className="rounded-md border bg-emerald-50 p-4 text-sm text-emerald-900">
+              {detail.run.status === "running"
                 ? "No findings recorded yet — autopilot is still running."
-                : "No findings — every suite came back green."
-              : "Nothing matches this filter."}
-          </div>
+                : "No findings — every suite came back green."}
+            </div>
+          ) : (
+            <div className="rounded-md border bg-slate-50 p-4 text-sm text-slate-700">
+              Nothing matches the <strong>{filter}</strong> filter.{" "}
+              <button
+                className="underline"
+                onClick={() => setFilter("all")}
+                data-testid="autopilot-clear-filter"
+              >
+                Show all
+              </button>
+              .
+            </div>
+          )
         ) : (
           <ScrollArea className="h-[55vh]">
             <Accordion type="multiple" className="space-y-2">
@@ -291,6 +318,7 @@ function RunDetail({ runId }: { runId: string }) {
                         <FindingRow
                           key={f.id}
                           finding={f}
+                          runId={runId}
                           fixActions={
                             fixActionsByFinding.get(f.id) ??
                             fixActionsByFinding.get(`__suite__${f.suiteId}`) ??
@@ -350,9 +378,11 @@ const AUTOFIX_TONE: Record<QaAutopilotFindingAutoFixStatus, string> = {
 
 function FindingRow({
   finding,
+  runId,
   fixActions,
 }: {
   finding: QaAutopilotFinding;
+  runId: string;
   fixActions: QaAutopilotFixAction[];
 }) {
   return (
@@ -379,8 +409,26 @@ function FindingRow({
           </span>
         ) : null}
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">
-        {finding.plainSummary}
+      <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{finding.plainSummary}</span>
+        {finding.autoFixStatus !== "auto-fixed" ? (
+          <AddToTriageButton
+            testId={`autopilot-triage-${finding.id}`}
+            body={{
+              sourceKind: "autopilot_finding",
+              sourceId: finding.id,
+              sourceRunId: runId,
+              suiteId: finding.suiteId,
+              title: finding.testName
+                ? `${finding.suiteId} — ${finding.testName}`
+                : `${finding.suiteId} — ${finding.category}`,
+              severity:
+                finding.autoFixStatus === "needs-review" ? "error" : "warning",
+              excerpt: finding.errorExcerpt ?? "",
+              suggestedNextStep: finding.plainSummary ?? "",
+            }}
+          />
+        ) : null}
       </div>
       <pre className="mt-2 max-h-40 overflow-auto rounded border bg-slate-950 p-2 text-[11px] text-slate-100 whitespace-pre-wrap break-words">
         {finding.errorExcerpt || "(no excerpt)"}
@@ -508,6 +556,23 @@ function NotificationsCard() {
   const stateQuery = useGetQaAutopilotState({
     query: { queryKey: getGetQaAutopilotStateQueryKey() },
   });
+  const testMutation = useSendQaAutopilotNotificationTest({
+    mutation: {
+      onSuccess: (result) => {
+        toast({
+          title: result.ok ? "Webhook accepted test" : "Webhook responded non-2xx",
+          description: result.message,
+          variant: result.ok ? "default" : "destructive",
+        });
+      },
+      onError: (err) =>
+        toast({
+          title: "Could not send test",
+          description: err instanceof Error ? err.message : String(err),
+          variant: "destructive",
+        }),
+    },
+  });
   const mutation = useUpdateQaAutopilotSettings({
     mutation: {
       onSuccess: () => {
@@ -626,19 +691,30 @@ function NotificationsCard() {
               {mutation.isPending ? "Saving…" : "Save"}
             </Button>
             {persisted?.enabled ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                data-testid="autopilot-notify-disable"
-                disabled={mutation.isPending}
-                onClick={() =>
-                  mutation.mutate({
-                    data: { notify: { webhook: "", minSeverity } },
-                  })
-                }
-              >
-                Disable
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="autopilot-notify-test"
+                  disabled={testMutation.isPending}
+                  onClick={() => testMutation.mutate()}
+                >
+                  {testMutation.isPending ? "Sending…" : "Send test payload"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  data-testid="autopilot-notify-disable"
+                  disabled={mutation.isPending}
+                  onClick={() =>
+                    mutation.mutate({
+                      data: { notify: { webhook: "", minSeverity } },
+                    })
+                  }
+                >
+                  Disable
+                </Button>
+              </>
             ) : null}
           </div>
         </div>

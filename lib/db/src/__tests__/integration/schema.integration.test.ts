@@ -115,6 +115,8 @@ describe("lib/db schema integration", () => {
         // Task #482 — kv settings store for the QA dashboard
         // (notify.* keys land in #484, table shape unchanged).
         "qa_settings",
+        // Task #503 — QA triage queue items (forwarded to planning).
+        "qa_triage_items",
         "render_outputs",
         // Spec 307 / Task #307 — reviewer scratch-note surface anchored
         // per (submission, target atom) tuple. Reviewer-only until the

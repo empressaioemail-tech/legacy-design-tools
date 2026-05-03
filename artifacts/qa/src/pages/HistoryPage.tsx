@@ -17,6 +17,7 @@ import { RunStatusBadge } from "@/components/StatusBadge";
 import { formatDuration, formatTimestamp } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { RotateCw } from "lucide-react";
+import { AddToTriageButton } from "@/components/triage";
 
 export default function HistoryPage() {
   const [selected, setSelected] = useState<string | null>(null);
@@ -94,9 +95,33 @@ export default function HistoryPage() {
 
 function RunRowMeta({ run }: { run: QaRunSummary }) {
   return (
-    <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+    <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
       <span>{formatTimestamp(run.startedAt)}</span>
-      <span>{formatDuration(run.durationMs)}</span>
+      <div className="flex items-center gap-2">
+        <span>{formatDuration(run.durationMs)}</span>
+        {run.status === "failed" || run.status === "errored" ? (
+          <span
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            role="presentation"
+          >
+            <AddToTriageButton
+              testId={`history-triage-${run.id}`}
+              label="Triage"
+              body={{
+                sourceKind: "run",
+                sourceId: run.id,
+                sourceRunId: run.id,
+                suiteId: run.suiteId,
+                title: `${run.suiteId} run failed`,
+                severity: "error",
+                excerpt: "",
+                suggestedNextStep: "Open the run log and identify root cause.",
+              }}
+            />
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -109,6 +134,22 @@ function RunDetail({ runId }: { runId: string }) {
     },
   });
   const run = runQuery.data;
+  if (runQuery.isError) {
+    return (
+      <CardContent
+        data-testid={`detail-error-${runId}`}
+        className="flex h-full flex-col items-center justify-center gap-3 text-sm text-rose-700"
+      >
+        <div>Could not load run log.</div>
+        <div className="text-xs text-muted-foreground">
+          {runQuery.error instanceof Error ? runQuery.error.message : "Unknown error"}
+        </div>
+        <Button variant="outline" size="sm" onClick={() => runQuery.refetch()}>
+          Retry
+        </Button>
+      </CardContent>
+    );
+  }
   if (!run) {
     return (
       <CardContent className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -121,7 +162,24 @@ function RunDetail({ runId }: { runId: string }) {
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">{run.suiteId}</CardTitle>
-          <RunStatusBadge status={run.status} />
+          <div className="flex items-center gap-2">
+            {run.status === "failed" || run.status === "errored" ? (
+              <AddToTriageButton
+                testId={`history-detail-triage-${run.id}`}
+                body={{
+                  sourceKind: "run",
+                  sourceId: run.id,
+                  sourceRunId: run.id,
+                  suiteId: run.suiteId,
+                  title: `${run.suiteId} run failed`,
+                  severity: "error",
+                  excerpt: (run.log ?? "").slice(-1500),
+                  suggestedNextStep: "Inspect the captured log and root cause.",
+                }}
+              />
+            ) : null}
+            <RunStatusBadge status={run.status} />
+          </div>
         </div>
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>Started {formatTimestamp(run.startedAt)}</span>

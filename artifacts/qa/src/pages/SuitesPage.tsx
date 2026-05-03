@@ -26,6 +26,8 @@ import { RunStatusBadge } from "@/components/StatusBadge";
 import { formatDuration, formatRelative } from "@/lib/format";
 import { apiUrl } from "@/lib/api";
 import { Loader2, Play, RotateCw } from "lucide-react";
+import { AddToTriageButton } from "@/components/triage";
+import { useGetQaRun, getGetQaRunQueryKey as getRunKey } from "@workspace/api-client-react";
 
 interface ActiveStream {
   runId: string;
@@ -318,20 +320,78 @@ function SuiteCard({
           </span>
         </div>
         <Separator />
-        <ScrollArea className="h-48 rounded border bg-slate-950">
-          <pre
-            ref={logRef}
-            data-testid={`log-${suite.id}`}
-            className="p-3 text-[11px] leading-snug text-slate-100 font-mono whitespace-pre-wrap break-words"
-          >
-            {stream?.log
-              ? stream.log
-              : suite.lastRun
-                ? "Open run history to view the log of the last run."
-                : "No runs yet. Click Run to kick off this suite."}
-          </pre>
-        </ScrollArea>
+        <SuiteLastLog suite={suite} stream={stream} logRef={logRef} />
+        {(lastStatus === "failed" || lastStatus === "errored") && suite.lastRun ? (
+          <div className="flex justify-end">
+            <AddToTriageButton
+              testId={`suite-triage-${suite.id}`}
+              label="Add failure to triage"
+              body={{
+                sourceKind: "suite_failure",
+                sourceId: suite.id,
+                sourceRunId: suite.lastRun.id,
+                suiteId: suite.id,
+                title: `${suite.label} suite failed`,
+                severity: "error",
+                excerpt: "",
+                suggestedNextStep:
+                  "Inspect the linked run log and propose a fix.",
+              }}
+            />
+          </div>
+        ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function SuiteLastLog({
+  suite,
+  stream,
+  logRef,
+}: {
+  suite: QaSuiteSummary;
+  stream: ActiveStream | undefined;
+  logRef: React.RefObject<HTMLPreElement | null>;
+}) {
+  // Fetch the persisted log of the last run when there's no live
+  // stream so reviewers can read it inline without bouncing to Run
+  // History (Task #503).
+  const lastRunId = suite.lastRun?.id ?? null;
+  const runQuery = useGetQaRun(lastRunId ?? "", {
+    query: {
+      enabled: !stream && !!lastRunId,
+      queryKey: getRunKey(lastRunId ?? ""),
+      staleTime: 30_000,
+    },
+  });
+  let log: string;
+  if (stream?.log) {
+    log = stream.log;
+  } else if (runQuery.isError) {
+    log = `Could not load last run log: ${
+      runQuery.error instanceof Error ? runQuery.error.message : "unknown error"
+    }`;
+  } else if (runQuery.data?.log != null) {
+    log = runQuery.data.log;
+  } else if (suite.lastRun && runQuery.isFetching) {
+    log = "Loading last run…";
+  } else if (suite.lastRun) {
+    log = "(no output captured)";
+  } else {
+    log = "No runs yet. Click Run to kick off this suite.";
+  }
+  return (
+    <ScrollArea className="h-48 rounded border bg-slate-950">
+      <pre
+        ref={logRef}
+        data-testid={`log-${suite.id}`}
+        className={`p-3 text-[11px] leading-snug font-mono whitespace-pre-wrap break-words ${
+          runQuery.isError ? "text-rose-300" : "text-slate-100"
+        }`}
+      >
+        {log}
+      </pre>
+    </ScrollArea>
   );
 }

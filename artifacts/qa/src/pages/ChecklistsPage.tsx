@@ -23,6 +23,11 @@ import { useToast } from "@/hooks/use-toast";
 import { ChecklistStatusBadge } from "@/components/StatusBadge";
 import { formatRelative } from "@/lib/format";
 import { Check, X, MinusCircle, RotateCcw } from "lucide-react";
+import { AddToTriageButton } from "@/components/triage";
+import {
+  useCreateQaTriageItem,
+  getListQaTriageItemsQueryKey,
+} from "@workspace/api-client-react";
 
 export default function ChecklistsPage() {
   const checklistsQuery = useListQaChecklists();
@@ -105,7 +110,8 @@ function ChecklistCard({ checklist }: { checklist: QaChecklistSummary }) {
             {checklist.counts.skipped} skip
           </Badge>
           <Badge variant="outline">{checklist.counts.notRun} not run</Badge>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-1">
+            <AddFailingToTriageButton checklist={checklist} />
             <Button
               variant="ghost"
               size="sm"
@@ -133,6 +139,54 @@ function ChecklistCard({ checklist }: { checklist: QaChecklistSummary }) {
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+function AddFailingToTriageButton({ checklist }: { checklist: QaChecklistSummary }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useCreateQaTriageItem();
+  const failing = checklist.items.filter((i) => i.status === "fail");
+  if (failing.length === 0) return null;
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      data-testid={`button-checklist-triage-failing-${checklist.id}`}
+      disabled={mutation.isPending}
+      onClick={async () => {
+        try {
+          for (const item of failing) {
+            await mutation.mutateAsync({
+              data: {
+                sourceKind: "checklist_item",
+                sourceId: `${checklist.id}/${item.id}`,
+                suiteId: checklist.id,
+                title: `${checklist.id} — ${item.label}`,
+                severity: "error",
+                excerpt: item.note ?? "",
+                suggestedNextStep:
+                  item.hint ?? "Investigate the failing manual check.",
+              },
+            });
+          }
+          await qc.invalidateQueries({
+            queryKey: getListQaTriageItemsQueryKey(),
+          });
+          toast({
+            title: `Added ${failing.length} failing item${failing.length === 1 ? "" : "s"} to triage`,
+          });
+        } catch (err) {
+          toast({
+            title: "Could not add to triage",
+            description: err instanceof Error ? err.message : String(err),
+            variant: "destructive",
+          });
+        }
+      }}
+    >
+      Add failing to triage ({failing.length})
+    </Button>
   );
 }
 
@@ -197,6 +251,24 @@ function ChecklistRow({
           </Button>
         </div>
       </div>
+      {item.status === "fail" ? (
+        <div>
+          <AddToTriageButton
+            testId={`checklist-triage-${checklistId}-${item.id}`}
+            label="Add to triage"
+            body={{
+              sourceKind: "checklist_item",
+              sourceId: `${checklistId}/${item.id}`,
+              suiteId: checklistId,
+              title: `${checklistId} — ${item.label}`,
+              severity: "error",
+              excerpt: item.note ?? "",
+              suggestedNextStep:
+                item.hint ?? "Investigate the failing manual check.",
+            }}
+          />
+        </div>
+      ) : null}
       {editing ? (
         <div className="space-y-2">
           <Textarea

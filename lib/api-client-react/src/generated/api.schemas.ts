@@ -4410,6 +4410,116 @@ export interface QaAutopilotRunReceipt {
   startedAt: string;
 }
 
+export interface QaAutopilotNotificationTestResult {
+  ok: boolean;
+  /** Upstream HTTP status code, or null on transport error. */
+  status: number | null;
+  message: string;
+}
+
+export type QaTriageSourceKind =
+  (typeof QaTriageSourceKind)[keyof typeof QaTriageSourceKind];
+
+export const QaTriageSourceKind = {
+  autopilot_finding: "autopilot_finding",
+  run: "run",
+  suite_failure: "suite_failure",
+  checklist_item: "checklist_item",
+} as const;
+
+export type QaTriageStatus =
+  (typeof QaTriageStatus)[keyof typeof QaTriageStatus];
+
+export const QaTriageStatus = {
+  open: "open",
+  sent: "sent",
+  done: "done",
+} as const;
+
+export type QaTriageSeverity =
+  (typeof QaTriageSeverity)[keyof typeof QaTriageSeverity];
+
+export const QaTriageSeverity = {
+  info: "info",
+  warning: "warning",
+  error: "error",
+} as const;
+
+export interface QaTriageItem {
+  id: string;
+  sourceKind: QaTriageSourceKind;
+  sourceId: string;
+  sourceRunId: string | null;
+  suiteId: string | null;
+  title: string;
+  severity: QaTriageSeverity;
+  excerpt: string;
+  suggestedNextStep: string;
+  status: QaTriageStatus;
+  createdAt: string;
+  sentAt: string | null;
+  doneAt: string | null;
+}
+
+export type QaTriageListResponseCounts = {
+  open: number;
+  sent: number;
+  done: number;
+  total: number;
+};
+
+export interface QaTriageListResponse {
+  items: QaTriageItem[];
+  counts: QaTriageListResponseCounts;
+}
+
+export interface CreateQaTriageItemBody {
+  sourceKind: QaTriageSourceKind;
+  /**
+   * @minLength 1
+   * @maxLength 256
+   */
+  sourceId: string;
+  /** @maxLength 256 */
+  sourceRunId?: string | null;
+  /** @maxLength 128 */
+  suiteId?: string | null;
+  /**
+   * @minLength 1
+   * @maxLength 512
+   */
+  title: string;
+  severity?: QaTriageSeverity;
+  /** @maxLength 8000 */
+  excerpt?: string;
+  /** @maxLength 2000 */
+  suggestedNextStep?: string;
+}
+
+export interface UpdateQaTriageItemBody {
+  status: QaTriageStatus;
+}
+
+export interface BulkUpdateQaTriageItemsBody {
+  /** @minItems 1 */
+  ids: string[];
+  status: QaTriageStatus;
+}
+
+export interface QaTriageBulkResult {
+  updated: QaTriageItem[];
+}
+
+export interface BundleQaTriageItemsBody {
+  ids?: string[];
+}
+
+export interface QaTriageBundleResponse {
+  markdown: string;
+  items: QaTriageItem[];
+  count: number;
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
@@ -4743,4 +4853,8 @@ export type ListQaAutopilotRunsParams = {
    * @maximum 100
    */
   limit?: number;
+};
+
+export type ListQaTriageItemsParams = {
+  status?: QaTriageStatus;
 };
