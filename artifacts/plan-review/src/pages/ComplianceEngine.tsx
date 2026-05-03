@@ -36,6 +36,14 @@
  * the per-submission panel uses, then invalidate the cross-submission
  * feed when the job settles so the row pill flips live.
  *
+ * Live updates: while ANY pending run is visible in the feed (the
+ * unfiltered list), the runs list and KPI summary are refetched on a
+ * 1500ms cadence so reviewers can watch pending rows flip to their
+ * terminal state without clicking Refresh. Polling automatically stops
+ * once every visible run has settled, so an idle page makes no extra
+ * network traffic. The detail panel reads the selected run from the
+ * same list, so it tracks the terminal outcome on the next poll tick.
+ *
  * Audience gate: route is wrapped in `RequireAudience` in `App.tsx`
  * so non-reviewers land on the shared `access-denied` screen instead
  * of seeing the page chrome with every action 403'ing. The matching
@@ -409,22 +417,43 @@ export default function ComplianceEngine() {
       : (stateFilter as ListFindingsRunsState);
   const listParams = stateParam ? { state: stateParam } : undefined;
 
-  const summaryQuery = useGetFindingsRunsSummary({
-    query: {
-      queryKey: getGetFindingsRunsSummaryQueryKey(),
-    },
-  });
-  const summary: FindingsRunsSummaryResponse | undefined = summaryQuery.data;
-
+  // Live updates: while any pending run is visible we poll both the
+  // list and the summary on a 1.5s cadence (matching the per-submission
+  // panel) so every pending row can flip to its terminal state — and
+  // the KPI strip can catch up — without a manual refresh. The list's
+  // refetchInterval reads the most recent response off the query cache
+  // so the cycle is self-sustaining: a settled feed stops polling, a
+  // new pending row (kicked off here or elsewhere) starts it again on
+  // the next refetch triggered by mutation invalidation.
   const runsQuery = useListFindingsRuns(listParams, {
     query: {
       queryKey: getListFindingsRunsQueryKey(listParams),
+      refetchInterval: (query: { state: { data?: FindingsRunsListResponse } }) => {
+        const data = query.state.data;
+        const hasPending = (data?.runs ?? []).some(
+          (r: FindingsRunsListItem) => r.state === "pending",
+        );
+        return hasPending ? 1500 : false;
+      },
     },
   });
   const runs = useMemo<FindingsRunsListItem[]>(() => {
     const data: FindingsRunsListResponse | undefined = runsQuery.data;
     return data?.runs ?? [];
   }, [runsQuery.data]);
+
+  const hasPendingRuns = useMemo(
+    () => runs.some((r) => r.state === "pending"),
+    [runs],
+  );
+
+  const summaryQuery = useGetFindingsRunsSummary({
+    query: {
+      queryKey: getGetFindingsRunsSummaryQueryKey(),
+      refetchInterval: hasPendingRuns ? 1500 : false,
+    },
+  });
+  const summary: FindingsRunsSummaryResponse | undefined = summaryQuery.data;
 
   const trimmedQuery = searchQuery.trim().toLowerCase();
   const filteredRuns = useMemo(() => {
