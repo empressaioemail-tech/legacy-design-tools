@@ -101,6 +101,25 @@ describe("CannedFindingPicker (Task #473)", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input, init) => {
         const url = urlOf(input);
+        // Pre-existing /api/session stub gap (BUCKET C — pre-dates
+        // Track 1; verified by reverting FindingsTab + findingsMock to
+        // their pre-Track-1 state and observing the same failure).
+        // The picker's `useListCannedFindings` is gated on
+        // `enabled: open && !!tenantId`; without a session response,
+        // `useSessionTenantId` resolves to null and the picker query
+        // never fires, so the row never renders. Returning a minimal
+        // session here gets the picker query enabled.
+        if (url.includes("/api/session")) {
+          return new Response(
+            JSON.stringify({
+              audience: "internal",
+              permissions: [],
+              tenantId: "default",
+              requestor: { kind: "user", id: "u-test", disciplines: [] },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
         // List canned findings — picker fires this when toggled open.
         if (url.includes("/api/tenants/default/canned-findings")) {
           return new Response(

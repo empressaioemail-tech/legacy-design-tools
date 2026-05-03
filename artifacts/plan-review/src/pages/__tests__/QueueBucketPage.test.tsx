@@ -109,14 +109,24 @@ describe("QueueBucketPage", () => {
     });
   });
 
-  it("forwards the approved status filter for Approved", () => {
+  it("forwards the approved status filter + respondedAt order for Approved", () => {
+    // Approved.tsx + Rejected.tsx pass `order="respondedAt"` (Task #380
+    // pre-Track-1) so freshest decisions surface first; the sidebar
+    // count and page share the same react-query cache entry, so the
+    // expected params here must spell the param out verbatim.
     render(<Approved />);
-    expect(hoisted.hookCalls[0]!.params).toEqual({ status: "approved" });
+    expect(hoisted.hookCalls[0]!.params).toEqual({
+      status: "approved",
+      order: "respondedAt",
+    });
   });
 
-  it("forwards the rejected status filter for Rejected", () => {
+  it("forwards the rejected status filter + respondedAt order for Rejected", () => {
     render(<Rejected />);
-    expect(hoisted.hookCalls[0]!.params).toEqual({ status: "rejected" });
+    expect(hoisted.hookCalls[0]!.params).toEqual({
+      status: "rejected",
+      order: "respondedAt",
+    });
   });
 
   it("renders the bucket-specific empty copy when the queue is empty", () => {

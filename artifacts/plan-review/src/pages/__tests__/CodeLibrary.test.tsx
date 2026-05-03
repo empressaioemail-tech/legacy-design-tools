@@ -183,6 +183,22 @@ vi.mock("@workspace/api-client-react", async () => {
     getGetSessionQueryKey: () => ["session"],
     useListMyReviewerRequests: () => ({ data: { requests: [] } }),
     getListMyReviewerRequestsQueryKey: () => ["listMyReviewerRequests"],
+    // Track 1 — `useNavGroups` (mounted by CodeLibrary) reads
+    // `useListReviewerQueue(...)` for the sidebar bucket counts.
+    // Defaulting to `data: undefined` matches the existing precedent
+    // in `permissions.test.tsx:71` and `EngagementDetail.test.tsx:279`
+    // — `data?.counts?.[k] ?? 0` falls through cleanly so the sidebar
+    // pills read 0 without forcing every adopting test to spell out
+    // a counts envelope.
+    useListReviewerQueue: () => ({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+    }),
+    getListReviewerQueueQueryKey: (params?: unknown) => [
+      "listReviewerQueue",
+      params,
+    ],
     useListCodeJurisdictions: () =>
       useQuery({
         queryKey: ["jurisdictions"],

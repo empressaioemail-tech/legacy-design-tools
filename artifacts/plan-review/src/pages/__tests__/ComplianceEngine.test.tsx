@@ -80,6 +80,20 @@ vi.mock("@workspace/api-client-react", () => ({
     refetch: () => {},
   }),
   getListMyReviewerRequestsQueryKey: () => ["listMyReviewerRequests"],
+  // Track 1 — `useNavGroups` (mounted by ComplianceEngine) reads
+  // `useListReviewerQueue(...)` for the sidebar bucket counts.
+  // Same precedent as `permissions.test.tsx:71` and
+  // `EngagementDetail.test.tsx:279` — `data?.counts?.[k] ?? 0` falls
+  // through cleanly so the sidebar pills read 0 without test churn.
+  useListReviewerQueue: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
+  getListReviewerQueueQueryKey: (params?: unknown) => [
+    "listReviewerQueue",
+    params,
+  ],
   useListFindingsRuns: (
     params?: { state?: string },
     _opts?: unknown,

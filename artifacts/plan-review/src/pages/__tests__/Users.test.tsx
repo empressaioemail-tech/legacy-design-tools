@@ -108,6 +108,35 @@ vi.mock("@workspace/portal-ui", () => ({
   DashboardLayout: ({ children }: { children: ReactNode }) => (
     <div data-testid="dashboard-layout">{children}</div>
   ),
+  // Track 1 — Users.tsx now imports the seven-value reviewer-discipline
+  // enum + label map + ReviewerDisciplineBadge to render the disciplines
+  // multi-select inside EditProfileModal. Inline literals here mirror
+  // the precedent in `ReviewConsole.test.tsx:65-79` (no
+  // `vi.importActual` plumbing needed; consistency across plan-review's
+  // test mocks).
+  PLAN_REVIEW_DISCIPLINES: [
+    "building",
+    "electrical",
+    "mechanical",
+    "plumbing",
+    "residential",
+    "fire-life-safety",
+    "accessibility",
+  ] as const,
+  PLAN_REVIEW_DISCIPLINE_LABELS: {
+    building: "Building",
+    electrical: "Electrical",
+    mechanical: "Mechanical",
+    plumbing: "Plumbing",
+    residential: "Residential",
+    "fire-life-safety": "Fire/Life Safety",
+    accessibility: "Accessibility",
+  },
+  ReviewerDisciplineBadge: ({ discipline }: { discipline: string }) => (
+    <span data-testid={`reviewer-discipline-badge-${discipline}`}>
+      {discipline}
+    </span>
+  ),
 }));
 
 vi.mock("../../components/NavGroups", () => ({
