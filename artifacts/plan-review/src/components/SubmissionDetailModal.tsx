@@ -71,6 +71,7 @@ import type {
   SubmissionStatus,
 } from "@workspace/api-client-react";
 import { BimModelTab } from "./BimModelTab";
+import { SheetsTab } from "./sheets/SheetsTab";
 import { DecisionTab } from "./DecisionTab";
 import { EngagementContextTab } from "./EngagementContextTab";
 import { relativeTime } from "../lib/relativeTime";
@@ -370,6 +371,12 @@ export function SubmissionDetailModal({
               >
                 BIM Model
               </TabsTrigger>
+              <TabsTrigger
+                value="sheets"
+                data-testid="submission-detail-modal-tab-sheets"
+              >
+                Sheets
+              </TabsTrigger>
             </TabsList>
             <TabsContent
               value="note"
@@ -492,6 +499,13 @@ export function SubmissionDetailModal({
                 highlightToken={highlightToken}
                 audience={audience}
               />
+            </TabsContent>
+            <TabsContent
+              value="sheets"
+              data-testid="submission-detail-modal-sheets-content"
+              style={{ padding: 0 }}
+            >
+              <SheetsTab submissionId={submission.id} />
             </TabsContent>
           </Tabs>
         )}

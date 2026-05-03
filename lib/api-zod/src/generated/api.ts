@@ -4184,6 +4184,54 @@ export const CreateSubmissionCommunicationBody = zod
   );
 
 /**
+ * Returns the drawing sheets associated with this plan-review
+submission, in `sortOrder` ascending.
+
+Today the `submissions` table does not yet carry a direct
+`snapshotId` column / composed sheet edge, so the
+implementation resolves the submission's *contemporaneous*
+snapshot — the newest snapshot whose `receivedAt` is at or
+before the submission's `submittedAt`. This pins each
+submission to the sheet set actually packaged at send-off
+even when newer snapshots land on the same engagement later
+(SD-5). Legacy fallback: when no snapshot pre-dates the
+submission (e.g. the package was recorded before the first
+snapshot was ingested), the engagement's earliest snapshot
+is used instead. Responds with `[]` when the engagement has
+no snapshots at all. When the submission atom grows a
+direct `snapshotId` column the resolver will switch to an
+exact lookup without changing this wire shape.
+
+Used by Plan Review's `SheetNavigatorRail` (PLR-7) inside
+`SubmissionDetailModal` to render thumbnail tiles.
+
+ * @summary List sheets composed by a plan-review submission
+ */
+export const ListSubmissionSheetsParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const ListSubmissionSheetsResponseItem = zod.object({
+  id: zod.string(),
+  snapshotId: zod.string(),
+  engagementId: zod.string(),
+  sheetNumber: zod.string(),
+  sheetName: zod.string(),
+  viewCount: zod.number().nullable(),
+  revisionNumber: zod.string().nullable(),
+  revisionDate: zod.string().nullable(),
+  thumbnailWidth: zod.number(),
+  thumbnailHeight: zod.number(),
+  fullWidth: zod.number(),
+  fullHeight: zod.number(),
+  sortOrder: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+export const ListSubmissionSheetsResponse = zod.array(
+  ListSubmissionSheetsResponseItem,
+);
+
+/**
  * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
 finding the AI engine missed without re-running generation.
 Persists with `status="ai-produced"` (so accept/reject/override

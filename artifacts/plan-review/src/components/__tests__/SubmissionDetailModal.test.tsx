@@ -532,6 +532,7 @@ describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () =>
         | "findings"
         | "renders"
         | "decision"
+        | "sheets"
       >("findings");
       return (
         <QueryClientProvider client={makeQueryClient()}>

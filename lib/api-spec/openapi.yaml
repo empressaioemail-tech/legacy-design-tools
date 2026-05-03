@@ -3064,6 +3064,54 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /submissions/{submissionId}/sheets:
+    get:
+      operationId: listSubmissionSheets
+      tags: [engagements]
+      summary: List sheets composed by a plan-review submission
+      description: |
+        Returns the drawing sheets associated with this plan-review
+        submission, in `sortOrder` ascending.
+
+        Today the `submissions` table does not yet carry a direct
+        `snapshotId` column / composed sheet edge, so the
+        implementation resolves the submission's *contemporaneous*
+        snapshot — the newest snapshot whose `receivedAt` is at or
+        before the submission's `submittedAt`. This pins each
+        submission to the sheet set actually packaged at send-off
+        even when newer snapshots land on the same engagement later
+        (SD-5). Legacy fallback: when no snapshot pre-dates the
+        submission (e.g. the package was recorded before the first
+        snapshot was ingested), the engagement's earliest snapshot
+        is used instead. Responds with `[]` when the engagement has
+        no snapshots at all. When the submission atom grows a
+        direct `snapshotId` column the resolver will switch to an
+        exact lookup without changing this wire shape.
+
+        Used by Plan Review's `SheetNavigatorRail` (PLR-7) inside
+        `SubmissionDetailModal` to render thumbnail tiles.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of sheet summaries (no PNG bytes), sorted by `sortOrder`.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SheetSummary"
+        "404":
+          description: Submission not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /submissions/{submissionId}/findings:
     post:
       operationId: createSubmissionFinding

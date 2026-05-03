@@ -6827,6 +6827,119 @@ export const useCreateSubmissionCommunication = <
 };
 
 /**
+ * Returns the drawing sheets associated with this plan-review
+submission, in `sortOrder` ascending.
+
+Today the `submissions` table does not yet carry a direct
+`snapshotId` column / composed sheet edge, so the
+implementation resolves the submission's *contemporaneous*
+snapshot — the newest snapshot whose `receivedAt` is at or
+before the submission's `submittedAt`. This pins each
+submission to the sheet set actually packaged at send-off
+even when newer snapshots land on the same engagement later
+(SD-5). Legacy fallback: when no snapshot pre-dates the
+submission (e.g. the package was recorded before the first
+snapshot was ingested), the engagement's earliest snapshot
+is used instead. Responds with `[]` when the engagement has
+no snapshots at all. When the submission atom grows a
+direct `snapshotId` column the resolver will switch to an
+exact lookup without changing this wire shape.
+
+Used by Plan Review's `SheetNavigatorRail` (PLR-7) inside
+`SubmissionDetailModal` to render thumbnail tiles.
+
+ * @summary List sheets composed by a plan-review submission
+ */
+export const getListSubmissionSheetsUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/sheets`;
+};
+
+export const listSubmissionSheets = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<SheetSummary[]> => {
+  return customFetch<SheetSummary[]>(getListSubmissionSheetsUrl(submissionId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListSubmissionSheetsQueryKey = (submissionId: string) => {
+  return [`/api/submissions/${submissionId}/sheets`] as const;
+};
+
+export const getListSubmissionSheetsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSubmissionSheets>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionSheets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListSubmissionSheetsQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSubmissionSheets>>
+  > = ({ signal }) =>
+    listSubmissionSheets(submissionId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSubmissionSheets>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSubmissionSheetsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSubmissionSheets>>
+>;
+export type ListSubmissionSheetsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List sheets composed by a plan-review submission
+ */
+
+export function useListSubmissionSheets<
+  TData = Awaited<ReturnType<typeof listSubmissionSheets>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionSheets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSubmissionSheetsQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
 finding the AI engine missed without re-running generation.
 Persists with `status="ai-produced"` (so accept/reject/override

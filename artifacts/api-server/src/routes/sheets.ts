@@ -6,8 +6,8 @@ import {
 } from "express";
 import { createHash } from "node:crypto";
 import Busboy from "busboy";
-import { db, snapshots, sheets } from "@workspace/db";
-import { eq, sql, asc, and, inArray, desc } from "drizzle-orm";
+import { db, snapshots, sheets, submissions } from "@workspace/db";
+import { eq, sql, asc, and, inArray, desc, lte } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { getHistoryService } from "../atoms/registry";
@@ -842,6 +842,100 @@ async function serveSheetPng(
     res.status(500).json({ error: "Failed to load sheet image" });
   }
 }
+
+router.get(
+  "/submissions/:submissionId/sheets",
+  async (req: Request, res: Response) => {
+    const submissionId = String(req.params["submissionId"] ?? "");
+    if (!submissionId) {
+      res.status(400).json({ error: "Missing submissionId" });
+      return;
+    }
+    try {
+      const subRows = await db
+        .select({
+          id: submissions.id,
+          engagementId: submissions.engagementId,
+          submittedAt: submissions.submittedAt,
+        })
+        .from(submissions)
+        .where(eq(submissions.id, submissionId))
+        .limit(1);
+      const sub = subRows[0];
+      if (!sub) {
+        res.status(404).json({ error: "Submission not found" });
+        return;
+      }
+
+      // Resolve the submission's *contemporaneous* snapshot — the
+      // newest snapshot uploaded at or before `submittedAt`. Pinning
+      // to submission time (instead of "engagement's latest snapshot
+      // right now") keeps each submission stable to the sheet set
+      // that was actually packaged and sent to the jurisdiction,
+      // even after later snapshots land on the same engagement (SD-5).
+      // When the submission atom grows a direct `snapshotId` column
+      // this can switch to an exact lookup without changing the wire
+      // shape.
+      let snapRows = await db
+        .select({ id: snapshots.id })
+        .from(snapshots)
+        .where(
+          and(
+            eq(snapshots.engagementId, sub.engagementId),
+            lte(snapshots.receivedAt, sub.submittedAt),
+          ),
+        )
+        .orderBy(desc(snapshots.receivedAt))
+        .limit(1);
+      // Fallback: a submission may pre-date its only snapshot in
+      // legacy data (the `engagement.submitted` event was appended
+      // before any snapshot was ingested). Surface the engagement's
+      // earliest snapshot in that case so the rail isn't empty for
+      // historical rows.
+      if (snapRows.length === 0) {
+        snapRows = await db
+          .select({ id: snapshots.id })
+          .from(snapshots)
+          .where(eq(snapshots.engagementId, sub.engagementId))
+          .orderBy(asc(snapshots.receivedAt))
+          .limit(1);
+      }
+      const latest = snapRows[0];
+      if (!latest) {
+        res.json([]);
+        return;
+      }
+
+      const rows = await db
+        .select({
+          id: sheets.id,
+          snapshotId: sheets.snapshotId,
+          engagementId: sheets.engagementId,
+          sheetNumber: sheets.sheetNumber,
+          sheetName: sheets.sheetName,
+          viewCount: sheets.viewCount,
+          revisionNumber: sheets.revisionNumber,
+          revisionDate: sheets.revisionDate,
+          thumbnailWidth: sheets.thumbnailWidth,
+          thumbnailHeight: sheets.thumbnailHeight,
+          fullWidth: sheets.fullWidth,
+          fullHeight: sheets.fullHeight,
+          sortOrder: sheets.sortOrder,
+          createdAt: sheets.createdAt,
+        })
+        .from(sheets)
+        .where(eq(sheets.snapshotId, latest.id))
+        .orderBy(asc(sheets.sortOrder));
+
+      res.json(
+        rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+      );
+    } catch (err) {
+      logger.error({ err, submissionId }, "list submission sheets failed");
+      res.status(500).json({ error: "Failed to list submission sheets" });
+    }
+  },
+);
 
 router.get("/sheets/:id/thumbnail.png", (req, res) =>
   serveSheetPng(req, res, "thumbnailPng"),
