@@ -27,11 +27,16 @@ import {
 } from "@/components/ui/dialog";
 import {
   useRecordDecision,
+  useListSubmissionDecisions,
   getListEngagementSubmissionsQueryKey,
   getListSubmissionDecisionsQueryKey,
+  type Decision,
+  type DecisionVerdict,
   type EngagementSubmissionSummary,
+  type ListDecisionsResponse,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { relativeTime } from "../lib/relativeTime";
 
 /**
  * Single source of truth for the verdict tuple on the FE side. Mirrors
@@ -83,6 +88,12 @@ export function DecideModal({
   onClose,
 }: DecideModalProps) {
   const queryClient = useQueryClient();
+  const decisionsQuery = useListSubmissionDecisions(submission.id, {
+    query: {
+      enabled: open && !!submission.id,
+      queryKey: getListSubmissionDecisionsQueryKey(submission.id),
+    },
+  });
   const [verdict, setVerdict] = useState<
     "approve" | "approve_with_conditions" | "return_for_revision"
   >("approve");
@@ -239,6 +250,7 @@ export function DecideModal({
               {error}
             </div>
           )}
+          <DecisionHistorySection query={decisionsQuery} />
           <div
             style={{
               display: "flex",
@@ -271,5 +283,149 @@ export function DecideModal({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const VERDICT_LABELS: Record<DecisionVerdict, string> = {
+  approve: "Approve",
+  approve_with_conditions: "Approve with conditions",
+  return_for_revision: "Return for revision",
+};
+
+interface DecisionHistorySectionProps {
+  query: {
+    data: ListDecisionsResponse | undefined;
+    isLoading: boolean;
+    isError: boolean;
+  };
+}
+
+/**
+ * Renders the prior decisions for the submission in newest-first
+ * order so the reviewer has audit-trail context before recording
+ * another verdict. Mirrors the loading / empty / error states the
+ * `RevisionHistoryList` uses on the Decision tab so the two
+ * surfaces feel consistent.
+ */
+function DecisionHistorySection({ query }: DecisionHistorySectionProps) {
+  const { data, isLoading, isError } = query;
+  const items: Decision[] = data?.items ?? [];
+
+  return (
+    <section
+      data-testid="decide-modal-history"
+      style={{ display: "flex", flexDirection: "column", gap: 6 }}
+    >
+      <div
+        className="sc-label"
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          color: "var(--text-muted)",
+        }}
+      >
+        Decision history
+      </div>
+      {isLoading ? (
+        <div
+          data-testid="decide-modal-history-loading"
+          className="sc-body opacity-60"
+          style={{ fontSize: 12 }}
+        >
+          Loading decision history…
+        </div>
+      ) : isError ? (
+        <div
+          data-testid="decide-modal-history-error"
+          role="alert"
+          style={{ fontSize: 12, color: "var(--danger-text)" }}
+        >
+          Couldn't load the decision history.
+        </div>
+      ) : items.length === 0 ? (
+        <div
+          data-testid="decide-modal-history-empty"
+          className="sc-body opacity-60"
+          style={{ fontSize: 12, fontStyle: "italic" }}
+        >
+          No decisions recorded yet.
+        </div>
+      ) : (
+        <ul
+          data-testid="decide-modal-history-list"
+          style={{
+            listStyle: "none",
+            padding: 0,
+            margin: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            maxHeight: 220,
+            overflowY: "auto",
+          }}
+        >
+          {items.map((d) => (
+            <li
+              key={d.id}
+              data-testid={`decide-modal-history-item-${d.id}`}
+              data-verdict={d.verdict}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                padding: 8,
+                border: "1px solid var(--border-default)",
+                borderRadius: 4,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  fontSize: 12,
+                }}
+              >
+                <span
+                  className="sc-medium"
+                  data-testid={`decide-modal-history-item-${d.id}-verdict`}
+                >
+                  {VERDICT_LABELS[d.verdict] ?? d.verdict}
+                </span>
+                <span
+                  className="sc-meta"
+                  data-testid={`decide-modal-history-item-${d.id}-recorded-at`}
+                  title={new Date(d.recordedAt).toLocaleString()}
+                  style={{ color: "var(--text-secondary)", fontSize: 11 }}
+                >
+                  {relativeTime(d.recordedAt)}
+                </span>
+              </div>
+              <div
+                className="sc-meta"
+                data-testid={`decide-modal-history-item-${d.id}-actor`}
+                style={{ color: "var(--text-secondary)", fontSize: 11 }}
+              >
+                {d.recordedBy.kind}: {d.recordedBy.id}
+              </div>
+              {d.comment && (
+                <div
+                  data-testid={`decide-modal-history-item-${d.id}-comment`}
+                  style={{
+                    fontSize: 12,
+                    color: "var(--text-primary)",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {d.comment}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
