@@ -38,6 +38,7 @@ export interface EngagementDetailsModalProps {
 interface FormState {
   name: string;
   address: string;
+  jurisdiction: string;
   projectType: "" | (typeof PROJECT_TYPE_OPTIONS)[number]["value"];
   zoningCode: string;
   lotAreaSqft: string;
@@ -49,6 +50,7 @@ function buildInitial(e: EngagementDetail): FormState {
   return {
     name: e.name,
     address: e.address ?? "",
+    jurisdiction: e.jurisdiction ?? "",
     projectType: (e.site?.projectType ?? "") as FormState["projectType"],
     zoningCode: e.site?.zoningCode ?? "",
     lotAreaSqft:
@@ -167,6 +169,11 @@ export function EngagementDetailsModal({
       // column; otherwise send the trimmed value.
       data["applicantFirm"] = newFirm === "" ? null : newFirm;
     }
+    const newJurisdiction = form.jurisdiction.trim();
+    const currentJurisdiction = engagement.jurisdiction ?? "";
+    if (newJurisdiction !== currentJurisdiction) {
+      data["jurisdiction"] = newJurisdiction;
+    }
 
     if (Object.keys(data).length === 0) {
       onClose();
@@ -249,6 +256,28 @@ export function EngagementDetailsModal({
                 {warnings.join(" ")}
               </div>
             )}
+          </Field>
+
+          <Field label="Jurisdiction (optional)">
+            <input
+              type="text"
+              value={form.jurisdiction}
+              onChange={(e) =>
+                setForm({ ...form, jurisdiction: e.target.value })
+              }
+              disabled={submitting}
+              placeholder="e.g., Moab, UT"
+              className="sc-ui"
+              style={inputStyle}
+              data-testid="engagement-jurisdiction-input"
+            />
+            <span
+              className="sc-meta"
+              style={{ marginTop: 4, opacity: 0.7 }}
+            >
+              City, State (e.g. "Moab, UT"). Used to gate which adapters
+              fire when the address geocoder can't resolve a city.
+            </span>
           </Field>
 
           <Field label="Project type">
