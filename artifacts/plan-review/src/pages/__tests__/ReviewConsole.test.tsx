@@ -389,10 +389,10 @@ describe("ReviewConsole", () => {
   });
 
   describe("Track 1 — discipline filter + no-disciplines banner", () => {
-    it("renders the no-disciplines banner for a non-admin reviewer with empty disciplines", () => {
-      // Empty disciplines + non-admin → the banner is the FE's
-      // ask-your-admin nudge, since the brief defers self-edit
-      // out of Track 1 scope (Q3 resolution: option (a)).
+    it("renders the ask-your-admin banner for a non-admin reviewer with empty disciplines (no /users CTA)", () => {
+      // Non-admin self-edit is out of Track 1 scope (Q3 option (a));
+      // the banner copy points the reviewer at their admin and
+      // intentionally does NOT render the Set-certifications link.
       disciplineFilterState.userHasNoDisciplines = true;
       disciplineFilterState.isAdmin = false;
       hoisted.queue = {
@@ -403,11 +403,43 @@ describe("ReviewConsole", () => {
       const banner = screen.getByTestId(
         "review-console-no-disciplines-banner",
       );
+      expect(banner).toHaveAttribute("data-admin", "false");
       expect(banner).toHaveTextContent(/ask your admin/i);
+      expect(
+        screen.queryByTestId("review-console-no-disciplines-banner-cta"),
+      ).not.toBeInTheDocument();
     });
 
-    it("hides the banner for an admin (admins see everything by default)", () => {
+    it("renders the banner with the /users deep-link CTA for an admin with empty disciplines", () => {
+      // X3 widened the visibility gate: admins are no longer excluded.
+      // An admin without disciplines configured sees the banner with
+      // an actionable /users link so they can set their own row inline.
       disciplineFilterState.userHasNoDisciplines = true;
+      disciplineFilterState.isAdmin = true;
+      hoisted.queue = {
+        items: [],
+        counts: { inReview: 0, awaitingAi: 0, rejected: 0, backlog: 0 },
+      };
+      render(<ReviewConsole />);
+      const banner = screen.getByTestId(
+        "review-console-no-disciplines-banner",
+      );
+      expect(banner).toHaveAttribute("data-admin", "true");
+      expect(banner).toHaveTextContent(
+        /You haven't set your reviewer disciplines/i,
+      );
+      const cta = screen.getByTestId(
+        "review-console-no-disciplines-banner-cta",
+      );
+      expect(cta).toHaveAttribute("href", "/users");
+      expect(cta).toHaveTextContent(/Set certifications/i);
+    });
+
+    it("hides the banner for an admin who already has disciplines configured", () => {
+      // The visibility gate is `userHasNoDisciplines` only. An admin
+      // who's already configured their own row no longer sees the
+      // banner — neither the copy nor the CTA.
+      disciplineFilterState.userHasNoDisciplines = false;
       disciplineFilterState.isAdmin = true;
       hoisted.queue = {
         items: [],

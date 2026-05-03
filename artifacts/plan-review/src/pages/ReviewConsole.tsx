@@ -117,17 +117,20 @@ export default function ReviewConsole() {
     return arr.map((d) => PLAN_REVIEW_DISCIPLINE_LABELS[d]).join(" · ");
   }, [disciplineFilter.selected]);
 
-  // One-time banner for reviewers with no disciplines configured. The
-  // dismissal key is per-browser; admins are excluded (admins see
-  // everything by default and don't get prompted).
+  // One-time banner for any user (admin or not) whose disciplines
+  // array is empty. Pass-A's contract-first lock means an empty
+  // array IS the wire-side default for legacy rows that haven't
+  // been backfilled; the banner nudges those users to set their
+  // certifications. The CTA branches by `isAdmin` (admins get an
+  // inline /users deep-link to their own profile; non-admins are
+  // told to ask an admin since self-edit is out of Track 1 scope).
+  // Dismissal key is per-browser.
   const [bannerDismissed, setBannerDismissed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(DISCIPLINE_BANNER_DISMISSED_KEY) === "1";
   });
   const showNoDisciplinesBanner =
-    !bannerDismissed &&
-    disciplineFilter.userHasNoDisciplines &&
-    !disciplineFilter.isAdmin;
+    !bannerDismissed && disciplineFilter.userHasNoDisciplines;
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (bannerDismissed) {
@@ -167,6 +170,7 @@ export default function ReviewConsole() {
           <div
             className="sc-card"
             data-testid="review-console-no-disciplines-banner"
+            data-admin={disciplineFilter.isAdmin ? "true" : "false"}
             style={{
               padding: 12,
               display: "flex",
@@ -176,10 +180,27 @@ export default function ReviewConsole() {
               borderLeft: "3px solid var(--cyan)",
             }}
           >
-            <div className="sc-body">
-              Ask your admin to set your certifications so the queue
-              can highlight what's yours.
-            </div>
+            {disciplineFilter.isAdmin ? (
+              <div
+                className="sc-body"
+                style={{ display: "flex", alignItems: "center", gap: 12 }}
+              >
+                <span>You haven't set your reviewer disciplines.</span>
+                <a
+                  href="/users"
+                  className="sc-link"
+                  data-testid="review-console-no-disciplines-banner-cta"
+                  style={{ color: "var(--cyan-text)" }}
+                >
+                  Set certifications
+                </a>
+              </div>
+            ) : (
+              <div className="sc-body">
+                Ask your admin to set your certifications so the queue
+                can highlight what's yours.
+              </div>
+            )}
             <button
               type="button"
               className="sc-btn-sm"

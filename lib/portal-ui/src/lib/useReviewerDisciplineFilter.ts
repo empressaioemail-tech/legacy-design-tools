@@ -11,20 +11,18 @@
  *    the user's full configured set if nothing is stored.
  *  - Persists every toggle so the bar remembers the reviewer's
  *    narrowing across page navigations and reloads (per-browser).
- *  - `isShowingAll` is true when no narrowing is in effect: either
- *    the user is an admin (sees everything by default), or has no
- *    disciplines configured (the one-time banner case), or has
- *    explicitly clicked "Show all".
+ *  - `isShowingAll` is true when the active selection is empty (no
+ *    narrowing in effect) — equivalently, when the user has no
+ *    disciplines configured or has explicitly clicked "Show all".
  *  - `userHasNoDisciplines` drives the one-time banner that invites
- *    the reviewer to set their certifications.
+ *    any user (admin or not) with an empty `disciplines` array to
+ *    set their certifications. The banner's CTA branches on `isAdmin`
+ *    in `ReviewConsole`.
  *
- * Source-of-truth for the user's `disciplines` is BE-blocked at the
- * time of writing — until the regenerated session shape carries the
- * field, every reviewer renders as "no disciplines configured" and
- * the hook's `isShowingAll` defaults to true. The cast on
- * `(requestor as { disciplines?: ... })` is intentional: it lets the
- * FE compile against the current contract while BE / CT land Pass A.
- * Swap to a typed import from `@workspace/api-zod` in commit 6.
+ * Source: `Session.requestor.disciplines` (BE hydrates this from
+ * `users.disciplines` on every session response — see CT's commit
+ * `84cc08b` for the codegen lock and BE's `9d60025` for the
+ * server-side hydration).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -100,13 +98,13 @@ export function useReviewerDisciplineFilter(): UseReviewerDisciplineFilter {
     },
   });
 
-  // BE BLOCKED — `disciplines` lands on the session response in
-  // Track 1 Pass A. Cast through unknown so the FE compiles today.
+  // BE Pass-A landed `disciplines` on `SessionRequestor` (BE 9d60025
+  // hydrates the array from `users.disciplines`; CT 84cc08b carries
+  // the typed field through the regenerated codegen). The defensive
+  // `isPlanReviewDiscipline` filter keeps a stale localStorage write
+  // from a prior build from leaking unknown values into the chip-bar.
   const userDisciplines = useMemo<ReadonlyArray<PlanReviewDiscipline>>(() => {
-    const requestor = session?.requestor as
-      | { disciplines?: ReadonlyArray<unknown> }
-      | undefined;
-    const raw = requestor?.disciplines;
+    const raw = session?.requestor?.disciplines;
     if (!Array.isArray(raw)) return [];
     return raw.filter(isPlanReviewDiscipline);
   }, [session]);
