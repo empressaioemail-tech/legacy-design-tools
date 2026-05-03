@@ -3932,6 +3932,172 @@ export interface UpdateCannedFindingBody {
   archivedAt?: string | null;
 }
 
+export type QaRunStatus = (typeof QaRunStatus)[keyof typeof QaRunStatus];
+
+export const QaRunStatus = {
+  running: "running",
+  passed: "passed",
+  failed: "failed",
+  errored: "errored",
+} as const;
+
+export type QaChecklistItemStatus =
+  (typeof QaChecklistItemStatus)[keyof typeof QaChecklistItemStatus];
+
+export const QaChecklistItemStatus = {
+  pass: "pass",
+  fail: "fail",
+  skip: "skip",
+} as const;
+
+export interface QaSuiteLastRun {
+  id: string;
+  status: QaRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+export type QaSuiteSummaryApp =
+  (typeof QaSuiteSummaryApp)[keyof typeof QaSuiteSummaryApp];
+
+export const QaSuiteSummaryApp = {
+  "api-server": "api-server",
+  "design-tools": "design-tools",
+  "plan-review": "plan-review",
+} as const;
+
+export type QaSuiteSummaryKind =
+  (typeof QaSuiteSummaryKind)[keyof typeof QaSuiteSummaryKind];
+
+export const QaSuiteSummaryKind = {
+  vitest: "vitest",
+  playwright: "playwright",
+} as const;
+
+export interface QaSuiteSummary {
+  id: string;
+  app: QaSuiteSummaryApp;
+  kind: QaSuiteSummaryKind;
+  label: string;
+  description: string;
+  activeRunId: string | null;
+  lastRun: QaSuiteLastRun | null;
+}
+
+export interface QaSuiteListResponse {
+  suites: QaSuiteSummary[];
+}
+
+export interface QaRunSummary {
+  id: string;
+  suiteId: string;
+  status: QaRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+export interface QaRunListResponse {
+  runs: QaRunSummary[];
+}
+
+export interface QaRunDetail {
+  id: string;
+  suiteId: string;
+  status: QaRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+  durationMs: number | null;
+  log: string;
+  isActive: boolean;
+}
+
+export interface StartQaRunBody {
+  suiteId: string;
+}
+
+export interface QaRunReceipt {
+  runId: string;
+  suiteId: string;
+  startedAt: string;
+}
+
+export type StartAllQaRunsResponseStartedItem = {
+  suiteId: string;
+  runId: string;
+};
+
+export type StartAllQaRunsResponseSkippedItem = {
+  suiteId: string;
+  reason: string;
+};
+
+export interface StartAllQaRunsResponse {
+  started: StartAllQaRunsResponseStartedItem[];
+  skipped: StartAllQaRunsResponseSkippedItem[];
+}
+
+export interface QaChecklistItemResult {
+  id: string;
+  label: string;
+  hint: string | null;
+  status: QaChecklistItemStatus | null;
+  note: string | null;
+  updatedAt: string | null;
+}
+
+export interface QaChecklistCounts {
+  passed: number;
+  failed: number;
+  skipped: number;
+  notRun: number;
+}
+
+export type QaChecklistSummaryApp =
+  (typeof QaChecklistSummaryApp)[keyof typeof QaChecklistSummaryApp];
+
+export const QaChecklistSummaryApp = {
+  "api-server": "api-server",
+  "design-tools": "design-tools",
+  "plan-review": "plan-review",
+} as const;
+
+export interface QaChecklistSummary {
+  id: string;
+  app: QaChecklistSummaryApp;
+  title: string;
+  description: string;
+  total: number;
+  counts: QaChecklistCounts;
+  items: QaChecklistItemResult[];
+}
+
+export interface QaChecklistListResponse {
+  checklists: QaChecklistSummary[];
+}
+
+export interface UpdateQaChecklistItemBody {
+  status: QaChecklistItemStatus | null;
+  /** @maxLength 2000 */
+  note?: string | null;
+}
+
+export interface QaChecklistItemResultPatch {
+  checklistId: string;
+  itemId: string;
+  status: QaChecklistItemStatus | null;
+  note: string | null;
+  updatedAt?: string;
+}
+
+export interface QaResetResponse {
+  ok: boolean;
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
@@ -4206,4 +4372,13 @@ export const GetRenderOutputFileDownload = {
 export type ListCannedFindingsParams = {
   discipline?: CannedFindingDiscipline;
   includeArchived?: boolean;
+};
+
+export type ListQaRunsParams = {
+  suiteId?: string;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
 };

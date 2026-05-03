@@ -6883,3 +6883,149 @@ export const DeleteCannedFindingResponse = zod.object({
       "One tenant-scoped canned-finding library entry. Curated by\nadmins, surfaced to reviewers via the Library picker on\nFindingsTab.\n",
     ),
 });
+
+/**
+ * @summary List QA test suites with their most recent run status
+ */
+export const ListQaSuitesResponse = zod.object({
+  suites: zod.array(
+    zod.object({
+      id: zod.string(),
+      app: zod.enum(["api-server", "design-tools", "plan-review"]),
+      kind: zod.enum(["vitest", "playwright"]),
+      label: zod.string(),
+      description: zod.string(),
+      activeRunId: zod.string().uuid().nullable(),
+      lastRun: zod
+        .object({
+          id: zod.string().uuid(),
+          status: zod.enum(["running", "passed", "failed", "errored"]),
+          startedAt: zod.coerce.date(),
+          finishedAt: zod.coerce.date().nullable(),
+          exitCode: zod.number().nullable(),
+          durationMs: zod.number().nullable(),
+        })
+        .nullable(),
+    }),
+  ),
+});
+
+/**
+ * @summary List recent QA test runs (newest first)
+ */
+export const listQaRunsQueryLimitDefault = 25;
+export const listQaRunsQueryLimitMax = 100;
+
+export const ListQaRunsQueryParams = zod.object({
+  suiteId: zod.coerce.string().optional(),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listQaRunsQueryLimitMax)
+    .default(listQaRunsQueryLimitDefault),
+});
+
+export const ListQaRunsResponse = zod.object({
+  runs: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      suiteId: zod.string(),
+      status: zod.enum(["running", "passed", "failed", "errored"]),
+      startedAt: zod.coerce.date(),
+      finishedAt: zod.coerce.date().nullable(),
+      exitCode: zod.number().nullable(),
+      durationMs: zod.number().nullable(),
+    }),
+  ),
+});
+
+/**
+ * @summary Kick off a QA test suite run
+ */
+export const StartQaRunBody = zod.object({
+  suiteId: zod.string(),
+});
+
+/**
+ * @summary Get a single QA run including the persisted log
+ */
+export const GetQaRunParams = zod.object({
+  runId: zod.coerce.string().uuid(),
+});
+
+export const GetQaRunResponse = zod.object({
+  id: zod.string().uuid(),
+  suiteId: zod.string(),
+  status: zod.enum(["running", "passed", "failed", "errored"]),
+  startedAt: zod.coerce.date(),
+  finishedAt: zod.coerce.date().nullable(),
+  exitCode: zod.number().nullable(),
+  durationMs: zod.number().nullable(),
+  log: zod.string(),
+  isActive: zod.boolean(),
+});
+
+/**
+ * @summary List manual QA checklists with their persisted item results
+ */
+export const ListQaChecklistsResponse = zod.object({
+  checklists: zod.array(
+    zod.object({
+      id: zod.string(),
+      app: zod.enum(["api-server", "design-tools", "plan-review"]),
+      title: zod.string(),
+      description: zod.string(),
+      total: zod.number(),
+      counts: zod.object({
+        passed: zod.number(),
+        failed: zod.number(),
+        skipped: zod.number(),
+        notRun: zod.number(),
+      }),
+      items: zod.array(
+        zod.object({
+          id: zod.string(),
+          label: zod.string(),
+          hint: zod.string().nullable(),
+          status: zod.enum(["pass", "fail", "skip"]).nullable(),
+          note: zod.string().nullable(),
+          updatedAt: zod.coerce.date().nullable(),
+        }),
+      ),
+    }),
+  ),
+});
+
+/**
+ * @summary Set or clear the status + note on a single checklist item
+ */
+export const UpdateQaChecklistItemParams = zod.object({
+  checklistId: zod.coerce.string(),
+  itemId: zod.coerce.string(),
+});
+
+export const updateQaChecklistItemBodyNoteMax = 2000;
+
+export const UpdateQaChecklistItemBody = zod.object({
+  status: zod.enum(["pass", "fail", "skip"]).nullable(),
+  note: zod.string().max(updateQaChecklistItemBodyNoteMax).nullish(),
+});
+
+export const UpdateQaChecklistItemResponse = zod.object({
+  checklistId: zod.string(),
+  itemId: zod.string(),
+  status: zod.enum(["pass", "fail", "skip"]).nullable(),
+  note: zod.string().nullable(),
+  updatedAt: zod.coerce.date().optional(),
+});
+
+/**
+ * @summary Clear all persisted item results for a checklist
+ */
+export const ResetQaChecklistParams = zod.object({
+  checklistId: zod.coerce.string(),
+});
+
+export const ResetQaChecklistResponse = zod.object({
+  ok: zod.boolean(),
+});

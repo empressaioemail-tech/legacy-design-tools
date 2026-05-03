@@ -24,3 +24,5 @@ export * from "./viewpointRenders";
 export * from "./renderOutputs";
 export * from "./architectNotificationReads";
 export * from "./cannedFindings";
+export * from "./qaRuns";
+export * from "./qaChecklistResults";

@@ -21,15 +21,6 @@ CREATE TABLE @@SCHEMA@@.adapter_response_cache (
 );
 
 
--- Name: architect_notification_reads; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.architect_notification_reads (
-    user_id text NOT NULL,
-    last_read_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
 -- Name: atom_events; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.atom_events (
@@ -117,27 +108,6 @@ CREATE TABLE @@SCHEMA@@.briefing_sources (
 );
 
 
--- Name: canned_findings; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.canned_findings (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id text NOT NULL,
-    discipline text NOT NULL,
-    title text NOT NULL,
-    default_body text NOT NULL,
-    severity text NOT NULL,
-    category text NOT NULL,
-    color text DEFAULT '#6b7280'::text NOT NULL,
-    code_atom_citations jsonb DEFAULT '[]'::jsonb NOT NULL,
-    archived_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT canned_findings_category_check CHECK ((category = ANY (ARRAY['setback'::text, 'height'::text, 'coverage'::text, 'egress'::text, 'use'::text, 'overlay-conflict'::text, 'divergence-related'::text, 'other'::text]))),
-    CONSTRAINT canned_findings_discipline_check CHECK ((discipline = ANY (ARRAY['building'::text, 'fire'::text, 'zoning'::text, 'civil'::text]))),
-    CONSTRAINT canned_findings_severity_check CHECK ((severity = ANY (ARRAY['blocker'::text, 'concern'::text, 'advisory'::text])))
-);
-
-
 -- Name: code_atom_fetch_queue; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.code_atom_fetch_queue (
@@ -219,55 +189,18 @@ CREATE TABLE @@SCHEMA@@.engagements (
     lot_area_sqft numeric,
     site_context_raw jsonb,
     revit_central_guid text,
-    revit_document_path text,
-    applicant_firm text,
-    architect_of_record_name text,
-    architect_of_record_email text,
-    architect_of_record_role text
+    revit_document_path text
 );
 
 
--- Name: finding_runs; Type: TABLE; Schema: public; Owner: -
+-- Name: findings_code_atoms; Type: TABLE; Schema: public; Owner: -
 
-CREATE TABLE @@SCHEMA@@.finding_runs (
+CREATE TABLE @@SCHEMA@@.findings_code_atoms (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    submission_id uuid NOT NULL,
-    state text NOT NULL,
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    completed_at timestamp with time zone,
-    error text,
-    invalid_citation_count integer,
-    invalid_citations text[],
-    discarded_finding_count integer
-);
-
-
--- Name: findings; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.findings (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    atom_id text NOT NULL,
-    submission_id uuid NOT NULL,
-    severity text NOT NULL,
-    category text NOT NULL,
-    status text DEFAULT 'ai-produced'::text NOT NULL,
-    text text NOT NULL,
-    citations jsonb DEFAULT '[]'::jsonb NOT NULL,
-    confidence numeric NOT NULL,
-    low_confidence boolean DEFAULT false NOT NULL,
-    reviewer_status_by jsonb,
-    reviewer_status_changed_at timestamp with time zone,
-    reviewer_comment text,
-    element_ref text,
-    source_ref jsonb,
-    ai_generated_at timestamp with time zone DEFAULT now() NOT NULL,
-    revision_of uuid,
-    finding_run_id uuid,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT findings_category_check CHECK ((category = ANY (ARRAY['setback'::text, 'height'::text, 'coverage'::text, 'egress'::text, 'use'::text, 'overlay-conflict'::text, 'divergence-related'::text, 'other'::text]))),
-    CONSTRAINT findings_severity_check CHECK ((severity = ANY (ARRAY['blocker'::text, 'concern'::text, 'advisory'::text]))),
-    CONSTRAINT findings_status_check CHECK ((status = ANY (ARRAY['ai-produced'::text, 'accepted'::text, 'rejected'::text, 'overridden'::text, 'promoted-to-architect'::text])))
+    finding_id uuid NOT NULL,
+    atom_id uuid NOT NULL,
+    role text DEFAULT 'supports'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -316,22 +249,29 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
 );
 
 
--- Name: render_outputs; Type: TABLE; Schema: public; Owner: -
+-- Name: qa_checklist_results; Type: TABLE; Schema: public; Owner: -
 
-CREATE TABLE @@SCHEMA@@.render_outputs (
+CREATE TABLE @@SCHEMA@@.qa_checklist_results (
+    checklist_id text NOT NULL,
+    item_id text NOT NULL,
+    status text NOT NULL,
+    note text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT qa_checklist_results_status_check CHECK ((status = ANY (ARRAY['pass'::text, 'fail'::text, 'skip'::text])))
+);
+
+
+-- Name: qa_runs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.qa_runs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    viewpoint_render_id uuid NOT NULL,
-    role text NOT NULL,
-    format text NOT NULL,
-    resolution text,
-    size_bytes integer,
-    duration_seconds integer,
-    source_url text NOT NULL,
-    mirrored_object_key text,
-    mnml_output_id text,
-    thumbnail_url text,
-    seed integer,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    suite_id text NOT NULL,
+    status text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone,
+    exit_code integer,
+    log text DEFAULT ''::text NOT NULL,
+    CONSTRAINT qa_runs_status_check CHECK ((status = ANY (ARRAY['running'::text, 'passed'::text, 'failed'::text, 'errored'::text])))
 );
 
 
@@ -354,34 +294,6 @@ CREATE TABLE @@SCHEMA@@.reviewer_annotations (
 );
 
 
--- Name: reviewer_requests; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.reviewer_requests (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    engagement_id uuid NOT NULL,
-    request_kind text NOT NULL,
-    target_entity_type text NOT NULL,
-    target_entity_id text NOT NULL,
-    reason text NOT NULL,
-    status text DEFAULT 'pending'::text NOT NULL,
-    requested_by jsonb NOT NULL,
-    requested_at timestamp with time zone DEFAULT now() NOT NULL,
-    dismissed_by jsonb,
-    dismissed_at timestamp with time zone,
-    dismissal_reason text,
-    withdrawn_by jsonb,
-    withdrawn_at timestamp with time zone,
-    withdrawal_reason text,
-    resolved_at timestamp with time zone,
-    triggered_action_event_id uuid,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT reviewer_requests_kind_check CHECK ((request_kind = ANY (ARRAY['refresh-briefing-source'::text, 'refresh-bim-model'::text, 'regenerate-briefing'::text]))),
-    CONSTRAINT reviewer_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'dismissed'::text, 'resolved'::text, 'withdrawn'::text]))),
-    CONSTRAINT reviewer_requests_target_type_check CHECK ((target_entity_type = ANY (ARRAY['briefing-source'::text, 'bim-model'::text, 'parcel-briefing'::text])))
-);
-
-
 -- Name: sheets; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.sheets (
@@ -400,7 +312,6 @@ CREATE TABLE @@SCHEMA@@.sheets (
     full_width integer NOT NULL,
     full_height integer NOT NULL,
     sort_order integer NOT NULL,
-    content_body text,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -420,35 +331,6 @@ CREATE TABLE @@SCHEMA@@.snapshots (
 );
 
 
--- Name: submission_comments; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.submission_comments (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    submission_id uuid NOT NULL,
-    author_role text NOT NULL,
-    author_id text NOT NULL,
-    body text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT submission_comments_author_role_check CHECK ((author_role = ANY (ARRAY['architect'::text, 'reviewer'::text])))
-);
-
-
--- Name: submission_communications; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.submission_communications (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    submission_id uuid NOT NULL,
-    atom_id text NOT NULL,
-    subject text NOT NULL,
-    body text NOT NULL,
-    finding_atom_ids jsonb NOT NULL,
-    recipient_user_ids jsonb NOT NULL,
-    sent_by jsonb NOT NULL,
-    sent_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
 -- Name: submissions; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.submissions (
@@ -464,9 +346,7 @@ CREATE TABLE @@SCHEMA@@.submissions (
     status text DEFAULT 'pending'::text NOT NULL,
     reviewer_comment text,
     responded_at timestamp with time zone,
-    response_recorded_at timestamp with time zone,
-    discipline text,
-    CONSTRAINT submissions_discipline_check CHECK (((discipline IS NULL) OR (discipline = ANY (ARRAY['building'::text, 'fire'::text, 'zoning'::text, 'civil'::text]))))
+    response_recorded_at timestamp with time zone
 );
 
 
@@ -483,40 +363,10 @@ CREATE TABLE @@SCHEMA@@.users (
 );
 
 
--- Name: viewpoint_renders; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.viewpoint_renders (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    engagement_id uuid NOT NULL,
-    briefing_id uuid,
-    briefing_atom_event_id text,
-    bim_model_id uuid,
-    bim_model_atom_event_id text,
-    kind text NOT NULL,
-    request_payload jsonb NOT NULL,
-    status text NOT NULL,
-    mnml_job_id text,
-    mnml_jobs jsonb,
-    error_code text,
-    error_message text,
-    error_details jsonb,
-    requested_by text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    completed_at timestamp with time zone
-);
-
-
 -- Name: adapter_response_cache adapter_response_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.adapter_response_cache
     ADD CONSTRAINT adapter_response_cache_pkey PRIMARY KEY (id);
-
-
--- Name: architect_notification_reads architect_notification_reads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.architect_notification_reads
-    ADD CONSTRAINT architect_notification_reads_pkey PRIMARY KEY (user_id);
 
 
 -- Name: atom_events atom_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -555,12 +405,6 @@ ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
     ADD CONSTRAINT briefing_sources_pkey PRIMARY KEY (id);
 
 
--- Name: canned_findings canned_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.canned_findings
-    ADD CONSTRAINT canned_findings_pkey PRIMARY KEY (id);
-
-
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
@@ -597,16 +441,10 @@ ALTER TABLE ONLY @@SCHEMA@@.engagements
     ADD CONSTRAINT engagements_pkey PRIMARY KEY (id);
 
 
--- Name: finding_runs finding_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: findings_code_atoms findings_code_atoms_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
-ALTER TABLE ONLY @@SCHEMA@@.finding_runs
-    ADD CONSTRAINT finding_runs_pkey PRIMARY KEY (id);
-
-
--- Name: findings findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.findings
-    ADD CONSTRAINT findings_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
+    ADD CONSTRAINT findings_code_atoms_pkey PRIMARY KEY (id);
 
 
 -- Name: materializable_elements materializable_elements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -627,22 +465,22 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_pkey PRIMARY KEY (id);
 
 
--- Name: render_outputs render_outputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: qa_checklist_results qa_checklist_results_pk; Type: CONSTRAINT; Schema: public; Owner: -
 
-ALTER TABLE ONLY @@SCHEMA@@.render_outputs
-    ADD CONSTRAINT render_outputs_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY @@SCHEMA@@.qa_checklist_results
+    ADD CONSTRAINT qa_checklist_results_pk PRIMARY KEY (checklist_id, item_id);
+
+
+-- Name: qa_runs qa_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.qa_runs
+    ADD CONSTRAINT qa_runs_pkey PRIMARY KEY (id);
 
 
 -- Name: reviewer_annotations reviewer_annotations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
     ADD CONSTRAINT reviewer_annotations_pkey PRIMARY KEY (id);
-
-
--- Name: reviewer_requests reviewer_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
-    ADD CONSTRAINT reviewer_requests_pkey PRIMARY KEY (id);
 
 
 -- Name: sheets sheets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -657,24 +495,6 @@ ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_pkey PRIMARY KEY (id);
 
 
--- Name: submission_comments submission_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.submission_comments
-    ADD CONSTRAINT submission_comments_pkey PRIMARY KEY (id);
-
-
--- Name: submission_communications submission_communications_atom_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.submission_communications
-    ADD CONSTRAINT submission_communications_atom_id_unique UNIQUE (atom_id);
-
-
--- Name: submission_communications submission_communications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.submission_communications
-    ADD CONSTRAINT submission_communications_pkey PRIMARY KEY (id);
-
-
 -- Name: submissions submissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.submissions
@@ -685,12 +505,6 @@ ALTER TABLE ONLY @@SCHEMA@@.submissions
 
 ALTER TABLE ONLY @@SCHEMA@@.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
-
-
--- Name: viewpoint_renders viewpoint_renders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
-    ADD CONSTRAINT viewpoint_renders_pkey PRIMARY KEY (id);
 
 
 -- Name: adapter_response_cache_expires_idx; Type: INDEX; Schema: public; Owner: -
@@ -758,11 +572,6 @@ CREATE INDEX briefing_sources_briefing_idx ON @@SCHEMA@@.briefing_sources USING 
 CREATE UNIQUE INDEX briefing_sources_current_layer_uniq ON @@SCHEMA@@.briefing_sources USING btree (briefing_id, layer_kind) WHERE (superseded_at IS NULL);
 
 
--- Name: canned_findings_tenant_discipline_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX canned_findings_tenant_discipline_idx ON @@SCHEMA@@.canned_findings USING btree (tenant_id, discipline);
-
-
 -- Name: code_atom_fetch_queue_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX code_atom_fetch_queue_jurisdiction_idx ON @@SCHEMA@@.code_atom_fetch_queue USING btree (jurisdiction_key);
@@ -813,24 +622,14 @@ CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (n
 CREATE UNIQUE INDEX engagements_revit_central_guid_uniq ON @@SCHEMA@@.engagements USING btree (revit_central_guid) WHERE (revit_central_guid IS NOT NULL);
 
 
--- Name: finding_runs_pending_per_submission_uniq; Type: INDEX; Schema: public; Owner: -
+-- Name: findings_code_atoms_atom_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE UNIQUE INDEX finding_runs_pending_per_submission_uniq ON @@SCHEMA@@.finding_runs USING btree (submission_id) WHERE (state = 'pending'::text);
-
-
--- Name: finding_runs_submission_started_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX finding_runs_submission_started_idx ON @@SCHEMA@@.finding_runs USING btree (submission_id, started_at);
+CREATE INDEX findings_code_atoms_atom_idx ON @@SCHEMA@@.findings_code_atoms USING btree (atom_id);
 
 
--- Name: findings_atom_id_uniq; Type: INDEX; Schema: public; Owner: -
+-- Name: findings_code_atoms_finding_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE UNIQUE INDEX findings_atom_id_uniq ON @@SCHEMA@@.findings USING btree (atom_id);
-
-
--- Name: findings_submission_created_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree (submission_id, created_at);
+CREATE INDEX findings_code_atoms_finding_idx ON @@SCHEMA@@.findings_code_atoms USING btree (finding_id);
 
 
 -- Name: materializable_elements_briefing_idx; Type: INDEX; Schema: public; Owner: -
@@ -848,14 +647,9 @@ CREATE INDEX materializable_elements_kind_idx ON @@SCHEMA@@.materializable_eleme
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
--- Name: render_outputs_render_role_uniq; Type: INDEX; Schema: public; Owner: -
+-- Name: qa_runs_suite_started_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE UNIQUE INDEX render_outputs_render_role_uniq ON @@SCHEMA@@.render_outputs USING btree (viewpoint_render_id, role);
-
-
--- Name: render_outputs_viewpoint_render_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX render_outputs_viewpoint_render_idx ON @@SCHEMA@@.render_outputs USING btree (viewpoint_render_id);
+CREATE INDEX qa_runs_suite_started_idx ON @@SCHEMA@@.qa_runs USING btree (suite_id, started_at);
 
 
 -- Name: reviewer_annotations_parent_idx; Type: INDEX; Schema: public; Owner: -
@@ -866,16 +660,6 @@ CREATE INDEX reviewer_annotations_parent_idx ON @@SCHEMA@@.reviewer_annotations 
 -- Name: reviewer_annotations_target_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX reviewer_annotations_target_idx ON @@SCHEMA@@.reviewer_annotations USING btree (submission_id, target_entity_type, target_entity_id);
-
-
--- Name: reviewer_requests_pending_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX reviewer_requests_pending_idx ON @@SCHEMA@@.reviewer_requests USING btree (engagement_id, status, requested_at);
-
-
--- Name: reviewer_requests_target_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX reviewer_requests_target_idx ON @@SCHEMA@@.reviewer_requests USING btree (target_entity_type, target_entity_id, status);
 
 
 -- Name: sheets_engagement_number_idx; Type: INDEX; Schema: public; Owner: -
@@ -903,16 +687,6 @@ CREATE INDEX snapshots_engagement_idx ON @@SCHEMA@@.snapshots USING btree (engag
 CREATE INDEX snapshots_received_at_idx ON @@SCHEMA@@.snapshots USING btree (received_at);
 
 
--- Name: submission_comments_submission_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX submission_comments_submission_idx ON @@SCHEMA@@.submission_comments USING btree (submission_id, created_at);
-
-
--- Name: submission_communications_submission_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX submission_communications_submission_idx ON @@SCHEMA@@.submission_communications USING btree (submission_id, sent_at);
-
-
 -- Name: submissions_engagement_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX submissions_engagement_idx ON @@SCHEMA@@.submissions USING btree (engagement_id);
@@ -921,16 +695,6 @@ CREATE INDEX submissions_engagement_idx ON @@SCHEMA@@.submissions USING btree (e
 -- Name: submissions_submitted_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX submissions_submitted_at_idx ON @@SCHEMA@@.submissions USING btree (submitted_at);
-
-
--- Name: viewpoint_renders_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX viewpoint_renders_engagement_created_idx ON @@SCHEMA@@.viewpoint_renders USING btree (engagement_id, created_at);
-
-
--- Name: viewpoint_renders_status_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX viewpoint_renders_status_idx ON @@SCHEMA@@.viewpoint_renders USING btree (status);
 
 
 -- Name: bim_models bim_models_active_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -999,28 +763,10 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
     ADD CONSTRAINT code_atoms_source_id_code_atom_sources_id_fk FOREIGN KEY (source_id) REFERENCES @@SCHEMA@@.code_atom_sources(id) ON DELETE CASCADE;
 
 
--- Name: finding_runs finding_runs_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: findings_code_atoms findings_code_atoms_atom_id_code_atoms_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
-ALTER TABLE ONLY @@SCHEMA@@.finding_runs
-    ADD CONSTRAINT finding_runs_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
-
-
--- Name: findings findings_finding_run_id_finding_runs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.findings
-    ADD CONSTRAINT findings_finding_run_id_finding_runs_id_fk FOREIGN KEY (finding_run_id) REFERENCES @@SCHEMA@@.finding_runs(id) ON DELETE SET NULL;
-
-
--- Name: findings findings_revision_of_findings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.findings
-    ADD CONSTRAINT findings_revision_of_findings_id_fk FOREIGN KEY (revision_of) REFERENCES @@SCHEMA@@.findings(id) ON DELETE SET NULL;
-
-
--- Name: findings findings_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.findings
-    ADD CONSTRAINT findings_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
+ALTER TABLE ONLY @@SCHEMA@@.findings_code_atoms
+    ADD CONSTRAINT findings_code_atoms_atom_id_code_atoms_id_fk FOREIGN KEY (atom_id) REFERENCES @@SCHEMA@@.code_atoms(id) ON DELETE CASCADE;
 
 
 -- Name: materializable_elements materializable_elements_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -1047,12 +793,6 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
 
 
--- Name: render_outputs render_outputs_viewpoint_render_id_viewpoint_renders_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.render_outputs
-    ADD CONSTRAINT render_outputs_viewpoint_render_id_viewpoint_renders_id_fk FOREIGN KEY (viewpoint_render_id) REFERENCES @@SCHEMA@@.viewpoint_renders(id) ON DELETE CASCADE;
-
-
 -- Name: reviewer_annotations reviewer_annotations_parent_annotation_id_reviewer_annotations_; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
@@ -1063,12 +803,6 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
     ADD CONSTRAINT reviewer_annotations_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
-
-
--- Name: reviewer_requests reviewer_requests_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
-    ADD CONSTRAINT reviewer_requests_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: sheets sheets_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -1089,40 +823,10 @@ ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
--- Name: submission_comments submission_comments_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.submission_comments
-    ADD CONSTRAINT submission_comments_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
-
-
--- Name: submission_communications submission_communications_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.submission_communications
-    ADD CONSTRAINT submission_communications_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
-
-
 -- Name: submissions submissions_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.submissions
     ADD CONSTRAINT submissions_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
-
-
--- Name: viewpoint_renders viewpoint_renders_bim_model_id_bim_models_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
-    ADD CONSTRAINT viewpoint_renders_bim_model_id_bim_models_id_fk FOREIGN KEY (bim_model_id) REFERENCES @@SCHEMA@@.bim_models(id) ON DELETE SET NULL;
-
-
--- Name: viewpoint_renders viewpoint_renders_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
-    ADD CONSTRAINT viewpoint_renders_briefing_id_parcel_briefings_id_fk FOREIGN KEY (briefing_id) REFERENCES @@SCHEMA@@.parcel_briefings(id) ON DELETE SET NULL;
-
-
--- Name: viewpoint_renders viewpoint_renders_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
-    ADD CONSTRAINT viewpoint_renders_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 

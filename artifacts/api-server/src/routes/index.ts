@@ -31,6 +31,7 @@ import decisionsRouter from "./decisions";
 import rendersRouter from "./renders";
 import notificationsRouter from "./notifications";
 import cannedFindingsRouter from "./cannedFindings";
+import qaRouter from "./qa";
 
 const router: IRouter = Router();
 
@@ -136,5 +137,6 @@ router.use(notificationsRouter);
 // `/tenants/:tenantId/canned-findings*`; distinct path subtree from
 // every other router so ordering is indifferent.
 router.use(cannedFindingsRouter);
+router.use(qaRouter);
 
 export default router;

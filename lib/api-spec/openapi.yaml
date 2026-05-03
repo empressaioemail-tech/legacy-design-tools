@@ -78,6 +78,14 @@ tags:
       `decision-event` atom's chain; the submission row's `status`
       and `reviewerComment` columns are also updated so existing
       list surfaces reflect the latest verdict.
+  - name: qa
+    description: |
+      Internal QA Dashboard. Exposes the static suite registry,
+      run-history rows, and manual checklist state. The live SSE
+      stream at `/qa/runs/{runId}/stream` is intentionally omitted
+      from this spec (event-stream contracts don't fit the OpenAPI
+      request/response shape) — the FE consumes it via a hand-written
+      `EventSource` against the same path.
 paths:
   /healthz:
     get:
@@ -4607,6 +4615,188 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Canned finding not found for tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /qa/suites:
+    get:
+      operationId: listQaSuites
+      tags: [qa]
+      summary: List QA test suites with their most recent run status
+      responses:
+        "200":
+          description: Suites with last-run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaSuiteListResponse"
+
+  /qa/runs:
+    get:
+      operationId: listQaRuns
+      tags: [qa]
+      summary: List recent QA test runs (newest first)
+      parameters:
+        - name: suiteId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: Recent run history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaRunListResponse"
+    post:
+      operationId: startQaRun
+      tags: [qa]
+      summary: Kick off a QA test suite run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartQaRunBody"
+      responses:
+        "201":
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaRunReceipt"
+        "404":
+          description: Unknown suite
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Suite already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /qa/runs/all:
+    post:
+      operationId: startAllQaRuns
+      tags: [qa]
+      summary: Kick off every known suite (skipping any already running)
+      responses:
+        "201":
+          description: Aggregate kickoff result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartAllQaRunsResponse"
+
+  /qa/runs/{runId}:
+    get:
+      operationId: getQaRun
+      tags: [qa]
+      summary: Get a single QA run including the persisted log
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Full run row including log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaRunDetail"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /qa/checklists:
+    get:
+      operationId: listQaChecklists
+      tags: [qa]
+      summary: List manual QA checklists with their persisted item results
+      responses:
+        "200":
+          description: Checklists with hydrated results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaChecklistListResponse"
+
+  /qa/checklists/{checklistId}/items/{itemId}:
+    patch:
+      operationId: updateQaChecklistItem
+      tags: [qa]
+      summary: Set or clear the status + note on a single checklist item
+      parameters:
+        - name: checklistId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateQaChecklistItemBody"
+      responses:
+        "200":
+          description: Updated item result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaChecklistItemResultPatch"
+        "404":
+          description: Checklist or item not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /qa/checklists/{checklistId}/reset:
+    post:
+      operationId: resetQaChecklist
+      tags: [qa]
+      summary: Clear all persisted item results for a checklist
+      parameters:
+        - name: checklistId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reset acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaResetResponse"
+        "404":
+          description: Checklist not found
           content:
             application/json:
               schema:
@@ -9850,3 +10040,284 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    QaRunStatus:
+      type: string
+      enum: [running, passed, failed, errored]
+
+    QaChecklistItemStatus:
+      type: string
+      enum: [pass, fail, skip]
+
+    QaSuiteLastRun:
+      type: object
+      required: [id, status, startedAt, finishedAt, exitCode, durationMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/QaRunStatus"
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        exitCode:
+          type: integer
+          nullable: true
+        durationMs:
+          type: integer
+          nullable: true
+
+    QaSuiteSummary:
+      type: object
+      required: [id, app, kind, label, description, activeRunId, lastRun]
+      properties:
+        id:
+          type: string
+        app:
+          type: string
+          enum: [api-server, design-tools, plan-review]
+        kind:
+          type: string
+          enum: [vitest, playwright]
+        label:
+          type: string
+        description:
+          type: string
+        activeRunId:
+          type: string
+          format: uuid
+          nullable: true
+        lastRun:
+          allOf:
+            - $ref: "#/components/schemas/QaSuiteLastRun"
+          nullable: true
+
+    QaSuiteListResponse:
+      type: object
+      required: [suites]
+      properties:
+        suites:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaSuiteSummary"
+
+    QaRunSummary:
+      type: object
+      required: [id, suiteId, status, startedAt, finishedAt, exitCode, durationMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        suiteId:
+          type: string
+        status:
+          $ref: "#/components/schemas/QaRunStatus"
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        exitCode:
+          type: integer
+          nullable: true
+        durationMs:
+          type: integer
+          nullable: true
+
+    QaRunListResponse:
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaRunSummary"
+
+    QaRunDetail:
+      type: object
+      required:
+        [id, suiteId, status, startedAt, finishedAt, exitCode, durationMs, log, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        suiteId:
+          type: string
+        status:
+          $ref: "#/components/schemas/QaRunStatus"
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        exitCode:
+          type: integer
+          nullable: true
+        durationMs:
+          type: integer
+          nullable: true
+        log:
+          type: string
+        isActive:
+          type: boolean
+
+    StartQaRunBody:
+      type: object
+      required: [suiteId]
+      properties:
+        suiteId:
+          type: string
+
+    QaRunReceipt:
+      type: object
+      required: [runId, suiteId, startedAt]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        suiteId:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+
+    StartAllQaRunsResponse:
+      type: object
+      required: [started, skipped]
+      properties:
+        started:
+          type: array
+          items:
+            type: object
+            required: [suiteId, runId]
+            properties:
+              suiteId:
+                type: string
+              runId:
+                type: string
+                format: uuid
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [suiteId, reason]
+            properties:
+              suiteId:
+                type: string
+              reason:
+                type: string
+
+    QaChecklistItemResult:
+      type: object
+      required: [id, label, hint, status, note, updatedAt]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        hint:
+          type: string
+          nullable: true
+        status:
+          allOf:
+            - $ref: "#/components/schemas/QaChecklistItemStatus"
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    QaChecklistCounts:
+      type: object
+      required: [passed, failed, skipped, notRun]
+      properties:
+        passed:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        notRun:
+          type: integer
+
+    QaChecklistSummary:
+      type: object
+      required: [id, app, title, description, total, counts, items]
+      properties:
+        id:
+          type: string
+        app:
+          type: string
+          enum: [api-server, design-tools, plan-review]
+        title:
+          type: string
+        description:
+          type: string
+        total:
+          type: integer
+        counts:
+          $ref: "#/components/schemas/QaChecklistCounts"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaChecklistItemResult"
+
+    QaChecklistListResponse:
+      type: object
+      required: [checklists]
+      properties:
+        checklists:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaChecklistSummary"
+
+    UpdateQaChecklistItemBody:
+      type: object
+      required: [status]
+      properties:
+        status:
+          allOf:
+            - $ref: "#/components/schemas/QaChecklistItemStatus"
+          nullable: true
+        note:
+          type: string
+          maxLength: 2000
+          nullable: true
+
+    QaChecklistItemResultPatch:
+      type: object
+      required: [checklistId, itemId, status, note]
+      properties:
+        checklistId:
+          type: string
+        itemId:
+          type: string
+        status:
+          allOf:
+            - $ref: "#/components/schemas/QaChecklistItemStatus"
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+
+    QaResetResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean

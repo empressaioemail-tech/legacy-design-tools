@@ -2,7 +2,7 @@
 
 ## Overview
 
-SmartCity OS is a pnpm monorepo project designed to manage urban development engagements and plan reviews. It consists of two React+Vite frontend applications and an Express API, all sharing a common design system. The platform integrates with a Postgres database and features real-time AI chat capabilities using Claude.
+SmartCity OS is a pnpm monorepo project designed to manage urban development engagements and plan reviews. It consists of three React+Vite frontend applications (Plan Review, Design Tools, and an internal QA Dashboard) and an Express API, all sharing a common design system. The platform integrates with a Postgres database and features real-time AI chat capabilities using Claude.
 
 Its core purpose is to streamline the process of managing project engagements, ingesting design snapshots from tools like Revit, performing plan reviews, and generating comprehensive site briefings. The system aims to provide a centralized platform for urban planning, incorporating various data sources and AI-driven insights to facilitate efficient decision-making and project oversight.
 

@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/qa/"
+title = "QA Dashboard"
+version = "1.0.0"
+id = "artifacts/qa"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/qa/" ]
+localPort = 23250
+
+[services.development]
+run = "pnpm --filter @workspace/qa run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/qa", "run", "build" ]
+publicDir = "artifacts/qa/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23250"
+BASE_PATH = "/qa/"

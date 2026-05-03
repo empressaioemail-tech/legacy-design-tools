@@ -77,6 +77,7 @@ import type {
   ListMyReviewerRequestsParams,
   ListMyReviewerRequestsResponse,
   ListNotificationsResponse,
+  ListQaRunsParams,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
   ListReviewerQueueParams,
@@ -92,6 +93,13 @@ import type {
   PromoteReviewerAnnotationsBody,
   PromoteReviewerAnnotationsResponse,
   PushBimModelBody,
+  QaChecklistItemResultPatch,
+  QaChecklistListResponse,
+  QaResetResponse,
+  QaRunDetail,
+  QaRunListResponse,
+  QaRunReceipt,
+  QaSuiteListResponse,
   RecordBimModelDivergenceBody,
   RecordDecisionBody,
   RenderDetailResponse,
@@ -113,6 +121,8 @@ import type {
   SnapshotReceipt,
   SnapshotSheetHistoryResponse,
   SnapshotSummary,
+  StartAllQaRunsResponse,
+  StartQaRunBody,
   SubmissionCommentResponse,
   SubmissionCommunicationResponse,
   SubmissionFindingsGenerationRunsResponse,
@@ -122,6 +132,7 @@ import type {
   UpdateEngagementBody,
   UpdateMyArchitectPdfHeaderBody,
   UpdateMyProfileBody,
+  UpdateQaChecklistItemBody,
   UpdateReviewerAnnotationBody,
   UpdateUserBody,
   UploadSnapshotSheetsBody,
@@ -9846,4 +9857,699 @@ export const useDeleteCannedFinding = <
   TContext
 > => {
   return useMutation(getDeleteCannedFindingMutationOptions(options));
+};
+
+/**
+ * @summary List QA test suites with their most recent run status
+ */
+export const getListQaSuitesUrl = () => {
+  return `/api/qa/suites`;
+};
+
+export const listQaSuites = async (
+  options?: RequestInit,
+): Promise<QaSuiteListResponse> => {
+  return customFetch<QaSuiteListResponse>(getListQaSuitesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListQaSuitesQueryKey = () => {
+  return [`/api/qa/suites`] as const;
+};
+
+export const getListQaSuitesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listQaSuites>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listQaSuites>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListQaSuitesQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listQaSuites>>> = ({
+    signal,
+  }) => listQaSuites({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listQaSuites>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListQaSuitesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listQaSuites>>
+>;
+export type ListQaSuitesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List QA test suites with their most recent run status
+ */
+
+export function useListQaSuites<
+  TData = Awaited<ReturnType<typeof listQaSuites>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listQaSuites>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListQaSuitesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List recent QA test runs (newest first)
+ */
+export const getListQaRunsUrl = (params?: ListQaRunsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/qa/runs?${stringifiedParams}`
+    : `/api/qa/runs`;
+};
+
+export const listQaRuns = async (
+  params?: ListQaRunsParams,
+  options?: RequestInit,
+): Promise<QaRunListResponse> => {
+  return customFetch<QaRunListResponse>(getListQaRunsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListQaRunsQueryKey = (params?: ListQaRunsParams) => {
+  return [`/api/qa/runs`, ...(params ? [params] : [])] as const;
+};
+
+export const getListQaRunsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listQaRuns>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListQaRunsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listQaRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListQaRunsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listQaRuns>>> = ({
+    signal,
+  }) => listQaRuns(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listQaRuns>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListQaRunsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listQaRuns>>
+>;
+export type ListQaRunsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List recent QA test runs (newest first)
+ */
+
+export function useListQaRuns<
+  TData = Awaited<ReturnType<typeof listQaRuns>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListQaRunsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listQaRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListQaRunsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Kick off a QA test suite run
+ */
+export const getStartQaRunUrl = () => {
+  return `/api/qa/runs`;
+};
+
+export const startQaRun = async (
+  startQaRunBody: StartQaRunBody,
+  options?: RequestInit,
+): Promise<QaRunReceipt> => {
+  return customFetch<QaRunReceipt>(getStartQaRunUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(startQaRunBody),
+  });
+};
+
+export const getStartQaRunMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startQaRun>>,
+    TError,
+    { data: BodyType<StartQaRunBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startQaRun>>,
+  TError,
+  { data: BodyType<StartQaRunBody> },
+  TContext
+> => {
+  const mutationKey = ["startQaRun"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startQaRun>>,
+    { data: BodyType<StartQaRunBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return startQaRun(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartQaRunMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startQaRun>>
+>;
+export type StartQaRunMutationBody = BodyType<StartQaRunBody>;
+export type StartQaRunMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Kick off a QA test suite run
+ */
+export const useStartQaRun = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startQaRun>>,
+    TError,
+    { data: BodyType<StartQaRunBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startQaRun>>,
+  TError,
+  { data: BodyType<StartQaRunBody> },
+  TContext
+> => {
+  return useMutation(getStartQaRunMutationOptions(options));
+};
+
+/**
+ * @summary Kick off every known suite (skipping any already running)
+ */
+export const getStartAllQaRunsUrl = () => {
+  return `/api/qa/runs/all`;
+};
+
+export const startAllQaRuns = async (
+  options?: RequestInit,
+): Promise<StartAllQaRunsResponse> => {
+  return customFetch<StartAllQaRunsResponse>(getStartAllQaRunsUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getStartAllQaRunsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startAllQaRuns>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startAllQaRuns>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["startAllQaRuns"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startAllQaRuns>>,
+    void
+  > = () => {
+    return startAllQaRuns(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartAllQaRunsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startAllQaRuns>>
+>;
+
+export type StartAllQaRunsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Kick off every known suite (skipping any already running)
+ */
+export const useStartAllQaRuns = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startAllQaRuns>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startAllQaRuns>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getStartAllQaRunsMutationOptions(options));
+};
+
+/**
+ * @summary Get a single QA run including the persisted log
+ */
+export const getGetQaRunUrl = (runId: string) => {
+  return `/api/qa/runs/${runId}`;
+};
+
+export const getQaRun = async (
+  runId: string,
+  options?: RequestInit,
+): Promise<QaRunDetail> => {
+  return customFetch<QaRunDetail>(getGetQaRunUrl(runId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetQaRunQueryKey = (runId: string) => {
+  return [`/api/qa/runs/${runId}`] as const;
+};
+
+export const getGetQaRunQueryOptions = <
+  TData = Awaited<ReturnType<typeof getQaRun>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  runId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getQaRun>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetQaRunQueryKey(runId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getQaRun>>> = ({
+    signal,
+  }) => getQaRun(runId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!runId,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getQaRun>>, TError, TData> & {
+    queryKey: QueryKey;
+  };
+};
+
+export type GetQaRunQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getQaRun>>
+>;
+export type GetQaRunQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get a single QA run including the persisted log
+ */
+
+export function useGetQaRun<
+  TData = Awaited<ReturnType<typeof getQaRun>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  runId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getQaRun>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetQaRunQueryOptions(runId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List manual QA checklists with their persisted item results
+ */
+export const getListQaChecklistsUrl = () => {
+  return `/api/qa/checklists`;
+};
+
+export const listQaChecklists = async (
+  options?: RequestInit,
+): Promise<QaChecklistListResponse> => {
+  return customFetch<QaChecklistListResponse>(getListQaChecklistsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListQaChecklistsQueryKey = () => {
+  return [`/api/qa/checklists`] as const;
+};
+
+export const getListQaChecklistsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listQaChecklists>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listQaChecklists>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListQaChecklistsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listQaChecklists>>
+  > = ({ signal }) => listQaChecklists({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listQaChecklists>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListQaChecklistsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listQaChecklists>>
+>;
+export type ListQaChecklistsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List manual QA checklists with their persisted item results
+ */
+
+export function useListQaChecklists<
+  TData = Awaited<ReturnType<typeof listQaChecklists>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listQaChecklists>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListQaChecklistsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Set or clear the status + note on a single checklist item
+ */
+export const getUpdateQaChecklistItemUrl = (
+  checklistId: string,
+  itemId: string,
+) => {
+  return `/api/qa/checklists/${checklistId}/items/${itemId}`;
+};
+
+export const updateQaChecklistItem = async (
+  checklistId: string,
+  itemId: string,
+  updateQaChecklistItemBody: UpdateQaChecklistItemBody,
+  options?: RequestInit,
+): Promise<QaChecklistItemResultPatch> => {
+  return customFetch<QaChecklistItemResultPatch>(
+    getUpdateQaChecklistItemUrl(checklistId, itemId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateQaChecklistItemBody),
+    },
+  );
+};
+
+export const getUpdateQaChecklistItemMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateQaChecklistItem>>,
+    TError,
+    {
+      checklistId: string;
+      itemId: string;
+      data: BodyType<UpdateQaChecklistItemBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateQaChecklistItem>>,
+  TError,
+  {
+    checklistId: string;
+    itemId: string;
+    data: BodyType<UpdateQaChecklistItemBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["updateQaChecklistItem"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateQaChecklistItem>>,
+    {
+      checklistId: string;
+      itemId: string;
+      data: BodyType<UpdateQaChecklistItemBody>;
+    }
+  > = (props) => {
+    const { checklistId, itemId, data } = props ?? {};
+
+    return updateQaChecklistItem(checklistId, itemId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateQaChecklistItemMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateQaChecklistItem>>
+>;
+export type UpdateQaChecklistItemMutationBody =
+  BodyType<UpdateQaChecklistItemBody>;
+export type UpdateQaChecklistItemMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Set or clear the status + note on a single checklist item
+ */
+export const useUpdateQaChecklistItem = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateQaChecklistItem>>,
+    TError,
+    {
+      checklistId: string;
+      itemId: string;
+      data: BodyType<UpdateQaChecklistItemBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateQaChecklistItem>>,
+  TError,
+  {
+    checklistId: string;
+    itemId: string;
+    data: BodyType<UpdateQaChecklistItemBody>;
+  },
+  TContext
+> => {
+  return useMutation(getUpdateQaChecklistItemMutationOptions(options));
+};
+
+/**
+ * @summary Clear all persisted item results for a checklist
+ */
+export const getResetQaChecklistUrl = (checklistId: string) => {
+  return `/api/qa/checklists/${checklistId}/reset`;
+};
+
+export const resetQaChecklist = async (
+  checklistId: string,
+  options?: RequestInit,
+): Promise<QaResetResponse> => {
+  return customFetch<QaResetResponse>(getResetQaChecklistUrl(checklistId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getResetQaChecklistMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetQaChecklist>>,
+    TError,
+    { checklistId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resetQaChecklist>>,
+  TError,
+  { checklistId: string },
+  TContext
+> => {
+  const mutationKey = ["resetQaChecklist"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resetQaChecklist>>,
+    { checklistId: string }
+  > = (props) => {
+    const { checklistId } = props ?? {};
+
+    return resetQaChecklist(checklistId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResetQaChecklistMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resetQaChecklist>>
+>;
+
+export type ResetQaChecklistMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Clear all persisted item results for a checklist
+ */
+export const useResetQaChecklist = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resetQaChecklist>>,
+    TError,
+    { checklistId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resetQaChecklist>>,
+  TError,
+  { checklistId: string },
+  TContext
+> => {
+  return useMutation(getResetQaChecklistMutationOptions(options));
 };
