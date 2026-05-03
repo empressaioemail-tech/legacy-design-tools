@@ -1,7 +1,7 @@
 import { Link } from "wouter";
 import { DashboardLayout } from "@workspace/portal-ui";
 import { useNavGroups } from "./NavGroups";
-import { usePermissionStatus } from "../lib/session";
+import { usePermissionStatus, useSessionAudience } from "../lib/session";
 
 /**
  * Route-level permission gating components.
@@ -50,6 +50,40 @@ export function RequirePermission({
   const status = usePermissionStatus(permission);
   if (status === "loading") return <PermissionLoading />;
   if (status === "denied") {
+    return <AccessDenied title={deniedTitle} message={deniedMessage} />;
+  }
+  return <>{children}</>;
+}
+
+interface RequireAudienceProps {
+  /** Audience the session must match for `children` to render. */
+  audience: "internal" | "user" | "ai";
+  children: React.ReactNode;
+  /** Optional override for the access-denied screen heading. */
+  deniedTitle?: string;
+  /** Optional override for the access-denied body text. */
+  deniedMessage?: string;
+}
+
+/**
+ * Audience-based route gate. Mirrors {@link RequirePermission} but
+ * checks the session's audience claim (`internal` for reviewers,
+ * `user` for architects, `ai` for agent calls) instead of a
+ * permission claim. Used by reviewer-only pages whose backing
+ * endpoints 403 every non-`internal` audience — keeps the FE surface
+ * in sync with the server-side gate so a non-reviewer pasting the
+ * URL lands on the shared {@link AccessDenied} screen instead of
+ * watching every action 403.
+ */
+export function RequireAudience({
+  audience,
+  children,
+  deniedTitle,
+  deniedMessage,
+}: RequireAudienceProps) {
+  const { audience: current, isLoading } = useSessionAudience();
+  if (isLoading) return <PermissionLoading />;
+  if (current !== audience) {
     return <AccessDenied title={deniedTitle} message={deniedMessage} />;
   }
   return <>{children}</>;

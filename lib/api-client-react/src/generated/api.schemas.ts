@@ -2993,6 +2993,110 @@ export interface SubmissionFindingsGenerationRun {
   discardedFindingCount: number | null;
 }
 
+export type FindingsRunsListItemState =
+  (typeof FindingsRunsListItemState)[keyof typeof FindingsRunsListItemState];
+
+export const FindingsRunsListItemState = {
+  pending: "pending",
+  succeeded: "succeeded",
+  failed: "failed",
+} as const;
+
+/**
+ * One row in the cross-submission finding-engine console
+(`GET /findings/runs`). Each row is a `finding_runs` row joined
+to its parent submission's engagement so the FE can render
+engagement name + jurisdiction without a follow-up lookup.
+
+`state` uses the public `pending` / `succeeded` / `failed`
+spelling rather than the on-disk `pending` / `completed` /
+`failed` so the wire matches the human wording from the task
+brief; the route translates `completed` ↔ `succeeded` when
+reading from / filtering against the table.
+
+`durationMs` is `completedAt - startedAt` in milliseconds, or
+null when the run is still pending. `invalidCitations` carries
+the verbatim stripped citation tokens (same shape as the per-
+submission status endpoint) so the run-detail panel can render
+them without a second round-trip.
+
+ */
+export interface FindingsRunsListItem {
+  generationId: string;
+  submissionId: string;
+  engagementId: string;
+  engagementName: string;
+  jurisdiction: string | null;
+  state: FindingsRunsListItemState;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  error: string | null;
+  invalidCitationCount: number | null;
+  invalidCitations: string[] | null;
+  discardedFindingCount: number | null;
+}
+
+/**
+ * Wire envelope for `GET /findings/runs`. `runs` is the recent
+attempts across all submissions (newest first), capped per-
+submission then globally as documented on the operation.
+
+ */
+export interface FindingsRunsListResponse {
+  runs: FindingsRunsListItem[];
+}
+
+export type FindingsRunsSummaryMetricTrend =
+  | (typeof FindingsRunsSummaryMetricTrend)[keyof typeof FindingsRunsSummaryMetricTrend]
+  | null;
+
+export const FindingsRunsSummaryMetricTrend = {
+  up: "up",
+  down: "down",
+} as const;
+
+/**
+ * One KPI tile in the Compliance Engine console's KPI strip.
+Same `value`/`trend`/`trendLabel` shape as `ReviewerKpiMetric`
+so the FE can reuse `buildKpiMetric` rendering. `value` is
+null when the current window has no runs at all; `trend` is
+null when the prior window has no runs (no comparable
+baseline).
+
+ */
+export interface FindingsRunsSummaryMetric {
+  value: number | null;
+  trend: FindingsRunsSummaryMetricTrend;
+  trendLabel: string | null;
+}
+
+/**
+ * Wire envelope for `GET /findings/runs/summary` (Compliance
+Engine console). Each metric carries `{value, trend,
+trendLabel}`:
+
+  - `totalRuns` — count of `finding_runs` rows started in the
+    trailing 30-day window.
+  - `successRate` — succeeded / (succeeded + failed) over the
+    window, as a percentage 0-100. Pending rows are excluded
+    from both numerator and denominator.
+  - `avgDurationMs` — mean (`completedAt - startedAt`) in
+    milliseconds across terminal rows.
+  - `invalidCitationsTotal` — sum of `invalid_citation_count`
+    across the window.
+  - `discardedFindingsTotal` — sum of `discarded_finding_count`
+    across the window.
+
+ */
+export interface FindingsRunsSummaryResponse {
+  totalRuns: FindingsRunsSummaryMetric;
+  successRate: FindingsRunsSummaryMetric;
+  avgDurationMs: FindingsRunsSummaryMetric;
+  invalidCitationsTotal: FindingsRunsSummaryMetric;
+  discardedFindingsTotal: FindingsRunsSummaryMetric;
+}
+
 /**
  * Wire envelope for `GET /submissions/{id}/findings/runs`.
 `runs` is the most recent attempts (newest first), capped by
@@ -4510,6 +4614,20 @@ anchored to this target entity id. Must be paired with
  */
   targetEntityId?: string;
 };
+
+export type ListFindingsRunsParams = {
+  state?: ListFindingsRunsState;
+  since?: string;
+};
+
+export type ListFindingsRunsState =
+  (typeof ListFindingsRunsState)[keyof typeof ListFindingsRunsState];
+
+export const ListFindingsRunsState = {
+  pending: "pending",
+  succeeded: "succeeded",
+  failed: "failed",
+} as const;
 
 export type ListReviewerQueueParams = {
   /**

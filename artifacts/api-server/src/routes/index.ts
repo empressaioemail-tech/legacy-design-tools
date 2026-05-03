@@ -23,6 +23,7 @@ import adapterCacheRouter from "./adapterCache";
 import reviewerAnnotationsRouter from "./reviewerAnnotations";
 import submissionCommentsRouter from "./submissionComments";
 import findingsRouter from "./findings";
+import findingsRunsRouter from "./findingsRuns";
 import submissionEventsRouter from "./submissionEvents";
 import communicationsRouter from "./communications";
 import reviewerRequestsRouter from "./reviewerRequests";
@@ -96,6 +97,11 @@ router.use(submissionCommentsRouter);
 // no path overlap with reviewer-annotations or any other router so
 // ordering is indifferent.
 router.use(findingsRouter);
+// Task #493 — Compliance Engine console (cross-submission). Mounts
+// `/findings/runs` and `/findings/runs/summary`; distinct from the
+// per-submission `/submissions/:id/findings/runs` so ordering is
+// indifferent.
+router.use(findingsRunsRouter);
 // PLR-9 — per-submission SSE live event channel + presence. Mounts
 // `/submissions/:submissionId/events`; distinct path subtree from
 // every other router so ordering is indifferent.

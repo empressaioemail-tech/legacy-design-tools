@@ -58,7 +58,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { label: "Outstanding Requests", href: "/requests", requiresAudience: "internal" },
   ]},
   { label: "AI REVIEWER", items: [
-      { label: "Compliance Engine", href: "/compliance" },
+      { label: "Compliance Engine", href: "/compliance", requiresAudience: "internal" },
       { label: "Code Library", href: "/code" },
       { label: "Saved Findings", href: "/findings" },
   ]},

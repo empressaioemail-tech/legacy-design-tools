@@ -3573,6 +3573,101 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /findings/runs:
+    get:
+      operationId: listFindingsRuns
+      tags: [findings]
+      summary: List recent finding-engine runs across every submission (Compliance Engine console)
+      description: |
+        Cross-submission feed for the Compliance Engine console
+        (Task #493). Returns recent `finding_runs` rows joined to
+        their submission's parent engagement so the page can render
+        a row per run without a follow-up
+        `GET /submissions/{id}` per row.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+
+        Default behavior mirrors the per-submission `findings/runs`
+        sweep precedent: the response is capped at the same per-
+        submission keep value (`FINDING_RUNS_KEEP_PER_SUBMISSION`,
+        default 5) applied across the global cut so an old, churning
+        submission cannot crowd out runs from every other submission.
+        After the per-submission cap, the surviving rows are ordered
+        `startedAt DESC` and capped at a hard global ceiling
+        (`FINDING_RUNS_CONSOLE_LIMIT`, default 200).
+
+        Optional filters:
+          - `state`: one of `pending`, `succeeded`, `failed`. The
+            `succeeded` alias matches `completed` in the
+            `finding_runs` table — the public wire keeps the human
+            wording from the task brief.
+          - `since`: ISO-8601 timestamp; only runs whose `startedAt`
+            is `>=` this value are returned. Default is the trailing
+            30 days.
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, succeeded, failed]
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Recent finding-engine runs across all submissions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingsRunsListResponse"
+        "400":
+          description: Invalid `state` or `since` query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /findings/runs/summary:
+    get:
+      operationId: getFindingsRunsSummary
+      tags: [findings]
+      summary: Aggregate finding-engine KPI rollup for the Compliance Engine console
+      description: |
+        Returns the trailing 30-day rollup the Compliance Engine
+        console renders in its KPI tiles: total runs, success rate,
+        average duration, total invalid citations, and total discarded
+        findings — plus the prior-window comparison values used by
+        the FE's `buildKpiMetric` so the tiles can show trend pills.
+
+        The numbers are computed across the full `finding_runs` table
+        (NOT scoped to any caller-supplied filter) so the strip stays
+        meaningful regardless of how the console narrowed the list.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+      responses:
+        "200":
+          description: Aggregate finding-engine KPI rollup.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingsRunsSummaryResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /submissions/{submissionId}/events:
     get:
       operationId: streamSubmissionEvents
@@ -9052,6 +9147,154 @@ components:
         - invalidCitationCount
         - invalidCitations
         - discardedFindingCount
+
+    FindingsRunsListItem:
+      type: object
+      description: |
+        One row in the cross-submission finding-engine console
+        (`GET /findings/runs`). Each row is a `finding_runs` row joined
+        to its parent submission's engagement so the FE can render
+        engagement name + jurisdiction without a follow-up lookup.
+
+        `state` uses the public `pending` / `succeeded` / `failed`
+        spelling rather than the on-disk `pending` / `completed` /
+        `failed` so the wire matches the human wording from the task
+        brief; the route translates `completed` ↔ `succeeded` when
+        reading from / filtering against the table.
+
+        `durationMs` is `completedAt - startedAt` in milliseconds, or
+        null when the run is still pending. `invalidCitations` carries
+        the verbatim stripped citation tokens (same shape as the per-
+        submission status endpoint) so the run-detail panel can render
+        them without a second round-trip.
+      properties:
+        generationId:
+          type: string
+        submissionId:
+          type: string
+        engagementId:
+          type: string
+        engagementName:
+          type: string
+        jurisdiction:
+          type: string
+          nullable: true
+        state:
+          type: string
+          enum: [pending, succeeded, failed]
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        durationMs:
+          type: integer
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        invalidCitationCount:
+          type: integer
+          nullable: true
+        invalidCitations:
+          type: array
+          nullable: true
+          items:
+            type: string
+        discardedFindingCount:
+          type: integer
+          nullable: true
+      required:
+        - generationId
+        - submissionId
+        - engagementId
+        - engagementName
+        - jurisdiction
+        - state
+        - startedAt
+        - completedAt
+        - durationMs
+        - error
+        - invalidCitationCount
+        - invalidCitations
+        - discardedFindingCount
+
+    FindingsRunsListResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /findings/runs`. `runs` is the recent
+        attempts across all submissions (newest first), capped per-
+        submission then globally as documented on the operation.
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/FindingsRunsListItem"
+      required:
+        - runs
+
+    FindingsRunsSummaryMetric:
+      type: object
+      description: |
+        One KPI tile in the Compliance Engine console's KPI strip.
+        Same `value`/`trend`/`trendLabel` shape as `ReviewerKpiMetric`
+        so the FE can reuse `buildKpiMetric` rendering. `value` is
+        null when the current window has no runs at all; `trend` is
+        null when the prior window has no runs (no comparable
+        baseline).
+      properties:
+        value:
+          type: number
+          nullable: true
+        trend:
+          type: string
+          enum: [up, down]
+          nullable: true
+        trendLabel:
+          type: string
+          nullable: true
+      required:
+        - value
+        - trend
+        - trendLabel
+
+    FindingsRunsSummaryResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /findings/runs/summary` (Compliance
+        Engine console). Each metric carries `{value, trend,
+        trendLabel}`:
+
+          - `totalRuns` — count of `finding_runs` rows started in the
+            trailing 30-day window.
+          - `successRate` — succeeded / (succeeded + failed) over the
+            window, as a percentage 0-100. Pending rows are excluded
+            from both numerator and denominator.
+          - `avgDurationMs` — mean (`completedAt - startedAt`) in
+            milliseconds across terminal rows.
+          - `invalidCitationsTotal` — sum of `invalid_citation_count`
+            across the window.
+          - `discardedFindingsTotal` — sum of `discarded_finding_count`
+            across the window.
+      properties:
+        totalRuns:
+          $ref: "#/components/schemas/FindingsRunsSummaryMetric"
+        successRate:
+          $ref: "#/components/schemas/FindingsRunsSummaryMetric"
+        avgDurationMs:
+          $ref: "#/components/schemas/FindingsRunsSummaryMetric"
+        invalidCitationsTotal:
+          $ref: "#/components/schemas/FindingsRunsSummaryMetric"
+        discardedFindingsTotal:
+          $ref: "#/components/schemas/FindingsRunsSummaryMetric"
+      required:
+        - totalRuns
+        - successRate
+        - avgDurationMs
+        - invalidCitationsTotal
+        - discardedFindingsTotal
 
     SubmissionFindingsGenerationRunsResponse:
       type: object

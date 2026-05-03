@@ -13,8 +13,9 @@ import OutstandingRequests from "./pages/OutstandingRequests";
 import InReview from "./pages/InReview";
 import Approved from "./pages/Approved";
 import Rejected from "./pages/Rejected";
+import ComplianceEngine from "./pages/ComplianceEngine";
 import ComingSoon from "./pages/ComingSoon";
-import { RequirePermission } from "./components/permissions";
+import { RequirePermission, RequireAudience } from "./components/permissions";
 
 const queryClient = new QueryClient();
 
@@ -29,11 +30,20 @@ function Router() {
       <Route path="/code" component={CodeLibrary} />
       <Route path="/sheets" component={Sheets} />
       <Route path="/style-probe" component={StyleProbe} />
-      
+
       <Route path="/in-review" component={InReview} />
       <Route path="/approved" component={Approved} />
       <Route path="/rejected" component={Rejected} />
-      <Route path="/compliance" component={ComingSoon} />
+      <Route path="/compliance">
+        {/* Reviewer-only — gate the route the same way `/users` is
+            gated, so a non-reviewer pasting the URL lands on the
+            shared access-denied screen instead of the page chrome
+            with every action 403'ing. The matching nav entry is
+            hidden via `requiresAudience: "internal"` in NavGroups. */}
+        <RequireAudience audience="internal">
+          <ComplianceEngine />
+        </RequireAudience>
+      </Route>
       <Route path="/firms" component={ComingSoon} />
       <Route path="/projects" component={ComingSoon} />
       <Route path="/integrations" component={ComingSoon} />

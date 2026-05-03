@@ -4901,6 +4901,135 @@ export const ListSubmissionFindingsGenerationRunsResponse = zod
   );
 
 /**
+ * Cross-submission feed for the Compliance Engine console
+(Task #493). Returns recent `finding_runs` rows joined to
+their submission's parent engagement so the page can render
+a row per run without a follow-up
+`GET /submissions/{id}` per row.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+Default behavior mirrors the per-submission `findings/runs`
+sweep precedent: the response is capped at the same per-
+submission keep value (`FINDING_RUNS_KEEP_PER_SUBMISSION`,
+default 5) applied across the global cut so an old, churning
+submission cannot crowd out runs from every other submission.
+After the per-submission cap, the surviving rows are ordered
+`startedAt DESC` and capped at a hard global ceiling
+(`FINDING_RUNS_CONSOLE_LIMIT`, default 200).
+
+Optional filters:
+  - `state`: one of `pending`, `succeeded`, `failed`. The
+    `succeeded` alias matches `completed` in the
+    `finding_runs` table — the public wire keeps the human
+    wording from the task brief.
+  - `since`: ISO-8601 timestamp; only runs whose `startedAt`
+    is `>=` this value are returned. Default is the trailing
+    30 days.
+
+ * @summary List recent finding-engine runs across every submission (Compliance Engine console)
+ */
+export const ListFindingsRunsQueryParams = zod.object({
+  state: zod.enum(["pending", "succeeded", "failed"]).optional(),
+  since: zod.date().optional(),
+});
+
+export const ListFindingsRunsResponse = zod
+  .object({
+    runs: zod.array(
+      zod
+        .object({
+          generationId: zod.string(),
+          submissionId: zod.string(),
+          engagementId: zod.string(),
+          engagementName: zod.string(),
+          jurisdiction: zod.string().nullable(),
+          state: zod.enum(["pending", "succeeded", "failed"]),
+          startedAt: zod.coerce.date(),
+          completedAt: zod.coerce.date().nullable(),
+          durationMs: zod.number().nullable(),
+          error: zod.string().nullable(),
+          invalidCitationCount: zod.number().nullable(),
+          invalidCitations: zod.array(zod.string()).nullable(),
+          discardedFindingCount: zod.number().nullable(),
+        })
+        .describe(
+          "One row in the cross-submission finding-engine console\n(`GET \/findings\/runs`). Each row is a `finding_runs` row joined\nto its parent submission's engagement so the FE can render\nengagement name + jurisdiction without a follow-up lookup.\n\n`state` uses the public `pending` \/ `succeeded` \/ `failed`\nspelling rather than the on-disk `pending` \/ `completed` \/\n`failed` so the wire matches the human wording from the task\nbrief; the route translates `completed` ↔ `succeeded` when\nreading from \/ filtering against the table.\n\n`durationMs` is `completedAt - startedAt` in milliseconds, or\nnull when the run is still pending. `invalidCitations` carries\nthe verbatim stripped citation tokens (same shape as the per-\nsubmission status endpoint) so the run-detail panel can render\nthem without a second round-trip.\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/findings\/runs`. `runs` is the recent\nattempts across all submissions (newest first), capped per-\nsubmission then globally as documented on the operation.\n",
+  );
+
+/**
+ * Returns the trailing 30-day rollup the Compliance Engine
+console renders in its KPI tiles: total runs, success rate,
+average duration, total invalid citations, and total discarded
+findings — plus the prior-window comparison values used by
+the FE's `buildKpiMetric` so the tiles can show trend pills.
+
+The numbers are computed across the full `finding_runs` table
+(NOT scoped to any caller-supplied filter) so the strip stays
+meaningful regardless of how the console narrowed the list.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Aggregate finding-engine KPI rollup for the Compliance Engine console
+ */
+export const GetFindingsRunsSummaryResponse = zod
+  .object({
+    totalRuns: zod
+      .object({
+        value: zod.number().nullable(),
+        trend: zod.enum(["up", "down"]).nullable(),
+        trendLabel: zod.string().nullable(),
+      })
+      .describe(
+        "One KPI tile in the Compliance Engine console's KPI strip.\nSame `value`\/`trend`\/`trendLabel` shape as `ReviewerKpiMetric`\nso the FE can reuse `buildKpiMetric` rendering. `value` is\nnull when the current window has no runs at all; `trend` is\nnull when the prior window has no runs (no comparable\nbaseline).\n",
+      ),
+    successRate: zod
+      .object({
+        value: zod.number().nullable(),
+        trend: zod.enum(["up", "down"]).nullable(),
+        trendLabel: zod.string().nullable(),
+      })
+      .describe(
+        "One KPI tile in the Compliance Engine console's KPI strip.\nSame `value`\/`trend`\/`trendLabel` shape as `ReviewerKpiMetric`\nso the FE can reuse `buildKpiMetric` rendering. `value` is\nnull when the current window has no runs at all; `trend` is\nnull when the prior window has no runs (no comparable\nbaseline).\n",
+      ),
+    avgDurationMs: zod
+      .object({
+        value: zod.number().nullable(),
+        trend: zod.enum(["up", "down"]).nullable(),
+        trendLabel: zod.string().nullable(),
+      })
+      .describe(
+        "One KPI tile in the Compliance Engine console's KPI strip.\nSame `value`\/`trend`\/`trendLabel` shape as `ReviewerKpiMetric`\nso the FE can reuse `buildKpiMetric` rendering. `value` is\nnull when the current window has no runs at all; `trend` is\nnull when the prior window has no runs (no comparable\nbaseline).\n",
+      ),
+    invalidCitationsTotal: zod
+      .object({
+        value: zod.number().nullable(),
+        trend: zod.enum(["up", "down"]).nullable(),
+        trendLabel: zod.string().nullable(),
+      })
+      .describe(
+        "One KPI tile in the Compliance Engine console's KPI strip.\nSame `value`\/`trend`\/`trendLabel` shape as `ReviewerKpiMetric`\nso the FE can reuse `buildKpiMetric` rendering. `value` is\nnull when the current window has no runs at all; `trend` is\nnull when the prior window has no runs (no comparable\nbaseline).\n",
+      ),
+    discardedFindingsTotal: zod
+      .object({
+        value: zod.number().nullable(),
+        trend: zod.enum(["up", "down"]).nullable(),
+        trendLabel: zod.string().nullable(),
+      })
+      .describe(
+        "One KPI tile in the Compliance Engine console's KPI strip.\nSame `value`\/`trend`\/`trendLabel` shape as `ReviewerKpiMetric`\nso the FE can reuse `buildKpiMetric` rendering. `value` is\nnull when the current window has no runs at all; `trend` is\nnull when the prior window has no runs (no comparable\nbaseline).\n",
+      ),
+  })
+  .describe(
+    "Wire envelope for `GET \/findings\/runs\/summary` (Compliance\nEngine console). Each metric carries `{value, trend,\ntrendLabel}`:\n\n  - `totalRuns` — count of `finding_runs` rows started in the\n    trailing 30-day window.\n  - `successRate` — succeeded \/ (succeeded + failed) over the\n    window, as a percentage 0-100. Pending rows are excluded\n    from both numerator and denominator.\n  - `avgDurationMs` — mean (`completedAt - startedAt`) in\n    milliseconds across terminal rows.\n  - `invalidCitationsTotal` — sum of `invalid_citation_count`\n    across the window.\n  - `discardedFindingsTotal` — sum of `discarded_finding_count`\n    across the window.\n",
+  );
+
+/**
  * PLR-9 — Long-lived Server-Sent Events channel for a single
 submission. Clients connect with `EventSource` and receive
 two families of events:

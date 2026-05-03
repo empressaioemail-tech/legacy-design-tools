@@ -51,6 +51,8 @@ import type {
   ErrorResponse,
   ExportEngagementBriefingPdfParams,
   FindingResponse,
+  FindingsRunsListResponse,
+  FindingsRunsSummaryResponse,
   GenerateBriefingBody,
   GenerateBriefingResponse,
   GenerateEngagementLayersParams,
@@ -72,6 +74,7 @@ import type {
   ListDecisionsResponse,
   ListEngagementBriefingSourcesParams,
   ListEngagementReviewerRequestsParams,
+  ListFindingsRunsParams,
   ListJurisdictionAtomsParams,
   ListMyNotificationsParams,
   ListMyReviewerRequestsParams,
@@ -7878,6 +7881,220 @@ export function useListSubmissionFindingsGenerationRuns<
     submissionId,
     options,
   );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cross-submission feed for the Compliance Engine console
+(Task #493). Returns recent `finding_runs` rows joined to
+their submission's parent engagement so the page can render
+a row per run without a follow-up
+`GET /submissions/{id}` per row.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+Default behavior mirrors the per-submission `findings/runs`
+sweep precedent: the response is capped at the same per-
+submission keep value (`FINDING_RUNS_KEEP_PER_SUBMISSION`,
+default 5) applied across the global cut so an old, churning
+submission cannot crowd out runs from every other submission.
+After the per-submission cap, the surviving rows are ordered
+`startedAt DESC` and capped at a hard global ceiling
+(`FINDING_RUNS_CONSOLE_LIMIT`, default 200).
+
+Optional filters:
+  - `state`: one of `pending`, `succeeded`, `failed`. The
+    `succeeded` alias matches `completed` in the
+    `finding_runs` table — the public wire keeps the human
+    wording from the task brief.
+  - `since`: ISO-8601 timestamp; only runs whose `startedAt`
+    is `>=` this value are returned. Default is the trailing
+    30 days.
+
+ * @summary List recent finding-engine runs across every submission (Compliance Engine console)
+ */
+export const getListFindingsRunsUrl = (params?: ListFindingsRunsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/findings/runs?${stringifiedParams}`
+    : `/api/findings/runs`;
+};
+
+export const listFindingsRuns = async (
+  params?: ListFindingsRunsParams,
+  options?: RequestInit,
+): Promise<FindingsRunsListResponse> => {
+  return customFetch<FindingsRunsListResponse>(getListFindingsRunsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListFindingsRunsQueryKey = (
+  params?: ListFindingsRunsParams,
+) => {
+  return [`/api/findings/runs`, ...(params ? [params] : [])] as const;
+};
+
+export const getListFindingsRunsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listFindingsRuns>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListFindingsRunsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listFindingsRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListFindingsRunsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listFindingsRuns>>
+  > = ({ signal }) => listFindingsRuns(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listFindingsRuns>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListFindingsRunsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listFindingsRuns>>
+>;
+export type ListFindingsRunsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List recent finding-engine runs across every submission (Compliance Engine console)
+ */
+
+export function useListFindingsRuns<
+  TData = Awaited<ReturnType<typeof listFindingsRuns>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ListFindingsRunsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listFindingsRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListFindingsRunsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns the trailing 30-day rollup the Compliance Engine
+console renders in its KPI tiles: total runs, success rate,
+average duration, total invalid citations, and total discarded
+findings — plus the prior-window comparison values used by
+the FE's `buildKpiMetric` so the tiles can show trend pills.
+
+The numbers are computed across the full `finding_runs` table
+(NOT scoped to any caller-supplied filter) so the strip stays
+meaningful regardless of how the console narrowed the list.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+
+ * @summary Aggregate finding-engine KPI rollup for the Compliance Engine console
+ */
+export const getGetFindingsRunsSummaryUrl = () => {
+  return `/api/findings/runs/summary`;
+};
+
+export const getFindingsRunsSummary = async (
+  options?: RequestInit,
+): Promise<FindingsRunsSummaryResponse> => {
+  return customFetch<FindingsRunsSummaryResponse>(
+    getGetFindingsRunsSummaryUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetFindingsRunsSummaryQueryKey = () => {
+  return [`/api/findings/runs/summary`] as const;
+};
+
+export const getGetFindingsRunsSummaryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFindingsRunsSummary>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getFindingsRunsSummary>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFindingsRunsSummaryQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFindingsRunsSummary>>
+  > = ({ signal }) => getFindingsRunsSummary({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFindingsRunsSummary>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFindingsRunsSummaryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFindingsRunsSummary>>
+>;
+export type GetFindingsRunsSummaryQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Aggregate finding-engine KPI rollup for the Compliance Engine console
+ */
+
+export function useGetFindingsRunsSummary<
+  TData = Awaited<ReturnType<typeof getFindingsRunsSummary>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getFindingsRunsSummary>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFindingsRunsSummaryQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
