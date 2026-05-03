@@ -38,11 +38,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   draftSubmissionCommunication,
+  getGetSessionQueryKey,
   getListSubmissionCommunicationsQueryKey,
   useCreateSubmissionCommunication,
+  useGetSession,
   type DraftSubmissionCommunicationResponse,
 } from "@workspace/api-client-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AIBadge } from "@workspace/portal-ui";
 
 /**
  * Task #475 — structured architect-of-record contact captured on the
@@ -182,6 +185,22 @@ export function CommunicateComposer({
     });
   };
 
+  // Track 1 — drafting reviewer's display name for the document-level
+  // AIBadge in the modal header. The session's requestor.id alone
+  // doesn't carry displayName; reading it off the session response
+  // means we get whatever name the requestor envelope carries (or
+  // the bare id if the auth layer hasn't hydrated a profile yet).
+  const { data: session } = useGetSession({
+    query: {
+      queryKey: getGetSessionQueryKey(),
+      staleTime: Number.POSITIVE_INFINITY,
+      gcTime: Number.POSITIVE_INFINITY,
+    },
+  });
+  const draftingReviewerName =
+    (session?.requestor as { displayName?: string } | undefined)
+      ?.displayName ?? session?.requestor?.id ?? null;
+
   const sending = sendMutation.isPending;
   const drafting = draftQuery.isPending && open;
   const draftLoadFailed = draftQuery.isError;
@@ -220,6 +239,17 @@ export function CommunicateComposer({
                     findingCount === 1 ? "open finding" : "open findings"
                   }. Review and edit before sending.`}
           </DialogDescription>
+          {!drafting && !draftLoadFailed && draft ? (
+            <div style={{ marginTop: 6 }}>
+              <AIBadge
+                aiGenerated
+                variant="aggregate"
+                findingCount={findingCount}
+                draftingReviewerName={draftingReviewerName}
+                data-testid="communicate-composer-ai-badge"
+              />
+            </div>
+          ) : null}
         </DialogHeader>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
