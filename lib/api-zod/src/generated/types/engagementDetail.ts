@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { ArchitectOfRecordContact } from "./architectOfRecordContact";
 import type { EngagementStatus } from "./engagementStatus";
 import type { Site } from "./site";
 import type { SnapshotSummary } from "./snapshotSummary";
@@ -30,4 +31,10 @@ the Plan Review Inbox row (Task #439). Null when no firm
 has been recorded yet.
  */
   applicantFirm: string | null;
+  /** Structured architect-of-record contact for the engagement
+(Task #475). When present, the Communicate composer uses
+this for the recipient row on outbound comment letters.
+Null when no contact has been captured yet.
+ */
+  architectOfRecord: ArchitectOfRecordContact | null;
 }

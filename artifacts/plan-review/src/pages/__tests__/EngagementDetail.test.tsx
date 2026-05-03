@@ -148,6 +148,37 @@ vi.mock("@workspace/api-client-react", async () => {
     // unconditionally (with `enabled: false`), so we have to provide
     // a stub. Returns an empty list so the badge count is 0 and the
     // row stays visually identical to the pre-Spec-307 layout.
+    // Task #475 — EngagementDetail now mounts an ArchitectOfRecordCard
+    // (reviewer-only) that calls `useUpdateEngagement`, and the
+    // OpenSubmissionModalRenderer (always mounted) calls
+    // `useListSubmissionCommunications`. Neither fires a real network
+    // request in these submission-banner tests (they're either
+    // mutations the user never triggers or queries gated by an
+    // `enabled` flag), but the imports still need stubs so the module
+    // mock doesn't throw at component render time.
+    useUpdateEngagement: () => ({
+      mutate: () => {},
+      mutateAsync: async () => null,
+      isPending: false,
+      isError: false,
+      isSuccess: false,
+      reset: () => {},
+    }),
+    getListSubmissionCommunicationsQueryKey: (id: string) => [
+      "listSubmissionCommunications",
+      id,
+    ],
+    useListSubmissionCommunications: (
+      submissionId: string,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          (["listSubmissionCommunications", submissionId] as const),
+        queryFn: async () => ({ communications: [] }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
     getListReviewerAnnotationsQueryKey: (
       submissionId: string,
       params: { targetEntityType: string; targetEntityId: string },

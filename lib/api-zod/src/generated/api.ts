@@ -77,6 +77,32 @@ export const ListEngagementsResponseItem = zod.object({
     .describe(
       "Free-text applicant firm (architect \/ designer of record)\nrecorded against the engagement. Surfaced to reviewers in\nthe Plan Review Inbox row (Task #439). Null when no firm\nhas been recorded yet.\n",
     ),
+  architectOfRecord: zod
+    .union([
+      zod
+        .object({
+          contactId: zod
+            .string()
+            .describe(
+              "Stable opaque identifier for the contact, derived from the\nengagement so it survives renames \/ contact edits. The\nCommunicateComposer pushes this into the persisted\n`recipientUserIds` array on `submission_communications`.\n",
+            ),
+          name: zod.string(),
+          email: zod.string(),
+          role: zod
+            .string()
+            .nullable()
+            .describe(
+              'Optional free-text role label (e.g. \"Architect of record\",\n\"Project manager\"). Null when not specified.\n',
+            ),
+        })
+        .describe(
+          "Structured architect-of-record (or other recipient) contact\ncaptured on an engagement (Task #475). The contact id is\nderived from the engagement (`engagement:{engagementId}:architect-of-record`)\nrather than being its own row, so the Communicate composer\ncan persist a stable reference into `recipientUserIds`\nwithout requiring the contact to exist in the `users` table.\n",
+        ),
+      zod.null(),
+    ])
+    .describe(
+      "Structured architect-of-record contact for the engagement\n(Task #475). When present, the Communicate composer uses\nthis for the recipient row on outbound comment letters.\nNull when no contact has been captured yet.\n",
+    ),
 });
 export const ListEngagementsResponse = zod.array(ListEngagementsResponseItem);
 
@@ -220,6 +246,32 @@ export const GetEngagementResponse = zod.object({
     .describe(
       "Free-text applicant firm (architect \/ designer of record)\nrecorded against the engagement. Surfaced to reviewers in\nthe Plan Review Inbox row (Task #439). Null when no firm\nhas been recorded yet.\n",
     ),
+  architectOfRecord: zod
+    .union([
+      zod
+        .object({
+          contactId: zod
+            .string()
+            .describe(
+              "Stable opaque identifier for the contact, derived from the\nengagement so it survives renames \/ contact edits. The\nCommunicateComposer pushes this into the persisted\n`recipientUserIds` array on `submission_communications`.\n",
+            ),
+          name: zod.string(),
+          email: zod.string(),
+          role: zod
+            .string()
+            .nullable()
+            .describe(
+              'Optional free-text role label (e.g. \"Architect of record\",\n\"Project manager\"). Null when not specified.\n',
+            ),
+        })
+        .describe(
+          "Structured architect-of-record (or other recipient) contact\ncaptured on an engagement (Task #475). The contact id is\nderived from the engagement (`engagement:{engagementId}:architect-of-record`)\nrather than being its own row, so the Communicate composer\ncan persist a stable reference into `recipientUserIds`\nwithout requiring the contact to exist in the `users` table.\n",
+        ),
+      zod.null(),
+    ])
+    .describe(
+      "Structured architect-of-record contact for the engagement\n(Task #475). When present, the Communicate composer uses\nthis for the recipient row on outbound comment letters.\nNull when no contact has been captured yet.\n",
+    ),
 });
 
 /**
@@ -256,6 +308,33 @@ export const UpdateEngagementBody = zod.object({
     .nullish()
     .describe(
       "Free-text name of the applicant firm (architect \/\ndesigner of record). Pass `null` to clear an\nexisting value. Surfaced to reviewers in the Plan\nReview Inbox row (Task #439).\n",
+    ),
+  architectOfRecord: zod
+    .union([
+      zod
+        .object({
+          contactId: zod
+            .string()
+            .describe(
+              "Stable opaque identifier for the contact, derived from the\nengagement so it survives renames \/ contact edits. The\nCommunicateComposer pushes this into the persisted\n`recipientUserIds` array on `submission_communications`.\n",
+            ),
+          name: zod.string(),
+          email: zod.string(),
+          role: zod
+            .string()
+            .nullable()
+            .describe(
+              'Optional free-text role label (e.g. \"Architect of record\",\n\"Project manager\"). Null when not specified.\n',
+            ),
+        })
+        .describe(
+          "Structured architect-of-record (or other recipient) contact\ncaptured on an engagement (Task #475). The contact id is\nderived from the engagement (`engagement:{engagementId}:architect-of-record`)\nrather than being its own row, so the Communicate composer\ncan persist a stable reference into `recipientUserIds`\nwithout requiring the contact to exist in the `users` table.\n",
+        ),
+      zod.null(),
+    ])
+    .optional()
+    .describe(
+      "Structured architect-of-record contact (Task #475).\nPass an object with `name` + `email` (and optional\n`role`) to set or replace the contact, or `null`\nto clear it. The Communicate composer uses this to\npopulate a real recipient row on the comment letter.\n",
     ),
 });
 
@@ -330,6 +409,32 @@ export const UpdateEngagementResponse = zod.object({
     .nullable()
     .describe(
       "Free-text applicant firm (architect \/ designer of record)\nrecorded against the engagement. Surfaced to reviewers in\nthe Plan Review Inbox row (Task #439). Null when no firm\nhas been recorded yet.\n",
+    ),
+  architectOfRecord: zod
+    .union([
+      zod
+        .object({
+          contactId: zod
+            .string()
+            .describe(
+              "Stable opaque identifier for the contact, derived from the\nengagement so it survives renames \/ contact edits. The\nCommunicateComposer pushes this into the persisted\n`recipientUserIds` array on `submission_communications`.\n",
+            ),
+          name: zod.string(),
+          email: zod.string(),
+          role: zod
+            .string()
+            .nullable()
+            .describe(
+              'Optional free-text role label (e.g. \"Architect of record\",\n\"Project manager\"). Null when not specified.\n',
+            ),
+        })
+        .describe(
+          "Structured architect-of-record (or other recipient) contact\ncaptured on an engagement (Task #475). The contact id is\nderived from the engagement (`engagement:{engagementId}:architect-of-record`)\nrather than being its own row, so the Communicate composer\ncan persist a stable reference into `recipientUserIds`\nwithout requiring the contact to exist in the `users` table.\n",
+        ),
+      zod.null(),
+    ])
+    .describe(
+      "Structured architect-of-record contact for the engagement\n(Task #475). When present, the Communicate composer uses\nthis for the recipient row on outbound comment letters.\nNull when no contact has been captured yet.\n",
     ),
 });
 
@@ -411,6 +516,32 @@ export const RegeocodeEngagementResponse = zod.object({
     .nullable()
     .describe(
       "Free-text applicant firm (architect \/ designer of record)\nrecorded against the engagement. Surfaced to reviewers in\nthe Plan Review Inbox row (Task #439). Null when no firm\nhas been recorded yet.\n",
+    ),
+  architectOfRecord: zod
+    .union([
+      zod
+        .object({
+          contactId: zod
+            .string()
+            .describe(
+              "Stable opaque identifier for the contact, derived from the\nengagement so it survives renames \/ contact edits. The\nCommunicateComposer pushes this into the persisted\n`recipientUserIds` array on `submission_communications`.\n",
+            ),
+          name: zod.string(),
+          email: zod.string(),
+          role: zod
+            .string()
+            .nullable()
+            .describe(
+              'Optional free-text role label (e.g. \"Architect of record\",\n\"Project manager\"). Null when not specified.\n',
+            ),
+        })
+        .describe(
+          "Structured architect-of-record (or other recipient) contact\ncaptured on an engagement (Task #475). The contact id is\nderived from the engagement (`engagement:{engagementId}:architect-of-record`)\nrather than being its own row, so the Communicate composer\ncan persist a stable reference into `recipientUserIds`\nwithout requiring the contact to exist in the `users` table.\n",
+        ),
+      zod.null(),
+    ])
+    .describe(
+      "Structured architect-of-record contact for the engagement\n(Task #475). When present, the Communicate composer uses\nthis for the recipient row on outbound comment letters.\nNull when no contact has been captured yet.\n",
     ),
 });
 

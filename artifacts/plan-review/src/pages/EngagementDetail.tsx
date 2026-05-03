@@ -14,13 +14,16 @@ import {
   useGetEngagement,
   useGetSession,
   useListEngagementSubmissions,
+  useUpdateEngagement,
   getGetEngagementQueryKey,
   getGetSessionQueryKey,
   getListEngagementSubmissionsQueryKey,
   type EngagementSubmissionSummary,
   type SubmissionReceipt,
   type SubmissionStatus,
+  type EngagementDetail as EngagementDetailType,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavGroups } from "../components/NavGroups";
 import { BriefingRecentRunsPanel } from "@workspace/portal-ui";
 import {
@@ -459,6 +462,10 @@ export default function EngagementDetail() {
             jurisdiction={lastSubmission.jurisdiction}
             onDismiss={() => setLastSubmission(null)}
           />
+        )}
+
+        {audience === "internal" && engagement && (
+          <ArchitectOfRecordCard engagement={engagement} />
         )}
 
         <SubmissionsList
@@ -1057,6 +1064,7 @@ function OpenSubmissionModalRenderer({
           }
           applicantFirm={engagement?.applicantFirm ?? null}
           submittedAt={submission.submittedAt}
+          architectOfRecord={engagement?.architectOfRecord ?? null}
         />
       )}
     </>
@@ -1076,6 +1084,240 @@ function OpenSubmissionModalRenderer({
  * too: design-tools surfaces the regen via its own "Regenerate"
  * button rather than the reviewer-request flow.
  */
+/**
+ * Task #475 — reviewer-side editor for the engagement's structured
+ * architect-of-record contact. Displayed above the past-submissions
+ * list so the reviewer can fill in / fix the recipient before opening
+ * the Communicate composer. Edits PATCH the engagement and invalidate
+ * the engagement query so the composer's recipient row reflects the
+ * change immediately.
+ *
+ * Audience-gated to `internal` at the call site — applicants don't
+ * need to (and shouldn't) see or edit the recipient list.
+ */
+function ArchitectOfRecordCard({
+  engagement,
+}: {
+  engagement: EngagementDetailType;
+}) {
+  const qc = useQueryClient();
+  const contact = engagement.architectOfRecord;
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(contact?.name ?? "");
+  const [email, setEmail] = useState(contact?.email ?? "");
+  const [role, setRole] = useState(contact?.role ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!editing) {
+      setName(contact?.name ?? "");
+      setEmail(contact?.email ?? "");
+      setRole(contact?.role ?? "");
+      setError(null);
+    }
+  }, [editing, contact?.name, contact?.email, contact?.role]);
+
+  const mutation = useUpdateEngagement({
+    mutation: {
+      onSuccess: async () => {
+        await qc.invalidateQueries({
+          queryKey: getGetEngagementQueryKey(engagement.id),
+        });
+        setEditing(false);
+      },
+      onError: (err: unknown) => {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to save the contact — please try again.",
+        );
+      },
+    },
+  });
+
+  const saving = mutation.isPending;
+
+  const handleSave = () => {
+    setError(null);
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const trimmedRole = role.trim();
+    if (!trimmedName || !trimmedEmail) {
+      setError(
+        "Both name and email are required to capture an architect-of-record contact.",
+      );
+      return;
+    }
+    mutation.mutate({
+      id: engagement.id,
+      data: {
+        architectOfRecord: {
+          contactId: contact?.contactId ??
+            `engagement:${engagement.id}:architect-of-record`,
+          name: trimmedName,
+          email: trimmedEmail,
+          role: trimmedRole.length > 0 ? trimmedRole : null,
+        },
+      },
+    });
+  };
+
+  const handleClear = () => {
+    setError(null);
+    mutation.mutate({
+      id: engagement.id,
+      data: { architectOfRecord: null },
+    });
+  };
+
+  return (
+    <div
+      className="sc-card flex flex-col"
+      data-testid="architect-of-record-card"
+    >
+      <div
+        className="sc-card-header sc-row-sb"
+        style={{ display: "flex", alignItems: "center", gap: 12 }}
+      >
+        <span className="sc-label">ARCHITECT OF RECORD</span>
+        {!editing && (
+          <button
+            type="button"
+            className="sc-btn-ghost"
+            onClick={() => setEditing(true)}
+            data-testid="architect-of-record-edit"
+            disabled={saving}
+          >
+            {contact ? "Edit" : "Add contact"}
+          </button>
+        )}
+      </div>
+      <div className="p-4" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {!editing && contact && (
+          <div data-testid="architect-of-record-display" className="sc-body">
+            <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+              {contact.name}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              {contact.email}
+              {contact.role ? ` · ${contact.role}` : ""}
+            </div>
+          </div>
+        )}
+        {!editing && !contact && (
+          <div
+            className="sc-body"
+            data-testid="architect-of-record-empty"
+            style={{ color: "var(--text-secondary)", fontSize: 12 }}
+          >
+            No architect-of-record contact captured yet. Add one so the
+            Communicate composer can populate a real recipient on
+            outbound comment letters.
+          </div>
+        )}
+        {editing && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="sc-label" style={{ color: "var(--text-secondary)" }}>
+                Name
+              </span>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={saving}
+                data-testid="architect-of-record-name-input"
+                className="sc-ui"
+                style={aorInputStyle}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="sc-label" style={{ color: "var(--text-secondary)" }}>
+                Email
+              </span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={saving}
+                data-testid="architect-of-record-email-input"
+                className="sc-ui"
+                style={aorInputStyle}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="sc-label" style={{ color: "var(--text-secondary)" }}>
+                Role (optional)
+              </span>
+              <input
+                type="text"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                disabled={saving}
+                placeholder="e.g., Architect of record"
+                data-testid="architect-of-record-role-input"
+                className="sc-ui"
+                style={aorInputStyle}
+              />
+            </label>
+            {error && (
+              <div
+                role="alert"
+                data-testid="architect-of-record-error"
+                style={{ color: "var(--destructive, #b91c1c)", fontSize: 12 }}
+              >
+                {error}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              {contact && (
+                <button
+                  type="button"
+                  className="sc-btn-ghost"
+                  onClick={handleClear}
+                  disabled={saving}
+                  data-testid="architect-of-record-clear"
+                >
+                  Clear contact
+                </button>
+              )}
+              <button
+                type="button"
+                className="sc-btn-ghost"
+                onClick={() => setEditing(false)}
+                disabled={saving}
+                data-testid="architect-of-record-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="sc-btn-primary"
+                onClick={handleSave}
+                disabled={saving}
+                data-testid="architect-of-record-save"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const aorInputStyle: React.CSSProperties = {
+  width: "100%",
+  background: "var(--bg-input)",
+  border: "1px solid var(--border-default)",
+  color: "var(--text-primary)",
+  padding: "6px 10px",
+  borderRadius: 4,
+  outline: "none",
+  fontSize: 12.5,
+};
+
 function BriefingRegenerationAffordance({
   engagementId,
   engagementName,

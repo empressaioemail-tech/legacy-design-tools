@@ -224,6 +224,16 @@ paths:
                     designer of record). Pass `null` to clear an
                     existing value. Surfaced to reviewers in the Plan
                     Review Inbox row (Task #439).
+                architectOfRecord:
+                  oneOf:
+                    - $ref: "#/components/schemas/ArchitectOfRecordContact"
+                    - type: "null"
+                  description: |
+                    Structured architect-of-record contact (Task #475).
+                    Pass an object with `name` + `email` (and optional
+                    `role`) to set or replace the contact, or `null`
+                    to clear it. The Communicate composer uses this to
+                    populate a real recipient row on the comment letter.
       responses:
         "200":
           description: Updated engagement detail
@@ -4661,6 +4671,15 @@ components:
             recorded against the engagement. Surfaced to reviewers in
             the Plan Review Inbox row (Task #439). Null when no firm
             has been recorded yet.
+        architectOfRecord:
+          oneOf:
+            - $ref: "#/components/schemas/ArchitectOfRecordContact"
+            - type: "null"
+          description: |
+            Structured architect-of-record contact for the engagement
+            (Task #475). When present, the Communicate composer uses
+            this for the recipient row on outbound comment letters.
+            Null when no contact has been captured yet.
       required:
         - id
         - name
@@ -4675,6 +4694,7 @@ components:
         - revitCentralGuid
         - revitDocumentPath
         - applicantFirm
+        - architectOfRecord
 
     EngagementDetail:
       type: object
@@ -4727,6 +4747,15 @@ components:
             recorded against the engagement. Surfaced to reviewers in
             the Plan Review Inbox row (Task #439). Null when no firm
             has been recorded yet.
+        architectOfRecord:
+          oneOf:
+            - $ref: "#/components/schemas/ArchitectOfRecordContact"
+            - type: "null"
+          description: |
+            Structured architect-of-record contact for the engagement
+            (Task #475). When present, the Communicate composer uses
+            this for the recipient row on outbound comment letters.
+            Null when no contact has been captured yet.
       required:
         - id
         - name
@@ -4742,6 +4771,40 @@ components:
         - revitCentralGuid
         - revitDocumentPath
         - applicantFirm
+        - architectOfRecord
+
+    ArchitectOfRecordContact:
+      type: object
+      description: |
+        Structured architect-of-record (or other recipient) contact
+        captured on an engagement (Task #475). The contact id is
+        derived from the engagement (`engagement:{engagementId}:architect-of-record`)
+        rather than being its own row, so the Communicate composer
+        can persist a stable reference into `recipientUserIds`
+        without requiring the contact to exist in the `users` table.
+      properties:
+        contactId:
+          type: string
+          description: |
+            Stable opaque identifier for the contact, derived from the
+            engagement so it survives renames / contact edits. The
+            CommunicateComposer pushes this into the persisted
+            `recipientUserIds` array on `submission_communications`.
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          nullable: true
+          description: |
+            Optional free-text role label (e.g. "Architect of record",
+            "Project manager"). Null when not specified.
+      required:
+        - contactId
+        - name
+        - email
+        - role
 
 
     SnapshotSummary:

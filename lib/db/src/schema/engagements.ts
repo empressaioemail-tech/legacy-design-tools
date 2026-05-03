@@ -31,6 +31,16 @@ export const engagements = pgTable(
     // Plan Review Inbox so triage can identify "who submitted this"
     // without opening the engagement (Task #439).
     applicantFirm: text("applicant_firm"),
+    // Task #475 — structured architect-of-record contact (name +
+    // email + optional role) so the Communicate composer can populate
+    // a real recipient list and a future outbound dispatcher has
+    // something to send to. All three columns are nullable: legacy
+    // engagements created before this column landed have no recorded
+    // contact, and the reviewer UI treats "name + email both present"
+    // as the threshold for surfacing the contact as a recipient.
+    architectOfRecordName: text("architect_of_record_name"),
+    architectOfRecordEmail: text("architect_of_record_email"),
+    architectOfRecordRole: text("architect_of_record_role"),
     status: text("status").notNull().default("active"),
 
     // Wave 1.2: site context fields (all nullable, additive)

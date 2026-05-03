@@ -65,6 +65,30 @@ export interface SnapshotSummary {
   receivedAt: string;
 }
 
+/**
+ * Structured architect-of-record (or other recipient) contact
+captured on an engagement (Task #475). The contact id is
+derived from the engagement (`engagement:{engagementId}:architect-of-record`)
+rather than being its own row, so the Communicate composer
+can persist a stable reference into `recipientUserIds`
+without requiring the contact to exist in the `users` table.
+
+ */
+export interface ArchitectOfRecordContact {
+  /** Stable opaque identifier for the contact, derived from the
+engagement so it survives renames / contact edits. The
+CommunicateComposer pushes this into the persisted
+`recipientUserIds` array on `submission_communications`.
+ */
+  contactId: string;
+  name: string;
+  email: string;
+  /** Optional free-text role label (e.g. "Architect of record",
+"Project manager"). Null when not specified.
+ */
+  role: string | null;
+}
+
 export interface EngagementSummary {
   id: string;
   name: string;
@@ -84,6 +108,12 @@ the Plan Review Inbox row (Task #439). Null when no firm
 has been recorded yet.
  */
   applicantFirm: string | null;
+  /** Structured architect-of-record contact for the engagement
+(Task #475). When present, the Communicate composer uses
+this for the recipient row on outbound comment letters.
+Null when no contact has been captured yet.
+ */
+  architectOfRecord: ArchitectOfRecordContact | null;
 }
 
 export interface EngagementDetail {
@@ -107,6 +137,12 @@ the Plan Review Inbox row (Task #439). Null when no firm
 has been recorded yet.
  */
   applicantFirm: string | null;
+  /** Structured architect-of-record contact for the engagement
+(Task #475). When present, the Communicate composer uses
+this for the recipient row on outbound comment letters.
+Null when no contact has been captured yet.
+ */
+  architectOfRecord: ArchitectOfRecordContact | null;
 }
 
 /**
@@ -3864,6 +3900,13 @@ existing value. Surfaced to reviewers in the Plan
 Review Inbox row (Task #439).
  */
   applicantFirm?: string | null;
+  /** Structured architect-of-record contact (Task #475).
+Pass an object with `name` + `email` (and optional
+`role`) to set or replace the contact, or `null`
+to clear it. The Communicate composer uses this to
+populate a real recipient row on the comment letter.
+ */
+  architectOfRecord?: ArchitectOfRecordContact | null;
 };
 
 export type ListEngagementBriefingSourcesParams = {

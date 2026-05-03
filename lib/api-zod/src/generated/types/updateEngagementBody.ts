@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { ArchitectOfRecordContact } from "./architectOfRecordContact";
 import type { EngagementStatus } from "./engagementStatus";
 import type { ProjectType } from "./projectType";
 
@@ -22,4 +23,11 @@ existing value. Surfaced to reviewers in the Plan
 Review Inbox row (Task #439).
  */
   applicantFirm?: string | null;
+  /** Structured architect-of-record contact (Task #475).
+Pass an object with `name` + `email` (and optional
+`role`) to set or replace the contact, or `null`
+to clear it. The Communicate composer uses this to
+populate a real recipient row on the comment letter.
+ */
+  architectOfRecord?: ArchitectOfRecordContact | null;
 };

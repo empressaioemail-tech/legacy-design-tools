@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./architectOfRecordContact";
 export * from "./atomEventActor";
 export * from "./atomEventActorKind";
 export * from "./atomHistoryEvent";

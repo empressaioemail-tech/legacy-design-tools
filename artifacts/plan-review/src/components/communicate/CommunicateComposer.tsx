@@ -44,6 +44,20 @@ import {
 } from "@workspace/api-client-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+/**
+ * Task #475 — structured architect-of-record contact captured on the
+ * parent engagement. When present, the recipient row shows the real
+ * contact and the persisted communication record's `recipientUserIds`
+ * carries the contact id (`engagement:{engagementId}:architect-of-record`)
+ * so a future outbound dispatcher has a stable reference to address.
+ */
+export interface CommunicateRecipient {
+  contactId: string;
+  name: string;
+  email: string;
+  role: string | null;
+}
+
 export interface CommunicateComposerProps {
   open: boolean;
   onClose: () => void;
@@ -57,6 +71,14 @@ export interface CommunicateComposerProps {
   jurisdictionLabel?: string;
   applicantFirm?: string | null;
   submittedAt?: string;
+  /**
+   * Architect-of-record contact for the parent engagement (Task #475).
+   * Null/undefined when no contact has been captured yet — the
+   * composer falls back to the legacy "no recipient" copy and
+   * persists an empty recipient list so the audit trail still
+   * records the send.
+   */
+  architectOfRecord?: CommunicateRecipient | null;
 }
 
 const DRAFT_FALLBACK_LABELS: Record<string, string> = {
@@ -77,6 +99,7 @@ export function CommunicateComposer({
   open,
   onClose,
   submissionId,
+  architectOfRecord,
 }: CommunicateComposerProps) {
   // The polished draft endpoint is a POST (it does real work — Anthropic
   // round-trip) but it's idempotent and reviewer-only, so we drive it
@@ -149,10 +172,12 @@ export function CommunicateComposer({
         // time — forwarding it verbatim keeps the reviewer's "what was
         // sent" record locked to the same finding set the polish saw.
         findingAtomIds: draft.findingAtomIds,
-        // No architect-of-record contact is captured on the
-        // engagement today; the route logs the empty list and
-        // persists it for a future dispatcher to pick up.
-        recipientUserIds: [],
+        // Task #475 — when an architect-of-record contact is
+        // captured on the engagement, persist its stable
+        // `contactId` so the audit row references the right
+        // recipient. When the engagement has no contact yet, fall
+        // back to the legacy empty-list behavior.
+        recipientUserIds: architectOfRecord ? [architectOfRecord.contactId] : [],
       },
     });
   };
@@ -244,9 +269,32 @@ export function CommunicateComposer({
             data-testid="communicate-composer-recipients"
             style={{ fontSize: 12, color: "var(--muted-foreground)" }}
           >
-            No architect-of-record contact has been captured for this
-            engagement; the letter will be persisted for the audit trail
-            and routed once an outbound dispatcher is wired up.
+            {architectOfRecord ? (
+              <>
+                <span style={{ fontWeight: 600 }}>To:</span>{" "}
+                <span data-testid="communicate-composer-recipient-name">
+                  {architectOfRecord.name}
+                </span>{" "}
+                &lt;
+                <span data-testid="communicate-composer-recipient-email">
+                  {architectOfRecord.email}
+                </span>
+                &gt;
+                {architectOfRecord.role ? ` · ${architectOfRecord.role}` : ""}
+                <div style={{ marginTop: 4, opacity: 0.75 }}>
+                  Outbound email dispatch is not wired up yet; the
+                  letter will be persisted with this recipient for
+                  the audit trail.
+                </div>
+              </>
+            ) : (
+              <>
+                No architect-of-record contact has been captured for
+                this engagement; the letter will be persisted for the
+                audit trail and routed once a contact is added and an
+                outbound dispatcher is wired up.
+              </>
+            )}
           </div>
           {errorMessage && (
             <div

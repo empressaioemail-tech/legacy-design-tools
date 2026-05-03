@@ -122,6 +122,31 @@ function buildSite(e: EngagementRow) {
   };
 }
 
+/**
+ * Task #475 — derive the structured architect-of-record contact from
+ * the engagement row. We treat (name && email) as the threshold for
+ * surfacing the contact: a row with only one of the two would not be
+ * a usable recipient (the Communicate composer needs both to address
+ * a real person), so we represent that as `null` to keep the
+ * "captured / not captured" check on the FE a single boolean.
+ *
+ * `contactId` is derived from the engagement id rather than stored
+ * separately so it stays stable across edits — and the
+ * CommunicateComposer can persist it into `recipientUserIds` as a
+ * forward-compatible reference for a future outbound dispatcher.
+ */
+function buildArchitectOfRecord(e: EngagementRow) {
+  const name = e.architectOfRecordName?.trim() || null;
+  const email = e.architectOfRecordEmail?.trim() || null;
+  if (!name || !email) return null;
+  return {
+    contactId: `engagement:${e.id}:architect-of-record`,
+    name,
+    email,
+    role: e.architectOfRecordRole?.trim() || null,
+  };
+}
+
 function toEngagementSummary(
   e: EngagementRow,
   count: number,
@@ -141,6 +166,7 @@ function toEngagementSummary(
     revitCentralGuid: e.revitCentralGuid,
     revitDocumentPath: e.revitDocumentPath,
     applicantFirm: e.applicantFirm,
+    architectOfRecord: buildArchitectOfRecord(e),
   };
 }
 
@@ -275,6 +301,31 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
       const trimmed = v === null ? null : v.trim();
       update["applicantFirm"] =
         trimmed === null || trimmed.length === 0 ? null : trimmed;
+    }
+
+    // Task #475 — structured architect-of-record contact. `null`
+    // explicitly clears all three columns; an object payload trims
+    // each field and collapses empty strings to null so a partial
+    // edit (e.g. clearing the role) doesn't write whitespace into
+    // the row. The Communicate composer treats (name && email) as
+    // the threshold for showing a real recipient, so writing only
+    // one of the two is allowed but won't surface a recipient.
+    if (body.architectOfRecord !== undefined) {
+      const c = body.architectOfRecord;
+      if (c === null) {
+        update["architectOfRecordName"] = null;
+        update["architectOfRecordEmail"] = null;
+        update["architectOfRecordRole"] = null;
+      } else {
+        const trim = (s: string | null | undefined) => {
+          if (s == null) return null;
+          const t = s.trim();
+          return t.length === 0 ? null : t;
+        };
+        update["architectOfRecordName"] = trim(c.name);
+        update["architectOfRecordEmail"] = trim(c.email);
+        update["architectOfRecordRole"] = trim(c.role ?? null);
+      }
     }
 
     const warnings: string[] = [];
