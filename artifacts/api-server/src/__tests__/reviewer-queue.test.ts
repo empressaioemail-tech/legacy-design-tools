@@ -52,6 +52,7 @@ function asArchitect<T extends { set: (h: string, v: string) => T }>(
 interface SeedSubmission {
   status?: "pending" | "approved" | "corrections_requested" | "rejected";
   submittedAt?: Date;
+  respondedAt?: Date | null;
   note?: string | null;
   reviewerComment?: string | null;
 }
@@ -95,6 +96,9 @@ async function seedEngagement(opts: {
         reviewerComment: s.reviewerComment ?? null,
         status: s.status ?? "pending",
         ...(s.submittedAt ? { submittedAt: s.submittedAt } : {}),
+        ...(s.respondedAt !== undefined
+          ? { respondedAt: s.respondedAt }
+          : {}),
       })
       .returning({ id: submissions.id });
     submissionIds.push(sub.id);
@@ -307,6 +311,130 @@ describe("GET /api/reviewer/queue", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("Invalid status filter");
     expect(res.body.detail).toContain("pending");
+  });
+
+  it("orders by respondedAt DESC when ?order=respondedAt is passed", async () => {
+    const submitted = new Date("2026-01-01T00:00:00Z");
+    const oldestDecision = new Date("2026-02-01T00:00:00Z");
+    const middleDecision = new Date("2026-03-15T00:00:00Z");
+    const newestDecision = new Date("2026-04-30T12:00:00Z");
+
+    const a = await seedEngagement({
+      name: "Old Decision",
+      submissions: [
+        {
+          status: "approved",
+          submittedAt: submitted,
+          respondedAt: oldestDecision,
+        },
+      ],
+    });
+    const b = await seedEngagement({
+      name: "Newest Decision",
+      submissions: [
+        {
+          status: "approved",
+          submittedAt: submitted,
+          respondedAt: newestDecision,
+        },
+      ],
+    });
+    const c = await seedEngagement({
+      name: "Middle Decision",
+      submissions: [
+        {
+          status: "approved",
+          submittedAt: submitted,
+          respondedAt: middleDecision,
+        },
+      ],
+    });
+
+    const res = await asReviewer(
+      request(getApp()).get(
+        "/api/reviewer/queue?status=approved&order=respondedAt",
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(3);
+    expect(
+      res.body.items.map((it: { engagementId: string }) => it.engagementId),
+    ).toEqual([b.engagementId, c.engagementId, a.engagementId]);
+  });
+
+  it("falls back to submittedAt as a tiebreaker when respondedAt is null", async () => {
+    const oldestSubmit = new Date("2026-01-01T00:00:00Z");
+    const newestSubmit = new Date("2026-04-30T00:00:00Z");
+    const decision = new Date("2026-05-01T00:00:00Z");
+
+    // Two pending rows (no decision yet) plus one approved with a
+    // recent decision. With ?order=respondedAt, the approved row
+    // should sort first; the two null-respondedAt rows should fall
+    // back to submittedAt DESC against each other.
+    const oldPending = await seedEngagement({
+      name: "Old Pending",
+      submissions: [
+        { status: "pending", submittedAt: oldestSubmit, respondedAt: null },
+      ],
+    });
+    const newPending = await seedEngagement({
+      name: "New Pending",
+      submissions: [
+        { status: "pending", submittedAt: newestSubmit, respondedAt: null },
+      ],
+    });
+    const approved = await seedEngagement({
+      name: "Approved",
+      submissions: [
+        {
+          status: "approved",
+          submittedAt: oldestSubmit,
+          respondedAt: decision,
+        },
+      ],
+    });
+
+    const res = await asReviewer(
+      request(getApp()).get(
+        "/api/reviewer/queue?status=pending,approved&order=respondedAt",
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(
+      res.body.items.map((it: { engagementId: string }) => it.engagementId),
+    ).toEqual([
+      approved.engagementId,
+      newPending.engagementId,
+      oldPending.engagementId,
+    ]);
+  });
+
+  it("400s on an unknown order value", async () => {
+    const res = await asReviewer(
+      request(getApp()).get("/api/reviewer/queue?order=bogus"),
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid order");
+  });
+
+  it("treats ?order= (empty string) as the default submittedAt order", async () => {
+    const oldest = new Date("2026-01-01T00:00:00Z");
+    const newest = new Date("2026-04-30T12:00:00Z");
+    const a = await seedEngagement({
+      name: "Old",
+      submissions: [{ status: "pending", submittedAt: oldest }],
+    });
+    const b = await seedEngagement({
+      name: "New",
+      submissions: [{ status: "pending", submittedAt: newest }],
+    });
+    const res = await asReviewer(
+      request(getApp()).get("/api/reviewer/queue?order="),
+    );
+    expect(res.status).toBe(200);
+    expect(
+      res.body.items.map((it: { engagementId: string }) => it.engagementId),
+    ).toEqual([b.engagementId, a.engagementId]);
   });
 
   it("dedupes repeated status values in the CSV", async () => {

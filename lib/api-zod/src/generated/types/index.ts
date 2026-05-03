@@ -167,6 +167,7 @@ export * from "./listQaAutopilotRunsParams";
 export * from "./listQaRunsParams";
 export * from "./listReviewerAnnotationsParams";
 export * from "./listReviewerAnnotationsResponse";
+export * from "./listReviewerQueueOrder";
 export * from "./listReviewerQueueParams";
 export * from "./listReviewerRequestsResponse";
 export * from "./listSubmissionCommentsResponse";

@@ -36,8 +36,15 @@ const DEFAULT_STATUS_FILTER: ReadonlyArray<SubmissionStatus> = [
   "corrections_requested",
 ];
 
+const QUEUE_ORDER_VALUES = ["submittedAt", "respondedAt"] as const;
+type QueueOrder = (typeof QUEUE_ORDER_VALUES)[number];
+
 function isSubmissionStatus(v: string): v is SubmissionStatus {
   return (SUBMISSION_STATUS_VALUES as readonly string[]).includes(v);
+}
+
+function isQueueOrder(v: string): v is QueueOrder {
+  return (QUEUE_ORDER_VALUES as readonly string[]).includes(v);
 }
 
 /**
@@ -78,6 +85,33 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
     return;
   }
 
+  const orderRaw = req.query.order;
+  let order: QueueOrder = "submittedAt";
+  if (typeof orderRaw === "string" && orderRaw.length > 0) {
+    if (!isQueueOrder(orderRaw)) {
+      res.status(400).json({
+        error: "Invalid order",
+        detail: `order must be one of: ${QUEUE_ORDER_VALUES.join(", ")}`,
+      });
+      return;
+    }
+    order = orderRaw;
+  }
+
+  // For `respondedAt` ordering, push null `respondedAt` rows
+  // (anything that hasn't been responded to yet) to the bottom and
+  // fall back to `submittedAt` as a tiebreaker so the slot is still
+  // deterministic. Postgres' default for `DESC` is NULLS FIRST,
+  // which would otherwise float pending rows to the top of the
+  // Approved/Rejected lists.
+  const orderByClause =
+    order === "respondedAt"
+      ? [
+          sql`${submissions.respondedAt} DESC NULLS LAST`,
+          desc(submissions.submittedAt),
+        ]
+      : [desc(submissions.submittedAt)];
+
   const itemRows = await db
     .select({
       submissionId: submissions.id,
@@ -97,7 +131,7 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
     .from(submissions)
     .innerJoin(engagements, eq(submissions.engagementId, engagements.id))
     .where(inArray(submissions.status, filter as SubmissionStatus[]))
-    .orderBy(desc(submissions.submittedAt));
+    .orderBy(...orderByClause);
 
   const countRows = await db
     .select({

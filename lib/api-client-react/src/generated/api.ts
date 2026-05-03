@@ -8644,9 +8644,14 @@ for a "what was just rejected" tab). An unrecognized status
 value is rejected with 400 rather than silently ignored so a
 typo does not return a misleading queue.
 
-Items are ordered by `submittedAt` DESC so the freshest
-package is at the top — matches the existing per-engagement
-list contract (`GET /engagements/{id}/submissions`).
+Items are ordered by `submittedAt` DESC by default so the
+freshest package is at the top — matches the existing
+per-engagement list contract
+(`GET /engagements/{id}/submissions`). Pass `?order=respondedAt`
+to instead sort by decision time DESC (`respondedAt`, with
+`submittedAt` as a tiebreaker for rows that have not been
+responded to yet); the Approved / Rejected bucket pages use
+this so freshest decisions surface first.
 
 `counts` accompanies the items as a denormalized roll-up so
 the page's KPI strip and "X in review · Y awaiting AI ·

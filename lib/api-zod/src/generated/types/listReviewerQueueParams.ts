@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListReviewerQueueOrder } from "./listReviewerQueueOrder";
 
 export type ListReviewerQueueParams = {
   /**
@@ -15,4 +16,15 @@ include in `items`. Defaults to
 
  */
   status?: string;
+  /**
+ * Sort key for `items`, always DESC. `submittedAt` (default)
+sorts by package arrival time and matches the Inbox.
+`respondedAt` sorts by decision time so the freshest
+approval / rejection is at the top — used by the
+Approved and Rejected bucket pages. Rows with a null
+`respondedAt` fall back to `submittedAt` as a tiebreaker.
+An unrecognized value is rejected with 400.
+
+ */
+  order?: ListReviewerQueueOrder;
 };

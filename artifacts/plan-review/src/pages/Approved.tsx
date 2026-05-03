@@ -8,6 +8,7 @@ export default function Approved() {
       cardLabel="APPROVED"
       testIdPrefix="approved"
       emptyMessage="No approved submissions yet."
+      order="respondedAt"
     />
   );
 }

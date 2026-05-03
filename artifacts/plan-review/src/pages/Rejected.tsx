@@ -8,6 +8,7 @@ export default function Rejected() {
       cardLabel="REJECTED"
       testIdPrefix="rejected"
       emptyMessage="Nothing has been rejected. Good news."
+      order="respondedAt"
     />
   );
 }

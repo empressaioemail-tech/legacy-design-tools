@@ -18,6 +18,12 @@ interface QueueBucketPageProps {
   emptyMessage: string;
   cardLabel: string;
   testIdPrefix: string;
+  /**
+   * Server-side ordering for the queue. `submittedAt` (default)
+   * matches the Inbox; the Approved / Rejected pages pass
+   * `respondedAt` so freshest decisions surface first.
+   */
+  order?: "submittedAt" | "respondedAt";
 }
 
 export default function QueueBucketPage({
@@ -26,6 +32,7 @@ export default function QueueBucketPage({
   emptyMessage,
   cardLabel,
   testIdPrefix,
+  order,
 }: QueueBucketPageProps) {
   const navGroups = useNavGroups();
   const { audience, isLoading: audienceLoading } = useSessionAudience();
@@ -33,7 +40,10 @@ export default function QueueBucketPage({
   // skip the fetch and render an inline access-denied banner.
   const enabled = audience === "internal";
 
-  const params = useMemo(() => ({ status }), [status]);
+  const params = useMemo(
+    () => (order ? { status, order } : { status }),
+    [status, order],
+  );
 
   const { data, isLoading, isError } = useListReviewerQueue(params, {
     query: {
