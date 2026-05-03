@@ -54,6 +54,8 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
+type Mode = "by-jurisdiction" | "all";
+
 export default function CodeLibrary() {
   const navGroups = useNavGroups();
   const { audience } = useSessionAudience();
@@ -67,7 +69,11 @@ export default function CodeLibrary() {
 
   const list = jurisdictions ?? [];
 
+  const [mode, setMode] = useState<Mode>("by-jurisdiction");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [initialOpenAtomId, setInitialOpenAtomId] = useState<string | null>(
+    null,
+  );
   const firstKey = list[0]?.key ?? null;
   useEffect(() => {
     if (selectedKey === null && firstKey) setSelectedKey(firstKey);
@@ -77,6 +83,18 @@ export default function CodeLibrary() {
     () => list.find((j) => j.key === selectedKey) ?? null,
     [list, selectedKey],
   );
+
+  const jurisdictionNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const j of list) map.set(j.key, j.displayName);
+    return map;
+  }, [list]);
+
+  const handleOpenFromAll = (atom: CodeAtomSummary) => {
+    setSelectedKey(atom.jurisdictionKey);
+    setInitialOpenAtomId(atom.id);
+    setMode("by-jurisdiction");
+  };
 
   return (
     <DashboardLayout
@@ -118,23 +136,66 @@ export default function CodeLibrary() {
             No jurisdictions are configured.
           </div>
         ) : (
-          <div className="grid gap-6 grid-cols-1 lg:grid-cols-[280px_1fr]">
-            <JurisdictionList
-              jurisdictions={list}
-              selectedKey={selectedKey}
-              onSelect={setSelectedKey}
-            />
-            {selected ? (
-              <JurisdictionPane
-                jurisdiction={selected}
-                canManage={canManage}
-              />
-            ) : (
-              <div className="sc-card p-8 text-center sc-body">
-                Pick a jurisdiction to browse its code atoms.
+          <>
+            <div
+              className="flex items-center gap-2"
+              data-testid="code-library-mode-tabs"
+              role="tablist"
+              aria-label="Code Library view"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "by-jurisdiction"}
+                className={
+                  mode === "by-jurisdiction" ? "sc-btn-primary" : "sc-btn-sm"
+                }
+                onClick={() => setMode("by-jurisdiction")}
+                data-testid="code-library-mode-by-jurisdiction"
+              >
+                By jurisdiction
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "all"}
+                className={mode === "all" ? "sc-btn-primary" : "sc-btn-sm"}
+                onClick={() => setMode("all")}
+                data-testid="code-library-mode-all"
+              >
+                Search all jurisdictions
+              </button>
+            </div>
+
+            {mode === "by-jurisdiction" ? (
+              <div className="grid gap-6 grid-cols-1 lg:grid-cols-[280px_1fr]">
+                <JurisdictionList
+                  jurisdictions={list}
+                  selectedKey={selectedKey}
+                  onSelect={setSelectedKey}
+                />
+                {selected ? (
+                  <JurisdictionPane
+                    jurisdiction={selected}
+                    canManage={canManage}
+                    initialOpenAtomId={initialOpenAtomId}
+                    onConsumeInitialOpenAtomId={() =>
+                      setInitialOpenAtomId(null)
+                    }
+                  />
+                ) : (
+                  <div className="sc-card p-8 text-center sc-body">
+                    Pick a jurisdiction to browse its code atoms.
+                  </div>
+                )}
               </div>
+            ) : (
+              <AllJurisdictionsSearch
+                jurisdictionNames={jurisdictionNames}
+                onOpenAtom={handleOpenFromAll}
+              />
             )}
-          </div>
+          </>
         )}
       </div>
     </DashboardLayout>
@@ -193,15 +254,21 @@ function JurisdictionList({
 function JurisdictionPane({
   jurisdiction,
   canManage,
+  initialOpenAtomId,
+  onConsumeInitialOpenAtomId,
 }: {
   jurisdiction: JurisdictionSummary;
   canManage: boolean;
+  initialOpenAtomId?: string | null;
+  onConsumeInitialOpenAtomId?: () => void;
 }) {
   const [bookFilter, setBookFilter] = useState<string>("all");
   const [searchInput, setSearchInput] = useState<string>("");
   const debouncedSearch = useDebouncedValue(searchInput.trim(), 250);
   const [page, setPage] = useState<number>(0);
-  const [openAtomId, setOpenAtomId] = useState<string | null>(null);
+  const [openAtomId, setOpenAtomId] = useState<string | null>(
+    initialOpenAtomId ?? null,
+  );
 
   // Reset state when jurisdiction or filters change so we don't surface a
   // stale page or codebook.
@@ -209,8 +276,22 @@ function JurisdictionPane({
     setBookFilter("all");
     setSearchInput("");
     setPage(0);
-    setOpenAtomId(null);
+    setOpenAtomId(initialOpenAtomId ?? null);
+    if (initialOpenAtomId && onConsumeInitialOpenAtomId) {
+      onConsumeInitialOpenAtomId();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jurisdiction.key]);
+
+  // If a deep-link target arrives after the pane is already mounted on the
+  // same jurisdiction, surface the modal too.
+  useEffect(() => {
+    if (initialOpenAtomId) {
+      setOpenAtomId(initialOpenAtomId);
+      onConsumeInitialOpenAtomId?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpenAtomId]);
 
   useEffect(() => {
     setPage(0);
@@ -381,6 +462,150 @@ function JurisdictionPane({
           atomId={openAtomId}
           onClose={() => setOpenAtomId(null)}
         />
+      ) : null}
+    </div>
+  );
+}
+
+function AllJurisdictionsSearch({
+  jurisdictionNames,
+  onOpenAtom,
+}: {
+  jurisdictionNames: Map<string, string>;
+  onOpenAtom: (atom: CodeAtomSummary) => void;
+}) {
+  const [searchInput, setSearchInput] = useState<string>("");
+  const debouncedSearch = useDebouncedValue(searchInput.trim(), 250);
+  const [page, setPage] = useState<number>(0);
+
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch]);
+
+  const params: ListCodeAtomsParams = {
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+  };
+  if (debouncedSearch) params.q = debouncedSearch;
+
+  const {
+    data: page_data,
+    isLoading,
+    isError,
+    isFetching,
+  } = useListCodeAtoms(params);
+
+  const items = page_data?.items ?? [];
+  const total = page_data?.total ?? 0;
+  const offset = page_data?.offset ?? 0;
+  const pageStart = total === 0 ? 0 : offset + 1;
+  const pageEnd = Math.min(offset + items.length, total);
+  const hasPrev = page > 0;
+  const hasNext = offset + items.length < total;
+
+  return (
+    <div className="sc-card" data-testid="atom-browser-all">
+      <div className="sc-card-header sc-row-sb">
+        <span className="sc-label">CODE ATOMS · ALL JURISDICTIONS</span>
+        <span className="sc-meta" data-testid="atom-browser-all-count">
+          {isLoading
+            ? "Loading…"
+            : total === 0
+              ? "0 results"
+              : `${pageStart}–${pageEnd} of ${total}`}
+        </span>
+      </div>
+
+      <div
+        className="flex flex-col gap-3 p-3"
+        style={{ borderBottom: "1px solid var(--border)" }}
+      >
+        <input
+          type="search"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search section number or title across every jurisdiction…"
+          data-testid="atom-search-input-all"
+          aria-label="Search code atoms across all jurisdictions"
+          className="sc-input"
+          style={{
+            width: "100%",
+            padding: "8px 10px",
+            background: "var(--surface-1)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            color: "var(--text-primary)",
+          }}
+        />
+      </div>
+
+      <div className="flex flex-col" data-testid="atom-list-all">
+        {isLoading ? (
+          <div
+            className="p-8 text-center sc-body"
+            data-testid="atom-list-all-loading"
+          >
+            Loading atoms…
+          </div>
+        ) : isError ? (
+          <div
+            className="p-8 text-center sc-body text-[var(--danger)]"
+            data-testid="atom-list-all-error"
+          >
+            Couldn't load atoms.
+          </div>
+        ) : items.length === 0 ? (
+          <div
+            className="p-8 text-center sc-body"
+            data-testid="atom-list-all-empty"
+          >
+            {debouncedSearch
+              ? "No atoms match your search."
+              : "Type to search across every ingested jurisdiction."}
+          </div>
+        ) : (
+          items.map((atom) => (
+            <AtomRow
+              key={atom.id}
+              atom={atom}
+              jurisdictionLabel={
+                jurisdictionNames.get(atom.jurisdictionKey) ??
+                atom.jurisdictionKey
+              }
+              onOpen={() => onOpenAtom(atom)}
+            />
+          ))
+        )}
+      </div>
+
+      {total > PAGE_SIZE ? (
+        <div
+          className="flex items-center justify-between p-3"
+          style={{ borderTop: "1px solid var(--border)" }}
+          data-testid="atom-pagination-all"
+        >
+          <button
+            type="button"
+            className="sc-btn-sm"
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={!hasPrev || isFetching}
+            data-testid="atom-pagination-all-prev"
+          >
+            ← Previous
+          </button>
+          <span className="sc-mono-sm sc-meta">
+            Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+          </span>
+          <button
+            type="button"
+            className="sc-btn-sm"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!hasNext || isFetching}
+            data-testid="atom-pagination-all-next"
+          >
+            Next →
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -631,9 +856,11 @@ function WarmupStatusPanel({
 function AtomRow({
   atom,
   onOpen,
+  jurisdictionLabel,
 }: {
   atom: CodeAtomSummary;
   onOpen: () => void;
+  jurisdictionLabel?: string;
 }) {
   return (
     <button
@@ -650,6 +877,15 @@ function AtomRow({
           <span className="sc-medium truncate">
             {atom.sectionTitle ?? "(untitled)"}
           </span>
+          {jurisdictionLabel ? (
+            <span
+              className="sc-pill sc-pill-cyan shrink-0"
+              data-testid={`atom-row-${atom.id}-jurisdiction`}
+              title={`Jurisdiction: ${jurisdictionLabel}`}
+            >
+              {jurisdictionLabel}
+            </span>
+          ) : null}
           {!atom.embedded ? (
             <span
               className="sc-pill sc-pill-amber shrink-0"
