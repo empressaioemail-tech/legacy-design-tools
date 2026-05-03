@@ -614,6 +614,7 @@ router.get(
           submittedAt: submissions.submittedAt,
           jurisdiction: submissions.jurisdiction,
           note: submissions.note,
+          discipline: submissions.discipline,
           status: submissions.status,
           reviewerComment: submissions.reviewerComment,
           respondedAt: submissions.respondedAt,
@@ -629,6 +630,9 @@ router.get(
           submittedAt: r.submittedAt.toISOString(),
           jurisdiction: r.jurisdiction,
           note: r.note,
+          // PLR-10 — surfaced so FindingsTab's "Add from library"
+          // picker can pre-filter to this submission's discipline.
+          discipline: r.discipline,
           status: r.status,
           reviewerComment: r.reviewerComment,
           respondedAt: r.respondedAt ? r.respondedAt.toISOString() : null,
@@ -684,6 +688,9 @@ router.post(
         typeof rawNote === "string" && rawNote.trim().length > 0
           ? rawNote.trim()
           : null;
+      // PLR-10 — optional discipline tag; `undefined` from the body
+      // becomes `null` on the row so the picker falls back to "All".
+      const discipline = bodyParse.data.discipline ?? null;
 
       // Persist the submission row first. The row id (and its
       // `submittedAt` default) become the canonical fields surfaced on
@@ -698,6 +705,7 @@ router.post(
           jurisdictionState: existing.jurisdictionState,
           jurisdictionFips: existing.jurisdictionFips,
           note,
+          discipline,
         })
         .returning();
       if (!inserted) {

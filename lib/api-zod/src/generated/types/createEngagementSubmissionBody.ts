@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { CannedFindingDiscipline } from "./cannedFindingDiscipline";
 
 /**
  * Request body for `POST /engagements/{id}/submissions`. The
@@ -29,4 +30,11 @@ the emitted event.
    * @maxLength 2048
    */
   note?: string;
+  /** PLR-10 — optional discipline tag (`building` / `fire` /
+`zoning` / `civil`). When supplied, gets persisted on the
+submission row and drives the FindingsTab "Add from
+library" picker default for reviewers. Omit to leave the
+field null (the picker falls back to "All").
+ */
+  discipline?: CannedFindingDiscipline;
 }

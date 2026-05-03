@@ -146,6 +146,22 @@ Null when no contact has been captured yet.
 }
 
 /**
+ * PLR-10 discipline scope. A canned finding belongs to exactly
+one discipline; the FindingsTab picker filters on the
+reviewer's active discipline.
+
+ */
+export type CannedFindingDiscipline =
+  (typeof CannedFindingDiscipline)[keyof typeof CannedFindingDiscipline];
+
+export const CannedFindingDiscipline = {
+  building: "building",
+  fire: "fire",
+  zoning: "zoning",
+  civil: "civil",
+} as const;
+
+/**
  * Request body for `POST /engagements/{id}/submissions`. The
 submission flow is currently a forward-ref child in the
 engagement atom's composition (no dedicated submissions table
@@ -168,6 +184,13 @@ the emitted event.
    * @maxLength 2048
    */
   note?: string;
+  /** PLR-10 — optional discipline tag (`building` / `fire` /
+`zoning` / `civil`). When supplied, gets persisted on the
+submission row and drives the FindingsTab "Add from
+library" picker default for reviewers. Omit to leave the
+field null (the picker falls back to "All").
+ */
+  discipline?: CannedFindingDiscipline;
 }
 
 /**
@@ -224,6 +247,15 @@ export interface EngagementSubmissionSummary {
   submittedAt: string;
   jurisdiction: string | null;
   note: string | null;
+  /** PLR-10 — review discipline this submission package targets
+(`building` / `fire` / `zoning` / `civil`). Used by the
+FindingsTab "Add from library" picker to pre-filter the
+canned-finding library to the relevant code track. Null
+when the submission was created before this column landed
+or when the architect didn't tag a discipline; the picker
+falls back to "All" in that case.
+ */
+  discipline: CannedFindingDiscipline | null;
   status: SubmissionStatus;
   reviewerComment: string | null;
   respondedAt: string | null;
@@ -3867,22 +3899,6 @@ not events and are not represented in this schema.
 export type SubmissionLiveEvent =
   | SubmissionFindingLiveEvent
   | SubmissionPresenceLiveEvent;
-
-/**
- * PLR-10 discipline scope. A canned finding belongs to exactly
-one discipline; the FindingsTab picker filters on the
-reviewer's active discipline.
-
- */
-export type CannedFindingDiscipline =
-  (typeof CannedFindingDiscipline)[keyof typeof CannedFindingDiscipline];
-
-export const CannedFindingDiscipline = {
-  building: "building",
-  fire: "fire",
-  zoning: "zoning",
-  civil: "civil",
-} as const;
 
 export type CannedFindingCodeCitationKind =
   (typeof CannedFindingCodeCitationKind)[keyof typeof CannedFindingCodeCitationKind];

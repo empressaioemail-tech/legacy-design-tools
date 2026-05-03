@@ -221,6 +221,7 @@ const baseSubmission: EngagementSubmissionSummary = {
   submittedAt: "2026-04-01T10:00:00.000Z",
   jurisdiction: "Boulder, CO",
   note: "Please review the parcel briefing before approving.",
+  discipline: null,
   status: "pending",
   reviewerComment: null,
   respondedAt: null,

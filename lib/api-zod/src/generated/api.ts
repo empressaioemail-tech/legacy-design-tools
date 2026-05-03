@@ -570,6 +570,12 @@ export const ListEngagementSubmissionsResponseItem = zod
     submittedAt: zod.coerce.date(),
     jurisdiction: zod.string().nullable(),
     note: zod.string().nullable(),
+    discipline: zod
+      .enum(["building", "fire", "zoning", "civil"])
+      .nullable()
+      .describe(
+        'PLR-10 — review discipline this submission package targets\n(`building` \/ `fire` \/ `zoning` \/ `civil`). Used by the\nFindingsTab \"Add from library\" picker to pre-filter the\ncanned-finding library to the relevant code track. Null\nwhen the submission was created before this column landed\nor when the architect didn\'t tag a discipline; the picker\nfalls back to \"All\" in that case.\n',
+      ),
     status: zod
       .enum(["pending", "approved", "corrections_requested", "rejected"])
       .describe(
@@ -624,6 +630,12 @@ export const CreateEngagementSubmissionBody = zod
       .optional()
       .describe(
         'Optional free-text note about the submission (e.g. \"Permit\nset v1, all sheets cleaned.\"). Capped at 2 KB to keep the\nevent payload bounded — notes longer than 2048 chars are\nrejected with a 400 (the server does not silently truncate).\nAn empty or whitespace-only string is coerced to null on\nthe emitted event.\n',
+      ),
+    discipline: zod
+      .enum(["building", "fire", "zoning", "civil"])
+      .optional()
+      .describe(
+        'PLR-10 — optional discipline tag (`building` \/ `fire` \/\n`zoning` \/ `civil`). When supplied, gets persisted on the\nsubmission row and drives the FindingsTab \"Add from\nlibrary\" picker default for reviewers. Omit to leave the\nfield null (the picker falls back to \"All\").\n',
       ),
   })
   .describe(

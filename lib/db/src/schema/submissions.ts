@@ -4,8 +4,9 @@ import {
   text,
   timestamp,
   index,
+  check,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { engagements } from "./engagements";
 
 /**
@@ -68,6 +69,16 @@ export const submissions = pgTable(
     jurisdictionState: text("jurisdiction_state"),
     jurisdictionFips: text("jurisdiction_fips"),
     note: text("note"),
+    /**
+     * PLR-10 — review discipline this submission package targets.
+     * Drives the FindingsTab "Add from library" picker default so
+     * reviewers see canned findings scoped to the relevant code
+     * track without manually filtering every time. Nullable so
+     * legacy submissions (and packages where the architect didn't
+     * tag a discipline) keep working — the picker falls back to
+     * "All" in that case.
+     */
+    discipline: text("discipline"),
     submittedAt: timestamp("submitted_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -84,6 +95,10 @@ export const submissions = pgTable(
   (t) => ({
     engagementIdx: index("submissions_engagement_idx").on(t.engagementId),
     submittedAtIdx: index("submissions_submitted_at_idx").on(t.submittedAt),
+    disciplineCheck: check(
+      "submissions_discipline_check",
+      sql`${t.discipline} IS NULL OR ${t.discipline} IN ('building', 'fire', 'zoning', 'civil')`,
+    ),
   }),
 );
 

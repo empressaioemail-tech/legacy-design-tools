@@ -455,6 +455,13 @@ export function SubmissionDetailModal({
                 onSelectFinding={onSelectFinding ?? (() => {})}
                 onShowInViewer={handleShowInViewer}
                 audience={audience}
+                // PLR-10 — pre-filter the canned-finding library
+                // picker to this submission's discipline. Null
+                // submissions (legacy / untagged) leave the picker
+                // defaulting to "All".
+                cannedLibraryDiscipline={
+                  submission.discipline ?? undefined
+                }
               />
             </TabsContent>
             <TabsContent

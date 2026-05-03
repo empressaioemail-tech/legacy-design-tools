@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { CannedFindingDiscipline } from "./cannedFindingDiscipline";
 import type { SubmissionStatus } from "./submissionStatus";
 
 /**
@@ -31,6 +32,15 @@ export interface EngagementSubmissionSummary {
   submittedAt: Date;
   jurisdiction: string | null;
   note: string | null;
+  /** PLR-10 — review discipline this submission package targets
+(`building` / `fire` / `zoning` / `civil`). Used by the
+FindingsTab "Add from library" picker to pre-filter the
+canned-finding library to the relevant code track. Null
+when the submission was created before this column landed
+or when the architect didn't tag a discipline; the picker
+falls back to "All" in that case.
+ */
+  discipline: CannedFindingDiscipline | null;
   status: SubmissionStatus;
   reviewerComment: string | null;
   respondedAt: Date | null;

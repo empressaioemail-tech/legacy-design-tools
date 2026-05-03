@@ -4992,6 +4992,14 @@ components:
             rejected with a 400 (the server does not silently truncate).
             An empty or whitespace-only string is coerced to null on
             the emitted event.
+        discipline:
+          $ref: "#/components/schemas/CannedFindingDiscipline"
+          description: |
+            PLR-10 — optional discipline tag (`building` / `fire` /
+            `zoning` / `civil`). When supplied, gets persisted on the
+            submission row and drives the FindingsTab "Add from
+            library" picker default for reviewers. Omit to leave the
+            field null (the picker falls back to "All").
 
     SubmissionReceipt:
       type: object
@@ -5044,6 +5052,17 @@ components:
         note:
           type: string
           nullable: true
+        discipline:
+          $ref: "#/components/schemas/CannedFindingDiscipline"
+          nullable: true
+          description: |
+            PLR-10 — review discipline this submission package targets
+            (`building` / `fire` / `zoning` / `civil`). Used by the
+            FindingsTab "Add from library" picker to pre-filter the
+            canned-finding library to the relevant code track. Null
+            when the submission was created before this column landed
+            or when the architect didn't tag a discipline; the picker
+            falls back to "All" in that case.
         status:
           $ref: "#/components/schemas/SubmissionStatus"
         reviewerComment:
@@ -5070,6 +5089,7 @@ components:
         - submittedAt
         - jurisdiction
         - note
+        - discipline
         - status
         - reviewerComment
         - respondedAt
