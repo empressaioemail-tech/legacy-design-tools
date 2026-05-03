@@ -95,6 +95,22 @@ export const FINDING_ENGINE_ACTOR_ID = "finding-engine";
 export const DECISION_RECORDED_ACTOR_ID = "decision-recorded";
 
 /**
+ * Track 1 auto-classifier path — `lib/classifySubmission.ts`. Stamped
+ * on `submission.classified` and `submission-classification.set` events
+ * when the LLM-backed classifier runs on `submission.created`. Reviewer
+ * reclassifications carry the session-bound requestor instead, so this
+ * id only shows up on the auto-classifier path.
+ *
+ * NOTE: intentionally NOT yet added to {@link SERVER_ACTOR_IDS} — the
+ * design-tools `actorLabel` test enforces a 1:1 mapping between that
+ * registry array and `FRIENDLY_AGENT_LABELS` in `lib/portal-ui`, which
+ * is FE-owned. FE follow-up: add the matching label entry AND add this
+ * constant to {@link SERVER_ACTOR_IDS} in the same commit so the
+ * tripwire stays intact.
+ */
+export const CLASSIFIER_ACTOR_ID = "classifier";
+
+/**
  * Every stable server-side actor id, in declaration order. Consumers
  * iterate this array (e.g. the design-tools actorLabel test) to assert
  * each emitted id has a matching operator-facing label, so a new server

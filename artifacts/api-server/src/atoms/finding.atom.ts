@@ -116,6 +116,21 @@ export interface FindingTypedPayload {
   elementRef?: string | null;
   aiGeneratedAt?: string;
   revisionOfAtomId?: string | null;
+  /**
+   * Track 1 — explicit AI-provenance flag for the "AI generated" badge.
+   * Mirrors `findings.ai_generated`; the FE composes
+   * "AI generated" or "AI generated · reviewer confirmed (Name, date)"
+   * from this plus `acceptedByReviewerId` + `acceptedAt`.
+   */
+  aiGenerated?: boolean;
+  /**
+   * Track 1 — reviewer id frozen at FIRST acceptance. Null until the
+   * row first transitions into `'accepted'`; preserved across
+   * subsequent reject/accept cycles.
+   */
+  acceptedByReviewerId?: string | null;
+  /** Track 1 — wall-clock timestamp of first acceptance (frozen). */
+  acceptedAt?: string | null;
 }
 
 export interface FindingAtomDeps {
@@ -267,6 +282,9 @@ export function makeFindingAtom(
         elementRef: row.elementRef,
         aiGeneratedAt: row.aiGeneratedAt.toISOString(),
         revisionOfAtomId,
+        aiGenerated: row.aiGenerated,
+        acceptedByReviewerId: row.acceptedByReviewerId,
+        acceptedAt: row.acceptedAt ? row.acceptedAt.toISOString() : null,
       } satisfies FindingTypedPayload;
 
       if (!latestEventId) {
