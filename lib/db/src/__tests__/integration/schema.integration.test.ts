@@ -70,6 +70,14 @@ describe("lib/db schema integration", () => {
         // /me/notifications/mark-read.
         "architect_notification_reads",
         "atom_events",
+        // Task #482 / #486 — QA autopilot orchestration tables.
+        // `autopilot_runs` is one row per kicked-off run;
+        // `autopilot_findings` carries per-suite per-test findings; and
+        // `autopilot_fix_actions` records fixer-applied side-effects we
+        // may revert. Listed alphabetically to match `ORDER BY tablename`.
+        "autopilot_findings",
+        "autopilot_fix_actions",
+        "autopilot_runs",
         // DA-PI-5 Revit-sensor materialization tables. Listed in
         // alphabetical order to match `ORDER BY tablename` from the
         // pg_tables query above. `bim_models` carries the per-engagement
@@ -104,6 +112,9 @@ describe("lib/db schema integration", () => {
         // Task #481 — QA Dashboard checklist runs and per-item results.
         "qa_checklist_results",
         "qa_runs",
+        // Task #482 — kv settings store for the QA dashboard
+        // (notify.* keys land in #484, table shape unchanged).
+        "qa_settings",
         "render_outputs",
         // Spec 307 / Task #307 — reviewer scratch-note surface anchored
         // per (submission, target atom) tuple. Reviewer-only until the
