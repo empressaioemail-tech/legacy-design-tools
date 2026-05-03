@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   clearDevSessionCookie,
   getDevSessionAudience,
+  markDevSessionChoice,
   setDevSessionAudience,
   type DevAudience,
 } from "../lib/devSession";
@@ -43,6 +44,11 @@ function DevSessionSwitcherInner() {
     } else {
       setDevSessionAudience(next);
     }
+    // Record that the operator made an explicit choice so the
+    // dev/preview auto-default in App.tsx stops re-applying Reviewer
+    // on subsequent loads — including when the operator picked
+    // "Clear (anonymous)".
+    markDevSessionChoice();
     setAudience(next);
     setOpen(false);
     // Reload so every cached `useGetSession` / `useListReviewerQueue`

@@ -80,3 +80,61 @@ export function clearDevSessionCookie(): void {
   if (typeof document === "undefined") return;
   document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; samesite=lax`;
 }
+
+/**
+ * localStorage key the DevSessionSwitcher writes to whenever the
+ * operator explicitly picks an audience (Reviewer / Architect /
+ * Anonymous). The auto-default below uses it to tell "this browser
+ * has never seen the switcher" apart from "operator deliberately
+ * cleared the cookie" — both of which present as a missing cookie.
+ */
+const CHOICE_STORAGE_KEY = "pr_dev_session_chosen";
+
+/**
+ * Mark that the operator has made an explicit dev-session choice in
+ * this browser, so {@link applyDevDefaultAudienceOnce} stops
+ * overriding the missing cookie back to Reviewer on the next page
+ * load.
+ */
+export function markDevSessionChoice(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CHOICE_STORAGE_KEY, "1");
+  } catch {
+    // localStorage may be disabled (private mode, quota); the worst
+    // case is the auto-default keeps re-applying, which is fine.
+  }
+}
+
+function hasDevSessionChoice(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(CHOICE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Dev/preview-only bootstrap: when the browser has no `pr_session`
+ * cookie *and* the operator has never made an explicit dev-session
+ * choice in this browser, write the cookie as `audience: "internal"`
+ * so the Plan Review Inbox loads as a reviewer by default. This is
+ * the smoke-check ergonomic — testers shouldn't have to flip the
+ * DevSessionSwitcher before the queue can render any rows.
+ *
+ * Production gating lives at the call site (`import.meta.env.PROD`)
+ * — this helper itself is environment-agnostic.
+ *
+ * No-op when:
+ * - the cookie is already set (operator already on Reviewer or
+ *   Architect).
+ * - the operator has made any explicit choice this browser session,
+ *   including the "Clear (anonymous)" option.
+ */
+export function applyDevDefaultAudienceOnce(): void {
+  if (typeof document === "undefined") return;
+  if (getDevSessionAudience() !== null) return;
+  if (hasDevSessionChoice()) return;
+  setDevSessionAudience("internal");
+}

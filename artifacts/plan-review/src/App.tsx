@@ -17,6 +17,19 @@ import ComplianceEngine from "./pages/ComplianceEngine";
 import ComingSoon from "./pages/ComingSoon";
 import { RequirePermission, RequireAudience } from "./components/permissions";
 import { DevSessionSwitcher } from "./components/DevSessionSwitcher";
+import { applyDevDefaultAudienceOnce } from "./lib/devSession";
+
+// Dev/preview-only: when no `pr_session` cookie is set yet (and the
+// operator hasn't already picked an audience this browser session),
+// auto-default the dev session to Reviewer so opening `/plan-review/`
+// from a fresh browser lands directly in the Inbox instead of in the
+// audience-mismatch empty state. The DevSessionSwitcher still lets the
+// operator flip to Architect or Anonymous, and any explicit choice
+// suppresses this default on subsequent loads. Production is left
+// untouched (the session middleware also fail-closes the cookie there).
+if (!import.meta.env.PROD) {
+  applyDevDefaultAudienceOnce();
+}
 
 const queryClient = new QueryClient();
 
