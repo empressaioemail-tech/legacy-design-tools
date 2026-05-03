@@ -171,6 +171,43 @@ export const findings = pgTable(
       .notNull()
       .defaultNow(),
     /**
+     * Track 1 — explicit AI-provenance flag for the "AI generated"
+     * badge surface. `true` when the row was inserted by the
+     * finding-engine; `false` for human-authored override-revisions
+     * (the override route inserts a NEW row with this column false,
+     * regardless of whether the row being revised was AI-produced —
+     * the override is a human-authored finding, period).
+     *
+     * Distinct from `aiGeneratedAt` (which is non-nullable on every
+     * row by historical schema; the `aiGenerated` boolean is the
+     * source of truth for badge rendering, while `aiGeneratedAt` stays
+     * useful as the engine's emit timestamp for AI-produced rows).
+     *
+     * Backfilled on existing rows via
+     * `UPDATE findings SET ai_generated = (finding_run_id IS NOT NULL)`
+     * in the migration.
+     */
+    aiGenerated: boolean("ai_generated").notNull().default(false),
+    /**
+     * Track 1 — bare reviewer id frozen at FIRST transition into
+     * `'accepted'`. The badge surface composes
+     * "AI generated · reviewer confirmed ({displayName}, {date})" by
+     * joining this id against the `users` profile table at read time.
+     *
+     * Frozen at first acceptance: a row that cycles
+     * `accepted → rejected → accepted` keeps the original
+     * `accepted_by_reviewer_id` and `accepted_at` from the first
+     * acceptance — the badge tracks "who first confirmed this
+     * finding," not "who most-recently accepted it." Most-recent
+     * action lives in `reviewerStatusBy` / `reviewerStatusChangedAt`.
+     */
+    acceptedByReviewerId: text("accepted_by_reviewer_id"),
+    /**
+     * Track 1 — wall-clock timestamp of the first acceptance. See
+     * `acceptedByReviewerId` for the freeze semantics.
+     */
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    /**
      * Self-FK for the override-creates-revision pattern. Null on the
      * original AI-produced row; set to the original's id on each
      * reviewer override. ON DELETE SET NULL so a deleted original

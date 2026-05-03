@@ -338,6 +338,9 @@ CREATE TABLE @@SCHEMA@@.findings (
     finding_run_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    ai_generated boolean DEFAULT false NOT NULL,
+    accepted_by_reviewer_id text,
+    accepted_at timestamp with time zone,
     CONSTRAINT findings_category_check CHECK ((category = ANY (ARRAY['setback'::text, 'height'::text, 'coverage'::text, 'egress'::text, 'use'::text, 'overlay-conflict'::text, 'divergence-related'::text, 'other'::text]))),
     CONSTRAINT findings_severity_check CHECK ((severity = ANY (ARRAY['blocker'::text, 'concern'::text, 'advisory'::text]))),
     CONSTRAINT findings_status_check CHECK ((status = ANY (ARRAY['ai-produced'::text, 'accepted'::text, 'rejected'::text, 'overridden'::text, 'promoted-to-architect'::text])))
@@ -573,6 +576,23 @@ CREATE TABLE @@SCHEMA@@.submission_comments (
 );
 
 
+-- Name: submission_classifications; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.submission_classifications (
+    submission_id uuid NOT NULL,
+    project_type text,
+    disciplines text[] DEFAULT '{}'::text[] NOT NULL,
+    applicable_code_books text[] DEFAULT '{}'::text[] NOT NULL,
+    confidence numeric,
+    source text DEFAULT 'auto'::text NOT NULL,
+    classified_by jsonb,
+    classified_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT submission_classifications_disciplines_check CHECK ((disciplines <@ ARRAY['building'::text, 'electrical'::text, 'mechanical'::text, 'plumbing'::text, 'residential'::text, 'fire-life-safety'::text, 'accessibility'::text])),
+    CONSTRAINT submission_classifications_source_check CHECK ((source = ANY (ARRAY['auto'::text, 'reviewer'::text])))
+);
+
+
 -- Name: submission_communications; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.submission_communications (
@@ -619,7 +639,9 @@ CREATE TABLE @@SCHEMA@@.users (
     avatar_url text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    architect_pdf_header text
+    architect_pdf_header text,
+    disciplines text[] DEFAULT '{}'::text[] NOT NULL,
+    CONSTRAINT users_disciplines_check CHECK ((disciplines <@ ARRAY['building'::text, 'electrical'::text, 'mechanical'::text, 'plumbing'::text, 'residential'::text, 'fire-life-safety'::text, 'accessibility'::text]))
 );
 
 
@@ -855,6 +877,12 @@ ALTER TABLE ONLY @@SCHEMA@@.snapshots
 
 ALTER TABLE ONLY @@SCHEMA@@.submission_comments
     ADD CONSTRAINT submission_comments_pkey PRIMARY KEY (id);
+
+
+-- Name: submission_classifications submission_classifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.submission_classifications
+    ADD CONSTRAINT submission_classifications_pkey PRIMARY KEY (submission_id);
 
 
 -- Name: submission_communications submission_communications_atom_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1137,6 +1165,11 @@ CREATE INDEX snapshots_engagement_idx ON @@SCHEMA@@.snapshots USING btree (engag
 CREATE INDEX snapshots_received_at_idx ON @@SCHEMA@@.snapshots USING btree (received_at);
 
 
+-- Name: submission_classifications_disciplines_gin_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX submission_classifications_disciplines_gin_idx ON @@SCHEMA@@.submission_classifications USING gin (disciplines);
+
+
 -- Name: submission_comments_submission_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX submission_comments_submission_idx ON @@SCHEMA@@.submission_comments USING btree (submission_id, created_at);
@@ -1345,6 +1378,12 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: submission_classifications submission_classifications_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.submission_classifications
+    ADD CONSTRAINT submission_classifications_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
 
 
 -- Name: submission_comments submission_comments_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
