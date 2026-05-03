@@ -425,6 +425,34 @@ export class ObjectStorageService {
   }
 }
 
+/**
+ * Mint a short-lived signed GET URL for an `/objects/<entityId>` path.
+ *
+ * Used by surfaces that hand a GLB URL to an unauthenticated worker
+ * (e.g. the mnml renders Puppeteer capture) where the architect's
+ * session cookie is not in scope and the API GLB endpoints would 401.
+ * The returned URL is fetchable by anyone holding it — keep TTL short.
+ */
+export async function signObjectEntityGetUrl(
+  objectEntityPath: string,
+  ttlSec = 600,
+): Promise<string> {
+  if (!objectEntityPath.startsWith("/objects/")) {
+    throw new Error(
+      `signObjectEntityGetUrl: expected /objects/<id>, got ${objectEntityPath}`,
+    );
+  }
+  const entityId = objectEntityPath.slice("/objects/".length);
+  if (!entityId) {
+    throw new Error("signObjectEntityGetUrl: empty entity id");
+  }
+  let entityDir = new ObjectStorageService().getPrivateObjectDir();
+  if (!entityDir.endsWith("/")) entityDir = `${entityDir}/`;
+  const fullPath = `${entityDir}${entityId}`;
+  const { bucketName, objectName } = parseObjectPath(fullPath);
+  return signObjectURL({ bucketName, objectName, method: "GET", ttlSec });
+}
+
 function parseObjectPath(path: string): {
   bucketName: string;
   objectName: string;

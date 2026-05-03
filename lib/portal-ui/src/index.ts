@@ -56,6 +56,13 @@ export type { RenderGalleryProps } from "./components/RenderGallery";
 export { RenderKickoffDialog } from "./components/RenderKickoffDialog";
 export type { RenderKickoffDialogProps } from "./components/RenderKickoffDialog";
 
+// Promoted from artifacts/plan-review so design-tools can mount the
+// same read-only Three.js BIM viewer on its Snapshots tab without
+// forking. Audience-agnostic; callers pass `selectedElementRef` for
+// finding-citation drill-in.
+export { BimModelViewport } from "./components/BimModelViewport";
+export type { BimModelViewportProps } from "./components/BimModelViewport";
+
 // Briefing divergences — shared by design-tools (architect surface)
 // and plan-review (read-only reviewer surface). Promoted to portal-ui
 // by Wave 2 Sprint B (Task #306) so the two surfaces stay in

@@ -14,7 +14,7 @@ import {
   type MaterializableElement,
   type MaterializableElementKind,
 } from "@workspace/api-client-react";
-import { BimModelViewport } from "./BimModelViewport";
+import { BimModelViewport } from "@workspace/portal-ui";
 import { useSessionUserId } from "../lib/session";
 
 /**

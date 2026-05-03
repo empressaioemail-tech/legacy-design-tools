@@ -48,8 +48,10 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod/v4";
 import {
   bimModels,
+  briefingSources,
   db,
   engagements,
+  materializableElements,
   parcelBriefings,
   renderOutputs,
   viewpointRenders,
@@ -76,7 +78,7 @@ import {
   RenderMirrorError,
   resolveRenderBucketName,
 } from "../lib/rendersObjectMirror";
-import { objectStorageClient } from "../lib/objectStorage";
+import { objectStorageClient, signObjectEntityGetUrl } from "../lib/objectStorage";
 import { Readable } from "node:stream";
 import { runRendersSweep } from "../lib/rendersSweep";
 
@@ -563,6 +565,58 @@ export async function runRenderPolling(args: {
   }
 }
 
+/**
+ * Convert a kickoff `glbUrl` into something the Puppeteer capture worker
+ * can actually load. The worker runs in an `about:blank` page with no
+ * architect cookies, so an authenticated API URL like
+ * `/api/materializable-elements/:id/glb` would 401/CORS-fail in-page.
+ *
+ * If the URL points at one of our auth-gated GLB endpoints, look up
+ * the row's `glbObjectPath` and mint a short-lived signed object-storage
+ * URL the worker can fetch unauthenticated. Any other URL (signed GCS,
+ * public mirror, data URL) is passed through verbatim.
+ */
+async function resolveCaptureGlbUrl(rawUrl: string): Promise<string> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return rawUrl;
+  }
+  const m = parsed.pathname.match(
+    /\/api\/(materializable-elements|briefing-sources)\/([^/]+)\/glb$/,
+  );
+  if (!m) return rawUrl;
+  const kind = m[1];
+  const id = decodeURIComponent(m[2]!);
+  let objectPath: string | null = null;
+  if (kind === "materializable-elements") {
+    const rows = await db
+      .select({ glbObjectPath: materializableElements.glbObjectPath })
+      .from(materializableElements)
+      .where(eq(materializableElements.id, id))
+      .limit(1);
+    objectPath = rows[0]?.glbObjectPath ?? null;
+  } else {
+    const rows = await db
+      .select({ glbObjectPath: briefingSources.glbObjectPath })
+      .from(briefingSources)
+      .where(eq(briefingSources.id, id))
+      .limit(1);
+    objectPath = rows[0]?.glbObjectPath ?? null;
+  }
+  if (!objectPath) {
+    throw new BimViewportCaptureError(
+      "render_failed",
+      `glb not attached for ${kind}/${id}`,
+    );
+  }
+  const normalized = objectPath.startsWith("/objects/")
+    ? objectPath
+    : `/objects/${objectPath.replace(/^\/+/, "")}`;
+  return signObjectEntityGetUrl(normalized, 1800);
+}
+
 // Single-call branch for `still` and `video` kickoffs.
 async function runSingleCall(
   viewpointRenderId: string,
@@ -574,8 +628,9 @@ async function runSingleCall(
   // 1. Capture viewport
   let imageBuffer: Buffer;
   try {
+    const glbUrl = await resolveCaptureGlbUrl(body.glbUrl);
     const cap = await captureBimViewport({
-      glbUrl: body.glbUrl,
+      glbUrl,
       cameraPosition,
       cameraTarget,
       // Reorder narrows body to the still variant BEFORE accessing
@@ -801,13 +856,28 @@ async function runElevationSet(
   //    risk a 429); the polling loop below is still single-pass.
   const jobs = [...initialJobs];
   const mnml = getMnmlClient();
+  // Resolve once for the whole set — same GLB, four camera angles.
+  let resolvedGlbUrl: string;
+  try {
+    resolvedGlbUrl = await resolveCaptureGlbUrl(body.glbUrl);
+  } catch (err) {
+    await persistTerminalState(viewpointRenderId, {
+      status: "failed",
+      errorCode: "capture_failed",
+      errorMessage: (err as Error).message,
+    });
+    await emitRenderEvent(viewpointRenderId, "viewpoint-render.failed", {
+      errorCode: "capture_failed",
+    });
+    return;
+  }
   for (let i = 0; i < ELEVATION_SET_CALLS.length; i++) {
     const call = ELEVATION_SET_CALLS[i]!;
     const cam = computeElevationCamera(body.buildingCenter, body.cameraDistance, body.cameraHeight, call.axis);
     let imageBuffer: Buffer;
     try {
       const cap = await captureBimViewport({
-        glbUrl: body.glbUrl,
+        glbUrl: resolvedGlbUrl,
         cameraPosition: cam.cameraPosition,
         cameraTarget: cam.cameraTarget,
         ...(body.fov !== undefined ? { fov: body.fov } : {}),

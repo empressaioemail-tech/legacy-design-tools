@@ -43,6 +43,11 @@ import {
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
+import { extractBriefingSourceOverlays } from "@workspace/site-context/client";
+import {
+  getGetBriefingSourceGlbUrl,
+  getGetMaterializableElementGlbUrl,
+} from "@workspace/api-client-react";
 // Task #303 B.5 / Task #314 — the per-section word-level diff that
 // powers the prior-narrative panel was extracted into
 // `@workspace/briefing-diff` so the Plan Review reviewer view can
@@ -105,6 +110,7 @@ import {
   BriefingDivergencesPanel as PortalBriefingDivergencesPanel,
   FindingDetailPanel,
   FindingsList,
+  BimModelViewport,
   ParcelZoningCard,
   ReviewerComment,
   SiteContextViewer,
@@ -1820,12 +1826,20 @@ function SiteContextTab({
   engagement,
   selectedElementRef,
   onClearSelectedElement,
+  buildingGlbUrl,
+  showBuilding,
+  onToggleShowBuilding,
 }: {
   engagement: EngagementDetailType;
   /** CAD element ref deep-linked from the Findings tab. */
   selectedElementRef?: string | null;
   /** Clear handler for the selected-element badge. */
   onClearSelectedElement?: () => void;
+  /** Engagement BIM model GLB for the optional "Show building"
+   * massing overlay on the 3D sub-tab. */
+  buildingGlbUrl?: string | null;
+  showBuilding?: boolean;
+  onToggleShowBuilding?: (next: boolean) => void;
 }) {
   const engagementId = engagement.id;
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -2168,6 +2182,13 @@ function SiteContextTab({
 
   const sources = briefingQuery.data?.briefing?.sources ?? [];
   const narrative = briefingQuery.data?.briefing?.narrative ?? null;
+  // Map sub-tab inputs hoisted so the overlay memo isn't gated by
+  // `subTab === "map"` (rules of hooks).
+  const mapGeocode = engagement.site?.geocode ?? null;
+  const mapOverlays = useMemo(
+    () => extractBriefingSourceOverlays(sources),
+    [sources],
+  );
   // M-A5: pair each layerKind with its producer adapter key for the
   // upload modal's supersede chip. Manual rows use the conventional
   // `manual-qgis-import` key; adapter rows expose the key embedded in
@@ -2855,23 +2876,38 @@ function SiteContextTab({
       </div>
 
       {subTab === "map" ? (
-        <div
-          data-testid="site-context-map-placeholder"
-          className="sc-card"
-          style={{
-            padding: 16,
-            background: "var(--surface-2, var(--info-dim))",
-            color: "var(--text-muted)",
-            fontSize: 13,
-            textAlign: "center",
-            minHeight: 320,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          Map view ships in DA-PI-2.
-        </div>
+        mapGeocode === null ? (
+          <div
+            data-testid="site-context-map-no-geocode"
+            className="sc-card"
+            style={{
+              padding: 16,
+              background: "var(--surface-2, var(--info-dim))",
+              color: "var(--text-muted)",
+              fontSize: 13,
+              textAlign: "center",
+              minHeight: 320,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            Add an address on the Site tab to load the parcel map.
+          </div>
+        ) : (
+          <div
+            data-testid="site-context-map"
+            style={{ minHeight: 320, flex: 1 }}
+          >
+            <SiteMap
+              latitude={mapGeocode.latitude}
+              longitude={mapGeocode.longitude}
+              addressLabel={engagement.address ?? undefined}
+              overlays={mapOverlays}
+              height={320}
+            />
+          </div>
+        )
       ) : (
         <div
           style={{
@@ -2885,6 +2921,9 @@ function SiteContextTab({
             sources={sources}
             selectedElementRef={selectedElementRef}
             onClearSelectedElement={onClearSelectedElement}
+            buildingGlbUrl={buildingGlbUrl}
+            showBuilding={showBuilding}
+            onToggleShowBuilding={onToggleShowBuilding}
           />
         </div>
       )}
@@ -3631,7 +3670,16 @@ function BackfillFilterChips({
  * render" button. The gallery owns polling, cancel confirmation,
  * and downloads; this tab just owns the dialog's open state.
  */
-function RendersTab({ engagementId }: { engagementId: string }) {
+function RendersTab({
+  engagementId,
+  defaultGlbUrl,
+}: {
+  engagementId: string;
+  /** Auto-resolved BIM-model GLB URL the kickoff dialog defaults
+   * to. Null when the engagement has no renderable BIM elements
+   * yet — the architect can still paste a URL manually. */
+  defaultGlbUrl?: string | null;
+}) {
   const [kickoffOpen, setKickoffOpen] = useState(false);
   return (
     <div
@@ -3668,6 +3716,7 @@ function RendersTab({ engagementId }: { engagementId: string }) {
       />
       <RenderKickoffDialog
         engagementId={engagementId}
+        defaultGlbUrl={defaultGlbUrl ?? null}
         isOpen={kickoffOpen}
         onClose={() => setKickoffOpen(false)}
       />
@@ -4512,9 +4561,41 @@ export function EngagementDetail() {
   const [selectedElementRef, setSelectedElementRef] = useState<string | null>(
     null,
   );
+
+  const bimModelQuery = useGetEngagementBimModel(id);
+  const bimModel = bimModelQuery.data?.bimModel ?? null;
+  const bimElements = useMemo(() => bimModel?.elements ?? [], [bimModel]);
+  // Resolve a GLB URL for the architect's BIM building. Architect-
+  // uploaded meshes (`glbObjectPath` set) take priority and use the
+  // element-id route; briefing-source-derived elements fall back to
+  // the briefing-source route since the element route 404s when
+  // `glbObjectPath` is null. Absolute URL so the server-side
+  // capture browser the renders route invokes can reach it.
+  const defaultBimGlbUrl = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const origin = window.location.origin;
+    const ownMesh = bimElements.find(
+      (el) => el.glbObjectPath !== null && el.glbObjectPath !== "",
+    );
+    if (ownMesh) {
+      return `${origin}${getGetMaterializableElementGlbUrl(ownMesh.id)}`;
+    }
+    const sourceBacked = bimElements.find(
+      (el) => el.briefingSourceId !== null && el.briefingSourceId !== "",
+    );
+    if (sourceBacked && sourceBacked.briefingSourceId) {
+      return `${origin}${getGetBriefingSourceGlbUrl(sourceBacked.briefingSourceId)}`;
+    }
+    return null;
+  }, [bimElements]);
+  const [showBuildingOverlay, setShowBuildingOverlay] = useState(false);
+  // Finding-citation drill-in lands on Snapshots so the new BIM
+  // viewer can highlight the matched element. The Site Context tab
+  // still subscribes to `selectedElementRef` if the user navigates
+  // there manually.
   const handleElementRefClick = (elementRef: string): void => {
     setSelectedElementRef(elementRef);
-    setTab("site-context");
+    setTab("snapshots");
   };
   // Auto-dismiss the banner after 8s so it stays out of the way once
   // the user has seen it. The dialog itself already closed on success,
@@ -4877,14 +4958,78 @@ export function EngagementDetail() {
                 )}
               </div>
             </div>
+
+            <div
+              className="sc-card flex flex-col"
+              data-testid="snapshots-bim-viewer"
+              style={{ minHeight: 420 }}
+            >
+              <div className="sc-card-header sc-row-sb">
+                <span className="sc-label">BIM MODEL</span>
+                <span className="sc-meta">
+                  {bimElements.length}{" "}
+                  {bimElements.length === 1 ? "element" : "elements"}
+                </span>
+              </div>
+              <div
+                className="flex-1"
+                style={{
+                  borderTop: "1px solid var(--border-default)",
+                  padding: 8,
+                  display: "flex",
+                  minHeight: 0,
+                }}
+              >
+                {bimModelQuery.isLoading ? (
+                  <div className="sc-prose opacity-60 m-auto">
+                    Loading BIM model…
+                  </div>
+                ) : bimElements.length === 0 ? (
+                  <div className="sc-prose opacity-70 m-auto text-center">
+                    No BIM elements yet. Push this engagement&apos;s briefing
+                    to Revit to populate the 3D viewer.
+                  </div>
+                ) : (
+                  <BimModelViewport
+                    elements={bimElements}
+                    selectedElementRef={selectedElementRef ?? null}
+                  />
+                )}
+              </div>
+            </div>
           </>
         )}
 
         {tab === "sheets" && (
-          <SheetGrid
-            snapshotId={selectedSnapshotId}
-            onAskClaude={handleAskClaudeAboutSheet}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <button
+                type="button"
+                className="sc-btn-ghost"
+                data-testid="sheets-tab-view-in-3d"
+                disabled={bimElements.length === 0}
+                onClick={() => setTab("snapshots")}
+                title={
+                  bimElements.length === 0
+                    ? "Push this engagement's briefing to Revit to enable the 3D viewer."
+                    : "Open the 3D BIM viewer on the Snapshots tab."
+                }
+              >
+                View in 3D
+              </button>
+            </div>
+            <SheetGrid
+              snapshotId={selectedSnapshotId}
+              onAskClaude={handleAskClaudeAboutSheet}
+            />
+          </div>
         )}
 
         {tab === "site" && (
@@ -4896,6 +5041,9 @@ export function EngagementDetail() {
             engagement={engagement}
             selectedElementRef={selectedElementRef}
             onClearSelectedElement={() => setSelectedElementRef(null)}
+            buildingGlbUrl={defaultBimGlbUrl}
+            showBuilding={showBuildingOverlay}
+            onToggleShowBuilding={setShowBuildingOverlay}
           />
         )}
 
@@ -4916,7 +5064,12 @@ export function EngagementDetail() {
           />
         )}
 
-        {tab === "renders" && <RendersTab engagementId={engagement.id} />}
+        {tab === "renders" && (
+          <RendersTab
+            engagementId={engagement.id}
+            defaultGlbUrl={defaultBimGlbUrl}
+          />
+        )}
 
         {tab === "settings" && (
           <SettingsTab engagement={engagement} onEdit={openEdit} />

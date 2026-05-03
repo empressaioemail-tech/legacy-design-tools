@@ -27,6 +27,25 @@ export interface SiteContextViewerProps {
   selectedElementRef?: string | null;
   /** Optional clear handler paired with `selectedElementRef`. */
   onClearSelectedElement?: () => void;
+  /**
+   * Absolute or relative URL of an engagement-scoped building GLB.
+   * When provided AND {@link showBuilding} is on, the viewer loads
+   * the GLB as a translucent massing overlay on top of the briefing
+   * sources so the architect can see how the building sits within
+   * the site context. The GLB is added at the scene origin, which
+   * by convention is the parcel centroid in this viewer (briefing
+   * sources are themselves loaded at origin), and rotated -90° about
+   * X to convert Z-up BIM coords to the viewer's Y-up convention.
+   */
+  buildingGlbUrl?: string | null;
+  /**
+   * Controls visibility of the building overlay. When undefined the
+   * viewer renders no toggle UI; when defined, a "Show building"
+   * checkbox appears in the status panel and only loads/shows the
+   * GLB when this is true.
+   */
+  showBuilding?: boolean;
+  onToggleShowBuilding?: (next: boolean) => void;
 }
 
 const TERRAIN_COLOR = 0x8b7355;
@@ -288,6 +307,9 @@ export function SiteContextViewer({
   sources,
   selectedElementRef,
   onClearSelectedElement,
+  buildingGlbUrl,
+  showBuilding,
+  onToggleShowBuilding,
 }: SiteContextViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -297,6 +319,10 @@ export function SiteContextViewer({
   const animationFrameRef = useRef<number | null>(null);
   const sourceGroupsRef = useRef<Map<string, THREE.Group>>(new Map());
   const activeMatchRef = useRef<MatchedObject | null>(null);
+  const buildingGroupRef = useRef<THREE.Group | null>(null);
+  const [buildingState, setBuildingState] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle");
 
   const [webGlOk] = useState<boolean>(detectWebGl);
   const [sourceState, setSourceState] = useState<
@@ -556,6 +582,95 @@ export function SiteContextViewer({
     }
   }, [selectedElementRef, webGlOk, loadedNonce, readySources]);
 
+  // Building GLB overlay. Loads on first toggle-on, then a
+  // hide/show cycle just toggles `group.visible` so we don't refetch
+  // on each click. Z-up GLBs are rotated -90° about X so they land
+  // in the viewer's Y-up convention.
+  useEffect(() => {
+    if (!webGlOk) return;
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const wantBuilding = Boolean(buildingGlbUrl) && showBuilding === true;
+    const existing = buildingGroupRef.current;
+    if (existing) {
+      existing.visible = wantBuilding;
+    }
+    if (!wantBuilding) return;
+    if (existing || !buildingGlbUrl) return;
+    setBuildingState("loading");
+    const controller = new AbortController();
+    const loader = new GLTFLoader();
+    void fetch(buildingGlbUrl, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(
+            `Failed to fetch building GLB (HTTP ${res.status} ${res.statusText}).`,
+          );
+        }
+        const buffer = await res.arrayBuffer();
+        await new Promise<void>((resolve, reject) => {
+          loader.parse(
+            buffer,
+            "",
+            (gltf) => {
+              if (controller.signal.aborted) {
+                resolve();
+                return;
+              }
+              const root = new THREE.Group();
+              gltf.scene.children.slice().forEach((child) => root.add(child));
+              const mat = new THREE.MeshLambertMaterial({
+                color: 0xd0d0d0,
+                transparent: true,
+                opacity: 0.7,
+                side: THREE.DoubleSide,
+              });
+              root.traverse((obj) => {
+                const mesh = obj as THREE.Mesh;
+                if (mesh.isMesh) mesh.material = mat;
+              });
+              const wrapper = new THREE.Group();
+              // Z-up → Y-up.
+              wrapper.rotation.x = -Math.PI / 2;
+              wrapper.add(root);
+              wrapper.userData.role = "building-overlay";
+              scene.add(wrapper);
+              buildingGroupRef.current = wrapper;
+              setBuildingState("loaded");
+              setLoadedNonce((n) => n + 1);
+              resolve();
+            },
+            (err) => reject(err as unknown),
+          );
+        });
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        // Best-effort: leave the toggle on so the architect can see
+        // the failure state in the status panel and retry by
+        // toggling off/on once the URL resolves.
+        setBuildingState("error");
+        // eslint-disable-next-line no-console
+        console.warn("SiteContextViewer building overlay load failed:", err);
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [webGlOk, buildingGlbUrl, showBuilding]);
+
+  // Drop the building group entirely if the URL changes so the next
+  // toggle-on refetches against the new URL.
+  useEffect(() => {
+    return () => {
+      const g = buildingGroupRef.current;
+      if (g) {
+        disposeGroup(g);
+        buildingGroupRef.current = null;
+        setBuildingState("idle");
+      }
+    };
+  }, [buildingGlbUrl]);
+
   const retryFetch = useCallback((sourceId: string) => {
     // Dropping the group makes the next pass re-fetch only this id.
     const group = sourceGroupsRef.current.get(sourceId);
@@ -691,7 +806,7 @@ export function SiteContextViewer({
         )}
       </div>
 
-      {dxfSources.length > 0 && (
+      {(dxfSources.length > 0 || onToggleShowBuilding) && (
         <div
           data-testid="site-context-viewer-status-panel"
           style={{
@@ -701,6 +816,48 @@ export function SiteContextViewer({
             fontSize: 11,
           }}
         >
+          {onToggleShowBuilding && (
+            <label
+              data-testid="site-context-viewer-show-building-toggle"
+              data-state={
+                buildingState === "loaded"
+                  ? showBuilding
+                    ? "shown"
+                    : "hidden"
+                  : buildingState
+              }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "2px 8px",
+                borderRadius: 4,
+                background: "var(--surface-2, var(--info-dim))",
+                color: "var(--text-secondary)",
+                cursor: buildingGlbUrl ? "pointer" : "not-allowed",
+                opacity: buildingGlbUrl ? 1 : 0.5,
+              }}
+              title={
+                buildingGlbUrl
+                  ? "Toggle the building massing overlay"
+                  : "No BIM model GLB available for this engagement yet."
+              }
+            >
+              <input
+                type="checkbox"
+                checked={showBuilding === true}
+                disabled={!buildingGlbUrl}
+                onChange={(e) => onToggleShowBuilding(e.target.checked)}
+                data-testid="site-context-viewer-show-building-checkbox"
+                style={{ margin: 0 }}
+              />
+              <span>
+                Show building
+                {buildingState === "loading" && " · loading…"}
+                {buildingState === "error" && " · load failed"}
+              </span>
+            </label>
+          )}
           {dxfSources.map((source) => {
             const state = sourceState[source.id];
             const known = RENDERABLE_LAYER_KINDS.has(source.layerKind);
