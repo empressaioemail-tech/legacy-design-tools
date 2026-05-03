@@ -150,6 +150,12 @@ Null when no contact has been captured yet.
 one discipline; the FindingsTab picker filters on the
 reviewer's active discipline.
 
+Distinct from `PlanReviewDiscipline` (the wider 7-value
+enum the Track 1 reviewer-assignment surface uses). The
+canned-findings list endpoint accepts `reviewerDisciplines`
+(a CSV of `PlanReviewDiscipline` values) and translates them
+server-side onto this 4-value enum.
+
  */
 export type CannedFindingDiscipline =
   (typeof CannedFindingDiscipline)[keyof typeof CannedFindingDiscipline];
@@ -271,6 +277,207 @@ server clock on every response update.
 }
 
 /**
+ * PLR-v2 reviewer discipline scope (Track 1). Names the
+discipline a reviewer can be assigned to and the discipline
+a submission's classification atom can carry.
+
+Distinct from `CannedFindingDiscipline` (4-value
+building/fire/zoning/civil) — that enum scopes the curated
+canned-findings library and predates this one. Both coexist:
+canned-finding rows continue to use `CannedFindingDiscipline`,
+and the canned-findings list endpoint translates from the
+reviewer's `PlanReviewDiscipline[]` to the matching subset of
+`CannedFindingDiscipline` server-side via a fixed map (e.g.
+`fire-life-safety → fire`).
+
+ */
+export type PlanReviewDiscipline =
+  (typeof PlanReviewDiscipline)[keyof typeof PlanReviewDiscipline];
+
+export const PlanReviewDiscipline = {
+  building: "building",
+  electrical: "electrical",
+  mechanical: "mechanical",
+  plumbing: "plumbing",
+  residential: "residential",
+  "fire-life-safety": "fire-life-safety",
+  accessibility: "accessibility",
+} as const;
+
+export type SubmissionClassificationSource =
+  (typeof SubmissionClassificationSource)[keyof typeof SubmissionClassificationSource];
+
+export const SubmissionClassificationSource = {
+  auto: "auto",
+  reviewer: "reviewer",
+} as const;
+
+export type FindingActorKind =
+  (typeof FindingActorKind)[keyof typeof FindingActorKind];
+
+export const FindingActorKind = {
+  user: "user",
+  agent: "agent",
+  system: "system",
+} as const;
+
+/**
+ * Stable actor envelope shared by reviewer-side audit surfaces
+(reviewer-requests, findings, eventually reviewer-annotations).
+
+`kind` distinguishes session-bound human actors (`user`) from
+AI/bot writes (`agent`) and infrastructure-stamped events
+(`system`). `id` is opaque to the framework — application code
+chooses its identity scheme (today: the upstream identity
+layer's stable user id). `displayName` is hydrated at write
+time so consumer surfaces (e.g. the architect's
+ReviewerRequestsStrip) can render "Requested by Alex" without
+a per-row roundtrip.
+
+Promoted to a shared schema in V1-2 — was previously only a
+TS interface in `artifacts/plan-review/src/lib/findingsMock.ts`.
+Both V1-1 (findings) and V1-2 (reviewer-requests) consume this
+envelope; future consumers (e.g. promoted reviewer-annotations
+when they pick up architect-visible attribution) should import
+from here rather than re-deriving the shape.
+
+ */
+export interface FindingActor {
+  kind: FindingActorKind;
+  id: string;
+  displayName?: string | null;
+}
+
+/**
+ * PLR-v2 Track 1 — current classification atom for a submission.
+Produced by the AI auto-classifier on submission arrival
+(`source: 'auto'`) and overwritten by reviewers via
+`POST /submissions/{submissionId}/reclassify`
+(`source: 'reviewer'`). The reviewer's reclassify call replaces
+the prior atom outright; the prior values are preserved on the
+atom's history chain rather than the live row.
+
+`disciplines` is the set of `PlanReviewDiscipline` values that
+scope which reviewers see the submission in their default
+Inbox feed and which discipline tab the FindingsTab opens to.
+
+`applicableCodeBooks` is a free-form list of code-book labels
+(e.g. `"IBC 2021"`, `"NEC 2020"`) — not the atom-id of a
+code-book; this is purely a display string for the triage
+strip's classification chip group.
+
+`confidence` is the auto-classifier's self-reported confidence
+on a 0..1 scale. Reviewer-overridden classifications carry the
+reviewer-provided value (or `1.0` if omitted on the
+reclassify body).
+
+`classifiedBy` is null for `source: 'auto'` rows and carries
+the reviewer actor (reusing the `FindingActor` envelope) for
+`source: 'reviewer'` rows.
+
+ */
+export interface SubmissionClassification {
+  submissionId: string;
+  projectType: string;
+  disciplines: PlanReviewDiscipline[];
+  applicableCodeBooks: string[];
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  confidence: number;
+  source: SubmissionClassificationSource;
+  classifiedAt: string;
+  classifiedBy: FindingActor | null;
+}
+
+/**
+ * PLR-v2 Track 1 — finding-severity counts for a submission,
+bucketed by `FindingSeverity` and totalled. Drives the triage
+strip's severity-rollup chip on the Inbox.
+
+Counts include rows in every reviewer-status state — the
+rollup represents the finding population on the submission,
+not just the open ones. `total` is the sum of `blockers +
+concerns + advisory` and is denormalized for FE convenience.
+
+ */
+export interface ReviewerSeverityRollup {
+  blockers: number;
+  concerns: number;
+  advisory: number;
+  total: number;
+}
+
+export type ApplicantHistoryPriorSubmissionVerdict =
+  (typeof ApplicantHistoryPriorSubmissionVerdict)[keyof typeof ApplicantHistoryPriorSubmissionVerdict];
+
+export const ApplicantHistoryPriorSubmissionVerdict = {
+  approved: "approved",
+  returned: "returned",
+  pending: "pending",
+} as const;
+
+/**
+ * PLR-v2 Track 1 — one prior submission for the applicant firm,
+carried inside `ApplicantHistory.priorSubmissions` so the
+Inbox triage hovercard can render per-row entries without a
+follow-up GET.
+
+`verdict` mirrors the parent submission's terminal state:
+  - `approved` — the submission was approved.
+  - `returned` — the submission was returned for revision or
+    rejected (both bucket here for the applicant-history
+    roll-up).
+  - `pending` — the submission is still open
+    (`pending`/`corrections_requested`).
+
+`returnReason` is only populated when `verdict === 'returned'`
+— it carries a short reason label (e.g. the reviewer comment's
+first line) the hovercard can render without expanding the
+full row. Omitted otherwise.
+
+ */
+export interface ApplicantHistoryPriorSubmission {
+  submissionId: string;
+  engagementName: string;
+  submittedAt: string;
+  verdict: ApplicantHistoryPriorSubmissionVerdict;
+  returnReason?: string;
+}
+
+/**
+ * PLR-v2 Track 1 — prior-submission roll-up for an applicant
+firm, denormalized onto each ReviewerQueueItem so the Inbox
+triage strip can render the applicant-history pill +
+hovercard without a follow-up `GET /applicants/:firm/history`
+per row.
+
+`totalPrior` counts every prior submission for the firm
+regardless of verdict; `approved`/`returned` partition the
+terminal subset (open ones don't roll into either). The sum
+of `approved + returned` may be less than `totalPrior` when
+prior submissions are still open — that's expected.
+
+`lastReturnReason` carries the most recent `returned` row's
+reason (or null if the firm has no returned submissions yet).
+
+`priorSubmissions` is capped at the 5 most recent (ordered
+`submittedAt` DESC) so the hovercard can render per-row
+entries without unbounded payload growth. Auditors with a
+legitimate need for the full list can hit a (future)
+applicant-history endpoint directly.
+
+ */
+export interface ApplicantHistory {
+  totalPrior: number;
+  approved: number;
+  returned: number;
+  lastReturnReason: string | null;
+  priorSubmissions: ApplicantHistoryPriorSubmission[];
+}
+
+/**
  * One submission row in the cross-engagement reviewer Inbox
 (`GET /reviewer/queue`). Joins the row to its parent
 engagement so the Inbox can render a row per submission
@@ -299,6 +506,58 @@ export interface ReviewerQueueItem {
   status: SubmissionStatus;
   note: string | null;
   reviewerComment: string | null;
+  /** PLR-v2 Track 1 — submission's current classification atom
+(project type, plan-review disciplines, applicable code
+books). Null when the AI auto-classifier has not yet run
+or when the submission predates the feature.
+
+**Optional in Pass A** (CT contract-first lock); BE's
+implementation PR flips this to required once every row
+is backfilled.
+ */
+  classification?: SubmissionClassification | null;
+  /** PLR-v2 Track 1 — counts of findings on this submission
+bucketed by severity (blockers / concerns / advisory) +
+total. Drives the triage strip's severity rollup chip on
+the Inbox.
+
+**Optional in Pass A** (CT contract-first lock); BE's
+implementation PR flips this to required once every row
+is backfilled.
+ */
+  severityRollup?: ReviewerSeverityRollup;
+  /** PLR-v2 Track 1 — prior-submission roll-up for this
+submission's applicant firm. Drives the triage strip's
+applicant-history pill + hovercard.
+
+**Optional in Pass A** (CT contract-first lock); BE's
+implementation PR flips this to required once every row
+is backfilled.
+ */
+  applicantHistory?: ApplicantHistory;
+}
+
+/**
+ * Body for `POST /submissions/{submissionId}/reclassify`. A
+reviewer overwrites the submission's classification atom — the
+prior atom is preserved on the atom's history chain, the live
+row is replaced. `confidence` defaults to `1.0` server-side
+(a reviewer-provided classification is, by construction,
+certain). `note` is an optional free-text comment recorded
+on the classification atom-event for audit purposes.
+
+ */
+export interface ReclassifySubmissionBody {
+  /** @minLength 1 */
+  projectType: string;
+  disciplines: PlanReviewDiscipline[];
+  applicableCodeBooks: string[];
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  confidence?: number;
+  note?: string;
 }
 
 /**
@@ -1432,6 +1691,23 @@ Null → fall back to the default header. Trimmed empty
 strings are normalized to null on write.
  */
   architectPdfHeader: string | null;
+  /** PLR-v2 Track 1 — the `PlanReviewDiscipline` values this
+user is assigned to as a reviewer. Empty for non-reviewer
+users (architects, applicants, admins) and for reviewers
+who have not yet been assigned. Drives the Inbox default
+filter ("show only my disciplines") and the FindingsTab
+default-discipline picker.
+
+Admin-write-only: only callers with the `users:manage`
+permission claim can update this column via
+`PATCH /users/{id}` (or via a future admin surface). The
+user themselves cannot self-assign.
+
+**Optional in Pass A** (CT contract-first lock); BE's
+implementation PR flips this to required (defaulting to
+`[]` for legacy rows) once every row is backfilled.
+ */
+  disciplines?: PlanReviewDiscipline[];
   createdAt: string;
   updatedAt: string;
 }
@@ -1457,12 +1733,19 @@ it should be the auth subject id.
 `avatarUrl` accept `null` to clear them; `displayName` is
 non-nullable so passing `null` is a 400.
 
+`disciplines` (PLR-v2 Track 1) is admin-only — the route's
+existing `users:manage` permission gate covers this; non-admin
+callers cannot reach the endpoint regardless of which fields
+the body carries. Omit to leave unchanged; pass `[]` to clear
+all assignments.
+
  */
 export interface UpdateUserBody {
   /** @minLength 1 */
   displayName?: string;
   email?: string | null;
   avatarUrl?: string | null;
+  disciplines?: PlanReviewDiscipline[];
 }
 
 /**
@@ -2562,42 +2845,6 @@ export interface ListSubmissionCommentsResponse {
   comments: SubmissionComment[];
 }
 
-export type FindingActorKind =
-  (typeof FindingActorKind)[keyof typeof FindingActorKind];
-
-export const FindingActorKind = {
-  user: "user",
-  agent: "agent",
-  system: "system",
-} as const;
-
-/**
- * Stable actor envelope shared by reviewer-side audit surfaces
-(reviewer-requests, findings, eventually reviewer-annotations).
-
-`kind` distinguishes session-bound human actors (`user`) from
-AI/bot writes (`agent`) and infrastructure-stamped events
-(`system`). `id` is opaque to the framework — application code
-chooses its identity scheme (today: the upstream identity
-layer's stable user id). `displayName` is hydrated at write
-time so consumer surfaces (e.g. the architect's
-ReviewerRequestsStrip) can render "Requested by Alex" without
-a per-row roundtrip.
-
-Promoted to a shared schema in V1-2 — was previously only a
-TS interface in `artifacts/plan-review/src/lib/findingsMock.ts`.
-Both V1-1 (findings) and V1-2 (reviewer-requests) consume this
-envelope; future consumers (e.g. promoted reviewer-annotations
-when they pick up architect-visible attribution) should import
-from here rather than re-deriving the shape.
-
- */
-export interface FindingActor {
-  kind: FindingActorKind;
-  id: string;
-  displayName?: string | null;
-}
-
 /**
  * One row in `submission_communications` — an AI-drafted
 comment letter the reviewer sent for a submission (PLR-5).
@@ -2887,6 +3134,58 @@ time, not at row insert.
 Null on AI-produced and never-overridden rows.
  */
   revisionOf: string | null;
+  /** PLR-v2 Track 1 — true iff this row was produced by the AI
+compliance-checker engine. False for reviewer-authored
+(manual-add) rows AND for reviewer override revisions
+(rows whose `revisionOf` points at an AI ancestor).
+
+Distinct from inferring "AI-ness" off `aiGeneratedAt`,
+which is set on every row (including reviewer-authored
+ones — for those it carries the row's createdAt) so the
+wire shape stays narrow. Read `aiGenerated` to decide
+whether to render the AI-badge; read `aiGeneratedAt`
+only for "when did this row land" formatting.
+
+**Optional in Pass A** (CT contract-first lock); BE's
+implementation PR flips this to required once every row
+is backfilled.
+ */
+  aiGenerated?: boolean;
+  /** PLR-v2 Track 1 — when an AI-generated finding was accepted
+by a reviewer, this carries the reviewer's user id; null
+otherwise. Drives the AI-badge persistence flow ("AI
+generated · reviewer confirmed (Name, date)") so the badge
+does not vanish on accept.
+
+Read together with `acceptedAt` and `acceptedBy` — the
+three fields move as a tuple.
+
+**Optional in Pass A**; BE's implementation PR flips this
+to required.
+ */
+  acceptedByReviewerId?: string | null;
+  /** PLR-v2 Track 1 — ISO timestamp of when the AI finding was
+accepted by a reviewer; null otherwise. Paired with
+`acceptedByReviewerId` and `acceptedBy`.
+
+**Optional in Pass A**; BE's implementation PR flips this
+to required.
+ */
+  acceptedAt?: string | null;
+  /** PLR-v2 Track 1 — actor envelope for the reviewer who
+accepted an AI-generated finding. Reuses the existing
+`FindingActor` shape so the FE can render
+`acceptedBy.displayName` on the badge without a per-row
+user-profile fetch.
+
+Null when `acceptedAt` is null. Otherwise carries the
+same actor data as `reviewerStatusBy` (the existing
+status-change attribution).
+
+**Optional in Pass A**; BE's implementation PR flips this
+to required.
+ */
+  acceptedBy?: FindingActor | null;
 }
 
 /**
@@ -4858,6 +5157,14 @@ export const GetRenderOutputFileDownload = {
 
 export type ListCannedFindingsParams = {
   discipline?: CannedFindingDiscipline;
+  /**
+ * Comma-separated list of `PlanReviewDiscipline` values
+(e.g. `building,fire-life-safety`). The server translates
+each value to the matching `CannedFindingDiscipline`(s)
+and unions the results. Unknown values cause a 400.
+
+ */
+  reviewerDisciplines?: string;
   includeArchived?: boolean;
 };
 

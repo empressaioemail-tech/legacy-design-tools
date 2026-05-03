@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { PlanReviewDiscipline } from "./planReviewDiscipline";
 
 /**
  * A row in the `users` profile table — display name / email / avatar
@@ -33,6 +34,23 @@ Null → fall back to the default header. Trimmed empty
 strings are normalized to null on write.
  */
   architectPdfHeader: string | null;
+  /** PLR-v2 Track 1 — the `PlanReviewDiscipline` values this
+user is assigned to as a reviewer. Empty for non-reviewer
+users (architects, applicants, admins) and for reviewers
+who have not yet been assigned. Drives the Inbox default
+filter ("show only my disciplines") and the FindingsTab
+default-discipline picker.
+
+Admin-write-only: only callers with the `users:manage`
+permission claim can update this column via
+`PATCH /users/{id}` (or via a future admin surface). The
+user themselves cannot self-assign.
+
+**Optional in Pass A** (CT contract-first lock); BE's
+implementation PR flips this to required (defaulting to
+`[]` for legacy rows) once every row is backfilled.
+ */
+  disciplines?: PlanReviewDiscipline[];
   createdAt: Date;
   updatedAt: Date;
 }

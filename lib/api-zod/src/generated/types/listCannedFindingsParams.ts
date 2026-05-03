@@ -9,5 +9,13 @@ import type { CannedFindingDiscipline } from "./cannedFindingDiscipline";
 
 export type ListCannedFindingsParams = {
   discipline?: CannedFindingDiscipline;
+  /**
+ * Comma-separated list of `PlanReviewDiscipline` values
+(e.g. `building,fire-life-safety`). The server translates
+each value to the matching `CannedFindingDiscipline`(s)
+and unions the results. Unknown values cause a 400.
+
+ */
+  reviewerDisciplines?: string;
   includeArchived?: boolean;
 };

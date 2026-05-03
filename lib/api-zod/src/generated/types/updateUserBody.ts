@@ -5,11 +5,18 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { PlanReviewDiscipline } from "./planReviewDiscipline";
 
 /**
  * Partial update. Omit a field to leave it unchanged. `email` and
 `avatarUrl` accept `null` to clear them; `displayName` is
 non-nullable so passing `null` is a 400.
+
+`disciplines` (PLR-v2 Track 1) is admin-only — the route's
+existing `users:manage` permission gate covers this; non-admin
+callers cannot reach the endpoint regardless of which fields
+the body carries. Omit to leave unchanged; pass `[]` to clear
+all assignments.
 
  */
 export interface UpdateUserBody {
@@ -17,4 +24,5 @@ export interface UpdateUserBody {
   displayName?: string;
   email?: string | null;
   avatarUrl?: string | null;
+  disciplines?: PlanReviewDiscipline[];
 }

@@ -121,6 +121,7 @@ import type {
   QaTriageBundleResponse,
   QaTriageItem,
   QaTriageListResponse,
+  ReclassifySubmissionBody,
   RecordBimModelDivergenceBody,
   RecordDecisionBody,
   RenderDetailResponse,
@@ -145,6 +146,7 @@ import type {
   StartAllQaRunsResponse,
   StartQaAutopilotRunBody,
   StartQaRunBody,
+  SubmissionClassification,
   SubmissionCommentResponse,
   SubmissionCommunicationResponse,
   SubmissionFindingsGenerationRunsResponse,
@@ -7461,6 +7463,117 @@ export const useDraftSubmissionCommunication = <
 };
 
 /**
+ * PLR-v2 Track 1 — reviewer-only endpoint that replaces the
+submission's current classification atom (project type,
+plan-review disciplines, applicable code books) with a
+reviewer-supplied set. The prior atom is preserved on the
+atom's history chain so audit history is intact; the live
+row reflects the latest call.
+
+Returns the new `SubmissionClassification` row with
+`source: 'reviewer'` and `classifiedBy` populated from the
+caller's session. Calling the route a second time appends a
+fresh classification-event and updates the live atom — there
+is no conflict / version check today.
+
+Reviewer-only: requires `audience: "internal"` (architects /
+applicants get a 403). The route does NOT require any
+per-discipline match between caller and target — any reviewer
+can reclassify any submission, by design (a fire-life-safety
+reviewer who spots a misclassified electrical scope can fix
+it without re-routing).
+
+ * @summary Reviewer overwrites a submission's classification atom
+ */
+export const getReclassifySubmissionUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/reclassify`;
+};
+
+export const reclassifySubmission = async (
+  submissionId: string,
+  reclassifySubmissionBody: ReclassifySubmissionBody,
+  options?: RequestInit,
+): Promise<SubmissionClassification> => {
+  return customFetch<SubmissionClassification>(
+    getReclassifySubmissionUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(reclassifySubmissionBody),
+    },
+  );
+};
+
+export const getReclassifySubmissionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reclassifySubmission>>,
+    TError,
+    { submissionId: string; data: BodyType<ReclassifySubmissionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof reclassifySubmission>>,
+  TError,
+  { submissionId: string; data: BodyType<ReclassifySubmissionBody> },
+  TContext
+> => {
+  const mutationKey = ["reclassifySubmission"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof reclassifySubmission>>,
+    { submissionId: string; data: BodyType<ReclassifySubmissionBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return reclassifySubmission(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReclassifySubmissionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof reclassifySubmission>>
+>;
+export type ReclassifySubmissionMutationBody =
+  BodyType<ReclassifySubmissionBody>;
+export type ReclassifySubmissionMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Reviewer overwrites a submission's classification atom
+ */
+export const useReclassifySubmission = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reclassifySubmission>>,
+    TError,
+    { submissionId: string; data: BodyType<ReclassifySubmissionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof reclassifySubmission>>,
+  TError,
+  { submissionId: string; data: BodyType<ReclassifySubmissionBody> },
+  TContext
+> => {
+  return useMutation(getReclassifySubmissionMutationOptions(options));
+};
+
+/**
  * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
 finding the AI engine missed without re-running generation.
 Persists with `status="ai-produced"` (so accept/reject/override
@@ -10103,7 +10216,18 @@ any audience (read-only) so reviewers can populate the
 library picker; admin gating only applies to writes. By
 default archived entries are excluded; pass
 `includeArchived=true` to include them. Optional `discipline`
-narrows to one discipline.
+narrows to one discipline (in `CannedFindingDiscipline`'s
+4-value enum).
+
+Optional `reviewerDisciplines` is a CSV of
+`PlanReviewDiscipline` values (Track 1) that the server
+translates onto the `CannedFindingDiscipline` enum via a
+fixed map (e.g. `fire-life-safety → fire`,
+`electrical|mechanical|plumbing → building` for now) and
+unions into the result. When both `discipline` and
+`reviewerDisciplines` are present the result is the union of
+the two filters. Absence of both falls back to the legacy
+unfiltered list.
 
  * @summary List canned findings for a tenant
  */

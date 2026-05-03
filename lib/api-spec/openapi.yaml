@@ -3358,6 +3358,69 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /submissions/{submissionId}/reclassify:
+    post:
+      operationId: reclassifySubmission
+      tags: [submissions]
+      summary: Reviewer overwrites a submission's classification atom
+      description: |
+        PLR-v2 Track 1 — reviewer-only endpoint that replaces the
+        submission's current classification atom (project type,
+        plan-review disciplines, applicable code books) with a
+        reviewer-supplied set. The prior atom is preserved on the
+        atom's history chain so audit history is intact; the live
+        row reflects the latest call.
+
+        Returns the new `SubmissionClassification` row with
+        `source: 'reviewer'` and `classifiedBy` populated from the
+        caller's session. Calling the route a second time appends a
+        fresh classification-event and updates the live atom — there
+        is no conflict / version check today.
+
+        Reviewer-only: requires `audience: "internal"` (architects /
+        applicants get a 403). The route does NOT require any
+        per-discipline match between caller and target — any reviewer
+        can reclassify any submission, by design (a fire-life-safety
+        reviewer who spots a misclassified electrical scope can fix
+        it without re-routing).
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReclassifySubmissionBody"
+      responses:
+        "200":
+          description: The newly written classification atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionClassification"
+        "400":
+          description: Invalid request body (e.g. unknown discipline value).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not on the internal (reviewer) audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /submissions/{submissionId}/findings:
     post:
       operationId: createSubmissionFinding
@@ -4760,7 +4823,18 @@ paths:
         library picker; admin gating only applies to writes. By
         default archived entries are excluded; pass
         `includeArchived=true` to include them. Optional `discipline`
-        narrows to one discipline.
+        narrows to one discipline (in `CannedFindingDiscipline`'s
+        4-value enum).
+
+        Optional `reviewerDisciplines` is a CSV of
+        `PlanReviewDiscipline` values (Track 1) that the server
+        translates onto the `CannedFindingDiscipline` enum via a
+        fixed map (e.g. `fire-life-safety → fire`,
+        `electrical|mechanical|plumbing → building` for now) and
+        unions into the result. When both `discipline` and
+        `reviewerDisciplines` are present the result is the union of
+        the two filters. Absence of both falls back to the legacy
+        unfiltered list.
       parameters:
         - name: tenantId
           in: path
@@ -4771,6 +4845,16 @@ paths:
           required: false
           schema:
             $ref: "#/components/schemas/CannedFindingDiscipline"
+        - name: reviewerDisciplines
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Comma-separated list of `PlanReviewDiscipline` values
+            (e.g. `building,fire-life-safety`). The server translates
+            each value to the matching `CannedFindingDiscipline`(s)
+            and unions the results. Unknown values cause a 400.
         - name: includeArchived
           in: query
           required: false
@@ -5840,6 +5924,42 @@ components:
         reviewerComment:
           type: string
           nullable: true
+        classification:
+          oneOf:
+            - $ref: "#/components/schemas/SubmissionClassification"
+          nullable: true
+          description: |
+            PLR-v2 Track 1 — submission's current classification atom
+            (project type, plan-review disciplines, applicable code
+            books). Null when the AI auto-classifier has not yet run
+            or when the submission predates the feature.
+
+            **Optional in Pass A** (CT contract-first lock); BE's
+            implementation PR flips this to required once every row
+            is backfilled.
+        severityRollup:
+          oneOf:
+            - $ref: "#/components/schemas/ReviewerSeverityRollup"
+          description: |
+            PLR-v2 Track 1 — counts of findings on this submission
+            bucketed by severity (blockers / concerns / advisory) +
+            total. Drives the triage strip's severity rollup chip on
+            the Inbox.
+
+            **Optional in Pass A** (CT contract-first lock); BE's
+            implementation PR flips this to required once every row
+            is backfilled.
+        applicantHistory:
+          oneOf:
+            - $ref: "#/components/schemas/ApplicantHistory"
+          description: |
+            PLR-v2 Track 1 — prior-submission roll-up for this
+            submission's applicant firm. Drives the triage strip's
+            applicant-history pill + hovercard.
+
+            **Optional in Pass A** (CT contract-first lock); BE's
+            implementation PR flips this to required once every row
+            is backfilled.
       required:
         - submissionId
         - engagementId
@@ -5851,6 +5971,216 @@ components:
         - status
         - note
         - reviewerComment
+
+    SubmissionClassification:
+      type: object
+      description: |
+        PLR-v2 Track 1 — current classification atom for a submission.
+        Produced by the AI auto-classifier on submission arrival
+        (`source: 'auto'`) and overwritten by reviewers via
+        `POST /submissions/{submissionId}/reclassify`
+        (`source: 'reviewer'`). The reviewer's reclassify call replaces
+        the prior atom outright; the prior values are preserved on the
+        atom's history chain rather than the live row.
+
+        `disciplines` is the set of `PlanReviewDiscipline` values that
+        scope which reviewers see the submission in their default
+        Inbox feed and which discipline tab the FindingsTab opens to.
+
+        `applicableCodeBooks` is a free-form list of code-book labels
+        (e.g. `"IBC 2021"`, `"NEC 2020"`) — not the atom-id of a
+        code-book; this is purely a display string for the triage
+        strip's classification chip group.
+
+        `confidence` is the auto-classifier's self-reported confidence
+        on a 0..1 scale. Reviewer-overridden classifications carry the
+        reviewer-provided value (or `1.0` if omitted on the
+        reclassify body).
+
+        `classifiedBy` is null for `source: 'auto'` rows and carries
+        the reviewer actor (reusing the `FindingActor` envelope) for
+        `source: 'reviewer'` rows.
+      properties:
+        submissionId:
+          type: string
+          format: uuid
+        projectType:
+          type: string
+        disciplines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanReviewDiscipline"
+        applicableCodeBooks:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        source:
+          type: string
+          enum: [auto, reviewer]
+        classifiedAt:
+          type: string
+          format: date-time
+        classifiedBy:
+          oneOf:
+            - $ref: "#/components/schemas/FindingActor"
+          nullable: true
+      required:
+        - submissionId
+        - projectType
+        - disciplines
+        - applicableCodeBooks
+        - confidence
+        - source
+        - classifiedAt
+        - classifiedBy
+
+    ReviewerSeverityRollup:
+      type: object
+      description: |
+        PLR-v2 Track 1 — finding-severity counts for a submission,
+        bucketed by `FindingSeverity` and totalled. Drives the triage
+        strip's severity-rollup chip on the Inbox.
+
+        Counts include rows in every reviewer-status state — the
+        rollup represents the finding population on the submission,
+        not just the open ones. `total` is the sum of `blockers +
+        concerns + advisory` and is denormalized for FE convenience.
+      properties:
+        blockers:
+          type: integer
+        concerns:
+          type: integer
+        advisory:
+          type: integer
+        total:
+          type: integer
+      required:
+        - blockers
+        - concerns
+        - advisory
+        - total
+
+    ApplicantHistoryPriorSubmission:
+      type: object
+      description: |
+        PLR-v2 Track 1 — one prior submission for the applicant firm,
+        carried inside `ApplicantHistory.priorSubmissions` so the
+        Inbox triage hovercard can render per-row entries without a
+        follow-up GET.
+
+        `verdict` mirrors the parent submission's terminal state:
+          - `approved` — the submission was approved.
+          - `returned` — the submission was returned for revision or
+            rejected (both bucket here for the applicant-history
+            roll-up).
+          - `pending` — the submission is still open
+            (`pending`/`corrections_requested`).
+
+        `returnReason` is only populated when `verdict === 'returned'`
+        — it carries a short reason label (e.g. the reviewer comment's
+        first line) the hovercard can render without expanding the
+        full row. Omitted otherwise.
+      properties:
+        submissionId:
+          type: string
+        engagementName:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+        verdict:
+          type: string
+          enum: [approved, returned, pending]
+        returnReason:
+          type: string
+      required:
+        - submissionId
+        - engagementName
+        - submittedAt
+        - verdict
+
+    ApplicantHistory:
+      type: object
+      description: |
+        PLR-v2 Track 1 — prior-submission roll-up for an applicant
+        firm, denormalized onto each ReviewerQueueItem so the Inbox
+        triage strip can render the applicant-history pill +
+        hovercard without a follow-up `GET /applicants/:firm/history`
+        per row.
+
+        `totalPrior` counts every prior submission for the firm
+        regardless of verdict; `approved`/`returned` partition the
+        terminal subset (open ones don't roll into either). The sum
+        of `approved + returned` may be less than `totalPrior` when
+        prior submissions are still open — that's expected.
+
+        `lastReturnReason` carries the most recent `returned` row's
+        reason (or null if the firm has no returned submissions yet).
+
+        `priorSubmissions` is capped at the 5 most recent (ordered
+        `submittedAt` DESC) so the hovercard can render per-row
+        entries without unbounded payload growth. Auditors with a
+        legitimate need for the full list can hit a (future)
+        applicant-history endpoint directly.
+      properties:
+        totalPrior:
+          type: integer
+        approved:
+          type: integer
+        returned:
+          type: integer
+        lastReturnReason:
+          type: string
+          nullable: true
+        priorSubmissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApplicantHistoryPriorSubmission"
+      required:
+        - totalPrior
+        - approved
+        - returned
+        - lastReturnReason
+        - priorSubmissions
+
+    ReclassifySubmissionBody:
+      type: object
+      description: |
+        Body for `POST /submissions/{submissionId}/reclassify`. A
+        reviewer overwrites the submission's classification atom — the
+        prior atom is preserved on the atom's history chain, the live
+        row is replaced. `confidence` defaults to `1.0` server-side
+        (a reviewer-provided classification is, by construction,
+        certain). `note` is an optional free-text comment recorded
+        on the classification atom-event for audit purposes.
+      properties:
+        projectType:
+          type: string
+          minLength: 1
+        disciplines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanReviewDiscipline"
+        applicableCodeBooks:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        note:
+          type: string
+      required:
+        - projectType
+        - disciplines
+        - applicableCodeBooks
 
     ReviewerQueueCounts:
       type: object
@@ -7304,6 +7634,26 @@ components:
             Per-architect override for the briefing-export PDF header.
             Null → fall back to the default header. Trimmed empty
             strings are normalized to null on write.
+        disciplines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanReviewDiscipline"
+          description: |
+            PLR-v2 Track 1 — the `PlanReviewDiscipline` values this
+            user is assigned to as a reviewer. Empty for non-reviewer
+            users (architects, applicants, admins) and for reviewers
+            who have not yet been assigned. Drives the Inbox default
+            filter ("show only my disciplines") and the FindingsTab
+            default-discipline picker.
+
+            Admin-write-only: only callers with the `users:manage`
+            permission claim can update this column via
+            `PATCH /users/{id}` (or via a future admin surface). The
+            user themselves cannot self-assign.
+
+            **Optional in Pass A** (CT contract-first lock); BE's
+            implementation PR flips this to required (defaulting to
+            `[]` for legacy rows) once every row is backfilled.
         createdAt:
           type: string
           format: date-time
@@ -7349,6 +7699,12 @@ components:
         Partial update. Omit a field to leave it unchanged. `email` and
         `avatarUrl` accept `null` to clear them; `displayName` is
         non-nullable so passing `null` is a 400.
+
+        `disciplines` (PLR-v2 Track 1) is admin-only — the route's
+        existing `users:manage` permission gate covers this; non-admin
+        callers cannot reach the endpoint regardless of which fields
+        the body carries. Omit to leave unchanged; pass `[]` to clear
+        all assignments.
       properties:
         displayName:
           type: string
@@ -7359,6 +7715,10 @@ components:
         avatarUrl:
           type: string
           nullable: true
+        disciplines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanReviewDiscipline"
 
     UpdateMyArchitectPdfHeaderBody:
       type: object
@@ -9287,6 +9647,67 @@ components:
           description: |
             On override revisions, the original AI finding's atom id.
             Null on AI-produced and never-overridden rows.
+        aiGenerated:
+          type: boolean
+          description: |
+            PLR-v2 Track 1 — true iff this row was produced by the AI
+            compliance-checker engine. False for reviewer-authored
+            (manual-add) rows AND for reviewer override revisions
+            (rows whose `revisionOf` points at an AI ancestor).
+
+            Distinct from inferring "AI-ness" off `aiGeneratedAt`,
+            which is set on every row (including reviewer-authored
+            ones — for those it carries the row's createdAt) so the
+            wire shape stays narrow. Read `aiGenerated` to decide
+            whether to render the AI-badge; read `aiGeneratedAt`
+            only for "when did this row land" formatting.
+
+            **Optional in Pass A** (CT contract-first lock); BE's
+            implementation PR flips this to required once every row
+            is backfilled.
+        acceptedByReviewerId:
+          type: string
+          nullable: true
+          description: |
+            PLR-v2 Track 1 — when an AI-generated finding was accepted
+            by a reviewer, this carries the reviewer's user id; null
+            otherwise. Drives the AI-badge persistence flow ("AI
+            generated · reviewer confirmed (Name, date)") so the badge
+            does not vanish on accept.
+
+            Read together with `acceptedAt` and `acceptedBy` — the
+            three fields move as a tuple.
+
+            **Optional in Pass A**; BE's implementation PR flips this
+            to required.
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            PLR-v2 Track 1 — ISO timestamp of when the AI finding was
+            accepted by a reviewer; null otherwise. Paired with
+            `acceptedByReviewerId` and `acceptedBy`.
+
+            **Optional in Pass A**; BE's implementation PR flips this
+            to required.
+        acceptedBy:
+          oneOf:
+            - $ref: "#/components/schemas/FindingActor"
+          nullable: true
+          description: |
+            PLR-v2 Track 1 — actor envelope for the reviewer who
+            accepted an AI-generated finding. Reuses the existing
+            `FindingActor` shape so the FE can render
+            `acceptedBy.displayName` on the badge without a per-row
+            user-profile fetch.
+
+            Null when `acceptedAt` is null. Otherwise carries the
+            same actor data as `reviewerStatusBy` (the existing
+            status-change attribution).
+
+            **Optional in Pass A**; BE's implementation PR flips this
+            to required.
       required:
         - id
         - submissionId
@@ -10669,6 +11090,30 @@ components:
           presence.joined: "#/components/schemas/SubmissionPresenceLiveEvent"
           presence.left: "#/components/schemas/SubmissionPresenceLiveEvent"
 
+    PlanReviewDiscipline:
+      type: string
+      enum:
+        - building
+        - electrical
+        - mechanical
+        - plumbing
+        - residential
+        - fire-life-safety
+        - accessibility
+      description: |
+        PLR-v2 reviewer discipline scope (Track 1). Names the
+        discipline a reviewer can be assigned to and the discipline
+        a submission's classification atom can carry.
+
+        Distinct from `CannedFindingDiscipline` (4-value
+        building/fire/zoning/civil) — that enum scopes the curated
+        canned-findings library and predates this one. Both coexist:
+        canned-finding rows continue to use `CannedFindingDiscipline`,
+        and the canned-findings list endpoint translates from the
+        reviewer's `PlanReviewDiscipline[]` to the matching subset of
+        `CannedFindingDiscipline` server-side via a fixed map (e.g.
+        `fire-life-safety → fire`).
+
     CannedFindingDiscipline:
       type: string
       enum: [building, fire, zoning, civil]
@@ -10676,6 +11121,12 @@ components:
         PLR-10 discipline scope. A canned finding belongs to exactly
         one discipline; the FindingsTab picker filters on the
         reviewer's active discipline.
+
+        Distinct from `PlanReviewDiscipline` (the wider 7-value
+        enum the Track 1 reviewer-assignment surface uses). The
+        canned-findings list endpoint accepts `reviewerDisciplines`
+        (a CSV of `PlanReviewDiscipline` values) and translates them
+        server-side onto this 4-value enum.
 
     CannedFindingCodeCitation:
       type: object
