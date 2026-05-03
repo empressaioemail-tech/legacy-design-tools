@@ -484,12 +484,17 @@ describe("FindingsTab (AIR-2)", () => {
 
   it("manual-add disclosure renders the server's structured error code inline", async () => {
     __seedFindingsForTests("sub-err", []);
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({ error: "invalid_create_finding_body" }),
-        { status: 400, headers: { "content-type": "application/json" } },
-      ),
-    );
+    // Use mockImplementation to construct a fresh Response per call —
+    // Response bodies are streams readable only once. Mirrors the success-path mock at line 382.
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({ error: "invalid_create_finding_body" }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          ),
+      );
     try {
       render(<ControlledTab submissionId="sub-err" />, { wrapper });
       fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
