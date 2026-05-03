@@ -319,6 +319,12 @@ function JurisdictionPane({
   const pageEnd = Math.min(offset + items.length, total);
   const hasPrev = page > 0;
   const hasNext = offset + items.length < total;
+  // Unfiltered jurisdiction-wide total comes from the jurisdictions
+  // summary (cheap, already loaded). The "X of Y" header always
+  // anchors on this so reviewers can see how big the corpus is even
+  // while drilling in with a book pill or search query.
+  const jurisdictionTotal = jurisdiction.atomCount;
+  const isFiltered = bookFilter !== "all" || debouncedSearch.length > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -335,9 +341,13 @@ function JurisdictionPane({
           <span className="sc-meta" data-testid="atom-browser-count">
             {atomsLoading
               ? "Loading…"
-              : total === 0
-                ? "0 results"
-                : `${pageStart}–${pageEnd} of ${total}`}
+              : isFiltered
+                ? total === 0
+                  ? `0 of ${jurisdictionTotal} (0 matches)`
+                  : `${pageStart}–${pageEnd} of ${jurisdictionTotal} (${total} match${total === 1 ? "" : "es"})`
+                : total === 0
+                  ? `0 of ${jurisdictionTotal}`
+                  : `${pageStart}–${pageEnd} of ${jurisdictionTotal}`}
           </span>
         </div>
 
