@@ -34,6 +34,9 @@ import {
 import {
   isAutopilotEnabled,
   setSetting,
+  getAutopilotNotifyPublic,
+  assertSafeWebhookUrl,
+  WebhookValidationError,
 } from "../lib/qa/settings";
 
 const router: IRouter = Router();
@@ -388,20 +391,36 @@ function serializeAutopilotRun(
 }
 
 router.get("/qa/autopilot", async (_req: Request, res: Response) => {
-  const [enabled, latest] = await Promise.all([
+  const [enabled, latest, notify] = await Promise.all([
     isAutopilotEnabled(),
     getLatestAutopilotRun(),
+    getAutopilotNotifyPublic(),
   ]);
   res.json({
     enabled,
     activeRunId: getActiveAutopilotRunId(),
     latestRun: latest ? serializeAutopilotRun(latest) : null,
+    notify,
   });
 });
 
-const UpdateAutopilotSettingsBody = z.object({
-  enabled: z.boolean(),
+const NotifySettingsBody = z.object({
+  // `webhook` is write-only and optional. Omit to leave the current
+  // webhook untouched. Empty string explicitly disables notifications.
+  // The full URL is treated as a bearer secret and is never returned
+  // by the GET endpoint.
+  webhook: z.string().max(2048).optional(),
+  minSeverity: z.enum(["warning", "error"]),
 });
+
+const UpdateAutopilotSettingsBody = z
+  .object({
+    enabled: z.boolean().optional(),
+    notify: NotifySettingsBody.optional(),
+  })
+  .refine((v) => v.enabled !== undefined || v.notify !== undefined, {
+    message: "must include enabled or notify",
+  });
 
 router.patch("/qa/autopilot/settings", async (req: Request, res: Response) => {
   const parsed = UpdateAutopilotSettingsBody.safeParse(req.body);
@@ -411,8 +430,42 @@ router.patch("/qa/autopilot/settings", async (req: Request, res: Response) => {
       .json({ error: "invalid_body", issues: parsed.error.issues });
     return;
   }
-  await setSetting("autopilot.enabled", parsed.data.enabled ? "true" : "false");
-  res.json({ enabled: parsed.data.enabled });
+  if (parsed.data.enabled !== undefined) {
+    await setSetting(
+      "autopilot.enabled",
+      parsed.data.enabled ? "true" : "false",
+    );
+  }
+  if (parsed.data.notify) {
+    if (parsed.data.notify.webhook !== undefined) {
+      const trimmed = parsed.data.notify.webhook.trim();
+      if (trimmed.length > 0) {
+        try {
+          await assertSafeWebhookUrl(trimmed);
+        } catch (err) {
+          if (err instanceof WebhookValidationError) {
+            res.status(400).json({
+              error: "invalid_webhook_url",
+              reason: err.code,
+              message: err.message,
+            });
+            return;
+          }
+          throw err;
+        }
+      }
+      await setSetting("autopilot.notify.webhook", trimmed);
+    }
+    await setSetting(
+      "autopilot.notify.minSeverity",
+      parsed.data.notify.minSeverity,
+    );
+  }
+  const [enabled, notify] = await Promise.all([
+    isAutopilotEnabled(),
+    getAutopilotNotifyPublic(),
+  ]);
+  res.json({ enabled, notify });
 });
 
 const StartAutopilotBody = z.object({

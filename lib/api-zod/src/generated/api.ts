@@ -7035,17 +7035,59 @@ export const GetQaAutopilotStateResponse = zod.object({
       notes: zod.string(),
     })
     .nullable(),
+  notify: zod
+    .object({
+      enabled: zod.boolean(),
+      hint: zod
+        .string()
+        .nullable()
+        .describe(
+          "Masked preview of the configured webhook (e.g. https:\/\/hooks.slack.com\/…).",
+        ),
+      minSeverity: zod.enum(["warning", "error"]),
+    })
+    .describe(
+      "Read-only view of the notify settings. The full webhook URL is\ntreated as a bearer secret and is never returned by the API —\nonly an `enabled` flag and a host `hint`.\n",
+    ),
 });
 
 /**
  * @summary Toggle the autopilot ON/OFF
  */
+export const updateQaAutopilotSettingsBodyNotifyWebhookMax = 2048;
+
 export const UpdateQaAutopilotSettingsBody = zod.object({
-  enabled: zod.boolean(),
+  enabled: zod.boolean().optional(),
+  notify: zod
+    .object({
+      webhook: zod
+        .string()
+        .max(updateQaAutopilotSettingsBodyNotifyWebhookMax)
+        .optional(),
+      minSeverity: zod.enum(["warning", "error"]).optional(),
+    })
+    .optional()
+    .describe(
+      'Write-only payload for setting the notify webhook. The webhook\nURL must be https:\/\/ (http:\/\/ is rejected unless the server is\nexplicitly opted into insecure mode) and must not resolve to a\nloopback \/ private \/ link-local \/ reserved address. An empty\nstring disables notifications. Both fields are optional so the\nUI can update minSeverity without re-supplying the persisted\nwebhook (treated as \"leave unchanged\" by the server).\n',
+    ),
 });
 
 export const UpdateQaAutopilotSettingsResponse = zod.object({
   enabled: zod.boolean(),
+  notify: zod
+    .object({
+      enabled: zod.boolean(),
+      hint: zod
+        .string()
+        .nullable()
+        .describe(
+          "Masked preview of the configured webhook (e.g. https:\/\/hooks.slack.com\/…).",
+        ),
+      minSeverity: zod.enum(["warning", "error"]),
+    })
+    .describe(
+      "Read-only view of the notify settings. The full webhook URL is\ntreated as a bearer secret and is never returned by the API —\nonly an `enabled` flag and a host `hint`.\n",
+    ),
 });
 
 /**

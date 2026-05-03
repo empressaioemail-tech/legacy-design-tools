@@ -5,10 +5,12 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { QaAutopilotNotifyPublic } from "./qaAutopilotNotifyPublic";
 import type { QaAutopilotRunSummary } from "./qaAutopilotRunSummary";
 
 export interface QaAutopilotState {
   enabled: boolean;
   activeRunId: string | null;
   latestRun: QaAutopilotRunSummary | null;
+  notify: QaAutopilotNotifyPublic;
 }

@@ -1332,3 +1332,18 @@ ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
 
 
 
+
+
+--
+-- Task #482 — qa_settings kv. Task #484 adds the notify.* keys but the
+-- table shape is unchanged. Drizzle source: lib/db/src/schema/qaSettings.ts.
+--
+CREATE TABLE @@SCHEMA@@.qa_settings (
+    key text NOT NULL,
+    value text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY @@SCHEMA@@.qa_settings
+    ADD CONSTRAINT qa_settings_pkey PRIMARY KEY (key);
+

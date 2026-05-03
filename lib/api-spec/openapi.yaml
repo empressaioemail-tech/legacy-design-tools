@@ -10736,7 +10736,7 @@ components:
 
     QaAutopilotState:
       type: object
-      required: [enabled, activeRunId, latestRun]
+      required: [enabled, activeRunId, latestRun, notify]
       properties:
         enabled:
           type: boolean
@@ -10748,20 +10748,63 @@ components:
           allOf:
             - $ref: "#/components/schemas/QaAutopilotRunSummary"
           nullable: true
+        notify:
+          $ref: "#/components/schemas/QaAutopilotNotifyPublic"
+
+    QaAutopilotNotifyMinSeverity:
+      type: string
+      enum: [warning, error]
+
+    QaAutopilotNotifyPublic:
+      description: |
+        Read-only view of the notify settings. The full webhook URL is
+        treated as a bearer secret and is never returned by the API —
+        only an `enabled` flag and a host `hint`.
+      type: object
+      required: [enabled, hint, minSeverity]
+      properties:
+        enabled:
+          type: boolean
+        hint:
+          type: string
+          nullable: true
+          description: Masked preview of the configured webhook (e.g. https://hooks.slack.com/…).
+        minSeverity:
+          $ref: "#/components/schemas/QaAutopilotNotifyMinSeverity"
+
+    QaAutopilotNotifyWriteBody:
+      description: |
+        Write-only payload for setting the notify webhook. The webhook
+        URL must be https:// (http:// is rejected unless the server is
+        explicitly opted into insecure mode) and must not resolve to a
+        loopback / private / link-local / reserved address. An empty
+        string disables notifications. Both fields are optional so the
+        UI can update minSeverity without re-supplying the persisted
+        webhook (treated as "leave unchanged" by the server).
+      type: object
+      properties:
+        webhook:
+          type: string
+          maxLength: 2048
+        minSeverity:
+          $ref: "#/components/schemas/QaAutopilotNotifyMinSeverity"
 
     QaAutopilotSettings:
       type: object
-      required: [enabled]
+      required: [enabled, notify]
       properties:
         enabled:
           type: boolean
+        notify:
+          $ref: "#/components/schemas/QaAutopilotNotifyPublic"
 
     UpdateQaAutopilotSettingsBody:
       type: object
-      required: [enabled]
       properties:
         enabled:
           type: boolean
+        notify:
+          $ref: "#/components/schemas/QaAutopilotNotifyWriteBody"
 
     StartQaAutopilotRunBody:
       type: object

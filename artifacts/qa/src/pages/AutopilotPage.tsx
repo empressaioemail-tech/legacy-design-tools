@@ -1,17 +1,30 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useGetQaAutopilotState,
   useGetQaAutopilotRun,
   useListQaAutopilotRuns,
+  useUpdateQaAutopilotSettings,
   getGetQaAutopilotStateQueryKey,
   getGetQaAutopilotRunQueryKey,
   getListQaAutopilotRunsQueryKey,
+  QaAutopilotNotifyMinSeverity,
   type QaAutopilotFinding,
   type QaAutopilotFindingAutoFixStatus,
   type QaAutopilotFindingCategory,
   type QaAutopilotFixAction,
   type QaAutopilotRunSummary,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -74,6 +87,8 @@ export default function AutopilotPage() {
           </p>
         </div>
       </div>
+
+      <NotificationsCard />
 
       <div className="grid gap-4 lg:grid-cols-[2fr_3fr]">
         <Card>
@@ -484,5 +499,150 @@ function SuggestedDiff({
         {diff}
       </pre>
     </div>
+  );
+}
+
+function NotificationsCard() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const stateQuery = useGetQaAutopilotState({
+    query: { queryKey: getGetQaAutopilotStateQueryKey() },
+  });
+  const mutation = useUpdateQaAutopilotSettings({
+    mutation: {
+      onSuccess: () => {
+        toast({ title: "Notification settings saved" });
+        void qc.invalidateQueries({
+          queryKey: getGetQaAutopilotStateQueryKey(),
+        });
+      },
+      onError: (err) =>
+        toast({
+          title: "Could not save settings",
+          description: err instanceof Error ? err.message : String(err),
+          variant: "destructive",
+        }),
+    },
+  });
+
+  const persisted = stateQuery.data?.notify;
+  // The webhook URL is write-only on the server (it's a bearer
+  // secret), so we cannot pre-fill the input. The current value is
+  // surfaced as a hint underneath instead. Any save submits the
+  // current minSeverity plus whatever URL the operator typed (empty
+  // disables).
+  const [webhook, setWebhook] = useState("");
+  const [minSeverity, setMinSeverity] =
+    useState<QaAutopilotNotifyMinSeverity>(
+      QaAutopilotNotifyMinSeverity.error,
+    );
+
+  useEffect(() => {
+    if (!persisted) return;
+    setMinSeverity(persisted.minSeverity);
+  }, [persisted]);
+
+  const dirty =
+    persisted &&
+    (webhook.trim().length > 0 || minSeverity !== persisted.minSeverity);
+
+  return (
+    <Card data-testid="autopilot-notify-card">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Notifications</CardTitle>
+        <CardDescription className="text-xs">
+          POST a JSON summary to a webhook (Slack, Teams, Zapier, …) when a
+          sweep finishes with failing or needs-review findings. Leave the URL
+          empty to disable.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto] sm:items-end">
+          <div className="space-y-1">
+            <Label htmlFor="autopilot-notify-webhook" className="text-xs">
+              Webhook URL{" "}
+              <span className="text-muted-foreground">(write-only)</span>
+            </Label>
+            <Input
+              id="autopilot-notify-webhook"
+              data-testid="autopilot-notify-webhook"
+              type="password"
+              autoComplete="off"
+              placeholder={
+                persisted?.enabled
+                  ? "Leave blank to keep current"
+                  : "https://hooks.slack.com/services/…"
+              }
+              value={webhook}
+              onChange={(e) => setWebhook(e.target.value)}
+            />
+            <div
+              className="text-[11px] text-muted-foreground"
+              data-testid="autopilot-notify-hint"
+            >
+              {persisted?.enabled
+                ? `Currently sending to ${persisted.hint ?? "(unknown)"}`
+                : "Notifications are disabled."}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Min severity</Label>
+            <Select
+              value={minSeverity}
+              onValueChange={(v) =>
+                setMinSeverity(v as QaAutopilotNotifyMinSeverity)
+              }
+            >
+              <SelectTrigger data-testid="autopilot-notify-min-severity">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={QaAutopilotNotifyMinSeverity.warning}>
+                  Warning (any red findings)
+                </SelectItem>
+                <SelectItem value={QaAutopilotNotifyMinSeverity.error}>
+                  Error (failing suite required)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Button
+              data-testid="autopilot-notify-save"
+              disabled={!dirty || mutation.isPending}
+              onClick={() => {
+                const trimmed = webhook.trim();
+                mutation.mutate({
+                  data: {
+                    notify:
+                      trimmed.length > 0
+                        ? { webhook: trimmed, minSeverity }
+                        : { minSeverity },
+                  },
+                });
+                setWebhook("");
+              }}
+            >
+              {mutation.isPending ? "Saving…" : "Save"}
+            </Button>
+            {persisted?.enabled ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="autopilot-notify-disable"
+                disabled={mutation.isPending}
+                onClick={() =>
+                  mutation.mutate({
+                    data: { notify: { webhook: "", minSeverity } },
+                  })
+                }
+              >
+                Disable
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

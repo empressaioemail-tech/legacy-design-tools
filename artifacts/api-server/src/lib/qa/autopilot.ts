@@ -50,6 +50,7 @@ import { runSuiteToCompletion, type RunOutcome } from "./runner";
 import { classifyRunLog, type ClassifiedFinding } from "./classifier";
 import { pickFixers, gitRevertPaths } from "./fixers";
 import { suggestDiffForFinding } from "./diffSuggester";
+import { getAutopilotNotifySettings } from "./settings";
 
 let activeAutopilotRunId: string | null = null;
 
@@ -216,11 +217,12 @@ async function executeAutopilotRun(
       await populateSuggestedDiffs(persistedFindings, suiteResult.findings);
     }
 
+    const finishedAt = new Date();
     await db
       .update(autopilotRuns)
       .set({
         status: "completed",
-        finishedAt: new Date(),
+        finishedAt,
         passing,
         failing,
         flaky: flakyCount,
@@ -229,6 +231,28 @@ async function executeAutopilotRun(
         notes: notes.join("\n"),
       })
       .where(eq(autopilotRuns.id, autopilotRunId));
+
+    // Best-effort notification — never let a webhook failure mask a
+    // successful run. Only fires when the sweep finished red and the
+    // configured min severity threshold is met.
+    try {
+      await maybeNotifyRedSweep({
+        autopilotRunId,
+        startedAt: (await getRunStartedAt(autopilotRunId)) ?? finishedAt,
+        finishedAt,
+        passing,
+        failing,
+        flaky: flakyCount,
+        autoFixesApplied,
+        needsReview,
+        totalSuites: suites.length,
+      });
+    } catch (err) {
+      logger.warn(
+        { err, autopilotRunId },
+        "autopilot: notify webhook threw",
+      );
+    }
   } catch (err) {
     logger.error({ err, autopilotRunId }, "autopilot: orchestration error");
     await db
@@ -450,6 +474,108 @@ function fixerCoversFinding(fixerId: string, f: AutopilotFinding): boolean {
     default:
       return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (Task #484) — fire a webhook when a sweep finishes red.
+// ---------------------------------------------------------------------------
+
+interface NotifyContext {
+  autopilotRunId: string;
+  startedAt: Date;
+  finishedAt: Date;
+  passing: number;
+  failing: number;
+  flaky: number;
+  autoFixesApplied: number;
+  needsReview: number;
+  totalSuites: number;
+}
+
+async function getRunStartedAt(autopilotRunId: string): Promise<Date | null> {
+  const [row] = await db
+    .select({ startedAt: autopilotRuns.startedAt })
+    .from(autopilotRuns)
+    .where(eq(autopilotRuns.id, autopilotRunId))
+    .limit(1);
+  return row?.startedAt ?? null;
+}
+
+async function maybeNotifyRedSweep(ctx: NotifyContext): Promise<void> {
+  // Only notify when the sweep actually has red findings the team
+  // needs to look at. flaky-only runs are noisy and skipped.
+  if (ctx.failing === 0 && ctx.needsReview === 0) return;
+
+  const settings = await getAutopilotNotifySettings();
+  if (!settings.webhook) return;
+
+  // minSeverity gating: today every persisted finding for a non-flaky
+  // failing suite carries severity 'error', so 'warning' = always
+  // notify when there are red findings, 'error' = same here. We still
+  // check the failing-suite count so 'error' threshold won't fire on a
+  // run with zero failing suites (e.g. only flaky retries surfaced).
+  if (settings.minSeverity === "error" && ctx.failing === 0) return;
+
+  const deepLink = buildDashboardDeepLink(ctx.autopilotRunId);
+  const summary =
+    `Autopilot sweep finished with ${ctx.failing} failing suite` +
+    (ctx.failing === 1 ? "" : "s") +
+    `, ${ctx.needsReview} finding` +
+    (ctx.needsReview === 1 ? "" : "s") +
+    " awaiting review.";
+
+  const payload = {
+    source: "qa-autopilot",
+    runId: ctx.autopilotRunId,
+    startedAt: ctx.startedAt.toISOString(),
+    finishedAt: ctx.finishedAt.toISOString(),
+    durationMs: ctx.finishedAt.getTime() - ctx.startedAt.getTime(),
+    counts: {
+      totalSuites: ctx.totalSuites,
+      passing: ctx.passing,
+      failing: ctx.failing,
+      flaky: ctx.flaky,
+      autoFixesApplied: ctx.autoFixesApplied,
+      needsReview: ctx.needsReview,
+    },
+    summary,
+    deepLink,
+    // Slack-friendly fallback so the message is readable even if the
+    // receiving webhook only renders `text`.
+    text: `:rotating_light: ${summary}${deepLink ? `\n${deepLink}` : ""}`,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const resp = await fetch(settings.webhook, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      logger.warn(
+        { autopilotRunId: ctx.autopilotRunId, status: resp.status },
+        "autopilot: notify webhook returned non-2xx",
+      );
+    } else {
+      logger.info(
+        { autopilotRunId: ctx.autopilotRunId },
+        "autopilot: notification posted",
+      );
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function buildDashboardDeepLink(autopilotRunId: string): string | null {
+  const domains = process.env["REPLIT_DOMAINS"];
+  if (!domains) return null;
+  const host = domains.split(",")[0]?.trim();
+  if (!host) return null;
+  return `https://${host}/qa/autopilot?run=${encodeURIComponent(autopilotRunId)}`;
 }
 
 // ---------------------------------------------------------------------------

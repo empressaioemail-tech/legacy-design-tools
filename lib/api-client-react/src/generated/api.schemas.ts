@@ -4222,18 +4222,58 @@ export interface QaAutopilotRunDetail {
   fixActions: QaAutopilotFixAction[];
 }
 
+export type QaAutopilotNotifyMinSeverity =
+  (typeof QaAutopilotNotifyMinSeverity)[keyof typeof QaAutopilotNotifyMinSeverity];
+
+export const QaAutopilotNotifyMinSeverity = {
+  warning: "warning",
+  error: "error",
+} as const;
+
+/**
+ * Read-only view of the notify settings. The full webhook URL is
+treated as a bearer secret and is never returned by the API —
+only an `enabled` flag and a host `hint`.
+
+ */
+export interface QaAutopilotNotifyPublic {
+  enabled: boolean;
+  /** Masked preview of the configured webhook (e.g. https://hooks.slack.com/…). */
+  hint: string | null;
+  minSeverity: QaAutopilotNotifyMinSeverity;
+}
+
 export interface QaAutopilotState {
   enabled: boolean;
   activeRunId: string | null;
   latestRun: QaAutopilotRunSummary | null;
+  notify: QaAutopilotNotifyPublic;
+}
+
+/**
+ * Write-only payload for setting the notify webhook. The webhook
+URL must be https:// (http:// is rejected unless the server is
+explicitly opted into insecure mode) and must not resolve to a
+loopback / private / link-local / reserved address. An empty
+string disables notifications. Both fields are optional so the
+UI can update minSeverity without re-supplying the persisted
+webhook (treated as "leave unchanged" by the server).
+
+ */
+export interface QaAutopilotNotifyWriteBody {
+  /** @maxLength 2048 */
+  webhook?: string;
+  minSeverity?: QaAutopilotNotifyMinSeverity;
 }
 
 export interface QaAutopilotSettings {
   enabled: boolean;
+  notify: QaAutopilotNotifyPublic;
 }
 
 export interface UpdateQaAutopilotSettingsBody {
-  enabled: boolean;
+  enabled?: boolean;
+  notify?: QaAutopilotNotifyWriteBody;
 }
 
 export interface StartQaAutopilotRunBody {

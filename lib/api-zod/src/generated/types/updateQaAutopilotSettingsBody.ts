@@ -5,7 +5,9 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { QaAutopilotNotifyWriteBody } from "./qaAutopilotNotifyWriteBody";
 
 export interface UpdateQaAutopilotSettingsBody {
-  enabled: boolean;
+  enabled?: boolean;
+  notify?: QaAutopilotNotifyWriteBody;
 }
