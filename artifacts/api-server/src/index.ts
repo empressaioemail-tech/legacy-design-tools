@@ -6,6 +6,7 @@ import { bootstrapAtomRegistry } from "./atoms/registry";
 import { validateConverterEnvAtBoot } from "./lib/converterClient";
 import { validateFindingEngineEnvAtBoot } from "./lib/findingLlmClient";
 import { validateSheetContentEnvAtBoot } from "./lib/sheetContentLlmClient";
+import { reconcileOrphanedAutopilotRuns } from "./lib/qa/autopilot";
 
 const rawPort = process.env["PORT"];
 
@@ -101,11 +102,34 @@ try {
 // the broken atom, hours after deploy.
 bootstrapAtomRegistry(logger);
 
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
+// Boot-time autopilot reconciliation runs *before* the HTTP listener
+// comes up so the dashboard can never observe a phantom in-flight run
+// after a server restart. Reconciliation errors are logged but
+// non-fatal — the API surface should still come up so an operator can
+// debug from the UI.
+async function bootAndListen(): Promise<void> {
+  try {
+    const reconciled = await reconcileOrphanedAutopilotRuns();
+    if (reconciled > 0) {
+      logger.warn(
+        { count: reconciled },
+        "autopilot: reconciled orphaned runs at boot",
+      );
+    }
+  } catch (err) {
+    logger.error(
+      { err },
+      "autopilot: boot-time reconciliation failed — continuing",
+    );
   }
 
-  logger.info({ port }, "Server listening");
-});
+  app.listen(port, (err) => {
+    if (err) {
+      logger.error({ err }, "Error listening on port");
+      process.exit(1);
+    }
+    logger.info({ port }, "Server listening");
+  });
+}
+
+void bootAndListen();

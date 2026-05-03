@@ -291,7 +291,7 @@ describe("autopilot orchestrator (integration)", () => {
     h.runnerQueueBySuite.set(fakeSuite.id, [{ status: "passed", log: "ok\n" }]);
 
     const { runId: firstId } = await startAutopilotRun("manual", [fakeSuite]);
-    expect(getActiveAutopilotRunId()).toBe(firstId);
+    expect(await getActiveAutopilotRunId()).toBe(firstId);
 
     await expect(
       startAutopilotRun("manual", [fakeSuite]),
@@ -300,6 +300,6 @@ describe("autopilot orchestrator (integration)", () => {
     release();
     const detail = await waitForRunComplete(firstId);
     expect(detail.run.status).toBe("completed");
-    expect(getActiveAutopilotRunId()).toBeNull();
+    expect(await getActiveAutopilotRunId()).toBeNull();
   });
 });

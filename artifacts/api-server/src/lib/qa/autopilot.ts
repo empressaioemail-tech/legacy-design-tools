@@ -43,7 +43,7 @@ import {
   type AutopilotTrigger,
   type AutopilotFindingAutoFixStatus,
 } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { logger } from "../logger";
 import { QA_SUITES, type QaSuite } from "./suites";
 import { runSuiteToCompletion, type RunOutcome } from "./runner";
@@ -52,7 +52,25 @@ import { pickFixers, gitRevertPaths } from "./fixers";
 import { suggestDiffForFinding } from "./diffSuggester";
 import { getAutopilotNotifySettings } from "./settings";
 
-let activeAutopilotRunId: string | null = null;
+/**
+ * Max wall-clock budget for a single autopilot run. If the orchestrator
+ * has not completed within this window the run is forcibly flipped to
+ * `errored` so it can't block new runs indefinitely.
+ */
+export const AUTOPILOT_MAX_RUNTIME_MS = 30 * 60 * 1000;
+
+let autopilotMaxRuntimeMsOverride: number | null = null;
+/** Test hook: shrink the watchdog budget without faking timers. */
+export function _setAutopilotMaxRuntimeMsForTesting(ms: number | null): void {
+  autopilotMaxRuntimeMsOverride = ms;
+}
+
+/**
+ * Cluster-wide advisory-lock key for `startAutopilotRun`. Hash of
+ * the literal "qa.autopilot.start" so the value is stable across
+ * processes / restarts.
+ */
+const AUTOPILOT_START_LOCK_KEY = 7732_419_835_201_111n;
 
 export class AutopilotAlreadyRunningError extends Error {
   constructor(public readonly runId: string) {
@@ -66,41 +84,131 @@ export interface StartAutopilotResult {
   startedAt: Date;
 }
 
-export function getActiveAutopilotRunId(): string | null {
-  return activeAutopilotRunId;
+/**
+ * Returns the id of the currently in-flight autopilot run, if any.
+ *
+ * The `autopilot_runs` table is the sole source of truth — there is no
+ * in-memory cache, so a server restart can never desync the read.
+ */
+export async function getActiveAutopilotRunId(): Promise<string | null> {
+  const [row] = await db
+    .select({ id: autopilotRuns.id })
+    .from(autopilotRuns)
+    .where(eq(autopilotRuns.status, "running"))
+    .orderBy(desc(autopilotRuns.startedAt))
+    .limit(1);
+  return row?.id ?? null;
 }
 
 /**
- * Kick off a new autopilot run. Returns immediately with the run id
- * after persisting the row; the actual suite execution + fix loop
- * runs in the background. Callers poll `GET /qa/autopilot/runs/:id`
- * to track progress.
+ * Predicate used by the orchestration loop after every awaited
+ * suite/fixer step: if the run has been flipped out of `running` by
+ * the watchdog or the boot reconciler, the loop must bail before
+ * running more side-effecting work.
+ */
+async function isAutopilotRunStillRunning(
+  autopilotRunId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ status: autopilotRuns.status })
+    .from(autopilotRuns)
+    .where(eq(autopilotRuns.id, autopilotRunId))
+    .limit(1);
+  return row?.status === "running";
+}
+
+/**
+ * Flip every `autopilot_runs` row left in `status = 'running'` to
+ * `errored` with a "[reconcile] abandoned by server restart" note.
+ * Such rows are by definition orphaned — their background orchestration
+ * died with the previous process. Also stamps `finishedAt` on any
+ * `autopilot_fix_actions` rows tied to those runs that never finished.
+ *
+ * Returns the number of runs reconciled.
+ */
+export async function reconcileOrphanedAutopilotRuns(): Promise<number> {
+  const orphans = await db
+    .select({ id: autopilotRuns.id })
+    .from(autopilotRuns)
+    .where(eq(autopilotRuns.status, "running"));
+  if (orphans.length === 0) return 0;
+  const finishedAt = new Date();
+  for (const o of orphans) {
+    await db
+      .update(autopilotRuns)
+      .set({
+        status: "errored",
+        finishedAt,
+        notes: sql`COALESCE(${autopilotRuns.notes}, '') || E'\n[reconcile] abandoned by server restart'`,
+      })
+      .where(
+        and(eq(autopilotRuns.id, o.id), eq(autopilotRuns.status, "running")),
+      );
+    await db
+      .update(autopilotFixActions)
+      .set({ finishedAt })
+      .where(
+        and(
+          eq(autopilotFixActions.autopilotRunId, o.id),
+          isNull(autopilotFixActions.finishedAt),
+        ),
+      );
+    logger.warn(
+      { autopilotRunId: o.id },
+      "autopilot: reconciled orphan run on boot (abandoned by server restart)",
+    );
+  }
+  return orphans.length;
+}
+
+/**
+ * Kick off a new autopilot run. Returns immediately after persisting
+ * the row; suite execution + the fix loop runs in the background.
+ *
+ * Concurrency: the check-then-insert is wrapped in a transaction
+ * guarded by a postgres advisory lock so two concurrent callers (or
+ * two API processes behind a load balancer) cannot both observe an
+ * empty `running` row and insert duplicates.
  */
 export async function startAutopilotRun(
   trigger: AutopilotTrigger,
   suites: ReadonlyArray<QaSuite> = QA_SUITES,
 ): Promise<StartAutopilotResult> {
-  if (activeAutopilotRunId) {
-    throw new AutopilotAlreadyRunningError(activeAutopilotRunId);
-  }
   const startedAt = new Date();
-  const [row] = await db
-    .insert(autopilotRuns)
-    .values({
-      status: "running",
-      trigger,
-      startedAt,
-      totalSuites: suites.length,
-    })
-    .returning({ id: autopilotRuns.id, startedAt: autopilotRuns.startedAt });
-  if (!row) throw new Error("Failed to insert autopilot_runs row");
-  activeAutopilotRunId = row.id;
-  // Fire-and-forget the actual orchestration; we surface progress via
-  // the persisted row + findings, not via a returned promise.
-  void executeAutopilotRun(row.id, suites).catch((err) => {
-    logger.error({ err, autopilotRunId: row.id }, "autopilot: run threw");
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${AUTOPILOT_START_LOCK_KEY})`,
+    );
+    const [existing] = await tx
+      .select({ id: autopilotRuns.id })
+      .from(autopilotRuns)
+      .where(eq(autopilotRuns.status, "running"))
+      .orderBy(desc(autopilotRuns.startedAt))
+      .limit(1);
+    if (existing) {
+      return { kind: "existing" as const, id: existing.id };
+    }
+    const [row] = await tx
+      .insert(autopilotRuns)
+      .values({
+        status: "running",
+        trigger,
+        startedAt,
+        totalSuites: suites.length,
+      })
+      .returning({ id: autopilotRuns.id, startedAt: autopilotRuns.startedAt });
+    if (!row) throw new Error("Failed to insert autopilot_runs row");
+    return { kind: "new" as const, id: row.id, startedAt: row.startedAt };
   });
-  return { runId: row.id, startedAt: row.startedAt };
+  if (result.kind === "existing") {
+    throw new AutopilotAlreadyRunningError(result.id);
+  }
+  // Fire-and-forget the actual orchestration; progress is surfaced via
+  // the persisted row + findings, not via a returned promise.
+  void executeAutopilotRun(result.id, suites).catch((err) => {
+    logger.error({ err, autopilotRunId: result.id }, "autopilot: run threw");
+  });
+  return { runId: result.id, startedAt: result.startedAt };
 }
 
 interface SuiteResult {
@@ -122,9 +230,69 @@ async function executeAutopilotRun(
   let needsReview = 0;
   const notes: string[] = [];
 
+  // Per-run watchdog. If the orchestration loop hangs (e.g. a suite
+  // child process never exits, or a fixer wedges on git state), this
+  // timer flips the row to `errored`. The loop checks the row's status
+  // after every awaited step (`isAutopilotRunStillRunning`) and bails
+  // before doing further side effects, so once the watchdog fires no
+  // additional findings/fixers/git mutations are issued.
+  const watchdog = setTimeout(
+    () => {
+      void (async () => {
+        try {
+          await db
+            .update(autopilotRuns)
+            .set({
+              status: "errored",
+              finishedAt: new Date(),
+              notes: sql`COALESCE(${autopilotRuns.notes}, '') || E'\n[watchdog] exceeded max runtime'`,
+            })
+            .where(
+              and(
+                eq(autopilotRuns.id, autopilotRunId),
+                eq(autopilotRuns.status, "running"),
+              ),
+            );
+          logger.error(
+            { autopilotRunId },
+            "autopilot: watchdog tripped — run exceeded max runtime",
+          );
+        } catch (err) {
+          logger.error(
+            { err, autopilotRunId },
+            "autopilot: watchdog DB update failed",
+          );
+        }
+      })();
+    },
+    autopilotMaxRuntimeMsOverride ?? AUTOPILOT_MAX_RUNTIME_MS,
+  );
+  // Don't keep the event loop alive just for the watchdog — the
+  // orchestrator's own promise chain already does that.
+  if (typeof watchdog.unref === "function") watchdog.unref();
+
+  // Sentinel thrown when a checkpoint observes that the run is no
+  // longer `running` (watchdog fired or boot reconciler ran). It
+  // propagates to the outer `try/finally` and skips the final status
+  // update entirely, leaving whatever terminal status the watchdog/
+  // reconciler set in place.
+  class AutopilotBailout extends Error {
+    constructor() {
+      super("autopilot: bail — run no longer in `running` status");
+      this.name = "AutopilotBailout";
+    }
+  }
+  const bailIfNotRunning = async (): Promise<void> => {
+    if (!(await isAutopilotRunStillRunning(autopilotRunId))) {
+      throw new AutopilotBailout();
+    }
+  };
+
   try {
     for (const suite of suites) {
+      await bailIfNotRunning();
       const suiteResult = await runWithFlakeRetry(suite);
+      await bailIfNotRunning();
 
       if (suiteResult.outcome.status === "passed" && !suiteResult.flaky) {
         passing += 1;
@@ -155,6 +323,7 @@ async function executeAutopilotRun(
       const fixers = pickFixers(suite, suiteResult.findings);
       let suiteFixed = false;
       for (const fixer of fixers) {
+        await bailIfNotRunning();
         const action = await runFixer(
           autopilotRunId,
           suite,
@@ -165,8 +334,10 @@ async function executeAutopilotRun(
         );
         if (!action.success) continue;
 
+        await bailIfNotRunning();
         // Re-run the suite to confirm green.
         const verify = await runSuiteToCompletion(suite);
+        await bailIfNotRunning();
         const verifyOk = verify.outcome.status === "passed";
 
         await db
@@ -218,6 +389,8 @@ async function executeAutopilotRun(
     }
 
     const finishedAt = new Date();
+    // Scope to `status = 'running'` so a watchdog flip wins if it
+    // already marked this row `errored`.
     await db
       .update(autopilotRuns)
       .set({
@@ -230,7 +403,12 @@ async function executeAutopilotRun(
         needsReview,
         notes: notes.join("\n"),
       })
-      .where(eq(autopilotRuns.id, autopilotRunId));
+      .where(
+        and(
+          eq(autopilotRuns.id, autopilotRunId),
+          eq(autopilotRuns.status, "running"),
+        ),
+      );
 
     // Best-effort notification — never let a webhook failure mask a
     // successful run. Only fires when the sweep finished red and the
@@ -254,20 +432,31 @@ async function executeAutopilotRun(
       );
     }
   } catch (err) {
-    logger.error({ err, autopilotRunId }, "autopilot: orchestration error");
-    await db
-      .update(autopilotRuns)
-      .set({
-        status: "errored",
-        finishedAt: new Date(),
-        notes:
-          (notes.join("\n") + `\n[error] ${err instanceof Error ? err.message : String(err)}`).trim(),
-      })
-      .where(eq(autopilotRuns.id, autopilotRunId));
-  } finally {
-    if (activeAutopilotRunId === autopilotRunId) {
-      activeAutopilotRunId = null;
+    if (err instanceof AutopilotBailout) {
+      logger.warn(
+        { autopilotRunId },
+        "autopilot: bailed mid-run (watchdog or reconciler flipped status)",
+      );
+    } else {
+      logger.error({ err, autopilotRunId }, "autopilot: orchestration error");
+      // Scope to `status = 'running'` so a watchdog flip wins.
+      await db
+        .update(autopilotRuns)
+        .set({
+          status: "errored",
+          finishedAt: new Date(),
+          notes:
+            (notes.join("\n") + `\n[error] ${err instanceof Error ? err.message : String(err)}`).trim(),
+        })
+        .where(
+          and(
+            eq(autopilotRuns.id, autopilotRunId),
+            eq(autopilotRuns.status, "running"),
+          ),
+        );
     }
+  } finally {
+    clearTimeout(watchdog);
   }
 }
 

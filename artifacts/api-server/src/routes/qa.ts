@@ -405,14 +405,15 @@ function serializeAutopilotRun(
 }
 
 router.get("/qa/autopilot", async (_req: Request, res: Response) => {
-  const [enabled, latest, notify] = await Promise.all([
+  const [enabled, latest, notify, activeRunId] = await Promise.all([
     isAutopilotEnabled(),
     getLatestAutopilotRun(),
     getAutopilotNotifyPublic(),
+    getActiveAutopilotRunId(),
   ]);
   res.json({
     enabled,
-    activeRunId: getActiveAutopilotRunId(),
+    activeRunId,
     latestRun: latest ? serializeAutopilotRun(latest) : null,
     notify,
   });
