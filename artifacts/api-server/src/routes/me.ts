@@ -53,6 +53,9 @@ import { eq } from "drizzle-orm";
 import {
   UpdateMyArchitectPdfHeaderBody,
   UpdateMyProfileBody,
+  PLAN_REVIEW_DISCIPLINE_VALUES,
+  isPlanReviewDiscipline,
+  type PlanReviewDiscipline,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 import { ensureUserProfile } from "../lib/userProfiles";
@@ -321,6 +324,67 @@ router.patch("/me/profile", async (req: Request, res: Response) => {
         await rollbackOrphanedAvatar(candidateAvatar, requestor.id);
       }
     }
+  }
+});
+
+/**
+ * `PATCH /me/disciplines` — reviewer self-edit of
+ * `users.disciplines` (Track 1).
+ *
+ * Accepts `{ disciplines: PlanReviewDiscipline[] }`; rejects unknown
+ * enum values with a 400. Empty array is allowed (clears the
+ * reviewer's discipline scope; FE falls back to "Show all"). Hand-
+ * written validation rather than a generated `UpdateMyDisciplinesBody`
+ * because CT lands the regenerated zod schema in a follow-up — until
+ * then this surface keeps the FE-driven default-filter UX unblocked.
+ */
+router.patch("/me/disciplines", async (req: Request, res: Response) => {
+  const requestor = req.session?.requestor;
+  if (!requestor || requestor.kind !== "user") {
+    res
+      .status(401)
+      .json({ error: "Self-edit requires a signed-in user session" });
+    return;
+  }
+
+  const body = req.body as { disciplines?: unknown } | undefined;
+  if (!body || !Array.isArray(body.disciplines)) {
+    res.status(400).json({
+      error: "Body must be { disciplines: PlanReviewDiscipline[] }",
+    });
+    return;
+  }
+  const out: PlanReviewDiscipline[] = [];
+  const seen = new Set<PlanReviewDiscipline>();
+  for (const v of body.disciplines) {
+    if (!isPlanReviewDiscipline(v)) {
+      res.status(400).json({
+        error: `Unknown discipline; must be one of: ${PLAN_REVIEW_DISCIPLINE_VALUES.join(
+          ", ",
+        )}`,
+      });
+      return;
+    }
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+
+  try {
+    await ensureUserProfile(requestor.id);
+    const [row] = await db
+      .update(users)
+      .set({ disciplines: out, updatedAt: new Date() })
+      .where(eq(users.id, requestor.id))
+      .returning();
+    if (!row) {
+      res.status(404).json({ error: "User profile not found" });
+      return;
+    }
+    res.json(toUserResponse(row));
+  } catch (err) {
+    logger.error({ err, id: requestor.id }, "update my disciplines failed");
+    res.status(500).json({ error: "Failed to update disciplines" });
   }
 });
 

@@ -412,6 +412,63 @@ describe("POST /api/findings/:id/accept", () => {
       .set(REVIEWER_HEADERS);
     expect(res.status).toBe(404);
   });
+
+  it("Track 1 — stamps acceptedByReviewerId/acceptedAt on first acceptance and freezes them across reject/re-accept", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { engagement, submission } = await seedEngagementSubmission(
+      "ai-badge-engagement",
+    );
+    await seedBriefingForEngagement(engagement.id);
+
+    await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    await waitForStatus(submission.id, "completed");
+
+    const list = await request(getApp())
+      .get(`/api/submissions/${submission.id}/findings`)
+      .set(REVIEWER_HEADERS);
+    const target = list.body.findings[0];
+    // Engine-produced rows are AI-tagged.
+    expect(target.aiGenerated).toBe(true);
+    expect(target.acceptedByReviewerId).toBeNull();
+    expect(target.acceptedAt).toBeNull();
+    expect(target.acceptedBy).toBeNull();
+
+    // First acceptance — stamps both columns.
+    const firstAccept = await request(getApp())
+      .post(`/api/findings/${target.id}/accept`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(firstAccept.status).toBe(200);
+    expect(firstAccept.body.finding.acceptedByReviewerId).toBe("reviewer-test");
+    expect(firstAccept.body.finding.acceptedAt).toBeTruthy();
+    expect(firstAccept.body.finding.acceptedBy).toMatchObject({
+      kind: "user",
+      id: "reviewer-test",
+    });
+    const frozenAcceptedAt = firstAccept.body.finding.acceptedAt as string;
+
+    // Reject — must NOT clear acceptedAt / acceptedByReviewerId.
+    const rejectRes = await request(getApp())
+      .post(`/api/findings/${target.id}/reject`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(rejectRes.status).toBe(200);
+    expect(rejectRes.body.finding.acceptedByReviewerId).toBe("reviewer-test");
+    expect(rejectRes.body.finding.acceptedAt).toBe(frozenAcceptedAt);
+
+    // Re-accept (different requestor on the cookie wouldn't matter for
+    // freeze; here we just confirm the frozen fields don't move).
+    const reAccept = await request(getApp())
+      .post(`/api/findings/${target.id}/accept`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(reAccept.status).toBe(200);
+    expect(reAccept.body.finding.acceptedByReviewerId).toBe("reviewer-test");
+    expect(reAccept.body.finding.acceptedAt).toBe(frozenAcceptedAt);
+  });
 });
 
 describe("POST /api/findings/:id/reject", () => {

@@ -201,6 +201,26 @@ interface FindingWire {
   sourceRef: { id: string; label: string } | null;
   aiGeneratedAt: string;
   revisionOf: string | null;
+  /**
+   * Track 1 — AI-provenance flag for the badge. `true` for engine-
+   * produced rows, `false` for human-authored override-revisions.
+   */
+  aiGenerated: boolean;
+  /**
+   * Track 1 — bare reviewer id frozen at FIRST acceptance. Used by the
+   * FE to look up the displayName for the badge label.
+   */
+  acceptedByReviewerId: string | null;
+  /**
+   * Track 1 — actor envelope hydrated at read time from `users` (for
+   * `kind: "user"`) so the FE can compose
+   * `"AI generated · reviewer confirmed (Name, date)"` without a
+   * separate fetch. Null until first acceptance. The `id` mirrors
+   * `acceptedByReviewerId`.
+   */
+  acceptedBy: FindingActorWire | null;
+  /** Track 1 — wall-clock timestamp of first acceptance (frozen). */
+  acceptedAt: string | null;
 }
 
 function actorFromRequest(req: Request): FindingActorWire | null {
@@ -223,7 +243,17 @@ function actorFromRequest(req: Request): FindingActorWire | null {
   return wire;
 }
 
-function toWire(row: Finding, revisionOfAtomId: string | null): FindingWire {
+function toWire(
+  row: Finding,
+  revisionOfAtomId: string | null,
+  /**
+   * Track 1 — hydrated actor envelope for the AI-badge "reviewer
+   * confirmed" label. When omitted (or the row's
+   * `acceptedByReviewerId` is null) the wire's `acceptedBy` collapses
+   * to null and the FE renders the unconfirmed badge variant.
+   */
+  acceptedBy: FindingActorWire | null = null,
+): FindingWire {
   const citations = Array.isArray(row.citations)
     ? (row.citations as FindingCitation[])
     : [];
@@ -254,6 +284,39 @@ function toWire(row: Finding, revisionOfAtomId: string | null): FindingWire {
     sourceRef,
     aiGeneratedAt: row.aiGeneratedAt.toISOString(),
     revisionOf: revisionOfAtomId,
+    aiGenerated: row.aiGenerated,
+    acceptedByReviewerId: row.acceptedByReviewerId,
+    acceptedBy,
+    acceptedAt: row.acceptedAt ? row.acceptedAt.toISOString() : null,
+  };
+}
+
+/**
+ * Track 1 — resolve the hydrated actor envelope for a finding's
+ * `acceptedByReviewerId`. Looks up the `users` row to fetch the
+ * displayName so the FE can compose the badge label without a
+ * separate fetch. Best-effort: a missing `users` row degrades to a
+ * raw `{kind, id, displayName: null}` envelope.
+ */
+async function resolveAcceptedByActor(
+  acceptedByReviewerId: string | null,
+): Promise<FindingActorWire | null> {
+  if (!acceptedByReviewerId) return null;
+  const { hydrateActors } = await import("../lib/userLookup");
+  const [hydrated] = await hydrateActors([
+    { kind: "user", id: acceptedByReviewerId },
+  ]);
+  if (!hydrated) {
+    return {
+      kind: "user",
+      id: acceptedByReviewerId,
+      displayName: null,
+    };
+  }
+  return {
+    kind: "user",
+    id: hydrated.id,
+    displayName: hydrated.displayName ?? null,
   };
 }
 
@@ -657,6 +720,13 @@ async function persistFinding(
       sourceRef:
         engineFinding.sourceRef as unknown as Record<string, unknown> | null,
       aiGeneratedAt: engineFinding.aiGeneratedAt,
+      // Track 1 — engine-produced rows tag aiGenerated=true so the
+      // FE renders the "AI generated" badge. Distinct from the
+      // backfill in migration 0008 (which sets ai_generated based on
+      // finding_run_id presence) — this keeps brand-new engine rows
+      // explicit at write time rather than relying on the backfill
+      // semantic for forward writes.
+      aiGenerated: true,
       findingRunId: generationId,
     })
     .returning();
@@ -1073,8 +1143,44 @@ router.get(
           revisionOfMap.set(o.id, o.atomId);
         }
       }
+
+      // Track 1 — batch-hydrate the AI-badge `acceptedBy` actor envelope
+      // for rows that have been accepted at least once. Single-pass user
+      // lookup keyed on `acceptedByReviewerId`.
+      const acceptedByMap = new Map<string, FindingActorWire>();
+      const acceptedByIds = Array.from(
+        new Set(
+          rows
+            .map((r) => r.acceptedByReviewerId)
+            .filter((v): v is string => !!v),
+        ),
+      );
+      if (acceptedByIds.length > 0) {
+        const { hydrateActors } = await import("../lib/userLookup");
+        const hydrated = await hydrateActors(
+          acceptedByIds.map((id) => ({ kind: "user" as const, id })),
+        );
+        for (const h of hydrated) {
+          acceptedByMap.set(h.id, {
+            kind: "user",
+            id: h.id,
+            displayName: h.displayName ?? null,
+          });
+        }
+      }
+
       const wire = rows.map((r) =>
-        toWire(r, r.revisionOf ? revisionOfMap.get(r.revisionOf) ?? null : null),
+        toWire(
+          r,
+          r.revisionOf ? revisionOfMap.get(r.revisionOf) ?? null : null,
+          r.acceptedByReviewerId
+            ? acceptedByMap.get(r.acceptedByReviewerId) ?? {
+                kind: "user",
+                id: r.acceptedByReviewerId,
+                displayName: null,
+              }
+            : null,
+        ),
       );
       res.json({ findings: wire });
     } catch (err) {
@@ -1330,14 +1436,29 @@ router.post(
         return;
       }
       const now = new Date();
+      // Track 1 — `accepted_by_reviewer_id` and `accepted_at` are
+      // FROZEN at the FIRST transition into `'accepted'`. A row that
+      // cycles `accepted → rejected → accepted` keeps its original
+      // first-acceptance attribution because the badge surface ("AI
+      // generated · reviewer confirmed (Name, date)") tracks who
+      // first confirmed the finding, not who most-recently accepted
+      // it. Most-recent action lives on `reviewerStatusBy` /
+      // `reviewerStatusChangedAt`.
+      const isFirstAcceptance =
+        row.acceptedAt == null && actor.kind === "user" && !!actor.id;
+      const updateValues: Record<string, unknown> = {
+        status: next,
+        reviewerStatusBy: actor as unknown as Record<string, unknown>,
+        reviewerStatusChangedAt: now,
+        updatedAt: now,
+      };
+      if (isFirstAcceptance) {
+        updateValues["acceptedByReviewerId"] = actor.id;
+        updateValues["acceptedAt"] = now;
+      }
       const [updated] = await db
         .update(findings)
-        .set({
-          status: next,
-          reviewerStatusBy: actor as unknown as Record<string, unknown>,
-          reviewerStatusChangedAt: now,
-          updatedAt: now,
-        })
+        .set(updateValues)
         .where(eq(findings.id, row.id))
         .returning();
       const finalRow = updated!;
@@ -1367,7 +1488,12 @@ router.post(
           actor,
         },
       });
-      res.json({ finding: toWire(finalRow, revisionOfAtomId) });
+      const acceptedByActor = await resolveAcceptedByActor(
+        finalRow.acceptedByReviewerId,
+      );
+      res.json({
+        finding: toWire(finalRow, revisionOfAtomId, acceptedByActor),
+      });
     } catch (err) {
       logger.error({ err, findingId }, "accept finding failed");
       res.status(500).json({ error: "Failed to accept finding" });
@@ -1441,7 +1567,16 @@ router.post(
           actor,
         },
       });
-      res.json({ finding: toWire(finalRow, revisionOfAtomId) });
+      // The reject path doesn't change `acceptedByReviewerId` or
+      // `acceptedAt` (Track 1 freeze semantics), but the row may
+      // already carry them from a prior acceptance — hydrate so the
+      // wire keeps the badge label intact.
+      const acceptedByActor = await resolveAcceptedByActor(
+        finalRow.acceptedByReviewerId,
+      );
+      res.json({
+        finding: toWire(finalRow, revisionOfAtomId, acceptedByActor),
+      });
     } catch (err) {
       logger.error({ err, findingId }, "reject finding failed");
       res.status(500).json({ error: "Failed to reject finding" });

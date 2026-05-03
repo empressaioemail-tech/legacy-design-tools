@@ -16,10 +16,13 @@ import {
   type Response,
 } from "express";
 import { db, cannedFindings, type CannedFinding } from "@workspace/db";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import {
   CreateCannedFindingBody,
   UpdateCannedFindingBody,
+  PLAN_REVIEW_DISCIPLINE_VALUES,
+  isPlanReviewDiscipline,
+  type PlanReviewDiscipline,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 
@@ -72,6 +75,42 @@ const DISCIPLINES = ["building", "fire", "zoning", "civil"] as const;
 type Discipline = (typeof DISCIPLINES)[number];
 function isDiscipline(v: unknown): v is Discipline {
   return typeof v === "string" && (DISCIPLINES as readonly string[]).includes(v);
+}
+
+/**
+ * Track 1 — translation map from the 7-value `PlanReviewDiscipline`
+ * (reviewer certification) vocabulary to the 4-value canned-findings
+ * `Discipline` vocabulary. Used by the `?reviewerDisciplines=` query
+ * filter so a reviewer with disciplines `['building','accessibility']`
+ * sees the canned-findings library narrowed to `['building']`.
+ *
+ * The map is rough by design (and acknowledged so in the BE plan).
+ * The legacy 4-value canned-findings vocabulary will be revisited
+ * once the broader data-model harmonisation lands; for now this
+ * keeps the FE default-filter UX usable without breaking the
+ * existing canned_findings.discipline column.
+ */
+const REVIEWER_TO_CANNED_DISCIPLINE: Record<PlanReviewDiscipline, Discipline[]> =
+  {
+    building: ["building"],
+    electrical: ["building"],
+    mechanical: ["building"],
+    plumbing: ["building"],
+    residential: ["building"],
+    "fire-life-safety": ["fire"],
+    accessibility: ["building"],
+  };
+
+function translateReviewerDisciplines(
+  reviewerDisciplines: ReadonlyArray<PlanReviewDiscipline>,
+): Discipline[] {
+  const out = new Set<Discipline>();
+  for (const r of reviewerDisciplines) {
+    for (const c of REVIEWER_TO_CANNED_DISCIPLINE[r]) {
+      out.add(c);
+    }
+  }
+  return Array.from(out);
 }
 
 interface CannedFindingWire {
@@ -135,11 +174,60 @@ router.get(
       }
       discipline = disciplineRaw;
     }
+
+    /**
+     * Track 1 — optional CSV of `PlanReviewDiscipline` values.
+     * Server applies the 7→4 translation map and filters to canned
+     * rows whose `discipline` column appears in the translated set.
+     * Mutually-exclusive with the legacy `discipline` query param —
+     * if both are supplied the 400 error name calls out the conflict
+     * so the FE knows which knob it picked. Empty string == absent.
+     */
+    let translatedDisciplines: Discipline[] | null = null;
+    const reviewerDisciplinesRaw = req.query.reviewerDisciplines;
+    if (
+      typeof reviewerDisciplinesRaw === "string" &&
+      reviewerDisciplinesRaw.length > 0
+    ) {
+      if (discipline) {
+        res.status(400).json({
+          error: "discipline_and_reviewerDisciplines_mutually_exclusive",
+        });
+        return;
+      }
+      const parts = reviewerDisciplinesRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      const reviewerDisciplines: PlanReviewDiscipline[] = [];
+      for (const p of parts) {
+        if (!isPlanReviewDiscipline(p)) {
+          res.status(400).json({
+            error: `invalid_reviewer_discipline; must be one of: ${PLAN_REVIEW_DISCIPLINE_VALUES.join(", ")}`,
+          });
+          return;
+        }
+        if (!reviewerDisciplines.includes(p)) reviewerDisciplines.push(p);
+      }
+      translatedDisciplines = translateReviewerDisciplines(reviewerDisciplines);
+      // Empty translation result (only possible if the client sent
+      // an empty list once we strip blanks, which we already 0-length
+      // guard above; keep for defense). Treat as "no filter."
+      if (translatedDisciplines.length === 0) {
+        translatedDisciplines = null;
+      }
+    }
+
     const includeArchived = String(req.query.includeArchived ?? "") === "true";
 
     try {
       const conditions = [eq(cannedFindings.tenantId, tenantId)];
       if (discipline) conditions.push(eq(cannedFindings.discipline, discipline));
+      if (translatedDisciplines) {
+        conditions.push(
+          inArray(cannedFindings.discipline, translatedDisciplines as string[]),
+        );
+      }
       if (!includeArchived) conditions.push(isNull(cannedFindings.archivedAt));
       const rows = await db
         .select()
