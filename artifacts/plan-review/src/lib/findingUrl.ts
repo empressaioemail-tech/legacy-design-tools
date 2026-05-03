@@ -70,7 +70,6 @@ export type SubmissionDetailTab =
   | "bim-model"
   | "engagement-context"
   | "renders"
-  | "decision"
   | "sheets";
 
 const SUBMISSION_DETAIL_TABS: readonly SubmissionDetailTab[] = [
@@ -79,7 +78,6 @@ const SUBMISSION_DETAIL_TABS: readonly SubmissionDetailTab[] = [
   "bim-model",
   "engagement-context",
   "renders",
-  "decision",
   "sheets",
 ];
 

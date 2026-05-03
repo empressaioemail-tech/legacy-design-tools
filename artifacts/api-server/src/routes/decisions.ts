@@ -24,7 +24,7 @@
  * reviewer-facing audience). Architects hitting these routes get a
  * 403; the Decide UI is reviewer-only.
  *
- * Coexistence with the legacy `/engagements/:id/submissions/:sid/response`
+ * Coexistence with the (now-retired) `/engagements/:id/submissions/:sid/response`
  * endpoint (Task #428's DecisionTab): both paths can co-exist on the
  * same submission. Each appends its own audit event; the latest call
  * wins for the row's `status` / `reviewerComment` columns.

@@ -591,7 +591,7 @@ export const ListEngagementSubmissionsResponseItem = zod
       ),
   })
   .describe(
-    'One past plan-review submission for an engagement, as returned\nby `GET \/engagements\/{id}\/submissions`. The `jurisdiction`\nlabel is the denormalized snapshot captured at submission time\n(so a later jurisdiction change on the parent engagement does\nnot retroactively rewrite the audit trail). `note` is the\noptional free-text note from the submission body, surfaced\nverbatim (capped to 2 KB by the create route\'s contract).\n\n`status`, `reviewerComment`, and `respondedAt` reflect the\njurisdiction\'s recorded reply. `status` is always present and\ndefaults to `pending` until a reviewer records a response via\n`POST \/engagements\/{id}\/submissions\/{submissionId}\/response`,\nat which point `respondedAt` is set and `reviewerComment` may\nbe populated. The fields stay null while the submission is\nstill pending so consumers can drive a \"no response yet\" UI\noff `status === \"pending\"` without a presence check.\n',
+    'One past plan-review submission for an engagement, as returned\nby `GET \/engagements\/{id}\/submissions`. The `jurisdiction`\nlabel is the denormalized snapshot captured at submission time\n(so a later jurisdiction change on the parent engagement does\nnot retroactively rewrite the audit trail). `note` is the\noptional free-text note from the submission body, surfaced\nverbatim (capped to 2 KB by the create route\'s contract).\n\n`status`, `reviewerComment`, and `respondedAt` reflect the\njurisdiction\'s recorded reply. `status` is always present and\ndefaults to `pending` until a reviewer records a verdict via\nthe PLR-6 `POST \/submissions\/{submissionId}\/decisions` route,\nat which point `respondedAt` is set and `reviewerComment` may\nbe populated. The fields stay null while the submission is\nstill pending so consumers can drive a \"no response yet\" UI\noff `status === \"pending\"` without a presence check.\n',
   );
 export const ListEngagementSubmissionsResponse = zod.array(
   ListEngagementSubmissionsResponseItem,
@@ -640,85 +640,6 @@ export const CreateEngagementSubmissionBody = zod
   })
   .describe(
     "Request body for `POST \/engagements\/{id}\/submissions`. The\nsubmission flow is currently a forward-ref child in the\nengagement atom's composition (no dedicated submissions table\nyet), so the body is intentionally narrow: an optional free-text\n`note` that lands in the `engagement.submitted` event payload.\nWhen the catalog atom and table land this schema can grow\nadditional fields (package label, attached document refs, etc.)\nwithout breaking existing callers.\n",
-  );
-
-/**
- * Records the jurisdiction's reply against a previously-recorded
-plan-review submission. Updates the submission row's `status`,
-optional `reviewerComment`, and `respondedAt` columns, and
-emits a `submission.response-recorded` event scoped to the
-submission entity (so the back-and-forth shows up on the
-submission's own timeline rather than collapsing into the
-parent engagement's).
-
-The response body always reflects the submission row *after*
-the update — callers do not need a follow-up GET to see the
-new status. Calling this route a second time on the same
-submission is allowed and overwrites the prior response (the
-event chain on the submission preserves the full history).
-
-`respondedAt` must not be later than the server clock at
-request time. Future-dated values are rejected with a 400 so
-a non-browser caller cannot backfill a reply into the future
-and silently corrupt the engagement timeline. The same rule
-applies in the other direction: `respondedAt` must not be
-earlier than the submission row's own `submittedAt` (a reply
-cannot pre-date the package being sent), and pre-submission
-values are likewise rejected with a 400.
-
- * @summary Record the jurisdiction's response on a submission
- */
-export const RecordSubmissionResponseParams = zod.object({
-  id: zod.coerce.string().describe("Engagement id (must own the submission)."),
-  submissionId: zod.coerce.string(),
-});
-
-export const recordSubmissionResponseBodyReviewerCommentMax = 4096;
-
-export const RecordSubmissionResponseBody = zod
-  .object({
-    status: zod
-      .enum(["approved", "corrections_requested", "rejected"])
-      .describe("Jurisdiction's review outcome for the submission."),
-    reviewerComment: zod
-      .string()
-      .max(recordSubmissionResponseBodyReviewerCommentMax)
-      .optional()
-      .describe(
-        "Optional free-text note from the reviewer. Capped at 4 KB\nso the event payload stays bounded. Empty \/ whitespace-only\nvalues are coerced to null on the stored row and event.\n",
-      ),
-    respondedAt: zod.coerce
-      .date()
-      .optional()
-      .describe(
-        "Optional explicit response timestamp. Defaults to the\nserver clock when omitted; supply when backfilling a\nhistorical jurisdiction reply. Must not be later than the\nserver clock at request time — future-dated values are\nrejected with a 400 (the in-browser dialog mirrors this).\n",
-      ),
-  })
-  .describe(
-    "Request body for `POST \/engagements\/{id}\/submissions\/{submissionId}\/response`.\n`status` is the new review state the jurisdiction has assigned;\n`pending` is intentionally not a valid response value (it is the\nstarting state, not an outcome). `reviewerComment` is an optional\nfree-text note from the reviewer (e.g. correction requests,\napproval conditions); empty \/ whitespace-only strings are\ncoerced to null. `respondedAt` is optional and defaults to the\nserver's clock at the moment the response is recorded — callers\nonly need to supply it when backfilling a historical reply.\n",
-  );
-
-export const RecordSubmissionResponseResponse = zod
-  .object({
-    id: zod.string(),
-    engagementId: zod.string(),
-    status: zod
-      .enum(["pending", "approved", "corrections_requested", "rejected"])
-      .describe(
-        "Canonical jurisdiction-response status for a submission.\n`pending` is the default at insert (no response recorded yet);\nthe other three are review outcomes the response route may\ntransition the row into.\n",
-      ),
-    reviewerComment: zod.string().nullable(),
-    respondedAt: zod.coerce.date().nullable(),
-    responseRecordedAt: zod.coerce
-      .date()
-      .nullable()
-      .describe(
-        "Wall-clock timestamp the server stamped when this response\nupdate was committed. Always non-null on the route's own\nreturn value (the response route stamps it on every call);\nkept nullable to mirror the `EngagementSubmissionSummary`\nshape used by the list endpoint, where rows still in the\npending state never set the field.\n",
-      ),
-    submittedAt: zod.coerce.date(),
-  })
-  .describe(
-    "Submission row reflecting the jurisdiction's recorded response.\nReturned by the response route so callers don't need a\nfollow-up GET to see the new state. `respondedAt` is null\nonly when the row is still pending (the response route always\nsets it, but the type allows null for the pre-response state\nin case a future GET shares this shape).\n",
   );
 
 /**

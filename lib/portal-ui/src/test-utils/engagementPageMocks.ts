@@ -118,14 +118,6 @@ export async function makeEngagementPageMockHooks(
     // does `instanceof ApiError` keeps branching on the same shape
     // the hand-rolled boilerplate exposed.
     ApiError: MockApiError,
-    // Submission-status enum the Submissions tab + reviewer UIs
-    // import as a value (e.g. `RecordSubmissionResponseBodyStatus.approved`).
-    RecordSubmissionResponseBodyStatus: {
-      approved: "approved",
-      corrections_requested: "corrections_requested",
-      rejected: "rejected",
-    } as const,
-
     // Standard query-key helpers — derived from the helper-name
     // convention so a typo in the list fails loudly at import
     // time rather than silently returning `undefined`.
@@ -195,7 +187,6 @@ export async function makeEngagementPageMockHooks(
         queryFn: async () => getSubmissions().map((s) => ({ ...s })),
       }),
     useCreateEngagementSubmission: noopMutationHook,
-    useRecordSubmissionResponse: noopMutationHook,
     // V1-2 — ReviewerRequestsStrip mounts in EngagementDetail above
     // the TabBar, so every engagement-page test now needs the
     // reviewer-requests hook + its query-key helper. Default to an

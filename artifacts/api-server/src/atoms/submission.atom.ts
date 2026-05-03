@@ -71,7 +71,7 @@ export type SubmissionSupportedModes = typeof SUBMISSION_SUPPORTED_MODES;
  * Submission-scoped events live on this list:
  *   - `submission.response-recorded` — emitted by
  *     `routes/engagements.ts`'s POST
- *     `/engagements/:id/submissions/:submissionId/response` handler
+ *     (now-retired) `/engagements/:id/submissions/:submissionId/response` handler
  *     when the jurisdiction's reply is recorded against a submission.
  *     Scoped to the submission entity (not the parent engagement) so
  *     the back-and-forth lives on the submission's own history chain.

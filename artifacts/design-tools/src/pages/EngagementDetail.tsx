@@ -40,7 +40,6 @@ import {
   type Finding,
   type GenerateLayersOutcome,
   type SubmissionReceipt,
-  type SubmissionResponse,
   type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
@@ -92,7 +91,6 @@ import { AppShell } from "../components/AppShell";
 import { BriefingSourceUploadModal } from "../components/BriefingSourceUploadModal";
 import { ClaudeChat } from "../components/ClaudeChat";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
-import { RecordSubmissionResponseDialog } from "../components/RecordSubmissionResponseDialog";
 import { RevitBinding } from "../components/RevitBinding";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
@@ -3556,16 +3554,10 @@ function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
  * optional reviewer comment + responded-at timestamp, and the
  * original outbound note. The visual layout mirrors `SubmissionRow`
  * in `artifacts/plan-review/src/pages/EngagementDetail.tsx` so the
- * two surfaces stay consistent. Each row carries a "Record response"
- * action that opens `RecordSubmissionResponseDialog`.
- *
- * `EngagementSubmissionSummary` now carries `status`,
- * `reviewerComment`, and `respondedAt` directly (Task #102's sister
- * task on the API side already shipped). We still keep a local map
- * of just-recorded responses keyed by submission id so the row
- * reflects a freshly-saved reply *before* the listing query
- * refetches; the resolver below prefers the local mirror when
- * present and falls through to the row payload otherwise.
+ * two surfaces stay consistent. The architect view is read-only
+ * with respect to verdicts: reviewer responses are recorded in
+ * plan-review via `DecideModal` (PLR-6); this list simply
+ * surfaces whatever the listing query returns.
  *
  * Pagination is still a follow-up: engagements typically accumulate
  * a handful of packages, so a bare array is fine for now.
@@ -3714,84 +3706,19 @@ function SubmissionsTab({
     },
   );
 
-  // `responseDialogFor` holds the submission id whose response form
-  // is currently open (null when no dialog is mounted). Stored as the
-  // id rather than the row so a refetch that reorders the list still
-  // resolves the dialog target by id.
-  const [responseDialogFor, setResponseDialogFor] = useState<string | null>(
-    null,
-  );
-  // Local mirror of just-recorded responses, keyed by submission id.
-  // See the doc comment above for why this is here and when it
-  // becomes removable.
-  const [recordedResponses, setRecordedResponses] = useState<
-    Record<string, SubmissionResponse>
-  >({});
-
-  // Reset the local mirror whenever the engagement changes so a
-  // recorded response on engagement A doesn't carry over into a row
-  // on engagement B that happens to share an id (it can't in
-  // practice — submission ids are uuids — but the cleanup keeps the
-  // map bounded for long-lived sessions).
-  useEffect(() => {
-    setRecordedResponses({});
-    setResponseDialogFor(null);
-  }, [engagementId]);
-
-  // Reconcile the local mirror against the listing query: once the
-  // server-side row reflects the recorded response (status + comment
-  // + respondedAt all agree), drop the local entry so an out-of-band
-  // edit on another tab doesn't get permanently shadowed by a stale
-  // optimistic value. Done in a layout-style effect so the prune
-  // happens before paint and avoids a no-op re-render.
-  useEffect(() => {
-    if (!submissions) return;
-    setRecordedResponses((prev) => {
-      const ids = Object.keys(prev);
-      if (ids.length === 0) return prev;
-      let changed = false;
-      const next = { ...prev };
-      for (const id of ids) {
-        const local = prev[id];
-        const row = submissions.find((s) => s.id === id);
-        if (
-          row &&
-          row.status === local.status &&
-          row.reviewerComment === local.reviewerComment &&
-          row.respondedAt === local.respondedAt
-        ) {
-          delete next[id];
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [submissions]);
-
-  const dialogTarget =
-    responseDialogFor && submissions
-      ? (submissions.find((s) => s.id === responseDialogFor) ?? null)
-      : null;
-
-  // Resolve the timeline rows once: local optimistic mirror wins
-  // over the listing query so a freshly-recorded reply is bucketed
-  // by its new state, not the stale "pending" snapshot the server
-  // still returns until the next refetch. Both the chip filter
-  // (Task #124) and the live/backfilled/pending tally line above
-  // the timeline (Task #136) consume this same resolved view, so
-  // they can never disagree.
+  // The architect-side submissions tab is read-only since the
+  // legacy `/response` route was retired (Task #479). Reviewer
+  // verdicts are recorded in plan-review via `DecideModal`
+  // (PLR-6); this view simply renders whatever the listing query
+  // returns.
   const resolvedSubmissions = useMemo(() => {
     if (!submissions) return [];
-    return submissions.map((s) => {
-      const local = recordedResponses[s.id] ?? null;
-      return {
-        row: s,
-        respondedAt: local?.respondedAt ?? s.respondedAt,
-        responseRecordedAt:
-          local?.responseRecordedAt ?? s.responseRecordedAt,
-      };
-    });
-  }, [submissions, recordedResponses]);
+    return submissions.map((s) => ({
+      row: s,
+      respondedAt: s.respondedAt,
+      responseRecordedAt: s.responseRecordedAt,
+    }));
+  }, [submissions]);
 
   const visibleSubmissions = useMemo(
     () =>
@@ -3892,24 +3819,15 @@ function SubmissionsTab({
           )}
           {visibleSubmissions.map((s: EngagementSubmissionSummary) => {
             // The OpenAPI contract guarantees `status` is always
-            // present on the row; reviewer comment, respondedAt, and
-            // responseRecordedAt remain optional. We still consult the
-            // local mirror so a just-recorded reply renders
-            // immediately, before the listing query refetches.
-            const localResponse = recordedResponses[s.id] ?? null;
-            const status: SubmissionStatus =
-              localResponse?.status ?? s.status;
-            const reviewerComment: string | null =
-              localResponse?.reviewerComment ?? s.reviewerComment;
-            const respondedAt: string | null =
-              localResponse?.respondedAt ?? s.respondedAt;
-            // `responseRecordedAt` is the wall-clock instant the
-            // server stamped this reply (Task #106). Pair it with
-            // `respondedAt` to surface a "backfilled on" annotation
-            // when the user-picked reply date is meaningfully earlier
-            // than the recording event.
-            const responseRecordedAt: string | null =
-              localResponse?.responseRecordedAt ?? s.responseRecordedAt;
+            // present on the row; reviewer comment, respondedAt,
+            // and responseRecordedAt remain optional. The legacy
+            // local-mirror was removed alongside the retired
+            // `/response` route (Task #479) — verdicts now flow in
+            // exclusively from the plan-review DecideModal.
+            const status: SubmissionStatus = s.status;
+            const reviewerComment: string | null = s.reviewerComment;
+            const respondedAt: string | null = s.respondedAt;
+            const responseRecordedAt: string | null = s.responseRecordedAt;
             const backfillNote = backfillAnnotation(
               respondedAt,
               responseRecordedAt,
@@ -3991,22 +3909,6 @@ function SubmissionsTab({
                       {relativeTime(s.submittedAt)}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="sc-btn-ghost"
-                    onClick={(e) => {
-                      // Prevent the row click from also opening the
-                      // detail modal — this button has its own action.
-                      e.stopPropagation();
-                      setResponseDialogFor(s.id);
-                    }}
-                    data-testid={`submission-record-response-${s.id}`}
-                    style={{ padding: "2px 10px", fontSize: 12 }}
-                  >
-                    {status === "pending"
-                      ? "Record response"
-                      : "Update response"}
-                  </button>
                 </div>
                 {hasResponse && (
                   <div
@@ -4079,26 +3981,6 @@ function SubmissionsTab({
           })}
         </div>
       </div>
-
-      {dialogTarget && (
-        <RecordSubmissionResponseDialog
-          engagementId={engagementId}
-          submissionId={dialogTarget.id}
-          jurisdiction={dialogTarget.jurisdiction}
-          // Pass the row's `submittedAt` so the dialog can mirror the
-          // server's lower-bound guard (Task #119) and surface the
-          // problem inline before the request goes out.
-          submittedAt={dialogTarget.submittedAt}
-          isOpen={true}
-          onClose={() => setResponseDialogFor(null)}
-          onRecorded={(response) => {
-            setRecordedResponses((prev) => ({
-              ...prev,
-              [response.id]: response,
-            }));
-          }}
-        />
-      )}
     </>
   );
 }

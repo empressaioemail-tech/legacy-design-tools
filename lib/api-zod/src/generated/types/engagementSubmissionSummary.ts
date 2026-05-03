@@ -19,8 +19,8 @@ verbatim (capped to 2 KB by the create route's contract).
 
 `status`, `reviewerComment`, and `respondedAt` reflect the
 jurisdiction's recorded reply. `status` is always present and
-defaults to `pending` until a reviewer records a response via
-`POST /engagements/{id}/submissions/{submissionId}/response`,
+defaults to `pending` until a reviewer records a verdict via
+the PLR-6 `POST /submissions/{submissionId}/decisions` route,
 at which point `respondedAt` is set and `reviewerComment` may
 be populated. The fields stay null while the submission is
 still pending so consumers can drive a "no response yet" UI

@@ -72,7 +72,6 @@ import type {
 } from "@workspace/api-client-react";
 import { BimModelTab } from "./BimModelTab";
 import { SheetsTab } from "./sheets/SheetsTab";
-import { DecisionTab } from "./DecisionTab";
 import { EngagementContextTab } from "./EngagementContextTab";
 import { relativeTime } from "../lib/relativeTime";
 import { FindingsTab } from "./findings/FindingsTab";
@@ -119,21 +118,17 @@ export interface SubmissionDetailModalProps {
    */
   audience?: "internal" | "user" | "ai";
   /**
-   * Optional callback fired when a sibling row in the Decision tab's
-   * revision history is opened. The parent (`EngagementDetail`) wires
-   * this to its own modal-state setter so clicking "Open this
-   * submission" actually swaps the modal over to the chosen revision
-   * — the controlled-modal architecture means a URL-only deep-link
-   * would change `?submission=` without flipping `openSubmissionId`.
-   * When omitted, the history list falls back to a plain wouter
-   * `<Link>` for non-controlled callers / tests.
+   * Optional callback fired by the parent when a sibling submission
+   * is opened. Reserved for cross-revision deep-links from inside the
+   * modal; safe to omit (callers without revision-jump UI ignore it).
    */
   onOpenSubmission?: (submissionId: string) => void;
   /** Optional Communicate-button handler. Disabled when omitted. */
   onCommunicate?: () => void;
   /**
-   * Optional Decide-button handler. When omitted, the button falls
-   * back to switching the modal to the existing Decision tab.
+   * Optional Decide-button handler. Required for the reviewer Decide
+   * surface (PLR-6 / `DecideModal`); when omitted the button is
+   * inert.
    */
   onDecide?: () => void;
   /**
@@ -259,7 +254,7 @@ export function SubmissionDetailModal({
     }
   };
 
-  const handleDecide = onDecide ?? (() => setActiveTab("decision"));
+  const handleDecide = onDecide ?? (() => {});
 
   const handleShowInViewer = (elementRef: string) => {
     nextHighlightNonceRef.current += 1;
@@ -358,12 +353,6 @@ export function SubmissionDetailModal({
                 data-testid="submission-detail-modal-tab-renders"
               >
                 Renders
-              </TabsTrigger>
-              <TabsTrigger
-                value="decision"
-                data-testid="submission-detail-modal-tab-decision"
-              >
-                Decision
               </TabsTrigger>
               <TabsTrigger
                 value="bim-model"
@@ -487,17 +476,6 @@ export function SubmissionDetailModal({
               </div>
             </TabsContent>
             <TabsContent
-              value="decision"
-              data-testid="submission-detail-modal-decision-content"
-            >
-              <DecisionTab
-                submission={submission}
-                engagementId={engagementId}
-                audience={audience}
-                onOpenSubmission={onOpenSubmission}
-              />
-            </TabsContent>
-            <TabsContent
               value="bim-model"
               data-testid="submission-detail-modal-bim-model-content"
             >
@@ -566,9 +544,10 @@ function SubmissionActionHeader({
     SUBMISSION_STATUS_LABELS[submission.status] ?? submission.status;
 
   const communicateDisabled = onCommunicate == null;
+  const decideDisabled = !decideHandlerProvided;
   const decideTitle = decideHandlerProvided
     ? "Record verdict"
-    : "Open Decision tab";
+    : "Decide is reviewer-only";
 
   return (
     <div
@@ -603,7 +582,8 @@ function SubmissionActionHeader({
         label="Decide"
         statusLabel={decidePill}
         statusTestId="submission-action-decide-status"
-        onClick={onDecide}
+        onClick={onDecide ?? (() => {})}
+        disabled={decideDisabled}
         title={decideTitle}
       />
     </div>

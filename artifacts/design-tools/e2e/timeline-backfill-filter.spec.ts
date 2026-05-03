@@ -19,20 +19,16 @@
  *   1. Insert a fresh engagement directly via `@workspace/db` so the
  *      test owns a known engagement id (mirrors the seeding pattern
  *      already used in `submission-detail.spec.ts`).
- *   2. POST two submissions through the real API. For the row that
- *      should render as a backfill, directly UPDATE the
- *      `respondedAt` / `responseRecordedAt` columns to two timestamps
- *      whose gap clears the `SUBMISSION_BACKFILL_THRESHOLD_MS`
- *      window — we cannot achieve that gap purely through the
- *      response route because it (correctly) refuses to record a
- *      `respondedAt` earlier than the row's `submittedAt`, and the
- *      row was just submitted. The other row gets a live reply via
- *      the real response route (omit `respondedAt`, server stamps
- *      both timestamps to "now" → ~0 gap → reads as live). Direct
+ *   2. POST two submissions through the real API, then directly
+ *      UPDATE the response columns on each row to seed the
+ *      backfill / live distinction. The legacy `/response` route was
+ *      retired in Task #479 (verdicts now flow through the PLR-6
+ *      `POST /submissions/:id/decisions` endpoint, which requires
+ *      reviewer-audience auth that this spec doesn't carry). Direct
  *      UPDATE is a deliberate seeding-only escape hatch, scoped to
- *      a single row in a test-owned engagement; the *production*
- *      write path is still exercised by the live submission and by
- *      `submission-detail.spec.ts`.
+ *      a test-owned engagement; the *production* write path for
+ *      decisions is exercised by `decisions.test.ts` on the
+ *      api-server side.
  *   3. Drive the UI through Playwright:
  *        - Land on `?tab=submissions&reply=backfilled`, assert the
  *          Backfilled chip is pre-selected and only the backfilled
@@ -108,13 +104,19 @@ test.beforeAll(async ({ request }) => {
     })
     .where(eq(submissions.id, backfilledSubmissionId));
 
-  // Submission #2 — receives a live reply via the real route.
-  // Omitting `respondedAt` makes the server stamp both timestamps to
-  // "now", so the gap is ~0 and the row reads as a live reply.
+  // Submission #2 — receives a live reply seeded directly via the
+  // db. `respondedAt === responseRecordedAt` ⇒ ~0 gap ⇒ reads as
+  // live in the backfill filter.
   liveSubmissionId = await postSubmission(request, engagementId, LIVE_NOTE);
-  await postResponse(request, engagementId, liveSubmissionId, {
-    status: "approved",
-  });
+  const liveAt = new Date();
+  await db
+    .update(submissions)
+    .set({
+      status: "approved",
+      respondedAt: liveAt,
+      responseRecordedAt: liveAt,
+    })
+    .where(eq(submissions.id, liveSubmissionId));
 });
 
 test.afterAll(async () => {
@@ -207,27 +209,3 @@ async function postSubmission(
   return body.submissionId;
 }
 
-/**
- * POST a jurisdiction response against an existing submission via
- * the real API. Same throw-on-non-200 contract as `postSubmission`.
- */
-async function postResponse(
-  request: import("@playwright/test").APIRequestContext,
-  engagementIdArg: string,
-  submissionIdArg: string,
-  body: { status: "approved" | "corrections_requested" | "rejected"; respondedAt?: string },
-): Promise<void> {
-  const resp = await request.post(
-    `/api/engagements/${engagementIdArg}/submissions/${submissionIdArg}/response`,
-    {
-      data: body,
-      headers: { "content-type": "application/json" },
-    },
-  );
-  if (resp.status() !== 200) {
-    throw new Error(
-      `seed: POST .../submissions/${submissionIdArg}/response returned ` +
-        `${resp.status()}: ${await resp.text()}`,
-    );
-  }
-}

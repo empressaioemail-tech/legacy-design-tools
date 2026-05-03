@@ -43,32 +43,6 @@ import type {
   EngagementBriefingNarrative,
 } from "@workspace/api-client-react";
 
-// DecisionTab (Task #428) is mocked to a thin marker — its full
-// behavior (4-action grid, comment composer, revision history,
-// recorded banner) is covered end-to-end by DecisionTab.test.tsx.
-// Here we only need to verify the modal exposes the new trigger
-// and routes the active-tab signal into the mounted content.
-vi.mock("../DecisionTab", () => ({
-  DecisionTab: ({
-    submission,
-    engagementId,
-    audience,
-  }: {
-    submission: { id: string };
-    engagementId: string;
-    audience: string;
-  }) => (
-    <div
-      data-testid="decision-tab-mock"
-      data-submission-id={submission.id}
-      data-engagement-id={engagementId}
-      data-audience={audience}
-    >
-      Decision tab
-    </div>
-  ),
-}));
-
 vi.mock("../BimModelTab", () => ({
   BimModelTab: ({
     engagementId,
@@ -533,7 +507,6 @@ describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () =>
         | "note"
         | "findings"
         | "renders"
-        | "decision"
         | "sheets"
       >("findings");
       return (
@@ -647,13 +620,9 @@ describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () =>
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  // Task #428 — the modal exposes new "Renders" and "Decision" tab
-  // triggers alongside the existing surfaces. Activating Renders
-  // mounts the (mocked) `RenderGallery` with `canCancel={false}`
-  // and a reviewer-tuned empty hint; activating Decision mounts
-  // the (mocked) `DecisionTab` and forwards the modal's `audience`
-  // prop so the panel can gate its action grid behind the reviewer
-  // role.
+  // Task #428 — the modal exposes a "Renders" tab trigger.
+  // Activating Renders mounts the (mocked) `RenderGallery` with
+  // `canCancel={false}` and a reviewer-tuned empty hint.
   it("activates the Renders tab and mounts RenderGallery with reviewer-safe props (Task #428)", async () => {
     const user = userEvent.setup();
     renderModal();
@@ -664,27 +633,6 @@ describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () =>
     expect(
       gallery.getAttribute("data-empty-state-hint") ?? "",
     ).toMatch(/architect/i);
-  });
-
-  it("activates the Decision tab and forwards audience to DecisionTab (Task #428)", async () => {
-    const user = userEvent.setup();
-    render(
-      <QueryClientProvider client={makeQueryClient()}>
-        <SubmissionDetailModal
-          submission={baseSubmission}
-          engagementId="eng-1"
-          onClose={() => {}}
-          audience="internal"
-        />
-      </QueryClientProvider>,
-    );
-    await user.click(
-      screen.getByTestId("submission-detail-modal-tab-decision"),
-    );
-    const decision = await screen.findByTestId("decision-tab-mock");
-    expect(decision).toHaveAttribute("data-submission-id", "sub-1");
-    expect(decision).toHaveAttribute("data-engagement-id", "eng-1");
-    expect(decision).toHaveAttribute("data-audience", "internal");
   });
 
   it("surfaces the jurisdiction + relative-time subtitle in the modal header", async () => {
@@ -756,13 +704,10 @@ describe("SubmissionDetailModal — Plan Review (Tasks #305, #306, #319)", () =>
       expect(onCommunicate).toHaveBeenCalledTimes(1);
     });
 
-    it("Decide button falls back to opening the Decision tab when no handler is wired", async () => {
-      const user = userEvent.setup();
+    it("Decide button is disabled when no handler is provided", async () => {
       renderModal();
-      await user.click(await screen.findByTestId("submission-action-decide"));
-      expect(
-        await screen.findByTestId("decision-tab-mock"),
-      ).toBeInTheDocument();
+      const btn = await screen.findByTestId("submission-action-decide");
+      expect(btn).toBeDisabled();
     });
 
     it("Decide button fires the supplied handler when wired", async () => {

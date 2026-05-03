@@ -4,14 +4,11 @@ import {
   engagements,
   snapshots,
   submissions,
-  type SubmissionStatus,
 } from "@workspace/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   CreateEngagementSubmissionBody,
   GetEngagementParams,
-  RecordSubmissionResponseBody,
-  RecordSubmissionResponseParams,
   UpdateEngagementBody,
 } from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
@@ -21,12 +18,9 @@ import { autoTriggerFindingsOnSubmissionCreated } from "../lib/autoTriggerFindin
 import {
   ENGAGEMENT_EDIT_ACTOR,
   SUBMISSION_INGEST_ACTOR,
-  SUBMISSION_RESPONSE_ACTOR,
   emitEngagementAddressUpdatedEvent,
   emitEngagementJurisdictionResolvedEvent,
   emitEngagementSubmittedEvent,
-  emitSubmissionResponseRecordedEvent,
-  emitSubmissionStatusChangedEvent,
   type EngagementEventActor,
 } from "../lib/engagementEvents";
 
@@ -747,236 +741,5 @@ router.post(
   },
 );
 
-/**
- * POST /engagements/:id/submissions/:submissionId/response — record
- * the jurisdiction's reply against a previously-recorded submission.
- *
- * Updates the `submissions` row's `status`, `reviewerComment`, and
- * `respondedAt` columns, then emits a `submission.response-recorded`
- * event scoped to the *submission* entity (not the parent engagement)
- * so the back-and-forth lives on the submission's own history chain.
- *
- * The `engagementId` path parameter is required and must own the
- * referenced submission — the route returns a 400 (not a 404) on a
- * cross-engagement lookup so the caller can distinguish "this
- * submission really doesn't exist" from "this submission exists but
- * not under the engagement you specified". Both cases ultimately
- * refuse to mutate; the distinction is purely for callers to log /
- * surface meaningfully.
- *
- * Best-effort emit by the same contract as the sibling lifecycle
- * routes: the event append is gated on the row UPDATE actually
- * committing (so a transient driver failure mid-update doesn't leave
- * an audit-event pointing at a state the row never adopted), but the
- * inverse — a successful row UPDATE followed by an event-append
- * failure — does not roll back the response. Rows are the source of
- * truth (locked decision #5); events are the audit-trail surface.
- *
- * Calling the route a second time on the same submission is allowed
- * — the row update simply overwrites the prior values, and a new
- * event is appended to the submission's chain. The event chain
- * therefore preserves the full back-and-forth even when the row
- * only carries the latest state.
- */
-router.post(
-  "/engagements/:id/submissions/:submissionId/response",
-  async (req: Request, res: Response) => {
-    const params = RecordSubmissionResponseParams.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: "Invalid id" });
-      return;
-    }
-
-    const bodyParse = RecordSubmissionResponseBody.safeParse(req.body ?? {});
-    if (!bodyParse.success) {
-      res.status(400).json({ error: "Invalid request body" });
-      return;
-    }
-
-    try {
-      // The submission must (a) exist and (b) belong to the engagement
-      // named in the path. Combining both filters in the lookup avoids
-      // a follow-up engagement-id check after the row is loaded.
-      const existingRows = await db
-        .select()
-        .from(submissions)
-        .where(
-          and(
-            eq(submissions.id, params.data.submissionId),
-            eq(submissions.engagementId, params.data.id),
-          ),
-        )
-        .limit(1);
-      const existing = existingRows[0];
-      if (!existing) {
-        // Distinguish "submission missing entirely" from "submission
-        // exists but under a different engagement" so the caller log
-        // is meaningful; both refuse to mutate either way.
-        const orphanRows = await db
-          .select({ id: submissions.id })
-          .from(submissions)
-          .where(eq(submissions.id, params.data.submissionId))
-          .limit(1);
-        if (orphanRows[0]) {
-          res.status(400).json({
-            error: "Submission does not belong to this engagement",
-          });
-        } else {
-          res.status(404).json({ error: "Submission not found" });
-        }
-        return;
-      }
-
-      const rawComment = bodyParse.data.reviewerComment;
-      const reviewerComment =
-        typeof rawComment === "string" && rawComment.trim().length > 0
-          ? rawComment.trim()
-          : null;
-      // `respondedAt` is the canonical reply timestamp. Zod has already
-      // coerced any provided value to a `Date` (orval `useDates: true`);
-      // when omitted we stamp the server clock.
-      //
-      // Reject explicit values dated after the server clock so a non-
-      // browser caller (curl, scripts, future integrations) cannot
-      // backfill a reply into the future and silently corrupt the
-      // engagement timeline / audit trail. Mirrors the in-browser guard
-      // shipped in Task #104 so the rule holds regardless of client.
-      // The omitted-value branch is unaffected — the server stamp is
-      // by definition not in the future.
-      const now = new Date();
-      const providedRespondedAt = bodyParse.data.respondedAt;
-      if (providedRespondedAt && providedRespondedAt.getTime() > now.getTime()) {
-        res.status(400).json({
-          error: "respondedAt cannot be in the future",
-        });
-        return;
-      }
-      // Symmetric lower bound: a reply cannot pre-date the submission
-      // row's own `submittedAt`. Without this guard a backfilled or
-      // scripted call could record a jurisdiction reply timestamped
-      // weeks before the package was actually sent, which corrupts the
-      // engagement timeline ordering just as silently as the
-      // future-date case did. The omitted-value branch is unaffected —
-      // the server stamp is `now`, which is by construction >= the
-      // existing row's `submittedAt`.
-      if (
-        providedRespondedAt &&
-        providedRespondedAt.getTime() < existing.submittedAt.getTime()
-      ) {
-        res.status(400).json({
-          error: "respondedAt cannot be earlier than the submission's submittedAt",
-        });
-        return;
-      }
-      const respondedAt = providedRespondedAt ?? now;
-      // `responseRecordedAt` is the wall-clock time the server commits
-      // this update — always stamped here (never read from the body)
-      // so a backfilled `respondedAt` is paired with an honest
-      // recording timestamp the timeline can use to surface the
-      // backfill (Task #106). Reuse `now` (captured above before any
-      // I/O) so the stamp reflects the moment validation passed, not
-      // post-UPDATE wall-clock.
-      const responseRecordedAt = now;
-      const status = bodyParse.data.status;
-
-      const [updated] = await db
-        .update(submissions)
-        .set({
-          status,
-          reviewerComment,
-          respondedAt,
-          responseRecordedAt,
-        })
-        .where(eq(submissions.id, existing.id))
-        .returning();
-      if (!updated) {
-        // .returning() should always yield a row when the update
-        // matched; bail loudly if the driver violates that.
-        throw new Error("submission update returned no row");
-      }
-
-      const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
-      // Attribute the response to the session-bound user when one is
-      // attached (so the timeline shows *who* recorded the reply);
-      // falls back to the dedicated `submission-response` system actor
-      // otherwise — distinct from `submission-ingest` so the timeline
-      // can tell the send-off apart from the reply.
-      const requestor = req.session?.requestor;
-      const actor: EngagementEventActor =
-        requestor && requestor.id
-          ? { kind: requestor.kind, id: requestor.id }
-          : SUBMISSION_RESPONSE_ACTOR;
-      await emitSubmissionResponseRecordedEvent(
-        getHistoryService(),
-        {
-          submissionId: updated.id,
-          engagementId: updated.engagementId,
-          status,
-          reviewerComment,
-          respondedAt,
-          actor,
-        },
-        reqLog,
-      );
-      // Companion `submission.status-changed` event (Task #93). The
-      // response-recorded event above carries the *reply* semantics
-      // (reviewer comment + respondedAt); this one carries the
-      // *status transition* the FE timeline reads. We emit it
-      // unconditionally on a successful row update — including when
-      // the prior status equals the new status (e.g. re-recording the
-      // same `approved` reply with a corrected comment) — so the
-      // timeline preserves an audit entry per recording. The
-      // companion event uses the same actor and the resolved
-      // `respondedAt` timestamp so the two events read as a single
-      // moment in the chain.
-      await emitSubmissionStatusChangedEvent(
-        getHistoryService(),
-        {
-          submissionId: updated.id,
-          engagementId: updated.engagementId,
-          // `existing.status` is the value the row carried *before*
-          // the UPDATE above. The schema narrows this to a known
-          // enum at write-time, so the cast is safe; we still go
-          // through `as` rather than tightening the column's TS type
-          // to keep the row's text-typed status forward-compatible.
-          fromStatus: existing.status as SubmissionStatus,
-          toStatus: status,
-          // The reviewer comment doubles as the status-change note
-          // for the timeline. Stays `null` when the producer didn't
-          // supply one (the comment is already normalized to null
-          // for blank/whitespace inputs above).
-          note: reviewerComment,
-          occurredAt: respondedAt,
-          actor,
-        },
-        reqLog,
-      );
-
-      res.status(200).json({
-        id: updated.id,
-        engagementId: updated.engagementId,
-        status: updated.status,
-        reviewerComment: updated.reviewerComment,
-        respondedAt: updated.respondedAt
-          ? updated.respondedAt.toISOString()
-          : null,
-        responseRecordedAt: updated.responseRecordedAt
-          ? updated.responseRecordedAt.toISOString()
-          : null,
-        submittedAt: updated.submittedAt.toISOString(),
-      });
-    } catch (err) {
-      logger.error(
-        {
-          err,
-          id: params.data.id,
-          submissionId: params.data.submissionId,
-        },
-        "record submission response failed",
-      );
-      res.status(500).json({ error: "Failed to record submission response" });
-    }
-  },
-);
 
 export default router;
