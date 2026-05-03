@@ -101,5 +101,13 @@ jobs:
           psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
       - name: Push database schema
         run: pnpm --filter @workspace/db run push
+      - name: Check schema fixture drift
+        # Guardrail: pg_dump the live (just-pushed) schema and diff it
+        # against lib/db/src/__tests__/__fixtures__/schema.sql.template.
+        # If a schema change was made without running
+        # `pnpm --filter @workspace/db run test:fixture:schema`, the
+        # checked-in fixture will be stale and integration tests would
+        # silently miss new columns/tables. Fail the PR loudly instead.
+        run: pnpm --filter @workspace/db run test:fixture:drift
       - name: Run tests
         run: pnpm test

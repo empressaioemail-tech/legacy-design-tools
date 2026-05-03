@@ -459,13 +459,13 @@ CREATE TABLE @@SCHEMA@@.submissions (
     jurisdiction_state text,
     jurisdiction_fips text,
     note text,
-    discipline text,
     submitted_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
     reviewer_comment text,
     responded_at timestamp with time zone,
     response_recorded_at timestamp with time zone,
+    discipline text,
     CONSTRAINT submissions_discipline_check CHECK (((discipline IS NULL) OR (discipline = ANY (ARRAY['building'::text, 'fire'::text, 'zoning'::text, 'civil'::text]))))
 );
 

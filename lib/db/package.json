@@ -14,7 +14,8 @@
     "seed": "tsx src/seed.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:fixture:schema": "bash ./scripts/refresh-schema-fixture.sh"
+    "test:fixture:schema": "bash ./scripts/refresh-schema-fixture.sh",
+    "test:fixture:drift": "bash ./scripts/check-fixture-drift.sh"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",
