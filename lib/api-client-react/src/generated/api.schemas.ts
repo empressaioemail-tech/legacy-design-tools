@@ -3617,6 +3617,89 @@ export interface MarkNotificationsReadResponse {
   lastReadAt: string;
 }
 
+/**
+ * A reviewer present on a submission's live channel. Identity
+is the application user id; `displayName` is looked up from
+the `users` table at connect time and may be `null` when the
+lookup fails or no display name is set, in which case the FE
+renders its own "Unknown reviewer" placeholder.
+
+ */
+export interface SubmissionPresenceUser {
+  id: string;
+  displayName: string | null;
+}
+
+export type SubmissionFindingLiveEventType =
+  (typeof SubmissionFindingLiveEventType)[keyof typeof SubmissionFindingLiveEventType];
+
+export const SubmissionFindingLiveEventType = {
+  findingadded: "finding.added",
+  findingaccepted: "finding.accepted",
+  findingrejected: "finding.rejected",
+  findingoverridden: "finding.overridden",
+} as const;
+
+export type SubmissionFindingLiveEventPayload = { [key: string]: unknown };
+
+/**
+ * SSE frame fanned out by the findings router after a
+successful mutation. The `payload` mirrors the wire shape
+the originating REST call returned (typically a
+`FindingResponse` body); it is intentionally typed as a free
+object here because the producer evolves independently of
+the schema.
+
+ */
+export interface SubmissionFindingLiveEvent {
+  type: SubmissionFindingLiveEventType;
+  submissionId: string;
+  occurredAt: string;
+  payload: SubmissionFindingLiveEventPayload;
+}
+
+export type SubmissionPresenceLiveEventType =
+  (typeof SubmissionPresenceLiveEventType)[keyof typeof SubmissionPresenceLiveEventType];
+
+export const SubmissionPresenceLiveEventType = {
+  presencejoined: "presence.joined",
+  presenceleft: "presence.left",
+} as const;
+
+/**
+ * SSE frame fired when a reviewer connects or disconnects.
+`user` is the reviewer that transitioned; `presence` is the
+full snapshot of distinct reviewers currently watching the
+submission *after* the transition has been applied (so the
+FE can reconcile its chip list without bookkeeping). The
+newly-joined subscriber always receives an immediate
+`presence.joined` carrying the snapshot — even when no one
+else is watching — so the first frame is render-able.
+Multiple tabs from the same reviewer collapse: a second tab
+does not emit a `presence.joined` to existing peers, and the
+last tab closing is what triggers `presence.left`.
+
+ */
+export interface SubmissionPresenceLiveEvent {
+  type: SubmissionPresenceLiveEventType;
+  submissionId: string;
+  occurredAt: string;
+  user: SubmissionPresenceUser;
+  presence: SubmissionPresenceUser[];
+}
+
+/**
+ * Discriminated union of every event type emitted on the SSE
+channel at `GET /submissions/{submissionId}/events`. The
+`type` field matches the SSE `event:` line and selects the
+variant. Keep-alive comments (lines beginning with `:`) are
+not events and are not represented in this schema.
+
+ */
+export type SubmissionLiveEvent =
+  | SubmissionFindingLiveEvent
+  | SubmissionPresenceLiveEvent;
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;

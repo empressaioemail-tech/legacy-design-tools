@@ -55,6 +55,14 @@ tags:
       only (audience `internal`); persists a `communication-event`
       atom row plus a `communication-event.sent` history event per
       send.
+  - name: submission-events
+    description: |
+      Per-submission live event channel (PLR-9). A long-lived
+      Server-Sent Events stream that fans out reviewer-presence
+      transitions and finding-mutation events to every reviewer
+      currently watching a submission. Reviewer-only
+      (audience-gated to `internal`); single-process, in-memory
+      pub/sub backed by `lib/submissionLiveEvents.ts`.
 paths:
   /healthz:
     get:
@@ -3296,6 +3304,93 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/events:
+    get:
+      operationId: streamSubmissionEvents
+      tags: [submission-events]
+      summary: Subscribe to a submission's live event stream (SSE)
+      description: |
+        PLR-9 — Long-lived Server-Sent Events channel for a single
+        submission. Clients connect with `EventSource` and receive
+        two families of events:
+
+          - **Presence** (`presence.joined`, `presence.left`) — fired
+            as reviewers connect and disconnect. Each event carries
+            both the transitioning `user` and a `presence` snapshot
+            (one entry per distinct reviewer; multiple tabs from the
+            same reviewer collapse into one chip). The newly-joined
+            subscriber always receives an immediate `presence.joined`
+            with the full snapshot, even when no one else is watching.
+          - **Finding mutations** (`finding.added`,
+            `finding.accepted`, `finding.rejected`,
+            `finding.overridden`) — fanned out by the findings router
+            after each successful mutation. The `payload` mirrors the
+            wire shape that the originating REST call returned.
+
+        Every frame is a JSON-encoded `SubmissionLiveEvent` whose
+        `type` matches the SSE `event:` line, so the FE can either
+        register per-type listeners with
+        `EventSource.addEventListener` or branch on `data.type` from a
+        single `onmessage`. The server also sends a `:` keep-alive
+        comment every ~25s to defeat idle proxies; those frames are
+        not events and are skipped by the spec.
+
+        Reviewer-only — the endpoint requires the `internal` audience.
+        EventSource cannot send custom headers, so identity is
+        resolved from the same `req.session.requestor` as every other
+        route (cookie-based in dev/test, verified-auth-stamped in
+        production). A 404 is returned if the submission id is
+        unknown so a typo cannot accumulate orphaned subscriptions.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: |
+            SSE stream opened. The response stays open until the
+            client disconnects; frames are emitted as
+            `SubmissionLiveEvent` JSON payloads, one per SSE event.
+            Documented as a string body because OpenAPI has no native
+            streaming type — see the `SubmissionLiveEvent` schema for
+            the per-frame `data:` shape.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Concatenated SSE frames. Each frame is
+                  `event: <type>\ndata: <json>\n\n` where `<json>`
+                  conforms to `SubmissionLiveEvent`. Lines starting
+                  with `:` are keep-alive comments and have no
+                  payload.
+        "400":
+          description: Invalid submission id or missing session requestor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to open the events channel.
           content:
             application/json:
               schema:
@@ -9003,3 +9098,99 @@ components:
           type: string
           format: date-time
       required: [lastReadAt]
+
+    SubmissionPresenceUser:
+      type: object
+      description: |
+        A reviewer present on a submission's live channel. Identity
+        is the application user id; `displayName` is looked up from
+        the `users` table at connect time and may be `null` when the
+        lookup fails or no display name is set, in which case the FE
+        renders its own "Unknown reviewer" placeholder.
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+      required: [id, displayName]
+
+    SubmissionFindingLiveEvent:
+      type: object
+      description: |
+        SSE frame fanned out by the findings router after a
+        successful mutation. The `payload` mirrors the wire shape
+        the originating REST call returned (typically a
+        `FindingResponse` body); it is intentionally typed as a free
+        object here because the producer evolves independently of
+        the schema.
+      properties:
+        type:
+          type: string
+          enum:
+            - finding.added
+            - finding.accepted
+            - finding.rejected
+            - finding.overridden
+        submissionId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+      required: [type, submissionId, occurredAt, payload]
+
+    SubmissionPresenceLiveEvent:
+      type: object
+      description: |
+        SSE frame fired when a reviewer connects or disconnects.
+        `user` is the reviewer that transitioned; `presence` is the
+        full snapshot of distinct reviewers currently watching the
+        submission *after* the transition has been applied (so the
+        FE can reconcile its chip list without bookkeeping). The
+        newly-joined subscriber always receives an immediate
+        `presence.joined` carrying the snapshot — even when no one
+        else is watching — so the first frame is render-able.
+        Multiple tabs from the same reviewer collapse: a second tab
+        does not emit a `presence.joined` to existing peers, and the
+        last tab closing is what triggers `presence.left`.
+      properties:
+        type:
+          type: string
+          enum:
+            - presence.joined
+            - presence.left
+        submissionId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/SubmissionPresenceUser"
+        presence:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubmissionPresenceUser"
+      required: [type, submissionId, occurredAt, user, presence]
+
+    SubmissionLiveEvent:
+      description: |
+        Discriminated union of every event type emitted on the SSE
+        channel at `GET /submissions/{submissionId}/events`. The
+        `type` field matches the SSE `event:` line and selects the
+        variant. Keep-alive comments (lines beginning with `:`) are
+        not events and are not represented in this schema.
+      oneOf:
+        - $ref: "#/components/schemas/SubmissionFindingLiveEvent"
+        - $ref: "#/components/schemas/SubmissionPresenceLiveEvent"
+      discriminator:
+        propertyName: type
+        mapping:
+          finding.added: "#/components/schemas/SubmissionFindingLiveEvent"
+          finding.accepted: "#/components/schemas/SubmissionFindingLiveEvent"
+          finding.rejected: "#/components/schemas/SubmissionFindingLiveEvent"
+          finding.overridden: "#/components/schemas/SubmissionFindingLiveEvent"
+          presence.joined: "#/components/schemas/SubmissionPresenceLiveEvent"
+          presence.left: "#/components/schemas/SubmissionPresenceLiveEvent"

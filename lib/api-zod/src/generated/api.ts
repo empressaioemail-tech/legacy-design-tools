@@ -4522,6 +4522,45 @@ export const ListSubmissionFindingsGenerationRunsResponse = zod
   );
 
 /**
+ * PLR-9 — Long-lived Server-Sent Events channel for a single
+submission. Clients connect with `EventSource` and receive
+two families of events:
+
+  - **Presence** (`presence.joined`, `presence.left`) — fired
+    as reviewers connect and disconnect. Each event carries
+    both the transitioning `user` and a `presence` snapshot
+    (one entry per distinct reviewer; multiple tabs from the
+    same reviewer collapse into one chip). The newly-joined
+    subscriber always receives an immediate `presence.joined`
+    with the full snapshot, even when no one else is watching.
+  - **Finding mutations** (`finding.added`,
+    `finding.accepted`, `finding.rejected`,
+    `finding.overridden`) — fanned out by the findings router
+    after each successful mutation. The `payload` mirrors the
+    wire shape that the originating REST call returned.
+
+Every frame is a JSON-encoded `SubmissionLiveEvent` whose
+`type` matches the SSE `event:` line, so the FE can either
+register per-type listeners with
+`EventSource.addEventListener` or branch on `data.type` from a
+single `onmessage`. The server also sends a `:` keep-alive
+comment every ~25s to defeat idle proxies; those frames are
+not events and are skipped by the spec.
+
+Reviewer-only — the endpoint requires the `internal` audience.
+EventSource cannot send custom headers, so identity is
+resolved from the same `req.session.requestor` as every other
+route (cookie-based in dev/test, verified-auth-stamped in
+production). A 404 is returned if the submission id is
+unknown so a typo cannot accumulate orphaned subscriptions.
+
+ * @summary Subscribe to a submission's live event stream (SSE)
+ */
+export const StreamSubmissionEventsParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+/**
  * Stamps the finding's status to `accepted` plus the reviewer
 attribution (`reviewerStatusBy`, `reviewerStatusChangedAt`).
 The original AI-produced text is preserved in place — accept
