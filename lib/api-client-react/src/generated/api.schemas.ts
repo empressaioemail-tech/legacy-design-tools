@@ -4117,6 +4117,134 @@ export interface QaResetResponse {
   ok: boolean;
 }
 
+export type QaAutopilotRunStatus =
+  (typeof QaAutopilotRunStatus)[keyof typeof QaAutopilotRunStatus];
+
+export const QaAutopilotRunStatus = {
+  running: "running",
+  completed: "completed",
+  errored: "errored",
+} as const;
+
+export type QaAutopilotTrigger =
+  (typeof QaAutopilotTrigger)[keyof typeof QaAutopilotTrigger];
+
+export const QaAutopilotTrigger = {
+  manual: "manual",
+  "auto-on-open": "auto-on-open",
+} as const;
+
+export type QaAutopilotFindingCategory =
+  (typeof QaAutopilotFindingCategory)[keyof typeof QaAutopilotFindingCategory];
+
+export const QaAutopilotFindingCategory = {
+  flaky: "flaky",
+  snapshot: "snapshot",
+  "codegen-stale": "codegen-stale",
+  lint: "lint",
+  fixture: "fixture",
+  "app-code": "app-code",
+  unknown: "unknown",
+} as const;
+
+export type QaAutopilotFindingSeverity =
+  (typeof QaAutopilotFindingSeverity)[keyof typeof QaAutopilotFindingSeverity];
+
+export const QaAutopilotFindingSeverity = {
+  info: "info",
+  warning: "warning",
+  error: "error",
+} as const;
+
+export type QaAutopilotFindingAutoFixStatus =
+  (typeof QaAutopilotFindingAutoFixStatus)[keyof typeof QaAutopilotFindingAutoFixStatus];
+
+export const QaAutopilotFindingAutoFixStatus = {
+  "auto-fixed": "auto-fixed",
+  "needs-review": "needs-review",
+  skipped: "skipped",
+} as const;
+
+export interface QaAutopilotRunSummary {
+  id: string;
+  status: QaAutopilotRunStatus;
+  trigger: QaAutopilotTrigger;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  totalSuites: number;
+  passing: number;
+  failing: number;
+  flaky: number;
+  autoFixesApplied: number;
+  needsReview: number;
+  notes: string;
+}
+
+export interface QaAutopilotRunListResponse {
+  runs: QaAutopilotRunSummary[];
+}
+
+export interface QaAutopilotFinding {
+  id: string;
+  autopilotRunId: string;
+  suiteId: string;
+  qaRunId: string | null;
+  testName: string | null;
+  filePath: string | null;
+  line: number | null;
+  errorExcerpt: string;
+  category: QaAutopilotFindingCategory;
+  severity: QaAutopilotFindingSeverity;
+  autoFixStatus: QaAutopilotFindingAutoFixStatus;
+  plainSummary: string;
+  suggestedDiff: string;
+  createdAt: string;
+}
+
+export interface QaAutopilotFixAction {
+  id: string;
+  autopilotRunId: string;
+  findingId: string | null;
+  fixerId: string;
+  suiteId: string;
+  command: string;
+  filesChanged: string[];
+  success: boolean;
+  log: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface QaAutopilotRunDetail {
+  run: QaAutopilotRunSummary;
+  findings: QaAutopilotFinding[];
+  fixActions: QaAutopilotFixAction[];
+}
+
+export interface QaAutopilotState {
+  enabled: boolean;
+  activeRunId: string | null;
+  latestRun: QaAutopilotRunSummary | null;
+}
+
+export interface QaAutopilotSettings {
+  enabled: boolean;
+}
+
+export interface UpdateQaAutopilotSettingsBody {
+  enabled: boolean;
+}
+
+export interface StartQaAutopilotRunBody {
+  trigger?: QaAutopilotTrigger;
+}
+
+export interface QaAutopilotRunReceipt {
+  runId: string;
+  startedAt: string;
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
@@ -4395,6 +4523,14 @@ export type ListCannedFindingsParams = {
 
 export type ListQaRunsParams = {
   suiteId?: string;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
+
+export type ListQaAutopilotRunsParams = {
   /**
    * @minimum 1
    * @maximum 100

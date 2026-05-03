@@ -205,6 +205,67 @@ export function getActiveRunIdForSuite(suiteId: string): string | null {
   return activeBySuite.get(suiteId) ?? null;
 }
 
+/**
+ * Resolve when the given run finishes (or immediately if it has already
+ * finalized). Used by the autopilot orchestrator to drive sequential
+ * runs over the suite registry without polling the runs table.
+ */
+export interface RunOutcome {
+  status: QaRunStatus;
+  exitCode: number | null;
+  durationMs: number;
+  log: string;
+}
+
+export async function waitForRun(runId: string): Promise<RunOutcome> {
+  const live = active.get(runId);
+  if (live) {
+    return new Promise<RunOutcome>((resolve) => {
+      const onEvent = (e: RunStreamEvent) => {
+        if (e.type !== "done") return;
+        live.subscribers.delete(onEvent);
+        resolve({
+          status: e.status,
+          exitCode: e.exitCode,
+          durationMs: e.durationMs,
+          log: live.buffer.join(""),
+        });
+      };
+      live.subscribers.add(onEvent);
+    });
+  }
+  const [row] = await db
+    .select()
+    .from(qaRuns)
+    .where(eq(qaRuns.id, runId))
+    .limit(1);
+  if (!row) {
+    return { status: "errored", exitCode: null, durationMs: 0, log: "" };
+  }
+  return {
+    status: row.status as QaRunStatus,
+    exitCode: row.exitCode,
+    durationMs: row.finishedAt
+      ? row.finishedAt.getTime() - row.startedAt.getTime()
+      : 0,
+    log: row.log,
+  };
+}
+
+/** Convenience: start a suite run and wait for it to finish. */
+export async function runSuiteToCompletion(suite: QaSuite): Promise<{
+  runId: string;
+  outcome: RunOutcome;
+}> {
+  const { runId } = await startRun(suite);
+  const outcome = await waitForRun(runId);
+  return { runId, outcome };
+}
+
+/** Repo root, exported for callers (autopilot fixers) that need to spawn
+ *  workspace-relative commands. */
+export const QA_REPO_ROOT = REPO_ROOT;
+
 export interface StartAllResult {
   started: Array<{ suiteId: string; runId: string }>;
   skipped: Array<{ suiteId: string; reason: string }>;

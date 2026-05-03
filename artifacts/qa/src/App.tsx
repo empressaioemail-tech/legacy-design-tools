@@ -6,6 +6,8 @@ import NotFound from "@/pages/not-found";
 import SuitesPage from "@/pages/SuitesPage";
 import HistoryPage from "@/pages/HistoryPage";
 import ChecklistsPage from "@/pages/ChecklistsPage";
+import AutopilotPage from "@/pages/AutopilotPage";
+import { AutopilotBanner } from "@/components/AutopilotBanner";
 import { Beaker } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +19,7 @@ const queryClient = new QueryClient({
 
 const NAV: Array<{ path: string; label: string }> = [
   { path: "/", label: "Suites" },
+  { path: "/autopilot", label: "Autopilot" },
   { path: "/history", label: "Run history" },
   { path: "/checklists", label: "Manual checklists" },
 ];
@@ -63,7 +66,10 @@ function Shell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-6 py-6">{children}</main>
+      <main className="mx-auto max-w-6xl space-y-4 px-6 py-6">
+        <AutopilotBanner />
+        {children}
+      </main>
     </div>
   );
 }
@@ -73,6 +79,7 @@ function Router() {
     <Shell>
       <Switch>
         <Route path="/" component={SuitesPage} />
+        <Route path="/autopilot" component={AutopilotPage} />
         <Route path="/history" component={HistoryPage} />
         <Route path="/checklists" component={ChecklistsPage} />
         <Route component={NotFound} />

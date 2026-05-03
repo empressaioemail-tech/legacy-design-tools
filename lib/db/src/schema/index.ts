@@ -28,3 +28,7 @@ export * from "./qaRuns";
 export * from "./qaChecklistResults";
 export * from "./decisionPdfArtifacts";
 export * from "./permitCounters";
+export * from "./qaSettings";
+export * from "./autopilotRuns";
+export * from "./autopilotFindings";
+export * from "./autopilotFixActions";

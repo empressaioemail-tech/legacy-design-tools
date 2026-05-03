@@ -23,6 +23,18 @@ import {
   SuiteAlreadyRunningError,
   type RunStreamEvent,
 } from "../lib/qa/runner";
+import {
+  startAutopilotRun,
+  getActiveAutopilotRunId,
+  getLatestAutopilotRun,
+  listAutopilotRuns,
+  getAutopilotRunDetail,
+  AutopilotAlreadyRunningError,
+} from "../lib/qa/autopilot";
+import {
+  isAutopilotEnabled,
+  setSetting,
+} from "../lib/qa/settings";
 
 const router: IRouter = Router();
 
@@ -335,5 +347,146 @@ router.post(
     res.json({ ok: true });
   },
 );
+
+// -----------------------------------------------------------------------------
+// Autopilot (Task #482)
+// -----------------------------------------------------------------------------
+
+function serializeAutopilotRun(
+  row: {
+    id: string;
+    status: string;
+    trigger: string;
+    startedAt: Date;
+    finishedAt: Date | null;
+    totalSuites: number;
+    passing: number;
+    failing: number;
+    flaky: number;
+    autoFixesApplied: number;
+    needsReview: number;
+    notes: string;
+  },
+): Record<string, unknown> {
+  return {
+    id: row.id,
+    status: row.status,
+    trigger: row.trigger,
+    startedAt: row.startedAt.toISOString(),
+    finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
+    durationMs: row.finishedAt
+      ? row.finishedAt.getTime() - row.startedAt.getTime()
+      : null,
+    totalSuites: row.totalSuites,
+    passing: row.passing,
+    failing: row.failing,
+    flaky: row.flaky,
+    autoFixesApplied: row.autoFixesApplied,
+    needsReview: row.needsReview,
+    notes: row.notes,
+  };
+}
+
+router.get("/qa/autopilot", async (_req: Request, res: Response) => {
+  const [enabled, latest] = await Promise.all([
+    isAutopilotEnabled(),
+    getLatestAutopilotRun(),
+  ]);
+  res.json({
+    enabled,
+    activeRunId: getActiveAutopilotRunId(),
+    latestRun: latest ? serializeAutopilotRun(latest) : null,
+  });
+});
+
+const UpdateAutopilotSettingsBody = z.object({
+  enabled: z.boolean(),
+});
+
+router.patch("/qa/autopilot/settings", async (req: Request, res: Response) => {
+  const parsed = UpdateAutopilotSettingsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: "invalid_body", issues: parsed.error.issues });
+    return;
+  }
+  await setSetting("autopilot.enabled", parsed.data.enabled ? "true" : "false");
+  res.json({ enabled: parsed.data.enabled });
+});
+
+const StartAutopilotBody = z.object({
+  trigger: z.enum(["manual", "auto-on-open"]).default("manual"),
+});
+
+router.post("/qa/autopilot/runs", async (req: Request, res: Response) => {
+  const parsed = StartAutopilotBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: "invalid_body", issues: parsed.error.issues });
+    return;
+  }
+  try {
+    const result = await startAutopilotRun(parsed.data.trigger);
+    res
+      .status(201)
+      .json({ runId: result.runId, startedAt: result.startedAt.toISOString() });
+  } catch (err) {
+    if (err instanceof AutopilotAlreadyRunningError) {
+      res.status(409).json({ error: "already_running", runId: err.runId });
+      return;
+    }
+    logger.error({ err }, "qa: failed to start autopilot run");
+    res.status(500).json({ error: "start_failed" });
+  }
+});
+
+router.get("/qa/autopilot/runs", async (req: Request, res: Response) => {
+  const limit = Math.min(Number(req.query["limit"] ?? 25) || 25, 100);
+  const rows = await listAutopilotRuns(limit);
+  res.json({ runs: rows.map(serializeAutopilotRun) });
+});
+
+router.get("/qa/autopilot/runs/:runId", async (req: Request, res: Response) => {
+  const runId = String(req.params.runId ?? "").trim();
+  const detail = await getAutopilotRunDetail(runId);
+  if (!detail) {
+    res.status(404).json({ error: "run_not_found" });
+    return;
+  }
+  res.json({
+    run: serializeAutopilotRun(detail.run),
+    findings: detail.findings.map((f) => ({
+      id: f.id,
+      autopilotRunId: f.autopilotRunId,
+      suiteId: f.suiteId,
+      qaRunId: f.qaRunId,
+      testName: f.testName,
+      filePath: f.filePath,
+      line: f.line,
+      errorExcerpt: f.errorExcerpt,
+      category: f.category,
+      severity: f.severity,
+      autoFixStatus: f.autoFixStatus,
+      plainSummary: f.plainSummary,
+      suggestedDiff: f.suggestedDiff,
+      createdAt: f.createdAt.toISOString(),
+    })),
+    fixActions: detail.fixActions.map((a) => ({
+      id: a.id,
+      autopilotRunId: a.autopilotRunId,
+      findingId: a.findingId,
+      fixerId: a.fixerId,
+      suiteId: a.suiteId,
+      command: a.command,
+      filesChanged: JSON.parse(a.filesChanged) as string[],
+      success: a.success,
+      log: a.log,
+      startedAt: a.startedAt.toISOString(),
+      finishedAt: a.finishedAt ? a.finishedAt.toISOString() : null,
+    })),
+  });
+});
 
 export default router;

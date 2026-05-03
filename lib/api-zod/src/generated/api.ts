@@ -7013,6 +7013,149 @@ export const GetQaRunResponse = zod.object({
 });
 
 /**
+ * @summary Current autopilot state — toggle, latest run, active run id
+ */
+export const GetQaAutopilotStateResponse = zod.object({
+  enabled: zod.boolean(),
+  activeRunId: zod.string().uuid().nullable(),
+  latestRun: zod
+    .object({
+      id: zod.string().uuid(),
+      status: zod.enum(["running", "completed", "errored"]),
+      trigger: zod.enum(["manual", "auto-on-open"]),
+      startedAt: zod.coerce.date(),
+      finishedAt: zod.coerce.date().nullable(),
+      durationMs: zod.number().nullable(),
+      totalSuites: zod.number(),
+      passing: zod.number(),
+      failing: zod.number(),
+      flaky: zod.number(),
+      autoFixesApplied: zod.number(),
+      needsReview: zod.number(),
+      notes: zod.string(),
+    })
+    .nullable(),
+});
+
+/**
+ * @summary Toggle the autopilot ON/OFF
+ */
+export const UpdateQaAutopilotSettingsBody = zod.object({
+  enabled: zod.boolean(),
+});
+
+export const UpdateQaAutopilotSettingsResponse = zod.object({
+  enabled: zod.boolean(),
+});
+
+/**
+ * @summary List recent autopilot runs (newest first)
+ */
+export const listQaAutopilotRunsQueryLimitDefault = 25;
+export const listQaAutopilotRunsQueryLimitMax = 100;
+
+export const ListQaAutopilotRunsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listQaAutopilotRunsQueryLimitMax)
+    .default(listQaAutopilotRunsQueryLimitDefault),
+});
+
+export const ListQaAutopilotRunsResponse = zod.object({
+  runs: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      status: zod.enum(["running", "completed", "errored"]),
+      trigger: zod.enum(["manual", "auto-on-open"]),
+      startedAt: zod.coerce.date(),
+      finishedAt: zod.coerce.date().nullable(),
+      durationMs: zod.number().nullable(),
+      totalSuites: zod.number(),
+      passing: zod.number(),
+      failing: zod.number(),
+      flaky: zod.number(),
+      autoFixesApplied: zod.number(),
+      needsReview: zod.number(),
+      notes: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Kick off a new autopilot run across every registered suite
+ */
+export const StartQaAutopilotRunBody = zod.object({
+  trigger: zod.enum(["manual", "auto-on-open"]).optional(),
+});
+
+/**
+ * @summary Get an autopilot run with its findings + fix actions
+ */
+export const GetQaAutopilotRunParams = zod.object({
+  runId: zod.coerce.string().uuid(),
+});
+
+export const GetQaAutopilotRunResponse = zod.object({
+  run: zod.object({
+    id: zod.string().uuid(),
+    status: zod.enum(["running", "completed", "errored"]),
+    trigger: zod.enum(["manual", "auto-on-open"]),
+    startedAt: zod.coerce.date(),
+    finishedAt: zod.coerce.date().nullable(),
+    durationMs: zod.number().nullable(),
+    totalSuites: zod.number(),
+    passing: zod.number(),
+    failing: zod.number(),
+    flaky: zod.number(),
+    autoFixesApplied: zod.number(),
+    needsReview: zod.number(),
+    notes: zod.string(),
+  }),
+  findings: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      autopilotRunId: zod.string().uuid(),
+      suiteId: zod.string(),
+      qaRunId: zod.string().uuid().nullable(),
+      testName: zod.string().nullable(),
+      filePath: zod.string().nullable(),
+      line: zod.number().nullable(),
+      errorExcerpt: zod.string(),
+      category: zod.enum([
+        "flaky",
+        "snapshot",
+        "codegen-stale",
+        "lint",
+        "fixture",
+        "app-code",
+        "unknown",
+      ]),
+      severity: zod.enum(["info", "warning", "error"]),
+      autoFixStatus: zod.enum(["auto-fixed", "needs-review", "skipped"]),
+      plainSummary: zod.string(),
+      suggestedDiff: zod.string(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  fixActions: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      autopilotRunId: zod.string().uuid(),
+      findingId: zod.string().uuid().nullable(),
+      fixerId: zod.string(),
+      suiteId: zod.string(),
+      command: zod.string(),
+      filesChanged: zod.array(zod.string()),
+      success: zod.boolean(),
+      log: zod.string(),
+      startedAt: zod.coerce.date(),
+      finishedAt: zod.coerce.date().nullable(),
+    }),
+  ),
+});
+
+/**
  * @summary List manual QA checklists with their persisted item results
  */
 export const ListQaChecklistsResponse = zod.object({

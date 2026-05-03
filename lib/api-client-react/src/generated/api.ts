@@ -77,6 +77,7 @@ import type {
   ListMyReviewerRequestsParams,
   ListMyReviewerRequestsResponse,
   ListNotificationsResponse,
+  ListQaAutopilotRunsParams,
   ListQaRunsParams,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
@@ -93,6 +94,11 @@ import type {
   PromoteReviewerAnnotationsBody,
   PromoteReviewerAnnotationsResponse,
   PushBimModelBody,
+  QaAutopilotRunDetail,
+  QaAutopilotRunListResponse,
+  QaAutopilotRunReceipt,
+  QaAutopilotSettings,
+  QaAutopilotState,
   QaChecklistItemResultPatch,
   QaChecklistListResponse,
   QaResetResponse,
@@ -122,6 +128,7 @@ import type {
   SnapshotSheetHistoryResponse,
   SnapshotSummary,
   StartAllQaRunsResponse,
+  StartQaAutopilotRunBody,
   StartQaRunBody,
   SubmissionCommentResponse,
   SubmissionCommunicationResponse,
@@ -132,6 +139,7 @@ import type {
   UpdateEngagementBody,
   UpdateMyArchitectPdfHeaderBody,
   UpdateMyProfileBody,
+  UpdateQaAutopilotSettingsBody,
   UpdateQaChecklistItemBody,
   UpdateReviewerAnnotationBody,
   UpdateUserBody,
@@ -10468,6 +10476,445 @@ export function useGetQaRun<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetQaRunQueryOptions(runId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Current autopilot state — toggle, latest run, active run id
+ */
+export const getGetQaAutopilotStateUrl = () => {
+  return `/api/qa/autopilot`;
+};
+
+export const getQaAutopilotState = async (
+  options?: RequestInit,
+): Promise<QaAutopilotState> => {
+  return customFetch<QaAutopilotState>(getGetQaAutopilotStateUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetQaAutopilotStateQueryKey = () => {
+  return [`/api/qa/autopilot`] as const;
+};
+
+export const getGetQaAutopilotStateQueryOptions = <
+  TData = Awaited<ReturnType<typeof getQaAutopilotState>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getQaAutopilotState>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetQaAutopilotStateQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getQaAutopilotState>>
+  > = ({ signal }) => getQaAutopilotState({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getQaAutopilotState>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetQaAutopilotStateQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getQaAutopilotState>>
+>;
+export type GetQaAutopilotStateQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Current autopilot state — toggle, latest run, active run id
+ */
+
+export function useGetQaAutopilotState<
+  TData = Awaited<ReturnType<typeof getQaAutopilotState>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getQaAutopilotState>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetQaAutopilotStateQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Toggle the autopilot ON/OFF
+ */
+export const getUpdateQaAutopilotSettingsUrl = () => {
+  return `/api/qa/autopilot/settings`;
+};
+
+export const updateQaAutopilotSettings = async (
+  updateQaAutopilotSettingsBody: UpdateQaAutopilotSettingsBody,
+  options?: RequestInit,
+): Promise<QaAutopilotSettings> => {
+  return customFetch<QaAutopilotSettings>(getUpdateQaAutopilotSettingsUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateQaAutopilotSettingsBody),
+  });
+};
+
+export const getUpdateQaAutopilotSettingsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateQaAutopilotSettings>>,
+    TError,
+    { data: BodyType<UpdateQaAutopilotSettingsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateQaAutopilotSettings>>,
+  TError,
+  { data: BodyType<UpdateQaAutopilotSettingsBody> },
+  TContext
+> => {
+  const mutationKey = ["updateQaAutopilotSettings"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateQaAutopilotSettings>>,
+    { data: BodyType<UpdateQaAutopilotSettingsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateQaAutopilotSettings(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateQaAutopilotSettingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateQaAutopilotSettings>>
+>;
+export type UpdateQaAutopilotSettingsMutationBody =
+  BodyType<UpdateQaAutopilotSettingsBody>;
+export type UpdateQaAutopilotSettingsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Toggle the autopilot ON/OFF
+ */
+export const useUpdateQaAutopilotSettings = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateQaAutopilotSettings>>,
+    TError,
+    { data: BodyType<UpdateQaAutopilotSettingsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateQaAutopilotSettings>>,
+  TError,
+  { data: BodyType<UpdateQaAutopilotSettingsBody> },
+  TContext
+> => {
+  return useMutation(getUpdateQaAutopilotSettingsMutationOptions(options));
+};
+
+/**
+ * @summary List recent autopilot runs (newest first)
+ */
+export const getListQaAutopilotRunsUrl = (
+  params?: ListQaAutopilotRunsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/qa/autopilot/runs?${stringifiedParams}`
+    : `/api/qa/autopilot/runs`;
+};
+
+export const listQaAutopilotRuns = async (
+  params?: ListQaAutopilotRunsParams,
+  options?: RequestInit,
+): Promise<QaAutopilotRunListResponse> => {
+  return customFetch<QaAutopilotRunListResponse>(
+    getListQaAutopilotRunsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListQaAutopilotRunsQueryKey = (
+  params?: ListQaAutopilotRunsParams,
+) => {
+  return [`/api/qa/autopilot/runs`, ...(params ? [params] : [])] as const;
+};
+
+export const getListQaAutopilotRunsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listQaAutopilotRuns>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListQaAutopilotRunsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listQaAutopilotRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListQaAutopilotRunsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listQaAutopilotRuns>>
+  > = ({ signal }) =>
+    listQaAutopilotRuns(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listQaAutopilotRuns>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListQaAutopilotRunsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listQaAutopilotRuns>>
+>;
+export type ListQaAutopilotRunsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List recent autopilot runs (newest first)
+ */
+
+export function useListQaAutopilotRuns<
+  TData = Awaited<ReturnType<typeof listQaAutopilotRuns>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListQaAutopilotRunsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listQaAutopilotRuns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListQaAutopilotRunsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Kick off a new autopilot run across every registered suite
+ */
+export const getStartQaAutopilotRunUrl = () => {
+  return `/api/qa/autopilot/runs`;
+};
+
+export const startQaAutopilotRun = async (
+  startQaAutopilotRunBody?: StartQaAutopilotRunBody,
+  options?: RequestInit,
+): Promise<QaAutopilotRunReceipt> => {
+  return customFetch<QaAutopilotRunReceipt>(getStartQaAutopilotRunUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(startQaAutopilotRunBody),
+  });
+};
+
+export const getStartQaAutopilotRunMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startQaAutopilotRun>>,
+    TError,
+    { data: BodyType<StartQaAutopilotRunBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startQaAutopilotRun>>,
+  TError,
+  { data: BodyType<StartQaAutopilotRunBody> },
+  TContext
+> => {
+  const mutationKey = ["startQaAutopilotRun"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startQaAutopilotRun>>,
+    { data: BodyType<StartQaAutopilotRunBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return startQaAutopilotRun(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartQaAutopilotRunMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startQaAutopilotRun>>
+>;
+export type StartQaAutopilotRunMutationBody = BodyType<StartQaAutopilotRunBody>;
+export type StartQaAutopilotRunMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Kick off a new autopilot run across every registered suite
+ */
+export const useStartQaAutopilotRun = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startQaAutopilotRun>>,
+    TError,
+    { data: BodyType<StartQaAutopilotRunBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startQaAutopilotRun>>,
+  TError,
+  { data: BodyType<StartQaAutopilotRunBody> },
+  TContext
+> => {
+  return useMutation(getStartQaAutopilotRunMutationOptions(options));
+};
+
+/**
+ * @summary Get an autopilot run with its findings + fix actions
+ */
+export const getGetQaAutopilotRunUrl = (runId: string) => {
+  return `/api/qa/autopilot/runs/${runId}`;
+};
+
+export const getQaAutopilotRun = async (
+  runId: string,
+  options?: RequestInit,
+): Promise<QaAutopilotRunDetail> => {
+  return customFetch<QaAutopilotRunDetail>(getGetQaAutopilotRunUrl(runId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetQaAutopilotRunQueryKey = (runId: string) => {
+  return [`/api/qa/autopilot/runs/${runId}`] as const;
+};
+
+export const getGetQaAutopilotRunQueryOptions = <
+  TData = Awaited<ReturnType<typeof getQaAutopilotRun>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  runId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getQaAutopilotRun>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetQaAutopilotRunQueryKey(runId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getQaAutopilotRun>>
+  > = ({ signal }) => getQaAutopilotRun(runId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!runId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getQaAutopilotRun>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetQaAutopilotRunQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getQaAutopilotRun>>
+>;
+export type GetQaAutopilotRunQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get an autopilot run with its findings + fix actions
+ */
+
+export function useGetQaAutopilotRun<
+  TData = Awaited<ReturnType<typeof getQaAutopilotRun>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  runId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getQaAutopilotRun>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetQaAutopilotRunQueryOptions(runId, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

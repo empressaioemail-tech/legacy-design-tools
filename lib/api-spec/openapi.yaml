@@ -4808,6 +4808,109 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /qa/autopilot:
+    get:
+      operationId: getQaAutopilotState
+      tags: [qa]
+      summary: Current autopilot state — toggle, latest run, active run id
+      responses:
+        "200":
+          description: Autopilot state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaAutopilotState"
+
+  /qa/autopilot/settings:
+    patch:
+      operationId: updateQaAutopilotSettings
+      tags: [qa]
+      summary: Toggle the autopilot ON/OFF
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateQaAutopilotSettingsBody"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaAutopilotSettings"
+
+  /qa/autopilot/runs:
+    get:
+      operationId: listQaAutopilotRuns
+      tags: [qa]
+      summary: List recent autopilot runs (newest first)
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: Recent autopilot runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaAutopilotRunListResponse"
+    post:
+      operationId: startQaAutopilotRun
+      tags: [qa]
+      summary: Kick off a new autopilot run across every registered suite
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartQaAutopilotRunBody"
+      responses:
+        "201":
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaAutopilotRunReceipt"
+        "409":
+          description: Autopilot already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /qa/autopilot/runs/{runId}:
+    get:
+      operationId: getQaAutopilotRun
+      tags: [qa]
+      summary: Get an autopilot run with its findings + fix actions
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Run detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QaAutopilotRunDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /qa/checklists:
     get:
       operationId: listQaChecklists
@@ -10429,3 +10532,250 @@ components:
       properties:
         ok:
           type: boolean
+
+    QaAutopilotRunStatus:
+      type: string
+      enum: [running, completed, errored]
+
+    QaAutopilotTrigger:
+      type: string
+      enum: [manual, auto-on-open]
+
+    QaAutopilotFindingCategory:
+      type: string
+      enum: [flaky, snapshot, codegen-stale, lint, fixture, app-code, unknown]
+
+    QaAutopilotFindingSeverity:
+      type: string
+      enum: [info, warning, error]
+
+    QaAutopilotFindingAutoFixStatus:
+      type: string
+      enum: [auto-fixed, needs-review, skipped]
+
+    QaAutopilotRunSummary:
+      type: object
+      required:
+        [
+          id,
+          status,
+          trigger,
+          startedAt,
+          finishedAt,
+          durationMs,
+          totalSuites,
+          passing,
+          failing,
+          flaky,
+          autoFixesApplied,
+          needsReview,
+          notes,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/QaAutopilotRunStatus"
+        trigger:
+          $ref: "#/components/schemas/QaAutopilotTrigger"
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        durationMs:
+          type: integer
+          nullable: true
+        totalSuites:
+          type: integer
+        passing:
+          type: integer
+        failing:
+          type: integer
+        flaky:
+          type: integer
+        autoFixesApplied:
+          type: integer
+        needsReview:
+          type: integer
+        notes:
+          type: string
+
+    QaAutopilotRunListResponse:
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaAutopilotRunSummary"
+
+    QaAutopilotFinding:
+      type: object
+      required:
+        [
+          id,
+          autopilotRunId,
+          suiteId,
+          qaRunId,
+          testName,
+          filePath,
+          line,
+          errorExcerpt,
+          category,
+          severity,
+          autoFixStatus,
+          plainSummary,
+          suggestedDiff,
+          createdAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        autopilotRunId:
+          type: string
+          format: uuid
+        suiteId:
+          type: string
+        qaRunId:
+          type: string
+          format: uuid
+          nullable: true
+        testName:
+          type: string
+          nullable: true
+        filePath:
+          type: string
+          nullable: true
+        line:
+          type: integer
+          nullable: true
+        errorExcerpt:
+          type: string
+        category:
+          $ref: "#/components/schemas/QaAutopilotFindingCategory"
+        severity:
+          $ref: "#/components/schemas/QaAutopilotFindingSeverity"
+        autoFixStatus:
+          $ref: "#/components/schemas/QaAutopilotFindingAutoFixStatus"
+        plainSummary:
+          type: string
+        suggestedDiff:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    QaAutopilotFixAction:
+      type: object
+      required:
+        [
+          id,
+          autopilotRunId,
+          findingId,
+          fixerId,
+          suiteId,
+          command,
+          filesChanged,
+          success,
+          log,
+          startedAt,
+          finishedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        autopilotRunId:
+          type: string
+          format: uuid
+        findingId:
+          type: string
+          format: uuid
+          nullable: true
+        fixerId:
+          type: string
+        suiteId:
+          type: string
+        command:
+          type: string
+        filesChanged:
+          type: array
+          items:
+            type: string
+        success:
+          type: boolean
+        log:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    QaAutopilotRunDetail:
+      type: object
+      required: [run, findings, fixActions]
+      properties:
+        run:
+          $ref: "#/components/schemas/QaAutopilotRunSummary"
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaAutopilotFinding"
+        fixActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/QaAutopilotFixAction"
+
+    QaAutopilotState:
+      type: object
+      required: [enabled, activeRunId, latestRun]
+      properties:
+        enabled:
+          type: boolean
+        activeRunId:
+          type: string
+          format: uuid
+          nullable: true
+        latestRun:
+          allOf:
+            - $ref: "#/components/schemas/QaAutopilotRunSummary"
+          nullable: true
+
+    QaAutopilotSettings:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+
+    UpdateQaAutopilotSettingsBody:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+
+    StartQaAutopilotRunBody:
+      type: object
+      properties:
+        trigger:
+          $ref: "#/components/schemas/QaAutopilotTrigger"
+
+    QaAutopilotRunReceipt:
+      type: object
+      required: [runId, startedAt]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        startedAt:
+          type: string
+          format: date-time
