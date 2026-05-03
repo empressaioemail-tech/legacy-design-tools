@@ -5,6 +5,7 @@ import { logger } from "./lib/logger";
 import { bootstrapAtomRegistry } from "./atoms/registry";
 import { validateConverterEnvAtBoot } from "./lib/converterClient";
 import { validateFindingEngineEnvAtBoot } from "./lib/findingLlmClient";
+import { validateSheetContentEnvAtBoot } from "./lib/sheetContentLlmClient";
 
 const rawPort = process.env["PORT"];
 
@@ -76,6 +77,19 @@ try {
   logger.error(
     { err },
     "finding-engine env validation failed — refusing to start",
+  );
+  process.exit(1);
+}
+
+// Fail-fast on misconfigured sheet-content extractor env (Task #477):
+// when SHEET_CONTENT_LLM_MODE=anthropic we require the AI Integrations
+// Anthropic env vars. Mock mode is the default and boots clean.
+try {
+  validateSheetContentEnvAtBoot();
+} catch (err) {
+  logger.error(
+    { err },
+    "sheet-content env validation failed — refusing to start",
   );
   process.exit(1);
 }

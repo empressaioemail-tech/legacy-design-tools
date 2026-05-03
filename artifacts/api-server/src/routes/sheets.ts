@@ -12,6 +12,10 @@ import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { getHistoryService } from "../atoms/registry";
 import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
+import {
+  runSheetContentExtraction,
+  type SheetExtractionTarget,
+} from "../lib/sheetContentExtractor";
 
 const snapshotSecret = getSnapshotSecret();
 
@@ -747,6 +751,53 @@ router.post(
       }
 
       safeRespond(200, { uploaded, skipped, failed, errors });
+
+      // Fire-and-forget vision/OCR extraction pass for sheets whose
+      // metadata.contentBody was null (i.e. the Revit add-in did not
+      // ship a Revit-side text capture). The pass calls the configured
+      // sheet-content LLM client and patches the row's content_body
+      // column once the call returns. In `mock` mode (the default) the
+      // extractor short-circuits to null and this loop is essentially
+      // free. The whole stage is wrapped in an outer try/catch so a
+      // failure in the (post-response) target-lookup step never
+      // produces an unhandled rejection on the busboy `finish` handler.
+      // (Task #477.)
+      void (async () => {
+        try {
+          const extractionTargets: SheetExtractionTarget[] = [];
+          for (const row of rowsToInsert) {
+            if (row.contentBody) continue;
+            const matchEntry = entries.find(
+              (e) => e.sheetNumber === row.sheetNumber,
+            );
+            if (!matchEntry) continue;
+            const full = fullsByIndex.get(matchEntry.index);
+            if (!full) continue;
+            const idForExtract = (
+              await db
+                .select({ id: sheets.id })
+                .from(sheets)
+                .where(
+                  and(
+                    eq(sheets.snapshotId, snapshotIdStr),
+                    eq(sheets.sheetNumber, row.sheetNumber),
+                  ),
+                )
+                .limit(1)
+            )[0]?.id;
+            if (!idForExtract) continue;
+            extractionTargets.push({ sheetId: idForExtract, fullPng: full });
+          }
+          if (extractionTargets.length > 0) {
+            await runSheetContentExtraction(extractionTargets, reqLogger);
+          }
+        } catch (err) {
+          reqLogger.error(
+            { err, snapshotId },
+            "sheet-content extraction pass failed unexpectedly",
+          );
+        }
+      })();
     });
 
     req.pipe(busboy);
@@ -787,6 +838,7 @@ router.get(
           fullWidth: sheets.fullWidth,
           fullHeight: sheets.fullHeight,
           sortOrder: sheets.sortOrder,
+          contentBody: sheets.contentBody,
           createdAt: sheets.createdAt,
         })
         .from(sheets)
@@ -794,7 +846,11 @@ router.get(
         .orderBy(asc(sheets.sortOrder));
 
       res.json(
-        rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+        rows.map((r) => ({
+          ...r,
+          createdAt: r.createdAt.toISOString(),
+          crossRefs: extractSheetCrossRefs(r.contentBody ?? ""),
+        })),
       );
     } catch (err) {
       logger.error({ err, snapshotId }, "list sheets failed");

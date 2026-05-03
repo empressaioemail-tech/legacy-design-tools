@@ -26,6 +26,10 @@ import type {
   EventAnchoringService,
 } from "@workspace/empressa-atom";
 import type { db as ProdDb } from "@workspace/db";
+import {
+  extractSheetCrossRefs,
+  type SheetCrossRef,
+} from "../lib/sheetCrossRefs";
 
 /** Hard cap on the prose summary length so we don't blow up token budget. */
 export const SHEET_PROSE_MAX_CHARS = 600;
@@ -76,6 +80,19 @@ export interface SheetTypedPayload {
   engagementId?: string;
   snapshotId?: string;
   sortOrder?: number;
+  /**
+   * Free-text body of in-sheet notes/callouts as captured by the Revit
+   * add-in OR the server-side vision pipeline (Task #477). `null` when
+   * neither path has populated the column yet.
+   */
+  contentBody?: string | null;
+  /**
+   * Structured cross-references parsed from {@link contentBody} via
+   * {@link extractSheetCrossRefs}. Empty array when there is no body or
+   * no recognisable references — never `undefined` on a found sheet so
+   * downstream consumers can iterate without a guard.
+   */
+  crossRefs?: SheetCrossRef[];
 }
 
 /**
@@ -124,6 +141,7 @@ export function makeSheetAtom(
           fullWidth: sheets.fullWidth,
           fullHeight: sheets.fullHeight,
           sortOrder: sheets.sortOrder,
+          contentBody: sheets.contentBody,
           createdAt: sheets.createdAt,
         })
         .from(sheets)
@@ -158,11 +176,20 @@ export function makeSheetAtom(
           ? ` ${row.viewCount} view${row.viewCount === 1 ? "" : "s"} placed.`
           : "";
 
+      const crossRefs = extractSheetCrossRefs(row.contentBody ?? "");
+      const crossRefFragment =
+        crossRefs.length > 0
+          ? ` Cross-references: ${crossRefs
+              .map((r) => r.sheetNumber)
+              .join(", ")}.`
+          : "";
+
       const proseRaw =
         `Sheet ${row.sheetNumber} — "${row.sheetName}". ` +
         `Drawing dimensions ${dimensions}.` +
         revisionFragment +
-        viewsFragment;
+        viewsFragment +
+        crossRefFragment;
       const prose =
         proseRaw.length > SHEET_PROSE_MAX_CHARS
           ? proseRaw.slice(0, SHEET_PROSE_MAX_CHARS - 1) + "…"
@@ -209,6 +236,8 @@ export function makeSheetAtom(
           engagementId: row.engagementId,
           snapshotId: row.snapshotId,
           sortOrder: row.sortOrder,
+          contentBody: row.contentBody,
+          crossRefs,
         } satisfies SheetTypedPayload,
         keyMetrics: [
           { label: "Sheet number", value: row.sheetNumber },
