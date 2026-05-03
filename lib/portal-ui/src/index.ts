@@ -234,3 +234,35 @@ export {
   formatActorLabel,
   type ActorLike,
 } from "./lib/actorLabel";
+
+// Track 1 — reviewer-discipline label / dept-token maps + the new
+// `ReviewerDisciplineBadge` (sibling to the loose-string
+// `DisciplineBadge` in plan-review). The `PlanReviewDiscipline`
+// enum here is a SCAFFOLD until CT lands the regenerated zod
+// schemas; commit 6 swaps to `import { PlanReviewDiscipline } from
+// "@workspace/api-zod"`.
+export {
+  PLAN_REVIEW_DISCIPLINES,
+  PLAN_REVIEW_DISCIPLINE_LABELS,
+  PLAN_REVIEW_DISCIPLINE_DEPT_TOKEN,
+  isPlanReviewDiscipline,
+  type PlanReviewDiscipline,
+} from "./lib/planReviewDiscipline";
+export { ReviewerDisciplineBadge } from "./components/ReviewerDisciplineBadge";
+export type { ReviewerDisciplineBadgeProps } from "./components/ReviewerDisciplineBadge";
+
+// Track 1 — single canonical hook + chip-bar primitive used by the
+// Inbox / FindingsTab / CannedFindings / OutstandingRequests
+// surfaces.
+export {
+  useReviewerDisciplineFilter,
+  type UseReviewerDisciplineFilter,
+} from "./lib/useReviewerDisciplineFilter";
+export { DisciplineFilterChipBar } from "./components/DisciplineFilterChipBar";
+export type { DisciplineFilterChipBarProps } from "./components/DisciplineFilterChipBar";
+
+// Track 1 — minimal Hovercard primitive (CSS-only positioning,
+// hover + focus a11y, 200ms enter/exit). Used by the Inbox triage
+// strip's applicant-history pill; reusable for Tracks 4/5/7.
+export { Hovercard } from "./components/Hovercard";
+export type { HovercardProps, HovercardPlacement } from "./components/Hovercard";
