@@ -28,7 +28,18 @@ import { Router, Route, Switch } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import type { ReactNode } from "react";
 
-const hoisted = vi.hoisted(() => ({
+const hoisted = vi.hoisted(() => {
+  class ApiError extends Error {
+    status: number;
+    data: unknown;
+    constructor(status: number, message: string, data: unknown) {
+      super(message);
+      this.status = status;
+      this.data = data;
+    }
+  }
+  return {
+  ApiErrorCtor: ApiError,
   audience: "internal" as "internal" | "user" | "ai" | null,
   audienceLoading: false,
   runs: [] as Array<{
@@ -49,19 +60,13 @@ const hoisted = vi.hoisted(() => ({
   lastListParams: undefined as undefined | { state?: string },
   generateMutate: vi.fn() as ReturnType<typeof vi.fn>,
   generateIsPending: false,
+  generateError: null as null | { status: number; message: string; data: unknown },
   statusState: "idle" as "idle" | "pending" | "completed" | "failed",
-}));
+  };
+});
 
 vi.mock("@workspace/api-client-react", () => ({
-  ApiError: class ApiError extends Error {
-    status: number;
-    data: unknown;
-    constructor(status: number, message: string, data: unknown) {
-      super(message);
-      this.status = status;
-      this.data = data;
-    }
-  },
+  ApiError: hoisted.ApiErrorCtor,
   useGetSession: () => ({
     data: { audience: hoisted.audience, permissions: [], requestor: null },
     isLoading: hoisted.audienceLoading,
@@ -113,7 +118,16 @@ vi.mock("@workspace/api-client-react", () => ({
   }) => ({
     mutate: (vars: unknown) => {
       hoisted.generateMutate(vars);
-      opts?.mutation?.onSuccess?.({ generationId: "g_new" }, vars, undefined);
+      if (hoisted.generateError) {
+        const err = new hoisted.ApiErrorCtor(
+          hoisted.generateError.status,
+          hoisted.generateError.message,
+          hoisted.generateError.data,
+        );
+        opts?.mutation?.onError?.(err, vars, undefined);
+      } else {
+        opts?.mutation?.onSuccess?.({ generationId: "g_new" }, vars, undefined);
+      }
     },
     isPending: hoisted.generateIsPending,
   }),
@@ -213,6 +227,7 @@ beforeEach(() => {
   hoisted.lastListParams = undefined;
   hoisted.generateMutate = vi.fn();
   hoisted.generateIsPending = false;
+  hoisted.generateError = null;
   hoisted.statusState = "idle";
 });
 
@@ -282,6 +297,31 @@ describe("ComplianceEngine — row deep links", () => {
   });
 });
 
+describe("ComplianceEngine — KPI strip", () => {
+  it("renders formatted values from /findings/runs/summary across all five tiles", () => {
+    hoisted.runs = [makeRun({ generationId: "g_1", submissionId: "sub_1" })];
+    renderAt("/compliance");
+    // The summary mock returns: totalRuns 12, successRate 83, avgDurationMs
+    // 4200, invalidCitationsTotal 0, discardedFindingsTotal 0. Verify each
+    // tile gets the right formatter (integer / percent / duration).
+    expect(
+      screen.getByTestId("kpi-tile-Total runs (30d)"),
+    ).toHaveTextContent("12");
+    expect(screen.getByTestId("kpi-tile-Success rate")).toHaveTextContent(
+      "83%",
+    );
+    expect(screen.getByTestId("kpi-tile-Avg duration")).toHaveTextContent(
+      "4.2s",
+    );
+    expect(
+      screen.getByTestId("kpi-tile-Invalid citations"),
+    ).toHaveTextContent("0");
+    expect(
+      screen.getByTestId("kpi-tile-Discarded findings"),
+    ).toHaveTextContent("0");
+  });
+});
+
 describe("ComplianceEngine — re-run single-flight", () => {
   it("disables the re-run button when a pending run for the submission exists in the feed", () => {
     // Two rows for the same submission: a fresh pending one + an older
@@ -326,5 +366,28 @@ describe("ComplianceEngine — re-run single-flight", () => {
       submissionId: "sub_99",
       data: {},
     });
+    // No error rendered on the success path.
+    expect(
+      screen.queryByTestId("compliance-run-detail-rerun-error"),
+    ).toBeNull();
+  });
+
+  it("surfaces the 409 single-flight copy inline when the kickoff conflicts", () => {
+    hoisted.runs = [
+      makeRun({
+        generationId: "g_done",
+        submissionId: "sub_42",
+        state: "succeeded",
+      }),
+    ];
+    hoisted.generateError = {
+      status: 409,
+      message: "Conflict",
+      data: { error: "generation_in_flight" },
+    };
+    renderAt("/compliance");
+    fireEvent.click(screen.getByTestId("compliance-run-detail-rerun"));
+    const alert = screen.getByTestId("compliance-run-detail-rerun-error");
+    expect(alert.textContent).toMatch(/already in flight/i);
   });
 });

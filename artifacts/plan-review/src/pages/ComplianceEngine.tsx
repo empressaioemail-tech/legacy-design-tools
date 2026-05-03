@@ -404,7 +404,10 @@ export default function ComplianceEngine() {
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [rerunError, setRerunError] = useState<string | null>(null);
+  const [rerunError, setRerunError] = useState<{
+    submissionId: string;
+    message: string;
+  } | null>(null);
   const [rerunSubmissionId, setRerunSubmissionId] = useState<string | null>(
     null,
   );
@@ -545,8 +548,9 @@ export default function ComplianceEngine() {
           queryKey: getGetFindingsRunsSummaryQueryKey(),
         });
       },
-      onError: (err) => {
-        setRerunError(describeRerunError(err));
+      onError: (err, vars) => {
+        const submissionId = (vars as { submissionId: string }).submissionId;
+        setRerunError({ submissionId, message: describeRerunError(err) });
         setRerunSubmissionId(null);
       },
     },
@@ -715,8 +719,9 @@ export default function ComplianceEngine() {
                     onRerun={() => handleRerun(selectedRun)}
                     rerunPending={selectedSubmissionPending}
                     rerunError={
-                      rerunSubmissionId === selectedRun.submissionId
-                        ? rerunError
+                      rerunError &&
+                      rerunError.submissionId === selectedRun.submissionId
+                        ? rerunError.message
                         : null
                     }
                   />
