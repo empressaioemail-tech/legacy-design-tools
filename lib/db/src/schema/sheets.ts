@@ -40,6 +40,12 @@ export const sheets = pgTable(
     fullWidth: integer("full_width").notNull(),
     fullHeight: integer("full_height").notNull(),
     sortOrder: integer("sort_order").notNull(),
+    /**
+     * Optional vision-pipeline output: free-text body of in-sheet
+     * notes / callouts. Drives PLR-8 cross-reference link extraction.
+     * Null until the vision/OCR pipeline lands and starts populating.
+     */
+    contentBody: text("content_body"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

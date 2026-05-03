@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { SheetCrossRef } from "./sheetCrossRef";
 
 export interface SheetSummary {
   id: string;
@@ -20,5 +21,9 @@ export interface SheetSummary {
   fullWidth: number;
   fullHeight: number;
   sortOrder: number;
+  /** Free-text body of in-sheet notes/callouts (PLR-8). Null until the vision pipeline populates it. */
+  contentBody: string | null;
+  /** Cross-references extracted from contentBody (PLR-8). */
+  crossRefs: SheetCrossRef[];
   createdAt: Date;
 }

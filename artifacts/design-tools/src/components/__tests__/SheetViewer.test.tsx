@@ -35,6 +35,8 @@ function mkSheet(
     fullWidth: over.fullWidth ?? 1024,
     fullHeight: over.fullHeight ?? 768,
     sortOrder: over.sortOrder ?? 0,
+    contentBody: over.contentBody ?? null,
+    crossRefs: over.crossRefs ?? [],
     createdAt: over.createdAt ?? new Date().toISOString(),
   };
 }

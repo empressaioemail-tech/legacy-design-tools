@@ -35,6 +35,7 @@ import type { EngagementEventType } from "../atoms/engagement.atom";
 import { emitEngagementJurisdictionResolvedEvent } from "../lib/engagementEvents";
 import { hydrateActors, type HydratedActor } from "../lib/userLookup";
 import { kickoffBriefingGeneration } from "./parcelBriefings";
+import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
 
 /**
  * Engagement event-type literals used by the producers in this file.
@@ -780,6 +781,7 @@ router.get("/snapshots/:id", async (req: Request, res: Response) => {
         fullWidth: sheets.fullWidth,
         fullHeight: sheets.fullHeight,
         sortOrder: sheets.sortOrder,
+        contentBody: sheets.contentBody,
         createdAt: sheets.createdAt,
       })
       .from(sheets)
@@ -792,6 +794,7 @@ router.get("/snapshots/:id", async (req: Request, res: Response) => {
       sheets: sheetRows.map((s) => ({
         ...s,
         createdAt: s.createdAt.toISOString(),
+        crossRefs: extractSheetCrossRefs(s.contentBody ?? ""),
       })),
     });
   } catch (err) {

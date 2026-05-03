@@ -11,6 +11,7 @@ import { eq, sql, asc, and, inArray, desc, lte } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { getHistoryService } from "../atoms/registry";
+import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
 
 const snapshotSecret = getSnapshotSecret();
 
@@ -32,6 +33,7 @@ interface SheetMetadataEntry {
   thumbnailHeight: number;
   fullWidth: number;
   fullHeight: number;
+  contentBody: string | null;
 }
 
 /**
@@ -49,6 +51,7 @@ const SHEET_DIFF_SCALAR_FIELDS = [
   "fullHeight",
   "sortOrder",
   "engagementId",
+  "contentBody",
 ] as const;
 
 function sha256Hex(buf: Buffer | Uint8Array): string {
@@ -142,6 +145,10 @@ function parseMetadataEntries(raw: string): SheetMetadataEntry[] {
       thumbnailHeight: o["thumbnailHeight"] as number,
       fullWidth: o["fullWidth"] as number,
       fullHeight: o["fullHeight"] as number,
+      contentBody:
+        typeof o["contentBody"] === "string"
+          ? (o["contentBody"] as string)
+          : null,
     });
   }
   return out;
@@ -392,6 +399,7 @@ router.post(
           fullWidth: entry.fullWidth,
           fullHeight: entry.fullHeight,
           sortOrder: entry.index,
+          contentBody: entry.contentBody,
         });
       }
 
@@ -464,6 +472,7 @@ router.post(
                 fullHeight: row.fullHeight,
                 sortOrder: row.sortOrder,
                 engagementId: row.engagementId,
+                contentBody: row.contentBody,
               },
             })
             .returning({
@@ -921,6 +930,7 @@ router.get(
           fullWidth: sheets.fullWidth,
           fullHeight: sheets.fullHeight,
           sortOrder: sheets.sortOrder,
+          contentBody: sheets.contentBody,
           createdAt: sheets.createdAt,
         })
         .from(sheets)
@@ -928,7 +938,11 @@ router.get(
         .orderBy(asc(sheets.sortOrder));
 
       res.json(
-        rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+        rows.map((r) => ({
+          ...r,
+          createdAt: r.createdAt.toISOString(),
+          crossRefs: extractSheetCrossRefs(r.contentBody ?? ""),
+        })),
       );
     } catch (err) {
       logger.error({ err, submissionId }, "list submission sheets failed");

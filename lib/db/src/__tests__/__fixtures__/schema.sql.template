@@ -397,6 +397,7 @@ CREATE TABLE @@SCHEMA@@.sheets (
     full_width integer NOT NULL,
     full_height integer NOT NULL,
     sort_order integer NOT NULL,
+    content_body text,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 

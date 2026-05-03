@@ -6464,6 +6464,20 @@ components:
         - payload
         - sheets
 
+    SheetCrossRef:
+      type: object
+      description: Structured cross-reference parsed from a sheet's contentBody (PLR-8).
+      properties:
+        raw:
+          type: string
+        sheetNumber:
+          type: string
+        detailNumber:
+          type: string
+      required:
+        - raw
+        - sheetNumber
+
     SheetSummary:
       type: object
       properties:
@@ -6496,6 +6510,15 @@ components:
           type: integer
         sortOrder:
           type: integer
+        contentBody:
+          type: string
+          nullable: true
+          description: Free-text body of in-sheet notes/callouts (PLR-8). Null until the vision pipeline populates it.
+        crossRefs:
+          type: array
+          description: Cross-references extracted from contentBody (PLR-8).
+          items:
+            $ref: "#/components/schemas/SheetCrossRef"
         createdAt:
           type: string
           format: date-time
@@ -6513,6 +6536,8 @@ components:
         - fullWidth
         - fullHeight
         - sortOrder
+        - contentBody
+        - crossRefs
         - createdAt
 
     SheetUploadResponse:

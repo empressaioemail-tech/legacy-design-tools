@@ -1,21 +1,37 @@
 /**
- * SheetPreviewPane (PLR-7)
- *
- * Right pane in the Sheets tab: shows the selected sheet's full
- * resolution PNG plus its sheet-content metadata (number, name,
- * revision, dimensions). Falls back to an empty-state hint when no
- * sheet is selected.
+ * SheetPreviewPane — full-resolution PNG, metadata grid, and (PLR-8)
+ * sheet-content text body with clickable cross-reference chips that
+ * jump the navigator to the referenced sheet.
  */
+import { useMemo } from "react";
 import {
   useGetAtomSummary,
   type SheetSummary,
 } from "@workspace/api-client-react";
+import {
+  renderSheetTextWithCrossRefs,
+  type SheetCrossRef,
+} from "./SheetReferenceLink";
 
 export interface SheetPreviewPaneProps {
   sheet: SheetSummary | null;
+  /** Sibling sheets in the same submission, used to resolve cross-refs. */
+  siblingSheets: ReadonlyArray<SheetSummary>;
+  /** Jump callback invoked when a resolved cross-ref chip is clicked. */
+  onJumpToSheet: (sheet: SheetSummary) => void;
+  /** Optional sheet-content text body (vision pipeline output). */
+  contentBody?: string | null;
+  /** Optional structured cross-references extracted from `contentBody`. */
+  crossRefs?: ReadonlyArray<SheetCrossRef>;
 }
 
-export function SheetPreviewPane({ sheet }: SheetPreviewPaneProps) {
+export function SheetPreviewPane({
+  sheet,
+  siblingSheets,
+  onJumpToSheet,
+  contentBody,
+  crossRefs,
+}: SheetPreviewPaneProps) {
   if (!sheet) {
     return (
       <div
@@ -71,6 +87,54 @@ export function SheetPreviewPane({ sheet }: SheetPreviewPaneProps) {
         />
       </div>
       <SheetMetadataPanel sheet={sheet} />
+      <SheetContentBody
+        body={contentBody ?? null}
+        crossRefs={crossRefs ?? []}
+        siblingSheets={siblingSheets}
+        onJumpToSheet={onJumpToSheet}
+      />
+    </div>
+  );
+}
+
+interface SheetContentBodyProps {
+  body: string | null;
+  crossRefs: ReadonlyArray<SheetCrossRef>;
+  siblingSheets: ReadonlyArray<SheetSummary>;
+  onJumpToSheet: (sheet: SheetSummary) => void;
+}
+
+function SheetContentBody({
+  body,
+  crossRefs,
+  siblingSheets,
+  onJumpToSheet,
+}: SheetContentBodyProps) {
+  const nodes = useMemo(
+    () =>
+      body
+        ? renderSheetTextWithCrossRefs(
+            body,
+            crossRefs,
+            siblingSheets,
+            onJumpToSheet,
+          )
+        : [],
+    [body, crossRefs, siblingSheets, onJumpToSheet],
+  );
+  if (!body) return null;
+  return (
+    <div
+      data-testid="sheet-preview-content-body"
+      style={{
+        fontSize: 12,
+        lineHeight: 1.5,
+        color: "var(--text-primary)",
+        whiteSpace: "pre-wrap",
+        marginTop: 4,
+      }}
+    >
+      {nodes}
     </div>
   );
 }

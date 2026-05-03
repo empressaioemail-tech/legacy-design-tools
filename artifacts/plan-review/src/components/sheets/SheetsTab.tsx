@@ -103,7 +103,13 @@ export function SheetsTab({ submissionId }: SheetsTabProps) {
           onSelect={(s) => setSelectedId(s.id)}
         />
       )}
-      <SheetPreviewPane sheet={selected} />
+      <SheetPreviewPane
+        sheet={selected}
+        siblingSheets={sheets}
+        onJumpToSheet={(s) => setSelectedId(s.id)}
+        contentBody={selected?.contentBody ?? null}
+        crossRefs={selected?.crossRefs ?? []}
+      />
     </div>
   );
 }

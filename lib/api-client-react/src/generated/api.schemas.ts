@@ -1347,6 +1347,15 @@ export interface SnapshotReceipt {
 
 export type SnapshotDetailPayload = { [key: string]: unknown };
 
+/**
+ * Structured cross-reference parsed from a sheet's contentBody (PLR-8).
+ */
+export interface SheetCrossRef {
+  raw: string;
+  sheetNumber: string;
+  detailNumber?: string;
+}
+
 export interface SheetSummary {
   id: string;
   snapshotId: string;
@@ -1361,6 +1370,10 @@ export interface SheetSummary {
   fullWidth: number;
   fullHeight: number;
   sortOrder: number;
+  /** Free-text body of in-sheet notes/callouts (PLR-8). Null until the vision pipeline populates it. */
+  contentBody: string | null;
+  /** Cross-references extracted from contentBody (PLR-8). */
+  crossRefs: SheetCrossRef[];
   createdAt: string;
 }
 

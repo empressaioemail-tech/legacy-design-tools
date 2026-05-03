@@ -2685,6 +2685,25 @@ export const GetSnapshotResponse = zod.object({
       fullWidth: zod.number(),
       fullHeight: zod.number(),
       sortOrder: zod.number(),
+      contentBody: zod
+        .string()
+        .nullable()
+        .describe(
+          "Free-text body of in-sheet notes\/callouts (PLR-8). Null until the vision pipeline populates it.",
+        ),
+      crossRefs: zod
+        .array(
+          zod
+            .object({
+              raw: zod.string(),
+              sheetNumber: zod.string(),
+              detailNumber: zod.string().optional(),
+            })
+            .describe(
+              "Structured cross-reference parsed from a sheet's contentBody (PLR-8).",
+            ),
+        )
+        .describe("Cross-references extracted from contentBody (PLR-8)."),
       createdAt: zod.coerce.date(),
     }),
   ),
@@ -2711,6 +2730,25 @@ export const GetSnapshotSheetsResponseItem = zod.object({
   fullWidth: zod.number(),
   fullHeight: zod.number(),
   sortOrder: zod.number(),
+  contentBody: zod
+    .string()
+    .nullable()
+    .describe(
+      "Free-text body of in-sheet notes\/callouts (PLR-8). Null until the vision pipeline populates it.",
+    ),
+  crossRefs: zod
+    .array(
+      zod
+        .object({
+          raw: zod.string(),
+          sheetNumber: zod.string(),
+          detailNumber: zod.string().optional(),
+        })
+        .describe(
+          "Structured cross-reference parsed from a sheet's contentBody (PLR-8).",
+        ),
+    )
+    .describe("Cross-references extracted from contentBody (PLR-8)."),
   createdAt: zod.coerce.date(),
 });
 export const GetSnapshotSheetsResponse = zod.array(
@@ -4457,6 +4495,25 @@ export const ListSubmissionSheetsResponseItem = zod.object({
   fullWidth: zod.number(),
   fullHeight: zod.number(),
   sortOrder: zod.number(),
+  contentBody: zod
+    .string()
+    .nullable()
+    .describe(
+      "Free-text body of in-sheet notes\/callouts (PLR-8). Null until the vision pipeline populates it.",
+    ),
+  crossRefs: zod
+    .array(
+      zod
+        .object({
+          raw: zod.string(),
+          sheetNumber: zod.string(),
+          detailNumber: zod.string().optional(),
+        })
+        .describe(
+          "Structured cross-reference parsed from a sheet's contentBody (PLR-8).",
+        ),
+    )
+    .describe("Cross-references extracted from contentBody (PLR-8)."),
   createdAt: zod.coerce.date(),
 });
 export const ListSubmissionSheetsResponse = zod.array(

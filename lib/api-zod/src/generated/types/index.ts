@@ -230,6 +230,7 @@ export * from "./session";
 export * from "./sessionAudience";
 export * from "./sessionRequestor";
 export * from "./sessionRequestorKind";
+export * from "./sheetCrossRef";
 export * from "./sheetSummary";
 export * from "./sheetUploadResponse";
 export * from "./site";
