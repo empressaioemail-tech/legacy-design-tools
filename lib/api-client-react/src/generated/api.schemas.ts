@@ -3969,6 +3969,21 @@ inline default.
 
  */
   download?: ExportEngagementBriefingPdfDownload;
+  /**
+ * Comma-separated list of `briefing_sources.id` values that
+the caller has determined are "stale" — i.e. were served
+from the adapter response cache and the runner's
+`upstreamFreshness` verdict came back `stale` on the most
+recent generate-layers run. The renderer annotates each
+A–G section that cites at least one of these IDs with the
+same "N source(s) may be stale" copy the in-app briefing
+panel uses, plus a footer note explaining the cache
+verdict. Unknown / empty IDs are silently ignored;
+omitting the parameter (the default) reproduces the
+pre-Task #468 behaviour of no annotation at all.
+
+ */
+  staleSourceIds?: string;
 };
 
 export type ExportEngagementBriefingPdfDownload =

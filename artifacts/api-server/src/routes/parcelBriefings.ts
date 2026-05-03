@@ -2123,6 +2123,22 @@ router.get(
     }
     const engagementId = paramsParse.data.id;
     const wantsDownload = queryParse.data.download === "1";
+    // Task #468: parse the optional `staleSourceIds` query param
+    // (comma-separated `briefing_sources.id` values the FE has
+    // determined are stale upstream). Trim, drop empties, and
+    // de-duplicate so the renderer can treat membership as a
+    // constant-time `Set.has`. Unknown / non-cited IDs are silently
+    // ignored downstream so a flaky FE map can never block an export.
+    const staleSourceIds = (() => {
+      const raw = queryParse.data.staleSourceIds;
+      if (!raw) return [] as string[];
+      const seen = new Set<string>();
+      for (const part of raw.split(",")) {
+        const trimmed = part.trim();
+        if (trimmed.length > 0) seen.add(trimmed);
+      }
+      return Array.from(seen);
+    })();
     const reqLog = (req as unknown as { log?: typeof logger }).log ?? logger;
 
     try {
@@ -2218,6 +2234,11 @@ router.get(
         sources: pdfSources,
         header,
         architectName: identity.displayName,
+        // Task #468: forward the FE-supplied stale-source map so each
+        // A–G section that cites at least one cache-stale source gets
+        // the same "N source(s) may be stale" annotation the in-app
+        // briefing panel renders.
+        staleSourceIds,
       });
 
       // Stable filename — engagement name slugged, no embedded

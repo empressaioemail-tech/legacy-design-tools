@@ -148,6 +148,19 @@ export interface RenderBriefingHtmlInput {
    * system-driven exports.
    */
   architectName?: string | null;
+  /**
+   * Set of `briefing_sources.id` values whose most recent adapter run
+   * came back from cache and whose `upstreamFreshness` verdict was
+   * `stale` — i.e. the upstream feed has likely moved since the cache
+   * was populated. Mirrors the on-screen behaviour of
+   * `BriefingNarrativePanel`'s amber chip (M2-A, Task #456): each A–G
+   * section that cites at least one ID from this set gets a
+   * "N source(s) may be stale" annotation under its heading and a
+   * footer note explaining the cache verdict. Empty / undefined →
+   * no annotation, parity with the on-screen behaviour for fresh /
+   * unknown / non-cached sources. Task #468.
+   */
+  staleSourceIds?: ReadonlyArray<string>;
 }
 
 const SECTION_ORDER: ReadonlyArray<keyof BriefingSections> = [
@@ -178,6 +191,46 @@ export function plainTextCitations(text: string): string {
     .replace(SOURCE_TOKEN, (_m, _id, label) => `[${String(label).trim()}]`)
     .replace(CODE_TOKEN, (_m, atom) => `[Code: ${String(atom).trim()}]`);
 }
+
+/**
+ * Extract the unique `briefing_sources.id` values cited inline in a
+ * section body via the `{{atom|briefing-source|<id>|<label>}}` token
+ * grammar. Mirrors the FE's `extractCitedSourceIds` in
+ * `BriefingNarrativePanel.tsx` so the PDF and the in-app panel agree
+ * on which sources a given section "cites" for stale-warning
+ * purposes. Task #468.
+ */
+export function extractCitedSourceIds(
+  body: string | null | undefined,
+): string[] {
+  if (!body) return [];
+  const ids = new Set<string>();
+  const re = /\{\{atom\|briefing-source\|([^|}]+)\|[^}]+\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    ids.add(m[1]);
+  }
+  return Array.from(ids);
+}
+
+/**
+ * Plain-text copy stamped under any A–G section that cites at least
+ * one stale source — exact parity with the in-app amber chip in
+ * `BriefingNarrativePanel.tsx` so an architect comparing the screen
+ * and the PDF reads the same wording. Task #468.
+ */
+export function staleAnnotationCopy(count: number): string {
+  return `${count} source${count === 1 ? "" : "s"} may be stale`;
+}
+
+/**
+ * Footer note explaining what the stale annotation means. Stamped
+ * once per affected section so the stakeholder reading the PDF in
+ * isolation (e.g. emailed to a city reviewer) can interpret the
+ * warning without context from the in-app panel. Task #468.
+ */
+export const STALE_FOOTER_NOTE =
+  "Cache verdict: one or more cited sources were served from the adapter response cache and the upstream feed has likely moved since. Re-run the adapters to refresh before relying on the cited values for a regulatory determination.";
 
 /**
  * Tier the citation appendix groups sources under. Mirrors the brief's
@@ -290,6 +343,12 @@ export function renderBriefingHtml(input: RenderBriefingHtmlInput): string {
     input.header && input.header.trim().length > 0
       ? input.header.trim()
       : DEFAULT_BRIEFING_PDF_HEADER;
+  // Normalise the stale-id list once so the per-section renderer can
+  // treat membership lookup as a constant-time `Set.has`. Empty input
+  // (the common case) collapses to an empty set so the per-section
+  // path is a noop and stays wire-identical to the pre-Task #468
+  // output.
+  const staleSourceIds = new Set(input.staleSourceIds ?? []);
   return [
     "<!doctype html>",
     "<html lang=\"en\">",
@@ -297,7 +356,9 @@ export function renderBriefingHtml(input: RenderBriefingHtmlInput): string {
     "<body>",
     renderCover(input),
     renderToc(),
-    ...SECTION_ORDER.map((k) => renderSection(k, input.narrative.sections[k])),
+    ...SECTION_ORDER.map((k) =>
+      renderSection(k, input.narrative.sections[k], staleSourceIds),
+    ),
     renderAppendix(input.sources),
     renderMap(input.engagement),
     renderThumbnailGrid(input.sources),
@@ -337,6 +398,23 @@ function renderHead(input: RenderBriefingHtmlInput, header: string): string {
   .toc { padding-left: 1.1em; }
   .toc li { margin: 0.25em 0; }
   .section-body { white-space: pre-wrap; }
+  .stale-annotation { margin: -0.2em 0 0.6em; }
+  .stale-annotation .stale-chip {
+    display: inline-block;
+    font-size: 9.5pt;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #fdf3d8;
+    color: #8a5a00;
+  }
+  .stale-annotation .stale-footnote {
+    margin-top: 0.3em;
+    font-size: 9pt;
+    color: #6b4a00;
+    line-height: 1.4;
+    font-style: italic;
+  }
   .appendix-empty { color: #555; }
   .appendix-tier { margin-bottom: 1.2em; }
   .appendix-row { margin: 0.35em 0 0.6em; padding-bottom: 0.35em; border-bottom: 1px dotted #ddd; }
@@ -428,10 +506,28 @@ function renderToc(): string {
 function renderSection(
   key: keyof BriefingSections,
   body: string | undefined | null,
+  staleSourceIds: ReadonlySet<string>,
 ): string {
   const text = plainTextCitations(body || "(section empty)");
+  // Match the citation tokens BEFORE plain-text flattening so we can
+  // count how many of the section's cited briefing-source IDs the
+  // caller has marked stale. Parity with the in-app
+  // `BriefingNarrativePanel` chip (M2-A, Task #456). Task #468.
+  let staleAnnotation = "";
+  if (staleSourceIds.size > 0) {
+    const cited = extractCitedSourceIds(body);
+    const staleCited = cited.filter((id) => staleSourceIds.has(id));
+    if (staleCited.length > 0) {
+      const copy = staleAnnotationCopy(staleCited.length);
+      staleAnnotation = `
+  <div class="stale-annotation" data-testid="briefing-section-stale-${esc(key)}">
+    <span class="stale-chip">${esc(copy)}</span>
+    <div class="stale-footnote">${esc(STALE_FOOTER_NOTE)}</div>
+  </div>`;
+    }
+  }
   return `<section class="page" data-page="section-${key}">
-  <h2>${esc(`${key.toUpperCase()} — ${SECTION_LABELS[key]}`)}</h2>
+  <h2>${esc(`${key.toUpperCase()} — ${SECTION_LABELS[key]}`)}</h2>${staleAnnotation}
   <div class="section-body">${esc(text)}</div>
 </section>`;
 }

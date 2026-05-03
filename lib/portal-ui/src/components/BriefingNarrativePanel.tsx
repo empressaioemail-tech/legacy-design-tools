@@ -271,6 +271,26 @@ export function BriefingNarrativePanel({
     [sources],
   );
 
+  // Task #468 — collect every cited source id (across all A–G
+  // sections) whose `cacheInfoBySourceId` entry came back with a
+  // `stale` upstream-freshness verdict so we can pass them through
+  // to the PDF export route as a comma-separated `staleSourceIds`
+  // query param. The route forwards them to the renderer which
+  // stamps the same "N source(s) may be stale" annotation the
+  // on-screen amber chip uses (M2-A, Task #456). Empty set → no
+  // query param at all so the export URL stays wire-identical to
+  // the pre-Task #468 anchor for the fresh / unknown / non-cached
+  // case.
+  const exportPdfStaleQuery = useMemo(() => {
+    if (!cacheInfoBySourceId || cacheInfoBySourceId.size === 0) return "";
+    const stale: string[] = [];
+    for (const [id, info] of cacheInfoBySourceId.entries()) {
+      if (info.upstreamFreshness?.status === "stale") stale.push(id);
+    }
+    if (stale.length === 0) return "";
+    return `?staleSourceIds=${stale.map(encodeURIComponent).join(",")}`;
+  }, [cacheInfoBySourceId]);
+
   return (
     <div
       data-testid="briefing-narrative-panel"
@@ -351,7 +371,7 @@ export function BriefingNarrativePanel({
             className="sc-btn sc-btn-ghost"
             href={
               hasNarrative
-                ? `${baseUrl}api/engagements/${engagementId}/briefing/export.pdf`
+                ? `${baseUrl}api/engagements/${engagementId}/briefing/export.pdf${exportPdfStaleQuery}`
                 : undefined
             }
             target="_blank"

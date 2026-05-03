@@ -1741,6 +1741,12 @@ export const ExportEngagementBriefingPdfQueryParams = zod.object({
     .describe(
       "When `1`, the response uses `Content-Disposition:\nattachment` so the browser saves the PDF instead of\ninlining it. Any other value (or omission) keeps the\ninline default.\n",
     ),
+  staleSourceIds: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      'Comma-separated list of `briefing_sources.id` values that\nthe caller has determined are \"stale\" — i.e. were served\nfrom the adapter response cache and the runner\'s\n`upstreamFreshness` verdict came back `stale` on the most\nrecent generate-layers run. The renderer annotates each\nA–G section that cites at least one of these IDs with the\nsame \"N source(s) may be stale\" copy the in-app briefing\npanel uses, plus a footer note explaining the cache\nverdict. Unknown \/ empty IDs are silently ignored;\nomitting the parameter (the default) reproduces the\npre-Task #468 behaviour of no annotation at all.\n',
+    ),
 });
 
 /**
