@@ -156,6 +156,7 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
   const counts = {
     awaitingAi: byStatus.pending,
     inReview: byStatus.corrections_requested,
+    approved: byStatus.approved,
     rejected: byStatus.rejected,
     backlog: byStatus.pending + byStatus.corrections_requested,
   };

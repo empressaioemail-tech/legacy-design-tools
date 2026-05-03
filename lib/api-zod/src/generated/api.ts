@@ -5652,11 +5652,12 @@ export const ListReviewerQueueResponse = zod
       .object({
         inReview: zod.number(),
         awaitingAi: zod.number(),
+        approved: zod.number(),
         rejected: zod.number(),
         backlog: zod.number(),
       })
       .describe(
-        "Cross-system roll-up counts the reviewer Inbox renders in its\nKPI strip \/ header summary line. Computed across the entire\n`submissions` table (NOT just the filtered queue items) so\nthe strip stays meaningful regardless of the caller's\n`?status=` filter.\n\n  - `awaitingAi` — submissions in `pending`. The mock surface\n    called this \"awaiting AI\" because the AI reviewer engine\n    is the next thing that should fire on a freshly-arrived\n    package; the name is preserved here so the FE wording\n    stays consistent.\n  - `inReview` — submissions in `corrections_requested`.\n  - `rejected` — submissions in `rejected`.\n  - `backlog` — `awaitingAi + inReview`, i.e. the size of the\n    default queue. Surfaced separately so the FE doesn't have\n    to repeat the addition.\n",
+        "Cross-system roll-up counts the reviewer Inbox renders in its\nKPI strip \/ header summary line. Computed across the entire\n`submissions` table (NOT just the filtered queue items) so\nthe strip stays meaningful regardless of the caller's\n`?status=` filter.\n\n  - `awaitingAi` — submissions in `pending`. The mock surface\n    called this \"awaiting AI\" because the AI reviewer engine\n    is the next thing that should fire on a freshly-arrived\n    package; the name is preserved here so the FE wording\n    stays consistent.\n  - `inReview` — submissions in `corrections_requested`.\n  - `approved` — submissions in `approved`.\n  - `rejected` — submissions in `rejected`.\n  - `backlog` — `awaitingAi + inReview`, i.e. the size of the\n    default queue. Surfaced separately so the FE doesn't have\n    to repeat the addition.\n",
       ),
     kpis: zod
       .object({

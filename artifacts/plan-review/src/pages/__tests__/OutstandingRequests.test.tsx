@@ -17,6 +17,13 @@ const hoisted = vi.hoisted(() => ({
   lastListParams: null as null | { status?: string },
   withdrawCalls: [] as Array<{ id: string; data: unknown }>,
   withdrawIsPending: false,
+  // `useNavGroups` reads `useListReviewerQueue({status})` for each
+  // bucket badge. Default counts to 0 so existing tests render no
+  // extra badges; the bucket-badge suite mutates these per case.
+  inReviewCount: 0,
+  approvedCount: 0,
+  rejectedCount: 0,
+  reviewerQueueCalls: [] as Array<unknown>,
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
@@ -57,6 +64,31 @@ vi.mock("@workspace/api-client-react", () => ({
     },
     isPending: hoisted.withdrawIsPending,
   }),
+  // `useNavGroups` calls `useListReviewerQueue({status})` per
+  // bucket badge. Returns the hoisted bucket counts so tests can
+  // drive the badges directly, and records each call's params so
+  // tests can assert the per-bucket cache-sharing pattern.
+  useListReviewerQueue: (params: unknown, _opts?: unknown) => {
+    hoisted.reviewerQueueCalls.push(params);
+    return {
+      data: {
+        items: [],
+        counts: {
+          inReview: hoisted.inReviewCount,
+          awaitingAi: 0,
+          approved: hoisted.approvedCount,
+          rejected: hoisted.rejectedCount,
+          backlog: 0,
+        },
+      },
+      isLoading: false,
+      isError: false,
+    };
+  },
+  getListReviewerQueueQueryKey: (params?: unknown) =>
+    params === undefined
+      ? ["/api/reviewer/queue"]
+      : ["/api/reviewer/queue", params],
 }));
 
 const { default: OutstandingRequests } = await import("../OutstandingRequests");
@@ -135,6 +167,10 @@ beforeEach(() => {
   hoisted.lastListParams = null;
   hoisted.withdrawCalls = [];
   hoisted.withdrawIsPending = false;
+  hoisted.inReviewCount = 0;
+  hoisted.approvedCount = 0;
+  hoisted.rejectedCount = 0;
+  hoisted.reviewerQueueCalls = [];
 });
 
 afterEach(() => {
@@ -471,6 +507,105 @@ describe("OutstandingRequests — withdraw + target deep-link (Task #443)", () =
     expect(
       screen.getByTestId("request-row-target-req-pb").getAttribute("href"),
     ).toBe("/engagements/eng-C#briefing");
+  });
+});
+
+describe("In Review / Approved / Rejected sidebar bucket badges", () => {
+  function BucketBadgeProbe() {
+    const groups = useNavGroups();
+    const items = groups.flatMap((g) => g.items);
+    const inReview = items.find((i) => i.href === "/in-review");
+    const approved = items.find((i) => i.href === "/approved");
+    const rejected = items.find((i) => i.href === "/rejected");
+    return (
+      <div data-testid="bucket-probe">
+        <span data-testid="bucket-probe-in-review-badge">
+          {inReview?.badge ?? null}
+        </span>
+        <span data-testid="bucket-probe-approved-badge">
+          {approved?.badge ?? null}
+        </span>
+        <span data-testid="bucket-probe-rejected-badge">
+          {rejected?.badge ?? null}
+        </span>
+      </div>
+    );
+  }
+
+  it("hides every bucket badge when all counts are zero", () => {
+    hoisted.audience = "internal";
+    render(
+      <Router>
+        <BucketBadgeProbe />
+      </Router>,
+    );
+    expect(screen.queryByTestId("nav-in-review-badge")).toBeNull();
+    expect(screen.queryByTestId("nav-approved-badge")).toBeNull();
+    expect(screen.queryByTestId("nav-rejected-badge")).toBeNull();
+  });
+
+  it("renders each bucket pill from the matching reviewer-queue count", () => {
+    hoisted.audience = "internal";
+    hoisted.inReviewCount = 7;
+    hoisted.approvedCount = 2;
+    hoisted.rejectedCount = 4;
+    render(
+      <Router>
+        <BucketBadgeProbe />
+      </Router>,
+    );
+    expect(screen.getByTestId("nav-in-review-badge").textContent).toBe("7");
+    expect(screen.getByTestId("nav-approved-badge").textContent).toBe("2");
+    expect(screen.getByTestId("nav-rejected-badge").textContent).toBe("4");
+  });
+
+  it("caps the rendered label at 99+ for runaway buckets", () => {
+    hoisted.audience = "internal";
+    hoisted.inReviewCount = 250;
+    hoisted.approvedCount = 100;
+    hoisted.rejectedCount = 1000;
+    render(
+      <Router>
+        <BucketBadgeProbe />
+      </Router>,
+    );
+    expect(screen.getByTestId("nav-in-review-badge").textContent).toBe("99+");
+    expect(screen.getByTestId("nav-approved-badge").textContent).toBe("99+");
+    expect(screen.getByTestId("nav-rejected-badge").textContent).toBe("99+");
+  });
+
+  it("hides bucket entries entirely when audience is not internal", () => {
+    hoisted.audience = "user";
+    hoisted.inReviewCount = 5;
+    hoisted.approvedCount = 5;
+    hoisted.rejectedCount = 5;
+    render(
+      <Router>
+        <BucketBadgeProbe />
+      </Router>,
+    );
+    expect(screen.queryByTestId("nav-in-review-badge")).toBeNull();
+    expect(screen.queryByTestId("nav-approved-badge")).toBeNull();
+    expect(screen.queryByTestId("nav-rejected-badge")).toBeNull();
+  });
+
+  it("uses one cache entry per bucket, matching the params the bucket page reads", () => {
+    hoisted.audience = "internal";
+    render(
+      <Router>
+        <BucketBadgeProbe />
+      </Router>,
+    );
+    // Each bucket badge shares its react-query cache entry with the
+    // matching page, so the recorded params mirror what `InReview`,
+    // `Approved`, and `Rejected` already pass — `Approved`/`Rejected`
+    // both add `order: "respondedAt"` so the freshest decisions surface
+    // first, while `InReview` keeps the default ordering.
+    expect(hoisted.reviewerQueueCalls).toEqual([
+      { status: "corrections_requested" },
+      { status: "approved", order: "respondedAt" },
+      { status: "rejected", order: "respondedAt" },
+    ]);
   });
 });
 

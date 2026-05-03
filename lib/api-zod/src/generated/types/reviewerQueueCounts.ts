@@ -19,6 +19,7 @@ the strip stays meaningful regardless of the caller's
     package; the name is preserved here so the FE wording
     stays consistent.
   - `inReview` — submissions in `corrections_requested`.
+  - `approved` — submissions in `approved`.
   - `rejected` — submissions in `rejected`.
   - `backlog` — `awaitingAi + inReview`, i.e. the size of the
     default queue. Surfaced separately so the FE doesn't have
@@ -28,6 +29,7 @@ the strip stays meaningful regardless of the caller's
 export interface ReviewerQueueCounts {
   inReview: number;
   awaitingAi: number;
+  approved: number;
   rejected: number;
   backlog: number;
 }

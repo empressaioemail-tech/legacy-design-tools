@@ -2,6 +2,9 @@ import type { ReactNode } from "react";
 import {
   useListMyReviewerRequests,
   getListMyReviewerRequestsQueryKey,
+  useListReviewerQueue,
+  getListReviewerQueueQueryKey,
+  type SubmissionStatus,
 } from "@workspace/api-client-react";
 import { useSessionAudience, useSessionPermissions } from "../lib/session";
 
@@ -119,16 +122,77 @@ export function filterNavGroups(
 export function useNavGroups(): NavGroup[] {
   const { permissions } = useSessionPermissions();
   const { audience } = useSessionAudience();
-  const pendingCount = useOutstandingRequestsBadgeCount(audience === "internal");
+  const isInternal = audience === "internal";
+  const pendingCount = useOutstandingRequestsBadgeCount(isInternal);
+  const inReviewCount = useReviewerQueueBucketCount(
+    { status: "corrections_requested" },
+    "inReview",
+    isInternal,
+  );
+  const approvedCount = useReviewerQueueBucketCount(
+    { status: "approved", order: "respondedAt" },
+    "approved",
+    isInternal,
+  );
+  const rejectedCount = useReviewerQueueBucketCount(
+    { status: "rejected", order: "respondedAt" },
+    "rejected",
+    isInternal,
+  );
   const groups = filterNavGroups(permissions, audience);
-  if (pendingCount <= 0) return groups;
   return groups.map((group) => ({
     ...group,
-    items: group.items.map((item) =>
-      item.href === "/requests"
-        ? { ...item, badge: <OutstandingRequestsBadge count={pendingCount} /> }
-        : item,
-    ),
+    items: group.items.map((item) => {
+      if (item.href === "/requests" && pendingCount > 0) {
+        return {
+          ...item,
+          badge: (
+            <BucketCountBadge
+              count={pendingCount}
+              testId="nav-outstanding-requests-badge"
+              ariaLabel={`${pendingCount} pending ${pendingCount === 1 ? "request" : "requests"}`}
+            />
+          ),
+        };
+      }
+      if (item.href === "/in-review" && inReviewCount > 0) {
+        return {
+          ...item,
+          badge: (
+            <BucketCountBadge
+              count={inReviewCount}
+              testId="nav-in-review-badge"
+              ariaLabel={`${inReviewCount} in review`}
+            />
+          ),
+        };
+      }
+      if (item.href === "/approved" && approvedCount > 0) {
+        return {
+          ...item,
+          badge: (
+            <BucketCountBadge
+              count={approvedCount}
+              testId="nav-approved-badge"
+              ariaLabel={`${approvedCount} approved`}
+            />
+          ),
+        };
+      }
+      if (item.href === "/rejected" && rejectedCount > 0) {
+        return {
+          ...item,
+          badge: (
+            <BucketCountBadge
+              count={rejectedCount}
+              testId="nav-rejected-badge"
+              ariaLabel={`${rejectedCount} rejected`}
+            />
+          ),
+        };
+      }
+      return item;
+    }),
   }));
 }
 
@@ -156,18 +220,52 @@ function useOutstandingRequestsBadgeCount(enabled: boolean): number {
 }
 
 /**
- * Trailing pill rendered on the Outstanding Requests sidebar entry.
- * Caps display at `99+` so a wildly stale queue doesn't blow out the
- * sidebar width. The wrapping `useNavGroups` only constructs this
- * when `count > 0`, so the badge stays absent at rest.
+ * Read one bucket's count off `useListReviewerQueue(params)`. The
+ * caller passes the *exact* params the matching bucket page uses
+ * (`InReview` / `Approved` / `Rejected`) so the sidebar pill and
+ * the page share one react-query cache entry — visiting the page
+ * warms the badge and any queue-mutating action that invalidates
+ * the queue refreshes both at once. `countKey` selects from
+ * `data.counts` (cross-system roll-up, not scoped to the filter).
+ * Gated on `enabled` because the endpoint 403s any non-internal
+ * audience.
  */
-function OutstandingRequestsBadge({ count }: { count: number }) {
+function useReviewerQueueBucketCount(
+  params: { status: SubmissionStatus; order?: "submittedAt" | "respondedAt" },
+  countKey: "inReview" | "approved" | "rejected",
+  enabled: boolean,
+): number {
+  const { data } = useListReviewerQueue(params, {
+    query: {
+      queryKey: getListReviewerQueueQueryKey(params),
+      enabled,
+    },
+  });
+  return data?.counts?.[countKey] ?? 0;
+}
+
+/**
+ * Trailing pill rendered on the Outstanding Requests / In Review /
+ * Rejected sidebar entries. Caps display at `99+` so a wildly stale
+ * queue doesn't blow out the sidebar width. The wrapping
+ * `useNavGroups` only constructs this when `count > 0`, so the badge
+ * stays absent at rest.
+ */
+function BucketCountBadge({
+  count,
+  testId,
+  ariaLabel,
+}: {
+  count: number;
+  testId: string;
+  ariaLabel: string;
+}) {
   const label = count > 99 ? "99+" : String(count);
   return (
     <span
       className="sc-pill sc-pill-amber"
-      data-testid="nav-outstanding-requests-badge"
-      aria-label={`${count} pending ${count === 1 ? "request" : "requests"}`}
+      data-testid={testId}
+      aria-label={ariaLabel}
     >
       {label}
     </span>

@@ -62,12 +62,17 @@ vi.mock("@workspace/api-client-react", () => ({
   useCreateUser: () => ({ mutate: () => {}, isPending: false }),
   useUpdateUser: () => ({ mutate: () => {}, isPending: false }),
   useDeleteUser: () => ({ mutate: () => {}, isPending: false }),
-  // Task #444 — `useNavGroups` now reads pending reviewer-requests
-  // for the sidebar badge. Audience is undefined in these gating
-  // tests so the hook is gated to `enabled: false`, but the symbol
-  // still has to resolve at module load.
+  // `useNavGroups` reads pending reviewer-requests and the
+  // reviewer-queue bucket counts for sidebar badges. Audience is
+  // undefined in these gating tests so the hooks are
+  // `enabled: false`, but the symbols still have to resolve.
   useListMyReviewerRequests: () => ({ data: { requests: [] } }),
   getListMyReviewerRequestsQueryKey: () => ["listMyReviewerRequests"],
+  useListReviewerQueue: () => ({ data: undefined }),
+  getListReviewerQueueQueryKey: (params?: unknown) =>
+    params === undefined
+      ? ["listReviewerQueue"]
+      : ["listReviewerQueue", params],
 }));
 
 vi.mock("@workspace/object-storage-web", () => ({

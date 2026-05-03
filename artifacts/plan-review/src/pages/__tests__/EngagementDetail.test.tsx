@@ -270,12 +270,17 @@ vi.mock("@workspace/api-client-react", async () => {
         queryKey: ["getSession"],
         queryFn: async () => ({ permissions: [] as string[] }),
       }),
-    // Task #444 — `useNavGroups` now reads pending reviewer-requests
-    // for the sidebar badge. Audience is undefined here so the hook
-    // is gated to `enabled: false`, but the symbol still has to
-    // resolve at module load.
+    // `useNavGroups` reads pending reviewer-requests and the
+    // reviewer-queue bucket counts for sidebar badges. Audience is
+    // undefined here so the hooks are `enabled: false`, but the
+    // symbols still have to resolve at module load.
     useListMyReviewerRequests: () => ({ data: { requests: [] } }),
     getListMyReviewerRequestsQueryKey: () => ["listMyReviewerRequests"],
+    useListReviewerQueue: () => ({ data: undefined }),
+    getListReviewerQueueQueryKey: (params?: unknown) =>
+      params === undefined
+        ? ["listReviewerQueue"]
+        : ["listReviewerQueue", params],
     useGetEngagement: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },

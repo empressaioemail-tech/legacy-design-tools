@@ -131,7 +131,13 @@ describe("GET /api/reviewer/queue", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       items: [],
-      counts: { inReview: 0, awaitingAi: 0, rejected: 0, backlog: 0 },
+      counts: {
+        inReview: 0,
+        awaitingAi: 0,
+        approved: 0,
+        rejected: 0,
+        backlog: 0,
+      },
       kpis: {
         avgReviewTime: { value: null, trend: null, trendLabel: null },
         aiAccuracy: { value: null, trend: null, trendLabel: null },
@@ -207,6 +213,7 @@ describe("GET /api/reviewer/queue", () => {
     expect(res.body.counts).toEqual({
       awaitingAi: 1,
       inReview: 1,
+      approved: 1,
       rejected: 1,
       backlog: 2,
     });
@@ -269,6 +276,7 @@ describe("GET /api/reviewer/queue", () => {
       expect(res.body.counts).toEqual({
         awaitingAi: 2,
         inReview: 1,
+        approved: 1,
         rejected: 1,
         backlog: 3,
       });

@@ -8,6 +8,11 @@ vi.mock("@workspace/api-client-react", () => ({
   getGetSessionQueryKey: () => ["session"],
   useListMyReviewerRequests: () => ({ data: { requests: [] } }),
   getListMyReviewerRequestsQueryKey: () => ["listMyReviewerRequests"],
+  useListReviewerQueue: () => ({ data: undefined }),
+  getListReviewerQueueQueryKey: (params?: unknown) =>
+    params === undefined
+      ? ["listReviewerQueue"]
+      : ["listReviewerQueue", params],
 }));
 
 const { default: FindingsLibrary } = await import("../FindingsLibrary");
