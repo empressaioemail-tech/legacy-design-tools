@@ -113,6 +113,9 @@ describe("lib/db schema integration", () => {
         // is reviewer-only scratch notes); this table is the
         // cross-audience conversation channel.
         "submission_comments",
+        // PLR-5 — reviewer-sent communication-event rows (audit-grade
+        // append-only letter log). Cascades off `submissions`.
+        "submission_communications",
         "submissions",
         "users",
         "viewpoint_renders",

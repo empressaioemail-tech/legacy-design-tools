@@ -83,6 +83,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // `submissions`, but listed explicitly per the "if a route writes
   // to it, it's in this list" invariant.
   "submission_comments",
+  // PLR-5 — reviewer-sent communication-event rows. Cascades off
+  // `submissions`, but listed explicitly per the "if a route writes
+  // to it, it's in this list" invariant so a suite that exercises
+  // the communications composer always starts from a known-empty
+  // state.
+  "submission_communications",
   // V1-1 / AIR-1 — finding row + its producing-run row. Both
   // cascade off `submissions`, but listed explicitly per the
   // "if a route writes to it, it's in this list" invariant. `findings`
