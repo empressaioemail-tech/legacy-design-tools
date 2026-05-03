@@ -115,7 +115,10 @@ router.post("/qa/runs", async (req: Request, res: Response) => {
       return;
     }
     logger.error({ err, suiteId: suite.id }, "qa: failed to start run");
-    res.status(500).json({ error: "start_failed" });
+    res.status(500).json({
+      error: "start_failed",
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 });
 
@@ -491,7 +494,10 @@ router.post("/qa/autopilot/runs", async (req: Request, res: Response) => {
       return;
     }
     logger.error({ err }, "qa: failed to start autopilot run");
-    res.status(500).json({ error: "start_failed" });
+    res.status(500).json({
+      error: "start_failed",
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 });
 

@@ -41,10 +41,30 @@ export function AutopilotBanner() {
         });
       },
       onError: (err) => {
-        const message = err instanceof Error ? err.message : String(err);
+        // Prefer the server's structured `{ error, message }` body so the
+        // toast shows the real reason instead of "HTTP 500 : start_failed".
+        const data =
+          err && typeof err === "object" && "data" in err
+            ? (err as { data: unknown }).data
+            : null;
+        let description = err instanceof Error ? err.message : String(err);
+        if (data && typeof data === "object") {
+          const code =
+            "error" in data && typeof (data as Record<string, unknown>).error === "string"
+              ? ((data as Record<string, unknown>).error as string)
+              : null;
+          const message =
+            "message" in data &&
+            typeof (data as Record<string, unknown>).message === "string"
+              ? ((data as Record<string, unknown>).message as string)
+              : null;
+          if (code && message) description = `${code}: ${message}`;
+          else if (code) description = code;
+          else if (message) description = message;
+        }
         toast({
           title: "Could not start autopilot",
-          description: message,
+          description,
           variant: "destructive",
         });
       },

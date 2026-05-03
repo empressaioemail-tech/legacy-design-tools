@@ -1395,6 +1395,12 @@ server-side; ids are de-duplicated.
 
 export interface ErrorResponse {
   error: string;
+  /** Optional human-readable explanation of the failure. Servers
+include this on 500 responses (and other unexpected errors)
+so clients can surface a debuggable reason in toasts/logs
+instead of just the opaque `error` code.
+ */
+  message?: string;
 }
 
 /**
