@@ -266,3 +266,10 @@ export type { DisciplineFilterChipBarProps } from "./components/DisciplineFilter
 // strip's applicant-history pill; reusable for Tracks 4/5/7.
 export { Hovercard } from "./components/Hovercard";
 export type { HovercardProps, HovercardPlacement } from "./components/Hovercard";
+
+// Track 1 — AIBadge supersedes the older FindingAuthorTag. Same
+// rendering convention reused on the FindingsTab row, the
+// FindingDrillIn PROVENANCE block, and the comment-letter draft
+// (aggregate variant for the document-level provenance line).
+export { AIBadge } from "./components/AIBadge";
+export type { AIBadgeProps, AIBadgeVariant } from "./components/AIBadge";
