@@ -36,6 +36,7 @@ import {
   useListSubmissionCommunications,
   getListSubmissionCommunicationsQueryKey,
 } from "@workspace/api-client-react";
+import { DecideModal } from "../components/DecideModal";
 import { relativeTime } from "../lib/relativeTime";
 import {
   readFindingFromUrl,
@@ -1036,9 +1037,17 @@ function OpenSubmissionModalRenderer({
   const lastCommunicatedAt = commsData?.communications?.[0]?.sentAt ?? null;
   const [composerOpen, setComposerOpen] = useState(false);
 
+  // PLR-6 / Task #460 — Decide modal mount. Reviewer-only: gated on
+  // `audience === "internal"` so the architect / AI audiences fall
+  // back to the legacy "switch to Decision tab" path inside
+  // `SubmissionDetailModal` (the modal's `handleDecide` does that
+  // when no `onDecide` callback is wired).
+  const [decideOpen, setDecideOpen] = useState(false);
   if (!openSubmissionId) return null;
   const submission = submissions?.find((s) => s.id === openSubmissionId);
   if (!submission) return null;
+  const onDecide =
+    audience === "internal" ? () => setDecideOpen(true) : undefined;
   return (
     <>
       <SubmissionDetailModal
@@ -1053,6 +1062,7 @@ function OpenSubmissionModalRenderer({
         onOpenSubmission={onOpenSubmission}
         onCommunicate={isReviewer ? () => setComposerOpen(true) : undefined}
         lastCommunicatedAt={lastCommunicatedAt}
+        onDecide={onDecide}
       />
       {isReviewer && (
         <CommunicateComposer
@@ -1065,6 +1075,14 @@ function OpenSubmissionModalRenderer({
           applicantFirm={engagement?.applicantFirm ?? null}
           submittedAt={submission.submittedAt}
           architectOfRecord={engagement?.architectOfRecord ?? null}
+        />
+      )}
+      {audience === "internal" && (
+        <DecideModal
+          submission={submission}
+          engagementId={engagementId}
+          open={decideOpen}
+          onClose={() => setDecideOpen(false)}
         />
       )}
     </>

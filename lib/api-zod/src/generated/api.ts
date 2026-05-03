@@ -3824,6 +3824,89 @@ export const RequestUploadUrlResponse = zod.object({
 });
 
 /**
+ * Records a reviewer verdict against the submission. The
+verdict is persisted as a `decision-event.recorded` row on
+the `decision-event` atom's chain (one event per decision),
+and the submission row's `status` / `reviewerComment` columns
+are updated in the same call so existing list surfaces
+reflect the new state without a follow-up GET.
+
+Verdict → submission-status mapping:
+  - `approve`                 → `approved`
+  - `approve_with_conditions` → `approved`
+  - `return_for_revision`     → `corrections_requested`
+
+Reviewer-only: requires `audience: "internal"` (architects
+get a 403). Calling the route a second time on the same
+submission is allowed and appends a fresh decision-event
+row; the submission row reflects the latest call.
+
+ * @summary Record a reviewer verdict against a submission
+ */
+export const RecordDecisionParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const recordDecisionBodyCommentMax = 4096;
+
+export const RecordDecisionBody = zod
+  .object({
+    verdict: zod
+      .enum(["approve", "approve_with_conditions", "return_for_revision"])
+      .describe(
+        "PLR-6 reviewer verdict tuple. The three options the Decide\nbutton surface offers, mapped to submission `status` per the\ndecisions route doc-block.\n",
+      ),
+    comment: zod
+      .string()
+      .max(recordDecisionBodyCommentMax)
+      .optional()
+      .describe("Optional free-text note from the reviewer."),
+  })
+  .describe(
+    "Request body for `POST \/submissions\/{submissionId}\/decisions`.\n`verdict` is the reviewer's choice; `comment` is an optional\nfree-text note copied onto the submission row's\n`reviewerComment` column AND embedded in the\n`decision-event.recorded` payload. Empty \/ whitespace-only\ncomments are coerced to null.\n",
+  );
+
+/**
+ * Returns every decision-event ever recorded for the
+submission, newest-first. Reviewer-only (architects get a
+403). Returns an empty `items` array when no verdict has
+been recorded yet.
+
+ * @summary List recorded decisions for a submission
+ */
+export const ListSubmissionDecisionsParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const ListSubmissionDecisionsResponse = zod
+  .object({
+    items: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          submissionId: zod.string(),
+          verdict: zod
+            .enum(["approve", "approve_with_conditions", "return_for_revision"])
+            .describe(
+              "PLR-6 reviewer verdict tuple. The three options the Decide\nbutton surface offers, mapped to submission `status` per the\ndecisions route doc-block.\n",
+            ),
+          comment: zod.string().nullable(),
+          recordedAt: zod.coerce.date(),
+          recordedBy: zod.object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+          }),
+        })
+        .describe(
+          "One recorded decision-event for a submission. `id` is the\ndecision's stable uuid (also the `entityId` of the matching\n`decision-event` atom). `recordedAt` is the event's\n`occurredAt`; `recordedBy` is the actor recorded against the\nevent (the session-bound reviewer when one is attached, or\nthe dedicated `decision-recorded` system actor as a defensive\nfallback).\n",
+        ),
+    ),
+  })
+  .describe(
+    "Wire envelope for `GET \/submissions\/{submissionId}\/decisions`.\n`items` is newest-first; empty when no verdict has been\nrecorded yet.\n",
+  );
+
+/**
  * Returns every reviewer-annotation row anchored to the
 submission, in newest-first order. Reviewer-only — the
 endpoint requires the `internal` audience and 403s any

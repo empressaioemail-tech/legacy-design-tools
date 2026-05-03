@@ -1136,6 +1136,82 @@ pending state never set the field.
   submittedAt: string;
 }
 
+/**
+ * PLR-6 reviewer verdict tuple. The three options the Decide
+button surface offers, mapped to submission `status` per the
+decisions route doc-block.
+
+ */
+export type DecisionVerdict =
+  (typeof DecisionVerdict)[keyof typeof DecisionVerdict];
+
+export const DecisionVerdict = {
+  approve: "approve",
+  approve_with_conditions: "approve_with_conditions",
+  return_for_revision: "return_for_revision",
+} as const;
+
+/**
+ * Request body for `POST /submissions/{submissionId}/decisions`.
+`verdict` is the reviewer's choice; `comment` is an optional
+free-text note copied onto the submission row's
+`reviewerComment` column AND embedded in the
+`decision-event.recorded` payload. Empty / whitespace-only
+comments are coerced to null.
+
+ */
+export interface RecordDecisionBody {
+  verdict: DecisionVerdict;
+  /**
+   * Optional free-text note from the reviewer.
+   * @maxLength 4096
+   */
+  comment?: string;
+}
+
+export type DecisionRecordedByKind =
+  (typeof DecisionRecordedByKind)[keyof typeof DecisionRecordedByKind];
+
+export const DecisionRecordedByKind = {
+  user: "user",
+  agent: "agent",
+  system: "system",
+} as const;
+
+export type DecisionRecordedBy = {
+  kind: DecisionRecordedByKind;
+  id: string;
+};
+
+/**
+ * One recorded decision-event for a submission. `id` is the
+decision's stable uuid (also the `entityId` of the matching
+`decision-event` atom). `recordedAt` is the event's
+`occurredAt`; `recordedBy` is the actor recorded against the
+event (the session-bound reviewer when one is attached, or
+the dedicated `decision-recorded` system actor as a defensive
+fallback).
+
+ */
+export interface Decision {
+  id: string;
+  submissionId: string;
+  verdict: DecisionVerdict;
+  comment: string | null;
+  recordedAt: string;
+  recordedBy: DecisionRecordedBy;
+}
+
+/**
+ * Wire envelope for `GET /submissions/{submissionId}/decisions`.
+`items` is newest-first; empty when no verdict has been
+recorded yet.
+
+ */
+export interface ListDecisionsResponse {
+  items: Decision[];
+}
+
 export interface SnapshotPayloadExisting {
   engagementId: string;
   [key: string]: unknown;

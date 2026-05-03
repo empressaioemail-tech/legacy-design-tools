@@ -69,6 +69,15 @@ tags:
       Tenant admins (gated on `settings:manage`) curate
       discipline-scoped entries; reviewers consume them via the
       Library picker on the FindingsTab.
+  - name: decisions
+    description: |
+      Reviewer Decide surface (PLR-6 / Task #460). Records a verdict
+      (`approve`, `approve_with_conditions`, `return_for_revision`)
+      against a plan-review submission. Reviewer-only (audience-
+      gated to `internal`). Each verdict is persisted on the
+      `decision-event` atom's chain; the submission row's `status`
+      and `reviewerComment` columns are also updated so existing
+      list surfaces reflect the latest verdict.
 paths:
   /healthz:
     get:
@@ -2664,6 +2673,106 @@ paths:
             Requested `contentType` is not in the allow-list (see
             `RequestUploadUrlBody.contentType`). The avatar flow is the
             only consumer today; it always uploads `image/jpeg`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /submissions/{submissionId}/decisions:
+    post:
+      operationId: recordDecision
+      tags: [decisions]
+      summary: Record a reviewer verdict against a submission
+      description: |
+        Records a reviewer verdict against the submission. The
+        verdict is persisted as a `decision-event.recorded` row on
+        the `decision-event` atom's chain (one event per decision),
+        and the submission row's `status` / `reviewerComment` columns
+        are updated in the same call so existing list surfaces
+        reflect the new state without a follow-up GET.
+
+        Verdict → submission-status mapping:
+          - `approve`                 → `approved`
+          - `approve_with_conditions` → `approved`
+          - `return_for_revision`     → `corrections_requested`
+
+        Reviewer-only: requires `audience: "internal"` (architects
+        get a 403). Calling the route a second time on the same
+        submission is allowed and appends a fresh decision-event
+        row; the submission row reflects the latest call.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordDecisionBody"
+      responses:
+        "201":
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Decision"
+        "400":
+          description: Invalid request body or path params
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not on the internal (reviewer) audience
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listSubmissionDecisions
+      tags: [decisions]
+      summary: List recorded decisions for a submission
+      description: |
+        Returns every decision-event ever recorded for the
+        submission, newest-first. Reviewer-only (architects get a
+        403). Returns an empty `items` array when no verdict has
+        been recorded yet.
+      parameters:
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Decisions list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListDecisionsResponse"
+        "400":
+          description: Invalid path params
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not on the internal (reviewer) audience
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Submission not found
           content:
             application/json:
               schema:
@@ -6041,6 +6150,90 @@ components:
         - respondedAt
         - responseRecordedAt
         - submittedAt
+
+    DecisionVerdict:
+      type: string
+      description: |
+        PLR-6 reviewer verdict tuple. The three options the Decide
+        button surface offers, mapped to submission `status` per the
+        decisions route doc-block.
+      enum:
+        - approve
+        - approve_with_conditions
+        - return_for_revision
+
+    RecordDecisionBody:
+      type: object
+      description: |
+        Request body for `POST /submissions/{submissionId}/decisions`.
+        `verdict` is the reviewer's choice; `comment` is an optional
+        free-text note copied onto the submission row's
+        `reviewerComment` column AND embedded in the
+        `decision-event.recorded` payload. Empty / whitespace-only
+        comments are coerced to null.
+      properties:
+        verdict:
+          $ref: "#/components/schemas/DecisionVerdict"
+        comment:
+          type: string
+          maxLength: 4096
+          description: Optional free-text note from the reviewer.
+      required:
+        - verdict
+
+    Decision:
+      type: object
+      description: |
+        One recorded decision-event for a submission. `id` is the
+        decision's stable uuid (also the `entityId` of the matching
+        `decision-event` atom). `recordedAt` is the event's
+        `occurredAt`; `recordedBy` is the actor recorded against the
+        event (the session-bound reviewer when one is attached, or
+        the dedicated `decision-recorded` system actor as a defensive
+        fallback).
+      properties:
+        id:
+          type: string
+        submissionId:
+          type: string
+        verdict:
+          $ref: "#/components/schemas/DecisionVerdict"
+        comment:
+          type: string
+          nullable: true
+        recordedAt:
+          type: string
+          format: date-time
+        recordedBy:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum: [user, agent, system]
+            id:
+              type: string
+          required: [kind, id]
+      required:
+        - id
+        - submissionId
+        - verdict
+        - comment
+        - recordedAt
+        - recordedBy
+
+    ListDecisionsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /submissions/{submissionId}/decisions`.
+        `items` is newest-first; empty when no verdict has been
+        recorded yet.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Decision"
+      required:
+        - items
 
     SnapshotPayload:
       description: |

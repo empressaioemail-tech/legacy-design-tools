@@ -27,6 +27,7 @@ import submissionEventsRouter from "./submissionEvents";
 import communicationsRouter from "./communications";
 import reviewerRequestsRouter from "./reviewerRequests";
 import reviewerQueueRouter from "./submissions";
+import decisionsRouter from "./decisions";
 import rendersRouter from "./renders";
 import notificationsRouter from "./notifications";
 import cannedFindingsRouter from "./cannedFindings";
@@ -111,6 +112,12 @@ router.use(communicationsRouter);
 router.use(reviewerRequestsRouter);
 // Cross-engagement reviewer Inbox feed at /reviewer/queue.
 router.use(reviewerQueueRouter);
+// PLR-6 / Task #460 — reviewer Decide surface. Mounts under
+// /submissions/:submissionId/decisions; distinct from the reviewer-
+// annotations / submission-comments routers (their parametric
+// segment is always literal `reviewer-annotations` / `comments`)
+// so ordering is indifferent.
+router.use(decisionsRouter);
 // V1-4 / DA-RP-1 — mnml.ai renders. Mounts under
 // /engagements/:id/renders (kickoff + list) and top-level /renders/:id
 // (status + cancel). The /engagements/:id/renders path is more

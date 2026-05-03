@@ -85,6 +85,16 @@ export const REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID =
 export const FINDING_ENGINE_ACTOR_ID = "finding-engine";
 
 /**
+ * PLR-6 reviewer Decide path — `routes/decisions.ts`. Stamped on
+ * `decision-event.recorded` events when the route's session has no
+ * bound reviewer requestor id (defensive fallback — the route gates
+ * on `audience: "internal"` which usually carries one). The actor
+ * exists so the audit trail still attributes a decision to
+ * *something* stable in the unlikely fallback path.
+ */
+export const DECISION_RECORDED_ACTOR_ID = "decision-recorded";
+
+/**
  * Every stable server-side actor id, in declaration order. Consumers
  * iterate this array (e.g. the design-tools actorLabel test) to assert
  * each emitted id has a matching operator-facing label, so a new server
@@ -109,6 +119,7 @@ export const SERVER_ACTOR_IDS = [
   REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID,
   REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,
   FINDING_ENGINE_ACTOR_ID,
+  DECISION_RECORDED_ACTOR_ID,
 ] as const;
 
 /** Literal-id union of {@link SERVER_ACTOR_IDS}. */

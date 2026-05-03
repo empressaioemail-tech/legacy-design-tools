@@ -39,6 +39,7 @@ import type {
   CreateSubmissionCommunicationBody,
   CreateSubmissionFindingBody,
   CreateUserBody,
+  Decision,
   DismissReviewerRequestBody,
   DraftSubmissionCommunicationResponse,
   EngagementBimModelResponse,
@@ -68,6 +69,7 @@ import type {
   ListCannedFindingsParams,
   ListCannedFindingsResponse,
   ListCodeAtomsParams,
+  ListDecisionsResponse,
   ListEngagementBriefingSourcesParams,
   ListEngagementReviewerRequestsParams,
   ListJurisdictionAtomsParams,
@@ -91,6 +93,7 @@ import type {
   PromoteReviewerAnnotationsResponse,
   PushBimModelBody,
   RecordBimModelDivergenceBody,
+  RecordDecisionBody,
   RecordSubmissionResponseBody,
   RenderDetailResponse,
   RenderListResponse,
@@ -5934,6 +5937,210 @@ export const useRequestUploadUrl = <
 > => {
   return useMutation(getRequestUploadUrlMutationOptions(options));
 };
+
+/**
+ * Records a reviewer verdict against the submission. The
+verdict is persisted as a `decision-event.recorded` row on
+the `decision-event` atom's chain (one event per decision),
+and the submission row's `status` / `reviewerComment` columns
+are updated in the same call so existing list surfaces
+reflect the new state without a follow-up GET.
+
+Verdict → submission-status mapping:
+  - `approve`                 → `approved`
+  - `approve_with_conditions` → `approved`
+  - `return_for_revision`     → `corrections_requested`
+
+Reviewer-only: requires `audience: "internal"` (architects
+get a 403). Calling the route a second time on the same
+submission is allowed and appends a fresh decision-event
+row; the submission row reflects the latest call.
+
+ * @summary Record a reviewer verdict against a submission
+ */
+export const getRecordDecisionUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/decisions`;
+};
+
+export const recordDecision = async (
+  submissionId: string,
+  recordDecisionBody: RecordDecisionBody,
+  options?: RequestInit,
+): Promise<Decision> => {
+  return customFetch<Decision>(getRecordDecisionUrl(submissionId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(recordDecisionBody),
+  });
+};
+
+export const getRecordDecisionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordDecision>>,
+    TError,
+    { submissionId: string; data: BodyType<RecordDecisionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordDecision>>,
+  TError,
+  { submissionId: string; data: BodyType<RecordDecisionBody> },
+  TContext
+> => {
+  const mutationKey = ["recordDecision"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordDecision>>,
+    { submissionId: string; data: BodyType<RecordDecisionBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return recordDecision(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordDecisionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordDecision>>
+>;
+export type RecordDecisionMutationBody = BodyType<RecordDecisionBody>;
+export type RecordDecisionMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Record a reviewer verdict against a submission
+ */
+export const useRecordDecision = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordDecision>>,
+    TError,
+    { submissionId: string; data: BodyType<RecordDecisionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recordDecision>>,
+  TError,
+  { submissionId: string; data: BodyType<RecordDecisionBody> },
+  TContext
+> => {
+  return useMutation(getRecordDecisionMutationOptions(options));
+};
+
+/**
+ * Returns every decision-event ever recorded for the
+submission, newest-first. Reviewer-only (architects get a
+403). Returns an empty `items` array when no verdict has
+been recorded yet.
+
+ * @summary List recorded decisions for a submission
+ */
+export const getListSubmissionDecisionsUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/decisions`;
+};
+
+export const listSubmissionDecisions = async (
+  submissionId: string,
+  options?: RequestInit,
+): Promise<ListDecisionsResponse> => {
+  return customFetch<ListDecisionsResponse>(
+    getListSubmissionDecisionsUrl(submissionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListSubmissionDecisionsQueryKey = (submissionId: string) => {
+  return [`/api/submissions/${submissionId}/decisions`] as const;
+};
+
+export const getListSubmissionDecisionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSubmissionDecisions>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionDecisions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListSubmissionDecisionsQueryKey(submissionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSubmissionDecisions>>
+  > = ({ signal }) =>
+    listSubmissionDecisions(submissionId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!submissionId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSubmissionDecisions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSubmissionDecisionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSubmissionDecisions>>
+>;
+export type ListSubmissionDecisionsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List recorded decisions for a submission
+ */
+
+export function useListSubmissionDecisions<
+  TData = Awaited<ReturnType<typeof listSubmissionDecisions>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  submissionId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubmissionDecisions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSubmissionDecisionsQueryOptions(
+    submissionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Returns every reviewer-annotation row anchored to the

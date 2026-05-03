@@ -30,6 +30,9 @@
     },
     {
       "path": "../../lib/briefing-pdf-tokens"
+    },
+    {
+      "path": "../../lib/comment-letter"
     }
   ]
 }

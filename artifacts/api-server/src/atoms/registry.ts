@@ -37,6 +37,7 @@ import { makeViewpointRenderAtom } from "./viewpoint-render.atom";
 import { makeRenderOutputAtom } from "./render-output.atom";
 import { makeFindingAtom } from "./finding.atom";
 import { makeCommunicationEventAtom } from "./communication-event.atom";
+import { makeDecisionEventAtom } from "./decision-event.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -212,6 +213,12 @@ export function getAtomRegistry(): AtomRegistry {
   // letter. Registered AFTER submission (its only concrete child)
   // so the boot-log tail surfaces the dependency order naturally.
   registry.register(makeCommunicationEventAtom({ db, history }));
+  // PLR-6 / Task #460 — decision-event atom. Composes `submission`
+  // (concrete edge, dataKey `submission`); contextSummary loads the
+  // matching `decision-event.recorded` row from `atom_events`.
+  // Registered after `submission` so the boot-log tail surfaces the
+  // dependency order naturally.
+  registry.register(makeDecisionEventAtom({ db, history }));
   _registry = registry;
   return registry;
 }

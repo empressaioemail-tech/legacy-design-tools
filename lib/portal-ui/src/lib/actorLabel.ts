@@ -5,6 +5,7 @@ import {
   BIM_MODEL_REFRESH_ACTOR_ID,
   BRIEFING_ENGINE_ACTOR_ID,
   BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
+  DECISION_RECORDED_ACTOR_ID,
   ENGAGEMENT_EDIT_ACTOR_ID,
   FINDING_ENGINE_ACTOR_ID,
   REVIEWER_ANNOTATION_AUTHOR_ACTOR_ID,
@@ -66,6 +67,11 @@ export const FRIENDLY_AGENT_LABELS: Readonly<Record<string, string>> = {
   [REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID]: "Reviewer annotation promotion",
   // V1-1 / AIR-1 — finding-engine generation events.
   [FINDING_ENGINE_ACTOR_ID]: "Finding engine",
+  // PLR-6 / Task #460 — Decide-button decision-event recording.
+  // Stamped only on the rare path where the route's session does
+  // not carry a session-bound reviewer requestor id; the audience
+  // guard normally ensures the event attributes to the reviewer.
+  [DECISION_RECORDED_ACTOR_ID]: "Reviewer decision",
 };
 
 /**
