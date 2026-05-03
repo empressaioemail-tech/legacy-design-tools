@@ -142,6 +142,12 @@ interface UserResponse {
   email: string | null;
   avatarUrl: string | null;
   architectPdfHeader: string | null;
+  /**
+   * Track 1 — reviewer's `PlanReviewDiscipline[]`. Empty array on
+   * legacy / non-reviewer rows; the UI's "Show all" mode is the safe
+   * default when this is empty.
+   */
+  disciplines: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -157,6 +163,10 @@ export function toUserResponse(row: UserRow): UserResponse {
     // PATCH /users/{id} route does not write the column today; the
     // architect updates it via PATCH /me/architect-pdf-header.
     architectPdfHeader: row.architectPdfHeader,
+    // Track 1 — reviewer disciplines. Surfaced on every read so the
+    // FE can default-filter the Inbox / Findings / CannedFindings /
+    // OutstandingRequests surfaces without a separate fetch.
+    disciplines: row.disciplines,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

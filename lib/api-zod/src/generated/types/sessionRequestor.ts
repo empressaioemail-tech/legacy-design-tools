@@ -5,6 +5,7 @@
  * SmartCity OS Design Tools API
  * OpenAPI spec version: 0.1.0
  */
+import type { PlanReviewDiscipline } from "./planReviewDiscipline";
 import type { SessionRequestorKind } from "./sessionRequestorKind";
 
 /**
@@ -17,4 +18,17 @@ auth lands: the verified subject id from the auth provider).
 export interface SessionRequestor {
   kind: SessionRequestorKind;
   id: string;
+  /** PLR-v2 Track 1 — the requestor's reviewer-discipline
+assignments, surfaced on the session envelope so the FE's
+Inbox default-filter and FindingsTab default-discipline
+picker don't need to round-trip
+`useGetUser(session.requestor.id)` on every render.
+
+Hydrated server-side from `users.disciplines` for
+`kind: 'user'` requestors; empty array for `kind: 'agent'`
+/ `system`. The `User.disciplines` column remains the
+source of truth — this is a denormalized read-side
+convenience.
+ */
+  disciplines: PlanReviewDiscipline[];
 }

@@ -155,6 +155,26 @@ vi.mock("@workspace/api-client-react", async () => {
       "getEngagementBriefing",
       id,
     ],
+    // Track 1 — SubmissionDetailModal now reads the latest decision's
+    // `pdfArtifactRef` to gate the "Issued PDF" reviewer-side download
+    // link (PLR-11). Unmocked, the import would throw and every test
+    // in this file would fail at module load. Default-empty list so
+    // the gating branch reads "no decision yet" without test churn.
+    getListSubmissionDecisionsQueryKey: (id: string) => [
+      "listSubmissionDecisions",
+      id,
+    ],
+    useListSubmissionDecisions: (
+      submissionId: string,
+      opts?: { query?: { queryKey?: readonly unknown[]; enabled?: boolean } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          (["listSubmissionDecisions", submissionId] as const),
+        queryFn: async () => ({ items: [] }),
+        enabled: opts?.query?.enabled ?? true,
+      }),
     useGetEngagement: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[]; enabled?: boolean } },

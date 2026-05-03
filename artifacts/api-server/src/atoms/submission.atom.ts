@@ -89,6 +89,25 @@ export type SubmissionSupportedModes = typeof SUBMISSION_SUPPORTED_MODES;
 export const SUBMISSION_EVENT_TYPES = [
   "submission.response-recorded",
   "submission.status-changed",
+  /**
+   * Track 1 — emitted by the auto-classifier on first classification of
+   * a fresh submission. Anchored against the submission entity (not the
+   * `submission-classification` atom) so the per-submission timeline UI
+   * picks it up alongside `submission.status-changed`. Mirrors the
+   * `engagement.submitted` precedent (lifecycle event lives on the
+   * parent's chain). Payload:
+   *   `{ projectType, disciplines, applicableCodeBooks, confidence, source }`
+   */
+  "submission.classified",
+  /**
+   * Track 1 — emitted by the reclassify route when a reviewer overwrites
+   * an existing classification. Distinct from `submission.classified` so
+   * the timeline can tell apart the auto-classifier's first write from a
+   * subsequent human correction. Payload carries before/after for
+   * downstream training-signal consumers:
+   *   `{ before: {...}, after: {...} }`
+   */
+  "submission.reclassified",
 ] as const;
 
 export type SubmissionEventType = (typeof SUBMISSION_EVENT_TYPES)[number];

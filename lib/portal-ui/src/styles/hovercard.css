@@ -1,0 +1,51 @@
+/* Hovercard — Track 1 / addendum D3.
+ *
+ * Imported into the consuming surface via `@workspace/portal-ui/styles`
+ * (see lib/portal-ui/src/styles/index.css). Positioning is CSS-only,
+ * relative to the wrapping `<span class="sc-hovercard">` element.
+ *
+ * The four placements use translate to sit outside the trigger; an 8px
+ * offset matches the existing card edge spacing. Background and border
+ * read off the same dark-theme tokens as `.sc-card` so the hovercard
+ * looks like a popover-shaped card without us minting new tokens.
+ */
+
+.sc-hovercard {
+  /* Lets the absolute-positioned popover hang off the trigger
+   * without affecting layout flow. */
+  position: relative;
+  display: inline-block;
+}
+
+.sc-hovercard-popover {
+  position: absolute;
+  z-index: 200;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: var(--depth-shadow-md);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.sc-hovercard-popover-bottom {
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, 8px);
+}
+.sc-hovercard-popover-top {
+  bottom: 100%;
+  left: 50%;
+  transform: translate(-50%, -8px);
+}
+.sc-hovercard-popover-right {
+  top: 50%;
+  left: 100%;
+  transform: translate(8px, -50%);
+}
+.sc-hovercard-popover-left {
+  top: 50%;
+  right: 100%;
+  transform: translate(-8px, -50%);
+}

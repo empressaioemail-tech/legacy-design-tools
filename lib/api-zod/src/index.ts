@@ -1,6 +1,10 @@
 // Runtime zod schemas (request bodies, params, responses)
 export * from "./generated/api";
 
+// Hand-written types (BE source-of-truth; CT mirrors into OpenAPI).
+// Lives outside `./generated/` so orval's `clean: true` does not wipe it.
+export * from "./types/planReviewDiscipline";
+
 // TypeScript interfaces for the same OpenAPI schemas. Re-exported as
 // types-only so that names which collide with the zod consts above
 // (e.g. UpdateEngagementBody) resolve to the value side at runtime

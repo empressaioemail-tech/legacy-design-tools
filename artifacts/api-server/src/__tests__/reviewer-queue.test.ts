@@ -21,7 +21,12 @@ vi.mock("@workspace/db", async () => {
 });
 
 const { setupRouteTests } = await import("./setup");
-const { engagements, submissions } = await import("@workspace/db");
+const {
+  engagements,
+  submissions,
+  findings,
+  submissionClassifications,
+} = await import("@workspace/db");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -458,5 +463,300 @@ describe("GET /api/reviewer/queue", () => {
     );
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(2);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*           Track 1 — triage strip: severity / applicant / class      */
+  /* ------------------------------------------------------------------ */
+
+  async function seedFindings(
+    submissionId: string,
+    severities: ReadonlyArray<"blocker" | "concern" | "advisory">,
+  ): Promise<void> {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    let i = 0;
+    for (const sev of severities) {
+      const atomId = `finding:${submissionId}:row-${i++}`;
+      await db.insert(findings).values({
+        atomId,
+        submissionId,
+        severity: sev,
+        category: "egress",
+        status: "ai-produced",
+        text: `${sev} test finding`,
+        confidence: "0.95",
+      });
+    }
+  }
+
+  async function seedClassification(
+    submissionId: string,
+    opts: {
+      projectType?: string;
+      disciplines?: string[];
+      applicableCodeBooks?: string[];
+      confidence?: number | null;
+      source?: "auto" | "reviewer";
+    },
+  ): Promise<void> {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    await db.insert(submissionClassifications).values({
+      submissionId,
+      projectType: opts.projectType ?? null,
+      disciplines: opts.disciplines ?? [],
+      applicableCodeBooks: opts.applicableCodeBooks ?? [],
+      confidence: opts.confidence == null ? null : String(opts.confidence),
+      source: opts.source ?? "auto",
+    });
+  }
+
+  it("returns severityRollup, classification, and applicantHistory on each item", async () => {
+    const eng = await seedEngagement({
+      name: "Track 1 Triage Engagement",
+      applicantFirm: "Empressa Plans LLC",
+      submissions: [{ status: "pending" }],
+    });
+    const submissionId = eng.submissionIds[0]!;
+    await seedFindings(submissionId, [
+      "blocker",
+      "blocker",
+      "concern",
+      "concern",
+      "concern",
+      "advisory",
+    ]);
+    await seedClassification(submissionId, {
+      projectType: "commercial-tenant-improvement",
+      disciplines: ["building", "fire-life-safety"],
+      applicableCodeBooks: ["IBC 2021"],
+      confidence: 0.82,
+      source: "auto",
+    });
+
+    const res = await asReviewer(request(getApp()).get("/api/reviewer/queue"));
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    const item = res.body.items[0];
+
+    expect(item.severityRollup).toEqual({
+      blockers: 2,
+      concerns: 3,
+      advisory: 1,
+      total: 6,
+    });
+    expect(item.classification).toMatchObject({
+      submissionId,
+      projectType: "commercial-tenant-improvement",
+      disciplines: ["building", "fire-life-safety"],
+      applicableCodeBooks: ["IBC 2021"],
+      confidence: 0.82,
+      source: "auto",
+    });
+    // No prior submissions in this test → empty history.
+    expect(item.applicantHistory).toEqual({
+      totalPrior: 0,
+      approved: 0,
+      returned: 0,
+      lastReturnReason: null,
+      priorSubmissions: [],
+    });
+  });
+
+  it("zeros severityRollup and nulls classification when neither has been seeded", async () => {
+    const { submissionIds } = await seedEngagement({
+      name: "No-data Engagement",
+      submissions: [{ status: "pending" }],
+    });
+    expect(submissionIds).toHaveLength(1);
+
+    const res = await asReviewer(request(getApp()).get("/api/reviewer/queue"));
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].classification).toBeNull();
+    expect(res.body.items[0].severityRollup).toEqual({
+      blockers: 0,
+      concerns: 0,
+      advisory: 0,
+      total: 0,
+    });
+  });
+
+  it("aggregates applicantHistory by case-insensitive applicant_firm match across engagements", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+
+    // Three prior submissions for the same applicant — variant-cased
+    // applicant_firm to confirm case-insensitive match.
+    await seedEngagement({
+      name: "Past Project A (approved)",
+      applicantFirm: "ACME Architecture",
+      submissions: [
+        {
+          status: "approved",
+          submittedAt: new Date("2025-11-01T00:00:00Z"),
+        },
+      ],
+    });
+    await seedEngagement({
+      name: "Past Project B (returned, last)",
+      applicantFirm: "  acme architecture  ",
+      submissions: [
+        {
+          status: "corrections_requested",
+          submittedAt: new Date("2026-02-15T00:00:00Z"),
+          reviewerComment: "Stormwater plan missing",
+        },
+      ],
+    });
+    await seedEngagement({
+      name: "Past Project C (rejected)",
+      applicantFirm: "ACME ARCHITECTURE",
+      submissions: [
+        {
+          status: "rejected",
+          submittedAt: new Date("2025-12-10T00:00:00Z"),
+          reviewerComment: "Out of scope",
+        },
+      ],
+    });
+
+    // The current submission whose row appears in the inbox.
+    const cur = await seedEngagement({
+      name: "Active Project",
+      applicantFirm: "ACME Architecture",
+      submissions: [
+        {
+          status: "pending",
+          submittedAt: new Date("2026-04-30T00:00:00Z"),
+        },
+      ],
+    });
+
+    const res = await asReviewer(request(getApp()).get("/api/reviewer/queue"));
+    expect(res.status).toBe(200);
+    const item = res.body.items.find(
+      (i: { engagementId: string }) => i.engagementId === cur.engagementId,
+    );
+    expect(item).toBeDefined();
+    expect(item.applicantHistory.totalPrior).toBe(3);
+    expect(item.applicantHistory.approved).toBe(1);
+    expect(item.applicantHistory.returned).toBe(2);
+    // lastReturnReason comes from the most-recent returned submission
+    // (priorSubmissions are sorted submittedAt desc).
+    expect(item.applicantHistory.lastReturnReason).toBe(
+      "Stormwater plan missing",
+    );
+    expect(item.applicantHistory.priorSubmissions).toHaveLength(3);
+    expect(item.applicantHistory.priorSubmissions[0].verdict).toBe(
+      "returned",
+    );
+    expect(item.applicantHistory.priorSubmissions[0].returnReason).toBe(
+      "Stormwater plan missing",
+    );
+  });
+});
+
+describe("POST /api/submissions/:id/reclassify", () => {
+  it("403s for non-internal callers", async () => {
+    const eng = await seedEngagement({
+      name: "Reclassify Auth Test",
+      submissions: [{ status: "pending" }],
+    });
+    const submissionId = eng.submissionIds[0]!;
+    const res = await asArchitect(
+      request(getApp())
+        .post(`/api/submissions/${submissionId}/reclassify`)
+        .send({
+          projectType: "commercial-tenant-improvement",
+          disciplines: ["building"],
+          applicableCodeBooks: ["IBC 2021"],
+        }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("upserts a classification row, sets source='reviewer', and emits submission.reclassified when prior row existed", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    const eng = await seedEngagement({
+      name: "Reclassify Happy Path",
+      submissions: [{ status: "pending" }],
+    });
+    const submissionId = eng.submissionIds[0]!;
+
+    // Seed a prior auto-classification row so the reclassify path
+    // hits the "submission.reclassified" branch (not "classified").
+    await db.insert(submissionClassifications).values({
+      submissionId,
+      projectType: "wrong-guess",
+      disciplines: ["accessibility"],
+      applicableCodeBooks: [],
+      source: "auto",
+    });
+
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/submissions/${submissionId}/reclassify`)
+        .send({
+          projectType: "commercial-tenant-improvement",
+          disciplines: ["building", "fire-life-safety"],
+          applicableCodeBooks: ["IBC 2021", "IFC 2021"],
+          confidence: 0.95,
+        }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.classification).toMatchObject({
+      submissionId,
+      projectType: "commercial-tenant-improvement",
+      disciplines: ["building", "fire-life-safety"],
+      applicableCodeBooks: ["IBC 2021", "IFC 2021"],
+      source: "reviewer",
+      confidence: 0.95,
+    });
+
+    // Verify the row was overwritten in place (one row, source flipped
+    // to 'reviewer', new project type persisted).
+    const { eq } = await import("drizzle-orm");
+    const rows = await db
+      .select()
+      .from(submissionClassifications)
+      .where(eq(submissionClassifications.submissionId, submissionId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.source).toBe("reviewer");
+    expect(rows[0]!.projectType).toBe("commercial-tenant-improvement");
+  });
+
+  it("400s on unknown discipline values", async () => {
+    const eng = await seedEngagement({
+      name: "Reclassify Validation Test",
+      submissions: [{ status: "pending" }],
+    });
+    const submissionId = eng.submissionIds[0]!;
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/submissions/${submissionId}/reclassify`)
+        .send({
+          projectType: "commercial",
+          disciplines: ["building", "not-a-real-discipline"],
+          applicableCodeBooks: [],
+        }),
+    );
+    expect(res.status).toBe(400);
+    expect(typeof res.body.error).toBe("string");
+  });
+
+  it("404s for an unknown submission id", async () => {
+    const res = await asReviewer(
+      request(getApp())
+        .post(`/api/submissions/00000000-0000-0000-0000-000000000000/reclassify`)
+        .send({
+          projectType: "x",
+          disciplines: ["building"],
+          applicableCodeBooks: [],
+        }),
+    );
+    expect(res.status).toBe(404);
   });
 });

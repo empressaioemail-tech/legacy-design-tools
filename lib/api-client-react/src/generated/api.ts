@@ -121,6 +121,7 @@ import type {
   QaTriageBundleResponse,
   QaTriageItem,
   QaTriageListResponse,
+  ReclassifySubmissionBody,
   RecordBimModelDivergenceBody,
   RecordDecisionBody,
   RenderDetailResponse,
@@ -145,6 +146,7 @@ import type {
   StartAllQaRunsResponse,
   StartQaAutopilotRunBody,
   StartQaRunBody,
+  SubmissionClassification,
   SubmissionCommentResponse,
   SubmissionCommunicationResponse,
   SubmissionFindingsGenerationRunsResponse,
@@ -153,6 +155,7 @@ import type {
   UpdateCannedFindingBody,
   UpdateEngagementBody,
   UpdateMyArchitectPdfHeaderBody,
+  UpdateMyDisciplinesBody,
   UpdateMyProfileBody,
   UpdateQaAutopilotSettingsBody,
   UpdateQaChecklistItemBody,
@@ -5003,6 +5006,115 @@ export const useUpdateMyArchitectPdfHeader = <
 };
 
 /**
+ * PLR-v2 Track 1 — lets the session's current `user`-kind
+requestor replace their own `users.disciplines` array. The
+Settings / "My disciplines" surface wires this up so a reviewer
+can self-assign or revise their reviewer-discipline scope
+without having to ask an admin to `PATCH /users/{id}` (which
+requires the `users:manage` claim — reviewers do not have it).
+
+Self-edit only — there is no `users:manage` admin gate, but
+the request must carry a `user`-kind requestor (anonymous /
+agent sessions get a 401). The row id always comes from
+`req.session.requestor.id`, so a malicious payload that
+smuggles another user's id cannot reach `users.id = <other>`.
+
+Replacement semantics: the request body's `disciplines` array
+replaces the existing column outright. To clear all
+assignments, pass `disciplines: []` — that's a legitimate
+self-edit (a reviewer rotating off plan-review duty).
+
+Returns the full updated `User` envelope (mirroring
+`/me/architect-pdf-header` and `/me/profile`) so the FE can
+update its profile-cached state without a follow-up
+`GET /users/{id}` round trip.
+
+ * @summary Update the current reviewer's own plan-review discipline assignments
+ */
+export const getUpdateMyDisciplinesUrl = () => {
+  return `/api/me/disciplines`;
+};
+
+export const updateMyDisciplines = async (
+  updateMyDisciplinesBody: UpdateMyDisciplinesBody,
+  options?: RequestInit,
+): Promise<User> => {
+  return customFetch<User>(getUpdateMyDisciplinesUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateMyDisciplinesBody),
+  });
+};
+
+export const getUpdateMyDisciplinesMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyDisciplines>>,
+    TError,
+    { data: BodyType<UpdateMyDisciplinesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyDisciplines>>,
+  TError,
+  { data: BodyType<UpdateMyDisciplinesBody> },
+  TContext
+> => {
+  const mutationKey = ["updateMyDisciplines"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyDisciplines>>,
+    { data: BodyType<UpdateMyDisciplinesBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateMyDisciplines(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyDisciplinesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyDisciplines>>
+>;
+export type UpdateMyDisciplinesMutationBody = BodyType<UpdateMyDisciplinesBody>;
+export type UpdateMyDisciplinesMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update the current reviewer's own plan-review discipline assignments
+ */
+export const useUpdateMyDisciplines = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyDisciplines>>,
+    TError,
+    { data: BodyType<UpdateMyDisciplinesBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyDisciplines>>,
+  TError,
+  { data: BodyType<UpdateMyDisciplinesBody> },
+  TContext
+> => {
+  return useMutation(getUpdateMyDisciplinesMutationOptions(options));
+};
+
+/**
  * Lets the session's current `user`-kind requestor edit their
 own `displayName`, `email`, and `avatarUrl` columns. The
 Settings page wires this up so an architect can fix the
@@ -7458,6 +7570,117 @@ export const useDraftSubmissionCommunication = <
   TContext
 > => {
   return useMutation(getDraftSubmissionCommunicationMutationOptions(options));
+};
+
+/**
+ * PLR-v2 Track 1 — reviewer-only endpoint that replaces the
+submission's current classification atom (project type,
+plan-review disciplines, applicable code books) with a
+reviewer-supplied set. The prior atom is preserved on the
+atom's history chain so audit history is intact; the live
+row reflects the latest call.
+
+Returns the new `SubmissionClassification` row with
+`source: 'reviewer'` and `classifiedBy` populated from the
+caller's session. Calling the route a second time appends a
+fresh classification-event and updates the live atom — there
+is no conflict / version check today.
+
+Reviewer-only: requires `audience: "internal"` (architects /
+applicants get a 403). The route does NOT require any
+per-discipline match between caller and target — any reviewer
+can reclassify any submission, by design (a fire-life-safety
+reviewer who spots a misclassified electrical scope can fix
+it without re-routing).
+
+ * @summary Reviewer overwrites a submission's classification atom
+ */
+export const getReclassifySubmissionUrl = (submissionId: string) => {
+  return `/api/submissions/${submissionId}/reclassify`;
+};
+
+export const reclassifySubmission = async (
+  submissionId: string,
+  reclassifySubmissionBody: ReclassifySubmissionBody,
+  options?: RequestInit,
+): Promise<SubmissionClassification> => {
+  return customFetch<SubmissionClassification>(
+    getReclassifySubmissionUrl(submissionId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(reclassifySubmissionBody),
+    },
+  );
+};
+
+export const getReclassifySubmissionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reclassifySubmission>>,
+    TError,
+    { submissionId: string; data: BodyType<ReclassifySubmissionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof reclassifySubmission>>,
+  TError,
+  { submissionId: string; data: BodyType<ReclassifySubmissionBody> },
+  TContext
+> => {
+  const mutationKey = ["reclassifySubmission"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof reclassifySubmission>>,
+    { submissionId: string; data: BodyType<ReclassifySubmissionBody> }
+  > = (props) => {
+    const { submissionId, data } = props ?? {};
+
+    return reclassifySubmission(submissionId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReclassifySubmissionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof reclassifySubmission>>
+>;
+export type ReclassifySubmissionMutationBody =
+  BodyType<ReclassifySubmissionBody>;
+export type ReclassifySubmissionMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Reviewer overwrites a submission's classification atom
+ */
+export const useReclassifySubmission = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reclassifySubmission>>,
+    TError,
+    { submissionId: string; data: BodyType<ReclassifySubmissionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof reclassifySubmission>>,
+  TError,
+  { submissionId: string; data: BodyType<ReclassifySubmissionBody> },
+  TContext
+> => {
+  return useMutation(getReclassifySubmissionMutationOptions(options));
 };
 
 /**
@@ -10103,7 +10326,18 @@ any audience (read-only) so reviewers can populate the
 library picker; admin gating only applies to writes. By
 default archived entries are excluded; pass
 `includeArchived=true` to include them. Optional `discipline`
-narrows to one discipline.
+narrows to one discipline (in `CannedFindingDiscipline`'s
+4-value enum).
+
+Optional `reviewerDisciplines` is a CSV of
+`PlanReviewDiscipline` values (Track 1) that the server
+translates onto the `CannedFindingDiscipline` enum via a
+fixed map (e.g. `fire-life-safety → fire`,
+`electrical|mechanical|plumbing → building` for now) and
+unions into the result. When both `discipline` and
+`reviewerDisciplines` are present the result is the union of
+the two filters. Absence of both falls back to the legacy
+unfiltered list.
 
  * @summary List canned findings for a tenant
  */

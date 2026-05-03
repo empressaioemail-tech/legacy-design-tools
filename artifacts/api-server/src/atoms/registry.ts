@@ -38,6 +38,7 @@ import { makeRenderOutputAtom } from "./render-output.atom";
 import { makeFindingAtom } from "./finding.atom";
 import { makeCommunicationEventAtom } from "./communication-event.atom";
 import { makeDecisionEventAtom } from "./decision-event.atom";
+import { makeSubmissionClassificationAtom } from "./submission-classification.atom";
 
 /**
  * Lightweight logger interface accepted by {@link bootstrapAtomRegistry}.
@@ -219,6 +220,12 @@ export function getAtomRegistry(): AtomRegistry {
   // Registered after `submission` so the boot-log tail surfaces the
   // dependency order naturally.
   registry.register(makeDecisionEventAtom({ db, history }));
+  // Track 1 — auto-classification atom (project type / disciplines /
+  // applicable code books) emitted by the classifier on
+  // `submission.created`. Composes `submission` as a concrete child;
+  // registered after `submission` so the boot-log tail surfaces the
+  // dependency order naturally.
+  registry.register(makeSubmissionClassificationAtom({ db, history }));
   _registry = registry;
   return registry;
 }

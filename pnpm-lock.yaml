@@ -1745,12 +1745,18 @@ importers:
       '@google-cloud/storage':
         specifier: ^7.19.0
         version: 7.19.0
+      '@workspace/api-zod':
+        specifier: workspace:*
+        version: link:../lib/api-zod
       '@workspace/db':
         specifier: workspace:*
         version: link:../lib/db
       '@workspace/empressa-atom':
         specifier: workspace:*
         version: link:../lib/empressa-atom
+      '@workspace/integrations-anthropic-ai':
+        specifier: workspace:*
+        version: link:../lib/integrations-anthropic-ai
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)

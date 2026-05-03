@@ -16,10 +16,23 @@ import {
   engagements,
   findings,
   submissions,
+  submissionClassifications,
   SUBMISSION_STATUS_VALUES,
   type SubmissionStatus,
 } from "@workspace/db";
+import {
+  PLAN_REVIEW_DISCIPLINE_VALUES,
+  isPlanReviewDiscipline,
+  type PlanReviewDiscipline,
+} from "@workspace/api-zod";
 import { and, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { logger } from "../lib/logger";
+import { getHistoryService } from "../atoms/registry";
+import {
+  classificationAtomId,
+  type SubmissionClassificationTypedPayload,
+} from "../atoms/submission-classification.atom";
+import { emitClassificationEvents } from "../lib/classifySubmission";
 
 const router: IRouter = Router();
 
@@ -163,8 +176,23 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
 
   const kpis = await computeReviewerKpis();
 
+  // Track 1 — per-row triage strip data: severity rollup,
+  // applicant-history pill, classification chips. Computed per-row
+  // (1 + 2N queries; ~20-30 rows in the inbox today, optimization
+  // deferred until the inbox grows — see plan rule 4e).
+  const submissionIds = itemRows.map((r) => r.submissionId);
+  const severityRollupBySubmission = await loadSeverityRollups(submissionIds);
+  const classificationBySubmission = await loadClassifications(submissionIds);
+  const applicantHistoryByRow = await Promise.all(
+    itemRows.map((r) =>
+      r.applicantFirm
+        ? loadApplicantHistory(r.applicantFirm, r.submissionId)
+        : Promise.resolve(null),
+    ),
+  );
+
   res.json({
-    items: itemRows.map((r) => ({
+    items: itemRows.map((r, i) => ({
       submissionId: r.submissionId,
       engagementId: r.engagementId,
       engagementName: r.engagementName,
@@ -178,11 +206,430 @@ router.get("/reviewer/queue", async (req: Request, res: Response) => {
       status: r.status as SubmissionStatus,
       note: r.note,
       reviewerComment: r.reviewerComment,
+      // Track 1 additions
+      classification: classificationBySubmission.get(r.submissionId) ?? null,
+      severityRollup:
+        severityRollupBySubmission.get(r.submissionId) ?? EMPTY_SEVERITY_ROLLUP,
+      applicantHistory: applicantHistoryByRow[i] ?? EMPTY_APPLICANT_HISTORY,
     })),
     counts,
     kpis,
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/*               Track 1 — reviewer-queue triage-strip helpers                */
+/* -------------------------------------------------------------------------- */
+
+interface SeverityRollup {
+  blockers: number;
+  concerns: number;
+  advisory: number;
+  total: number;
+}
+
+const EMPTY_SEVERITY_ROLLUP: SeverityRollup = {
+  blockers: 0,
+  concerns: 0,
+  advisory: 0,
+  total: 0,
+};
+
+interface ApplicantPriorEntry {
+  submissionId: string;
+  engagementName: string;
+  submittedAt: string;
+  verdict: "approved" | "returned" | "pending";
+  returnReason?: string;
+}
+
+interface ApplicantHistorySummary {
+  totalPrior: number;
+  approved: number;
+  returned: number;
+  lastReturnReason: string | null;
+  priorSubmissions: ApplicantPriorEntry[];
+}
+
+const EMPTY_APPLICANT_HISTORY: ApplicantHistorySummary = {
+  totalPrior: 0,
+  approved: 0,
+  returned: 0,
+  lastReturnReason: null,
+  priorSubmissions: [],
+};
+
+const APPLICANT_HISTORY_MAX_PRIOR = 5;
+
+async function loadSeverityRollups(
+  submissionIds: ReadonlyArray<string>,
+): Promise<Map<string, SeverityRollup>> {
+  const out = new Map<string, SeverityRollup>();
+  if (submissionIds.length === 0) return out;
+  const rows = await db
+    .select({
+      submissionId: findings.submissionId,
+      severity: findings.severity,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(findings)
+    .where(inArray(findings.submissionId, submissionIds as string[]))
+    .groupBy(findings.submissionId, findings.severity);
+  for (const r of rows) {
+    const existing = out.get(r.submissionId) ?? { ...EMPTY_SEVERITY_ROLLUP };
+    if (r.severity === "blocker") existing.blockers = r.count;
+    else if (r.severity === "concern") existing.concerns = r.count;
+    else if (r.severity === "advisory") existing.advisory = r.count;
+    existing.total = existing.blockers + existing.concerns + existing.advisory;
+    out.set(r.submissionId, existing);
+  }
+  return out;
+}
+
+async function loadClassifications(
+  submissionIds: ReadonlyArray<string>,
+): Promise<Map<string, SubmissionClassificationTypedPayload>> {
+  const out = new Map<string, SubmissionClassificationTypedPayload>();
+  if (submissionIds.length === 0) return out;
+  const rows = await db
+    .select()
+    .from(submissionClassifications)
+    .where(
+      inArray(submissionClassifications.submissionId, submissionIds as string[]),
+    );
+  for (const row of rows) {
+    const classifiedBy =
+      row.classifiedBy && typeof row.classifiedBy === "object"
+        ? (row.classifiedBy as { kind: string; id: string })
+        : null;
+    out.set(row.submissionId, {
+      id: classificationAtomId(row.submissionId),
+      found: true,
+      submissionId: row.submissionId,
+      projectType: row.projectType,
+      disciplines: row.disciplines,
+      applicableCodeBooks: row.applicableCodeBooks,
+      confidence: row.confidence == null ? null : Number(row.confidence),
+      source: row.source as "auto" | "reviewer",
+      classifiedAt: row.classifiedAt.toISOString(),
+      classifiedBy,
+    });
+  }
+  return out;
+}
+
+/**
+ * Track 1 — applicant-history derivation for the inbox triage strip.
+ *
+ * Scoping: case-insensitive trim equality on `engagements.applicant_firm`
+ * (no tenant filter — see Data-quality notes in the BE report; the
+ * legacy-design-tools repo has no tenant_id column on engagements /
+ * submissions, so cross-tenant leakage is impossible by construction
+ * here, but variant applicant-firm strings WILL miss matches until a
+ * future applicant-normalization sprint introduces a canonical
+ * applicants table).
+ *
+ * Returns the totals plus up to {@link APPLICANT_HISTORY_MAX_PRIOR}
+ * most-recent prior submissions for the hovercard expansion.
+ * `lastReturnReason` is best-effort: pulled from the most recent
+ * prior submission with a non-empty `reviewerComment` and status
+ * `corrections_requested` or `rejected`.
+ */
+async function loadApplicantHistory(
+  applicantFirm: string,
+  excludeSubmissionId: string,
+): Promise<ApplicantHistorySummary> {
+  const normalized = applicantFirm.trim();
+  if (!normalized) return { ...EMPTY_APPLICANT_HISTORY };
+  const rows = await db
+    .select({
+      submissionId: submissions.id,
+      engagementName: engagements.name,
+      submittedAt: submissions.submittedAt,
+      status: submissions.status,
+      reviewerComment: submissions.reviewerComment,
+    })
+    .from(submissions)
+    .innerJoin(engagements, eq(submissions.engagementId, engagements.id))
+    .where(
+      and(
+        sql`LOWER(TRIM(${engagements.applicantFirm})) = LOWER(TRIM(${normalized}))`,
+        sql`${submissions.id} <> ${excludeSubmissionId}`,
+      ),
+    )
+    .orderBy(desc(submissions.submittedAt));
+
+  let approved = 0;
+  let returned = 0;
+  let lastReturnReason: string | null = null;
+  for (const r of rows) {
+    if (r.status === "approved") {
+      approved++;
+    } else if (
+      r.status === "corrections_requested" ||
+      r.status === "rejected"
+    ) {
+      returned++;
+      if (
+        lastReturnReason === null &&
+        r.reviewerComment &&
+        r.reviewerComment.trim().length > 0
+      ) {
+        lastReturnReason = r.reviewerComment.trim();
+      }
+    }
+  }
+  const priorSubmissions: ApplicantPriorEntry[] = rows
+    .slice(0, APPLICANT_HISTORY_MAX_PRIOR)
+    .map((r) => {
+      const verdict: "approved" | "returned" | "pending" =
+        r.status === "approved"
+          ? "approved"
+          : r.status === "corrections_requested" || r.status === "rejected"
+            ? "returned"
+            : "pending";
+      const submittedAtIso =
+        r.submittedAt instanceof Date
+          ? r.submittedAt.toISOString()
+          : r.submittedAt;
+      const entry: ApplicantPriorEntry = {
+        submissionId: r.submissionId,
+        engagementName: r.engagementName,
+        submittedAt: submittedAtIso,
+        verdict,
+      };
+      if (
+        verdict === "returned" &&
+        r.reviewerComment &&
+        r.reviewerComment.trim().length > 0
+      ) {
+        entry.returnReason = r.reviewerComment.trim();
+      }
+      return entry;
+    });
+
+  return {
+    totalPrior: rows.length,
+    approved,
+    returned,
+    lastReturnReason,
+    priorSubmissions,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*                Track 1 — POST /api/submissions/:id/reclassify              */
+/* -------------------------------------------------------------------------- */
+
+router.post(
+  "/submissions/:id/reclassify",
+  async (req: Request, res: Response): Promise<void> => {
+    if (requireReviewerAudience(req, res)) return;
+    const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+
+    const idRaw =
+      typeof req.params?.["id"] === "string" ? req.params["id"] : "";
+    if (!idRaw) {
+      res.status(400).json({ error: "missing_submission_id" });
+      return;
+    }
+
+    const body = req.body as
+      | {
+          projectType?: unknown;
+          disciplines?: unknown;
+          applicableCodeBooks?: unknown;
+          confidence?: unknown;
+        }
+      | undefined;
+    if (!body || typeof body !== "object") {
+      res.status(400).json({ error: "invalid_reclassify_body" });
+      return;
+    }
+
+    let projectType: string | null = null;
+    if (typeof body.projectType === "string") {
+      const trimmed = body.projectType.trim();
+      projectType = trimmed.length > 0 ? trimmed : null;
+    } else if (body.projectType === null) {
+      projectType = null;
+    } else if (body.projectType !== undefined) {
+      res.status(400).json({ error: "invalid_project_type" });
+      return;
+    }
+
+    if (!Array.isArray(body.disciplines)) {
+      res.status(400).json({ error: "disciplines_required" });
+      return;
+    }
+    const disciplines: PlanReviewDiscipline[] = [];
+    const seen = new Set<PlanReviewDiscipline>();
+    for (const v of body.disciplines) {
+      if (!isPlanReviewDiscipline(v)) {
+        res.status(400).json({
+          error: `Unknown discipline; must be one of: ${PLAN_REVIEW_DISCIPLINE_VALUES.join(", ")}`,
+        });
+        return;
+      }
+      if (seen.has(v)) continue;
+      seen.add(v);
+      disciplines.push(v);
+    }
+
+    if (!Array.isArray(body.applicableCodeBooks)) {
+      res.status(400).json({ error: "applicable_code_books_required" });
+      return;
+    }
+    const applicableCodeBooks: string[] = [];
+    for (const v of body.applicableCodeBooks) {
+      if (typeof v !== "string") {
+        res.status(400).json({ error: "invalid_applicable_code_book" });
+        return;
+      }
+      const trimmed = v.trim();
+      if (!trimmed) continue;
+      applicableCodeBooks.push(trimmed);
+    }
+
+    let confidence: number | null = null;
+    if (
+      body.confidence !== undefined &&
+      body.confidence !== null
+    ) {
+      if (
+        typeof body.confidence !== "number" ||
+        !Number.isFinite(body.confidence) ||
+        body.confidence < 0 ||
+        body.confidence > 1
+      ) {
+        res
+          .status(400)
+          .json({ error: "confidence must be a number in [0,1]" });
+        return;
+      }
+      confidence = body.confidence;
+    }
+
+    const requestor = req.session.requestor;
+    if (!requestor || !requestor.id) {
+      res.status(400).json({ error: "missing_session_requestor" });
+      return;
+    }
+    const actor = {
+      kind: requestor.kind as "user" | "agent" | "system",
+      id: requestor.id,
+    };
+
+    try {
+      const subRows = await db
+        .select({ id: submissions.id })
+        .from(submissions)
+        .where(eq(submissions.id, idRaw))
+        .limit(1);
+      if (!subRows[0]) {
+        res.status(404).json({ error: "submission_not_found" });
+        return;
+      }
+
+      const existingRows = await db
+        .select()
+        .from(submissionClassifications)
+        .where(eq(submissionClassifications.submissionId, idRaw))
+        .limit(1);
+      const existing = existingRows[0] ?? null;
+
+      const now = new Date();
+      const [row] = await db
+        .insert(submissionClassifications)
+        .values({
+          submissionId: idRaw,
+          projectType,
+          disciplines,
+          applicableCodeBooks,
+          confidence: confidence == null ? null : String(confidence),
+          source: "reviewer",
+          classifiedBy: actor as unknown as Record<string, unknown>,
+          classifiedAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: submissionClassifications.submissionId,
+          set: {
+            projectType,
+            disciplines,
+            applicableCodeBooks,
+            confidence: confidence == null ? null : String(confidence),
+            source: "reviewer",
+            classifiedBy: actor as unknown as Record<string, unknown>,
+            classifiedAt: now,
+            updatedAt: now,
+          },
+        })
+        .returning();
+      if (!row) {
+        throw new Error("submission_classifications upsert returned no row");
+      }
+
+      // Emit submission.reclassified (or submission.classified on the
+      // first-write-from-reviewer path where no auto row landed first).
+      const eventName = existing
+        ? "submission.reclassified"
+        : "submission.classified";
+      const beforePayload = existing
+        ? {
+            projectType: existing.projectType,
+            disciplines: existing.disciplines,
+            applicableCodeBooks: existing.applicableCodeBooks,
+            confidence:
+              existing.confidence == null ? null : Number(existing.confidence),
+            source: existing.source,
+          }
+        : null;
+      const afterPayload = {
+        projectType: row.projectType,
+        disciplines: row.disciplines,
+        applicableCodeBooks: row.applicableCodeBooks,
+        confidence: row.confidence == null ? null : Number(row.confidence),
+        source: row.source,
+      };
+      await emitClassificationEvents(getHistoryService(), {
+        submissionId: idRaw,
+        classificationAtomId: classificationAtomId(idRaw),
+        eventName,
+        actor,
+        payload: existing
+          ? { before: beforePayload, after: afterPayload }
+          : afterPayload,
+        reqLog,
+      });
+
+      const classifiedBy =
+        row.classifiedBy && typeof row.classifiedBy === "object"
+          ? (row.classifiedBy as { kind: string; id: string })
+          : null;
+      res.json({
+        classification: {
+          id: classificationAtomId(row.submissionId),
+          found: true,
+          submissionId: row.submissionId,
+          projectType: row.projectType,
+          disciplines: row.disciplines,
+          applicableCodeBooks: row.applicableCodeBooks,
+          confidence: row.confidence == null ? null : Number(row.confidence),
+          source: row.source as "auto" | "reviewer",
+          classifiedAt: row.classifiedAt.toISOString(),
+          classifiedBy,
+        } satisfies SubmissionClassificationTypedPayload,
+      });
+    } catch (err) {
+      reqLog.error(
+        { err, submissionId: idRaw },
+        "reclassify submission failed",
+      );
+      res.status(500).json({ error: "Failed to reclassify submission" });
+    }
+  },
+);
 
 const WINDOW_DAYS = 30;
 const WINDOW_MS = WINDOW_DAYS * 24 * 60 * 60 * 1000;

@@ -11,6 +11,12 @@
 one discipline; the FindingsTab picker filters on the
 reviewer's active discipline.
 
+Distinct from `PlanReviewDiscipline` (the wider 7-value
+enum the Track 1 reviewer-assignment surface uses). The
+canned-findings list endpoint accepts `reviewerDisciplines`
+(a CSV of `PlanReviewDiscipline` values) and translates them
+server-side onto this 4-value enum.
+
  */
 export type CannedFindingDiscipline =
   (typeof CannedFindingDiscipline)[keyof typeof CannedFindingDiscipline];

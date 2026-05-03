@@ -15,6 +15,7 @@ import { geocodeAddress } from "@workspace/site-context/server";
 import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";
 import { autoTriggerFindingsOnSubmissionCreated } from "../lib/autoTriggerFindingsOnSubmissionCreated";
+import { autoTriggerClassificationOnSubmissionCreated } from "../lib/autoTriggerClassificationOnSubmissionCreated";
 import {
   ENGAGEMENT_EDIT_ACTOR,
   SUBMISSION_INGEST_ACTOR,
@@ -725,6 +726,10 @@ router.post(
 
       // Fire-and-forget — must not block the 201 response.
       autoTriggerFindingsOnSubmissionCreated(inserted.id, reqLog);
+      // Track 1 — fire-and-forget auto-classification, mirrors AT-2's
+      // contract: never awaited, never throws, every failure is logged
+      // so the submission HTTP response is unaffected.
+      autoTriggerClassificationOnSubmissionCreated(inserted.id, reqLog);
 
       res.status(201).json({
         submissionId: inserted.id,

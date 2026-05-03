@@ -52,6 +52,7 @@ import { db, users } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import {
   UpdateMyArchitectPdfHeaderBody,
+  UpdateMyDisciplinesBody,
   UpdateMyProfileBody,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
@@ -321,6 +322,72 @@ router.patch("/me/profile", async (req: Request, res: Response) => {
         await rollbackOrphanedAvatar(candidateAvatar, requestor.id);
       }
     }
+  }
+});
+
+/**
+ * `PATCH /me/disciplines` — reviewer self-edit of
+ * `users.disciplines` (Track 1).
+ *
+ * Accepts `{ disciplines: PlanReviewDiscipline[] }`; rejects unknown
+ * enum values with a 400. Empty array is allowed (clears the
+ * reviewer's discipline scope; FE falls back to "Show all").
+ *
+ * Validates against the generated `UpdateMyDisciplinesBody` zod
+ * schema from `@workspace/api-zod` — the spec is authoritative; this
+ * route is the wire endpoint that mirrors it. The earlier hand-rolled
+ * validation has been retired now that CT's regenerated schema is
+ * available. The schema dedupes via `.array()` semantics not at all,
+ * so we still de-duplicate inline before persisting (an array with
+ * `["building","building"]` would otherwise round-trip as a duplicate
+ * value in the DB column).
+ *
+ * Returns the full `User` envelope (matches `/me/architect-pdf-header`
+ * and `/me/profile` patterns) so the FE can update its profile-cached
+ * state without a follow-up GET.
+ */
+router.patch("/me/disciplines", async (req: Request, res: Response) => {
+  const requestor = req.session?.requestor;
+  if (!requestor || requestor.kind !== "user") {
+    res
+      .status(401)
+      .json({ error: "Self-edit requires a signed-in user session" });
+    return;
+  }
+
+  const parsed = UpdateMyDisciplinesBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  // De-duplicate the array — the schema accepts duplicates (zod's
+  // `.array()` doesn't enforce uniqueness) but the column should
+  // never carry repeats. Preserve the caller's order so the round-
+  // trip is stable.
+  const seen = new Set<string>();
+  const next: typeof parsed.data.disciplines = [];
+  for (const v of parsed.data.disciplines) {
+    if (seen.has(v)) continue;
+    seen.add(v);
+    next.push(v);
+  }
+
+  try {
+    await ensureUserProfile(requestor.id);
+    const [row] = await db
+      .update(users)
+      .set({ disciplines: next, updatedAt: new Date() })
+      .where(eq(users.id, requestor.id))
+      .returning();
+    if (!row) {
+      res.status(404).json({ error: "User profile not found" });
+      return;
+    }
+    res.json(toUserResponse(row));
+  } catch (err) {
+    logger.error({ err, id: requestor.id }, "update my disciplines failed");
+    res.status(500).json({ error: "Failed to update disciplines" });
   }
 });
 

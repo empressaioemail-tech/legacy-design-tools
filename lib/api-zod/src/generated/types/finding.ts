@@ -60,4 +60,43 @@ time, not at row insert.
 Null on AI-produced and never-overridden rows.
  */
   revisionOf: string | null;
+  /** PLR-v2 Track 1 — true iff this row was produced by the AI
+compliance-checker engine. False for reviewer-authored
+(manual-add) rows AND for reviewer override revisions
+(rows whose `revisionOf` points at an AI ancestor).
+
+Distinct from inferring "AI-ness" off `aiGeneratedAt`,
+which is set on every row (including reviewer-authored
+ones — for those it carries the row's createdAt) so the
+wire shape stays narrow. Read `aiGenerated` to decide
+whether to render the AI-badge; read `aiGeneratedAt`
+only for "when did this row land" formatting.
+ */
+  aiGenerated: boolean;
+  /** PLR-v2 Track 1 — when an AI-generated finding was accepted
+by a reviewer, this carries the reviewer's user id; null
+otherwise. Drives the AI-badge persistence flow ("AI
+generated · reviewer confirmed (Name, date)") so the badge
+does not vanish on accept.
+
+Read together with `acceptedAt` and `acceptedBy` — the
+three fields move as a tuple.
+ */
+  acceptedByReviewerId: string | null;
+  /** PLR-v2 Track 1 — ISO timestamp of when the AI finding was
+accepted by a reviewer; null otherwise. Paired with
+`acceptedByReviewerId` and `acceptedBy`.
+ */
+  acceptedAt: Date | null;
+  /** PLR-v2 Track 1 — actor envelope for the reviewer who
+accepted an AI-generated finding. Reuses the existing
+`FindingActor` shape so the FE can render
+`acceptedBy.displayName` on the badge without a per-row
+user-profile fetch.
+
+Null when `acceptedAt` is null. Otherwise carries the
+same actor data as `reviewerStatusBy` (the existing
+status-change attribution).
+ */
+  acceptedBy: FindingActor | null;
 }

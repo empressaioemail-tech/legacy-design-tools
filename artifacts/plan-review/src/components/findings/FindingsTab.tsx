@@ -23,7 +23,7 @@ import { FindingDrillIn } from "./FindingDrillIn";
 import { CodeAtomPill, renderFindingBody } from "./CodeAtomPill";
 import { SEVERITY_PALETTE, STATUS_PALETTE } from "./severityStyles";
 import { OverrideFindingModal } from "./OverrideFindingModal";
-import { LowConfidencePill } from "@workspace/portal-ui";
+import { AIBadge, LowConfidencePill } from "@workspace/portal-ui";
 import {
   useListCannedFindings,
   getListCannedFindingsQueryKey,
@@ -515,36 +515,30 @@ function FindingsSeverityGroup({
 }
 
 /**
- * PLR-9 — Inline tag showing who authored / last actioned a finding.
- * Engine-only rows show "AI"; human-reviewer rows show the actor's
- * displayName (or id when no profile lookup is available client-side).
+ * Track 1 — finding-row provenance tag. Replaces the legacy PLR-9
+ * `FindingAuthorTag` (inferred AI-ness from `reviewerStatusBy`); now
+ * reads the explicit `aiGenerated` / `acceptedAt` / `acceptedBy`
+ * fields BE landed in the Finding wire shape so the badge persists
+ * after acceptance with the confirming reviewer's name + date.
+ *
+ * Falls back to `reviewerStatusBy` for the reviewer-authored author
+ * lookup (matches the addendum D2 fallback note: "use existing
+ * reviewerStatusBy fallback for original author if no dedicated
+ * field"). On wire shapes that haven't backfilled `aiGenerated`
+ * yet (Pass A's contract-first lock), defaults aiGenerated to true
+ * — every legacy finding came out of the AI engine, and the
+ * reviewer-authored bucket was empty before Track 1.
  */
-function FindingAuthorTag({ finding }: { finding: Finding }) {
-  const actor = finding.reviewerStatusBy;
-  let label: string;
-  if (!actor) {
-    label = "AI";
-  } else if (actor.kind === "user") {
-    label = actor.displayName?.trim() || actor.id;
-  } else {
-    label = actor.displayName?.trim() || actor.kind;
-  }
+function FindingProvenanceBadge({ finding }: { finding: Finding }) {
   return (
-    <span
+    <AIBadge
+      aiGenerated={finding.aiGenerated ?? true}
+      acceptedAt={finding.acceptedAt}
+      acceptedBy={finding.acceptedBy}
+      reviewerAuthor={finding.reviewerStatusBy}
+      variant="row"
       data-testid={`finding-row-author-${finding.id}`}
-      style={{
-        fontSize: 10,
-        color: "var(--text-secondary)",
-        fontStyle: "italic",
-      }}
-      title={
-        actor
-          ? `${actor.kind}: ${actor.displayName ?? actor.id}`
-          : "AI-produced"
-      }
-    >
-      by {label}
-    </span>
+    />
   );
 }
 
@@ -650,7 +644,7 @@ function FindingRow({
         >
           {finding.category.replace(/-/g, " ")}
         </span>
-        <FindingAuthorTag finding={finding} />
+        <FindingProvenanceBadge finding={finding} />
         <span
           data-testid={`finding-row-citation-count-${finding.id}`}
           className="sc-meta opacity-70"

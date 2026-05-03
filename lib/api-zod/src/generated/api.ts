@@ -3405,6 +3405,115 @@ export const UpdateMyArchitectPdfHeaderResponse = zod
       .describe(
         "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
       ),
+    disciplines: zod
+      .array(
+        zod
+          .enum([
+            "building",
+            "electrical",
+            "mechanical",
+            "plumbing",
+            "residential",
+            "fire-life-safety",
+            "accessibility",
+          ])
+          .describe(
+            "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+          ),
+      )
+      .describe(
+        'PLR-v2 Track 1 — the `PlanReviewDiscipline` values this\nuser is assigned to as a reviewer. Empty for non-reviewer\nusers (architects, applicants, admins) and for reviewers\nwho have not yet been assigned. Drives the Inbox default\nfilter (\"show only my disciplines\") and the FindingsTab\ndefault-discipline picker.\n\nAdmins can edit any user\'s `disciplines` via\n`PATCH \/users\/{id}` (gated on the `users:manage` claim).\nReviewers can self-edit via `PATCH \/me\/disciplines` —\nself-edit only, no admin gate.\n',
+      ),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  })
+  .describe(
+    'A row in the `users` profile table — display name \/ email \/ avatar\nused to hydrate timeline actor labels. The `id` is the same opaque\nidentifier the session layer carries (today: dev cookie ids like\n`u1`; once real auth lands: the verified subject id from the auth\nprovider). See `lib\/db\/src\/schema\/users.ts` for the rationale on\nwhy this is intentionally NOT FK\'d from `atom_events.actor.id`.\n\n`architectPdfHeader` is the per-architect override for the header\ntext printed on the stakeholder-briefing PDF export. Null falls\nback to the default (\"SmartCity Design Tools — Pre-Design\nBriefing\"). Architects edit their own value via\n`PATCH \/me\/architect-pdf-header`; the admin `PATCH \/users\/{id}`\nroute does not write the column today (the field is read-only on\nthe admin \"Users & Roles\" surface).\n',
+  );
+
+/**
+ * PLR-v2 Track 1 — lets the session's current `user`-kind
+requestor replace their own `users.disciplines` array. The
+Settings / "My disciplines" surface wires this up so a reviewer
+can self-assign or revise their reviewer-discipline scope
+without having to ask an admin to `PATCH /users/{id}` (which
+requires the `users:manage` claim — reviewers do not have it).
+
+Self-edit only — there is no `users:manage` admin gate, but
+the request must carry a `user`-kind requestor (anonymous /
+agent sessions get a 401). The row id always comes from
+`req.session.requestor.id`, so a malicious payload that
+smuggles another user's id cannot reach `users.id = <other>`.
+
+Replacement semantics: the request body's `disciplines` array
+replaces the existing column outright. To clear all
+assignments, pass `disciplines: []` — that's a legitimate
+self-edit (a reviewer rotating off plan-review duty).
+
+Returns the full updated `User` envelope (mirroring
+`/me/architect-pdf-header` and `/me/profile`) so the FE can
+update its profile-cached state without a follow-up
+`GET /users/{id}` round trip.
+
+ * @summary Update the current reviewer's own plan-review discipline assignments
+ */
+export const updateMyDisciplinesBodyDisciplinesMin = 0;
+
+export const UpdateMyDisciplinesBody = zod
+  .object({
+    disciplines: zod
+      .array(
+        zod
+          .enum([
+            "building",
+            "electrical",
+            "mechanical",
+            "plumbing",
+            "residential",
+            "fire-life-safety",
+            "accessibility",
+          ])
+          .describe(
+            "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+          ),
+      )
+      .min(updateMyDisciplinesBodyDisciplinesMin),
+  })
+  .describe(
+    "Body for `PATCH \/me\/disciplines`. Replaces the caller's\n`users.disciplines` array outright. `disciplines: []` is a\nlegitimate self-edit (clearing all assignments — e.g. a\nreviewer rotating off plan-review duty).\n\nServer-side: values are de-duplicated and validated against the\nclosed `PlanReviewDiscipline` set; an unknown value is a 400.\n",
+  );
+
+export const UpdateMyDisciplinesResponse = zod
+  .object({
+    id: zod.string(),
+    displayName: zod.string(),
+    email: zod.string().nullable(),
+    avatarUrl: zod.string().nullable(),
+    architectPdfHeader: zod
+      .string()
+      .nullable()
+      .describe(
+        "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
+    disciplines: zod
+      .array(
+        zod
+          .enum([
+            "building",
+            "electrical",
+            "mechanical",
+            "plumbing",
+            "residential",
+            "fire-life-safety",
+            "accessibility",
+          ])
+          .describe(
+            "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+          ),
+      )
+      .describe(
+        'PLR-v2 Track 1 — the `PlanReviewDiscipline` values this\nuser is assigned to as a reviewer. Empty for non-reviewer\nusers (architects, applicants, admins) and for reviewers\nwho have not yet been assigned. Drives the Inbox default\nfilter (\"show only my disciplines\") and the FindingsTab\ndefault-discipline picker.\n\nAdmins can edit any user\'s `disciplines` via\n`PATCH \/users\/{id}` (gated on the `users:manage` claim).\nReviewers can self-edit via `PATCH \/me\/disciplines` —\nself-edit only, no admin gate.\n',
+      ),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
   })
@@ -3465,6 +3574,25 @@ export const UpdateMyProfileResponse = zod
       .nullable()
       .describe(
         "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
+    disciplines: zod
+      .array(
+        zod
+          .enum([
+            "building",
+            "electrical",
+            "mechanical",
+            "plumbing",
+            "residential",
+            "fire-life-safety",
+            "accessibility",
+          ])
+          .describe(
+            "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+          ),
+      )
+      .describe(
+        'PLR-v2 Track 1 — the `PlanReviewDiscipline` values this\nuser is assigned to as a reviewer. Empty for non-reviewer\nusers (architects, applicants, admins) and for reviewers\nwho have not yet been assigned. Drives the Inbox default\nfilter (\"show only my disciplines\") and the FindingsTab\ndefault-discipline picker.\n\nAdmins can edit any user\'s `disciplines` via\n`PATCH \/users\/{id}` (gated on the `users:manage` claim).\nReviewers can self-edit via `PATCH \/me\/disciplines` —\nself-edit only, no admin gate.\n',
       ),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
@@ -3601,6 +3729,25 @@ export const GetSessionResponse = zod
       .object({
         kind: zod.enum(["user", "agent"]),
         id: zod.string(),
+        disciplines: zod
+          .array(
+            zod
+              .enum([
+                "building",
+                "electrical",
+                "mechanical",
+                "plumbing",
+                "residential",
+                "fire-life-safety",
+                "accessibility",
+              ])
+              .describe(
+                "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+              ),
+          )
+          .describe(
+            "PLR-v2 Track 1 — the requestor's reviewer-discipline\nassignments, surfaced on the session envelope so the FE's\nInbox default-filter and FindingsTab default-discipline\npicker don't need to round-trip\n`useGetUser(session.requestor.id)` on every render.\n\nHydrated server-side from `users.disciplines` for\n`kind: 'user'` requestors; empty array for `kind: 'agent'`\n\/ `system`. The `User.disciplines` column remains the\nsource of truth — this is a denormalized read-side\nconvenience.\n",
+          ),
       })
       .optional()
       .describe(
@@ -3636,6 +3783,25 @@ export const ListUsersResponseItem = zod
       .nullable()
       .describe(
         "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
+    disciplines: zod
+      .array(
+        zod
+          .enum([
+            "building",
+            "electrical",
+            "mechanical",
+            "plumbing",
+            "residential",
+            "fire-life-safety",
+            "accessibility",
+          ])
+          .describe(
+            "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+          ),
+      )
+      .describe(
+        'PLR-v2 Track 1 — the `PlanReviewDiscipline` values this\nuser is assigned to as a reviewer. Empty for non-reviewer\nusers (architects, applicants, admins) and for reviewers\nwho have not yet been assigned. Drives the Inbox default\nfilter (\"show only my disciplines\") and the FindingsTab\ndefault-discipline picker.\n\nAdmins can edit any user\'s `disciplines` via\n`PATCH \/users\/{id}` (gated on the `users:manage` claim).\nReviewers can self-edit via `PATCH \/me\/disciplines` —\nself-edit only, no admin gate.\n',
       ),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
@@ -3694,6 +3860,25 @@ export const GetUserResponse = zod
       .describe(
         "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
       ),
+    disciplines: zod
+      .array(
+        zod
+          .enum([
+            "building",
+            "electrical",
+            "mechanical",
+            "plumbing",
+            "residential",
+            "fire-life-safety",
+            "accessibility",
+          ])
+          .describe(
+            "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+          ),
+      )
+      .describe(
+        'PLR-v2 Track 1 — the `PlanReviewDiscipline` values this\nuser is assigned to as a reviewer. Empty for non-reviewer\nusers (architects, applicants, admins) and for reviewers\nwho have not yet been assigned. Drives the Inbox default\nfilter (\"show only my disciplines\") and the FindingsTab\ndefault-discipline picker.\n\nAdmins can edit any user\'s `disciplines` via\n`PATCH \/users\/{id}` (gated on the `users:manage` claim).\nReviewers can self-edit via `PATCH \/me\/disciplines` —\nself-edit only, no admin gate.\n',
+      ),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
   })
@@ -3728,9 +3913,26 @@ export const UpdateUserBody = zod
     displayName: zod.string().min(1).optional(),
     email: zod.string().nullish(),
     avatarUrl: zod.string().nullish(),
+    disciplines: zod
+      .array(
+        zod
+          .enum([
+            "building",
+            "electrical",
+            "mechanical",
+            "plumbing",
+            "residential",
+            "fire-life-safety",
+            "accessibility",
+          ])
+          .describe(
+            "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+          ),
+      )
+      .optional(),
   })
   .describe(
-    "Partial update. Omit a field to leave it unchanged. `email` and\n`avatarUrl` accept `null` to clear them; `displayName` is\nnon-nullable so passing `null` is a 400.\n",
+    "Partial update. Omit a field to leave it unchanged. `email` and\n`avatarUrl` accept `null` to clear them; `displayName` is\nnon-nullable so passing `null` is a 400.\n\n`disciplines` (PLR-v2 Track 1) is admin-only — the route's\nexisting `users:manage` permission gate covers this; non-admin\ncallers cannot reach the endpoint regardless of which fields\nthe body carries. Omit to leave unchanged; pass `[]` to clear\nall assignments.\n",
   );
 
 export const UpdateUserResponse = zod
@@ -3744,6 +3946,25 @@ export const UpdateUserResponse = zod
       .nullable()
       .describe(
         "Per-architect override for the briefing-export PDF header.\nNull → fall back to the default header. Trimmed empty\nstrings are normalized to null on write.\n",
+      ),
+    disciplines: zod
+      .array(
+        zod
+          .enum([
+            "building",
+            "electrical",
+            "mechanical",
+            "plumbing",
+            "residential",
+            "fire-life-safety",
+            "accessibility",
+          ])
+          .describe(
+            "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+          ),
+      )
+      .describe(
+        'PLR-v2 Track 1 — the `PlanReviewDiscipline` values this\nuser is assigned to as a reviewer. Empty for non-reviewer\nusers (architects, applicants, admins) and for reviewers\nwho have not yet been assigned. Drives the Inbox default\nfilter (\"show only my disciplines\") and the FindingsTab\ndefault-discipline picker.\n\nAdmins can edit any user\'s `disciplines` via\n`PATCH \/users\/{id}` (gated on the `users:manage` claim).\nReviewers can self-edit via `PATCH \/me\/disciplines` —\nself-edit only, no admin gate.\n',
       ),
     createdAt: zod.coerce.date(),
     updatedAt: zod.coerce.date(),
@@ -4595,6 +4816,110 @@ export const DraftSubmissionCommunicationResponse = zod
   );
 
 /**
+ * PLR-v2 Track 1 — reviewer-only endpoint that replaces the
+submission's current classification atom (project type,
+plan-review disciplines, applicable code books) with a
+reviewer-supplied set. The prior atom is preserved on the
+atom's history chain so audit history is intact; the live
+row reflects the latest call.
+
+Returns the new `SubmissionClassification` row with
+`source: 'reviewer'` and `classifiedBy` populated from the
+caller's session. Calling the route a second time appends a
+fresh classification-event and updates the live atom — there
+is no conflict / version check today.
+
+Reviewer-only: requires `audience: "internal"` (architects /
+applicants get a 403). The route does NOT require any
+per-discipline match between caller and target — any reviewer
+can reclassify any submission, by design (a fire-life-safety
+reviewer who spots a misclassified electrical scope can fix
+it without re-routing).
+
+ * @summary Reviewer overwrites a submission's classification atom
+ */
+export const ReclassifySubmissionParams = zod.object({
+  submissionId: zod.coerce.string(),
+});
+
+export const reclassifySubmissionBodyConfidenceMin = 0;
+export const reclassifySubmissionBodyConfidenceMax = 1;
+
+export const ReclassifySubmissionBody = zod
+  .object({
+    projectType: zod.string().min(1),
+    disciplines: zod.array(
+      zod
+        .enum([
+          "building",
+          "electrical",
+          "mechanical",
+          "plumbing",
+          "residential",
+          "fire-life-safety",
+          "accessibility",
+        ])
+        .describe(
+          "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+        ),
+    ),
+    applicableCodeBooks: zod.array(zod.string()),
+    confidence: zod
+      .number()
+      .min(reclassifySubmissionBodyConfidenceMin)
+      .max(reclassifySubmissionBodyConfidenceMax)
+      .optional(),
+    note: zod.string().optional(),
+  })
+  .describe(
+    "Body for `POST \/submissions\/{submissionId}\/reclassify`. A\nreviewer overwrites the submission's classification atom — the\nprior atom is preserved on the atom's history chain, the live\nrow is replaced. `confidence` defaults to `1.0` server-side\n(a reviewer-provided classification is, by construction,\ncertain). `note` is an optional free-text comment recorded\non the classification atom-event for audit purposes.\n",
+  );
+
+export const reclassifySubmissionResponseConfidenceMin = 0;
+export const reclassifySubmissionResponseConfidenceMax = 1;
+
+export const ReclassifySubmissionResponse = zod
+  .object({
+    submissionId: zod.string().uuid(),
+    projectType: zod.string(),
+    disciplines: zod.array(
+      zod
+        .enum([
+          "building",
+          "electrical",
+          "mechanical",
+          "plumbing",
+          "residential",
+          "fire-life-safety",
+          "accessibility",
+        ])
+        .describe(
+          "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+        ),
+    ),
+    applicableCodeBooks: zod.array(zod.string()),
+    confidence: zod
+      .number()
+      .min(reclassifySubmissionResponseConfidenceMin)
+      .max(reclassifySubmissionResponseConfidenceMax),
+    source: zod.enum(["auto", "reviewer"]),
+    classifiedAt: zod.coerce.date(),
+    classifiedBy: zod
+      .object({
+        kind: zod.enum(["user", "agent", "system"]),
+        id: zod.string(),
+        displayName: zod.string().nullish(),
+      })
+      .describe(
+        "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "PLR-v2 Track 1 — current classification atom for a submission.\nProduced by the AI auto-classifier on submission arrival\n(`source: 'auto'`) and overwritten by reviewers via\n`POST \/submissions\/{submissionId}\/reclassify`\n(`source: 'reviewer'`). The reviewer's reclassify call replaces\nthe prior atom outright; the prior values are preserved on the\natom's history chain rather than the live row.\n\n`disciplines` is the set of `PlanReviewDiscipline` values that\nscope which reviewers see the submission in their default\nInbox feed and which discipline tab the FindingsTab opens to.\n\n`applicableCodeBooks` is a free-form list of code-book labels\n(e.g. `\"IBC 2021\"`, `\"NEC 2020\"`) — not the atom-id of a\ncode-book; this is purely a display string for the triage\nstrip's classification chip group.\n\n`confidence` is the auto-classifier's self-reported confidence\non a 0..1 scale. Reviewer-overridden classifications carry the\nreviewer-provided value (or `1.0` if omitted on the\nreclassify body).\n\n`classifiedBy` is null for `source: 'auto'` rows and carries\nthe reviewer actor (reusing the `FindingActor` envelope) for\n`source: 'reviewer'` rows.\n",
+  );
+
+/**
  * Reviewer V1-C — manual-add endpoint. Lets a reviewer append a
 finding the AI engine missed without re-running generation.
 Persists with `status="ai-produced"` (so accept/reject/override
@@ -4800,6 +5125,36 @@ export const ListSubmissionFindingsResponse = zod
             .nullable()
             .describe(
               "On override revisions, the original AI finding's atom id.\nNull on AI-produced and never-overridden rows.\n",
+            ),
+          aiGenerated: zod
+            .boolean()
+            .describe(
+              'PLR-v2 Track 1 — true iff this row was produced by the AI\ncompliance-checker engine. False for reviewer-authored\n(manual-add) rows AND for reviewer override revisions\n(rows whose `revisionOf` points at an AI ancestor).\n\nDistinct from inferring \"AI-ness\" off `aiGeneratedAt`,\nwhich is set on every row (including reviewer-authored\nones — for those it carries the row\'s createdAt) so the\nwire shape stays narrow. Read `aiGenerated` to decide\nwhether to render the AI-badge; read `aiGeneratedAt`\nonly for \"when did this row land\" formatting.\n',
+            ),
+          acceptedByReviewerId: zod
+            .string()
+            .nullable()
+            .describe(
+              'PLR-v2 Track 1 — when an AI-generated finding was accepted\nby a reviewer, this carries the reviewer\'s user id; null\notherwise. Drives the AI-badge persistence flow (\"AI\ngenerated · reviewer confirmed (Name, date)\") so the badge\ndoes not vanish on accept.\n\nRead together with `acceptedAt` and `acceptedBy` — the\nthree fields move as a tuple.\n',
+            ),
+          acceptedAt: zod.coerce
+            .date()
+            .nullable()
+            .describe(
+              "PLR-v2 Track 1 — ISO timestamp of when the AI finding was\naccepted by a reviewer; null otherwise. Paired with\n`acceptedByReviewerId` and `acceptedBy`.\n",
+            ),
+          acceptedBy: zod
+            .object({
+              kind: zod.enum(["user", "agent", "system"]),
+              id: zod.string(),
+              displayName: zod.string().nullish(),
+            })
+            .describe(
+              "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+            )
+            .nullable()
+            .describe(
+              "PLR-v2 Track 1 — actor envelope for the reviewer who\naccepted an AI-generated finding. Reuses the existing\n`FindingActor` shape so the FE can render\n`acceptedBy.displayName` on the badge without a per-row\nuser-profile fetch.\n\nNull when `acceptedAt` is null. Otherwise carries the\nsame actor data as `reviewerStatusBy` (the existing\nstatus-change attribution).\n",
             ),
         })
         .describe(
@@ -5277,6 +5632,36 @@ export const AcceptFindingResponse = zod
           .describe(
             "On override revisions, the original AI finding's atom id.\nNull on AI-produced and never-overridden rows.\n",
           ),
+        aiGenerated: zod
+          .boolean()
+          .describe(
+            'PLR-v2 Track 1 — true iff this row was produced by the AI\ncompliance-checker engine. False for reviewer-authored\n(manual-add) rows AND for reviewer override revisions\n(rows whose `revisionOf` points at an AI ancestor).\n\nDistinct from inferring \"AI-ness\" off `aiGeneratedAt`,\nwhich is set on every row (including reviewer-authored\nones — for those it carries the row\'s createdAt) so the\nwire shape stays narrow. Read `aiGenerated` to decide\nwhether to render the AI-badge; read `aiGeneratedAt`\nonly for \"when did this row land\" formatting.\n',
+          ),
+        acceptedByReviewerId: zod
+          .string()
+          .nullable()
+          .describe(
+            'PLR-v2 Track 1 — when an AI-generated finding was accepted\nby a reviewer, this carries the reviewer\'s user id; null\notherwise. Drives the AI-badge persistence flow (\"AI\ngenerated · reviewer confirmed (Name, date)\") so the badge\ndoes not vanish on accept.\n\nRead together with `acceptedAt` and `acceptedBy` — the\nthree fields move as a tuple.\n',
+          ),
+        acceptedAt: zod.coerce
+          .date()
+          .nullable()
+          .describe(
+            "PLR-v2 Track 1 — ISO timestamp of when the AI finding was\naccepted by a reviewer; null otherwise. Paired with\n`acceptedByReviewerId` and `acceptedBy`.\n",
+          ),
+        acceptedBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+          )
+          .nullable()
+          .describe(
+            "PLR-v2 Track 1 — actor envelope for the reviewer who\naccepted an AI-generated finding. Reuses the existing\n`FindingActor` shape so the FE can render\n`acceptedBy.displayName` on the badge without a per-row\nuser-profile fetch.\n\nNull when `acceptedAt` is null. Otherwise carries the\nsame actor data as `reviewerStatusBy` (the existing\nstatus-change attribution).\n",
+          ),
       })
       .describe(
         "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
@@ -5421,6 +5806,36 @@ export const RejectFindingResponse = zod
           .nullable()
           .describe(
             "On override revisions, the original AI finding's atom id.\nNull on AI-produced and never-overridden rows.\n",
+          ),
+        aiGenerated: zod
+          .boolean()
+          .describe(
+            'PLR-v2 Track 1 — true iff this row was produced by the AI\ncompliance-checker engine. False for reviewer-authored\n(manual-add) rows AND for reviewer override revisions\n(rows whose `revisionOf` points at an AI ancestor).\n\nDistinct from inferring \"AI-ness\" off `aiGeneratedAt`,\nwhich is set on every row (including reviewer-authored\nones — for those it carries the row\'s createdAt) so the\nwire shape stays narrow. Read `aiGenerated` to decide\nwhether to render the AI-badge; read `aiGeneratedAt`\nonly for \"when did this row land\" formatting.\n',
+          ),
+        acceptedByReviewerId: zod
+          .string()
+          .nullable()
+          .describe(
+            'PLR-v2 Track 1 — when an AI-generated finding was accepted\nby a reviewer, this carries the reviewer\'s user id; null\notherwise. Drives the AI-badge persistence flow (\"AI\ngenerated · reviewer confirmed (Name, date)\") so the badge\ndoes not vanish on accept.\n\nRead together with `acceptedAt` and `acceptedBy` — the\nthree fields move as a tuple.\n',
+          ),
+        acceptedAt: zod.coerce
+          .date()
+          .nullable()
+          .describe(
+            "PLR-v2 Track 1 — ISO timestamp of when the AI finding was\naccepted by a reviewer; null otherwise. Paired with\n`acceptedByReviewerId` and `acceptedBy`.\n",
+          ),
+        acceptedBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+          )
+          .nullable()
+          .describe(
+            "PLR-v2 Track 1 — actor envelope for the reviewer who\naccepted an AI-generated finding. Reuses the existing\n`FindingActor` shape so the FE can render\n`acceptedBy.displayName` on the badge without a per-row\nuser-profile fetch.\n\nNull when `acceptedAt` is null. Otherwise carries the\nsame actor data as `reviewerStatusBy` (the existing\nstatus-change attribution).\n",
           ),
       })
       .describe(
@@ -5597,6 +6012,36 @@ export const OverrideFindingResponse = zod
           .describe(
             "On override revisions, the original AI finding's atom id.\nNull on AI-produced and never-overridden rows.\n",
           ),
+        aiGenerated: zod
+          .boolean()
+          .describe(
+            'PLR-v2 Track 1 — true iff this row was produced by the AI\ncompliance-checker engine. False for reviewer-authored\n(manual-add) rows AND for reviewer override revisions\n(rows whose `revisionOf` points at an AI ancestor).\n\nDistinct from inferring \"AI-ness\" off `aiGeneratedAt`,\nwhich is set on every row (including reviewer-authored\nones — for those it carries the row\'s createdAt) so the\nwire shape stays narrow. Read `aiGenerated` to decide\nwhether to render the AI-badge; read `aiGeneratedAt`\nonly for \"when did this row land\" formatting.\n',
+          ),
+        acceptedByReviewerId: zod
+          .string()
+          .nullable()
+          .describe(
+            'PLR-v2 Track 1 — when an AI-generated finding was accepted\nby a reviewer, this carries the reviewer\'s user id; null\notherwise. Drives the AI-badge persistence flow (\"AI\ngenerated · reviewer confirmed (Name, date)\") so the badge\ndoes not vanish on accept.\n\nRead together with `acceptedAt` and `acceptedBy` — the\nthree fields move as a tuple.\n',
+          ),
+        acceptedAt: zod.coerce
+          .date()
+          .nullable()
+          .describe(
+            "PLR-v2 Track 1 — ISO timestamp of when the AI finding was\naccepted by a reviewer; null otherwise. Paired with\n`acceptedByReviewerId` and `acceptedBy`.\n",
+          ),
+        acceptedBy: zod
+          .object({
+            kind: zod.enum(["user", "agent", "system"]),
+            id: zod.string(),
+            displayName: zod.string().nullish(),
+          })
+          .describe(
+            "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+          )
+          .nullable()
+          .describe(
+            "PLR-v2 Track 1 — actor envelope for the reviewer who\naccepted an AI-generated finding. Reuses the existing\n`FindingActor` shape so the FE can render\n`acceptedBy.displayName` on the badge without a per-row\nuser-profile fetch.\n\nNull when `acceptedAt` is null. Otherwise carries the\nsame actor data as `reviewerStatusBy` (the existing\nstatus-change attribution).\n",
+          ),
       })
       .describe(
         "One AIR-1 compliance finding. Wire shape mirrors\n`findingsMock.ts:82-103` so the V1-6 frontend swap is a\nsingle-file change. The `id` field is the public atom id\n(`finding:{submissionId}:{rowUuid}`) — see\nlib\/db\/src\/schema\/findings.ts column docs for the row pk vs\natom id split.\n",
@@ -5661,6 +6106,9 @@ export const ListReviewerQueueQueryParams = zod.object({
     ),
 });
 
+export const listReviewerQueueResponseItemsItemClassificationOneConfidenceMin = 0;
+export const listReviewerQueueResponseItemsItemClassificationOneConfidenceMax = 1;
+
 export const ListReviewerQueueResponse = zod
   .object({
     items: zod.array(
@@ -5680,6 +6128,93 @@ export const ListReviewerQueueResponse = zod
             ),
           note: zod.string().nullable(),
           reviewerComment: zod.string().nullable(),
+          classification: zod
+            .object({
+              submissionId: zod.string().uuid(),
+              projectType: zod.string(),
+              disciplines: zod.array(
+                zod
+                  .enum([
+                    "building",
+                    "electrical",
+                    "mechanical",
+                    "plumbing",
+                    "residential",
+                    "fire-life-safety",
+                    "accessibility",
+                  ])
+                  .describe(
+                    "PLR-v2 reviewer discipline scope (Track 1). Names the\ndiscipline a reviewer can be assigned to and the discipline\na submission's classification atom can carry.\n\nDistinct from `CannedFindingDiscipline` (4-value\nbuilding\/fire\/zoning\/civil) — that enum scopes the curated\ncanned-findings library and predates this one. Both coexist:\ncanned-finding rows continue to use `CannedFindingDiscipline`,\nand the canned-findings list endpoint translates from the\nreviewer's `PlanReviewDiscipline[]` to the matching subset of\n`CannedFindingDiscipline` server-side via a fixed map (e.g.\n`fire-life-safety → fire`).\n",
+                  ),
+              ),
+              applicableCodeBooks: zod.array(zod.string()),
+              confidence: zod
+                .number()
+                .min(
+                  listReviewerQueueResponseItemsItemClassificationOneConfidenceMin,
+                )
+                .max(
+                  listReviewerQueueResponseItemsItemClassificationOneConfidenceMax,
+                ),
+              source: zod.enum(["auto", "reviewer"]),
+              classifiedAt: zod.coerce.date(),
+              classifiedBy: zod
+                .object({
+                  kind: zod.enum(["user", "agent", "system"]),
+                  id: zod.string(),
+                  displayName: zod.string().nullish(),
+                })
+                .describe(
+                  "Stable actor envelope shared by reviewer-side audit surfaces\n(reviewer-requests, findings, eventually reviewer-annotations).\n\n`kind` distinguishes session-bound human actors (`user`) from\nAI\/bot writes (`agent`) and infrastructure-stamped events\n(`system`). `id` is opaque to the framework — application code\nchooses its identity scheme (today: the upstream identity\nlayer's stable user id). `displayName` is hydrated at write\ntime so consumer surfaces (e.g. the architect's\nReviewerRequestsStrip) can render \"Requested by Alex\" without\na per-row roundtrip.\n\nPromoted to a shared schema in V1-2 — was previously only a\nTS interface in `artifacts\/plan-review\/src\/lib\/findingsMock.ts`.\nBoth V1-1 (findings) and V1-2 (reviewer-requests) consume this\nenvelope; future consumers (e.g. promoted reviewer-annotations\nwhen they pick up architect-visible attribution) should import\nfrom here rather than re-deriving the shape.\n",
+                )
+                .nullable(),
+            })
+            .describe(
+              "PLR-v2 Track 1 — current classification atom for a submission.\nProduced by the AI auto-classifier on submission arrival\n(`source: 'auto'`) and overwritten by reviewers via\n`POST \/submissions\/{submissionId}\/reclassify`\n(`source: 'reviewer'`). The reviewer's reclassify call replaces\nthe prior atom outright; the prior values are preserved on the\natom's history chain rather than the live row.\n\n`disciplines` is the set of `PlanReviewDiscipline` values that\nscope which reviewers see the submission in their default\nInbox feed and which discipline tab the FindingsTab opens to.\n\n`applicableCodeBooks` is a free-form list of code-book labels\n(e.g. `\"IBC 2021\"`, `\"NEC 2020\"`) — not the atom-id of a\ncode-book; this is purely a display string for the triage\nstrip's classification chip group.\n\n`confidence` is the auto-classifier's self-reported confidence\non a 0..1 scale. Reviewer-overridden classifications carry the\nreviewer-provided value (or `1.0` if omitted on the\nreclassify body).\n\n`classifiedBy` is null for `source: 'auto'` rows and carries\nthe reviewer actor (reusing the `FindingActor` envelope) for\n`source: 'reviewer'` rows.\n",
+            )
+            .nullable()
+            .describe(
+              "PLR-v2 Track 1 — submission's current classification atom\n(project type, plan-review disciplines, applicable code\nbooks). Null when the AI auto-classifier has not yet run\nor when the submission predates the feature.\n",
+            ),
+          severityRollup: zod
+            .object({
+              blockers: zod.number(),
+              concerns: zod.number(),
+              advisory: zod.number(),
+              total: zod.number(),
+            })
+            .describe(
+              "PLR-v2 Track 1 — finding-severity counts for a submission,\nbucketed by `FindingSeverity` and totalled. Drives the triage\nstrip's severity-rollup chip on the Inbox.\n\nCounts include rows in every reviewer-status state — the\nrollup represents the finding population on the submission,\nnot just the open ones. `total` is the sum of `blockers +\nconcerns + advisory` and is denormalized for FE convenience.\n",
+            )
+            .describe(
+              "PLR-v2 Track 1 — counts of findings on this submission\nbucketed by severity (blockers \/ concerns \/ advisory) +\ntotal. Drives the triage strip's severity rollup chip on\nthe Inbox.\n",
+            ),
+          applicantHistory: zod
+            .object({
+              totalPrior: zod.number(),
+              approved: zod.number(),
+              returned: zod.number(),
+              lastReturnReason: zod.string().nullable(),
+              priorSubmissions: zod.array(
+                zod
+                  .object({
+                    submissionId: zod.string(),
+                    engagementName: zod.string(),
+                    submittedAt: zod.coerce.date(),
+                    verdict: zod.enum(["approved", "returned", "pending"]),
+                    returnReason: zod.string().optional(),
+                  })
+                  .describe(
+                    "PLR-v2 Track 1 — one prior submission for the applicant firm,\ncarried inside `ApplicantHistory.priorSubmissions` so the\nInbox triage hovercard can render per-row entries without a\nfollow-up GET.\n\n`verdict` mirrors the parent submission's terminal state:\n  - `approved` — the submission was approved.\n  - `returned` — the submission was returned for revision or\n    rejected (both bucket here for the applicant-history\n    roll-up).\n  - `pending` — the submission is still open\n    (`pending`\/`corrections_requested`).\n\n`returnReason` is only populated when `verdict === 'returned'`\n— it carries a short reason label (e.g. the reviewer comment's\nfirst line) the hovercard can render without expanding the\nfull row. Omitted otherwise.\n",
+                  ),
+              ),
+            })
+            .describe(
+              "PLR-v2 Track 1 — prior-submission roll-up for an applicant\nfirm, denormalized onto each ReviewerQueueItem so the Inbox\ntriage strip can render the applicant-history pill +\nhovercard without a follow-up `GET \/applicants\/:firm\/history`\nper row.\n\n`totalPrior` counts every prior submission for the firm\nregardless of verdict; `approved`\/`returned` partition the\nterminal subset (open ones don't roll into either). The sum\nof `approved + returned` may be less than `totalPrior` when\nprior submissions are still open — that's expected.\n\n`lastReturnReason` carries the most recent `returned` row's\nreason (or null if the firm has no returned submissions yet).\n\n`priorSubmissions` is capped at the 5 most recent (ordered\n`submittedAt` DESC) so the hovercard can render per-row\nentries without unbounded payload growth. Auditors with a\nlegitimate need for the full list can hit a (future)\napplicant-history endpoint directly.\n",
+            )
+            .describe(
+              "PLR-v2 Track 1 — prior-submission roll-up for this\nsubmission's applicant firm. Drives the triage strip's\napplicant-history pill + hovercard.\n",
+            ),
         })
         .describe(
           "One submission row in the cross-engagement reviewer Inbox\n(`GET \/reviewer\/queue`). Joins the row to its parent\nengagement so the Inbox can render a row per submission\nwithout a follow-up `GET \/engagements\/{id}` per row.\n\n`engagementName` is denormalized off the engagement at\nread-time (not at submit-time, unlike `jurisdiction` which is\nsnapshotted into the submission row by the create route) —\nthe Inbox should reflect the current engagement name even if\nthe project was renamed after the package was submitted.\n`applicantFirm` is read-through from the engagement's own\n`applicant_firm` column (Task #439). Null when the engagement\nhas no recorded firm — legacy engagements that pre-date the\ncolumn or new engagements where the field hasn't been filled\nin yet.\n",
@@ -6831,7 +7366,18 @@ any audience (read-only) so reviewers can populate the
 library picker; admin gating only applies to writes. By
 default archived entries are excluded; pass
 `includeArchived=true` to include them. Optional `discipline`
-narrows to one discipline.
+narrows to one discipline (in `CannedFindingDiscipline`'s
+4-value enum).
+
+Optional `reviewerDisciplines` is a CSV of
+`PlanReviewDiscipline` values (Track 1) that the server
+translates onto the `CannedFindingDiscipline` enum via a
+fixed map (e.g. `fire-life-safety → fire`,
+`electrical|mechanical|plumbing → building` for now) and
+unions into the result. When both `discipline` and
+`reviewerDisciplines` are present the result is the union of
+the two filters. Absence of both falls back to the legacy
+unfiltered list.
 
  * @summary List canned findings for a tenant
  */
@@ -6844,6 +7390,12 @@ export const listCannedFindingsQueryIncludeArchivedDefault = false;
 
 export const ListCannedFindingsQueryParams = zod.object({
   discipline: zod.enum(["building", "fire", "zoning", "civil"]).optional(),
+  reviewerDisciplines: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Comma-separated list of `PlanReviewDiscipline` values\n(e.g. `building,fire-life-safety`). The server translates\neach value to the matching `CannedFindingDiscipline`(s)\nand unions the results. Unknown values cause a 400.\n",
+    ),
   includeArchived: zod.coerce
     .boolean()
     .default(listCannedFindingsQueryIncludeArchivedDefault),
@@ -6858,7 +7410,7 @@ export const ListCannedFindingsResponse = zod.object({
         discipline: zod
           .enum(["building", "fire", "zoning", "civil"])
           .describe(
-            "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+            "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n\nDistinct from `PlanReviewDiscipline` (the wider 7-value\nenum the Track 1 reviewer-assignment surface uses). The\ncanned-findings list endpoint accepts `reviewerDisciplines`\n(a CSV of `PlanReviewDiscipline` values) and translates them\nserver-side onto this 4-value enum.\n",
           ),
         title: zod.string(),
         defaultBody: zod.string(),
@@ -6919,7 +7471,7 @@ export const CreateCannedFindingBody = zod.object({
   discipline: zod
     .enum(["building", "fire", "zoning", "civil"])
     .describe(
-      "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+      "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n\nDistinct from `PlanReviewDiscipline` (the wider 7-value\nenum the Track 1 reviewer-assignment surface uses). The\ncanned-findings list endpoint accepts `reviewerDisciplines`\n(a CSV of `PlanReviewDiscipline` values) and translates them\nserver-side onto this 4-value enum.\n",
     ),
   title: zod.string().min(1),
   defaultBody: zod.string(),
@@ -6976,7 +7528,7 @@ export const UpdateCannedFindingBody = zod
       .enum(["building", "fire", "zoning", "civil"])
       .optional()
       .describe(
-        "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+        "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n\nDistinct from `PlanReviewDiscipline` (the wider 7-value\nenum the Track 1 reviewer-assignment surface uses). The\ncanned-findings list endpoint accepts `reviewerDisciplines`\n(a CSV of `PlanReviewDiscipline` values) and translates them\nserver-side onto this 4-value enum.\n",
       ),
     title: zod.string().min(1).optional(),
     defaultBody: zod.string().optional(),
@@ -7028,7 +7580,7 @@ export const UpdateCannedFindingResponse = zod.object({
       discipline: zod
         .enum(["building", "fire", "zoning", "civil"])
         .describe(
-          "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+          "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n\nDistinct from `PlanReviewDiscipline` (the wider 7-value\nenum the Track 1 reviewer-assignment surface uses). The\ncanned-findings list endpoint accepts `reviewerDisciplines`\n(a CSV of `PlanReviewDiscipline` values) and translates them\nserver-side onto this 4-value enum.\n",
         ),
       title: zod.string(),
       defaultBody: zod.string(),
@@ -7096,7 +7648,7 @@ export const DeleteCannedFindingResponse = zod.object({
       discipline: zod
         .enum(["building", "fire", "zoning", "civil"])
         .describe(
-          "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+          "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n\nDistinct from `PlanReviewDiscipline` (the wider 7-value\nenum the Track 1 reviewer-assignment surface uses). The\ncanned-findings list endpoint accepts `reviewerDisciplines`\n(a CSV of `PlanReviewDiscipline` values) and translates them\nserver-side onto this 4-value enum.\n",
         ),
       title: zod.string(),
       defaultBody: zod.string(),

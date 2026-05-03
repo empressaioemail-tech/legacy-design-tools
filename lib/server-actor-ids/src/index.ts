@@ -95,6 +95,15 @@ export const FINDING_ENGINE_ACTOR_ID = "finding-engine";
 export const DECISION_RECORDED_ACTOR_ID = "decision-recorded";
 
 /**
+ * Track 1 auto-classifier path — `lib/classifySubmission.ts`. Stamped
+ * on `submission.classified` and `submission-classification.set` events
+ * when the LLM-backed classifier runs on `submission.created`. Reviewer
+ * reclassifications carry the session-bound requestor instead, so this
+ * id only shows up on the auto-classifier path.
+ */
+export const CLASSIFIER_ACTOR_ID = "classifier";
+
+/**
  * Every stable server-side actor id, in declaration order. Consumers
  * iterate this array (e.g. the design-tools actorLabel test) to assert
  * each emitted id has a matching operator-facing label, so a new server
@@ -120,6 +129,7 @@ export const SERVER_ACTOR_IDS = [
   REVIEWER_ANNOTATION_PROMOTE_ACTOR_ID,
   FINDING_ENGINE_ACTOR_ID,
   DECISION_RECORDED_ACTOR_ID,
+  CLASSIFIER_ACTOR_ID,
 ] as const;
 
 /** Literal-id union of {@link SERVER_ACTOR_IDS}. */

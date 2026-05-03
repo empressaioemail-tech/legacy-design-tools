@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { DashboardLayout } from "@workspace/portal-ui";
+import {
+  DashboardLayout,
+  PLAN_REVIEW_DISCIPLINES,
+  PLAN_REVIEW_DISCIPLINE_LABELS,
+  ReviewerDisciplineBadge,
+  type PlanReviewDiscipline,
+} from "@workspace/portal-ui";
 import {
   useListUsers,
   useCreateUser,
@@ -158,6 +164,20 @@ function UserRow({ user, onEdit }: UserRowProps) {
         <div className="sc-meta truncate">
           {user.email ?? "no email on file"}
         </div>
+        {user.disciplines && user.disciplines.length > 0 ? (
+          <div
+            className="flex flex-wrap items-center gap-1 mt-1"
+            data-testid={`user-disciplines-${user.id}`}
+          >
+            {(user.disciplines as PlanReviewDiscipline[]).map((d) => (
+              <ReviewerDisciplineBadge
+                key={d}
+                discipline={d}
+                size="sm"
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <button
@@ -327,6 +347,12 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
   const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  // Track 1 — admin-write-only `disciplines` column. Initialize from
+  // the user row so the form starts at the current set; track changes
+  // with a Set for cheap toggling.
+  const [disciplines, setDisciplines] = useState<Set<PlanReviewDiscipline>>(
+    () => new Set((user.disciplines ?? []) as PlanReviewDiscipline[]),
+  );
 
   const {
     uploadFile,
@@ -379,6 +405,7 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
               displayName?: string;
               email?: string | null;
               avatarUrl?: string | null;
+              disciplines?: PlanReviewDiscipline[];
             } = {};
             if (displayName.trim() !== user.displayName) {
               patch.displayName = displayName.trim();
@@ -387,6 +414,20 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
             if (emailNext !== (user.email ?? null)) patch.email = emailNext;
             if (resolvedAvatar !== (user.avatarUrl ?? null)) {
               patch.avatarUrl = resolvedAvatar;
+            }
+            // Disciplines are admin-write-only — only send the field
+            // when the active set diverges from the user's current
+            // value. Compare by content (Set membership) so an empty
+            // → empty round-trip is a no-op.
+            const currentDisciplines = new Set(
+              (user.disciplines ?? []) as PlanReviewDiscipline[],
+            );
+            const sameSize = currentDisciplines.size === disciplines.size;
+            const sameMembers =
+              sameSize &&
+              [...disciplines].every((d) => currentDisciplines.has(d));
+            if (!sameMembers) {
+              patch.disciplines = Array.from(disciplines);
             }
             if (Object.keys(patch).length === 0) {
               onClose();
@@ -433,6 +474,18 @@ function EditProfileModal({ user, onClose }: EditProfileModalProps) {
           uploadError={uploadError}
           testIdPrefix="user-edit"
           clearableHint
+        />
+        <DisciplinesField
+          selected={disciplines}
+          onToggle={(d) =>
+            setDisciplines((prev) => {
+              const next = new Set(prev);
+              if (next.has(d)) next.delete(d);
+              else next.add(d);
+              return next;
+            })
+          }
+          testIdPrefix="user-edit"
         />
         {serverError ? (
           <div className="sc-body text-[var(--danger)]">{serverError}</div>
@@ -683,6 +736,66 @@ function Field({ label, hint, children }: FieldProps) {
       {children}
       {hint ? <span className="sc-meta">{hint}</span> : null}
     </label>
+  );
+}
+
+interface DisciplinesFieldProps {
+  selected: ReadonlySet<PlanReviewDiscipline>;
+  onToggle: (d: PlanReviewDiscipline) => void;
+  testIdPrefix: string;
+}
+
+/**
+ * Track 1 — admin-write-only multi-select for `users.disciplines`.
+ * Renders as a row of toggleable ReviewerDisciplineBadge buttons; the
+ * selected subset reads full-color, the rest dim to ~55%. Mirrors the
+ * Inbox chip-bar's interaction pattern so the admin's mental model
+ * stays consistent.
+ */
+function DisciplinesField({
+  selected,
+  onToggle,
+  testIdPrefix,
+}: DisciplinesFieldProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="sc-label">Reviewer disciplines</span>
+      <div
+        className="flex flex-wrap items-center gap-1"
+        data-testid={`${testIdPrefix}-disciplines`}
+      >
+        {PLAN_REVIEW_DISCIPLINES.map((d) => {
+          const active = selected.has(d);
+          return (
+            <button
+              key={d}
+              type="button"
+              onClick={() => onToggle(d)}
+              data-testid={`${testIdPrefix}-discipline-${d}`}
+              data-selected={active ? "true" : "false"}
+              aria-pressed={active}
+              aria-label={`${active ? "Remove" : "Add"} ${
+                PLAN_REVIEW_DISCIPLINE_LABELS[d]
+              }`}
+              style={{
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                opacity: active ? 1 : 0.55,
+              }}
+            >
+              <ReviewerDisciplineBadge discipline={d} size="sm" />
+            </button>
+          );
+        })}
+      </div>
+      <span className="sc-meta">
+        Track 1 — admin-write-only. Drives the reviewer's default
+        Inbox filter ("show only my disciplines") and the FindingsTab
+        default-discipline picker.
+      </span>
+    </div>
   );
 }
 

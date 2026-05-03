@@ -15,7 +15,15 @@ export type {
   MutationOptions,
   MutationCapture,
 } from "./mockApiClient";
-export { makeEngagementPageMockHooks } from "./engagementPageMocks";
+export {
+  makeEngagementPageMockHooks,
+  buildClassification,
+  buildSeverityRollup,
+  buildApplicantHistory,
+  buildFinding,
+  buildUser,
+  sampleClassifiedSubmissions,
+} from "./engagementPageMocks";
 export type { EngagementPageMockHooksOptions } from "./engagementPageMocks";
 // Render fixtures co-located with the engagement-page mock factory.
 export {

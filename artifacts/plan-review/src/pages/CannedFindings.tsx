@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { DashboardLayout } from "@workspace/portal-ui";
+import {
+  DashboardLayout,
+  DisciplineFilterChipBar,
+  PLAN_REVIEW_DISCIPLINE_LABELS,
+  useReviewerDisciplineFilter,
+  type PlanReviewDiscipline,
+} from "@workspace/portal-ui";
 import {
   useListCannedFindings,
   useCreateCannedFinding,
@@ -53,12 +59,28 @@ export default function CannedFindingsPage() {
   const [editing, setEditing] = useState<CannedFinding | null>(null);
   const [creating, setCreating] = useState(false);
 
+  const disciplineFilter = useReviewerDisciplineFilter();
+  // Track 1 — when the chip-bar narrowing is active, forward the
+  // selected disciplines as a CSV string the BE translates onto
+  // CannedFindingDiscipline values server-side (per Q2 resolution
+  // option (c): two filters compose orthogonally — the existing 4-
+  // value DISCIPLINE select still runs alongside, narrowing further
+  // when set).
+  const reviewerDisciplinesCsv = useMemo<string | undefined>(() => {
+    if (disciplineFilter.isShowingAll) return undefined;
+    const arr = Array.from(disciplineFilter.selected);
+    if (arr.length === 0) return undefined;
+    return arr.join(",");
+  }, [disciplineFilter.selected, disciplineFilter.isShowingAll]);
   const params = useMemo(
     () => ({
       ...(discipline !== "all" ? { discipline } : {}),
+      ...(reviewerDisciplinesCsv
+        ? { reviewerDisciplines: reviewerDisciplinesCsv }
+        : {}),
       includeArchived,
     }),
-    [discipline, includeArchived],
+    [discipline, reviewerDisciplinesCsv, includeArchived],
   );
   // PLR-10 — tenant id now comes from the authenticated session so a
   // future multi-tenant deployment scopes the library per-install
@@ -99,6 +121,11 @@ export default function CannedFindingsPage() {
   });
 
   const rows = listQuery.data?.cannedFindings ?? [];
+  const selectedDisciplinesLabel = useMemo(() => {
+    const arr = Array.from(disciplineFilter.selected) as PlanReviewDiscipline[];
+    if (arr.length === 0) return "your disciplines";
+    return arr.map((d) => PLAN_REVIEW_DISCIPLINE_LABELS[d]).join(" · ");
+  }, [disciplineFilter.selected]);
 
   return (
     <DashboardLayout
@@ -108,6 +135,24 @@ export default function CannedFindingsPage() {
       brandProductName="Plan Review"
     >
       <div className="flex flex-col gap-4" data-testid="canned-findings-page">
+        <DisciplineFilterChipBar
+          selected={disciplineFilter.selected}
+          allDisciplines={disciplineFilter.allDisciplines}
+          isShowingAll={disciplineFilter.isShowingAll}
+          onToggle={disciplineFilter.toggle}
+          onShowAll={disciplineFilter.showAll}
+          onResetToMine={disciplineFilter.resetToMine}
+          userDisciplines={
+            Array.from(
+              disciplineFilter.selected,
+            ) as PlanReviewDiscipline[]
+          }
+          hidden={
+            disciplineFilter.userHasNoDisciplines &&
+            disciplineFilter.isShowingAll
+          }
+          data-testid="canned-findings-discipline-chip-bar"
+        />
         <div
           className="flex items-center"
           style={{ gap: 12, flexWrap: "wrap" }}
@@ -168,13 +213,39 @@ export default function CannedFindingsPage() {
         )}
 
         {!listQuery.isLoading && rows.length === 0 && (
-          <div
-            data-testid="canned-findings-empty"
-            className="sc-body opacity-60"
-            style={{ fontSize: 12 }}
-          >
-            No canned findings yet. Click <em>Add canned finding</em> to start.
-          </div>
+          reviewerDisciplinesCsv ? (
+            <div
+              data-testid="canned-findings-empty-discipline-filter"
+              className="sc-body opacity-80 flex flex-col items-start gap-2"
+              style={{ fontSize: 12 }}
+            >
+              <div>
+                {`No canned findings match your discipline filter (${selectedDisciplinesLabel}).`}
+              </div>
+              <button
+                type="button"
+                className="sc-link sc-mono-sm"
+                data-testid="canned-findings-empty-discipline-show-all"
+                onClick={disciplineFilter.showAll}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--cyan-text)",
+                  cursor: "pointer",
+                }}
+              >
+                Show all
+              </button>
+            </div>
+          ) : (
+            <div
+              data-testid="canned-findings-empty"
+              className="sc-body opacity-60"
+              style={{ fontSize: 12 }}
+            >
+              No canned findings yet. Click <em>Add canned finding</em> to start.
+            </div>
+          )
         )}
 
         <div

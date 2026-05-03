@@ -9,6 +9,7 @@ import {
   FINDING_SEVERITY_LABELS,
   FINDING_STATUS_LABELS,
 } from "../../lib/findingsApi";
+import { AIBadge } from "@workspace/portal-ui";
 import {
   CodeAtomPill,
   SourceCitationPill,
@@ -374,7 +375,15 @@ export function FindingDrillIn({
         )}
 
         <Section label="PROVENANCE">
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--text-secondary)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11, color: "var(--text-secondary)" }}>
+            <AIBadge
+              aiGenerated={finding.aiGenerated ?? true}
+              acceptedAt={finding.acceptedAt}
+              acceptedBy={finding.acceptedBy}
+              reviewerAuthor={finding.reviewerStatusBy}
+              variant="drill-in"
+              data-testid={`finding-drill-in-ai-badge-${finding.id}`}
+            />
             <div>AI generated: {new Date(finding.aiGeneratedAt).toLocaleString()}</div>
             <div>
               Confidence: {(finding.confidence * 100).toFixed(0)}%

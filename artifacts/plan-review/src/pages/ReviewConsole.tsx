@@ -1,5 +1,11 @@
-import { useMemo, useState } from "react";
-import { DashboardLayout } from "@workspace/portal-ui";
+import { useEffect, useMemo, useState } from "react";
+import {
+  DashboardLayout,
+  DisciplineFilterChipBar,
+  PLAN_REVIEW_DISCIPLINE_LABELS,
+  useReviewerDisciplineFilter,
+  type PlanReviewDiscipline,
+} from "@workspace/portal-ui";
 import {
   useListReviewerQueue,
   getListReviewerQueueQueryKey,
@@ -12,7 +18,11 @@ import { AIBriefingPanel } from "../components/AIBriefingPanel";
 import {
   ReviewerQueueList,
   filterReviewerQueueItems,
+  filterReviewerQueueItemsByDisciplines,
 } from "../components/ReviewerQueueList";
+
+const DISCIPLINE_BANNER_DISMISSED_KEY =
+  "plr.reviewerDisciplineFilter.bannerDismissed.v1";
 
 /**
  * Reviewer Inbox at `/`. Reads the cross-engagement queue from
@@ -68,12 +78,65 @@ export default function ReviewConsole() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const trimmedQuery = searchQuery.trim();
+
+  const disciplineFilter = useReviewerDisciplineFilter();
+  // Apply the discipline narrowing *first*, then leave the search
+  // filter to ReviewerQueueList's existing internal pass — that way
+  // the no-matches branch (search produced zero against a non-empty
+  // post-discipline list) stays distinguishable from the discipline-
+  // attributable empty branch (post-discipline produced zero against
+  // a non-empty raw queue).
+  const queueAfterDiscipline = useMemo(
+    () =>
+      filterReviewerQueueItemsByDisciplines(
+        items,
+        disciplineFilter.selected as ReadonlySet<string>,
+        disciplineFilter.isShowingAll,
+      ),
+    [items, disciplineFilter.selected, disciplineFilter.isShowingAll],
+  );
+  // Surface count for the queue card header — the "X of Y items"
+  // summary surfaces both the search and discipline narrowing.
   const filteredItems = useMemo(
-    () => filterReviewerQueueItems(items, trimmedQuery),
-    [items, trimmedQuery],
+    () => filterReviewerQueueItems(queueAfterDiscipline, trimmedQuery),
+    [queueAfterDiscipline, trimmedQuery],
   );
 
   const queueCount = items.length;
+  // True when the discipline filter zero'd a queue that had rows
+  // before the chip-bar narrowed it. Distinct from "raw queue is
+  // empty" (no rows at all) and "search has no matches" (post-
+  // discipline list non-empty, search zero'd it).
+  const emptyDueToDisciplineFilter =
+    !disciplineFilter.isShowingAll &&
+    items.length > 0 &&
+    queueAfterDiscipline.length === 0;
+  const selectedDisciplinesLabel = useMemo(() => {
+    const arr = Array.from(disciplineFilter.selected) as PlanReviewDiscipline[];
+    if (arr.length === 0) return "your disciplines";
+    return arr.map((d) => PLAN_REVIEW_DISCIPLINE_LABELS[d]).join(" · ");
+  }, [disciplineFilter.selected]);
+
+  // One-time banner for any user (admin or not) whose disciplines
+  // array is empty. Pass-A's contract-first lock means an empty
+  // array IS the wire-side default for legacy rows that haven't
+  // been backfilled; the banner nudges those users to set their
+  // certifications. The CTA branches by `isAdmin` (admins get an
+  // inline /users deep-link to their own profile; non-admins are
+  // told to ask an admin since self-edit is out of Track 1 scope).
+  // Dismissal key is per-browser.
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(DISCIPLINE_BANNER_DISMISSED_KEY) === "1";
+  });
+  const showNoDisciplinesBanner =
+    !bannerDismissed && disciplineFilter.userHasNoDisciplines;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (bannerDismissed) {
+      window.localStorage.setItem(DISCIPLINE_BANNER_DISMISSED_KEY, "1");
+    }
+  }, [bannerDismissed]);
 
   // When the queue request hasn't returned successful counts yet
   // (still loading, or any non-2xx — including the audience-mismatch
@@ -103,6 +166,52 @@ export default function ReviewConsole() {
       }}
     >
       <div className="flex flex-col gap-6">
+        {showNoDisciplinesBanner ? (
+          <div
+            className="sc-card"
+            data-testid="review-console-no-disciplines-banner"
+            data-admin={disciplineFilter.isAdmin ? "true" : "false"}
+            style={{
+              padding: 12,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              borderLeft: "3px solid var(--cyan)",
+            }}
+          >
+            {disciplineFilter.isAdmin ? (
+              <div
+                className="sc-body"
+                style={{ display: "flex", alignItems: "center", gap: 12 }}
+              >
+                <span>You haven't set your reviewer disciplines.</span>
+                <a
+                  href="/users"
+                  className="sc-link"
+                  data-testid="review-console-no-disciplines-banner-cta"
+                  style={{ color: "var(--cyan-text)" }}
+                >
+                  Set certifications
+                </a>
+              </div>
+            ) : (
+              <div className="sc-body">
+                Ask your admin to set your certifications so the queue
+                can highlight what's yours.
+              </div>
+            )}
+            <button
+              type="button"
+              className="sc-btn-sm"
+              data-testid="review-console-no-disciplines-banner-dismiss"
+              onClick={() => setBannerDismissed(true)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-[22px] font-bold font-['Oxygen'] text-[var(--text-primary)]">
@@ -140,18 +249,46 @@ export default function ReviewConsole() {
             <div className="sc-card-header sc-row-sb">
               <span className="sc-label">REVIEW QUEUE</span>
               <span className="sc-meta">
-                {trimmedQuery
+                {trimmedQuery || !disciplineFilter.isShowingAll
                   ? `${filteredItems.length} of ${queueCount} items`
                   : `${queueCount} items`}
               </span>
             </div>
+            {!disciplineFilter.userHasNoDisciplines ||
+            !disciplineFilter.isShowingAll ? (
+              <div
+                className="px-4 pt-2"
+                data-testid="review-queue-discipline-filter"
+              >
+                <DisciplineFilterChipBar
+                  selected={disciplineFilter.selected}
+                  allDisciplines={disciplineFilter.allDisciplines}
+                  isShowingAll={disciplineFilter.isShowingAll}
+                  onToggle={disciplineFilter.toggle}
+                  onShowAll={disciplineFilter.showAll}
+                  onResetToMine={disciplineFilter.resetToMine}
+                  userDisciplines={
+                    Array.from(
+                      disciplineFilter.selected,
+                    ) as PlanReviewDiscipline[]
+                  }
+                  hidden={
+                    disciplineFilter.userHasNoDisciplines &&
+                    disciplineFilter.isShowingAll
+                  }
+                />
+              </div>
+            ) : null}
             <div className="flex flex-col" data-testid="review-queue">
               <ReviewerQueueList
-                items={items}
+                items={queueAfterDiscipline}
                 isLoading={isLoading}
                 isError={isError}
                 error={error}
                 searchQuery={searchQuery}
+                emptyDueToDisciplineFilter={emptyDueToDisciplineFilter}
+                onShowAllDisciplines={disciplineFilter.showAll}
+                selectedDisciplinesLabel={selectedDisciplinesLabel}
               />
             </div>
           </div>

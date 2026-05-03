@@ -100,6 +100,20 @@ export interface Finding {
   aiGeneratedAt: string;
   /** When this is an overridden revision, the original AI finding's id. */
   revisionOf: string | null;
+  /**
+   * PLR-v2 Track 1 — true iff this row was produced by the AI
+   * compliance-checker engine (vs. authored by a reviewer or an
+   * override revision). Optional in Pass A; legacy rows that
+   * predate the column read as undefined and the FE defaults to
+   * AI-generated since the reviewer-authored bucket was empty
+   * before Track 1 landed.
+   */
+  aiGenerated?: boolean;
+  /** PLR-v2 Track 1 — reviewer who accepted the AI finding. Null when not yet accepted. */
+  acceptedByReviewerId?: string | null;
+  acceptedAt?: string | null;
+  /** Actor envelope for the accepting reviewer; carries displayName so the badge renders without a per-row user fetch. */
+  acceptedBy?: FindingActor | null;
 }
 
 export interface FindingRun {
