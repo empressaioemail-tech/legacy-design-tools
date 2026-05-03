@@ -28,11 +28,11 @@ import {
 import { and, desc, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";
+import { type SubmissionClassificationTypedPayload } from "../atoms/submission-classification.atom";
 import {
   classificationAtomId,
-  type SubmissionClassificationTypedPayload,
-} from "../atoms/submission-classification.atom";
-import { emitClassificationEvents } from "../lib/classifySubmission";
+  emitClassificationEvents,
+} from "@workspace/submission-classifier";
 
 const router: IRouter = Router();
 

@@ -26,6 +26,7 @@
     "@workspace/plan-review-pdf": "workspace:*",
     "@workspace/server-actor-ids": "workspace:*",
     "@workspace/site-context": "workspace:*",
+    "@workspace/submission-classifier": "workspace:*",
     "busboy": "^1.6.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2",

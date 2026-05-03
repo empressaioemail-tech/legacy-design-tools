@@ -17,9 +17,17 @@
  * The mock branch is represented as `null` (rather than a stub object)
  * so the classifier's "no client → mock pass" branch fires on a single
  * null check.
+ *
+ * Logger wiring: the lib defaults to silent. The api-server's
+ * `bootstrapAtomRegistry` calls `setClassifierLogger(logger)` once at
+ * boot to wire its pino logger; the resulting `info` lines on first
+ * `getClassificationLlmClient()` resolve match the pre-extraction
+ * behavior verbatim. The backfill script does not wire a logger and
+ * the boot lines are silently omitted (matching today's behavior —
+ * the script never instantiated the singleton client directly).
  */
 
-import { logger } from "./logger";
+import type { ClassifierLogger } from "./types";
 
 export type ClassificationLlmMode = "mock" | "anthropic";
 
@@ -33,6 +41,22 @@ let cached: AnthropicClient | null = null;
 let cachedFromEnv = true;
 let cachedMode: ClassificationLlmMode = "mock";
 let cacheInitialized = false;
+
+let externalLogger: ClassifierLogger | null = null;
+
+/**
+ * One-time wiring for the lib's internal logger. Callers (typically
+ * the api-server's `bootstrapAtomRegistry`) call this once at boot to
+ * surface the boot-time mode line on the same pino logger the rest of
+ * the server uses. Default is silent — the backfill script and tests
+ * pay nothing for this hook.
+ *
+ * Calling this with `null` resets to the silent default (useful for
+ * test cleanup).
+ */
+export function setClassifierLogger(log: ClassifierLogger | null): void {
+  externalLogger = log;
+}
 
 export function resolveClassificationLlmMode(): ClassificationLlmMode {
   const raw = (process.env["CLASSIFICATION_LLM_MODE"] ?? "mock").toLowerCase();
@@ -48,14 +72,14 @@ export async function getClassificationLlmClient(): Promise<AnthropicClient | nu
     const integrations = await import("@workspace/integrations-anthropic-ai");
     cached = integrations.createAnthropicClient();
     cacheInitialized = true;
-    logger.info(
+    externalLogger?.info(
       { mode: "anthropic" },
       "classification LLM client wired to Anthropic Claude Sonnet 4.5",
     );
   } else {
     cached = null;
     cacheInitialized = true;
-    logger.info(
+    externalLogger?.info(
       { mode: "mock" },
       "classification LLM client wired in mock mode (no network calls)",
     );

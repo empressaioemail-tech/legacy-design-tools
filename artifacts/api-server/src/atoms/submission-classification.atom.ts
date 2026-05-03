@@ -45,6 +45,25 @@ import type {
   KeyMetric,
 } from "@workspace/empressa-atom";
 import type { db as ProdDb } from "@workspace/db";
+// Atom-grammar helpers + the event-vocabulary tuple live in
+// `@workspace/submission-classifier` so the historical-inbox backfill
+// script and any future emitter can stay in lock-step with the
+// canonical names. Re-exported below so existing consumers of this
+// atom file (route handlers, tests, the engagement-events module)
+// keep working without an external rewrite.
+import {
+  classificationAtomId,
+  submissionIdFromClassificationAtomId,
+  SUBMISSION_CLASSIFICATION_EVENT_TYPES,
+  type SubmissionClassificationEventType,
+} from "@workspace/submission-classifier";
+
+export {
+  classificationAtomId,
+  submissionIdFromClassificationAtomId,
+  SUBMISSION_CLASSIFICATION_EVENT_TYPES,
+  type SubmissionClassificationEventType,
+};
 
 /** Hard cap on the prose summary. */
 export const SUBMISSION_CLASSIFICATION_PROSE_MAX_CHARS = 400;
@@ -58,29 +77,6 @@ export const SUBMISSION_CLASSIFICATION_SUPPORTED_MODES = [
 
 export type SubmissionClassificationSupportedModes =
   typeof SUBMISSION_CLASSIFICATION_SUPPORTED_MODES;
-
-export const SUBMISSION_CLASSIFICATION_EVENT_TYPES = [
-  "submission-classification.set",
-] as const;
-
-export type SubmissionClassificationEventType =
-  (typeof SUBMISSION_CLASSIFICATION_EVENT_TYPES)[number];
-
-/** Prefixed entityId grammar — see file header. */
-export function classificationAtomId(submissionId: string): string {
-  return `classification:${submissionId}`;
-}
-
-/** Inverse: parse `classification:{uuid}` → uuid. Returns null on miss. */
-export function submissionIdFromClassificationAtomId(
-  atomId: string,
-): string | null {
-  const prefix = "classification:";
-  if (!atomId.startsWith(prefix)) return null;
-  const rest = atomId.slice(prefix.length);
-  if (!rest) return null;
-  return rest;
-}
 
 export interface SubmissionClassificationTypedPayload {
   id: string;

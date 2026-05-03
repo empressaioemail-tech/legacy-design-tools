@@ -20,26 +20,33 @@
  * backfilled submission's per-submission timeline gains a real
  * ingest entry.
  *
- * Self-contained
- * --------------
- * The api-server's `classifySubmission` / `upsertAutoClassification`
- * helpers can't be imported from `@workspace/scripts` (api-server is
- * a deployable artifact, not a lib package; cross-artifact imports
- * fall outside `scripts/tsconfig.json`'s `include`). To stay in
- * lock-step with the live classifier, this script mirrors the same
- * model pin (`claude-sonnet-4-5`), system prompt, and JSON-response
- * parse rules. If the live classifier in
- * `artifacts/api-server/src/lib/classifySubmission.ts` evolves —
- * model pin, prompt, response shape — this file should be updated
- * to match.
+ * Shared logic
+ * ------------
+ * The classifier itself (model pin, system prompt, JSON parse rules,
+ * `gatherClassifierInputText`, `parseClassificationResponse`,
+ * `classifySubmission`, `emitClassificationEvents`,
+ * `setClassificationLlmClient`) lives in
+ * `@workspace/submission-classifier` so the live auto-trigger and
+ * this backfill stay in lock-step. Pre-extraction this script
+ * mirrored ~80 lines of classifier logic inline; that duplication
+ * has been removed.
+ *
+ * What stays inline
+ * -----------------
+ *   - `--anthropic` / `--max-rows` CLI parsing + Q5 budget guard.
+ *   - The `LEFT JOIN`-based candidate selection (oldest-first).
+ *   - The `ON CONFLICT DO NOTHING` row insert (concurrent-safe).
+ *   - The distinct `classifier-backfill` system actor + the
+ *     `backfilled: true` payload flag — operators want deploy-log
+ *     greps to distinguish historical writes from live classifier
+ *     runs, and that's a behavior the live classifier doesn't carry.
  *
  * Idempotency
  * -----------
- * Safe to re-run. The selection query is a LEFT JOIN that already
- * excludes submissions with an existing classification row, and the
- * INSERT uses `ON CONFLICT DO NOTHING` as a second safety net for
- * concurrent inserts. Running the script twice yields zero new rows
- * on the second pass.
+ * Safe to re-run. The selection query LEFT-JOINs against
+ * `submission_classifications` and excludes already-classified rows;
+ * the INSERT additionally uses `ON CONFLICT DO NOTHING` as a safety
+ * net for concurrent inserts.
  *
  * Modes
  * -----
@@ -50,11 +57,10 @@
  *                   fire-and-forget hook uses) instead of the
  *                   deterministic mock classifier. REQUIRES
  *                   `--max-rows N` so the operator opts in to a
- *                   specific budget; running `--anthropic` without
- *                   `--max-rows` is a hard error in `parseArgs`.
- *                   Anthropic mode also requires the AI Integrations
- *                   env vars (`AI_INTEGRATIONS_ANTHROPIC_API_KEY`,
- *                   `AI_INTEGRATIONS_ANTHROPIC_BASE_URL`).
+ *                   specific budget. The shared classifier resolves
+ *                   the Anthropic client from `CLASSIFICATION_LLM_MODE`
+ *                   (set by `main()` before the first call) and the
+ *                   AI Integrations env vars.
  *   - `--max-rows N` Cap the number of submissions processed in one
  *                   run. Default 0 = unbounded (mock mode only).
  *                   Required when `--anthropic` is set.
@@ -75,53 +81,31 @@
  * partial completion is visible in the operator's deploy log.
  */
 
-import { sql, eq, desc } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   db as defaultDb,
   pool,
-  submissions,
-  snapshots,
-  sheets,
   submissionClassifications,
 } from "@workspace/db";
 import {
   PostgresEventAnchoringService,
   type EventAnchoringService,
 } from "@workspace/empressa-atom";
+import { PLAN_REVIEW_DISCIPLINE_VALUES } from "@workspace/api-zod";
 import {
-  PLAN_REVIEW_DISCIPLINE_VALUES,
-  isPlanReviewDiscipline,
-  type PlanReviewDiscipline,
-} from "@workspace/api-zod";
+  classificationAtomId,
+  classifySubmission,
+  emitClassificationEvents,
+  EMPTY_CLASSIFICATION,
+  type ClassificationResult,
+  type ClassifierLogger,
+} from "@workspace/submission-classifier";
 
 /** Stable system actor for backfilled classifications. Distinct from
  *  the live `classifier` actor used by the fire-and-forget hook so
  *  operators can grep deploy logs / atom_events for backfill writes
  *  without confusing them with real classifier runs. */
 export const CLASSIFIER_BACKFILL_ACTOR_ID = "classifier-backfill";
-
-/** Pinned model — kept in lock-step with `CLASSIFIER_ANTHROPIC_MODEL`
- *  in `artifacts/api-server/src/lib/classifySubmission.ts`. */
-export const CLASSIFIER_ANTHROPIC_MODEL = "claude-sonnet-4-5";
-
-/** Token budget mirrors the live classifier. */
-export const CLASSIFIER_ANTHROPIC_MAX_TOKENS = 800;
-
-/** Hard cap on the cover-sheet text we hand to the model — mirrors
- *  the live classifier. */
-export const CLASSIFIER_PROMPT_TEXT_MAX_CHARS = 8000;
-
-const CLASSIFIER_SYSTEM_PROMPT = [
-  "You are a triage assistant for a building-department plan-review queue.",
-  "Given the cover-sheet text and sheet metadata of an architectural plan",
-  "submission, return a JSON object with exactly these keys:",
-  '  "projectType"         (short kebab-case label, e.g. "commercial-tenant-improvement")',
-  '  "disciplines"         (subset of: building, electrical, mechanical, plumbing,',
-  "                         residential, fire-life-safety, accessibility)",
-  '  "applicableCodeBooks" (array of code-book labels, e.g. ["IBC 2021","NEC 2020"])',
-  '  "confidence"          (number between 0 and 1)',
-  "Return ONLY the JSON object — no preamble, no markdown fences.",
-].join(" ");
 
 export interface CliOptions {
   dryRun: boolean;
@@ -210,20 +194,6 @@ export interface BackfillSummary {
  *  sibling backfill scripts. */
 export type BackfillDb = typeof defaultDb;
 
-export interface ClassificationResult {
-  projectType: string | null;
-  disciplines: PlanReviewDiscipline[];
-  applicableCodeBooks: string[];
-  confidence: number | null;
-}
-
-const EMPTY_CLASSIFICATION: ClassificationResult = {
-  projectType: null,
-  disciplines: [],
-  applicableCodeBooks: [],
-  confidence: null,
-};
-
 /**
  * Find the ids of submissions that have no classification row.
  * `LIMIT` is applied when the caller passed `--max-rows N`; default
@@ -253,236 +223,50 @@ async function fetchUnclassifiedSubmissionIds(
 }
 
 /**
- * Concatenate the latest snapshot's sheet metadata + extracted
- * `content_body` text for the engagement parented to this
- * submission. Mirrors `gatherClassifierInputText` in
- * `artifacts/api-server/src/lib/classifySubmission.ts`. Empty string
- * when the engagement has no snapshot or no sheets.
+ * Stable script-side logger. The classifier lib's functions accept a
+ * `ClassifierLogger`; the backfill writes its operator-visible lines
+ * via `console.log` directly (script convention) but still passes a
+ * minimal `info`/`warn`/`error` shim into the lib so its internal
+ * warn lines surface on stderr if anything goes wrong.
  */
-async function gatherClassifierInputText(
-  db: BackfillDb,
-  submissionId: string,
-): Promise<string> {
-  const subRows = await db
-    .select({ engagementId: submissions.engagementId })
-    .from(submissions)
-    .where(eq(submissions.id, submissionId))
-    .limit(1);
-  const sub = subRows[0];
-  if (!sub) return "";
-  const snapRows = await db
-    .select({ id: snapshots.id })
-    .from(snapshots)
-    .where(eq(snapshots.engagementId, sub.engagementId))
-    .orderBy(desc(snapshots.receivedAt))
-    .limit(1);
-  const snap = snapRows[0];
-  if (!snap) return "";
-  const sheetRows = await db
-    .select({
-      sheetNumber: sheets.sheetNumber,
-      sheetName: sheets.sheetName,
-      contentBody: sheets.contentBody,
-    })
-    .from(sheets)
-    .where(eq(sheets.snapshotId, snap.id))
-    .orderBy(sheets.sortOrder);
-  if (sheetRows.length === 0) return "";
-  const parts: string[] = [];
-  for (const r of sheetRows) {
-    const header = `${r.sheetNumber} — ${r.sheetName}`;
-    if (r.contentBody && r.contentBody.trim().length > 0) {
-      parts.push(`${header}\n${r.contentBody.trim()}`);
-    } else {
-      parts.push(header);
+const SCRIPT_LOGGER: ClassifierLogger = {
+  info: (obj, msg) => {
+    if (msg) {
+      // eslint-disable-next-line no-console
+      console.log(msg, obj);
     }
-  }
-  const joined = parts.join("\n\n---\n\n");
-  return joined.length > CLASSIFIER_PROMPT_TEXT_MAX_CHARS
-    ? joined.slice(0, CLASSIFIER_PROMPT_TEXT_MAX_CHARS)
-    : joined;
-}
-
-/**
- * Parse the model's JSON response into a {@link ClassificationResult}.
- * Mirrors `parseClassificationResponse` in api-server's
- * `classifySubmission.ts`. Tolerates leading/trailing prose around
- * the JSON object; drops unknown disciplines silently; clamps
- * confidence to [0,1] (out-of-range → null).
- */
-export function parseClassificationResponse(raw: string): ClassificationResult {
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start < 0 || end <= start) return EMPTY_CLASSIFICATION;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1));
-  } catch {
-    return EMPTY_CLASSIFICATION;
-  }
-  if (!parsed || typeof parsed !== "object") return EMPTY_CLASSIFICATION;
-  const obj = parsed as Record<string, unknown>;
-  const projectType =
-    typeof obj["projectType"] === "string" && obj["projectType"].trim()
-      ? (obj["projectType"] as string).trim()
-      : null;
-  const disciplinesRaw = Array.isArray(obj["disciplines"])
-    ? (obj["disciplines"] as unknown[])
-    : [];
-  const disciplines: PlanReviewDiscipline[] = [];
-  const seen = new Set<PlanReviewDiscipline>();
-  for (const v of disciplinesRaw) {
-    if (typeof v !== "string") continue;
-    const trimmed = v.trim();
-    if (!isPlanReviewDiscipline(trimmed)) continue;
-    if (seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    disciplines.push(trimmed);
-  }
-  const codesRaw = Array.isArray(obj["applicableCodeBooks"])
-    ? (obj["applicableCodeBooks"] as unknown[])
-    : [];
-  const applicableCodeBooks: string[] = [];
-  for (const v of codesRaw) {
-    if (typeof v !== "string") continue;
-    const trimmed = v.trim();
-    if (!trimmed) continue;
-    applicableCodeBooks.push(trimmed);
-  }
-  let confidence: number | null = null;
-  if (
-    typeof obj["confidence"] === "number" &&
-    Number.isFinite(obj["confidence"])
-  ) {
-    const c = obj["confidence"] as number;
-    if (c >= 0 && c <= 1) confidence = c;
-  }
-  return { projectType, disciplines, applicableCodeBooks, confidence };
-}
-
-/** Minimal subset of the Anthropic SDK shape this script needs. */
-interface AnthropicLikeClient {
-  messages: {
-    create: (args: unknown) => Promise<{
-      content: ReadonlyArray<{ type: string; text?: string }>;
-    }>;
-  };
-}
-
-/**
- * Run the classifier against a submission. Mock mode returns the
- * deterministic empty result; anthropic mode prompts Sonnet 4.5 and
- * parses the JSON response.
- *
- * In anthropic mode the AI Integrations env vars must be set; the
- * lazy `createAnthropicClient` call throws if they're not.
- */
-async function classifyOne(
-  db: BackfillDb,
-  submissionId: string,
-  anthropic: boolean,
-  client: AnthropicLikeClient | null,
-): Promise<ClassificationResult> {
-  if (!anthropic || !client) return EMPTY_CLASSIFICATION;
-
-  const inputText = await gatherClassifierInputText(db, submissionId);
-  if (!inputText) return EMPTY_CLASSIFICATION;
-
-  const response = await client.messages.create({
-    model: CLASSIFIER_ANTHROPIC_MODEL,
-    max_tokens: CLASSIFIER_ANTHROPIC_MAX_TOKENS,
-    system: CLASSIFIER_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: [{ type: "text", text: inputText }],
-      },
-    ],
-  });
-  const text = response.content
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text!)
-    .join("\n")
-    .trim();
-  if (!text) return EMPTY_CLASSIFICATION;
-  return parseClassificationResponse(text);
-}
-
-/**
- * Append the matched pair of events for a backfilled classification.
- * Anchored against the submission entity (`submission.classified`)
- * AND the classification entity (`submission-classification.set`) to
- * stay consistent with the live classifier's emit pattern. Best-
- * effort: a transient append failure is logged but does not roll
- * back the row insert (rows are the source of truth, events are the
- * audit trail — locked decision #5).
- */
-async function emitBackfillEvents(
-  history: EventAnchoringService,
-  submissionId: string,
-  result: ClassificationResult,
-): Promise<void> {
-  const payload: Record<string, unknown> = {
-    projectType: result.projectType,
-    disciplines: result.disciplines,
-    applicableCodeBooks: result.applicableCodeBooks,
-    confidence: result.confidence,
-    source: "auto",
-    backfilled: true,
-  };
-  const actor = {
-    kind: "system" as const,
-    id: CLASSIFIER_BACKFILL_ACTOR_ID,
-  };
-  try {
-    await history.appendEvent({
-      entityType: "submission-classification",
-      entityId: `classification:${submissionId}`,
-      eventType: "submission-classification.set",
-      actor,
-      payload,
-    });
-  } catch (err) {
+  },
+  warn: (obj, msg) => {
     // eslint-disable-next-line no-console
-    console.error(
-      `submission-classification.set append failed for ${submissionId}:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
-  try {
-    await history.appendEvent({
-      entityType: "submission",
-      entityId: submissionId,
-      eventType: "submission.classified",
-      actor,
-      payload,
-    });
-  } catch (err) {
+    console.warn(msg ?? "warning", obj);
+  },
+  error: (obj, msg) => {
     // eslint-disable-next-line no-console
-    console.error(
-      `submission.classified append failed for ${submissionId}:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
-}
+    console.error(msg ?? "error", obj);
+  },
+};
 
 /**
  * Run the backfill. Caller is responsible for env preparation when
- * `--anthropic` is set (the AI Integrations env vars). Tests inject
- * a fake `EventAnchoringService` to assert on appended events
- * without touching `atom_events`; production constructs a
- * `PostgresEventAnchoringService` over the same `db` so the
- * classification events land alongside live ones.
+ * `--anthropic` is set: `main()` sets `CLASSIFICATION_LLM_MODE`
+ * before this is invoked so the shared classifier's cached client
+ * resolves to the correct mode on first call.
  *
- * Anthropic client is also injectable for tests so the LLM call is
- * deterministic; production passes `null` and the function lazily
- * resolves the integration client when `opts.anthropic` is true.
+ * Tests inject a fake `EventAnchoringService` via the `history`
+ * parameter to assert on appended events without touching
+ * `atom_events`; production constructs a `PostgresEventAnchoringService`
+ * over the same `db` so the classification events land alongside
+ * live ones.
+ *
+ * Tests that want to exercise anthropic mode use
+ * `setClassificationLlmClient(testClient)` from
+ * `@workspace/submission-classifier` (the cached-singleton pattern
+ * the rest of the codebase uses), rather than per-call injection.
  */
 export async function backfill(
   opts: CliOptions,
   db: BackfillDb = defaultDb,
   history?: EventAnchoringService,
-  anthropicClient?: AnthropicLikeClient | null,
 ): Promise<BackfillSummary> {
   const summary: BackfillSummary = {
     totalCandidates: 0,
@@ -502,16 +286,6 @@ export async function backfill(
       >[0],
     );
 
-  // Lazily construct the Anthropic client only when needed and only
-  // if the caller didn't inject one. The integrations module's
-  // top-level code throws if env vars are missing — defer the import
-  // until we know we're on the anthropic branch.
-  let client: AnthropicLikeClient | null = anthropicClient ?? null;
-  if (opts.anthropic && client === null && !opts.dryRun) {
-    const integrations = await import("@workspace/integrations-anthropic-ai");
-    client = integrations.createAnthropicClient() as AnthropicLikeClient;
-  }
-
   for (const submissionId of candidateIds) {
     if (opts.dryRun) {
       summary.classified++;
@@ -523,12 +297,12 @@ export async function backfill(
       continue;
     }
     try {
-      const result = await classifyOne(
-        db,
-        submissionId,
-        opts.anthropic,
-        client,
-      );
+      // The shared classifier resolves the Anthropic client (or
+      // null in mock mode) via its cached singleton. `main()` set
+      // `CLASSIFICATION_LLM_MODE` before we got here.
+      const result: ClassificationResult = opts.anthropic
+        ? await classifySubmission(submissionId, SCRIPT_LOGGER, db)
+        : EMPTY_CLASSIFICATION;
       const now = new Date();
       const inserted = await db
         .insert(submissionClassifications)
@@ -561,7 +335,28 @@ export async function backfill(
         continue;
       }
 
-      await emitBackfillEvents(anchoring, submissionId, result);
+      // Use the shared `emitClassificationEvents` so the event-emit
+      // path is identical to the live classifier — but with the
+      // distinct `classifier-backfill` actor and the `backfilled: true`
+      // payload flag that operators rely on for deploy-log triage.
+      await emitClassificationEvents(anchoring, {
+        submissionId,
+        classificationAtomId: classificationAtomId(submissionId),
+        eventName: "submission.classified",
+        actor: {
+          kind: "system",
+          id: CLASSIFIER_BACKFILL_ACTOR_ID,
+        },
+        payload: {
+          projectType: result.projectType,
+          disciplines: result.disciplines,
+          applicableCodeBooks: result.applicableCodeBooks,
+          confidence: result.confidence,
+          source: "auto",
+          backfilled: true,
+        },
+        reqLog: SCRIPT_LOGGER,
+      });
 
       summary.classified++;
       // eslint-disable-next-line no-console
@@ -586,6 +381,11 @@ export async function backfill(
 
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
+  // Set the LLM-mode env BEFORE any code path that lazily resolves
+  // the classifier client. `getClassificationLlmClient()` (from the
+  // shared lib) caches its mode on first call; the lazy import sees
+  // this env value when the cache initialises.
+  process.env["CLASSIFICATION_LLM_MODE"] = opts.anthropic ? "anthropic" : "mock";
   // eslint-disable-next-line no-console
   console.log(
     `backfillTrack1Classifications: starting${opts.dryRun ? " (dry-run)" : ""} ` +

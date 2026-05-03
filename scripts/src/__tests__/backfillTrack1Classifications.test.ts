@@ -14,24 +14,27 @@
  *     processed.
  *   - `--dry-run` mode: the row count and tally read normally but
  *     no INSERT lands and no events are appended.
- *   - parseClassificationResponse: tolerates leading/trailing prose,
- *     drops unknown disciplines, clamps confidence (mirrors the api-
- *     server's same-named helper so a parser drift fails here too).
+ *   - Per-row failure accounting.
+ *
+ * `parseClassificationResponse` cases used to live here (mirroring
+ * the api-server's same-named helper). Post-extraction the parser is
+ * the source-of-truth in `@workspace/submission-classifier`'s test
+ * suite (`lib/submission-classifier/src/__tests__/classifier.test.ts`)
+ * and the duplicates have been deleted — re-testing the shared
+ * function at the script level was double-maintenance. The script's
+ * import-correctness is implicitly verified by the happy-path /
+ * idempotent / max-rows / dry-run / failure cases below, all of
+ * which chain through the lib.
  */
 
 import { describe, it, expect } from "vitest";
-import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { withTestSchema, type TestSchemaContext } from "@workspace/db/testing";
 import {
   PostgresEventAnchoringService,
   type EventAnchoringService,
 } from "@workspace/empressa-atom";
-import {
-  backfill,
-  parseArgs,
-  parseClassificationResponse,
-} from "../backfillTrack1Classifications";
+import { backfill, parseArgs } from "../backfillTrack1Classifications";
 
 function makeDb(ctx: TestSchemaContext): Parameters<typeof backfill>[1] {
   return drizzle(ctx.pool) as unknown as Parameters<typeof backfill>[1];
@@ -135,68 +138,6 @@ describe("parseArgs", () => {
       dryRun: false,
       anthropic: true,
       maxRows: 25,
-    });
-  });
-});
-
-describe("parseClassificationResponse", () => {
-  it("parses a minimal valid response", () => {
-    expect(
-      parseClassificationResponse(
-        JSON.stringify({
-          projectType: "residential-addition",
-          disciplines: ["building", "residential"],
-          applicableCodeBooks: ["IRC 2021"],
-          confidence: 0.81,
-        }),
-      ),
-    ).toEqual({
-      projectType: "residential-addition",
-      disciplines: ["building", "residential"],
-      applicableCodeBooks: ["IRC 2021"],
-      confidence: 0.81,
-    });
-  });
-
-  it("tolerates leading/trailing prose around the JSON object", () => {
-    const result = parseClassificationResponse(
-      `Here you go:\n{"projectType":"x","disciplines":["building"],"applicableCodeBooks":[],"confidence":0.5}\nThanks`,
-    );
-    expect(result.projectType).toBe("x");
-    expect(result.disciplines).toEqual(["building"]);
-    expect(result.confidence).toBe(0.5);
-  });
-
-  it("drops unknown discipline values silently", () => {
-    const result = parseClassificationResponse(
-      JSON.stringify({
-        projectType: "x",
-        disciplines: ["building", "not-a-discipline", "fire-life-safety"],
-        applicableCodeBooks: [],
-        confidence: 0.7,
-      }),
-    );
-    expect(result.disciplines).toEqual(["building", "fire-life-safety"]);
-  });
-
-  it("nulls out-of-range confidence", () => {
-    const result = parseClassificationResponse(
-      JSON.stringify({
-        projectType: "x",
-        disciplines: [],
-        applicableCodeBooks: [],
-        confidence: 1.5,
-      }),
-    );
-    expect(result.confidence).toBeNull();
-  });
-
-  it("returns the empty result on a non-JSON response", () => {
-    expect(parseClassificationResponse("sorry, can't do it")).toEqual({
-      projectType: null,
-      disciplines: [],
-      applicableCodeBooks: [],
-      confidence: null,
     });
   });
 });
@@ -358,12 +299,12 @@ describe("backfill (mock mode)", () => {
           calls++;
           // First two calls (first row's two events) reject; the
           // rest go through. The script catches event-emit errors
-          // INSIDE emitBackfillEvents (best-effort), so failure
+          // INSIDE emitClassificationEvents (best-effort), so failure
           // there logs but doesn't propagate. To test the
           // failed-counter path, we'd need to break the row write,
           // not the event write. Confirm the contract: emit-error
           // does NOT increment `failed` (failed counts only when
-          // the row insert / classifyOne path throws).
+          // the row insert / classifySubmission path throws).
           if (calls <= 2) {
             throw new Error("synthetic emit failure");
           }
