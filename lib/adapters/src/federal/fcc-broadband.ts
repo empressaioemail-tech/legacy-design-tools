@@ -28,6 +28,14 @@ const FCC_BDC_AVAILABILITY_ENDPOINT =
 const FCC_BROADBAND_LABEL = "FCC National Broadband Map";
 
 /**
+ * Identifying User-Agent for the FCC NBM call. Several public broker
+ * endpoints (Apache-fronted) 406 requests without a recognized UA;
+ * spelling one out keeps the production call from tripping that gate.
+ */
+const FCC_BROADBAND_USER_AGENT =
+  "smartcity-plan-review/1.0 (+https://prompt-agent-accelerator.replit.app)";
+
+/**
  * Freshness window for the FCC National Broadband Map snapshot.
  *
  * The Broadband DATA Collection (BDC, post-Form 477) publishes new
@@ -167,7 +175,16 @@ export const fccBroadbandAdapter: Adapter = {
 
     const { response: res, attempts } = await fetchWithRetry(
       url.toString(),
-      { signal: ctx.signal, headers: { Accept: "application/json" } },
+      {
+        signal: ctx.signal,
+        // Apache front doors (and the FCC NBM tile server in particular)
+        // 406 requests without a recognized `User-Agent`. Spell both UA
+        // and Accept out so Node fetch's defaults don't trigger that gate.
+        headers: {
+          "User-Agent": FCC_BROADBAND_USER_AGENT,
+          Accept: "application/json, */*;q=0.1",
+        },
+      },
       {
         fetchImpl: ctx.fetchImpl,
         signal: ctx.signal,

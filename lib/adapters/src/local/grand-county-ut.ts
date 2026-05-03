@@ -46,6 +46,21 @@ const OSM_OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const OSM_OVERPASS_LABEL = "OSM Overpass";
 
 /**
+ * Identifying User-Agent for upstream calls.
+ *
+ * OSM Overpass (and several of the other public broker endpoints we
+ * hit) front their servers with Apache, which returns `HTTP 406 Not
+ * Acceptable` for requests with a missing or unrecognized
+ * `User-Agent`. Node 20+'s built-in `fetch` does not always set one,
+ * so the runner-level call started 406-ing in production after the
+ * Task #490 redeploy. Per OSM Overpass etiquette, identify the app
+ * (and a contact path) so operators can rate-limit politely instead
+ * of blocking the whole request.
+ */
+const ADAPTER_USER_AGENT =
+  "smartcity-plan-review/1.0 (+https://prompt-agent-accelerator.replit.app)";
+
+/**
  * Per-adapter timeout override (ms) for the Grand County roads
  * adapter. Sized to cover two full Overpass attempts at the
  * server-side `[timeout:25]` plus backoff between them:
@@ -254,7 +269,15 @@ export async function runOsmRoadsFallback(
     {
       method: "POST",
       body: query,
-      headers: { "Content-Type": "text/plain" },
+      // Apache (Overpass's front door) returns HTTP 406 for requests
+      // without a recognized `User-Agent` and without a permissive
+      // `Accept`. Spelling both out fixes the production 406 and is
+      // standard Overpass etiquette (UA identifies the app + contact).
+      headers: {
+        "Content-Type": "text/plain",
+        "User-Agent": ADAPTER_USER_AGENT,
+        Accept: "application/json, */*;q=0.1",
+      },
       signal: ctx.signal,
     },
     {

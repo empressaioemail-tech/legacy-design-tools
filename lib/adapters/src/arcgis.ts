@@ -26,6 +26,15 @@
 import { AdapterRunError } from "./types";
 import { fetchWithRetry } from "./retry";
 
+/**
+ * Identifying User-Agent the helper sends on every request. See the
+ * docstring above the `headers:` block in `arcgisPointQuery` for why
+ * — Apache front doors on several of our upstream hosts 406 requests
+ * with a missing/unrecognized UA.
+ */
+const ARC_GIS_USER_AGENT =
+  "smartcity-plan-review/1.0 (+https://prompt-agent-accelerator.replit.app)";
+
 export interface ArcGisPointQueryInput {
   serviceUrl: string;
   latitude: number;
@@ -91,7 +100,18 @@ export async function arcgisPointQuery(
 
   const { response: res, attempts } = await fetchWithRetry(
     url.toString(),
-    { signal: input.signal },
+    {
+      signal: input.signal,
+      // Several upstream ArcGIS hosts (Grand County, Lemhi County, the
+      // FCC NBM tile server, EJScreen broker) sit behind Apache front
+      // doors that 406 requests without a recognized `User-Agent` and
+      // a permissive `Accept`. Send both explicitly so Node's fetch
+      // doesn't trigger that gate in production.
+      headers: {
+        "User-Agent": ARC_GIS_USER_AGENT,
+        Accept: "application/json, */*;q=0.1",
+      },
+    },
     {
       fetchImpl: input.fetchImpl,
       signal: input.signal,

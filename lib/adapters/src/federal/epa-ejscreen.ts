@@ -30,6 +30,14 @@ const EPA_EJSCREEN_BROKER =
 const EPA_EJSCREEN_LABEL = "EPA EJScreen";
 
 /**
+ * Identifying User-Agent for the EJScreen broker call. The broker
+ * sits behind an IIS/Apache front door that rejects requests without
+ * a recognized `User-Agent` (production saw this as `fetch failed`).
+ */
+const EPA_EJSCREEN_USER_AGENT =
+  "smartcity-plan-review/1.0 (+https://prompt-agent-accelerator.replit.app)";
+
+/**
  * Freshness window for the EPA EJScreen snapshot.
  *
  * EJScreen is rebuilt roughly annually, after the Census/ACS five-year
@@ -78,7 +86,16 @@ export const epaEjscreenAdapter: Adapter = {
 
     const { response: res, attempts } = await fetchWithRetry(
       url.toString(),
-      { signal: ctx.signal },
+      {
+        signal: ctx.signal,
+        // EJScreen's broker 406s requests with the default Node fetch
+        // headers (production saw this as `fetch failed`). Spell UA +
+        // Accept out so the broker accepts the call.
+        headers: {
+          "User-Agent": EPA_EJSCREEN_USER_AGENT,
+          Accept: "application/json, */*;q=0.1",
+        },
+      },
       {
         fetchImpl: ctx.fetchImpl,
         signal: ctx.signal,

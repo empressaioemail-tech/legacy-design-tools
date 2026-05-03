@@ -99,6 +99,30 @@ describe("Moab / Grand County UT adapter chain", () => {
     expect(outcomes[0].result?.provider).toMatch(/OpenStreetMap/i);
   });
 
+  it("sends an identifying User-Agent and a permissive Accept on the Overpass POST so Apache does not 406 the request", async () => {
+    // Production reproduction: with Node fetch's default headers
+    // Overpass's Apache front door returned `HTTP 406 Not Acceptable`.
+    // The adapter must spell out a UA + Accept on the POST so the
+    // upstream accepts the call (Task #494).
+    let overpassInit: RequestInit | undefined;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("overpass")) {
+        overpassInit = init;
+        return jsonResponse(osmRoadsResponse);
+      }
+      return jsonResponse(arcgisEmpty);
+    });
+    await runAdapters({
+      adapters: [grandCountyRoadsAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(overpassInit).toBeDefined();
+    const headers = (overpassInit?.headers ?? {}) as Record<string, string>;
+    expect(headers["User-Agent"]).toMatch(/smartcity-plan-review/);
+    expect(headers["Accept"]).toMatch(/application\/json/);
+  });
+
   it("declares a roads-adapter timeout floor wide enough for two Overpass attempts", async () => {
     // Two attempts at the upstream's `[timeout:25]` plus backoff
     // should comfortably fit in the configured budget.
