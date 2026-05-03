@@ -70,6 +70,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   { label: "ADMIN", items: [
       { label: "Users & Roles", href: "/users", requiresPermission: "users:manage" },
       { label: "Reviewer Pool", href: "/reviewers", requiresPermission: "reviewers:manage" },
+      { label: "Canned Findings", href: "/canned-findings", requiresPermission: "settings:manage" },
       { label: "Settings", href: "/settings", requiresPermission: "settings:manage" },
   ]},
   { label: "DEV", items: [

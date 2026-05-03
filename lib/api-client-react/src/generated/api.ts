@@ -24,12 +24,14 @@ import type {
   BriefingGenerationRunsResponse,
   BriefingGenerationStatusResponse,
   CancelRenderResponse,
+  CannedFindingResponse,
   ChatErrorResponse,
   ChatRequest,
   CodeAtomDetail,
   CodeAtomListResponse,
   CodeAtomSummary,
   CreateBriefingSourceBody,
+  CreateCannedFindingBody,
   CreateEngagementSubmissionBody,
   CreateReviewerAnnotationBody,
   CreateReviewerRequestBody,
@@ -63,6 +65,8 @@ import type {
   KickoffRenderBody,
   KickoffRenderResponse,
   ListBimModelDivergencesResponse,
+  ListCannedFindingsParams,
+  ListCannedFindingsResponse,
   ListCodeAtomsParams,
   ListEngagementBriefingSourcesParams,
   ListEngagementReviewerRequestsParams,
@@ -113,6 +117,7 @@ import type {
   SubmissionFindingsGenerationStatusResponse,
   SubmissionReceipt,
   SubmissionResponse,
+  UpdateCannedFindingBody,
   UpdateEngagementBody,
   UpdateMyArchitectPdfHeaderBody,
   UpdateMyProfileBody,
@@ -9339,4 +9344,439 @@ export const useRunRendersSweep = <
   TContext
 > => {
   return useMutation(getRunRendersSweepMutationOptions(options));
+};
+
+/**
+ * Returns canned-finding library entries for a tenant. Open to
+any audience (read-only) so reviewers can populate the
+library picker; admin gating only applies to writes. By
+default archived entries are excluded; pass
+`includeArchived=true` to include them. Optional `discipline`
+narrows to one discipline.
+
+ * @summary List canned findings for a tenant
+ */
+export const getListCannedFindingsUrl = (
+  tenantId: string,
+  params?: ListCannedFindingsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/tenants/${tenantId}/canned-findings?${stringifiedParams}`
+    : `/api/tenants/${tenantId}/canned-findings`;
+};
+
+export const listCannedFindings = async (
+  tenantId: string,
+  params?: ListCannedFindingsParams,
+  options?: RequestInit,
+): Promise<ListCannedFindingsResponse> => {
+  return customFetch<ListCannedFindingsResponse>(
+    getListCannedFindingsUrl(tenantId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListCannedFindingsQueryKey = (
+  tenantId: string,
+  params?: ListCannedFindingsParams,
+) => {
+  return [
+    `/api/tenants/${tenantId}/canned-findings`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListCannedFindingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCannedFindings>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  tenantId: string,
+  params?: ListCannedFindingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCannedFindings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListCannedFindingsQueryKey(tenantId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listCannedFindings>>
+  > = ({ signal }) =>
+    listCannedFindings(tenantId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!tenantId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCannedFindings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListCannedFindingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCannedFindings>>
+>;
+export type ListCannedFindingsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List canned findings for a tenant
+ */
+
+export function useListCannedFindings<
+  TData = Awaited<ReturnType<typeof listCannedFindings>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  tenantId: string,
+  params?: ListCannedFindingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCannedFindings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListCannedFindingsQueryOptions(
+    tenantId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Admin curation endpoint. Requires the `settings:manage`
+permission claim.
+
+ * @summary Create a canned finding (admin only)
+ */
+export const getCreateCannedFindingUrl = (tenantId: string) => {
+  return `/api/tenants/${tenantId}/canned-findings`;
+};
+
+export const createCannedFinding = async (
+  tenantId: string,
+  createCannedFindingBody: CreateCannedFindingBody,
+  options?: RequestInit,
+): Promise<CannedFindingResponse> => {
+  return customFetch<CannedFindingResponse>(
+    getCreateCannedFindingUrl(tenantId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createCannedFindingBody),
+    },
+  );
+};
+
+export const getCreateCannedFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createCannedFinding>>,
+    TError,
+    { tenantId: string; data: BodyType<CreateCannedFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createCannedFinding>>,
+  TError,
+  { tenantId: string; data: BodyType<CreateCannedFindingBody> },
+  TContext
+> => {
+  const mutationKey = ["createCannedFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createCannedFinding>>,
+    { tenantId: string; data: BodyType<CreateCannedFindingBody> }
+  > = (props) => {
+    const { tenantId, data } = props ?? {};
+
+    return createCannedFinding(tenantId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateCannedFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createCannedFinding>>
+>;
+export type CreateCannedFindingMutationBody = BodyType<CreateCannedFindingBody>;
+export type CreateCannedFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a canned finding (admin only)
+ */
+export const useCreateCannedFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createCannedFinding>>,
+    TError,
+    { tenantId: string; data: BodyType<CreateCannedFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createCannedFinding>>,
+  TError,
+  { tenantId: string; data: BodyType<CreateCannedFindingBody> },
+  TContext
+> => {
+  return useMutation(getCreateCannedFindingMutationOptions(options));
+};
+
+/**
+ * Partial update. Pass `archivedAt: null` to un-archive an
+entry; pass a timestamp to archive it. Requires the
+`settings:manage` permission claim.
+
+ * @summary Update a canned finding (admin only)
+ */
+export const getUpdateCannedFindingUrl = (
+  tenantId: string,
+  cannedFindingId: string,
+) => {
+  return `/api/tenants/${tenantId}/canned-findings/${cannedFindingId}`;
+};
+
+export const updateCannedFinding = async (
+  tenantId: string,
+  cannedFindingId: string,
+  updateCannedFindingBody: UpdateCannedFindingBody,
+  options?: RequestInit,
+): Promise<CannedFindingResponse> => {
+  return customFetch<CannedFindingResponse>(
+    getUpdateCannedFindingUrl(tenantId, cannedFindingId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateCannedFindingBody),
+    },
+  );
+};
+
+export const getUpdateCannedFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateCannedFinding>>,
+    TError,
+    {
+      tenantId: string;
+      cannedFindingId: string;
+      data: BodyType<UpdateCannedFindingBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateCannedFinding>>,
+  TError,
+  {
+    tenantId: string;
+    cannedFindingId: string;
+    data: BodyType<UpdateCannedFindingBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["updateCannedFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateCannedFinding>>,
+    {
+      tenantId: string;
+      cannedFindingId: string;
+      data: BodyType<UpdateCannedFindingBody>;
+    }
+  > = (props) => {
+    const { tenantId, cannedFindingId, data } = props ?? {};
+
+    return updateCannedFinding(tenantId, cannedFindingId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateCannedFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateCannedFinding>>
+>;
+export type UpdateCannedFindingMutationBody = BodyType<UpdateCannedFindingBody>;
+export type UpdateCannedFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update a canned finding (admin only)
+ */
+export const useUpdateCannedFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateCannedFinding>>,
+    TError,
+    {
+      tenantId: string;
+      cannedFindingId: string;
+      data: BodyType<UpdateCannedFindingBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateCannedFinding>>,
+  TError,
+  {
+    tenantId: string;
+    cannedFindingId: string;
+    data: BodyType<UpdateCannedFindingBody>;
+  },
+  TContext
+> => {
+  return useMutation(getUpdateCannedFindingMutationOptions(options));
+};
+
+/**
+ * Sets `archivedAt` to the server clock; the row is preserved
+so any historical references stay resolvable. Idempotent —
+archiving an already-archived row leaves the original
+`archivedAt` intact and returns the row. Requires the
+`settings:manage` permission claim.
+
+ * @summary Soft-delete (archive) a canned finding (admin only)
+ */
+export const getDeleteCannedFindingUrl = (
+  tenantId: string,
+  cannedFindingId: string,
+) => {
+  return `/api/tenants/${tenantId}/canned-findings/${cannedFindingId}`;
+};
+
+export const deleteCannedFinding = async (
+  tenantId: string,
+  cannedFindingId: string,
+  options?: RequestInit,
+): Promise<CannedFindingResponse> => {
+  return customFetch<CannedFindingResponse>(
+    getDeleteCannedFindingUrl(tenantId, cannedFindingId),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getDeleteCannedFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteCannedFinding>>,
+    TError,
+    { tenantId: string; cannedFindingId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteCannedFinding>>,
+  TError,
+  { tenantId: string; cannedFindingId: string },
+  TContext
+> => {
+  const mutationKey = ["deleteCannedFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteCannedFinding>>,
+    { tenantId: string; cannedFindingId: string }
+  > = (props) => {
+    const { tenantId, cannedFindingId } = props ?? {};
+
+    return deleteCannedFinding(tenantId, cannedFindingId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteCannedFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteCannedFinding>>
+>;
+
+export type DeleteCannedFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Soft-delete (archive) a canned finding (admin only)
+ */
+export const useDeleteCannedFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteCannedFinding>>,
+    TError,
+    { tenantId: string; cannedFindingId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteCannedFinding>>,
+  TError,
+  { tenantId: string; cannedFindingId: string },
+  TContext
+> => {
+  return useMutation(getDeleteCannedFindingMutationOptions(options));
 };

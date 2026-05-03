@@ -8,6 +8,7 @@ import CodeLibrary from "./pages/CodeLibrary";
 import StyleProbe from "./pages/StyleProbe";
 import Sheets from "./pages/Sheets";
 import Users from "./pages/Users";
+import CannedFindings from "./pages/CannedFindings";
 import OutstandingRequests from "./pages/OutstandingRequests";
 import ComingSoon from "./pages/ComingSoon";
 import { RequirePermission } from "./components/permissions";
@@ -58,6 +59,14 @@ function Router() {
       <Route path="/settings">
         <RequirePermission permission="settings:manage">
           <ComingSoon />
+        </RequirePermission>
+      </Route>
+      {/* PLR-10 — Tenant-scoped canned-finding library curation page.
+          Same `settings:manage` claim as Settings; the sidebar entry
+          is gated identically so the route and the link stay in sync. */}
+      <Route path="/canned-findings">
+        <RequirePermission permission="settings:manage">
+          <CannedFindings />
         </RequirePermission>
       </Route>
 

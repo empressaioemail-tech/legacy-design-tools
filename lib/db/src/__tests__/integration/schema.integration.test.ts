@@ -80,6 +80,10 @@ describe("lib/db schema integration", () => {
         "briefing_divergences",
         "briefing_generation_jobs",
         "briefing_sources",
+        // PLR-10 — tenant-scoped canned-finding library curated by
+        // tenant admins; reviewers consume entries on FindingsTab to
+        // pre-fill the manual-add form.
+        "canned_findings",
         "code_atom_fetch_queue",
         "code_atom_sources",
         "code_atoms",

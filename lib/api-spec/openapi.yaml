@@ -63,6 +63,12 @@ tags:
       currently watching a submission. Reviewer-only
       (audience-gated to `internal`); single-process, in-memory
       pub/sub backed by `lib/submissionLiveEvents.ts`.
+  - name: canned-findings
+    description: |
+      PLR-10 / SD-3 / SD-7 — tenant-scoped canned-finding library.
+      Tenant admins (gated on `settings:manage`) curate
+      discipline-scoped entries; reviewers consume them via the
+      Library picker on the FindingsTab.
 paths:
   /healthz:
     get:
@@ -4366,6 +4372,171 @@ paths:
           description: |
             `RENDERS_ADMIN_SECRET` is not configured; sweep is
             disabled in this environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tenants/{tenantId}/canned-findings:
+    get:
+      operationId: listCannedFindings
+      tags: [canned-findings]
+      summary: List canned findings for a tenant
+      description: |
+        Returns canned-finding library entries for a tenant. Open to
+        any audience (read-only) so reviewers can populate the
+        library picker; admin gating only applies to writes. By
+        default archived entries are excluded; pass
+        `includeArchived=true` to include them. Optional `discipline`
+        narrows to one discipline.
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: discipline
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/CannedFindingDiscipline"
+        - name: includeArchived
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Canned findings list (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListCannedFindingsResponse"
+        "400":
+          description: Invalid query parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: createCannedFinding
+      tags: [canned-findings]
+      summary: Create a canned finding (admin only)
+      description: |
+        Admin curation endpoint. Requires the `settings:manage`
+        permission claim.
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCannedFindingBody"
+      responses:
+        "201":
+          description: Newly created canned finding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CannedFindingResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is missing the `settings:manage` claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tenants/{tenantId}/canned-findings/{cannedFindingId}:
+    patch:
+      operationId: updateCannedFinding
+      tags: [canned-findings]
+      summary: Update a canned finding (admin only)
+      description: |
+        Partial update. Pass `archivedAt: null` to un-archive an
+        entry; pass a timestamp to archive it. Requires the
+        `settings:manage` permission claim.
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: cannedFindingId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCannedFindingBody"
+      responses:
+        "200":
+          description: Updated canned finding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CannedFindingResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is missing the `settings:manage` claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Canned finding not found for tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteCannedFinding
+      tags: [canned-findings]
+      summary: Soft-delete (archive) a canned finding (admin only)
+      description: |
+        Sets `archivedAt` to the server clock; the row is preserved
+        so any historical references stay resolvable. Idempotent —
+        archiving an already-archived row leaves the original
+        `archivedAt` intact and returns the row. Requires the
+        `settings:manage` permission claim.
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: cannedFindingId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Archived canned finding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CannedFindingResponse"
+        "403":
+          description: Caller is missing the `settings:manage` claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Canned finding not found for tenant.
           content:
             application/json:
               schema:
@@ -9354,3 +9525,148 @@ components:
           finding.overridden: "#/components/schemas/SubmissionFindingLiveEvent"
           presence.joined: "#/components/schemas/SubmissionPresenceLiveEvent"
           presence.left: "#/components/schemas/SubmissionPresenceLiveEvent"
+
+    CannedFindingDiscipline:
+      type: string
+      enum: [building, fire, zoning, civil]
+      description: |
+        PLR-10 discipline scope. A canned finding belongs to exactly
+        one discipline; the FindingsTab picker filters on the
+        reviewer's active discipline.
+
+    CannedFindingCodeCitation:
+      type: object
+      description: |
+        Pre-loaded code-section citation carried on a canned finding.
+        Wire shape mirrors `FindingCodeCitation` so the picker can
+        copy the array verbatim into the manual-add finding payload.
+      properties:
+        kind:
+          type: string
+          enum: [code-section]
+        atomId:
+          type: string
+      required: [kind, atomId]
+
+    CannedFinding:
+      type: object
+      description: |
+        One tenant-scoped canned-finding library entry. Curated by
+        admins, surfaced to reviewers via the Library picker on
+        FindingsTab.
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        discipline:
+          $ref: "#/components/schemas/CannedFindingDiscipline"
+        title:
+          type: string
+        defaultBody:
+          type: string
+        severity:
+          $ref: "#/components/schemas/FindingSeverity"
+        category:
+          $ref: "#/components/schemas/FindingCategory"
+        color:
+          type: string
+          description: Hex color (`#RRGGBB`) used for the picker chip.
+        codeAtomCitations:
+          type: array
+          items:
+            $ref: "#/components/schemas/CannedFindingCodeCitation"
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - tenantId
+        - discipline
+        - title
+        - defaultBody
+        - severity
+        - category
+        - color
+        - codeAtomCitations
+        - archivedAt
+        - createdAt
+        - updatedAt
+
+    CannedFindingResponse:
+      type: object
+      properties:
+        cannedFinding:
+          $ref: "#/components/schemas/CannedFinding"
+      required: [cannedFinding]
+
+    ListCannedFindingsResponse:
+      type: object
+      properties:
+        cannedFindings:
+          type: array
+          items:
+            $ref: "#/components/schemas/CannedFinding"
+      required: [cannedFindings]
+
+    CreateCannedFindingBody:
+      type: object
+      properties:
+        discipline:
+          $ref: "#/components/schemas/CannedFindingDiscipline"
+        title:
+          type: string
+          minLength: 1
+        defaultBody:
+          type: string
+        severity:
+          $ref: "#/components/schemas/FindingSeverity"
+        category:
+          $ref: "#/components/schemas/FindingCategory"
+        color:
+          type: string
+          description: Hex color (`#RRGGBB`).
+          nullable: true
+        codeAtomCitations:
+          type: array
+          items:
+            $ref: "#/components/schemas/CannedFindingCodeCitation"
+          nullable: true
+      required: [discipline, title, defaultBody, severity, category]
+
+    UpdateCannedFindingBody:
+      type: object
+      description: |
+        Partial update. Any subset of fields may be supplied. Pass
+        `archivedAt: null` to un-archive; pass a timestamp to
+        archive (the DELETE route is the canonical archive path).
+      properties:
+        discipline:
+          $ref: "#/components/schemas/CannedFindingDiscipline"
+        title:
+          type: string
+          minLength: 1
+        defaultBody:
+          type: string
+        severity:
+          $ref: "#/components/schemas/FindingSeverity"
+        category:
+          $ref: "#/components/schemas/FindingCategory"
+        color:
+          type: string
+        codeAtomCitations:
+          type: array
+          items:
+            $ref: "#/components/schemas/CannedFindingCodeCitation"
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true

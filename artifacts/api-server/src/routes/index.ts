@@ -29,6 +29,7 @@ import reviewerRequestsRouter from "./reviewerRequests";
 import reviewerQueueRouter from "./submissions";
 import rendersRouter from "./renders";
 import notificationsRouter from "./notifications";
+import cannedFindingsRouter from "./cannedFindings";
 
 const router: IRouter = Router();
 
@@ -124,5 +125,9 @@ router.use(rendersRouter);
 // (`/me/architect-pdf-header`, `/me/profile`) so ordering relative
 // to it is indifferent.
 router.use(notificationsRouter);
+// PLR-10 — tenant-scoped canned-finding library. Mounts under
+// `/tenants/:tenantId/canned-findings*`; distinct path subtree from
+// every other router so ordering is indifferent.
+router.use(cannedFindingsRouter);
 
 export default router;

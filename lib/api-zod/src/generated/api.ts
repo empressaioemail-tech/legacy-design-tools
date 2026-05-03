@@ -6352,3 +6352,319 @@ export const RunRendersSweepResponse = zod
   .describe(
     "Wire envelope for `POST \/admin\/renders\/sweep`. Counts surface\nfor observability (paste into the operator's Cloud Scheduler\nlog + dashboard); the sweep itself is idempotent so multiple\ninvocations on the same minute produce the same end state.\n",
   );
+
+/**
+ * Returns canned-finding library entries for a tenant. Open to
+any audience (read-only) so reviewers can populate the
+library picker; admin gating only applies to writes. By
+default archived entries are excluded; pass
+`includeArchived=true` to include them. Optional `discipline`
+narrows to one discipline.
+
+ * @summary List canned findings for a tenant
+ */
+
+export const ListCannedFindingsParams = zod.object({
+  tenantId: zod.coerce.string().min(1),
+});
+
+export const listCannedFindingsQueryIncludeArchivedDefault = false;
+
+export const ListCannedFindingsQueryParams = zod.object({
+  discipline: zod.enum(["building", "fire", "zoning", "civil"]).optional(),
+  includeArchived: zod.coerce
+    .boolean()
+    .default(listCannedFindingsQueryIncludeArchivedDefault),
+});
+
+export const ListCannedFindingsResponse = zod.object({
+  cannedFindings: zod.array(
+    zod
+      .object({
+        id: zod.string().uuid(),
+        tenantId: zod.string(),
+        discipline: zod
+          .enum(["building", "fire", "zoning", "civil"])
+          .describe(
+            "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+          ),
+        title: zod.string(),
+        defaultBody: zod.string(),
+        severity: zod
+          .enum(["blocker", "concern", "advisory"])
+          .describe(
+            "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+          ),
+        category: zod
+          .enum([
+            "setback",
+            "height",
+            "coverage",
+            "egress",
+            "use",
+            "overlay-conflict",
+            "divergence-related",
+            "other",
+          ])
+          .describe(
+            "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+          ),
+        color: zod
+          .string()
+          .describe("Hex color (`#RRGGBB`) used for the picker chip."),
+        codeAtomCitations: zod.array(
+          zod
+            .object({
+              kind: zod.enum(["code-section"]),
+              atomId: zod.string(),
+            })
+            .describe(
+              "Pre-loaded code-section citation carried on a canned finding.\nWire shape mirrors `FindingCodeCitation` so the picker can\ncopy the array verbatim into the manual-add finding payload.\n",
+            ),
+        ),
+        archivedAt: zod.coerce.date().nullable(),
+        createdAt: zod.coerce.date(),
+        updatedAt: zod.coerce.date(),
+      })
+      .describe(
+        "One tenant-scoped canned-finding library entry. Curated by\nadmins, surfaced to reviewers via the Library picker on\nFindingsTab.\n",
+      ),
+  ),
+});
+
+/**
+ * Admin curation endpoint. Requires the `settings:manage`
+permission claim.
+
+ * @summary Create a canned finding (admin only)
+ */
+
+export const CreateCannedFindingParams = zod.object({
+  tenantId: zod.coerce.string().min(1),
+});
+
+export const CreateCannedFindingBody = zod.object({
+  discipline: zod
+    .enum(["building", "fire", "zoning", "civil"])
+    .describe(
+      "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+    ),
+  title: zod.string().min(1),
+  defaultBody: zod.string(),
+  severity: zod
+    .enum(["blocker", "concern", "advisory"])
+    .describe(
+      "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+    ),
+  category: zod
+    .enum([
+      "setback",
+      "height",
+      "coverage",
+      "egress",
+      "use",
+      "overlay-conflict",
+      "divergence-related",
+      "other",
+    ])
+    .describe(
+      "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+    ),
+  color: zod.string().nullish().describe("Hex color (`#RRGGBB`)."),
+  codeAtomCitations: zod
+    .array(
+      zod
+        .object({
+          kind: zod.enum(["code-section"]),
+          atomId: zod.string(),
+        })
+        .describe(
+          "Pre-loaded code-section citation carried on a canned finding.\nWire shape mirrors `FindingCodeCitation` so the picker can\ncopy the array verbatim into the manual-add finding payload.\n",
+        ),
+    )
+    .nullish(),
+});
+
+/**
+ * Partial update. Pass `archivedAt: null` to un-archive an
+entry; pass a timestamp to archive it. Requires the
+`settings:manage` permission claim.
+
+ * @summary Update a canned finding (admin only)
+ */
+
+export const UpdateCannedFindingParams = zod.object({
+  tenantId: zod.coerce.string().min(1),
+  cannedFindingId: zod.coerce.string().uuid(),
+});
+
+export const UpdateCannedFindingBody = zod
+  .object({
+    discipline: zod
+      .enum(["building", "fire", "zoning", "civil"])
+      .optional()
+      .describe(
+        "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+      ),
+    title: zod.string().min(1).optional(),
+    defaultBody: zod.string().optional(),
+    severity: zod
+      .enum(["blocker", "concern", "advisory"])
+      .optional()
+      .describe(
+        "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+      ),
+    category: zod
+      .enum([
+        "setback",
+        "height",
+        "coverage",
+        "egress",
+        "use",
+        "overlay-conflict",
+        "divergence-related",
+        "other",
+      ])
+      .optional()
+      .describe(
+        "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+      ),
+    color: zod.string().optional(),
+    codeAtomCitations: zod
+      .array(
+        zod
+          .object({
+            kind: zod.enum(["code-section"]),
+            atomId: zod.string(),
+          })
+          .describe(
+            "Pre-loaded code-section citation carried on a canned finding.\nWire shape mirrors `FindingCodeCitation` so the picker can\ncopy the array verbatim into the manual-add finding payload.\n",
+          ),
+      )
+      .optional(),
+    archivedAt: zod.coerce.date().nullish(),
+  })
+  .describe(
+    "Partial update. Any subset of fields may be supplied. Pass\n`archivedAt: null` to un-archive; pass a timestamp to\narchive (the DELETE route is the canonical archive path).\n",
+  );
+
+export const UpdateCannedFindingResponse = zod.object({
+  cannedFinding: zod
+    .object({
+      id: zod.string().uuid(),
+      tenantId: zod.string(),
+      discipline: zod
+        .enum(["building", "fire", "zoning", "civil"])
+        .describe(
+          "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+        ),
+      title: zod.string(),
+      defaultBody: zod.string(),
+      severity: zod
+        .enum(["blocker", "concern", "advisory"])
+        .describe(
+          "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+        ),
+      category: zod
+        .enum([
+          "setback",
+          "height",
+          "coverage",
+          "egress",
+          "use",
+          "overlay-conflict",
+          "divergence-related",
+          "other",
+        ])
+        .describe(
+          "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+        ),
+      color: zod
+        .string()
+        .describe("Hex color (`#RRGGBB`) used for the picker chip."),
+      codeAtomCitations: zod.array(
+        zod
+          .object({
+            kind: zod.enum(["code-section"]),
+            atomId: zod.string(),
+          })
+          .describe(
+            "Pre-loaded code-section citation carried on a canned finding.\nWire shape mirrors `FindingCodeCitation` so the picker can\ncopy the array verbatim into the manual-add finding payload.\n",
+          ),
+      ),
+      archivedAt: zod.coerce.date().nullable(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    })
+    .describe(
+      "One tenant-scoped canned-finding library entry. Curated by\nadmins, surfaced to reviewers via the Library picker on\nFindingsTab.\n",
+    ),
+});
+
+/**
+ * Sets `archivedAt` to the server clock; the row is preserved
+so any historical references stay resolvable. Idempotent —
+archiving an already-archived row leaves the original
+`archivedAt` intact and returns the row. Requires the
+`settings:manage` permission claim.
+
+ * @summary Soft-delete (archive) a canned finding (admin only)
+ */
+
+export const DeleteCannedFindingParams = zod.object({
+  tenantId: zod.coerce.string().min(1),
+  cannedFindingId: zod.coerce.string().uuid(),
+});
+
+export const DeleteCannedFindingResponse = zod.object({
+  cannedFinding: zod
+    .object({
+      id: zod.string().uuid(),
+      tenantId: zod.string(),
+      discipline: zod
+        .enum(["building", "fire", "zoning", "civil"])
+        .describe(
+          "PLR-10 discipline scope. A canned finding belongs to exactly\none discipline; the FindingsTab picker filters on the\nreviewer's active discipline.\n",
+        ),
+      title: zod.string(),
+      defaultBody: zod.string(),
+      severity: zod
+        .enum(["blocker", "concern", "advisory"])
+        .describe(
+          "AIR-1 severity rubric (locked v1, see findingsMock.ts:41):\n  - blocker  — code violation requiring resolution before approval\n  - concern  — ambiguity or risk\n  - advisory — preference \/ coordination note\n",
+        ),
+      category: zod
+        .enum([
+          "setback",
+          "height",
+          "coverage",
+          "egress",
+          "use",
+          "overlay-conflict",
+          "divergence-related",
+          "other",
+        ])
+        .describe(
+          "FIXED v1 category enum (findingsMock.ts:48-56). Adding a\ncategory is an event-modeled schema change, not a silent\nextension — keep this in lock-step with the schema-side enum.\n",
+        ),
+      color: zod
+        .string()
+        .describe("Hex color (`#RRGGBB`) used for the picker chip."),
+      codeAtomCitations: zod.array(
+        zod
+          .object({
+            kind: zod.enum(["code-section"]),
+            atomId: zod.string(),
+          })
+          .describe(
+            "Pre-loaded code-section citation carried on a canned finding.\nWire shape mirrors `FindingCodeCitation` so the picker can\ncopy the array verbatim into the manual-add finding payload.\n",
+          ),
+      ),
+      archivedAt: zod.coerce.date().nullable(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    })
+    .describe(
+      "One tenant-scoped canned-finding library entry. Curated by\nadmins, surfaced to reviewers via the Library picker on\nFindingsTab.\n",
+    ),
+});

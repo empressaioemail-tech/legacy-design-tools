@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   useListSubmissionFindings,
   useListSubmissionFindingsGenerationRuns,
@@ -24,6 +24,12 @@ import { CodeAtomPill, renderFindingBody } from "./CodeAtomPill";
 import { SEVERITY_PALETTE, STATUS_PALETTE } from "./severityStyles";
 import { OverrideFindingModal } from "./OverrideFindingModal";
 import { LowConfidencePill } from "@workspace/portal-ui";
+import {
+  useListCannedFindings,
+  getListCannedFindingsQueryKey,
+  type CannedFinding,
+  type CannedFindingDiscipline,
+} from "@workspace/api-client-react";
 
 export type FindingsTabAudience = "internal" | "user" | "ai";
 
@@ -54,6 +60,25 @@ export interface FindingsTabProps {
   onShowInViewer?: (elementRef: string) => void;
   /** Only "internal" shows reviewer mutation affordances. */
   audience?: FindingsTabAudience;
+  /**
+   * PLR-10 — when supplied, the canned-finding library picker pre-filters
+   * to this discipline (the reviewer can still widen back to "All").
+   * Submission rows do not yet carry a discipline column, so this stays
+   * undefined at the existing call sites; once they do, threading the
+   * value here narrows the picker without further wiring.
+   */
+  cannedLibraryDiscipline?: CannedFindingDiscipline;
+}
+
+interface ManualAddPrefill {
+  title: string;
+  description: string;
+  codeCitation: string;
+  elementRef: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  /** Bumped each time the picker fires so an effect can react. */
+  seq: number;
 }
 
 export function FindingsTab({
@@ -62,7 +87,11 @@ export function FindingsTab({
   onSelectFinding,
   onShowInViewer,
   audience = "user",
+  cannedLibraryDiscipline,
 }: FindingsTabProps) {
+  const [manualPrefill, setManualPrefill] = useState<ManualAddPrefill | null>(
+    null,
+  );
   const isReviewer = audience === "internal";
   const findingsQuery = useListSubmissionFindings(submissionId);
   const findings = useMemo(
@@ -132,7 +161,21 @@ export function FindingsTab({
         />
 
         {isReviewer && (
-          <ManualAddFindingDisclosure submissionId={submissionId} />
+          <>
+            <CannedFindingPicker
+              defaultDiscipline={cannedLibraryDiscipline}
+              onPrefill={(values) =>
+                setManualPrefill({
+                  ...values,
+                  seq: (manualPrefill?.seq ?? 0) + 1,
+                })
+              }
+            />
+            <ManualAddFindingDisclosure
+              submissionId={submissionId}
+              prefill={manualPrefill}
+            />
+          </>
         )}
 
         <div
@@ -699,8 +742,11 @@ function FindingRow({
 
 function ManualAddFindingDisclosure({
   submissionId,
+  prefill,
 }: {
   submissionId: string;
+  /** PLR-10: when bumped, populate the form fields and open the disclosure. */
+  prefill?: ManualAddPrefill | null;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -711,6 +757,20 @@ function ManualAddFindingDisclosure({
   const [category, setCategory] = useState<FindingCategory>("other");
   const [error, setError] = useState<string | null>(null);
   const create = useCreateSubmissionFinding(submissionId);
+  const lastPrefillSeq = useRef<number>(0);
+  useEffect(() => {
+    if (!prefill) return;
+    if (prefill.seq === lastPrefillSeq.current) return;
+    lastPrefillSeq.current = prefill.seq;
+    setTitle(prefill.title);
+    setDescription(prefill.description);
+    setCodeCitation(prefill.codeCitation);
+    setElementRef(prefill.elementRef);
+    setSeverity(prefill.severity);
+    setCategory(prefill.category);
+    setError(null);
+    setOpen(true);
+  }, [prefill]);
 
   const reset = () => {
     setTitle("");
@@ -1063,3 +1123,242 @@ function truncateText(text: string, max: number): string {
 }
 
 export { SEVERITY_ORDER };
+
+
+const CANNED_PICKER_TENANT_ID = "default";
+const CANNED_PICKER_DISCIPLINES: Array<CannedFindingDiscipline | "all"> = [
+  "all",
+  "building",
+  "fire",
+  "zoning",
+  "civil",
+];
+const CANNED_PICKER_DISCIPLINE_LABELS: Record<
+  CannedFindingDiscipline | "all",
+  string
+> = {
+  all: "All",
+  building: "Building",
+  fire: "Fire",
+  zoning: "Zoning",
+  civil: "Civil",
+};
+
+interface CannedPickerPrefillValues {
+  title: string;
+  description: string;
+  codeCitation: string;
+  elementRef: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+}
+
+// PLR-10 — library picker. Selecting an entry hands its values up via
+// `onPrefill` so the manual-add form can populate and let the reviewer
+// edit before saving. Defaults the discipline filter to
+// `defaultDiscipline` when supplied (today: undefined; once submissions
+// carry a discipline, it narrows the picker by default).
+function CannedFindingPicker({
+  defaultDiscipline,
+  onPrefill,
+}: {
+  defaultDiscipline?: CannedFindingDiscipline;
+  onPrefill: (values: CannedPickerPrefillValues) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [discipline, setDiscipline] = useState<
+    CannedFindingDiscipline | "all"
+  >(defaultDiscipline ?? "all");
+  const params = useMemo(
+    () => (discipline === "all" ? undefined : { discipline }),
+    [discipline],
+  );
+  const listQuery = useListCannedFindings(
+    CANNED_PICKER_TENANT_ID,
+    params,
+    {
+      query: {
+        enabled: open,
+        queryKey: getListCannedFindingsQueryKey(
+          CANNED_PICKER_TENANT_ID,
+          params,
+        ),
+      },
+    },
+  );
+  const rows: CannedFinding[] = listQuery.data?.cannedFindings ?? [];
+
+  const apply = (row: CannedFinding) => {
+    // Preserve every citation: first atom id goes into the manual-add
+    // form's single `codeCitation` slot; any extras are appended to the
+    // description so they survive the save without losing fidelity.
+    const cites = row.codeAtomCitations.map((c) => c.atomId);
+    const firstCite = cites[0] ?? "";
+    const extraCites = cites.slice(1);
+    const descParts: string[] = [];
+    if (row.defaultBody.length > 0) descParts.push(row.defaultBody);
+    if (extraCites.length > 0) {
+      descParts.push(
+        `Additional code citations: ${extraCites.map((c) => `[[CODE:${c}]]`).join(", ")}`,
+      );
+    }
+    onPrefill({
+      title: row.title,
+      description: descParts.join("\n\n"),
+      codeCitation: firstCite,
+      elementRef: "",
+      severity: row.severity,
+      category: row.category,
+    });
+  };
+
+  return (
+    <div
+      data-testid="findings-canned-picker"
+      style={{
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        padding: "8px 12px",
+        background: "var(--surface-1, transparent)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        data-testid="findings-canned-picker-toggle"
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          textAlign: "left",
+          color: "var(--text-secondary)",
+          fontSize: 12,
+          alignSelf: "flex-start",
+          fontWeight: 600,
+        }}
+      >
+        {open ? "▾" : "▸"} Add from library
+      </button>
+
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <label
+            className="flex items-center"
+            style={{ gap: 6, fontSize: 11 }}
+          >
+            <span className="sc-label" style={{ fontSize: 10 }}>
+              DISCIPLINE
+            </span>
+            <select
+              data-testid="findings-canned-picker-discipline"
+              value={discipline}
+              onChange={(e) =>
+                setDiscipline(
+                  e.target.value as CannedFindingDiscipline | "all",
+                )
+              }
+              style={{
+                background: "var(--bg-input)",
+                border: "1px solid var(--border-default)",
+                borderRadius: 4,
+                padding: "4px 6px",
+                fontSize: 12,
+                color: "var(--text-primary)",
+              }}
+            >
+              {CANNED_PICKER_DISCIPLINES.map((d) => (
+                <option key={d} value={d}>
+                  {CANNED_PICKER_DISCIPLINE_LABELS[d]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {listQuery.isLoading && (
+            <div
+              data-testid="findings-canned-picker-loading"
+              className="sc-body opacity-60"
+              style={{ fontSize: 12 }}
+            >
+              Loading…
+            </div>
+          )}
+          {listQuery.error && (
+            <div
+              className="sc-body"
+              style={{ fontSize: 12, color: "var(--text-danger)" }}
+            >
+              Failed to load library.
+            </div>
+          )}
+          {!listQuery.isLoading && rows.length === 0 && (
+            <div
+              data-testid="findings-canned-picker-empty"
+              className="sc-body opacity-60"
+              style={{ fontSize: 12 }}
+            >
+              No canned findings for this discipline.
+            </div>
+          )}
+
+          <div
+            data-testid="findings-canned-picker-list"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              maxHeight: 240,
+              overflow: "auto",
+            }}
+          >
+            {rows.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                data-testid={`findings-canned-picker-item-${row.id}`}
+                onClick={() => apply(row)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  textAlign: "left",
+                  padding: "6px 8px",
+                  borderRadius: 4,
+                  border: "1px solid var(--border-subtle)",
+                  background: "transparent",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    width: 6,
+                    alignSelf: "stretch",
+                    background: row.color,
+                    borderRadius: 2,
+                    flexShrink: 0,
+                  }}
+                />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ display: "block" }}>{row.title}</strong>
+                  <span className="sc-meta opacity-70" style={{ fontSize: 10 }}>
+                    {CANNED_PICKER_DISCIPLINE_LABELS[row.discipline]} ·{" "}
+                    {FINDING_SEVERITY_LABELS[row.severity]} ·{" "}
+                    {FINDING_CATEGORY_LABELS[row.category]}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

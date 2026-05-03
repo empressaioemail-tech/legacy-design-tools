@@ -3756,6 +3756,100 @@ export type SubmissionLiveEvent =
   | SubmissionFindingLiveEvent
   | SubmissionPresenceLiveEvent;
 
+/**
+ * PLR-10 discipline scope. A canned finding belongs to exactly
+one discipline; the FindingsTab picker filters on the
+reviewer's active discipline.
+
+ */
+export type CannedFindingDiscipline =
+  (typeof CannedFindingDiscipline)[keyof typeof CannedFindingDiscipline];
+
+export const CannedFindingDiscipline = {
+  building: "building",
+  fire: "fire",
+  zoning: "zoning",
+  civil: "civil",
+} as const;
+
+export type CannedFindingCodeCitationKind =
+  (typeof CannedFindingCodeCitationKind)[keyof typeof CannedFindingCodeCitationKind];
+
+export const CannedFindingCodeCitationKind = {
+  "code-section": "code-section",
+} as const;
+
+/**
+ * Pre-loaded code-section citation carried on a canned finding.
+Wire shape mirrors `FindingCodeCitation` so the picker can
+copy the array verbatim into the manual-add finding payload.
+
+ */
+export interface CannedFindingCodeCitation {
+  kind: CannedFindingCodeCitationKind;
+  atomId: string;
+}
+
+/**
+ * One tenant-scoped canned-finding library entry. Curated by
+admins, surfaced to reviewers via the Library picker on
+FindingsTab.
+
+ */
+export interface CannedFinding {
+  id: string;
+  tenantId: string;
+  discipline: CannedFindingDiscipline;
+  title: string;
+  defaultBody: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  /** Hex color (`#RRGGBB`) used for the picker chip. */
+  color: string;
+  codeAtomCitations: CannedFindingCodeCitation[];
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CannedFindingResponse {
+  cannedFinding: CannedFinding;
+}
+
+export interface ListCannedFindingsResponse {
+  cannedFindings: CannedFinding[];
+}
+
+export interface CreateCannedFindingBody {
+  discipline: CannedFindingDiscipline;
+  /** @minLength 1 */
+  title: string;
+  defaultBody: string;
+  severity: FindingSeverity;
+  category: FindingCategory;
+  /** Hex color (`#RRGGBB`). */
+  color?: string | null;
+  codeAtomCitations?: CannedFindingCodeCitation[] | null;
+}
+
+/**
+ * Partial update. Any subset of fields may be supplied. Pass
+`archivedAt: null` to un-archive; pass a timestamp to
+archive (the DELETE route is the canonical archive path).
+
+ */
+export interface UpdateCannedFindingBody {
+  discipline?: CannedFindingDiscipline;
+  /** @minLength 1 */
+  title?: string;
+  defaultBody?: string;
+  severity?: FindingSeverity;
+  category?: FindingCategory;
+  color?: string;
+  codeAtomCitations?: CannedFindingCodeCitation[];
+  archivedAt?: string | null;
+}
+
 export type UpdateEngagementBody = {
   name?: string;
   address?: string;
@@ -4004,3 +4098,8 @@ export type GetRenderOutputFileDownload =
 export const GetRenderOutputFileDownload = {
   NUMBER_1: "1",
 } as const;
+
+export type ListCannedFindingsParams = {
+  discipline?: CannedFindingDiscipline;
+  includeArchived?: boolean;
+};

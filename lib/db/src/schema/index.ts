@@ -23,3 +23,4 @@ export * from "./reviewerRequests";
 export * from "./viewpointRenders";
 export * from "./renderOutputs";
 export * from "./architectNotificationReads";
+export * from "./cannedFindings";
