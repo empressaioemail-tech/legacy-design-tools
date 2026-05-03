@@ -3667,6 +3667,76 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /findings/runs/export.csv:
+    get:
+      operationId: exportFindingsRunsCsv
+      tags: [findings]
+      summary: "Export the Compliance Engine console feed as CSV"
+      description: |
+        CSV export of the same recent finding-engine runs returned by
+        `GET /findings/runs`, so reviewers can share evidence with
+        external auditors and slice the data in spreadsheets.
+
+        Reuses the same audience gate as the read endpoint —
+        reviewer-only (`internal` audience) — and the same `state` /
+        `since` filters. Adds an optional `q` text filter that
+        case-insensitively matches engagement name, jurisdiction, or
+        error message, so the FE's free-text search can be honoured
+        on the server. The per-submission cap and global ceiling
+        applied to `GET /findings/runs` apply here too — the export
+        mirrors what the console renders.
+
+        Columns (in order): `engagement`, `jurisdiction`, `state`,
+        `started`, `duration_ms`, `invalid_citations`,
+        `discarded_findings`. `started` is the run's
+        `startedAt` ISO-8601 timestamp; `duration_ms` is blank for
+        pending runs.
+
+        The response is served with `Content-Type: text/csv` and
+        `Content-Disposition: attachment` so the browser downloads a
+        file named `compliance-runs-<yyyymmdd>.csv`.
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, succeeded, failed]
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Case-insensitive substring match against engagement name,
+            jurisdiction, and error message. Mirrors the FE search box
+            so the export matches what the reviewer sees.
+      responses:
+        "200":
+          description: CSV file of the matching finding-engine runs.
+          content:
+            text/csv:
+              schema:
+                type: string
+        "400":
+          description: Invalid `state` or `since` query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not reviewer-audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /findings/runs/summary:
     get:
       operationId: getFindingsRunsSummary

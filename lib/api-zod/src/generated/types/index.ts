@@ -94,6 +94,8 @@ export * from "./engagementSummary";
 export * from "./errorResponse";
 export * from "./exportEngagementBriefingPdfDownload";
 export * from "./exportEngagementBriefingPdfParams";
+export * from "./exportFindingsRunsCsvParams";
+export * from "./exportFindingsRunsCsvState";
 export * from "./finding";
 export * from "./findingActor";
 export * from "./findingActorKind";

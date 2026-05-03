@@ -4765,6 +4765,27 @@ export const ListFindingsRunsState = {
   failed: "failed",
 } as const;
 
+export type ExportFindingsRunsCsvParams = {
+  state?: ExportFindingsRunsCsvState;
+  since?: string;
+  /**
+ * Case-insensitive substring match against engagement name,
+jurisdiction, and error message. Mirrors the FE search box
+so the export matches what the reviewer sees.
+
+ */
+  q?: string;
+};
+
+export type ExportFindingsRunsCsvState =
+  (typeof ExportFindingsRunsCsvState)[keyof typeof ExportFindingsRunsCsvState];
+
+export const ExportFindingsRunsCsvState = {
+  pending: "pending",
+  succeeded: "succeeded",
+  failed: "failed",
+} as const;
+
 export type ListReviewerQueueParams = {
   /**
  * Comma-separated list of `SubmissionStatus` values to

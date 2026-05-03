@@ -474,6 +474,19 @@ export default function ComplianceEngine() {
     filteredRuns[0] ??
     null;
 
+  // CSV export — same audience gate as the read endpoint, same `state`
+  // filter, plus the FE search box passed through as `q` so the file
+  // matches what the reviewer sees on screen. Plain `<a href>` so the
+  // browser's native download handles the streamed `text/csv`; the
+  // session cookie travels because we're same-origin behind the proxy.
+  const csvExportHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (stateParam) params.set("state", stateParam);
+    if (trimmedQuery) params.set("q", searchQuery.trim());
+    const qs = params.toString();
+    return `/api/findings/runs/export.csv${qs ? `?${qs}` : ""}`;
+  }, [stateParam, trimmedQuery, searchQuery]);
+
   // Pending-tracking — single-flight UX requires the re-run button to
   // be disabled whenever ANY visible run for that submission is still
   // pending, not just while the local mutation is in flight. Compute
@@ -596,6 +609,22 @@ export default function ComplianceEngine() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <a
+              className="sc-btn-ghost"
+              href={csvExportHref}
+              data-testid="compliance-export-csv"
+              aria-disabled={filteredRuns.length === 0 ? "true" : "false"}
+              onClick={(e) => {
+                if (filteredRuns.length === 0) e.preventDefault();
+              }}
+              style={
+                filteredRuns.length === 0
+                  ? { opacity: 0.5, pointerEvents: "none" }
+                  : undefined
+              }
+            >
+              Download CSV
+            </a>
             <button
               className="sc-btn-ghost"
               onClick={() => {

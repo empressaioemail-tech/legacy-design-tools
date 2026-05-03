@@ -7,8 +7,9 @@
  * `routes/findings.ts`.
  *
  * Surfaces:
- *   - GET /findings/runs           — recent runs across every submission
- *   - GET /findings/runs/summary   — trailing 30-day KPI rollup
+ *   - GET /findings/runs              — recent runs across every submission
+ *   - GET /findings/runs/export.csv   — CSV export of the same feed (Task #501)
+ *   - GET /findings/runs/summary      — trailing 30-day KPI rollup
  */
 
 import {
@@ -84,20 +85,30 @@ function isPublicState(v: unknown): v is PublicState {
   );
 }
 
-// ─── GET /findings/runs ────────────────────────────────────────────
+// ─── shared filter parsing ─────────────────────────────────────────
 
-router.get("/findings/runs", async (req: Request, res: Response) => {
-  if (requireReviewerAudience(req, res)) return;
+interface ParsedFilters {
+  stateFilter: PublicState | null;
+  since: Date;
+}
 
+type FilterParseResult =
+  | { ok: true; filters: ParsedFilters }
+  | { ok: false; status: number; body: { error: string; detail: string } };
+
+function parseRunFilters(req: Request): FilterParseResult {
   const rawState = req.query.state;
   let stateFilter: PublicState | null = null;
   if (rawState != null && rawState !== "") {
     if (!isPublicState(rawState)) {
-      res.status(400).json({
-        error: "invalid_state_filter",
-        detail: `state must be one of: ${PUBLIC_STATES.join(", ")}`,
-      });
-      return;
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: "invalid_state_filter",
+          detail: `state must be one of: ${PUBLIC_STATES.join(", ")}`,
+        },
+      };
     }
     stateFilter = rawState;
   }
@@ -107,93 +118,253 @@ router.get("/findings/runs", async (req: Request, res: Response) => {
   if (typeof rawSince === "string" && rawSince.length > 0) {
     const parsed = new Date(rawSince);
     if (Number.isNaN(parsed.getTime())) {
-      res.status(400).json({
-        error: "invalid_since_filter",
-        detail: "since must be an ISO-8601 timestamp",
-      });
-      return;
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: "invalid_since_filter",
+          detail: "since must be an ISO-8601 timestamp",
+        },
+      };
     }
     since = parsed;
   } else {
     since = new Date(Date.now() - WINDOW_MS);
   }
 
+  return { ok: true, filters: { stateFilter, since } };
+}
+
+interface ConsoleRun {
+  generationId: string;
+  submissionId: string;
+  engagementId: string;
+  engagementName: string;
+  jurisdiction: string | null;
+  state: PublicState;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  error: string | null;
+  invalidCitationCount: number | null;
+  invalidCitations: string[] | null;
+  discardedFindingCount: number | null;
+}
+
+async function loadConsoleRuns(filters: ParsedFilters): Promise<ConsoleRun[]> {
+  const whereClauses = [gte(findingRuns.startedAt, filters.since)];
+  if (filters.stateFilter) {
+    whereClauses.push(eq(findingRuns.state, toDbState(filters.stateFilter)));
+  }
+
+  const consoleLimit = resolveConsoleLimit();
+  const perSubmissionCap = resolveKeepPerSubmission();
+
+  // Pull ordered candidates, then apply the per-submission cap in
+  // memory (Drizzle does not surface a portable window-function
+  // helper). The query is bounded by the `since` window + the
+  // global limit so the unbounded-table pathology doesn't apply.
+  const rows = await db
+    .select({
+      generationId: findingRuns.id,
+      submissionId: findingRuns.submissionId,
+      engagementId: submissions.engagementId,
+      engagementName: engagements.name,
+      jurisdiction: engagements.jurisdiction,
+      state: findingRuns.state,
+      startedAt: findingRuns.startedAt,
+      completedAt: findingRuns.completedAt,
+      error: findingRuns.error,
+      invalidCitationCount: findingRuns.invalidCitationCount,
+      invalidCitations: findingRuns.invalidCitations,
+      discardedFindingCount: findingRuns.discardedFindingCount,
+    })
+    .from(findingRuns)
+    .innerJoin(submissions, eq(findingRuns.submissionId, submissions.id))
+    .innerJoin(engagements, eq(submissions.engagementId, engagements.id))
+    .where(and(...whereClauses))
+    .orderBy(desc(findingRuns.startedAt))
+    .limit(consoleLimit * Math.max(perSubmissionCap, 1));
+
+  const seenPerSubmission = new Map<string, number>();
+  const capped: typeof rows = [];
+  for (const r of rows) {
+    const seen = seenPerSubmission.get(r.submissionId) ?? 0;
+    if (seen >= perSubmissionCap) continue;
+    seenPerSubmission.set(r.submissionId, seen + 1);
+    capped.push(r);
+    if (capped.length >= consoleLimit) break;
+  }
+
+  return capped.map((r) => {
+    const startedAtIso = r.startedAt.toISOString();
+    const completedAtIso = r.completedAt
+      ? r.completedAt.toISOString()
+      : null;
+    const durationMs = r.completedAt
+      ? r.completedAt.getTime() - r.startedAt.getTime()
+      : null;
+    return {
+      generationId: r.generationId,
+      submissionId: r.submissionId,
+      engagementId: r.engagementId,
+      engagementName: r.engagementName,
+      jurisdiction: r.jurisdiction,
+      state: toPublicState(r.state),
+      startedAt: startedAtIso,
+      completedAt: completedAtIso,
+      durationMs,
+      error: r.error,
+      invalidCitationCount: r.invalidCitationCount,
+      invalidCitations: r.invalidCitations,
+      discardedFindingCount: r.discardedFindingCount,
+    };
+  });
+}
+
+// ─── GET /findings/runs ────────────────────────────────────────────
+
+router.get("/findings/runs", async (req: Request, res: Response) => {
+  if (requireReviewerAudience(req, res)) return;
+
+  const parsed = parseRunFilters(req);
+  if (!parsed.ok) {
+    res.status(parsed.status).json(parsed.body);
+    return;
+  }
+
   try {
-    const whereClauses = [gte(findingRuns.startedAt, since)];
-    if (stateFilter) {
-      whereClauses.push(eq(findingRuns.state, toDbState(stateFilter)));
-    }
-
-    const consoleLimit = resolveConsoleLimit();
-    const perSubmissionCap = resolveKeepPerSubmission();
-
-    // Pull ordered candidates, then apply the per-submission cap in
-    // memory (Drizzle does not surface a portable window-function
-    // helper). The query is bounded by the `since` window + the
-    // global limit so the unbounded-table pathology doesn't apply.
-    const rows = await db
-      .select({
-        generationId: findingRuns.id,
-        submissionId: findingRuns.submissionId,
-        engagementId: submissions.engagementId,
-        engagementName: engagements.name,
-        jurisdiction: engagements.jurisdiction,
-        state: findingRuns.state,
-        startedAt: findingRuns.startedAt,
-        completedAt: findingRuns.completedAt,
-        error: findingRuns.error,
-        invalidCitationCount: findingRuns.invalidCitationCount,
-        invalidCitations: findingRuns.invalidCitations,
-        discardedFindingCount: findingRuns.discardedFindingCount,
-      })
-      .from(findingRuns)
-      .innerJoin(submissions, eq(findingRuns.submissionId, submissions.id))
-      .innerJoin(engagements, eq(submissions.engagementId, engagements.id))
-      .where(and(...whereClauses))
-      .orderBy(desc(findingRuns.startedAt))
-      .limit(consoleLimit * Math.max(perSubmissionCap, 1));
-
-    const seenPerSubmission = new Map<string, number>();
-    const capped: typeof rows = [];
-    for (const r of rows) {
-      const seen = seenPerSubmission.get(r.submissionId) ?? 0;
-      if (seen >= perSubmissionCap) continue;
-      seenPerSubmission.set(r.submissionId, seen + 1);
-      capped.push(r);
-      if (capped.length >= consoleLimit) break;
-    }
-
-    const runs = capped.map((r) => {
-      const startedAtIso = r.startedAt.toISOString();
-      const completedAtIso = r.completedAt
-        ? r.completedAt.toISOString()
-        : null;
-      const durationMs = r.completedAt
-        ? r.completedAt.getTime() - r.startedAt.getTime()
-        : null;
-      return {
-        generationId: r.generationId,
-        submissionId: r.submissionId,
-        engagementId: r.engagementId,
-        engagementName: r.engagementName,
-        jurisdiction: r.jurisdiction,
-        state: toPublicState(r.state),
-        startedAt: startedAtIso,
-        completedAt: completedAtIso,
-        durationMs,
-        error: r.error,
-        invalidCitationCount: r.invalidCitationCount,
-        invalidCitations: r.invalidCitations,
-        discardedFindingCount: r.discardedFindingCount,
-      };
-    });
-
+    const runs = await loadConsoleRuns(parsed.filters);
     res.json({ runs });
   } catch (err) {
     logger.error({ err }, "list cross-submission finding runs failed");
     res.status(500).json({ error: "Failed to list finding runs" });
   }
 });
+
+// ─── GET /findings/runs/export.csv ─────────────────────────────────
+
+/** Spreadsheet formula-injection guard. Excel/Sheets interpret cells
+ *  whose first character is `=`, `+`, `-`, `@`, TAB, CR, or LF as a
+ *  formula even inside quoted CSV fields. Because this export is meant
+ *  to be opened by external auditors, neutralize any user-controlled
+ *  text that opens with one of those characters by prefixing a single
+ *  quote — the canonical Excel "treat as text" sigil. We trim leading
+ *  whitespace before the check so payloads like "  =cmd" are caught.
+ *  See OWASP "CSV Injection". */
+function neutralizeFormula(s: string): string {
+  if (s.length === 0) return s;
+  const firstNonWs = s.match(/^\s*(.)/);
+  const lead = firstNonWs ? firstNonWs[1] : s[0];
+  if (lead === "=" || lead === "+" || lead === "-" || lead === "@") {
+    return `'${s}`;
+  }
+  // Leading TAB/CR/LF can also kick a cell into formula mode in some
+  // spreadsheet apps; same defense.
+  const rawLead = s[0];
+  if (rawLead === "\t" || rawLead === "\r" || rawLead === "\n") {
+    return `'${s}`;
+  }
+  return s;
+}
+
+/** RFC 4180 field escaping — quote whenever the value contains a
+ *  delimiter, quote, or newline; escape embedded quotes by doubling.
+ *  Strings are also passed through `neutralizeFormula` so user-supplied
+ *  text columns can't kick a spreadsheet into formula evaluation. */
+function csvField(value: string | number | null | undefined): string {
+  if (value == null) return "";
+  let s = String(value);
+  if (s === "") return "";
+  if (typeof value === "string") {
+    s = neutralizeFormula(s);
+  }
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function csvRow(values: ReadonlyArray<string | number | null | undefined>): string {
+  return values.map(csvField).join(",");
+}
+
+function todayStamp(): string {
+  const d = new Date();
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}`;
+}
+
+router.get(
+  "/findings/runs/export.csv",
+  async (req: Request, res: Response) => {
+    if (requireReviewerAudience(req, res)) return;
+
+    const parsed = parseRunFilters(req);
+    if (!parsed.ok) {
+      res.status(parsed.status).json(parsed.body);
+      return;
+    }
+
+    const rawQ = req.query.q;
+    const q =
+      typeof rawQ === "string" && rawQ.trim().length > 0
+        ? rawQ.trim().toLowerCase()
+        : null;
+
+    try {
+      const runs = await loadConsoleRuns(parsed.filters);
+      const filtered = q
+        ? runs.filter((r) => {
+            const haystack = [
+              r.engagementName,
+              r.jurisdiction ?? "",
+              r.error ?? "",
+            ]
+              .join(" ")
+              .toLowerCase();
+            return haystack.includes(q);
+          })
+        : runs;
+
+      const header = csvRow([
+        "engagement",
+        "jurisdiction",
+        "state",
+        "started",
+        "duration_ms",
+        "invalid_citations",
+        "discarded_findings",
+      ]);
+      const body = filtered.map((r) =>
+        csvRow([
+          r.engagementName,
+          r.jurisdiction,
+          r.state,
+          r.startedAt,
+          r.durationMs,
+          r.invalidCitationCount ?? 0,
+          r.discardedFindingCount ?? 0,
+        ]),
+      );
+      // CRLF per RFC 4180; trailing newline so POSIX tools count the
+      // last row.
+      const csv = [header, ...body].join("\r\n") + "\r\n";
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="compliance-runs-${todayStamp()}.csv"`,
+      );
+      res.send(csv);
+    } catch (err) {
+      logger.error({ err }, "export cross-submission finding runs csv failed");
+      res.status(500).json({ error: "Failed to export finding runs" });
+    }
+  },
+);
 
 // ─── GET /findings/runs/summary ────────────────────────────────────
 

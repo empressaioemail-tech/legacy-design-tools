@@ -55,6 +55,7 @@ import type {
   EngagementSummary,
   ErrorResponse,
   ExportEngagementBriefingPdfParams,
+  ExportFindingsRunsCsvParams,
   FindingResponse,
   FindingsRunsListResponse,
   FindingsRunsSummaryResponse,
@@ -8124,6 +8125,132 @@ export function useListFindingsRuns<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getListFindingsRunsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * CSV export of the same recent finding-engine runs returned by
+`GET /findings/runs`, so reviewers can share evidence with
+external auditors and slice the data in spreadsheets.
+
+Reuses the same audience gate as the read endpoint —
+reviewer-only (`internal` audience) — and the same `state` /
+`since` filters. Adds an optional `q` text filter that
+case-insensitively matches engagement name, jurisdiction, or
+error message, so the FE's free-text search can be honoured
+on the server. The per-submission cap and global ceiling
+applied to `GET /findings/runs` apply here too — the export
+mirrors what the console renders.
+
+Columns (in order): `engagement`, `jurisdiction`, `state`,
+`started`, `duration_ms`, `invalid_citations`,
+`discarded_findings`. `started` is the run's
+`startedAt` ISO-8601 timestamp; `duration_ms` is blank for
+pending runs.
+
+The response is served with `Content-Type: text/csv` and
+`Content-Disposition: attachment` so the browser downloads a
+file named `compliance-runs-<yyyymmdd>.csv`.
+
+ * @summary Export the Compliance Engine console feed as CSV
+ */
+export const getExportFindingsRunsCsvUrl = (
+  params?: ExportFindingsRunsCsvParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/findings/runs/export.csv?${stringifiedParams}`
+    : `/api/findings/runs/export.csv`;
+};
+
+export const exportFindingsRunsCsv = async (
+  params?: ExportFindingsRunsCsvParams,
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getExportFindingsRunsCsvUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportFindingsRunsCsvQueryKey = (
+  params?: ExportFindingsRunsCsvParams,
+) => {
+  return [
+    `/api/findings/runs/export.csv`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getExportFindingsRunsCsvQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportFindingsRunsCsv>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ExportFindingsRunsCsvParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportFindingsRunsCsv>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getExportFindingsRunsCsvQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportFindingsRunsCsv>>
+  > = ({ signal }) =>
+    exportFindingsRunsCsv(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportFindingsRunsCsv>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportFindingsRunsCsvQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportFindingsRunsCsv>>
+>;
+export type ExportFindingsRunsCsvQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Export the Compliance Engine console feed as CSV
+ */
+
+export function useExportFindingsRunsCsv<
+  TData = Awaited<ReturnType<typeof exportFindingsRunsCsv>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params?: ExportFindingsRunsCsvParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportFindingsRunsCsv>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportFindingsRunsCsvQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

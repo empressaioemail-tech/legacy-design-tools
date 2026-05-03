@@ -4995,6 +4995,43 @@ export const ListFindingsRunsResponse = zod
   );
 
 /**
+ * CSV export of the same recent finding-engine runs returned by
+`GET /findings/runs`, so reviewers can share evidence with
+external auditors and slice the data in spreadsheets.
+
+Reuses the same audience gate as the read endpoint —
+reviewer-only (`internal` audience) — and the same `state` /
+`since` filters. Adds an optional `q` text filter that
+case-insensitively matches engagement name, jurisdiction, or
+error message, so the FE's free-text search can be honoured
+on the server. The per-submission cap and global ceiling
+applied to `GET /findings/runs` apply here too — the export
+mirrors what the console renders.
+
+Columns (in order): `engagement`, `jurisdiction`, `state`,
+`started`, `duration_ms`, `invalid_citations`,
+`discarded_findings`. `started` is the run's
+`startedAt` ISO-8601 timestamp; `duration_ms` is blank for
+pending runs.
+
+The response is served with `Content-Type: text/csv` and
+`Content-Disposition: attachment` so the browser downloads a
+file named `compliance-runs-<yyyymmdd>.csv`.
+
+ * @summary Export the Compliance Engine console feed as CSV
+ */
+export const ExportFindingsRunsCsvQueryParams = zod.object({
+  state: zod.enum(["pending", "succeeded", "failed"]).optional(),
+  since: zod.date().optional(),
+  q: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Case-insensitive substring match against engagement name,\njurisdiction, and error message. Mirrors the FE search box\nso the export matches what the reviewer sees.\n",
+    ),
+});
+
+/**
  * Returns the trailing 30-day rollup the Compliance Engine
 console renders in its KPI tiles: total runs, success rate,
 average duration, total invalid citations, and total discarded

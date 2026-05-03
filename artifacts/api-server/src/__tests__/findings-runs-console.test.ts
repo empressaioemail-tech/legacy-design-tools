@@ -228,6 +228,162 @@ describe("GET /api/findings/runs", () => {
   });
 });
 
+describe("GET /api/findings/runs/export.csv", () => {
+  it("403s on non-internal audience", async () => {
+    const res = await request(getApp()).get(
+      "/api/findings/runs/export.csv",
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("findings_require_internal_audience");
+  });
+
+  it("emits CSV with header + a row per run, attachment disposition", async () => {
+    const a = await seedEngagementSubmission(
+      "Alpha, Inc.",
+      "Bastrop, TX",
+    );
+    const b = await seedEngagementSubmission(
+      'Bravo "Quoted" Site',
+      "Smithville, TX",
+    );
+    const now = Date.now();
+    await seedRun({
+      submissionId: a.submission.id,
+      state: "completed",
+      startedAtIso: new Date(now - 30_000).toISOString(),
+      completedAtIso: new Date(now - 25_000).toISOString(),
+      invalidCitationCount: 2,
+      discardedFindingCount: 1,
+    });
+    await seedRun({
+      submissionId: b.submission.id,
+      state: "pending",
+      startedAtIso: new Date(now - 10_000).toISOString(),
+    });
+
+    const res = await request(getApp())
+      .get("/api/findings/runs/export.csv")
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/^text\/csv/);
+    expect(res.headers["content-disposition"]).toMatch(
+      /^attachment; filename="compliance-runs-\d{8}\.csv"$/,
+    );
+    const lines = (res.text as string).trim().split("\r\n");
+    expect(lines[0]).toBe(
+      "engagement,jurisdiction,state,started,duration_ms,invalid_citations,discarded_findings",
+    );
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(
+      /^"Bravo ""Quoted"" Site","Smithville, TX",pending,/,
+    );
+    expect(lines[1].endsWith(",,0,0")).toBe(true);
+    expect(lines[2]).toMatch(/^"Alpha, Inc\.","Bastrop, TX",succeeded,/);
+    expect(lines[2].endsWith(",5000,2,1")).toBe(true);
+  });
+
+  it("honours the state filter", async () => {
+    const a = await seedEngagementSubmission("Alpha", "Bastrop, TX");
+    const now = Date.now();
+    await seedRun({
+      submissionId: a.submission.id,
+      state: "completed",
+      startedAtIso: new Date(now - 20_000).toISOString(),
+      completedAtIso: new Date(now - 15_000).toISOString(),
+    });
+    await seedRun({
+      submissionId: a.submission.id,
+      state: "failed",
+      startedAtIso: new Date(now - 10_000).toISOString(),
+      completedAtIso: new Date(now - 5_000).toISOString(),
+      error: "x",
+    });
+
+    const res = await request(getApp())
+      .get("/api/findings/runs/export.csv?state=failed")
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(200);
+    const lines = (res.text as string).trim().split("\r\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain(",failed,");
+  });
+
+  it("honours the q text filter", async () => {
+    const a = await seedEngagementSubmission("Alpha", "Bastrop, TX");
+    const b = await seedEngagementSubmission("Bravo", "Smithville, TX");
+    const now = Date.now();
+    await seedRun({
+      submissionId: a.submission.id,
+      state: "completed",
+      startedAtIso: new Date(now - 20_000).toISOString(),
+      completedAtIso: new Date(now - 15_000).toISOString(),
+    });
+    await seedRun({
+      submissionId: b.submission.id,
+      state: "completed",
+      startedAtIso: new Date(now - 10_000).toISOString(),
+      completedAtIso: new Date(now - 5_000).toISOString(),
+    });
+
+    const res = await request(getApp())
+      .get("/api/findings/runs/export.csv?q=smithville")
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(200);
+    const lines = (res.text as string).trim().split("\r\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("Bravo");
+    expect(lines[1]).toContain("Smithville");
+  });
+
+  it("400s on an unknown state filter", async () => {
+    const res = await request(getApp())
+      .get("/api/findings/runs/export.csv?state=completed")
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_state_filter");
+  });
+
+  it("neutralizes spreadsheet formula payloads in user-controlled fields", async () => {
+    // Engagement / jurisdiction values that would otherwise be
+    // interpreted as Excel/Sheets formulas. Each must be prefixed with
+    // a literal apostrophe in the emitted cell so spreadsheet apps
+    // treat the cell as text.
+    const cases: Array<{ name: string; juris: string }> = [
+      { name: "=HYPERLINK(\"http://x\")", juris: "Bastrop, TX" },
+      { name: "+cmd|calc", juris: "Smithville, TX" },
+      { name: "@SUM(A1)", juris: "Bastrop, TX" },
+      { name: "-1+1", juris: "Bastrop, TX" },
+      { name: "  =leading", juris: "Bastrop, TX" },
+    ];
+    const now = Date.now();
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i];
+      const seeded = await seedEngagementSubmission(c.name, c.juris);
+      await seedRun({
+        submissionId: seeded.submission.id,
+        state: "completed",
+        startedAtIso: new Date(now - (cases.length - i) * 10_000).toISOString(),
+        completedAtIso: new Date(
+          now - (cases.length - i) * 10_000 + 1_000,
+        ).toISOString(),
+      });
+    }
+
+    const res = await request(getApp())
+      .get("/api/findings/runs/export.csv")
+      .set(REVIEWER_HEADERS);
+    expect(res.status).toBe(200);
+    const body = res.text as string;
+    // Every formula-leading engagement name must be neutralized with
+    // a leading apostrophe in the emitted cell.
+    expect(body).toContain("\"'=HYPERLINK(\"\"http://x\"\")\"");
+    expect(body).toContain("'+cmd|calc");
+    expect(body).toContain("'@SUM(A1)");
+    expect(body).toContain("'-1+1");
+    expect(body).toContain("'  =leading");
+  });
+});
+
 describe("GET /api/findings/runs/summary", () => {
   it("403s on non-internal audience", async () => {
     const res = await request(getApp()).get("/api/findings/runs/summary");
