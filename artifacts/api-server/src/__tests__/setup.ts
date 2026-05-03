@@ -123,6 +123,16 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // and so the notifications suite can assert unread-count
   // transitions from a known empty starting state.
   "architect_notification_reads",
+  // Task #485 — QA autopilot orchestration tables. `autopilot_findings`
+  // and `autopilot_fix_actions` cascade off `autopilot_runs`, so
+  // truncating the parent transitively clears the children — but
+  // listed explicitly per the "if a route writes to it, it's in this
+  // list" invariant so the orchestrator integration suite (and any
+  // future suite that queries the latest-run endpoints) starts from
+  // a known-empty state between cases.
+  "autopilot_runs",
+  "autopilot_findings",
+  "autopilot_fix_actions",
 ];
 
 /**

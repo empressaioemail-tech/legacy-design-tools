@@ -46,6 +46,66 @@ CREATE TABLE @@SCHEMA@@.atom_events (
 );
 
 
+-- Name: autopilot_findings; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.autopilot_findings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    autopilot_run_id uuid NOT NULL,
+    suite_id text NOT NULL,
+    qa_run_id uuid,
+    test_name text,
+    file_path text,
+    line integer,
+    error_excerpt text DEFAULT ''::text NOT NULL,
+    category text NOT NULL,
+    severity text NOT NULL,
+    auto_fix_status text NOT NULL,
+    plain_summary text DEFAULT ''::text NOT NULL,
+    suggested_diff text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT autopilot_findings_autofix_check CHECK ((auto_fix_status = ANY (ARRAY['auto-fixed'::text, 'needs-review'::text, 'skipped'::text]))),
+    CONSTRAINT autopilot_findings_category_check CHECK ((category = ANY (ARRAY['flaky'::text, 'snapshot'::text, 'codegen-stale'::text, 'lint'::text, 'fixture'::text, 'app-code'::text, 'unknown'::text]))),
+    CONSTRAINT autopilot_findings_severity_check CHECK ((severity = ANY (ARRAY['info'::text, 'warning'::text, 'error'::text])))
+);
+
+
+-- Name: autopilot_fix_actions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.autopilot_fix_actions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    autopilot_run_id uuid NOT NULL,
+    finding_id uuid,
+    fixer_id text NOT NULL,
+    suite_id text NOT NULL,
+    command text NOT NULL,
+    files_changed text DEFAULT '[]'::text NOT NULL,
+    success boolean DEFAULT false NOT NULL,
+    log text DEFAULT ''::text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone
+);
+
+
+-- Name: autopilot_runs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.autopilot_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    status text NOT NULL,
+    trigger text NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone,
+    total_suites integer DEFAULT 0 NOT NULL,
+    passing integer DEFAULT 0 NOT NULL,
+    failing integer DEFAULT 0 NOT NULL,
+    flaky integer DEFAULT 0 NOT NULL,
+    auto_fixes_applied integer DEFAULT 0 NOT NULL,
+    needs_review integer DEFAULT 0 NOT NULL,
+    notes text DEFAULT ''::text NOT NULL,
+    CONSTRAINT autopilot_runs_status_check CHECK ((status = ANY (ARRAY['running'::text, 'completed'::text, 'errored'::text]))),
+    CONSTRAINT autopilot_runs_trigger_check CHECK ((trigger = ANY (ARRAY['manual'::text, 'auto-on-open'::text])))
+);
+
+
 -- Name: bim_models; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.bim_models (
@@ -574,6 +634,24 @@ ALTER TABLE ONLY @@SCHEMA@@.atom_events
     ADD CONSTRAINT atom_events_pkey PRIMARY KEY (id);
 
 
+-- Name: autopilot_findings autopilot_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.autopilot_findings
+    ADD CONSTRAINT autopilot_findings_pkey PRIMARY KEY (id);
+
+
+-- Name: autopilot_fix_actions autopilot_fix_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.autopilot_fix_actions
+    ADD CONSTRAINT autopilot_fix_actions_pkey PRIMARY KEY (id);
+
+
+-- Name: autopilot_runs autopilot_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.autopilot_runs
+    ADD CONSTRAINT autopilot_runs_pkey PRIMARY KEY (id);
+
+
 -- Name: bim_models bim_models_engagement_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.bim_models
@@ -784,6 +862,26 @@ CREATE UNIQUE INDEX atom_events_chain_hash_uniq ON @@SCHEMA@@.atom_events USING 
 -- Name: atom_events_timeline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX atom_events_timeline_idx ON @@SCHEMA@@.atom_events USING btree (entity_type, entity_id, occurred_at);
+
+
+-- Name: autopilot_findings_run_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX autopilot_findings_run_idx ON @@SCHEMA@@.autopilot_findings USING btree (autopilot_run_id);
+
+
+-- Name: autopilot_findings_suite_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX autopilot_findings_suite_idx ON @@SCHEMA@@.autopilot_findings USING btree (suite_id);
+
+
+-- Name: autopilot_fix_actions_run_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX autopilot_fix_actions_run_idx ON @@SCHEMA@@.autopilot_fix_actions USING btree (autopilot_run_id);
+
+
+-- Name: autopilot_runs_started_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX autopilot_runs_started_idx ON @@SCHEMA@@.autopilot_runs USING btree (started_at);
 
 
 -- Name: bim_models_active_briefing_idx; Type: INDEX; Schema: public; Owner: -
@@ -1014,6 +1112,24 @@ CREATE INDEX viewpoint_renders_engagement_created_idx ON @@SCHEMA@@.viewpoint_re
 -- Name: viewpoint_renders_status_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX viewpoint_renders_status_idx ON @@SCHEMA@@.viewpoint_renders USING btree (status);
+
+
+-- Name: autopilot_findings autopilot_findings_autopilot_run_id_autopilot_runs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.autopilot_findings
+    ADD CONSTRAINT autopilot_findings_autopilot_run_id_autopilot_runs_id_fk FOREIGN KEY (autopilot_run_id) REFERENCES @@SCHEMA@@.autopilot_runs(id) ON DELETE CASCADE;
+
+
+-- Name: autopilot_fix_actions autopilot_fix_actions_autopilot_run_id_autopilot_runs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.autopilot_fix_actions
+    ADD CONSTRAINT autopilot_fix_actions_autopilot_run_id_autopilot_runs_id_fk FOREIGN KEY (autopilot_run_id) REFERENCES @@SCHEMA@@.autopilot_runs(id) ON DELETE CASCADE;
+
+
+-- Name: autopilot_fix_actions autopilot_fix_actions_finding_id_autopilot_findings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.autopilot_fix_actions
+    ADD CONSTRAINT autopilot_fix_actions_finding_id_autopilot_findings_id_fk FOREIGN KEY (finding_id) REFERENCES @@SCHEMA@@.autopilot_findings(id) ON DELETE SET NULL;
 
 
 -- Name: bim_models bim_models_active_briefing_id_parcel_briefings_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
