@@ -48,6 +48,14 @@ export const FEDERAL_ADAPTERS: ReadonlyArray<Adapter> = [
   fccBroadbandAdapter,
 ];
 
+// TODO: state-tier gates on localKey not stateKey — see PL-04
+// side-finding for follow-up cleanup. Each state adapter's
+// `appliesTo` checks `ctx.jurisdiction.localKey === "<county-slug>"`
+// rather than the parent `stateKey`, so an engagement that resolves
+// only to a state slug (no localKey match) gets zero state-tier
+// adapters even though the gate name implies state-wide coverage.
+// Decoupling this is a separate sprint — listed here so the next
+// engineer touching state tiers sees the inconsistency.
 export const STATE_ADAPTERS: ReadonlyArray<Adapter> = [
   utahDemAdapter,
   utahParcelsAdapter,

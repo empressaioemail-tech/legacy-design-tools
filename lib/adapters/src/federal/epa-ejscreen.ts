@@ -50,7 +50,12 @@ const EPA_EJSCREEN_USER_AGENT =
 export const EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS = 18;
 
 function federalApplies(ctx: AdapterContext): boolean {
-  return ctx.jurisdiction.stateKey !== null;
+  // PL-04: federal adapters apply nationwide whenever the engagement is
+  // geocoded. See fema-nfhl.ts for the decoupling rationale.
+  return (
+    Number.isFinite(ctx.parcel.latitude) &&
+    Number.isFinite(ctx.parcel.longitude)
+  );
 }
 
 function nowIso(): string {

@@ -79,8 +79,28 @@ describe("filterApplicableAdapters", () => {
     );
   });
 
-  it("returns [] for an out-of-pilot context (CO/CA — no resolved stateKey)", () => {
-    expect(filterApplicableAdapters(ctxFor(null, null))).toEqual([]);
+  it("returns the federal four for an out-of-pilot but geocoded context (PL-04)", () => {
+    // Boulder CO style: stateKey null, but the parcel is geocoded
+    // (lat/lng baked into ctxFor's defaults). Federal adapters now
+    // apply to any finite-coords engagement.
+    const applicable = filterApplicableAdapters(ctxFor(null, null));
+    const keys = applicable.map((a) => a.adapterKey).sort();
+    expect(keys).toEqual(
+      [
+        "fcc:broadband",
+        "fema:nfhl-flood-zone",
+        "epa:ejscreen",
+        "usgs:ned-elevation",
+      ].sort(),
+    );
+  });
+
+  it("returns [] when the parcel has no geocode (NaN coordinates)", () => {
+    const ctx: AdapterContext = {
+      parcel: { latitude: NaN, longitude: NaN },
+      jurisdiction: { stateKey: null, localKey: null },
+    };
+    expect(filterApplicableAdapters(ctx)).toEqual([]);
   });
 
   it("swallows an `appliesTo` throw and treats it as false", () => {
@@ -127,28 +147,47 @@ describe("filterApplicableAdapters", () => {
 });
 
 describe("noApplicableAdaptersMessage", () => {
-  it("produces the 'could not resolve' copy when stateKey is null", () => {
+  it("asks for an address when the engagement has no geocode", () => {
     expect(
-      noApplicableAdaptersMessage({ stateKey: null, localKey: null }),
+      noApplicableAdaptersMessage({
+        jurisdiction: { stateKey: null, localKey: null },
+        hasGeocode: false,
+      }),
+    ).toBe("Add an address to enable site context layers.");
+  });
+
+  it("falls back to a neutral message when geocoded but stateKey is unresolved (defensive)", () => {
+    // PL-04: federal adapters apply to any geocoded engagement, so
+    // reaching this branch means a non-US lat/lng or a future federal
+    // adapter that gates more strictly. The message should not imply
+    // the architect can fix it by editing the city/state.
+    expect(
+      noApplicableAdaptersMessage({
+        jurisdiction: { stateKey: null, localKey: null },
+        hasGeocode: true,
+      }),
+    ).toBe("No applicable adapters for this engagement's site context.");
+  });
+
+  it("names the resolved state when geocoded + stateKey resolved + localKey null", () => {
+    expect(
+      noApplicableAdaptersMessage({
+        jurisdiction: { stateKey: "utah", localKey: null },
+        hasGeocode: true,
+      }),
     ).toBe(
-      "Could not resolve a pilot jurisdiction from this engagement's site context (city/state/address). Add a city + state and try again.",
+      "Federal layers loaded. No local adapter for Utah yet — upload a QGIS overlay if you have one.",
     );
   });
 
-  it("substitutes stateKey alone when only the state resolved", () => {
-    expect(
-      noApplicableAdaptersMessage({ stateKey: "utah", localKey: null }),
-    ).toBe('No adapters configured for jurisdiction "utah".');
-  });
-
-  it("substitutes both stateKey and localKey when the resolver landed on a local pilot", () => {
+  it("names Texas when the resolver lands on the Texas state slug", () => {
     expect(
       noApplicableAdaptersMessage({
-        stateKey: "texas",
-        localKey: "bastrop-tx",
+        jurisdiction: { stateKey: "texas", localKey: null },
+        hasGeocode: true,
       }),
     ).toBe(
-      'No adapters configured for jurisdiction "texas" / bastrop-tx.',
+      "Federal layers loaded. No local adapter for Texas yet — upload a QGIS overlay if you have one.",
     );
   });
 });

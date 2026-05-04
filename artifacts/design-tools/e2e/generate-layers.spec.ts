@@ -486,7 +486,7 @@ test("Generate Layers: 422 no_applicable_adapters renders the empty-pilot banner
   const banner = page.getByTestId("generate-layers-no-adapters-banner");
   await expect(banner).toBeVisible();
   await expect(banner).toContainText(
-    "No adapters configured for this jurisdiction yet",
+    "No adapters configured for this engagement yet",
   );
   await expect(
     page.getByTestId("generate-layers-no-adapters-message"),
@@ -503,7 +503,7 @@ test("Generate Layers: 422 no_applicable_adapters renders the empty-pilot banner
     "generate-layers-no-adapters-supported",
   );
   await expect(supported).toBeVisible();
-  await expect(supported).toContainText("Currently supported:");
+  await expect(supported).toContainText("Currently supported state/local pilots:");
   for (const j of PILOT_JURISDICTIONS) {
     await expect(supported).toContainText(j.label);
   }
@@ -533,33 +533,27 @@ test("Generate Layers: 422 no_applicable_adapters renders the empty-pilot banner
 });
 
 /**
- * Pre-flight pilot-eligibility e2e (Task #189).
+ * Pre-flight eligibility e2e (PL-04).
  *
- * Companion case for the proactive empty-pilot banner. The earlier
- * spec above stubs the POST so the 422 envelope still fires; this
- * one seeds an out-of-pilot engagement (Boulder CO) and asserts that
+ * Federal adapters now apply to any geocoded engagement, so the
+ * Boulder CO seed below is no longer "dead-end out of pilot" — it's
+ * "federal-only partial coverage." The contract this spec pins:
  *
- *   - the empty-pilot banner is up before any click — the
- *     `appliesTo` gate runs client-side from the cached engagement
- *     record and shares its source-of-truth with `generateLayers.ts`
- *     through `@workspace/adapters/eligibility`, so the FE pre-flight
- *     produces the same verdict the server's 422 would have without
- *     the wasted round-trip;
- *   - the Generate Layers button is `disabled` and carries the same
- *     human-readable message as a `title` tooltip;
- *   - clicking the button does NOT fire a POST (a `page.route`
- *     handler is registered to count any request that slips through
- *     and assert it stays at zero);
- *   - clicking the banner's CTA opens the existing
- *     `BriefingSourceUploadModal`, proving the dead-end is
- *     immediately recoverable.
+ *   - the federal-only banner is up before any click, surfacing the
+ *     supported state/local pilots so the architect can correlate;
+ *   - the Generate Layers button is ENABLED — clicking it fires the
+ *     federal four through the runner (we still stub the POST to
+ *     keep the test deterministic; a `postCount` assertion verifies
+ *     the click actually fires a round-trip);
+ *   - the banner's upload CTA still opens the
+ *     `BriefingSourceUploadModal`, so an architect that wants
+ *     state/local coverage can seed it manually.
  *
- * A dedicated Boulder seed mirrors the Moab one above — the FE wiring
- * reads the city/state columns to make its pre-flight decision, so a
- * Boulder seed is the only honest way to exercise the "out of pilot"
- * branch in a real round-trip.
+ * A dedicated Boulder seed exercises the "geocoded but no state/local
+ * pilot" path — the FE resolver consults the city/state columns and
+ * decides "federal-only" without the address scan ever firing.
  */
-test.describe("Generate Layers pre-flight (Task #189)", () => {
+test.describe("Generate Layers pre-flight (PL-04)", () => {
   let outOfPilotEngagementId = "";
 
   test.beforeAll(async () => {
@@ -568,11 +562,8 @@ test.describe("Generate Layers pre-flight (Task #189)", () => {
       .values({
         name: `e2e Pre-flight Boulder ${RUN_TAG}`,
         nameLower: `e2e pre-flight boulder ${RUN_TAG}`.toLowerCase(),
-        // Boulder CO — outside every DA-PI-4 pilot jurisdiction.
-        // The FE resolver consults `jurisdictionCity` /
-        // `jurisdictionState` first so these columns alone are
-        // enough for the pre-flight gate to pick "out of pilot"
-        // even before the address scan kicks in.
+        // Boulder CO — outside every DA-PI-4 state/local pilot but
+        // inside the US, so federal adapters fire under PL-04.
         jurisdiction: "Boulder, CO",
         jurisdictionCity: "Boulder",
         jurisdictionState: "CO",
@@ -595,14 +586,16 @@ test.describe("Generate Layers pre-flight (Task #189)", () => {
     }
   });
 
-  test("disables Generate Layers + renders the proactive banner with a working upload CTA for an out-of-pilot engagement", async ({
+  test("renders the federal-only banner + leaves Generate Layers enabled for a geocoded out-of-pilot engagement", async ({
     page,
   }) => {
     // Stub both endpoints so the test is independent of any real
     // server response. The briefing GET keeps the engagement empty
-    // (the proactive banner does not depend on briefing state). The
-    // generate-layers POST counts requests so we can prove the
-    // disabled button never fires a round-trip.
+    // (the proactive banner does not depend on briefing state).
+    // The generate-layers POST counts requests so the
+    // ENABLED-button click is observable in the assertions below
+    // — but we still fake the response to keep the test
+    // independent of the real adapter network.
     let postCount = 0;
     await page.route(
       `**/api/engagements/${outOfPilotEngagementId}/briefing`,
@@ -626,17 +619,36 @@ test.describe("Generate Layers pre-flight (Task #189)", () => {
           return;
         }
         postCount += 1;
-        // If the disabled-button regression slips through and the
-        // POST fires anyway, return the same 422 the route would
-        // have so the rest of the page does not desync — the
-        // postCount assertion below is what fails the test.
+        // PL-04 makes the click viable: the runner returns a 200
+        // with federal-only outcomes. A minimal envelope keeps the
+        // test independent of upstream feed shape — the FE only
+        // needs the `outcomes` array + `briefing.sources` to render
+        // the post-run summary.
         await route.fulfill({
-          status: 422,
+          status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            error: "no_applicable_adapters",
-            message:
-              'No adapters configured for jurisdiction "CO" / "Boulder".',
+            briefing: {
+              id: "briefing-stub",
+              engagementId: outOfPilotEngagementId,
+              createdAt: "2026-05-01T00:00:00.000Z",
+              updatedAt: "2026-05-01T00:00:00.000Z",
+              sources: [],
+            },
+            outcomes: [
+              {
+                adapterKey: "fema:nfhl-flood-zone",
+                tier: "federal",
+                sourceKind: "federal-adapter",
+                layerKind: "fema-nfhl-flood-zone",
+                status: "ok",
+                error: null,
+                sourceId: "src-fema-stub",
+                fromCache: false,
+                cachedAt: null,
+                upstreamFreshness: null,
+              },
+            ],
           }),
         });
       },
@@ -646,52 +658,47 @@ test.describe("Generate Layers pre-flight (Task #189)", () => {
       `/engagements/${outOfPilotEngagementId}?tab=site-context`,
     );
 
-    // Proactive banner must be up *before* any click. The architect
-    // sees the dead-end on tab open instead of after a wasted POST.
-    const banner = page.getByTestId("generate-layers-no-adapters-banner");
+    // Federal-only banner must be up *before* any click.
+    const banner = page.getByTestId("generate-layers-federal-only-banner");
     await expect(banner).toBeVisible();
-    // Pre-flight message comes from the shared
-    // `noApplicableAdaptersMessage` helper — Boulder resolves to no
-    // `stateKey`, so the helper picks the "could not resolve a
-    // pilot jurisdiction" copy. The same helper is invoked by the
-    // server route's 422 envelope, so the FE pre-flight cannot
-    // disagree with the BE.
+    await expect(banner).toContainText(
+      "Federal layers will load — state/local pending",
+    );
     await expect(
-      page.getByTestId("generate-layers-no-adapters-message"),
-    ).toContainText(/Could not resolve a pilot jurisdiction/i);
-    await expect(banner).toContainText(
-      "No adapters configured for this jurisdiction yet",
-    );
-    await expect(banner).toContainText(
-      "Upload a QGIS overlay below to seed the briefing manually.",
-    );
+      page.getByTestId("generate-layers-federal-only-message"),
+    ).toContainText(/FEMA flood, USGS topo, EPA EJSCREEN, FCC broadband/);
 
-    // Generate Layers button is disabled — the architect cannot
-    // accidentally fire the wasted round-trip. Tooltip surfaces the
-    // shared message so a hover reveals the cause without scrolling.
+    const supported = page.getByTestId(
+      "generate-layers-federal-only-supported",
+    );
+    await expect(supported).toBeVisible();
+    await expect(supported).toContainText("Currently supported state/local pilots:");
+    for (const j of PILOT_JURISDICTIONS) {
+      await expect(supported).toContainText(j.label);
+    }
+
+    // Generate Layers button is ENABLED — federal layers will fire.
     const button = page.getByTestId("generate-layers-button");
-    await expect(button).toBeDisabled();
+    await expect(button).not.toBeDisabled();
     await expect(button).toHaveAttribute(
       "title",
-      /Could not resolve a pilot jurisdiction/i,
+      /Run the federal adapters \(FEMA, USGS, EPA, FCC\)/i,
     );
 
-    // Trying to click the disabled button is a no-op; Playwright's
-    // `force: true` bypasses the actionability check so we confirm
-    // the React handler also short-circuits even if a stray click
-    // event makes it through (e.g. via a future label-for binding).
-    await button.click({ force: true }).catch(() => {});
-    await expect(page.getByTestId("generate-layers-error")).toHaveCount(0);
+    // The missing-geocode banner must NOT also be present.
+    await expect(
+      page.getByTestId("generate-layers-no-adapters-banner"),
+    ).toHaveCount(0);
 
-    // Banner CTA opens the BriefingSourceUploadModal — the dead-end
-    // is recoverable. Same anchor as the post-error variant: the
-    // unique `briefing-source-layer-kind` id the modal owns.
+    // Click fires the round-trip (PL-04 — no longer suppressed).
+    await button.click();
+    await expect.poll(() => postCount).toBe(1);
+
+    // Banner CTA still opens the BriefingSourceUploadModal so the
+    // architect can manually upload a state/local overlay even
+    // while the federal run resolved.
     await expect(page.locator("#briefing-source-layer-kind")).toHaveCount(0);
-    await page.getByTestId("generate-layers-no-adapters-upload").click();
+    await page.getByTestId("generate-layers-federal-only-upload").click();
     await expect(page.locator("#briefing-source-layer-kind")).toBeVisible();
-
-    // Pin the no-round-trip contract: the disabled button + the
-    // proactive gate must mean zero POSTs hit the route.
-    expect(postCount).toBe(0);
   });
 });

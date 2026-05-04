@@ -48,7 +48,12 @@ const FCC_BROADBAND_USER_AGENT =
 export const FCC_BROADBAND_FRESHNESS_THRESHOLD_MONTHS = 6;
 
 function federalApplies(ctx: AdapterContext): boolean {
-  return ctx.jurisdiction.stateKey !== null;
+  // PL-04: federal adapters apply nationwide whenever the engagement is
+  // geocoded. See fema-nfhl.ts for the decoupling rationale.
+  return (
+    Number.isFinite(ctx.parcel.latitude) &&
+    Number.isFinite(ctx.parcel.longitude)
+  );
 }
 
 function nowIso(): string {

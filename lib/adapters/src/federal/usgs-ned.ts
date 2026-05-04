@@ -49,7 +49,14 @@ const EPQS_NODATA_SENTINEL = -1_000_000;
 export const USGS_NED_FRESHNESS_THRESHOLD_MONTHS = 24;
 
 function federalApplies(ctx: AdapterContext): boolean {
-  return ctx.jurisdiction.stateKey !== null;
+  // PL-04: federal adapters apply nationwide whenever the engagement is
+  // geocoded. See fema-nfhl.ts for the decoupling rationale — out-of-
+  // pilot engagements now receive federal layers + a partial-coverage
+  // UI banner instead of a blanket 422.
+  return (
+    Number.isFinite(ctx.parcel.latitude) &&
+    Number.isFinite(ctx.parcel.longitude)
+  );
 }
 
 function nowIso(): string {

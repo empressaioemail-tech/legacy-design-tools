@@ -1846,25 +1846,28 @@ function SiteContextTab({
   const briefingQuery = useGetEngagementBriefing(engagementId);
   const queryClient = useQueryClient();
 
-  // Pre-flight pilot eligibility from the cached engagement record
-  // (Task #189). Today the architect has to click "Generate Layers"
-  // before the empty-pilot 422 reveals that the jurisdiction is not
-  // in the pilot — which costs them an avoidable round-trip and a
-  // confusing "loading…" pulse on every out-of-pilot project.
+  // Pre-flight adapter eligibility from the cached engagement record.
+  // PL-04 reshaped the gate: federal adapters now apply to any
+  // geocoded engagement, so "can the architect run Generate Layers"
+  // collapses to "is the parcel geocoded." The variant discriminates
+  // three banner states the Site Context tab needs to render:
+  //
+  //   - missing-geocode: no lat/lng → no adapter can run; the button
+  //     is disabled and the banner asks for an address.
+  //   - federal-only: geocoded but no state/local pilot for this
+  //     parcel — the button runs the federal four and the banner
+  //     surfaces partial-coverage copy with the supported pilots.
+  //   - full-coverage: geocoded and a state/local pilot is wired —
+  //     no banner; the existing happy path.
   //
   // The same `appliesTo` gate the server runs is exposed by
   // `@workspace/adapters/eligibility` so the FE pre-flight cannot
   // disagree with the server's 422 — adding a new pilot jurisdiction
-  // flips both surfaces from a single registry edit. The resolver
-  // accepts the same site-context columns the server route reads, so
-  // an engagement that resolves to "out of pilot" here resolves the
-  // same on POST.
-  //
-  // We deliberately do NOT pre-flight while the engagement is still
-  // loading; the parent's react-query hook resolves before
-  // SiteContextTab is mounted (the parent gates the whole subtree on
-  // `engagement` being defined), so by the time we read the columns
-  // here they have their final values.
+  // flips both surfaces from a single registry edit. We deliberately
+  // do NOT pre-flight while the engagement is still loading; the
+  // parent's react-query hook resolves before SiteContextTab is
+  // mounted, so by the time we read the columns here they have their
+  // final values.
   const eligibility = useMemo(() => {
     const geocode = engagement.site?.geocode ?? null;
     const jurisdiction = resolveJurisdiction({
@@ -1873,26 +1876,29 @@ function SiteContextTab({
       jurisdiction: engagement.jurisdiction ?? null,
       address: engagement.address ?? null,
     });
-    // Build the same context shape the server constructs in
-    // `generateLayers.ts` — `appliesTo` only consults
-    // `ctx.jurisdiction` today but mirroring the parcel field keeps
-    // a future appliesTo that wants coords from silently mis-gating
-    // (NaN coords match the route's "no geocode" branch exactly).
     const lat = geocode?.latitude ?? NaN;
     const lng = geocode?.longitude ?? NaN;
+    const hasGeocode = Number.isFinite(lat) && Number.isFinite(lng);
     const ctx: AdapterContext = {
       parcel: { latitude: lat, longitude: lng },
       jurisdiction,
     };
     const applicable = filterApplicableAdapters(ctx);
+    const hasStateOrLocalCoverage = applicable.some(
+      (a) => a.tier === "state" || a.tier === "local",
+    );
+    const variant: "missing-geocode" | "federal-only" | "full-coverage" =
+      !hasGeocode
+        ? "missing-geocode"
+        : hasStateOrLocalCoverage
+          ? "full-coverage"
+          : "federal-only";
     return {
-      isInPilot: applicable.length > 0,
-      // Pre-computed message reuses the same helper the server's 422
-      // envelope uses, so the proactive banner reads identically to
-      // the post-click banner an architect on a half-resolved
-      // engagement might still see if the address-level resolver
-      // ever produces a different verdict than the column-level one.
-      message: noApplicableAdaptersMessage(jurisdiction),
+      canGenerate: applicable.length > 0,
+      variant,
+      jurisdiction,
+      hasGeocode,
+      message: noApplicableAdaptersMessage({ jurisdiction, hasGeocode }),
     };
   }, [
     engagement.address,
@@ -2447,17 +2453,20 @@ function SiteContextTab({
                 });
                 generateMutation.mutate({ id: engagementId });
               }}
-              // Out-of-pilot engagements pre-empt the click entirely
-              // (Task #189). The pre-flight already knows the server
-              // would 422, so disabling the button removes the wasted
-              // round-trip and the tooltip explains the dead-end
-              // before the architect hovers over the banner below.
-              disabled={generateMutation.isPending || !eligibility.isInPilot}
+              // PL-04: the button is enabled whenever any adapter can
+              // run. Federal adapters now apply to any geocoded
+              // engagement, so disabling only fires for the genuine
+              // dead-end case (no lat/lng). The tooltip flexes between
+              // the full-coverage happy-path copy and the partial /
+              // missing-geocode notices the banner below also surfaces.
+              disabled={generateMutation.isPending || !eligibility.canGenerate}
               data-testid="generate-layers-button"
               title={
-                eligibility.isInPilot
+                eligibility.variant === "full-coverage"
                   ? "Run every applicable federal/state/local adapter and persist the results as briefing sources."
-                  : eligibility.message
+                  : eligibility.variant === "federal-only"
+                    ? "Run the federal adapters (FEMA, USGS, EPA, FCC). State/local layers are not yet wired for this jurisdiction."
+                    : eligibility.message
               }
             >
               {generateMutation.isPending ? "Generating…" : "Generate Layers"}
@@ -2543,11 +2552,11 @@ function SiteContextTab({
         actionable upload CTA, disclosure as the always-on
         reference) without one hiding the other.
 
-        Task #189 additionally pulls the empty-pilot banner forward
-        to pre-flight render via `eligibility.isInPilot`, so on a
-        non-pilot project the disclosure here and the actionable
-        banner below are *both* visible without the architect ever
-        clicking Generate Layers.
+        PL-04 made the banner more nuanced: missing-geocode and
+        federal-only variants are pre-flight rendered alongside this
+        disclosure so the architect sees both the supported pilots
+        and the actionable next step without ever clicking Generate
+        Layers.
       */}
       <details
         data-testid="generate-layers-supported-jurisdictions"
@@ -2635,23 +2644,14 @@ function SiteContextTab({
         </div>
       </details>
 
-      {!eligibility.isInPilot ||
+      {eligibility.variant === "missing-geocode" ||
       lastGenerateErrorSlug === "no_applicable_adapters" ? (
-        // Distinct empty-pilot-jurisdiction banner. Originally this
-        // branch only fired after the server's 422 round-trip
-        // (Task #177); Task #189 pulls the same gate forward to
-        // pre-flight render so an architect on a non-pilot project
-        // sees the actionable upload-CTA before ever clicking
-        // Generate Layers. The empty-pilot eligibility check shares
-        // its `appliesTo` source-of-truth with `generateLayers.ts`
-        // through `@workspace/adapters/eligibility`, so the FE pre-
-        // flight cannot disagree with the server's 422 envelope.
-        // The proactive path uses the locally-computed
-        // `eligibility.message`; the post-error path prefers the
-        // server-supplied `lastGenerateError` so a future server
-        // tweak that wants to embed a richer hint (e.g. naming the
-        // adapter set the missing jurisdiction would unlock) flows
-        // through.
+        // Missing-geocode banner: no lat/lng → no adapter (federal or
+        // otherwise) can run. The architect's actionable next step is
+        // to add an address to the engagement so the geocoder fills
+        // in coordinates. The post-error path also lands here so a
+        // server-side 422 (rare under PL-04 — should require non-US
+        // coords) reads naturally.
         <div
           role="status"
           data-testid="generate-layers-no-adapters-banner"
@@ -2669,7 +2669,7 @@ function SiteContextTab({
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <div style={{ fontWeight: 600 }}>
-              No adapters configured for this jurisdiction yet
+              No adapters configured for this engagement yet
             </div>
             <div
               data-testid="generate-layers-no-adapters-message"
@@ -2677,21 +2677,13 @@ function SiteContextTab({
             >
               {lastGenerateError ?? eligibility.message}
             </div>
-            {/*
-              Task #188 — surface the actual pilot list inline so an
-              architect on a non-pilot project knows the dead-end is
-              systemic (the Generate Layers run only covers the three
-              jurisdictions below) rather than specific to their
-              current engagement. The list is sourced from
-              `@workspace/adapters` so the visible set tracks the
-              server's `appliesTo` gate without a separate manual
-              copy here.
-            */}
             <div
               data-testid="generate-layers-no-adapters-supported"
               style={{ color: "var(--text-secondary)" }}
             >
-              <span style={{ fontWeight: 600 }}>Currently supported:</span>{" "}
+              <span style={{ fontWeight: 600 }}>
+                Currently supported state/local pilots:
+              </span>{" "}
               {PILOT_JURISDICTIONS.map((j) => j.label).join(" • ")}
             </div>
             <div style={{ color: "var(--text-secondary)" }}>
@@ -2702,6 +2694,61 @@ function SiteContextTab({
             type="button"
             className="sc-btn sc-btn-primary"
             data-testid="generate-layers-no-adapters-upload"
+            onClick={() => setUploadOpen(true)}
+            style={{ flexShrink: 0 }}
+          >
+            Upload site context source
+          </button>
+        </div>
+      ) : eligibility.variant === "federal-only" ? (
+        // Partial-coverage banner: federal adapters will load (FEMA
+        // flood, USGS topo, EPA EJSCREEN, FCC broadband) but no
+        // state/local pilot is wired for this parcel yet. The button
+        // remains enabled — clicking it runs the federal four — and
+        // the supported-pilots list keeps the dead-end systemic
+        // rather than specific to this engagement.
+        <div
+          role="status"
+          data-testid="generate-layers-federal-only-banner"
+          style={{
+            fontSize: 12,
+            color: "var(--info-text)",
+            background: "var(--info-dim)",
+            padding: 12,
+            borderRadius: 4,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontWeight: 600 }}>
+              Federal layers will load — state/local pending
+            </div>
+            <div
+              data-testid="generate-layers-federal-only-message"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Federal adapters (FEMA flood, USGS topo, EPA EJSCREEN, FCC
+              broadband) will fetch for this parcel. No state/local adapter for
+              this jurisdiction yet — upload a QGIS overlay or wait for adapter
+              support.
+            </div>
+            <div
+              data-testid="generate-layers-federal-only-supported"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <span style={{ fontWeight: 600 }}>
+                Currently supported state/local pilots:
+              </span>{" "}
+              {PILOT_JURISDICTIONS.map((j) => j.label).join(" • ")}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="sc-btn sc-btn-primary"
+            data-testid="generate-layers-federal-only-upload"
             onClick={() => setUploadOpen(true)}
             style={{ flexShrink: 0 }}
           >
