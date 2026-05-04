@@ -79,13 +79,13 @@ function buildMeshForGeometry(
   geometryExpressID: number,
   doc: Document,
   buffer: ReturnType<Document["createBuffer"]>,
-): Mesh | null {
+): Mesh | undefined {
   // GetGeometry returns vertex/index buffer pointers into the WASM heap.
   // We copy out before any subsequent web-ifc call invalidates them.
   const geom = api.GetGeometry(modelID, geometryExpressID);
   const vertSrc = api.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize());
   const idxSrc = api.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
-  if (!vertSrc.length || !idxSrc.length) return null;
+  if (!vertSrc.length || !idxSrc.length) return undefined;
 
   // web-ifc's vertex format is interleaved [px py pz nx ny nz] per vertex.
   const vertCount = vertSrc.length / 6;

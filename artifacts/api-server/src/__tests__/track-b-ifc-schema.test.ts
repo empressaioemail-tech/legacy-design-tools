@@ -15,7 +15,7 @@ import {
   createTestSchema,
   dropTestSchema,
   truncateAll,
-  type TestSchema,
+  type TestSchemaContext,
 } from "@workspace/db/testing";
 import {
   engagements,
@@ -23,10 +23,11 @@ import {
   snapshots,
   snapshotIfcFiles,
   materializableElements,
+  type MaterializableElement,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-let schema: TestSchema;
+let schema: TestSchemaContext;
 
 beforeAll(async () => {
   schema = await createTestSchema();
@@ -207,7 +208,9 @@ describe("materializable_elements schema invariants (Track B)", () => {
       .from(materializableElements)
       .where(eq(materializableElements.sourceSnapshotId, snapshotId));
     expect(rows).toHaveLength(2);
-    const bundle = rows.find((r) => r.sourceKind === "as-built-ifc-bundle");
+    const bundle = rows.find(
+      (r: MaterializableElement) => r.sourceKind === "as-built-ifc-bundle",
+    );
     expect(bundle?.glbObjectPath).toBe("/objects/uploads/test-glb");
   });
 

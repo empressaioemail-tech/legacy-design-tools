@@ -1723,7 +1723,11 @@ router.post(
           .values({
             bimModelId: bm.id,
             materializableElementId: elem.id,
-            briefingId: elem.briefingId,
+            // Element's briefing matches the bim-model's active briefing
+            // post-guard (line 1712); use bm.activeBriefingId since TS has
+            // narrowed it non-null whereas elem.briefingId stays
+            // `string | null` from the schema-level relaxation.
+            briefingId: bm.activeBriefingId,
             reason: body.reason,
             note,
             detail,
@@ -1845,11 +1849,11 @@ class ElementBriefingMismatchError extends Error {
   constructor(
     elementId: string,
     bimModelId: string,
-    elementBriefingId: string,
+    elementBriefingId: string | null,
     bimModelBriefingId: string | null,
   ) {
     super(
-      `element ${elementId} belongs to briefing ${elementBriefingId} but bim-model ${bimModelId} is active against ${bimModelBriefingId ?? "(none)"}`,
+      `element ${elementId} belongs to briefing ${elementBriefingId ?? "(none)"} but bim-model ${bimModelId} is active against ${bimModelBriefingId ?? "(none)"}`,
     );
     this.name = "ElementBriefingMismatchError";
     Object.setPrototypeOf(this, ElementBriefingMismatchError.prototype);

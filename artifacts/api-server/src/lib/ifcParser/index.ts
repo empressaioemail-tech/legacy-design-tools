@@ -52,7 +52,7 @@ async function runParseInline(opts: ParseIfcOptions): Promise<ParseIfcResult> {
   const bytes = new Uint8Array(opts.bytes);
   const modelID = api.OpenModel(bytes);
   try {
-    const ifcVersion = api.GetIfcSchemaVersion(modelID) ?? "unknown";
+    const ifcVersion = api.GetModelSchema(modelID) ?? "unknown";
 
     const entities: ParsedEntity[] = [];
     for (const typeId of TRACKED_IFC_TYPE_IDS) {

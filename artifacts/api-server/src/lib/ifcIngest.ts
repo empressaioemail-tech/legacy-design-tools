@@ -377,7 +377,7 @@ export async function ingestSnapshotIfc(args: {
       ifcGlobalId: `bundle:${snapshot.id}`,
       ifcType: "<bundle>",
       label: "As-built IFC bundle",
-      glbObjectPath,
+      glbObjectPath: gltfObjectPath,
       locked: false,
     });
   } catch (err) {
