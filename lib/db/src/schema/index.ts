@@ -12,6 +12,7 @@ export * from "./parcelBriefings";
 export * from "./briefingSources";
 export * from "./bimModels";
 export * from "./materializableElements";
+export * from "./snapshotIfcFiles";
 export * from "./briefingDivergences";
 export * from "./briefingGenerationJobs";
 export * from "./adapterResponseCache";
