@@ -51,6 +51,7 @@ import {
   createMutationCapture,
   makeCapturingMutationHook,
   makeEngagementPageMockHooks,
+  MockApiError,
 } from "@workspace/portal-ui/test-utils";
 
 // ── Hoisted fixture state ───────────────────────────────────────────────
@@ -113,6 +114,20 @@ const hoisted = vi.hoisted(() => {
       sources: Array<Record<string, unknown>>;
       narrative: null;
     },
+    // PL-02 — `/findings/status` payload returned by the mocked
+    // `useGetSubmissionFindingsGenerationStatus` hook. Tests flip this
+    // to drive the re-run button's idle / pending / completed / failed
+    // branches.
+    findingsStatus: null as null | {
+      generationId: string | null;
+      state: "idle" | "pending" | "completed" | "failed";
+      startedAt: string | null;
+      completedAt: string | null;
+      error: string | null;
+      invalidCitationCount: number | null;
+      invalidCitations: string[] | null;
+      discardedFindingCount: number | null;
+    },
   };
 });
 
@@ -132,6 +147,14 @@ const overrideFinding = createMutationCapture<
       reviewerComment: string;
     };
   }
+>();
+// PL-02 — manual plan-review trigger. Captures the
+// `useGenerateSubmissionFindings` mutation options the page registers
+// so each test can fire `onSuccess` / `onError` synchronously and
+// assert the friendly-copy mapping + cache invalidation.
+const generateFindings = createMutationCapture<
+  unknown,
+  { submissionId: string; data: unknown }
 >();
 
 // useParams comes from wouter inside the page; hard-pin it to the
@@ -220,6 +243,30 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
       }),
     // Findings tab (Task #421): capture the override mutation.
     useOverrideFinding: makeCapturingMutationHook(overrideFinding),
+    // PL-02 — capture the manual plan-review generate mutation so
+    // tests can assert mutate args and drive onSuccess / onError.
+    useGenerateSubmissionFindings: makeCapturingMutationHook(generateFindings),
+    // PL-02 — read /findings/status from a hoisted slot so tests can
+    // toggle idle / pending / completed / failed branches by writing
+    // `hoisted.findingsStatus` before render. queryFn returns the
+    // hoisted value so an internal refetch (the production code wires
+    // `refetchInterval: 1500` while pending) still observes the same
+    // shape and never accidentally clobbers the seeded state.
+    useGetSubmissionFindingsGenerationStatus: (
+      submissionId: string,
+      opts?: { query?: { enabled?: boolean; queryKey?: readonly unknown[] } },
+    ) =>
+      useQuery({
+        queryKey:
+          opts?.query?.queryKey ??
+          ([`/api/submissions/${submissionId}/findings/status`] as const),
+        queryFn: async () => hoisted.findingsStatus,
+        enabled: opts?.query?.enabled ?? !!submissionId,
+      }),
+    getGetSubmissionFindingsGenerationStatusQueryKey: (
+      submissionId: string,
+    ) =>
+      [`/api/submissions/${submissionId}/findings/status`] as const,
     // Filter chips (Task #436) consume the generated enums for the
     // URL allow-list and chip labels — re-export the literal shape
     // here so the page module's `Object.keys(FindingCategory)` /
@@ -396,8 +443,10 @@ beforeEach(() => {
   };
   hoisted.submissions = [];
   hoisted.briefing = null;
+  hoisted.findingsStatus = null;
   submit.reset();
   overrideFinding.reset();
+  generateFindings.reset();
   // Reset URL state — the page reads the active tab from
   // `?tab=…` once on mount via `useState(() => readTabFromUrl())`,
   // so a leftover query string from a prior test would land us on
@@ -567,6 +616,20 @@ function seedSubmissionsWithFindings(
     client.setQueryData(["/api/submissions/sub-old/findings"], {
       findings: [],
     });
+    // PL-02 — pre-seed `/findings/status` for both submissions so the
+    // re-run button branch can read `runState` synchronously on first
+    // paint. Tests that exercise pending/completed/failed flip
+    // `hoisted.findingsStatus` BEFORE renderPage; that value is
+    // mirrored into the cache here so the re-run button doesn't
+    // briefly show its idle copy before the queryFn resolves.
+    client.setQueryData(
+      ["/api/submissions/sub-latest/findings/status"],
+      hoisted.findingsStatus,
+    );
+    client.setQueryData(
+      ["/api/submissions/sub-old/findings/status"],
+      null,
+    );
   };
 }
 describe("EngagementDetail renders tab (Task #422)", () => {
@@ -1164,5 +1227,166 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
         reviewerComment: "Addressed in next revision",
       },
     });
+  });
+});
+
+describe("EngagementDetail Findings tab — manual plan-review trigger (PL-02)", () => {
+  it("rewrites the no-submissions empty state to point at Submit to jurisdiction and renders no re-run button", () => {
+    renderPage();
+    gotoFindingsTab();
+    const empty = screen.getByTestId("findings-tab-empty-no-submissions");
+    expect(empty).toBeInTheDocument();
+    // The new copy must surface the Submit-to-jurisdiction handoff and
+    // explain the auto-trigger so the architect doesn't think the
+    // engine is gated on a manual click here.
+    expect(empty.textContent ?? "").toMatch(/Submit to jurisdiction/);
+    expect(empty.textContent ?? "").toMatch(/runs automatically/);
+    // The button only renders in the with-submissions branch.
+    expect(screen.queryByTestId("findings-tab-rerun")).not.toBeInTheDocument();
+  });
+
+  it("renders the 'Run plan review' button with no status (idle) and fires generate.mutate with the selected submissionId", () => {
+    renderPage({ seed: seedSubmissionsWithFindings([]) });
+    gotoFindingsTab();
+    const btn = screen.getByTestId("findings-tab-rerun");
+    expect(btn).toBeInTheDocument();
+    // Idle path: server has never run for this submission, so the
+    // status payload is absent and the CTA reads as the first run.
+    expect(btn.textContent).toBe("Run plan review");
+    expect(btn).not.toBeDisabled();
+    expect(
+      screen.queryByTestId("findings-tab-rerun-running-pill"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(btn);
+    expect(generateFindings.mutate).toHaveBeenCalledTimes(1);
+    expect(generateFindings.mutate.mock.calls[0][0]).toEqual({
+      submissionId: "sub-latest",
+      data: {},
+    });
+  });
+
+  it("re-run button shows 'Re-run plan review' when status is completed and pops a confirm before firing", () => {
+    hoisted.findingsStatus = {
+      generationId: "run-1",
+      state: "completed",
+      startedAt: "2026-05-01T00:00:00Z",
+      completedAt: "2026-05-01T00:00:30Z",
+      error: null,
+      invalidCitationCount: 0,
+      invalidCitations: [],
+      discardedFindingCount: 0,
+    };
+    renderPage({ seed: seedSubmissionsWithFindings([]) });
+    gotoFindingsTab();
+    const btn = screen.getByTestId("findings-tab-rerun");
+    expect(btn.textContent).toBe("Re-run plan review");
+    // Decline the confirm: the mutation must not fire.
+    const confirmSpy = vi
+      .spyOn(window, "confirm")
+      .mockImplementation(() => false);
+    try {
+      fireEvent.click(btn);
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(generateFindings.mutate).not.toHaveBeenCalled();
+      // Accept the confirm: the mutation does fire.
+      confirmSpy.mockImplementation(() => true);
+      fireEvent.click(btn);
+      expect(generateFindings.mutate).toHaveBeenCalledTimes(1);
+    } finally {
+      confirmSpy.mockRestore();
+    }
+  });
+
+  it("shows the Running pill, 'Running…' label, and disables the button when status is pending", () => {
+    hoisted.findingsStatus = {
+      generationId: "run-1",
+      state: "pending",
+      startedAt: "2026-05-01T00:00:00Z",
+      completedAt: null,
+      error: null,
+      invalidCitationCount: null,
+      invalidCitations: null,
+      discardedFindingCount: null,
+    };
+    renderPage({ seed: seedSubmissionsWithFindings([]) });
+    gotoFindingsTab();
+    expect(
+      screen.getByTestId("findings-tab-rerun-running-pill"),
+    ).toBeInTheDocument();
+    const btn = screen.getByTestId("findings-tab-rerun");
+    expect(btn.textContent).toBe("Running…");
+    expect(btn).toBeDisabled();
+  });
+
+  it("renders the auto-failure badge with the server error when status is failed", () => {
+    hoisted.findingsStatus = {
+      generationId: "run-1",
+      state: "failed",
+      startedAt: "2026-05-01T00:00:00Z",
+      completedAt: "2026-05-01T00:00:10Z",
+      error: "engine timeout",
+      invalidCitationCount: null,
+      invalidCitations: null,
+      discardedFindingCount: null,
+    };
+    renderPage({ seed: seedSubmissionsWithFindings([]) });
+    gotoFindingsTab();
+    const badge = screen.getByTestId("findings-tab-auto-failure-badge");
+    expect(badge).toBeInTheDocument();
+    expect(
+      within(badge).getByTestId("findings-tab-auto-failure-detail")
+        .textContent ?? "",
+    ).toMatch(/engine timeout/);
+    // Failed counts as a runState, so the CTA flips to "Re-run".
+    expect(screen.getByTestId("findings-tab-rerun").textContent).toBe(
+      "Re-run plan review",
+    );
+  });
+
+  it("surfaces the 409 single-flight error via describeRerunError when the kickoff returns 409", async () => {
+    renderPage({ seed: seedSubmissionsWithFindings([]) });
+    gotoFindingsTab();
+    fireEvent.click(screen.getByTestId("findings-tab-rerun"));
+    expect(generateFindings.capturedOptions?.mutation?.onError).toBeDefined();
+    await act(async () => {
+      generateFindings.capturedOptions!.mutation!.onError!(
+        new MockApiError(409, {
+          error: "finding_generation_already_in_flight",
+        }),
+        { submissionId: "sub-latest", data: {} },
+        undefined,
+      );
+    });
+    const alert = screen.getByTestId("findings-tab-rerun-error");
+    expect(alert).toBeInTheDocument();
+    expect(alert.textContent).toMatch(
+      /already in flight for this submission/,
+    );
+  });
+
+  it("clears the rerun error on the next successful kickoff", async () => {
+    renderPage({ seed: seedSubmissionsWithFindings([]) });
+    gotoFindingsTab();
+    fireEvent.click(screen.getByTestId("findings-tab-rerun"));
+    await act(async () => {
+      generateFindings.capturedOptions!.mutation!.onError!(
+        new MockApiError(403, { error: "findings_require_internal_audience" }),
+        { submissionId: "sub-latest", data: {} },
+        undefined,
+      );
+    });
+    expect(
+      screen.getByTestId("findings-tab-rerun-error").textContent,
+    ).toMatch(/internal audience/);
+    await act(async () => {
+      generateFindings.capturedOptions!.mutation!.onSuccess!(
+        { generationId: "run-2", state: "pending" },
+        { submissionId: "sub-latest", data: {} },
+        undefined,
+      );
+    });
+    expect(
+      screen.queryByTestId("findings-tab-rerun-error"),
+    ).not.toBeInTheDocument();
   });
 });

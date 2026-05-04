@@ -11,8 +11,10 @@ import {
   useGetEngagement,
   useGetEngagementBimModel,
   useGetEngagementBriefing,
+  useGenerateSubmissionFindings,
   useGetEngagementBriefingGenerationStatus,
   useGetSnapshot,
+  useGetSubmissionFindingsGenerationStatus,
   useListEngagementBriefingGenerationRuns,
   useListEngagementSubmissions,
   useListSubmissionFindings,
@@ -26,6 +28,7 @@ import {
   getGetEngagementBriefingGenerationStatusQueryKey,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
+  getGetSubmissionFindingsGenerationStatusQueryKey,
   getListBimModelDivergencesQueryKey,
   getListEngagementBriefingGenerationRunsQueryKey,
   getListEngagementsQueryKey,
@@ -4188,6 +4191,29 @@ function FindingsFilterChips({
   );
 }
 
+/**
+ * Map a thrown re-run error to a user-facing string. Mirrors the
+ * reviewer-side helper in
+ * `artifacts/plan-review/src/pages/ComplianceEngine.tsx` — we keep
+ * the architect-side surface in the same idiom so the strings stay
+ * close in tone even if they diverge in wording.
+ */
+function describeRerunError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 409) {
+      return "A finding-engine run is already in flight for this submission.";
+    }
+    if (err.status === 403) {
+      return "Findings require internal audience.";
+    }
+    if (err.status === 404) {
+      return "Submission not found.";
+    }
+    return err.message ?? "Failed to start plan review run.";
+  }
+  return "Failed to start plan review run.";
+}
+
 function FindingsTab({
   engagementId,
   initialSubmissionId,
@@ -4282,6 +4308,64 @@ function FindingsTab({
     },
   });
   const findings = findingsData?.findings ?? [];
+
+  // PL-02 — manual plan-review trigger. Status query polls
+  // `/findings/status` at 1.5s while a run is pending, idle otherwise,
+  // matching the reviewer-side ComplianceEngine cadence. The mutation
+  // hits POST `/findings/generate`; on success we invalidate the
+  // findings list + status so the list pops in the moment the engine
+  // settles. Error copy is mapped through `describeRerunError`.
+  const statusQuery = useGetSubmissionFindingsGenerationStatus(
+    selectedSubmissionId ?? "",
+    {
+      query: {
+        enabled: !!selectedSubmissionId,
+        queryKey: selectedSubmissionId
+          ? getGetSubmissionFindingsGenerationStatusQueryKey(
+              selectedSubmissionId,
+            )
+          : (["findings-status", "none"] as const),
+        refetchInterval: (q: { state: { data?: { state?: string } } }) =>
+          q.state.data?.state === "pending" ? 1500 : false,
+      },
+    },
+  );
+  const [rerunError, setRerunError] = useState<string | null>(null);
+  const generate = useGenerateSubmissionFindings({
+    mutation: {
+      onSuccess: () => {
+        if (!selectedSubmissionId) return;
+        queryClient.invalidateQueries({
+          queryKey: getListSubmissionFindingsQueryKey(selectedSubmissionId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: getGetSubmissionFindingsGenerationStatusQueryKey(
+            selectedSubmissionId,
+          ),
+        });
+        setRerunError(null);
+      },
+      onError: (err) => {
+        setRerunError(describeRerunError(err));
+      },
+    },
+  });
+  const runState = statusQuery.data?.state ?? null;
+  const isRunning = runState === "pending" || generate.isPending;
+  const handleRerun = () => {
+    if (!selectedSubmissionId || isRunning) return;
+    if (runState === "completed" || runState === "failed") {
+      const ok =
+        typeof window === "undefined"
+          ? true
+          : window.confirm(
+              "Re-run AI plan review? Prior runs are preserved.",
+            );
+      if (!ok) return;
+    }
+    setRerunError(null);
+    generate.mutate({ submissionId: selectedSubmissionId, data: {} });
+  };
 
   // Apply the active filter chips (Task #436) before handing the list
   // to FindingsList. The "X unaddressed of Y" counter above keeps
@@ -4388,12 +4472,19 @@ function FindingsTab({
         data-testid="findings-tab-empty-no-submissions"
       >
         <div className="sc-prose opacity-70">
-          No submissions yet. Findings appear here once the architect plan
-          review run completes.
+          No submissions yet. Click <strong>Submit to jurisdiction</strong>{" "}
+          above to record a submission — the AI plan review runs
+          automatically as soon as you do.
         </div>
       </div>
     );
   }
+
+  const rerunCtaLabel = isRunning
+    ? "Running…"
+    : runState
+      ? "Re-run plan review"
+      : "Run plan review";
 
   return (
     <div className="flex flex-col gap-3" data-testid="findings-tab">
@@ -4418,16 +4509,102 @@ function FindingsTab({
             ))}
           </select>
         </label>
-        <span
-          className="sc-meta"
-          data-testid="findings-tab-unaddressed-count"
-          style={{ opacity: 0.7, fontSize: 11 }}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginLeft: "auto",
+          }}
         >
-          {findings.length === 0
-            ? "0 findings"
-            : `${countUnaddressedFindings(findings)} unaddressed of ${findings.length}`}
-        </span>
+          <span
+            className="sc-meta"
+            data-testid="findings-tab-unaddressed-count"
+            style={{ opacity: 0.7, fontSize: 11 }}
+          >
+            {findings.length === 0
+              ? "0 findings"
+              : `${countUnaddressedFindings(findings)} unaddressed of ${findings.length}`}
+          </span>
+          {isRunning && (
+            <span
+              data-testid="findings-tab-rerun-running-pill"
+              style={{
+                background: "var(--info-dim)",
+                color: "var(--info-text)",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                padding: "2px 8px",
+                borderRadius: 999,
+              }}
+            >
+              Running
+            </span>
+          )}
+          <button
+            type="button"
+            className="sc-btn-primary"
+            onClick={handleRerun}
+            disabled={isRunning || !selectedSubmissionId}
+            data-testid="findings-tab-rerun"
+          >
+            {rerunCtaLabel}
+          </button>
+        </div>
       </div>
+
+      {rerunError && (
+        <div
+          role="alert"
+          data-testid="findings-tab-rerun-error"
+          className="sc-alert sc-alert-error"
+        >
+          {rerunError}
+        </div>
+      )}
+
+      {runState === "failed" && !isRunning && (
+        <div
+          role="alert"
+          data-testid="findings-tab-auto-failure-badge"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            padding: "10px 12px",
+            border: "1px solid var(--danger-border, var(--danger-text))",
+            background: "var(--danger-dim)",
+            borderRadius: 6,
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--danger-text)",
+              }}
+            >
+              AI plan review failed
+            </div>
+            <div
+              data-testid="findings-tab-auto-failure-detail"
+              style={{
+                fontSize: 12,
+                color: "var(--danger-text)",
+                marginTop: 2,
+                wordBreak: "break-word",
+              }}
+            >
+              {statusQuery.data?.error
+                ? `The most recent attempt failed: ${statusQuery.data.error}`
+                : "The most recent automatic attempt failed. Re-run to try again."}
+            </div>
+          </div>
+        </div>
+      )}
 
       <FindingsFilterChips
         severityFilter={severityFilter}
