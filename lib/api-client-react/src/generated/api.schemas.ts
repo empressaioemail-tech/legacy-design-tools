@@ -2252,10 +2252,12 @@ export interface EmbeddingsBackfillResult {
 }
 
 /**
- * DA-PI-5 / Spec 51a §2.4 — the seven element kinds the C# Revit
-add-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on
-the api-server `converterClient` so a materializable element
-sourced from a DXF round-trips through the same closed set.
+ * Eight values: the seven Spec 51a §2.4 briefing-derived kinds the
+C# Revit add-in materializes (DXF_LAYER_KINDS), plus
+`as-built-ifc` (Track B sprint) for rows produced by the
+server-side IFC parser. The C# add-in's mirror does NOT need
+the eighth value — IFC rows are filtered at the add-in-facing
+read in `routes/bimModels.ts:loadElementsForBriefing`.
 
  */
 export type MaterializableElementKind =
@@ -2269,6 +2271,25 @@ export const MaterializableElementKind = {
   floodplain: "floodplain",
   wetland: "wetland",
   "neighbor-mass": "neighbor-mass",
+  "as-built-ifc": "as-built-ifc",
+} as const;
+
+/**
+ * Track B sprint — provenance/lens discriminator on
+`materializable_elements`. `briefing-derived` rows come from
+the briefing engine; `as-built-ifc` rows are per-entity rows
+produced by the IFC parser; `as-built-ifc-bundle` is the single
+synthetic per-IFC-ingest row that carries the consolidated
+glTF for the viewer's first-row-with-glb-wins preference.
+
+ */
+export type MaterializableElementSourceKind =
+  (typeof MaterializableElementSourceKind)[keyof typeof MaterializableElementSourceKind];
+
+export const MaterializableElementSourceKind = {
+  "briefing-derived": "briefing-derived",
+  "as-built-ifc": "as-built-ifc",
+  "as-built-ifc-bundle": "as-built-ifc-bundle",
 } as const;
 
 /**
@@ -2308,15 +2329,39 @@ export const BriefingDivergenceReason = {
 export type MaterializableElementGeometry = { [key: string]: unknown };
 
 /**
+ * Flattened IFC `Pset_*Common` property values (Description,
+ObjectType, PredefinedType in Phase 1) for IFC rows; null
+on briefing-derived rows.
+
+ */
+export type MaterializableElementPropertySet = {
+  [key: string]: unknown;
+} | null;
+
+/**
  * DA-PI-5 / Spec 51a §2.4 — one piece of geometry the C# Revit
-add-in materializes into the architect's active model. The
-`geometry` payload is discriminator-dependent (see the
-column docstring on `materializable_elements.geometry`).
+add-in materializes, OR (Track B sprint) one IFC entity / IFC
+bundle ingested from a Revit IFC export. The `sourceKind`
+discriminator picks the lens; the `geometry` payload is
+discriminator-dependent (see the column docstring on
+`materializable_elements.geometry`).
 
  */
 export interface MaterializableElement {
   id: string;
-  briefingId: string;
+  /** Null on `as-built-ifc` / `as-built-ifc-bundle` rows
+(Track B sprint). The C#-add-in-facing read at
+`loadElementsForBriefing` filters those rows out, so the
+add-in never sees a null here. Web-viewer reads at
+`loadAsBuiltIfcElementsForEngagement` include them.
+ */
+  briefingId: string | null;
+  /** Engagement scope. Always set on IFC rows; nullable on
+legacy briefing-derived rows whose engagement is reachable
+via `briefing_id → parcel_briefings.engagement_id`.
+ */
+  engagementId: string | null;
+  sourceKind: MaterializableElementSourceKind;
   elementKind: MaterializableElementKind;
   briefingSourceId: string | null;
   label: string | null;
@@ -2324,6 +2369,21 @@ export interface MaterializableElement {
   geometry: MaterializableElementGeometry;
   glbObjectPath: string | null;
   locked: boolean;
+  /** IFC `GlobalId` (the stable 22-character GUID encoding) for
+`as-built-ifc` / `as-built-ifc-bundle` rows; null otherwise.
+The bundle row uses a sentinel `bundle:<snapshotId>` value.
+ */
+  ifcGlobalId: string | null;
+  /** IFC entity type — `IfcWall`, `IfcDoor`, `IfcSpace`, etc. —
+for IFC rows; null on briefing-derived rows. The bundle
+row uses a sentinel `<bundle>` value.
+ */
+  ifcType: string | null;
+  /** Flattened IFC `Pset_*Common` property values (Description,
+ObjectType, PredefinedType in Phase 1) for IFC rows; null
+on briefing-derived rows.
+ */
+  propertySet: MaterializableElementPropertySet;
   createdAt: string;
   updatedAt: string;
 }
@@ -2349,14 +2409,42 @@ export interface EngagementBimModel {
 }
 
 /**
+ * Track B / Track C — derived status of the most-recent
+`snapshot_ifc_files` row for the engagement, used by the FE
+Snapshots tab to drive the BIM card's empty-state copy and
+polling. `idle` covers both "no IFC ever pushed" and "IFC
+parsed cleanly" (in the parsed case the bimModel will be
+non-null and the status is moot). `parsing` means the most
+recent IFC has uploaded but `parsed_at` is still null.
+`parse_failed` means the most recent IFC has a non-null
+`parse_error`.
+
+ */
+export type IfcIngestStatus =
+  (typeof IfcIngestStatus)[keyof typeof IfcIngestStatus];
+
+export const IfcIngestStatus = {
+  idle: "idle",
+  parsing: "parsing",
+  parse_failed: "parse_failed",
+} as const;
+
+/**
  * Wire envelope for the bim-model read/push routes. `bimModel`
 is `null` when no push has happened yet for the engagement
 — the first call to `POST /engagements/{id}/bim-model` is
 what creates it.
 
+`ifcStatus` (Track C) reflects the engagement's most-recent
+IFC ingest state so the FE can drive a "processing…" /
+"parse failed" empty-state UI without a second round-trip.
+`ifcError` is non-null only when `ifcStatus = "parse_failed"`.
+
  */
 export interface EngagementBimModelResponse {
   bimModel: EngagementBimModel | null;
+  ifcStatus: IfcIngestStatus;
+  ifcError: string | null;
 }
 
 /**

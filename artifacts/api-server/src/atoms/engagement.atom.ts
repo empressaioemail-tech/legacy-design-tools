@@ -110,6 +110,12 @@ export const ENGAGEMENT_EVENT_TYPES = [
   "engagement.jurisdiction-resolved",
   "engagement.snapshot-received",
   "engagement.submitted",
+  // Track B/C — emitted by `lib/ifcIngest.ts` after a Revit-side IFC
+  // export has been parsed and atom rows + the consolidated glTF have
+  // committed. Surfaces "as-built model arrived" in the engagement
+  // timeline so the architect / reviewer sees the new geometry without
+  // having to refresh the BIM card by hand.
+  "engagement.ifc-ingested",
 ] as const;
 
 export type EngagementEventType = (typeof ENGAGEMENT_EVENT_TYPES)[number];

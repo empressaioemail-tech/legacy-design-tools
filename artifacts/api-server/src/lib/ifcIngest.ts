@@ -21,6 +21,8 @@ import {
 import { logger } from "./logger";
 import { ObjectStorageService } from "./objectStorage";
 import { parseIfc, type ParseIfcResult } from "./ifcParser";
+import { getHistoryService } from "../atoms/registry";
+import { emitEngagementIfcIngestedEvent } from "./engagementEvents";
 
 /**
  * Upper bound on a single IFC upload. Raised above the sheet caps because
@@ -409,6 +411,22 @@ export async function ingestSnapshotIfc(args: {
       updatedAt: parsedAt,
     })
     .where(eq(snapshotIfcFiles.id, ifcFileId));
+
+  // 6a) Emit `engagement.ifc-ingested` on the timeline (Track C). Best-
+  // effort — a history outage logs and proceeds; the row writes above
+  // are the source of truth and stay committed regardless. Mirrors the
+  // engagement.snapshot-received emission in routes/snapshots.ts.
+  await emitEngagementIfcIngestedEvent(
+    getHistoryService(),
+    {
+      engagementId: snapshot.engagementId,
+      snapshotId: snapshot.id,
+      ifcFileId,
+      entityCount: parseResult.entityCount,
+      ifcVersion: parseResult.ifcVersion,
+    },
+    reqLog,
+  );
 
   // 7) Best-effort cleanup of the previous blobs. After-commit so a delete
   //    failure can't roll back the new write.

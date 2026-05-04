@@ -39,6 +39,7 @@ import { keyFromEngagement } from "@workspace/codes";
 import {
   DECISION_RECORDED_ACTOR_ID,
   ENGAGEMENT_EDIT_ACTOR_ID,
+  SNAPSHOT_INGEST_ACTOR_ID,
   SUBMISSION_INGEST_ACTOR_ID,
 } from "@workspace/server-actor-ids";
 import type { EngagementEventType } from "../atoms/engagement.atom";
@@ -54,6 +55,8 @@ const ENGAGEMENT_JURISDICTION_RESOLVED_EVENT_TYPE: EngagementEventType =
   "engagement.jurisdiction-resolved";
 const ENGAGEMENT_SUBMITTED_EVENT_TYPE: EngagementEventType =
   "engagement.submitted";
+const ENGAGEMENT_IFC_INGESTED_EVENT_TYPE: EngagementEventType =
+  "engagement.ifc-ingested";
 const SUBMISSION_STATUS_CHANGED_EVENT_TYPE: SubmissionEventType =
   "submission.status-changed";
 const DECISION_EVENT_RECORDED_EVENT_TYPE: DecisionEventEventType =
@@ -453,6 +456,74 @@ export async function emitSubmissionStatusChangedEvent(
         toStatus: params.toStatus,
       },
       "submission.status-changed event append failed — row update kept",
+    );
+  }
+}
+
+/**
+ * Track B/C — `engagement.ifc-ingested`. Emitted by `lib/ifcIngest.ts`
+ * after a Revit-side IFC export has parsed cleanly and the per-entity
+ * + bundle `materializable_elements` rows have committed alongside
+ * the consolidated glTF cache. Surfaces "as-built model arrived" on
+ * the engagement timeline so the architect / reviewer can see the
+ * new geometry without polling the BIM card by hand.
+ *
+ * Best-effort, like the rest of the engagement-event helpers: a
+ * history outage logs and returns; the underlying ingest's row writes
+ * are the source of truth and stay committed.
+ *
+ * Actor: `snapshot-ingest` — the IFC arrives via the same multipart
+ * push from the Revit add-in that delivers sheet snapshots, so the
+ * timeline attribution mirrors `engagement.snapshot-received`.
+ */
+export const SNAPSHOT_INGEST_ACTOR = {
+  kind: "system" as const,
+  id: SNAPSHOT_INGEST_ACTOR_ID,
+};
+
+export async function emitEngagementIfcIngestedEvent(
+  history: EventAnchoringService,
+  params: {
+    engagementId: string;
+    snapshotId: string;
+    ifcFileId: string;
+    entityCount: number;
+    ifcVersion: string | null;
+  },
+  reqLog: Logger,
+): Promise<void> {
+  try {
+    const event = await history.appendEvent({
+      entityType: "engagement",
+      entityId: params.engagementId,
+      eventType: ENGAGEMENT_IFC_INGESTED_EVENT_TYPE,
+      actor: SNAPSHOT_INGEST_ACTOR,
+      payload: {
+        snapshotId: params.snapshotId,
+        ifcFileId: params.ifcFileId,
+        entityCount: params.entityCount,
+        ifcVersion: params.ifcVersion,
+      },
+    });
+    reqLog.info(
+      {
+        engagementId: params.engagementId,
+        snapshotId: params.snapshotId,
+        ifcFileId: params.ifcFileId,
+        eventId: event.id,
+        chainHash: event.chainHash,
+      },
+      "engagement.ifc-ingested event appended",
+    );
+  } catch (err) {
+    reqLog.error(
+      {
+        err,
+        engagementId: params.engagementId,
+        snapshotId: params.snapshotId,
+        ifcFileId: params.ifcFileId,
+      },
+      "engagement.ifc-ingested event append failed — row writes kept",
     );
   }
 }

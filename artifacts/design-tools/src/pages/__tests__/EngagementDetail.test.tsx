@@ -113,6 +113,16 @@ const hoisted = vi.hoisted(() => {
       sources: Array<Record<string, unknown>>;
       narrative: null;
     },
+    // Track C — `useGetEngagementBimModel` response. The Snapshots
+    // tab branches on (bimModel, ifcStatus) for the BIM card's
+    // empty-state copy. Default `null` keeps the legacy behaviour
+    // (idle, no model); per-test overrides exercise the parsing /
+    // parse_failed / parsed branches.
+    bimModelResponse: null as null | {
+      bimModel: unknown;
+      ifcStatus: "idle" | "parsing" | "parse_failed";
+      ifcError: string | null;
+    },
   };
 });
 
@@ -282,12 +292,20 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
       }),
     getGetEngagementBriefingGenerationStatusQueryKey: (id: string) =>
       ["getEngagementBriefingGenerationStatus", id] as const,
-    useGetEngagementBimModel: () =>
-      useQuery({
-        queryKey: ["getEngagementBimModel"] as const,
-        queryFn: async () => null,
-        enabled: false,
-      }),
+    // Track C — synthetic UseQueryResult-shape return so per-test
+    // overrides on hoisted.bimModelResponse can drive the Snapshots
+    // tab's empty-state branches without going through useQuery /
+    // a fetch. The page reads `.data?.bimModel`, `.data?.ifcStatus`,
+    // `.data?.ifcError`, and `.isLoading`; everything else is moot.
+    useGetEngagementBimModel: () => ({
+      data: hoisted.bimModelResponse,
+      isLoading: false,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    }),
+    getGetEngagementBimModelQueryKey: (id: string) =>
+      ["getEngagementBimModel", id] as const,
     useGetBimModelRefresh: () =>
       useQuery({
         queryKey: ["getBimModelRefresh"] as const,
@@ -396,6 +414,7 @@ beforeEach(() => {
   };
   hoisted.submissions = [];
   hoisted.briefing = null;
+  hoisted.bimModelResponse = null;
   submit.reset();
   overrideFinding.reset();
   // Reset URL state — the page reads the active tab from
@@ -1164,5 +1183,110 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
         reviewerComment: "Addressed in next revision",
       },
     });
+  });
+});
+
+/**
+ * Track C / PL-01 — Snapshots tab BIM Model card.
+ *
+ * Pins three things the layout fix + IFC-status copy depend on:
+ *   1. The BIM card sits between the KPI grid and the 3-col snapshot
+ *      list / Raw JSON grid (PL-01 — the architect's eye lands on
+ *      the 3D view first).
+ *   2. The empty-state copy branches on `ifcStatus`:
+ *      - idle (default)        → "Push a snapshot from Revit…"
+ *      - parsing               → "Processing IFC export…"
+ *      - parse_failed + error  → "IFC parse failed: <error>…"
+ *   3. The wrapper carries `data-ifc-status` so PRs that reach for
+ *      the bim-card layout can branch on it without re-walking the
+ *      mock setup.
+ */
+describe("EngagementDetail — Snapshots tab BIM Model card (Track C / PL-01)", () => {
+  function bimCard(): HTMLElement {
+    return screen.getByTestId("snapshots-bim-viewer");
+  }
+
+  it("renders the BIM card BEFORE the snapshot list / Raw JSON grid (PL-01)", () => {
+    const { container } = renderPage();
+    const tabPanels = container.querySelectorAll(
+      "[data-testid='snapshots-bim-viewer'], [data-testid='engagement-snapshot-timeline']",
+    );
+    expect(tabPanels.length).toBe(2);
+    // Document order: BIM card first, then the snapshot timeline
+    // (which lives inside the 3-col grid below). The opposite order
+    // is the regression PL-01 fixed.
+    expect(tabPanels[0].getAttribute("data-testid")).toBe(
+      "snapshots-bim-viewer",
+    );
+    expect(tabPanels[1].getAttribute("data-testid")).toBe(
+      "engagement-snapshot-timeline",
+    );
+  });
+
+  it("renders the idle empty-state copy when no IFC has been pushed", () => {
+    hoisted.bimModelResponse = {
+      bimModel: null,
+      ifcStatus: "idle",
+      ifcError: null,
+    };
+    renderPage();
+    expect(bimCard().getAttribute("data-ifc-status")).toBe("idle");
+    const idle = screen.getByTestId("snapshots-bim-empty-idle");
+    expect(idle.textContent).toContain(
+      "Push a snapshot from Revit",
+    );
+    expect(idle.textContent).toContain(
+      "IFC export populates the 3D viewer automatically",
+    );
+    expect(
+      screen.queryByTestId("snapshots-bim-empty-parsing"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("snapshots-bim-empty-parse-failed"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the parsing empty-state copy when ifcStatus is 'parsing'", () => {
+    hoisted.bimModelResponse = {
+      bimModel: null,
+      ifcStatus: "parsing",
+      ifcError: null,
+    };
+    renderPage();
+    expect(bimCard().getAttribute("data-ifc-status")).toBe("parsing");
+    const parsing = screen.getByTestId("snapshots-bim-empty-parsing");
+    expect(parsing.textContent).toContain("Processing IFC export");
+    expect(
+      screen.queryByTestId("snapshots-bim-empty-idle"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the parse_failed empty-state copy + the server error verbatim", () => {
+    hoisted.bimModelResponse = {
+      bimModel: null,
+      ifcStatus: "parse_failed",
+      ifcError: "web-ifc threw on OpenModel: malformed STEP header",
+    };
+    renderPage();
+    expect(bimCard().getAttribute("data-ifc-status")).toBe("parse_failed");
+    const failed = screen.getByTestId("snapshots-bim-empty-parse-failed");
+    expect(failed.textContent).toContain(
+      "web-ifc threw on OpenModel: malformed STEP header",
+    );
+    expect(failed.textContent).toContain("Re-push from Revit to retry");
+  });
+
+  it("renders parse_failed copy with a generic 'unknown error' fallback when ifcError is null", () => {
+    // Defensive — the server should always set ifcError when status
+    // is parse_failed, but if a future regression slips a null
+    // through, the FE shouldn't render the literal "null" string.
+    hoisted.bimModelResponse = {
+      bimModel: null,
+      ifcStatus: "parse_failed",
+      ifcError: null,
+    };
+    renderPage();
+    const failed = screen.getByTestId("snapshots-bim-empty-parse-failed");
+    expect(failed.textContent).toContain("IFC parse failed: unknown error");
   });
 });

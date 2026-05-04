@@ -4562,8 +4562,25 @@ export function EngagementDetail() {
     null,
   );
 
-  const bimModelQuery = useGetEngagementBimModel(id);
+  // Track C — poll the bim-model read every 2s while a Revit-side
+  // IFC export is still parsing on the server (ifcStatus === "parsing")
+  // so the BIM card flips out of the "Processing IFC export…" copy
+  // into rendered geometry without a manual refresh. We branch the
+  // refetchInterval against the previous response's ifcStatus rather
+  // than a separate query so the polling cadence stays in sync with
+  // whatever the server most-recently reported.
+  const bimModelQuery = useGetEngagementBimModel(id, {
+    query: {
+      queryKey: getGetEngagementBimModelQueryKey(id),
+      refetchInterval: (query) => {
+        const status = query.state.data?.ifcStatus;
+        return status === "parsing" ? 2000 : false;
+      },
+    },
+  });
   const bimModel = bimModelQuery.data?.bimModel ?? null;
+  const ifcStatus = bimModelQuery.data?.ifcStatus ?? "idle";
+  const ifcError = bimModelQuery.data?.ifcError ?? null;
   const bimElements = useMemo(() => bimModel?.elements ?? [], [bimModel]);
   // Resolve a GLB URL for the architect's BIM building. Architect-
   // uploaded meshes (`glbObjectPath` set) take priority and use the
@@ -4864,6 +4881,91 @@ export function EngagementDetail() {
               />
             </div>
 
+            {/*
+              PL-01 layout — BIM Model card sits BETWEEN the KPI grid
+              above and the 3-col snapshot/Raw-JSON grid below so the
+              architect's eye lands on the 3D view first (the most
+              load-bearing surface for an IFC-derived engagement) and
+              then drops into the snapshot timeline. Track C wires
+              empty-state copy variants per `ifcStatus`:
+                - idle (no IFC ever pushed): a Revit-CTA prompt.
+                - parsing (server still parsing the most-recent IFC):
+                  a "processing…" caption that stays live as the 2s
+                  poll on bimModelQuery ticks.
+                - parse_failed: surfaces `ifcError` with a re-push
+                  hint. The blob is preserved server-side per
+                  Track B's contract; re-pushing replaces it.
+              The viewer remounts on `bimModel.id` change so a
+              re-upload (which produces a fresh ifc:<snapshotId>
+              synthetic id and fresh per-entity row ids) doesn't
+              carry stale element-detail state across snapshots.
+            */}
+            <div
+              className="sc-card flex flex-col"
+              data-testid="snapshots-bim-viewer"
+              data-ifc-status={ifcStatus}
+              style={{ minHeight: 420 }}
+            >
+              <div className="sc-card-header sc-row-sb">
+                <span className="sc-label">BIM MODEL</span>
+                <span className="sc-meta">
+                  {bimElements.length}{" "}
+                  {bimElements.length === 1 ? "element" : "elements"}
+                </span>
+              </div>
+              <div
+                className="flex-1"
+                style={{
+                  borderTop: "1px solid var(--border-default)",
+                  padding: 8,
+                  display: "flex",
+                  minHeight: 0,
+                }}
+              >
+                {bimModelQuery.isLoading ? (
+                  <div className="sc-prose opacity-60 m-auto">
+                    Loading BIM model…
+                  </div>
+                ) : bimElements.length === 0 ? (
+                  ifcStatus === "parsing" ? (
+                    <div
+                      className="sc-prose opacity-70 m-auto text-center"
+                      data-testid="snapshots-bim-empty-parsing"
+                    >
+                      Processing IFC export… (~30s for typical projects)
+                    </div>
+                  ) : ifcStatus === "parse_failed" ? (
+                    <div
+                      className="sc-prose opacity-80 m-auto text-center"
+                      data-testid="snapshots-bim-empty-parse-failed"
+                    >
+                      <div style={{ marginBottom: 4 }}>
+                        IFC parse failed: {ifcError ?? "unknown error"}.
+                      </div>
+                      <div className="sc-meta">
+                        Re-push from Revit to retry — the server kept
+                        the blob for diagnostics.
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className="sc-prose opacity-70 m-auto text-center"
+                      data-testid="snapshots-bim-empty-idle"
+                    >
+                      No 3D model yet. Push a snapshot from Revit — IFC
+                      export populates the 3D viewer automatically.
+                    </div>
+                  )
+                ) : (
+                  <BimModelViewport
+                    key={bimModel?.id ?? "no-bim-model"}
+                    elements={bimElements}
+                    selectedElementRef={selectedElementRef ?? null}
+                  />
+                )}
+              </div>
+            </div>
+
             <div className="grid lg:grid-cols-3 gap-4 flex-1 min-h-0">
               <div className="sc-card flex flex-col col-span-1 min-h-0">
                 <div className="sc-card-header sc-row-sb">
@@ -4959,44 +5061,6 @@ export function EngagementDetail() {
               </div>
             </div>
 
-            <div
-              className="sc-card flex flex-col"
-              data-testid="snapshots-bim-viewer"
-              style={{ minHeight: 420 }}
-            >
-              <div className="sc-card-header sc-row-sb">
-                <span className="sc-label">BIM MODEL</span>
-                <span className="sc-meta">
-                  {bimElements.length}{" "}
-                  {bimElements.length === 1 ? "element" : "elements"}
-                </span>
-              </div>
-              <div
-                className="flex-1"
-                style={{
-                  borderTop: "1px solid var(--border-default)",
-                  padding: 8,
-                  display: "flex",
-                  minHeight: 0,
-                }}
-              >
-                {bimModelQuery.isLoading ? (
-                  <div className="sc-prose opacity-60 m-auto">
-                    Loading BIM model…
-                  </div>
-                ) : bimElements.length === 0 ? (
-                  <div className="sc-prose opacity-70 m-auto text-center">
-                    No BIM elements yet. Push this engagement&apos;s briefing
-                    to Revit to populate the 3D viewer.
-                  </div>
-                ) : (
-                  <BimModelViewport
-                    elements={bimElements}
-                    selectedElementRef={selectedElementRef ?? null}
-                  />
-                )}
-              </div>
-            </div>
           </>
         )}
 

@@ -65,6 +65,8 @@ const {
   briefingDivergences,
   atomEvents,
   users,
+  snapshots,
+  snapshotIfcFiles,
 } = await import("@workspace/db");
 const { eq, desc } = await import("drizzle-orm");
 
@@ -124,13 +126,20 @@ function asArchitect<T extends { set: (h: string, v: string) => T }>(
 }
 
 describe("GET /api/engagements/:id/bim-model", () => {
-  it("returns { bimModel: null } before any push", async () => {
+  it("returns { bimModel: null, ifcStatus: 'idle', ifcError: null } before any push", async () => {
     const { engagementId } = await seedEngagementAndBriefing();
     const res = await asArchitect(
       request(getApp()).get(`/api/engagements/${engagementId}/bim-model`),
     );
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ bimModel: null });
+    // Track C — every GET returns the EngagementBimModelResponse
+    // envelope including the IFC ingest status. With no IFC ever
+    // pushed, the status is "idle" and the error is null.
+    expect(res.body).toEqual({
+      bimModel: null,
+      ifcStatus: "idle",
+      ifcError: null,
+    });
 
     if (!ctx.schema) throw new Error("ctx.schema not set");
     const rows = await ctx.schema.db
@@ -160,6 +169,134 @@ describe("GET /api/engagements/:id/bim-model", () => {
     );
     expect(res.status).toBe(403);
     expect(res.body.error).toBe("bim_model_requires_architect_audience");
+  });
+});
+
+/**
+ * Track C — `ifcStatus` field on the GET response. Track B's IFC
+ * ingest pipeline writes a `snapshot_ifc_files` row before parse
+ * starts; the BIM card's empty-state branches off the row's
+ * (parsed_at, parse_error) state.
+ */
+describe("GET /api/engagements/:id/bim-model — ifcStatus (Track C)", () => {
+  async function seedSnapshotForEngagement(
+    engagementId: string,
+  ): Promise<string> {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const [snap] = await ctx.schema.db
+      .insert(snapshots)
+      .values({
+        engagementId,
+        projectName: "ifc-status-test",
+        payload: {},
+      })
+      .returning();
+    return snap.id;
+  }
+
+  it("returns ifcStatus 'idle' when no IFC has been pushed", async () => {
+    const { engagementId } = await seedEngagementAndBriefing();
+    const res = await asArchitect(
+      request(getApp()).get(`/api/engagements/${engagementId}/bim-model`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.ifcStatus).toBe("idle");
+    expect(res.body.ifcError).toBeNull();
+    expect(res.body.bimModel).toBeNull();
+  });
+
+  it("returns ifcStatus 'parsing' while parsed_at is null AND parse_error is null", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const { engagementId } = await seedEngagementAndBriefing();
+    const snapshotId = await seedSnapshotForEngagement(engagementId);
+    await ctx.schema.db.insert(snapshotIfcFiles).values({
+      snapshotId,
+      blobObjectPath: "/objects/uploads/ifc-blob",
+      fileSizeBytes: 1024,
+      // parsedAt + parseError both null → parsing.
+    });
+    const res = await asArchitect(
+      request(getApp()).get(`/api/engagements/${engagementId}/bim-model`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.ifcStatus).toBe("parsing");
+    expect(res.body.ifcError).toBeNull();
+    expect(res.body.bimModel).toBeNull();
+  });
+
+  it("returns ifcStatus 'parse_failed' + ifcError when the most-recent IFC has parse_error set", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const { engagementId } = await seedEngagementAndBriefing();
+    const snapshotId = await seedSnapshotForEngagement(engagementId);
+    await ctx.schema.db.insert(snapshotIfcFiles).values({
+      snapshotId,
+      blobObjectPath: "/objects/uploads/ifc-blob-bad",
+      fileSizeBytes: 2048,
+      parseError: "web-ifc threw on OpenModel: malformed STEP header",
+    });
+    const res = await asArchitect(
+      request(getApp()).get(`/api/engagements/${engagementId}/bim-model`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.ifcStatus).toBe("parse_failed");
+    expect(res.body.ifcError).toBe(
+      "web-ifc threw on OpenModel: malformed STEP header",
+    );
+    expect(res.body.bimModel).toBeNull();
+  });
+
+  it("returns ifcStatus 'idle' once parsed_at is set (parse cleanly completed)", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const { engagementId } = await seedEngagementAndBriefing();
+    const snapshotId = await seedSnapshotForEngagement(engagementId);
+    await ctx.schema.db.insert(snapshotIfcFiles).values({
+      snapshotId,
+      blobObjectPath: "/objects/uploads/ifc-blob-ok",
+      gltfObjectPath: "/objects/uploads/glb",
+      fileSizeBytes: 4096,
+      parsedAt: new Date(),
+      parseEntityCount: 0,
+    });
+    const res = await asArchitect(
+      request(getApp()).get(`/api/engagements/${engagementId}/bim-model`),
+    );
+    expect(res.status).toBe(200);
+    // Status is "idle" because parsing has finished cleanly. The
+    // bimModel is non-null in this branch (synthesized from the IFC
+    // ingest's bundle row even when there's no bim_models row), but
+    // the ifcStatus is still moot — the FE branches on bimModel
+    // first.
+    expect(res.body.ifcStatus).toBe("idle");
+    expect(res.body.ifcError).toBeNull();
+    expect(res.body.bimModel).not.toBeNull();
+    expect(res.body.bimModel.id).toBe(`ifc:${snapshotId}`);
+  });
+
+  it("respects most-recent-upload-wins: a failed older row + a still-parsing newer row reports 'parsing'", async () => {
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const { engagementId } = await seedEngagementAndBriefing();
+    const olderSnap = await seedSnapshotForEngagement(engagementId);
+    await ctx.schema.db.insert(snapshotIfcFiles).values({
+      snapshotId: olderSnap,
+      blobObjectPath: "/objects/uploads/ifc-old",
+      fileSizeBytes: 1024,
+      parseError: "old failure",
+      uploadedAt: new Date(Date.now() - 60_000),
+    });
+    const newerSnap = await seedSnapshotForEngagement(engagementId);
+    await ctx.schema.db.insert(snapshotIfcFiles).values({
+      snapshotId: newerSnap,
+      blobObjectPath: "/objects/uploads/ifc-new",
+      fileSizeBytes: 2048,
+      uploadedAt: new Date(),
+      // parsedAt + parseError null → parsing.
+    });
+    const res = await asArchitect(
+      request(getApp()).get(`/api/engagements/${engagementId}/bim-model`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.ifcStatus).toBe("parsing");
+    expect(res.body.ifcError).toBeNull();
   });
 });
 

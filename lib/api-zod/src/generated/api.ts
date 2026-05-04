@@ -2041,7 +2041,27 @@ export const GetEngagementBimModelResponse = zod
           zod
             .object({
               id: zod.string(),
-              briefingId: zod.string(),
+              briefingId: zod
+                .string()
+                .nullable()
+                .describe(
+                  "Null on `as-built-ifc` \/ `as-built-ifc-bundle` rows\n(Track B sprint). The C#-add-in-facing read at\n`loadElementsForBriefing` filters those rows out, so the\nadd-in never sees a null here. Web-viewer reads at\n`loadAsBuiltIfcElementsForEngagement` include them.\n",
+                ),
+              engagementId: zod
+                .string()
+                .nullable()
+                .describe(
+                  "Engagement scope. Always set on IFC rows; nullable on\nlegacy briefing-derived rows whose engagement is reachable\nvia `briefing_id → parcel_briefings.engagement_id`.\n",
+                ),
+              sourceKind: zod
+                .enum([
+                  "briefing-derived",
+                  "as-built-ifc",
+                  "as-built-ifc-bundle",
+                ])
+                .describe(
+                  "Track B sprint — provenance\/lens discriminator on\n`materializable_elements`. `briefing-derived` rows come from\nthe briefing engine; `as-built-ifc` rows are per-entity rows\nproduced by the IFC parser; `as-built-ifc-bundle` is the single\nsynthetic per-IFC-ingest row that carries the consolidated\nglTF for the viewer's first-row-with-glb-wins preference.\n",
+                ),
               elementKind: zod
                 .enum([
                   "terrain",
@@ -2051,9 +2071,10 @@ export const GetEngagementBimModelResponse = zod
                   "floodplain",
                   "wetland",
                   "neighbor-mass",
+                  "as-built-ifc",
                 ])
                 .describe(
-                  "DA-PI-5 \/ Spec 51a §2.4 — the seven element kinds the C# Revit\nadd-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on\nthe api-server `converterClient` so a materializable element\nsourced from a DXF round-trips through the same closed set.\n",
+                  "Eight values: the seven Spec 51a §2.4 briefing-derived kinds the\nC# Revit add-in materializes (DXF_LAYER_KINDS), plus\n`as-built-ifc` (Track B sprint) for rows produced by the\nserver-side IFC parser. The C# add-in's mirror does NOT need\nthe eighth value — IFC rows are filtered at the add-in-facing\nread in `routes\/bimModels.ts:loadElementsForBriefing`.\n",
                 ),
               briefingSourceId: zod.string().nullable(),
               label: zod.string().nullable(),
@@ -2064,11 +2085,29 @@ export const GetEngagementBimModelResponse = zod
                 ),
               glbObjectPath: zod.string().nullable(),
               locked: zod.boolean(),
+              ifcGlobalId: zod
+                .string()
+                .nullable()
+                .describe(
+                  "IFC `GlobalId` (the stable 22-character GUID encoding) for\n`as-built-ifc` \/ `as-built-ifc-bundle` rows; null otherwise.\nThe bundle row uses a sentinel `bundle:<snapshotId>` value.\n",
+                ),
+              ifcType: zod
+                .string()
+                .nullable()
+                .describe(
+                  "IFC entity type — `IfcWall`, `IfcDoor`, `IfcSpace`, etc. —\nfor IFC rows; null on briefing-derived rows. The bundle\nrow uses a sentinel `<bundle>` value.\n",
+                ),
+              propertySet: zod
+                .record(zod.string(), zod.unknown())
+                .nullable()
+                .describe(
+                  "Flattened IFC `Pset_\*Common` property values (Description,\nObjectType, PredefinedType in Phase 1) for IFC rows; null\non briefing-derived rows.\n",
+                ),
               createdAt: zod.coerce.date(),
               updatedAt: zod.coerce.date(),
             })
             .describe(
-              "DA-PI-5 \/ Spec 51a §2.4 — one piece of geometry the C# Revit\nadd-in materializes into the architect's active model. The\n`geometry` payload is discriminator-dependent (see the\ncolumn docstring on `materializable_elements.geometry`).\n",
+              "DA-PI-5 \/ Spec 51a §2.4 — one piece of geometry the C# Revit\nadd-in materializes, OR (Track B sprint) one IFC entity \/ IFC\nbundle ingested from a Revit IFC export. The `sourceKind`\ndiscriminator picks the lens; the `geometry` payload is\ndiscriminator-dependent (see the column docstring on\n`materializable_elements.geometry`).\n",
             ),
         ),
         createdAt: zod.coerce.date(),
@@ -2078,9 +2117,15 @@ export const GetEngagementBimModelResponse = zod
         "DA-PI-5 — the engagement's bim-model row plus the\nmaterializable elements derived from its currently-active\nbriefing.\n",
       )
       .nullable(),
+    ifcStatus: zod
+      .enum(["idle", "parsing", "parse_failed"])
+      .describe(
+        'Track B \/ Track C — derived status of the most-recent\n`snapshot_ifc_files` row for the engagement, used by the FE\nSnapshots tab to drive the BIM card\'s empty-state copy and\npolling. `idle` covers both \"no IFC ever pushed\" and \"IFC\nparsed cleanly\" (in the parsed case the bimModel will be\nnon-null and the status is moot). `parsing` means the most\nrecent IFC has uploaded but `parsed_at` is still null.\n`parse_failed` means the most recent IFC has a non-null\n`parse_error`.\n',
+      ),
+    ifcError: zod.string().nullable(),
   })
   .describe(
-    "Wire envelope for the bim-model read\/push routes. `bimModel`\nis `null` when no push has happened yet for the engagement\n— the first call to `POST \/engagements\/{id}\/bim-model` is\nwhat creates it.\n",
+    'Wire envelope for the bim-model read\/push routes. `bimModel`\nis `null` when no push has happened yet for the engagement\n— the first call to `POST \/engagements\/{id}\/bim-model` is\nwhat creates it.\n\n`ifcStatus` (Track C) reflects the engagement\'s most-recent\nIFC ingest state so the FE can drive a \"processing…\" \/\n\"parse failed\" empty-state UI without a second round-trip.\n`ifcError` is non-null only when `ifcStatus = \"parse_failed\"`.\n',
   );
 
 /**
@@ -2146,7 +2191,27 @@ export const PushEngagementBimModelResponse = zod
           zod
             .object({
               id: zod.string(),
-              briefingId: zod.string(),
+              briefingId: zod
+                .string()
+                .nullable()
+                .describe(
+                  "Null on `as-built-ifc` \/ `as-built-ifc-bundle` rows\n(Track B sprint). The C#-add-in-facing read at\n`loadElementsForBriefing` filters those rows out, so the\nadd-in never sees a null here. Web-viewer reads at\n`loadAsBuiltIfcElementsForEngagement` include them.\n",
+                ),
+              engagementId: zod
+                .string()
+                .nullable()
+                .describe(
+                  "Engagement scope. Always set on IFC rows; nullable on\nlegacy briefing-derived rows whose engagement is reachable\nvia `briefing_id → parcel_briefings.engagement_id`.\n",
+                ),
+              sourceKind: zod
+                .enum([
+                  "briefing-derived",
+                  "as-built-ifc",
+                  "as-built-ifc-bundle",
+                ])
+                .describe(
+                  "Track B sprint — provenance\/lens discriminator on\n`materializable_elements`. `briefing-derived` rows come from\nthe briefing engine; `as-built-ifc` rows are per-entity rows\nproduced by the IFC parser; `as-built-ifc-bundle` is the single\nsynthetic per-IFC-ingest row that carries the consolidated\nglTF for the viewer's first-row-with-glb-wins preference.\n",
+                ),
               elementKind: zod
                 .enum([
                   "terrain",
@@ -2156,9 +2221,10 @@ export const PushEngagementBimModelResponse = zod
                   "floodplain",
                   "wetland",
                   "neighbor-mass",
+                  "as-built-ifc",
                 ])
                 .describe(
-                  "DA-PI-5 \/ Spec 51a §2.4 — the seven element kinds the C# Revit\nadd-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on\nthe api-server `converterClient` so a materializable element\nsourced from a DXF round-trips through the same closed set.\n",
+                  "Eight values: the seven Spec 51a §2.4 briefing-derived kinds the\nC# Revit add-in materializes (DXF_LAYER_KINDS), plus\n`as-built-ifc` (Track B sprint) for rows produced by the\nserver-side IFC parser. The C# add-in's mirror does NOT need\nthe eighth value — IFC rows are filtered at the add-in-facing\nread in `routes\/bimModels.ts:loadElementsForBriefing`.\n",
                 ),
               briefingSourceId: zod.string().nullable(),
               label: zod.string().nullable(),
@@ -2169,11 +2235,29 @@ export const PushEngagementBimModelResponse = zod
                 ),
               glbObjectPath: zod.string().nullable(),
               locked: zod.boolean(),
+              ifcGlobalId: zod
+                .string()
+                .nullable()
+                .describe(
+                  "IFC `GlobalId` (the stable 22-character GUID encoding) for\n`as-built-ifc` \/ `as-built-ifc-bundle` rows; null otherwise.\nThe bundle row uses a sentinel `bundle:<snapshotId>` value.\n",
+                ),
+              ifcType: zod
+                .string()
+                .nullable()
+                .describe(
+                  "IFC entity type — `IfcWall`, `IfcDoor`, `IfcSpace`, etc. —\nfor IFC rows; null on briefing-derived rows. The bundle\nrow uses a sentinel `<bundle>` value.\n",
+                ),
+              propertySet: zod
+                .record(zod.string(), zod.unknown())
+                .nullable()
+                .describe(
+                  "Flattened IFC `Pset_\*Common` property values (Description,\nObjectType, PredefinedType in Phase 1) for IFC rows; null\non briefing-derived rows.\n",
+                ),
               createdAt: zod.coerce.date(),
               updatedAt: zod.coerce.date(),
             })
             .describe(
-              "DA-PI-5 \/ Spec 51a §2.4 — one piece of geometry the C# Revit\nadd-in materializes into the architect's active model. The\n`geometry` payload is discriminator-dependent (see the\ncolumn docstring on `materializable_elements.geometry`).\n",
+              "DA-PI-5 \/ Spec 51a §2.4 — one piece of geometry the C# Revit\nadd-in materializes, OR (Track B sprint) one IFC entity \/ IFC\nbundle ingested from a Revit IFC export. The `sourceKind`\ndiscriminator picks the lens; the `geometry` payload is\ndiscriminator-dependent (see the column docstring on\n`materializable_elements.geometry`).\n",
             ),
         ),
         createdAt: zod.coerce.date(),
@@ -2183,9 +2267,15 @@ export const PushEngagementBimModelResponse = zod
         "DA-PI-5 — the engagement's bim-model row plus the\nmaterializable elements derived from its currently-active\nbriefing.\n",
       )
       .nullable(),
+    ifcStatus: zod
+      .enum(["idle", "parsing", "parse_failed"])
+      .describe(
+        'Track B \/ Track C — derived status of the most-recent\n`snapshot_ifc_files` row for the engagement, used by the FE\nSnapshots tab to drive the BIM card\'s empty-state copy and\npolling. `idle` covers both \"no IFC ever pushed\" and \"IFC\nparsed cleanly\" (in the parsed case the bimModel will be\nnon-null and the status is moot). `parsing` means the most\nrecent IFC has uploaded but `parsed_at` is still null.\n`parse_failed` means the most recent IFC has a non-null\n`parse_error`.\n',
+      ),
+    ifcError: zod.string().nullable(),
   })
   .describe(
-    "Wire envelope for the bim-model read\/push routes. `bimModel`\nis `null` when no push has happened yet for the engagement\n— the first call to `POST \/engagements\/{id}\/bim-model` is\nwhat creates it.\n",
+    'Wire envelope for the bim-model read\/push routes. `bimModel`\nis `null` when no push has happened yet for the engagement\n— the first call to `POST \/engagements\/{id}\/bim-model` is\nwhat creates it.\n\n`ifcStatus` (Track C) reflects the engagement\'s most-recent\nIFC ingest state so the FE can drive a \"processing…\" \/\n\"parse failed\" empty-state UI without a second round-trip.\n`ifcError` is non-null only when `ifcStatus = \"parse_failed\"`.\n',
   );
 
 /**
@@ -2357,9 +2447,10 @@ export const ListBimModelDivergencesResponse = zod
               "floodplain",
               "wetland",
               "neighbor-mass",
+              "as-built-ifc",
             ])
             .describe(
-              "DA-PI-5 \/ Spec 51a §2.4 — the seven element kinds the C# Revit\nadd-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on\nthe api-server `converterClient` so a materializable element\nsourced from a DXF round-trips through the same closed set.\n",
+              "Eight values: the seven Spec 51a §2.4 briefing-derived kinds the\nC# Revit add-in materializes (DXF_LAYER_KINDS), plus\n`as-built-ifc` (Track B sprint) for rows produced by the\nserver-side IFC parser. The C# add-in's mirror does NOT need\nthe eighth value — IFC rows are filtered at the add-in-facing\nread in `routes\/bimModels.ts:loadElementsForBriefing`.\n",
             )
             .nullable(),
           elementLabel: zod.string().nullable(),
@@ -2451,9 +2542,10 @@ export const ResolveBimModelDivergenceResponse = zod
             "floodplain",
             "wetland",
             "neighbor-mass",
+            "as-built-ifc",
           ])
           .describe(
-            "DA-PI-5 \/ Spec 51a §2.4 — the seven element kinds the C# Revit\nadd-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on\nthe api-server `converterClient` so a materializable element\nsourced from a DXF round-trips through the same closed set.\n",
+            "Eight values: the seven Spec 51a §2.4 briefing-derived kinds the\nC# Revit add-in materializes (DXF_LAYER_KINDS), plus\n`as-built-ifc` (Track B sprint) for rows produced by the\nserver-side IFC parser. The C# add-in's mirror does NOT need\nthe eighth value — IFC rows are filtered at the add-in-facing\nread in `routes\/bimModels.ts:loadElementsForBriefing`.\n",
           )
           .nullable(),
         elementLabel: zod.string().nullable(),

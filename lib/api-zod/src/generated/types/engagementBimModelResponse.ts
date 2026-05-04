@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { EngagementBimModel } from "./engagementBimModel";
+import type { IfcIngestStatus } from "./ifcIngestStatus";
 
 /**
  * Wire envelope for the bim-model read/push routes. `bimModel`
@@ -13,7 +14,14 @@ is `null` when no push has happened yet for the engagement
 — the first call to `POST /engagements/{id}/bim-model` is
 what creates it.
 
+`ifcStatus` (Track C) reflects the engagement's most-recent
+IFC ingest state so the FE can drive a "processing…" /
+"parse failed" empty-state UI without a second round-trip.
+`ifcError` is non-null only when `ifcStatus = "parse_failed"`.
+
  */
 export interface EngagementBimModelResponse {
   bimModel: EngagementBimModel | null;
+  ifcStatus: IfcIngestStatus;
+  ifcError: string | null;
 }

@@ -7,10 +7,12 @@
  */
 
 /**
- * DA-PI-5 / Spec 51a §2.4 — the seven element kinds the C# Revit
-add-in knows how to materialize. Mirrors `DXF_LAYER_KINDS` on
-the api-server `converterClient` so a materializable element
-sourced from a DXF round-trips through the same closed set.
+ * Eight values: the seven Spec 51a §2.4 briefing-derived kinds the
+C# Revit add-in materializes (DXF_LAYER_KINDS), plus
+`as-built-ifc` (Track B sprint) for rows produced by the
+server-side IFC parser. The C# add-in's mirror does NOT need
+the eighth value — IFC rows are filtered at the add-in-facing
+read in `routes/bimModels.ts:loadElementsForBriefing`.
 
  */
 export type MaterializableElementKind =
@@ -24,4 +26,5 @@ export const MaterializableElementKind = {
   floodplain: "floodplain",
   wetland: "wetland",
   "neighbor-mass": "neighbor-mass",
+  "as-built-ifc": "as-built-ifc",
 } as const;

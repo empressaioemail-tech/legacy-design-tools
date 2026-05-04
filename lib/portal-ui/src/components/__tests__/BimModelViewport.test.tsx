@@ -247,12 +247,17 @@ function makeElement(
 ): MaterializableElement {
   return {
     briefingId: "br-1",
+    engagementId: null,
+    sourceKind: "briefing-derived",
     elementKind: "buildable-envelope",
     briefingSourceId: null,
     label: null,
     geometry: {},
     glbObjectPath: null,
     locked: true,
+    ifcGlobalId: null,
+    ifcType: null,
+    propertySet: null,
     createdAt: "2026-04-01T09:00:00.000Z",
     updatedAt: "2026-04-01T09:00:00.000Z",
     ...overrides,
@@ -1759,5 +1764,184 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
       ).toBe("2"),
     );
     expect(viewport.getAttribute("data-camera-target")).toBe("0.00,2.00,0.00");
+  });
+});
+
+/**
+ * Track C — IFC ingest surfaces.
+ *
+ * The IFC bundle row carries the consolidated glTF as `glbObjectPath`,
+ * so it loads through the existing `getGetMaterializableElementGlbUrl`
+ * branch with no new render pipeline. The legend overlay + IFC
+ * detail panel are pure-React derivations off the elements prop;
+ * tests assert them via the wrapper's data attributes.
+ */
+describe("BimModelViewport — IFC ingest (Track C)", () => {
+  function ifcBundle(
+    snapshotId: string,
+    overrides: Partial<MaterializableElement> = {},
+  ): MaterializableElement {
+    return makeElement({
+      id: `bundle-${snapshotId}`,
+      briefingId: null,
+      engagementId: "eng-1",
+      sourceKind: "as-built-ifc-bundle",
+      elementKind: "as-built-ifc",
+      ifcGlobalId: `bundle:${snapshotId}`,
+      ifcType: "<bundle>",
+      glbObjectPath: `/objects/uploads/${snapshotId}-glb`,
+      label: "As-built IFC bundle",
+      locked: false,
+      ...overrides,
+    });
+  }
+  function ifcEntity(
+    id: string,
+    type: string,
+    extras: Partial<MaterializableElement> = {},
+  ): MaterializableElement {
+    return makeElement({
+      id,
+      briefingId: null,
+      engagementId: "eng-1",
+      sourceKind: "as-built-ifc",
+      elementKind: "as-built-ifc",
+      ifcGlobalId: `0_guid_${id}`,
+      ifcType: type,
+      label: null,
+      locked: false,
+      ...extras,
+    });
+  }
+
+  it("classifies the IFC bundle as a glb-source element via /materializable-elements/{id}/glb", () => {
+    const bundle = ifcBundle("snap-1");
+    const { container } = render(<BimModelViewport elements={[bundle]} />);
+    const viewport = container.querySelector(
+      "[data-testid='bim-model-viewport']",
+    ) as HTMLElement;
+    expect(viewport.getAttribute("data-renderable-element-count")).toBe("1");
+    expect(viewport.getAttribute("data-ifc-bundle-element-id")).toBe(bundle.id);
+    expect(hoisted.fetchMock).toHaveBeenCalledWith(
+      `/api/materializable-elements/${bundle.id}/glb`,
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+  });
+
+  it("renders the per-IFC-type legend with counts sorted by frequency desc", () => {
+    const elements = [
+      ifcBundle("snap-1"),
+      ifcEntity("e-w-1", "IfcWall"),
+      ifcEntity("e-w-2", "IfcWall"),
+      ifcEntity("e-w-3", "IfcWall"),
+      ifcEntity("e-d-1", "IfcDoor"),
+      ifcEntity("e-s-1", "IfcSpace"),
+    ];
+    const { container } = render(<BimModelViewport elements={elements} />);
+    const viewport = container.querySelector(
+      "[data-testid='bim-model-viewport']",
+    ) as HTMLElement;
+    // 5 per-entity rows; bundle excluded from the count.
+    expect(viewport.getAttribute("data-ifc-entity-count")).toBe("5");
+    const legend = container.querySelector(
+      "[data-testid='bim-model-viewport-ifc-legend']",
+    );
+    expect(legend?.textContent).toBe(
+      "3 IfcWall · 1 IfcDoor · 1 IfcSpace",
+    );
+  });
+
+  it("does NOT render the legend when only briefing-derived elements are present", () => {
+    const elements = [
+      makeElement({
+        id: "br-1",
+        sourceKind: "briefing-derived",
+        elementKind: "buildable-envelope",
+        geometry: {
+          ring: [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+            [0, 10],
+          ],
+        },
+      }),
+    ];
+    const { container } = render(<BimModelViewport elements={elements} />);
+    expect(
+      container.querySelector("[data-testid='bim-model-viewport-ifc-legend']"),
+    ).toBeNull();
+    const viewport = container.querySelector(
+      "[data-testid='bim-model-viewport']",
+    ) as HTMLElement;
+    expect(viewport.getAttribute("data-ifc-bundle-element-id")).toBe("");
+  });
+
+  it("surfaces the IFC detail panel when the selection resolves to an as-built-ifc row", () => {
+    const wall = ifcEntity("e-w-1", "IfcWall", {
+      label: "WALL-001",
+      propertySet: { Description: "Exterior north wall", PredefinedType: "STANDARD" },
+    });
+    const elements = [ifcBundle("snap-1"), wall];
+    const { container } = render(
+      <BimModelViewport elements={elements} selectedElementRef="e-w-1" />,
+    );
+    const viewport = container.querySelector(
+      "[data-testid='bim-model-viewport']",
+    ) as HTMLElement;
+    expect(viewport.getAttribute("data-ifc-selected-element-id")).toBe("e-w-1");
+    const panel = container.querySelector(
+      "[data-testid='bim-model-viewport-ifc-detail']",
+    ) as HTMLElement;
+    expect(panel).not.toBeNull();
+    expect(panel.getAttribute("data-ifc-detail-element-id")).toBe("e-w-1");
+    expect(panel.textContent).toContain("IfcWall");
+    expect(panel.textContent).toContain("0_guid_e-w-1");
+    // Pset prose includes the JSON dump so the reviewer sees the
+    // raw values (Phase 1 — Phase 2 will replace with a typed UI).
+    const pset = container.querySelector(
+      "[data-testid='bim-model-viewport-ifc-detail-pset']",
+    ) as HTMLElement;
+    expect(pset.textContent).toContain("Exterior north wall");
+    expect(pset.textContent).toContain("STANDARD");
+  });
+
+  it("does NOT surface the IFC panel when the selection is briefing-derived", () => {
+    const elements = [
+      makeElement({
+        id: "br-1",
+        sourceKind: "briefing-derived",
+        elementKind: "buildable-envelope",
+        geometry: {
+          ring: [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+            [0, 10],
+          ],
+        },
+      }),
+    ];
+    const { container } = render(
+      <BimModelViewport elements={elements} selectedElementRef="br-1" />,
+    );
+    expect(
+      container.querySelector("[data-testid='bim-model-viewport-ifc-detail']"),
+    ).toBeNull();
+  });
+
+  it("renders the IFC detail panel for the bundle row itself when selected, with the synthetic GUID/type", () => {
+    const bundle = ifcBundle("snap-7");
+    const { container } = render(
+      <BimModelViewport elements={[bundle]} selectedElementRef={bundle.id} />,
+    );
+    const panel = container.querySelector(
+      "[data-testid='bim-model-viewport-ifc-detail']",
+    ) as HTMLElement;
+    expect(panel).not.toBeNull();
+    // Header reads "IFC Bundle" rather than the literal "<bundle>"
+    // so reviewers don't mistake the synthetic for a real entity.
+    expect(panel.textContent).toContain("IFC Bundle");
+    expect(panel.textContent).toContain("bundle:snap-7");
   });
 });

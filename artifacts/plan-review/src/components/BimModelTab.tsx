@@ -36,6 +36,10 @@ const ELEMENT_KIND_DISPLAY: Record<
   floodplain: { label: "Floodplain", order: 4 },
   wetland: { label: "Wetland", order: 5 },
   "neighbor-mass": { label: "Neighbor masses", order: 6 },
+  // Track B/C — IFC-derived rows. The reviewer's group label says
+  // "As-built (IFC)" rather than the literal kind value so the
+  // grouping reads like the briefing-derived headers above.
+  "as-built-ifc": { label: "As-built (IFC)", order: 7 },
 };
 
 const REFRESH_STATUS_COPY: Record<

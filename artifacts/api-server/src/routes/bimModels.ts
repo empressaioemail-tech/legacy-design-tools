@@ -173,6 +173,12 @@ interface MaterializableElementWire {
   ifcGlobalId: string | null;
   /** IFC entity type (`IfcWall`, etc.). Set only on as-built-ifc / as-built-ifc-bundle rows. */
   ifcType: string | null;
+  /**
+   * Flattened IFC `Pset_*Common` property values for IFC rows; null on
+   * briefing-derived rows. Track C surfaces this in the viewer's
+   * IFC-element-detail panel without a follow-up fetch.
+   */
+  propertySet: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -279,6 +285,11 @@ function toElementWire(e: MaterializableElement): MaterializableElementWire {
     locked: e.locked,
     ifcGlobalId: e.ifcGlobalId,
     ifcType: e.ifcType,
+    // The DB column is `jsonb` typed as `unknown`; only IFC rows set
+    // a non-null value (Track B parser populates Description /
+    // ObjectType / PredefinedType today; richer Pset traversal is
+    // a Phase 2 follow-up).
+    propertySet: (e.propertySet ?? null) as Record<string, unknown> | null,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };
@@ -612,6 +623,50 @@ async function toBimModelWire(bm: BimModel): Promise<BimModelWire> {
     createdAt: bm.createdAt.toISOString(),
     updatedAt: bm.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Resolve the engagement's most-recent IFC ingest state for the
+ * `ifcStatus` field on `EngagementBimModelResponse` (Track C). The FE
+ * uses the status to drive an empty-state-vs-progress copy split + a
+ * 2-second polling cadence while a parse is in flight.
+ *
+ *   - `idle`         — no IFC ever pushed for this engagement, OR the
+ *                      most recent IFC parsed cleanly (in which case
+ *                      bimModel will be non-null and the status is
+ *                      moot but harmless).
+ *   - `parsing`      — most recent IFC has `parsed_at` null AND no
+ *                      `parse_error`.
+ *   - `parse_failed` — most recent IFC has `parse_error` non-null.
+ *                      The blob is preserved for re-push triage.
+ */
+async function loadIfcIngestStatusForEngagement(
+  engagementId: string,
+): Promise<{ status: "idle" | "parsing" | "parse_failed"; error: string | null }> {
+  const rows = await db
+    .select({
+      parsedAt: snapshotIfcFiles.parsedAt,
+      parseError: snapshotIfcFiles.parseError,
+      uploadedAt: snapshotIfcFiles.uploadedAt,
+    })
+    .from(snapshotIfcFiles)
+    .innerJoin(snapshots, eq(snapshots.id, snapshotIfcFiles.snapshotId))
+    .where(eq(snapshots.engagementId, engagementId))
+    // Most-recent push wins: a re-upload supersedes the prior row's
+    // parse_error / parsed_at, so we read against `uploaded_at desc`
+    // not `parsed_at desc` (a still-parsing re-push of a previously-
+    // failed snapshot would otherwise stay stuck on `parse_failed`).
+    .orderBy(desc(snapshotIfcFiles.uploadedAt))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return { status: "idle", error: null };
+  if (row.parseError !== null) {
+    return { status: "parse_failed", error: row.parseError };
+  }
+  if (row.parsedAt === null) {
+    return { status: "parsing", error: null };
+  }
+  return { status: "idle", error: null };
 }
 
 /**
@@ -1070,16 +1125,28 @@ router.get(
         .where(eq(bimModels.engagementId, engagementId))
         .limit(1);
       const bm = rows[0];
+      // Resolve the IFC ingest status alongside the row read so the
+      // FE Snapshots tab can render "Processing IFC export…" / parse-
+      // failed copy without a second round-trip (Track C).
+      const ifcIngest = await loadIfcIngestStatusForEngagement(engagementId);
       if (!bm) {
         // Fallback: no bim_models row, but the engagement may have a
         // parsed IFC ingest (Track B sprint). Surface that as a
         // synthetic BimModelWire so the viewer can render IFC geometry
         // without the C# add-in having registered a row first.
         const synthesized = await synthesizeBimModelWireFromIfc(engagementId);
-        res.json({ bimModel: synthesized ?? null });
+        res.json({
+          bimModel: synthesized ?? null,
+          ifcStatus: ifcIngest.status,
+          ifcError: ifcIngest.error,
+        });
         return;
       }
-      res.json({ bimModel: await toBimModelWire(bm) });
+      res.json({
+        bimModel: await toBimModelWire(bm),
+        ifcStatus: ifcIngest.status,
+        ifcError: ifcIngest.error,
+      });
     } catch (err) {
       reqLog.error({ err, engagementId }, "get engagement bim-model failed");
       res.status(500).json({ error: "Failed to load bim-model" });
@@ -1203,7 +1270,20 @@ router.post(
       reqLog,
     );
 
-    res.status(200).json({ bimModel: await toBimModelWire(upserted) });
+    // POST also returns the same envelope as GET (Track C — `ifcStatus`
+    // is part of the `EngagementBimModelResponse` contract). The IFC
+    // ingest is independent of bim-model push, but a push that lands
+    // while a parse is in flight should still surface the parsing copy
+    // to whoever observes the POST response — they're rare in practice
+    // (the C# add-in pushes; the parsing is server-side ingest from a
+    // separate snapshot upload), but the wire shape must include the
+    // field unconditionally.
+    const ifcIngest = await loadIfcIngestStatusForEngagement(engagementId);
+    res.status(200).json({
+      bimModel: await toBimModelWire(upserted),
+      ifcStatus: ifcIngest.status,
+      ifcError: ifcIngest.error,
+    });
   },
 );
 

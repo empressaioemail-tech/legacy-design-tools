@@ -684,6 +684,45 @@ export function BimModelViewport({
 }: BimModelViewportProps) {
   const renderable = useMemo(() => classifyElements(elements), [elements]);
 
+  // Track C — IFC ingest surfaces. The consolidated glTF bundle row
+  // (sourceKind "as-built-ifc-bundle") loads through the existing
+  // glb-orphan branch in classifyElements above, so no special render
+  // pipeline is needed. We just need to know the bundle row is present
+  // (legend visibility) and which per-entity rows it represents
+  // (legend counts + IFC-detail panel content).
+  const ifcBundle = useMemo<MaterializableElement | null>(() => {
+    return (
+      elements.find(
+        (el) =>
+          el.sourceKind === "as-built-ifc-bundle" &&
+          el.glbObjectPath !== null &&
+          el.glbObjectPath !== "",
+      ) ?? null
+    );
+  }, [elements]);
+
+  // Per-IFC-type counts driven off the per-entity (`as-built-ifc`) rows.
+  // The bundle row carries a sentinel `<bundle>` ifc_type that we
+  // intentionally exclude from the legend — it isn't a real entity.
+  const ifcEntityCounts = useMemo<Array<[string, number]>>(() => {
+    const counts: Record<string, number> = {};
+    for (const el of elements) {
+      if (el.sourceKind !== "as-built-ifc") continue;
+      const t = el.ifcType ?? "Unknown";
+      counts[t] = (counts[t] ?? 0) + 1;
+    }
+    // Sorted by count desc then ifcType asc so the legend reads
+    // "47 IfcWall · 12 IfcDoor · …" — the most common entity first.
+    return Object.entries(counts).sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    );
+  }, [elements]);
+
+  const ifcEntityTotal = useMemo(
+    () => ifcEntityCounts.reduce((acc, [, n]) => acc + n, 0),
+    [ifcEntityCounts],
+  );
+
   // Three.js scene refs — the React state below mirrors what the
   // scene shows, and effects further down apply that state to
   // the scene (selection, camera fit, mesh add/remove).
@@ -825,6 +864,25 @@ export function BimModelViewport({
     if (!selectedElementRef) return null;
     return findElementByRef(elements, selectedElementRef);
   }, [elements, selectedElementRef]);
+
+  // Track C — when the selection resolves to an IFC row (per-entity
+  // or bundle), surface a small detail panel with the row's IFC
+  // metadata. Phase 1 stops at the JSON dump of `propertySet`; the
+  // panel is the foundation for Plan Review's "show me where" jump
+  // (Phase 2). Bundle rows have a sentinel ifc_type / ifc_global_id
+  // that we surface verbatim — the panel header marks them as
+  // "Bundle" so the reviewer doesn't mistake the synthetic for a
+  // real entity.
+  const selectedIfc = useMemo<MaterializableElement | null>(() => {
+    if (!selected) return null;
+    if (
+      selected.sourceKind !== "as-built-ifc" &&
+      selected.sourceKind !== "as-built-ifc-bundle"
+    ) {
+      return null;
+    }
+    return selected;
+  }, [selected]);
 
   const selectedRenderable = useMemo<Renderable | null>(() => {
     if (!selected) return null;
@@ -1469,6 +1527,9 @@ export function BimModelViewport({
       data-camera-distance={cameraDistanceAttr}
       data-camera-fit-applied-count={cameraFitAppliedCount}
       data-webgl-available={webGlOk ? "true" : "false"}
+      data-ifc-bundle-element-id={ifcBundle?.id ?? ""}
+      data-ifc-entity-count={ifcEntityTotal}
+      data-ifc-selected-element-id={selectedIfc?.id ?? ""}
       {...sourceLoadAttrs}
       style={{
         padding: 12,
@@ -1766,7 +1827,123 @@ export function BimModelViewport({
               . The element list still highlights its row below.
             </div>
           )}
+        {/*
+          Track C — IFC entity-type legend. Sits in the bottom-right
+          corner when the engagement has a parsed IFC bundle so the
+          reviewer can see what's loaded ("47 IfcWall · 8 IfcSpace
+          · 12 IfcDoor"). Bottom-right keeps top-left (gesture hint)
+          and top-right (Reset view) reserved for the existing
+          affordances. Only renders when the bundle is present AND
+          there's at least one per-entity row to count — an empty IFC
+          would otherwise float a "0 entities" pill on top of the
+          scene.
+        */}
+        {webGlOk && ifcBundle && ifcEntityCounts.length > 0 && (
+          <div
+            data-testid="bim-model-viewport-ifc-legend"
+            style={{
+              position: "absolute",
+              right: 8,
+              bottom: 8,
+              maxWidth: "55%",
+              background: "var(--bg-elevated)",
+              color: "var(--text-muted)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 4,
+              padding: "4px 8px",
+              fontSize: 11,
+              lineHeight: 1.35,
+              opacity: 0.92,
+              pointerEvents: "none",
+              zIndex: 2,
+            }}
+          >
+            {ifcEntityCounts
+              .map(([type, count]) => `${count} ${type}`)
+              .join(" · ")}
+          </div>
+        )}
       </div>
+      {/*
+        Track C — IFC element-detail panel. Sits below the canvas
+        rather than on top so the reviewer can read the JSON dump
+        without obscuring the geometry. Phase 1: ifcGlobalId, ifcType,
+        and the property_set jsonb. Phase 2 will replace the JSON
+        dump with a typed "show me where" affordance.
+      */}
+      {selectedIfc && (
+        <div
+          data-testid="bim-model-viewport-ifc-detail"
+          data-ifc-detail-element-id={selectedIfc.id}
+          style={{
+            border: "1px solid var(--border-default)",
+            borderRadius: 4,
+            padding: "8px 10px",
+            background: "var(--bg-input)",
+            fontSize: 12,
+            lineHeight: 1.4,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "baseline",
+              justifyContent: "space-between",
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>
+              {selectedIfc.sourceKind === "as-built-ifc-bundle"
+                ? "IFC Bundle"
+                : selectedIfc.ifcType ?? "IFC entity"}
+            </span>
+            <span
+              style={{
+                fontVariantNumeric: "tabular-nums",
+                color: "var(--text-muted)",
+              }}
+            >
+              {selectedIfc.ifcGlobalId ?? "<no GUID>"}
+            </span>
+          </div>
+          {selectedIfc.label !== null && selectedIfc.label !== "" && (
+            <div data-testid="bim-model-viewport-ifc-detail-label">
+              <strong style={{ fontWeight: 500 }}>Label:</strong>{" "}
+              {selectedIfc.label}
+            </div>
+          )}
+          <div data-testid="bim-model-viewport-ifc-detail-pset">
+            <strong style={{ fontWeight: 500 }}>Pset:</strong>{" "}
+            {selectedIfc.propertySet
+              ? Object.keys(selectedIfc.propertySet).length === 0
+                ? "—"
+                : null
+              : "—"}
+            {selectedIfc.propertySet &&
+              Object.keys(selectedIfc.propertySet).length > 0 && (
+                <pre
+                  style={{
+                    margin: "4px 0 0",
+                    padding: 6,
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: 3,
+                    fontSize: 11,
+                    overflow: "auto",
+                    maxHeight: 160,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {JSON.stringify(selectedIfc.propertySet, null, 2)}
+                </pre>
+              )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

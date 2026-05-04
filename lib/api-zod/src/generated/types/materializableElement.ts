@@ -7,17 +7,33 @@
  */
 import type { MaterializableElementGeometry } from "./materializableElementGeometry";
 import type { MaterializableElementKind } from "./materializableElementKind";
+import type { MaterializableElementPropertySet } from "./materializableElementPropertySet";
+import type { MaterializableElementSourceKind } from "./materializableElementSourceKind";
 
 /**
  * DA-PI-5 / Spec 51a §2.4 — one piece of geometry the C# Revit
-add-in materializes into the architect's active model. The
-`geometry` payload is discriminator-dependent (see the
-column docstring on `materializable_elements.geometry`).
+add-in materializes, OR (Track B sprint) one IFC entity / IFC
+bundle ingested from a Revit IFC export. The `sourceKind`
+discriminator picks the lens; the `geometry` payload is
+discriminator-dependent (see the column docstring on
+`materializable_elements.geometry`).
 
  */
 export interface MaterializableElement {
   id: string;
-  briefingId: string;
+  /** Null on `as-built-ifc` / `as-built-ifc-bundle` rows
+(Track B sprint). The C#-add-in-facing read at
+`loadElementsForBriefing` filters those rows out, so the
+add-in never sees a null here. Web-viewer reads at
+`loadAsBuiltIfcElementsForEngagement` include them.
+ */
+  briefingId: string | null;
+  /** Engagement scope. Always set on IFC rows; nullable on
+legacy briefing-derived rows whose engagement is reachable
+via `briefing_id → parcel_briefings.engagement_id`.
+ */
+  engagementId: string | null;
+  sourceKind: MaterializableElementSourceKind;
   elementKind: MaterializableElementKind;
   briefingSourceId: string | null;
   label: string | null;
@@ -25,6 +41,21 @@ export interface MaterializableElement {
   geometry: MaterializableElementGeometry;
   glbObjectPath: string | null;
   locked: boolean;
+  /** IFC `GlobalId` (the stable 22-character GUID encoding) for
+`as-built-ifc` / `as-built-ifc-bundle` rows; null otherwise.
+The bundle row uses a sentinel `bundle:<snapshotId>` value.
+ */
+  ifcGlobalId: string | null;
+  /** IFC entity type — `IfcWall`, `IfcDoor`, `IfcSpace`, etc. —
+for IFC rows; null on briefing-derived rows. The bundle
+row uses a sentinel `<bundle>` value.
+ */
+  ifcType: string | null;
+  /** Flattened IFC `Pset_*Common` property values (Description,
+ObjectType, PredefinedType in Phase 1) for IFC rows; null
+on briefing-derived rows.
+ */
+  propertySet: MaterializableElementPropertySet;
   createdAt: Date;
   updatedAt: Date;
 }
