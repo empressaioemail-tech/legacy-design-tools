@@ -60,21 +60,46 @@ export function hasApplicableAdapters(
 
 /**
  * The human-readable copy the route's 422 envelope and the FE empty-
- * pilot banner both surface. Two phrasings, branched on whether the
- * resolver landed on a state slug at all:
+ * pilot banner both surface. PL-04 reshaped the branches: federal
+ * adapters now apply to any geocoded engagement, so the no-applicable
+ * case is essentially "no geocode yet."
  *
- *   - `stateKey` set: the engagement is *in* a recognized state but
- *     no adapter has been registered for it (or its local key) yet.
- *     The architect's next step is "wait for an adapter / upload
- *     manually" — we name the slug so they can correlate with the
- *     adapter registry.
- *   - `stateKey` null: we couldn't resolve the engagement to any
- *     pilot state at all, usually because the city/state columns
- *     are blank. The architect's next step is "fill in city + state
- *     on Site Context" — the message names that explicit fix.
+ * Branches:
+ *   - `hasGeocode` false → no adapter can run; the architect's next
+ *     step is to add an address so the geocoder fills in lat/lng.
+ *   - `hasGeocode` true, `stateKey` null → defensive fallback. With a
+ *     finite lat/lng the federal adapters' `appliesTo` returns true,
+ *     so reaching this branch usually means a non-US coordinate or a
+ *     future federal adapter that gates more strictly. We surface a
+ *     neutral message so the route 422 reads naturally in that case.
+ *   - `hasGeocode` true, `stateKey` resolved, `localKey` null →
+ *     partial-coverage case: federal layers load but no state/local
+ *     adapter is wired for the resolved state yet. The architect's
+ *     next step is "upload a QGIS overlay or wait for adapter
+ *     support."
  */
-export function noApplicableAdaptersMessage(j: AdapterJurisdiction): string {
-  return j.stateKey
-    ? `No adapters configured for jurisdiction "${j.stateKey}"${j.localKey ? ` / ${j.localKey}` : ""}.`
-    : "Could not resolve a pilot jurisdiction from this engagement's site context (city/state/address). Add a city + state and try again.";
+export function noApplicableAdaptersMessage(args: {
+  jurisdiction: AdapterJurisdiction;
+  hasGeocode: boolean;
+}): string {
+  const { jurisdiction: j, hasGeocode } = args;
+  if (!hasGeocode) {
+    return "Add an address to enable site context layers.";
+  }
+  if (!j.stateKey) {
+    return "No applicable adapters for this engagement's site context.";
+  }
+  return `Federal layers loaded. No local adapter for ${stateLabel(j.stateKey)} yet — upload a QGIS overlay if you have one.`;
+}
+
+/** Display label for a resolved pilot state key. */
+function stateLabel(stateKey: NonNullable<AdapterJurisdiction["stateKey"]>): string {
+  switch (stateKey) {
+    case "utah":
+      return "Utah";
+    case "idaho":
+      return "Idaho";
+    case "texas":
+      return "Texas";
+  }
 }

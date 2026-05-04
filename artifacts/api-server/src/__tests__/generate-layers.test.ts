@@ -61,6 +61,7 @@ interface FakeAdapter {
   readonly provider: string;
   readonly jurisdictionGate: { state?: string; local?: string };
   appliesTo: (c: {
+    parcel: { latitude: number; longitude: number };
     jurisdiction: { stateKey: string | null; localKey: string | null };
   }) => boolean;
   run: () => Promise<{
@@ -127,9 +128,13 @@ function makeAdapter(
     appliesTo: (c) => {
       if (opts.local) return c.jurisdiction.localKey === opts.local;
       if (opts.state) return c.jurisdiction.stateKey === opts.state;
-      // No state/local gate ⇒ federal: applies whenever a pilot state
-      // resolved (mirrors the real federal adapters' contract).
-      return c.jurisdiction.stateKey !== null;
+      // No state/local gate ⇒ federal. PL-04: federal applies for any
+      // geocoded engagement, mirrors the real federal adapters' new
+      // lat/lng-only contract.
+      return (
+        Number.isFinite(c.parcel.latitude) &&
+        Number.isFinite(c.parcel.longitude)
+      );
     },
     run: async () => {
       if (opts.fail) {
@@ -332,7 +337,8 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     expect(res.body.error).toBe("engagement_not_found");
   });
 
-  it("422 when no adapters apply (out-of-pilot jurisdiction)", async () => {
+  it("PL-04: out-of-pilot but geocoded engagement runs the federal four (no 422)", async () => {
+    if (!ctx.schema) throw new Error("ctx");
     const eng = await seedEngagement({
       city: "Boulder",
       state: "CO",
@@ -342,8 +348,59 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     const res = await request(getApp()).post(
       `/api/engagements/${eng.id}/generate-layers`,
     );
+    expect(res.status).toBe(200);
+
+    const outcomes = res.body.outcomes as Array<{
+      adapterKey: string;
+      tier: string;
+      status: string;
+    }>;
+    // The Boulder context has stateKey=null + localKey=null, so no
+    // state/local fakes apply. The two federal fakes (FEMA + FCC)
+    // both fire — FEMA as ok, FCC as upstream-error per the fake's
+    // failure config. Every other fake is a no-coverage skip.
+    const ranKeys = outcomes
+      .filter((o) => o.status !== "no-coverage")
+      .map((o) => o.adapterKey)
+      .sort();
+    expect(ranKeys).toEqual(
+      ["fema:nfhl-flood-zone", "fcc:broadband"].sort(),
+    );
+    // The successful federal row was persisted as a briefing source,
+    // so the briefing wire has a non-empty `sources` array.
+    expect(res.body.briefing.sources.length).toBeGreaterThan(0);
+    expect(
+      res.body.briefing.sources.some(
+        (s: { sourceKind: string }) => s.sourceKind === "federal-adapter",
+      ),
+    ).toBe(true);
+  });
+
+  it("422 when the engagement has no geocode (no adapter can run)", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const name = "No-geocode Engagement";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name,
+        nameLower: name.trim().toLowerCase(),
+        jurisdiction: "Unknown",
+        jurisdictionCity: null,
+        jurisdictionState: null,
+        address: null,
+        latitude: null,
+        longitude: null,
+        status: "active",
+      })
+      .returning();
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/generate-layers`,
+    );
     expect(res.status).toBe(422);
     expect(res.body.error).toBe("no_applicable_adapters");
+    expect(res.body.message).toBe(
+      "Add an address to enable site context layers.",
+    );
   });
 
   it("Bastrop TX parcel runs Texas state + Bastrop local adapters and persists ok rows", async () => {

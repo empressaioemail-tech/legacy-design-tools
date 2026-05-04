@@ -424,7 +424,7 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
     // Headline + manual-upload guidance copy must be present so the
     // architect can act on the banner without reading the details.
     expect(
-      screen.getByText(/No adapters configured for this jurisdiction yet/i),
+      screen.getByText(/No adapters configured for this engagement yet/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -454,8 +454,7 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
       generate.capturedOptions!.mutation!.onError!(
         makeApiErrorLike(422, {
           error: "no_applicable_adapters",
-          message:
-            "Could not resolve a pilot jurisdiction from this engagement's site context.",
+          message: "Add an address to enable site context layers.",
         }),
         { id: hoisted.engagement.id },
         undefined,
@@ -1023,13 +1022,13 @@ describe("GenerateLayersSummaryBanner (Task #229)", () => {
  *      offscreen — the proactive gate is jurisdiction-driven, not a
  *      catch-all that breaks the happy path.
  */
-describe("SiteContextTab Generate Layers pre-flight (Task #189)", () => {
-  it("disables Generate Layers and renders the empty-pilot banner proactively for an out-of-pilot engagement", () => {
-    // Boulder CO: not in any of the three DA-PI-4 pilots
-    // (Bastrop TX, Moab UT, Salmon ID). The cached engagement
-    // record carries the city/state columns the resolver consults,
-    // so the proactive gate flips to "out of pilot" without the
-    // mutation ever firing.
+describe("SiteContextTab Generate Layers pre-flight (PL-04)", () => {
+  it("renders the federal-only banner + leaves Generate Layers ENABLED for a geocoded out-of-pilot engagement", () => {
+    // Boulder CO: not a state/local pilot, but geocoded — PL-04 lets
+    // federal adapters fire for any US lat/lng, so the architect
+    // gets partial coverage rather than a dead-end. The banner
+    // surfaces the partial-coverage notice and the button stays
+    // clickable.
     hoisted.engagement = {
       ...hoisted.engagement,
       jurisdiction: "Boulder, CO",
@@ -1053,58 +1052,92 @@ describe("SiteContextTab Generate Layers pre-flight (Task #189)", () => {
 
     renderPage();
 
-    // The proactive banner is up before any click — that's the
-    // entire point of Task #189: the architect doesn't have to
-    // discover the dead-end through a wasted POST.
+    const banner = screen.getByTestId("generate-layers-federal-only-banner");
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveAttribute("role", "status");
+    expect(
+      screen.getByText(/Federal layers will load — state\/local pending/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("generate-layers-federal-only-message"),
+    ).toHaveTextContent(/FEMA flood, USGS topo, EPA EJSCREEN, FCC broadband/);
+    // The supported-pilots list is reused from PILOT_JURISDICTIONS
+    // so a future adapter addition extends both surfaces from one
+    // registry edit.
+    const supported = screen.getByTestId(
+      "generate-layers-federal-only-supported",
+    );
+    for (const j of PILOT_JURISDICTIONS) {
+      expect(supported).toHaveTextContent(j.label);
+    }
+
+    // Generate Layers button is ENABLED — federal adapters will run.
+    const button = screen.getByTestId(
+      "generate-layers-button",
+    ) as HTMLButtonElement;
+    expect(button).not.toBeDisabled();
+    // Tooltip explains the partial-coverage scope without leaking
+    // the inner state machine.
+    expect(button).toHaveAttribute(
+      "title",
+      expect.stringMatching(/Run the federal adapters \(FEMA, USGS, EPA, FCC\)/i),
+    );
+    // The missing-geocode banner must NOT also be present.
+    expect(
+      screen.queryByTestId("generate-layers-no-adapters-banner"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the missing-geocode banner + DISABLES Generate Layers when the engagement has no geocode", () => {
+    // No geocode at all — the federal adapters' lat/lng-only
+    // contract bails, and so does every state/local adapter. The
+    // architect's actionable next step is "add an address."
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      jurisdiction: null as unknown as string,
+      address: null as unknown as string,
+      site: {
+        address: null,
+        geocode: null,
+        projectType: null,
+        zoningCode: null,
+        lotAreaSqft: null,
+      } as unknown,
+    };
+
+    renderPage();
+
     const banner = screen.getByTestId("generate-layers-no-adapters-banner");
     expect(banner).toBeInTheDocument();
     expect(banner).toHaveAttribute("role", "status");
-    // Pre-flight message comes from the shared
-    // `noApplicableAdaptersMessage` helper the server route uses,
-    // so the FE pre-flight copy and the BE 422 copy cannot drift.
-    // Boulder resolves to no `stateKey`, so the helper yields the
-    // "could not resolve a pilot jurisdiction" branch.
+    expect(
+      screen.getByText(/No adapters configured for this engagement yet/i),
+    ).toBeInTheDocument();
     expect(
       screen.getByTestId("generate-layers-no-adapters-message"),
-    ).toHaveTextContent(/Could not resolve a pilot jurisdiction/i);
-    // The actionable manual-upload guidance must render alongside
-    // the headline so the dead-end is immediately recoverable.
-    expect(
-      screen.getByText(/No adapters configured for this jurisdiction yet/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Upload a QGIS overlay below to seed the briefing manually\./i,
-      ),
-    ).toBeInTheDocument();
+    ).toHaveTextContent(/Add an address to enable site context layers\./i);
 
-    // Generate Layers button is disabled — no wasted round-trip.
     const button = screen.getByTestId(
       "generate-layers-button",
     ) as HTMLButtonElement;
     expect(button).toBeDisabled();
-    // Tooltip surfaces the same shared message so a hover reveals
-    // the cause without scrolling to the banner.
     expect(button).toHaveAttribute(
       "title",
-      expect.stringMatching(/Could not resolve a pilot jurisdiction/i),
+      expect.stringMatching(/Add an address to enable site context layers/i),
     );
-    // The generic error alert must NOT also be rendered — the
-    // proactive gate is exclusive of the post-error branch.
-    expect(
-      screen.queryByTestId("generate-layers-error"),
-    ).not.toBeInTheDocument();
   });
 
-  it("leaves the Generate Layers button enabled and the banner absent for an in-pilot engagement", () => {
-    // Default fixture is Moab UT — keep it as-is. This test is the
-    // happy-path counter-assertion: the proactive gate must not
-    // false-fire on an in-pilot engagement (would block every
-    // architect from running the layers).
+  it("leaves the Generate Layers button enabled and no banner for an in-pilot engagement", () => {
+    // Default fixture is Moab UT — full state/local pilot coverage,
+    // happy-path counter-assertion that the proactive gate doesn't
+    // false-fire on an in-pilot engagement.
     renderPage();
 
     expect(
       screen.queryByTestId("generate-layers-no-adapters-banner"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("generate-layers-federal-only-banner"),
     ).not.toBeInTheDocument();
     const button = screen.getByTestId(
       "generate-layers-button",

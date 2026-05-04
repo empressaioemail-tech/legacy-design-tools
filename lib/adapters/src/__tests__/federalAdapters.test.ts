@@ -39,6 +39,13 @@ const offPilot: AdapterContext = {
   parcel: { latitude: 40.0, longitude: -105.27 }, // Boulder, CO
   jurisdiction: { stateKey: null, localKey: null },
 };
+// PL-04: federal adapters now apply nationwide whenever lat/lng is
+// finite, so the genuine negative case is "engagement has no
+// geocode" — NaN coordinates short-circuit `appliesTo` to false.
+const noGeocode: AdapterContext = {
+  parcel: { latitude: NaN, longitude: NaN },
+  jurisdiction: { stateKey: null, localKey: null },
+};
 
 describe("FEMA NFHL flood-zone adapter", () => {
   it("returns inSpecialFloodHazardArea=true with the FEMA flood zone for an in-floodplain parcel", async () => {
@@ -78,11 +85,21 @@ describe("FEMA NFHL flood-zone adapter", () => {
     expect(outcomes[0].result?.note).toMatch(/Zone X/i);
   });
 
-  it("does not run when the engagement has no resolved pilot state", async () => {
-    const fetchImpl = vi.fn();
+  it("runs for an off-pilot but geocoded engagement (PL-04: federal applies nationwide)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(femaNfhlFeature));
     const outcomes = await runAdapters({
       adapters: [femaNfhlAdapter],
       context: { ...offPilot, fetchImpl },
+    });
+    expect(outcomes[0].status).toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("does not run when the engagement has no geocode", async () => {
+    const fetchImpl = vi.fn();
+    const outcomes = await runAdapters({
+      adapters: [femaNfhlAdapter],
+      context: { ...noGeocode, fetchImpl },
     });
     expect(outcomes[0].status).toBe("no-coverage");
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -417,9 +434,31 @@ describe("FCC broadband adapter", () => {
   });
 });
 
-describe("federal adapter gating", () => {
-  it("skips every federal adapter when the engagement has no resolved pilot state", async () => {
+describe("federal adapter gating (PL-04)", () => {
+  it("skips every federal adapter when the engagement has no geocode", async () => {
     const fetchImpl = vi.fn();
+    const outcomes = await runAdapters({
+      adapters: [
+        femaNfhlAdapter,
+        usgsNedAdapter,
+        epaEjscreenAdapter,
+        fccBroadbandAdapter,
+      ],
+      context: { ...noGeocode, fetchImpl },
+    });
+    expect(outcomes.every((o) => o.status === "no-coverage")).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("invokes every federal adapter for an off-pilot but geocoded engagement", async () => {
+    // Each fetch returns the per-adapter shape the success path expects;
+    // we only care that `appliesTo` accepted the off-pilot stateKey.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(femaNfhlFeature))
+      .mockResolvedValueOnce(jsonResponse(epqsElevationFeet))
+      .mockResolvedValueOnce(jsonResponse(ejscreenBlockGroup))
+      .mockResolvedValueOnce(jsonResponse(fccBroadbandFeatures));
     const outcomes = await runAdapters({
       adapters: [
         femaNfhlAdapter,
@@ -429,7 +468,7 @@ describe("federal adapter gating", () => {
       ],
       context: { ...offPilot, fetchImpl },
     });
-    expect(outcomes.every((o) => o.status === "no-coverage")).toBe(true);
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(outcomes.every((o) => o.status === "ok")).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 });

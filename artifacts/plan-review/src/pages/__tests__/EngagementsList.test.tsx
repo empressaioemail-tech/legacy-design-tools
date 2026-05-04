@@ -261,8 +261,13 @@ describe("EngagementsList — empty-pilot pill (Task #278)", () => {
     // shape the EngagementDetail banner would compute from. We assert
     // against the shared helper directly so a copy tweak on either
     // side fails this test instead of silently drifting.
+    // PL-04: the on-hold/archived fixtures have no geocode at all,
+    // so the helper picks the missing-geocode branch.
     expect(onHoldPill?.getAttribute("title")).toBe(
-      noApplicableAdaptersMessage({ stateKey: null, localKey: null }),
+      noApplicableAdaptersMessage({
+        jurisdiction: { stateKey: null, localKey: null },
+        hasGeocode: false,
+      }),
     );
 
     const archivedRow = screen.getByTestId("engagement-row-eng-archived");

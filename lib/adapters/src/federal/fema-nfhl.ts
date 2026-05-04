@@ -8,10 +8,14 @@
  * `AE`, `X`, `VE`) plus the supporting attributes (`SFHA_TF`,
  * `STATIC_BFE`, `ZONE_SUBTY`).
  *
- * Tier gating: NFHL is national, not pilot-state-specific, so the
- * adapter applies for any engagement we have a resolved pilot state
- * for (the runner gates non-pilot engagements upstream). We do not
- * require a `localKey` — federal coverage is uniform.
+ * Tier gating: NFHL is national, not pilot-state-specific. Per PL-04
+ * the federal adapter applies for any geocoded engagement (finite
+ * lat/lng), regardless of whether the resolver landed on a pilot
+ * state slug. Out-of-pilot engagements receive federal layers + a
+ * UI banner explaining state/local adapters are pending. The runner
+ * already converts NaN-coord adapters to per-row `no-coverage`
+ * outcomes (see runner.ts), so the finite-coords check is the only
+ * meaningful gate.
  */
 
 import { arcgisPointQuery } from "../arcgis";
@@ -41,12 +45,16 @@ const FEMA_NFHL_FLOOD_ZONES =
 export const FEMA_NFHL_FRESHNESS_THRESHOLD_MONTHS = 12;
 
 function federalApplies(ctx: AdapterContext): boolean {
-  // Federal adapters cover the entire US. We still gate on a resolved
-  // pilot state so an out-of-pilot engagement 422s consistently with
-  // the rest of DA-PI-4 — once additional pilots come online the
-  // resolver picks up the new state keys and federal adapters follow
-  // automatically.
-  return ctx.jurisdiction.stateKey !== null;
+  // PL-04: federal adapters apply nationwide whenever the engagement is
+  // geocoded. The earlier gate (`stateKey !== null`) coupled federal
+  // coverage to the pilot-state list so an out-of-pilot engagement
+  // 422'd consistently; that's now decoupled — federal layers fire for
+  // any US lat/lng and the UI surfaces a partial-coverage banner when
+  // state/local adapters aren't yet wired for the parcel.
+  return (
+    Number.isFinite(ctx.parcel.latitude) &&
+    Number.isFinite(ctx.parcel.longitude)
+  );
 }
 
 function nowIso(): string {

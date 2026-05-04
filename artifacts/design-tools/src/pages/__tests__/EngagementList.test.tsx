@@ -165,37 +165,37 @@ afterEach(() => {
   cleanup();
 });
 
-describe("EngagementList — empty-pilot pill", () => {
-  it("renders the 'No adapters' pill on out-of-pilot rows with the shared helper's message as its tooltip", () => {
+describe("EngagementList — empty-pilot pill (PL-04)", () => {
+  it("renders the 'No adapters' pill only on rows whose engagement has no geocode", () => {
     renderList();
 
-    // The Boulder row resolves to no applicable adapters because
-    // Colorado is not a pilot state — the pill must be present and
-    // its tooltip must match `noApplicableAdaptersMessage` for the
-    // resolved jurisdiction so the list copy stays in lockstep with
-    // the detail-tab banner.
+    // PL-04: Boulder CO is geocoded, so federal adapters apply and
+    // the row is now treated as in-pilot. The pill must be absent.
     const boulderCard = screen.getByTestId("engagement-card-eng-boulder");
-    expect(boulderCard.getAttribute("data-in-pilot")).toBe("false");
-    const boulderPill = boulderCard.querySelector(
-      "[data-testid='engagement-card-no-adapters-pill']",
-    );
-    expect(boulderPill).not.toBeNull();
-    // Boulder has city + state set, so the resolver lands on the
-    // state-key-null branch (Colorado isn't in the registry), which
-    // is the same input shape the detail banner would compute from.
-    expect(boulderPill?.getAttribute("title")).toBe(
-      noApplicableAdaptersMessage({ stateKey: null, localKey: null }),
-    );
-
-    // The unaddressed row also has no applicable adapters; same pill,
-    // same shared-helper tooltip.
-    const unresolvedCard = screen.getByTestId("engagement-card-eng-unresolved");
-    expect(unresolvedCard.getAttribute("data-in-pilot")).toBe("false");
+    expect(boulderCard.getAttribute("data-in-pilot")).toBe("true");
     expect(
-      unresolvedCard.querySelector(
+      boulderCard.querySelector(
         "[data-testid='engagement-card-no-adapters-pill']",
       ),
-    ).not.toBeNull();
+    ).toBeNull();
+
+    // The unaddressed row has no geocode at all — federal adapters
+    // bail along with state/local, so this row is the genuine
+    // no-applicable-adapters case the pill is meant to surface.
+    const unresolvedCard = screen.getByTestId("engagement-card-eng-unresolved");
+    expect(unresolvedCard.getAttribute("data-in-pilot")).toBe("false");
+    const unresolvedPill = unresolvedCard.querySelector(
+      "[data-testid='engagement-card-no-adapters-pill']",
+    );
+    expect(unresolvedPill).not.toBeNull();
+    // Tooltip flows from the shared helper — under PL-04 the
+    // no-geocode branch reads "Add an address …".
+    expect(unresolvedPill?.getAttribute("title")).toBe(
+      noApplicableAdaptersMessage({
+        jurisdiction: { stateKey: null, localKey: null },
+        hasGeocode: false,
+      }),
+    );
   });
 
   it("does NOT render the pill on rows whose jurisdiction is in the pilot", () => {
@@ -210,31 +210,29 @@ describe("EngagementList — empty-pilot pill", () => {
     ).toBeNull();
   });
 
-  it("counts out-of-pilot engagements in the header summary", () => {
+  it("counts out-of-pilot (no-geocode) engagements in the header summary", () => {
     renderList();
 
     const tally = screen.getByTestId("engagements-out-of-pilot-tally");
-    // Boulder + unaddressed → 2 of the 3 fixture rows.
-    expect(tally.textContent).toBe("2 out of pilot");
+    // PL-04: only the unaddressed row is "out of pilot" — Boulder
+    // has a geocode and now picks up the federal four.
+    expect(tally.textContent).toBe("1 out of pilot");
   });
 
-  it("sorts in-pilot rows ahead of out-of-pilot rows while preserving 'updatedAt desc' within each group (Task #277)", () => {
+  it("sorts in-pilot rows ahead of out-of-pilot rows while preserving 'updatedAt desc' within each group", () => {
     renderList();
 
-    // The fixture is delivered in API order (`updatedAt desc`):
-    // Boulder (out-of-pilot, newest), then Moab (in-pilot), then
-    // the unaddressed row (out-of-pilot, oldest). After the sort
-    // the actionable Moab row must float to the top so an architect
-    // can run Generate Layers on the in-pilot subset without a
-    // scan, and Boulder must still appear above the unaddressed row
-    // in the out-of-pilot tail because the sort is stable.
+    // PL-04: Boulder is in-pilot (federal-only). The two in-pilot
+    // rows are sorted by `updatedAt desc` — Boulder (2026-04-20) ahead
+    // of Moab (2026-04-15) — and the unaddressed row stays in the
+    // out-of-pilot tail.
     const cards = document.querySelectorAll(
       "[data-testid^='engagement-card-eng-']",
     );
     const order = Array.from(cards).map((c) => c.getAttribute("data-testid"));
     expect(order).toEqual([
-      "engagement-card-eng-moab",
       "engagement-card-eng-boulder",
+      "engagement-card-eng-moab",
       "engagement-card-eng-unresolved",
     ]);
   });
@@ -249,9 +247,9 @@ describe("EngagementList — empty-pilot pill", () => {
 
     fireEvent.click(screen.getByTestId("engagements-filter-in-pilot"));
 
-    // Only the Moab pilot row survives the filter.
+    // Boulder + Moab survive; only the unaddressed row is hidden.
     expect(screen.getByTestId("engagement-card-eng-moab")).toBeTruthy();
-    expect(screen.queryByTestId("engagement-card-eng-boulder")).toBeNull();
+    expect(screen.getByTestId("engagement-card-eng-boulder")).toBeTruthy();
     expect(screen.queryByTestId("engagement-card-eng-unresolved")).toBeNull();
 
     // Toggling back off restores every row — proves the filter is a

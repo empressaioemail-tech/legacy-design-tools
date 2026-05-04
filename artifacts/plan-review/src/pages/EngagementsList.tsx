@@ -102,6 +102,7 @@ function computeEligibility(e: EngagementSummary): {
   });
   const lat = geocode?.latitude ?? NaN;
   const lng = geocode?.longitude ?? NaN;
+  const hasGeocode = Number.isFinite(lat) && Number.isFinite(lng);
   const ctx: AdapterContext = {
     parcel: { latitude: lat, longitude: lng },
     jurisdiction,
@@ -109,7 +110,7 @@ function computeEligibility(e: EngagementSummary): {
   const applicable = filterApplicableAdapters(ctx);
   return {
     isInPilot: applicable.length > 0,
-    message: noApplicableAdaptersMessage(jurisdiction),
+    message: noApplicableAdaptersMessage({ jurisdiction, hasGeocode }),
   };
 }
 
