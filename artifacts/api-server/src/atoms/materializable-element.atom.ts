@@ -94,12 +94,27 @@ export type MaterializableElementEventType =
 export interface MaterializableElementTypedPayload {
   id: string;
   found: boolean;
-  briefingId?: string;
+  /**
+   * Null on as-built-ifc / as-built-ifc-bundle rows (Track B sprint).
+   * Optional+nullable so the typed payload stays a permissive union.
+   */
+  briefingId?: string | null;
   briefingSourceId?: string | null;
   elementKind?: string;
+  /**
+   * Provenance lens: 'briefing-derived' | 'as-built-ifc' | 'as-built-ifc-bundle'.
+   * Surfaced in prose to disambiguate "design requirement" from "as-built IFC".
+   */
+  sourceKind?: string;
+  /** Engagement scope. Always set on IFC rows; nullable on legacy briefing rows. */
+  engagementId?: string | null;
   label?: string | null;
   locked?: boolean;
   glbObjectPath?: string | null;
+  /** IFC GUID — set only on as-built-ifc / as-built-ifc-bundle rows. */
+  ifcGlobalId?: string | null;
+  /** IFC entity type — set only on as-built-ifc / as-built-ifc-bundle rows. */
+  ifcType?: string | null;
 }
 
 export interface MaterializableElementAtomDeps {
@@ -194,9 +209,17 @@ export function makeMaterializableElementAtom(
       const lockedFragment = row.locked
         ? "locked"
         : "advisory (architect may modify without divergence)";
+      // Provenance fragment disambiguates briefing-derived design
+      // requirements from as-built IFC rows ingested from a Revit export.
+      const provenanceFragment =
+        row.sourceKind === "as-built-ifc"
+          ? `As-built IFC ${row.ifcType ?? "<unknown type>"} (GUID ${row.ifcGlobalId ?? "<missing>"}).`
+          : row.sourceKind === "as-built-ifc-bundle"
+            ? "Consolidated as-built IFC bundle (carries glTF for the viewer)."
+            : `Derived from briefing ${row.briefingId ?? "<unknown>"}.`;
       const proseRaw =
-        `Materializable element ${row.id} (kind: ${row.elementKind})${labelFragment} — ${lockedFragment}. ` +
-        `Derived from briefing ${row.briefingId}.`;
+        `Materializable element ${row.id} (kind: ${row.elementKind}, source: ${row.sourceKind})${labelFragment} — ${lockedFragment}. ` +
+        provenanceFragment;
       const prose =
         proseRaw.length > MATERIALIZABLE_ELEMENT_PROSE_MAX_CHARS
           ? proseRaw.slice(0, MATERIALIZABLE_ELEMENT_PROSE_MAX_CHARS - 1) + "…"
@@ -204,10 +227,14 @@ export function makeMaterializableElementAtom(
 
       const keyMetrics: KeyMetric[] = [
         { label: "Kind", value: row.elementKind },
+        { label: "Source", value: row.sourceKind },
         { label: "Locked", value: row.locked ? "yes" : "no" },
       ];
       if (row.glbObjectPath) {
         keyMetrics.push({ label: "Glb artifact", value: row.glbObjectPath });
+      }
+      if (row.ifcType) {
+        keyMetrics.push({ label: "IFC type", value: row.ifcType });
       }
 
       const typed = {
@@ -216,9 +243,13 @@ export function makeMaterializableElementAtom(
         briefingId: row.briefingId,
         briefingSourceId: row.briefingSourceId,
         elementKind: row.elementKind,
+        sourceKind: row.sourceKind,
+        engagementId: row.engagementId,
         label: row.label,
         locked: row.locked,
         glbObjectPath: row.glbObjectPath,
+        ifcGlobalId: row.ifcGlobalId,
+        ifcType: row.ifcType,
       } satisfies MaterializableElementTypedPayload;
 
       if (!latestEventId) {

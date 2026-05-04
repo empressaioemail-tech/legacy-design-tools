@@ -39,6 +39,8 @@
     "pino": "^9",
     "pino-http": "^10",
     "puppeteer": "^24.42.0",
+    "web-ifc": "^0.0.71",
+    "@gltf-transform/core": "^4.4.0",
     "zod": "catalog:"
   },
   "devDependencies": {

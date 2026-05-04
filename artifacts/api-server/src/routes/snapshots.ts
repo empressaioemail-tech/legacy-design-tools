@@ -36,6 +36,11 @@ import { emitEngagementJurisdictionResolvedEvent } from "../lib/engagementEvents
 import { hydrateActors, type HydratedActor } from "../lib/userLookup";
 import { kickoffBriefingGeneration } from "./parcelBriefings";
 import { extractSheetCrossRefs } from "../lib/sheetCrossRefs";
+import {
+  ingestSnapshotIfc,
+  streamSnapshotIfcBlob,
+  streamSnapshotIfcGltf,
+} from "../lib/ifcIngest";
 
 /**
  * Engagement event-type literals used by the producers in this file.
@@ -961,5 +966,76 @@ router.get(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Track B sprint — IFC ingest endpoints.
+//   POST /api/snapshots/:id/ifc      Multipart upload from the Revit add-in.
+//   GET  /api/snapshots/:id/ifc      Raw IFC blob (admin / debug).
+//   GET  /api/snapshots/:id/ifc/gltf Consolidated glTF for the viewer.
+// All three require the same x-snapshot-secret as the rest of this file.
+// ---------------------------------------------------------------------------
+
+async function lookupSnapshotForIfc(
+  snapshotId: string,
+): Promise<{ id: string; engagementId: string } | null> {
+  const rows = await db
+    .select({ id: snapshots.id, engagementId: snapshots.engagementId })
+    .from(snapshots)
+    .where(eq(snapshots.id, snapshotId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+router.post("/snapshots/:id/ifc", async (req: Request, res: Response) => {
+  const provided = req.header("x-snapshot-secret");
+  if (!provided || provided !== snapshotSecret) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  const contentType = req.headers["content-type"] ?? "";
+  if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+    res.status(415).json({ error: "expected_multipart" });
+    return;
+  }
+  const snapshotId = req.params["id"];
+  if (!snapshotId) {
+    res.status(400).json({ error: "missing_snapshot_id" });
+    return;
+  }
+  const snapshot = await lookupSnapshotForIfc(String(snapshotId));
+  if (!snapshot) {
+    res.status(404).json({ error: "snapshot_not_found" });
+    return;
+  }
+  await ingestSnapshotIfc({ req, res, snapshot });
+});
+
+router.get("/snapshots/:id/ifc", async (req: Request, res: Response) => {
+  const provided = req.header("x-snapshot-secret");
+  if (!provided || provided !== snapshotSecret) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  const snapshotId = req.params["id"];
+  if (!snapshotId) {
+    res.status(400).json({ error: "missing_snapshot_id" });
+    return;
+  }
+  await streamSnapshotIfcBlob({ req, res, snapshotId: String(snapshotId) });
+});
+
+router.get("/snapshots/:id/ifc/gltf", async (req: Request, res: Response) => {
+  const provided = req.header("x-snapshot-secret");
+  if (!provided || provided !== snapshotSecret) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  const snapshotId = req.params["id"];
+  if (!snapshotId) {
+    res.status(400).json({ error: "missing_snapshot_id" });
+    return;
+  }
+  await streamSnapshotIfcGltf({ req, res, snapshotId: String(snapshotId) });
+});
 
 export default router;

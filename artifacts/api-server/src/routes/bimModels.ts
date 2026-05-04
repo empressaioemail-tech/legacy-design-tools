@@ -48,12 +48,14 @@ import {
   bimModels,
   materializableElements,
   briefingDivergences,
+  snapshots,
+  snapshotIfcFiles,
   BRIEFING_DIVERGENCE_REASONS,
   type BimModel,
   type MaterializableElement,
   type BriefingDivergence,
 } from "@workspace/db";
-import { eq, desc, sql, and, isNull } from "drizzle-orm";
+import { eq, desc, sql, and, isNull, isNotNull, inArray } from "drizzle-orm";
 import {
   GetEngagementBimModelParams,
   PushEngagementBimModelParams,
@@ -150,13 +152,27 @@ const BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR = {
 
 interface MaterializableElementWire {
   id: string;
-  briefingId: string;
+  /**
+   * Null only for IFC-derived rows (Track B sprint). The C#-add-in-facing
+   * read at `loadElementsForBriefing` filters these out, so the add-in
+   * never sees a null here. Web-viewer reads via `loadElementsForEngagement`
+   * include them.
+   */
+  briefingId: string | null;
   elementKind: string;
+  /** Provenance lens: 'briefing-derived' | 'as-built-ifc' | 'as-built-ifc-bundle'. */
+  sourceKind: string;
+  /** Engagement scope. Always set for IFC rows; nullable on legacy briefing rows. */
+  engagementId: string | null;
   briefingSourceId: string | null;
   label: string | null;
   geometry: Record<string, unknown>;
   glbObjectPath: string | null;
   locked: boolean;
+  /** IFC GlobalId (22-char GUID). Set only on as-built-ifc / as-built-ifc-bundle rows. */
+  ifcGlobalId: string | null;
+  /** IFC entity type (`IfcWall`, etc.). Set only on as-built-ifc / as-built-ifc-bundle rows. */
+  ifcType: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -251,6 +267,8 @@ function toElementWire(e: MaterializableElement): MaterializableElementWire {
     id: e.id,
     briefingId: e.briefingId,
     elementKind: e.elementKind,
+    sourceKind: e.sourceKind,
+    engagementId: e.engagementId,
     briefingSourceId: e.briefingSourceId,
     label: e.label,
     // The DB column is a `jsonb` typed as `unknown` by drizzle's
@@ -259,6 +277,8 @@ function toElementWire(e: MaterializableElement): MaterializableElementWire {
     geometry: (e.geometry ?? {}) as Record<string, unknown>,
     glbObjectPath: e.glbObjectPath,
     locked: e.locked,
+    ifcGlobalId: e.ifcGlobalId,
+    ifcType: e.ifcType,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
   };
@@ -486,6 +506,11 @@ async function loadActiveBriefingUpdatedAt(
 /**
  * Load the materializable elements attached to a briefing, kind-
  * grouped order so the C# add-in can iterate in a predictable order.
+ *
+ * Track B sprint: filter to `source_kind = 'briefing-derived'` so the
+ * C#-facing read does NOT surface IFC-derived rows the add-in cannot
+ * materialize. IFC rows are surfaced via the engagement-level read in
+ * {@link loadAsBuiltIfcElementsForEngagement}.
  */
 async function loadElementsForBriefing(
   briefingId: string,
@@ -493,15 +518,88 @@ async function loadElementsForBriefing(
   return db
     .select()
     .from(materializableElements)
-    .where(eq(materializableElements.briefingId, briefingId))
+    .where(
+      and(
+        eq(materializableElements.briefingId, briefingId),
+        eq(materializableElements.sourceKind, "briefing-derived"),
+      ),
+    )
     .orderBy(materializableElements.elementKind, materializableElements.createdAt);
+}
+
+/**
+ * Load the as-built-ifc rows for an engagement's most-recently-parsed
+ * snapshot IFC ingest (Track B sprint). Returns the bundle row first
+ * (the one carrying the consolidated glTF `glb_object_path`) so the
+ * viewer's "first row with glb_object_path wins" preference picks it
+ * up, followed by the per-IFC-entity rows.
+ *
+ * Returns `null` if the engagement has no parsed IFC. Returns `[]` if
+ * the most-recent IFC parsed cleanly but produced zero entities (a
+ * legitimate edge case for an empty / shell-only IFC).
+ */
+async function loadAsBuiltIfcElementsForEngagement(
+  engagementId: string,
+): Promise<{
+  ifcFile: { snapshotId: string; parsedAt: Date | null; gltfObjectPath: string | null } | null;
+  elements: MaterializableElement[];
+}> {
+  const ifcRows = await db
+    .select({
+      snapshotId: snapshotIfcFiles.snapshotId,
+      parsedAt: snapshotIfcFiles.parsedAt,
+      gltfObjectPath: snapshotIfcFiles.gltfObjectPath,
+    })
+    .from(snapshotIfcFiles)
+    .innerJoin(snapshots, eq(snapshots.id, snapshotIfcFiles.snapshotId))
+    .where(
+      and(
+        eq(snapshots.engagementId, engagementId),
+        isNotNull(snapshotIfcFiles.parsedAt),
+      ),
+    )
+    .orderBy(desc(snapshotIfcFiles.parsedAt))
+    .limit(1);
+  const ifcFile = ifcRows[0] ?? null;
+  if (!ifcFile) return { ifcFile: null, elements: [] };
+
+  const elements = await db
+    .select()
+    .from(materializableElements)
+    .where(
+      and(
+        eq(materializableElements.engagementId, engagementId),
+        eq(materializableElements.sourceSnapshotId, ifcFile.snapshotId),
+        inArray(materializableElements.sourceKind, [
+          "as-built-ifc-bundle",
+          "as-built-ifc",
+        ]),
+      ),
+    )
+    // Bundle first (it carries the GLB), then per-entity rows.
+    .orderBy(
+      sql`CASE WHEN ${materializableElements.sourceKind} = 'as-built-ifc-bundle' THEN 0 ELSE 1 END`,
+      materializableElements.createdAt,
+    );
+
+  return { ifcFile, elements };
 }
 
 async function toBimModelWire(bm: BimModel): Promise<BimModelWire> {
   const activeBriefingUpdatedAt = await loadActiveBriefingUpdatedAt(bm);
-  const elements = bm.activeBriefingId
+  const briefingElements = bm.activeBriefingId
     ? await loadElementsForBriefing(bm.activeBriefingId)
     : [];
+  const ifcView = await loadAsBuiltIfcElementsForEngagement(bm.engagementId);
+  // Order: IFC bundle first (so the viewer's "first row with glb wins"
+  // picks it up), then briefing-derived elements, then per-IFC-entity rows.
+  const ifcBundle = ifcView.elements.filter(
+    (e) => e.sourceKind === "as-built-ifc-bundle",
+  );
+  const ifcEntities = ifcView.elements.filter(
+    (e) => e.sourceKind === "as-built-ifc",
+  );
+  const elements = [...ifcBundle, ...briefingElements, ...ifcEntities];
   return {
     id: bm.id,
     engagementId: bm.engagementId,
@@ -513,6 +611,44 @@ async function toBimModelWire(bm: BimModel): Promise<BimModelWire> {
     elements: elements.map(toElementWire),
     createdAt: bm.createdAt.toISOString(),
     updatedAt: bm.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * Synthesize a BimModelWire for an engagement that has no `bim_models`
+ * row but does have a parsed IFC ingest (Track B sprint). The viewer
+ * doesn't care about the bim_models row identity per se — it only needs
+ * the `elements` array to render the GLB. We invent a non-DB id so the
+ * wire shape is stable and downstream consumers can branch on
+ * `activeBriefingId === null && ifc-derived elements present`.
+ */
+async function synthesizeBimModelWireFromIfc(
+  engagementId: string,
+): Promise<BimModelWire | null> {
+  const ifcView = await loadAsBuiltIfcElementsForEngagement(engagementId);
+  if (!ifcView.ifcFile) return null;
+  const ifcBundle = ifcView.elements.filter(
+    (e) => e.sourceKind === "as-built-ifc-bundle",
+  );
+  const ifcEntities = ifcView.elements.filter(
+    (e) => e.sourceKind === "as-built-ifc",
+  );
+  const elements = [...ifcBundle, ...ifcEntities];
+  const parsedAt = ifcView.ifcFile.parsedAt;
+  const stamp = parsedAt ? parsedAt.toISOString() : new Date(0).toISOString();
+  return {
+    // Synthetic id — `<ifc:snapshotId>` so admin tools can recognize the
+    // row as a viewer-side fallback rather than a real bim_models row.
+    id: `ifc:${ifcView.ifcFile.snapshotId}`,
+    engagementId,
+    activeBriefingId: null,
+    briefingVersion: 0,
+    materializedAt: parsedAt ? parsedAt.toISOString() : null,
+    revitDocumentPath: null,
+    refreshStatus: "current",
+    elements: elements.map(toElementWire),
+    createdAt: stamp,
+    updatedAt: stamp,
   };
 }
 
@@ -935,7 +1071,12 @@ router.get(
         .limit(1);
       const bm = rows[0];
       if (!bm) {
-        res.json({ bimModel: null });
+        // Fallback: no bim_models row, but the engagement may have a
+        // parsed IFC ingest (Track B sprint). Surface that as a
+        // synthetic BimModelWire so the viewer can render IFC geometry
+        // without the C# add-in having registered a row first.
+        const synthesized = await synthesizeBimModelWireFromIfc(engagementId);
+        res.json({ bimModel: synthesized ?? null });
         return;
       }
       res.json({ bimModel: await toBimModelWire(bm) });
