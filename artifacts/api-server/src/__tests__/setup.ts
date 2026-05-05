@@ -52,6 +52,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "bim_models",
   "materializable_elements",
   "briefing_divergences",
+  // Track B — server-side IFC ingest. Cascades off `snapshots` (which
+  // cascades off `engagements`), but listed explicitly per the
+  // "if a route writes to it, it's in this list" invariant so suites
+  // that exercise the IFC ingest path always start from a known-empty
+  // state.
+  "snapshot_ifc_files",
   // DA-PI-3 generation jobs. Cascades off `engagements`, but listed
   // explicitly per the "if a route writes to it, it's in this list"
   // invariant — and also so suites that seed jobs without going

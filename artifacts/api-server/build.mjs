@@ -100,6 +100,14 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
+      // web-ifc ships a Node-side WASM artifact that the JS entry resolves
+      // via `fs.readFileSync(__dirname + '/web-ifc-node.wasm')`. Bundling
+      // would point __dirname at dist/ where the wasm doesn't exist;
+      // externalizing keeps the require resolving against node_modules/web-ifc/
+      // where the .wasm sits next to the JS. Same pattern as @google-cloud/* /
+      // puppeteer above.
+      "web-ifc",
+      "web-ifc/web-ifc-api-node.js",
     ],
     sourcemap: "linked",
     plugins: [

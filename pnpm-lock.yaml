@@ -190,6 +190,9 @@ importers:
 
   artifacts/api-server:
     dependencies:
+      '@gltf-transform/core':
+        specifier: ^4.3.0
+        version: 4.3.0
       '@google-cloud/storage':
         specifier: ^7.19.0
         version: 7.19.0
@@ -274,6 +277,9 @@ importers:
       puppeteer:
         specifier: ^24.42.0
         version: 24.42.0(typescript@5.9.3)
+      web-ifc:
+        specifier: ^0.0.71
+        version: 0.0.71
       zod:
         specifier: 'catalog:'
         version: 3.25.76
@@ -1958,6 +1964,9 @@ packages:
 
   '@gerrit0/mini-shiki@3.23.0':
     resolution: {integrity: sha512-bEMORlG0cqdjVyCEuU0cDQbORWX+kYCeo0kV1lbxF5bt4r7SID2l9bqsxJEM0zndaxpOUT7riCyIVEuqq/Ynxg==}
+
+  '@gltf-transform/core@4.3.0':
+    resolution: {integrity: sha512-ZeaQfszGJ9LYwELszu45CuDQCsE26lJNNe36FVmN8xclaT6WDdCj7fwGpQXo0/l/YgAVAHX+uO7YNBW75/SRYw==}
 
   '@google-cloud/paginator@5.0.2':
     resolution: {integrity: sha512-DJS3s0OVH4zFDB1PzjxAsHqJT6sKVbRwwML0ZBP9PbU7Yebtu/7SWMRzvO2J3nUi9pRNITCfu4LJeooM2w4pjg==}
@@ -5149,6 +5158,9 @@ packages:
   prop-types@15.8.1:
     resolution: {integrity: sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==}
 
+  property-graph@4.1.0:
+    resolution: {integrity: sha512-AvPcP7XECNWy4LGmFQ77k7un4lSKM4eS29PTvW4ck95uYeLxXPWJM7hLuBqK91FaHqCcgJvIUCuNJjjxKE7VKQ==}
+
   property-information@7.1.0:
     resolution: {integrity: sha512-TwEZ+X+yCJmYfL7TPUOcvBZ4QfoT5YenQiJuX//0th53DE6w0xxLEtfK3iyryQFddXuvkIk51EEgrJQ0WJkOmQ==}
 
@@ -5920,6 +5932,9 @@ packages:
       jsdom:
         optional: true
 
+  web-ifc@0.0.71:
+    resolution: {integrity: sha512-T2DCLthJpEm/kEVo8QGD6KTZjDhsbGkoVJI2mdcngjW5G9dvzZtJ0rtvCVOpr5Bge1Fd0fSYoO/R/6V10xbeVQ==}
+
   web-streams-polyfill@3.3.3:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
     engines: {node: '>= 8'}
@@ -6234,6 +6249,10 @@ snapshots:
       '@shikijs/themes': 3.23.0
       '@shikijs/types': 3.23.0
       '@shikijs/vscode-textmate': 10.0.2
+
+  '@gltf-transform/core@4.3.0':
+    dependencies:
+      property-graph: 4.1.0
 
   '@google-cloud/paginator@5.0.2':
     dependencies:
@@ -9800,6 +9819,8 @@ snapshots:
       object-assign: 4.1.1
       react-is: 16.13.1
 
+  property-graph@4.1.0: {}
+
   property-information@7.1.0: {}
 
   proxy-addr@2.0.7:
@@ -10678,6 +10699,8 @@ snapshots:
       - terser
       - tsx
       - yaml
+
+  web-ifc@0.0.71: {}
 
   web-streams-polyfill@3.3.3: {}
 
