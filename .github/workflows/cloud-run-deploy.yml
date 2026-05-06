@@ -115,6 +115,12 @@ jobs:
         # MNML_API_URL, etc.) are layered on later via gcloud run services
         # update once Nick confirms target endpoints. See docs/deploy.md
         # env-var inventory.
+        #
+        # Object paths (artifacts/api-server/src/lib/objectStorage.ts):
+        # parseObjectPath expects `/<bucket>/<prefix>`. PUBLIC entries must
+        # not end with `/` — search joins `${searchPath}/${filePath}`.
+        # PRIVATE_OBJECT_DIR is the prefix before the code-appended
+        # `/uploads/<uuid>` (use `.../.private`, not `.../.private/uploads`).
         run: |
           IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
           gcloud run deploy ${{ env.CLOUD_RUN_SERVICE }} \
@@ -129,7 +135,7 @@ jobs:
             --concurrency=80 \
             --timeout=300 \
             --service-account=${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }} \
-            --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=mock,BRIEFING_LLM_MODE=mock,MNML_RENDER_MODE=mock,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com \
+            --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=mock,BRIEFING_LLM_MODE=mock,MNML_RENDER_MODE=mock,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com,PUBLIC_OBJECT_SEARCH_PATHS=/legacy-design-tools-prod-objects/public,PRIVATE_OBJECT_DIR=/legacy-design-tools-prod-objects/.private \
             --set-secrets=DATABASE_URL=DEPLOYMENT_DATABASE_URL:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,SESSION_SECRET=SESSION_SECRET:latest,BIM_MODEL_SHARED_SECRET=BIM_MODEL_SHARED_SECRET:latest
 
       - name: Show new revision
