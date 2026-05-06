@@ -4,8 +4,10 @@ name: Cloud Run Deploy (api-server)
 # - build-and-push fires on every push to main, tags <sha> + latest, pushes
 #   to Artifact Registry. Does NOT deploy.
 # - deploy-canary is workflow_dispatch-only. Deploys a new revision with
-#   --no-traffic (0%). Traffic shifts are manual via gcloud per the canary
-#   runbook. NEVER add a traffic-shifting step here.
+#   --no-traffic (0%) and --tag=canary so the revision has a stable smoke URL
+#   (https://canary---<service-host>/...) without receiving default traffic.
+#   Traffic shifts are manual via gcloud per the canary runbook. NEVER add a
+#   traffic-shifting step here.
 #
 # Toolchain (pnpm 10, Node 20) intentionally mirrors .github/workflows/pr-checks.yml.
 
@@ -127,6 +129,7 @@ jobs:
             --region=${{ env.GCP_REGION }} \
             --image="${IMAGE}" \
             --no-traffic \
+            --tag=canary \
             --port=8080 \
             --cpu=2 \
             --memory=2Gi \
@@ -138,8 +141,20 @@ jobs:
             --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=mock,BRIEFING_LLM_MODE=mock,MNML_RENDER_MODE=mock,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com,PUBLIC_OBJECT_SEARCH_PATHS=/legacy-design-tools-prod-objects/public,PRIVATE_OBJECT_DIR=/legacy-design-tools-prod-objects/.private \
             --set-secrets=DATABASE_URL=DEPLOYMENT_DATABASE_URL:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,SESSION_SECRET=SESSION_SECRET:latest,BIM_MODEL_SHARED_SECRET=BIM_MODEL_SHARED_SECRET:latest
 
-      - name: Show new revision
+      - name: Show new revision and canary smoke URL
         run: |
-          gcloud run services describe ${{ env.CLOUD_RUN_SERVICE }} \
-            --region=${{ env.GCP_REGION }} \
-            --format='value(status.latestCreatedRevisionName,status.url,status.traffic)'
+          set -euo pipefail
+          SVC="${{ env.CLOUD_RUN_SERVICE }}"
+          RGN="${{ env.GCP_REGION }}"
+          REV=$(gcloud run services describe "$SVC" --region="$RGN" \
+            --format='value(status.latestCreatedRevisionName)')
+          echo "Latest created revision: ${REV}"
+          gcloud run services describe "$SVC" --region="$RGN" \
+            --format='value(status.url,status.traffic)'
+          BASE_URL=$(gcloud run services describe "$SVC" --region="$RGN" \
+            --format='value(status.url)')
+          HOST="${BASE_URL#https://}"
+          HOST="${HOST#http://}"
+          echo ""
+          echo "Canary tag URL (0% default traffic; use for /api/healthz smoke):"
+          echo "  https://canary---${HOST}"
