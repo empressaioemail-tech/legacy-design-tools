@@ -132,9 +132,15 @@ const resolve = createMutationCapture();
 // these tests (we render the divergences / push affordance
 // directly), but the symbol is pulled in transitively by
 // `EngagementDetail.tsx` when we import the panel from it.
-vi.mock("@workspace/site-context/client", () => ({
-  SiteMap: () => null,
-}));
+vi.mock("@workspace/site-context/client", async () => {
+  const { extractBriefingSourceOverlays } = await import(
+    "@workspace/site-context/client/overlays"
+  );
+  return {
+    extractBriefingSourceOverlays,
+    SiteMap: () => null,
+  };
+});
 
 vi.mock("@workspace/api-client-react", async (importOriginal) => {
   // Import the real module and override only the four hooks the

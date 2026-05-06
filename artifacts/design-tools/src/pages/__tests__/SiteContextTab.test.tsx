@@ -136,9 +136,15 @@ vi.mock("@workspace/api-zod", () => ({
 // Leaflet's CSS / image side-effects don't survive happy-dom; the
 // page imports SiteMap unconditionally even though the Site tab is
 // never activated here.
-vi.mock("@workspace/site-context/client", () => ({
-  SiteMap: () => null,
-}));
+vi.mock("@workspace/site-context/client", async () => {
+  const { extractBriefingSourceOverlays } = await import(
+    "@workspace/site-context/client/overlays"
+  );
+  return {
+    extractBriefingSourceOverlays,
+    SiteMap: () => null,
+  };
+});
 
 // Stub every generated hook the page (and the SiteContextTab subtree)
 // consumes. The two hooks that drive the test —
@@ -197,13 +203,26 @@ vi.mock("@workspace/api-client-react", async () => {
     useGetEngagementBriefingGenerationStatus: (
       id: string,
       opts?: { query?: { queryKey?: readonly unknown[] } },
-    ) =>
-      useQuery({
+    ) => {
+      const idleStatus = {
+        generationId: null,
+        state: "idle" as const,
+        startedAt: null,
+        completedAt: null,
+        error: null,
+        invalidCitationCount: null,
+        invalidCitations: null,
+      };
+      return useQuery({
         queryKey:
           opts?.query?.queryKey ??
           (["getEngagementBriefingGenerationStatus", id] as const),
-        queryFn: async () => ({ status: "idle" }),
-      }),
+        queryFn: async () => idleStatus,
+        // First paint must not treat status as "unknown" (that hides
+        // Generate Layers until the query settles — Task #451 guard).
+        initialData: idleStatus,
+      });
+    },
     useGenerateEngagementBriefing: noopMutationHook,
     // Task #230 — BriefingNarrativePanel mounts the Recent runs
     // disclosure unconditionally. The disclosure only fetches when
