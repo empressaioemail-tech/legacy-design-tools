@@ -1,0 +1,51 @@
+# VCS / repo metadata
+.git
+.gitignore
+.gitattributes
+.github
+
+# Agent / tooling state
+.claude
+.agents
+.sc-triage
+
+# Replit (deploy is on Cloud Run; replit config is irrelevant)
+.replit
+.replitignore
+replit.nix
+replit.md
+replit-103-commits.bundle
+
+# Workspace build outputs — rebuilt fresh inside the container
+node_modules
+**/node_modules
+dist
+**/dist
+.generated
+**/.generated
+
+# Env files (Cloud Run injects via --set-env-vars / --set-secrets)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+**/*.log
+
+# Test outputs
+coverage
+**/coverage
+artifacts/qa/test-results
+artifacts/*/coverage
+artifacts/*/test-results
+artifacts/*/playwright-report
+
+# Editor / OS metadata
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Misc large artifacts not needed for the image
+attached_assets
