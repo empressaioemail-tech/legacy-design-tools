@@ -205,8 +205,8 @@ Manager. `Class = config` → Cloud Run env var.
 | `CONVERTER_SHARED_SECRET` | secret | conditional | `lib/converterClient.ts` | Required when `DXF_CONVERTER_MODE=http`. |
 | `OPENAI_API_KEY` | secret | optional (gates embeddings) | `lib/codes/src/embeddings.ts` | Without it, embedding-dependent code paths skip. |
 | `OPENAI_BASE_URL` | config | optional | `lib/codes/src/embeddings.ts` | Default `https://api.openai.com/v1`. |
-| `PUBLIC_OBJECT_SEARCH_PATHS` | config | required for object reads | `lib/objectStorage.ts` | Comma-separated paths under the GCS bucket. |
-| `PRIVATE_OBJECT_DIR` | config | required for object writes | `lib/objectStorage.ts` | Path prefix for private uploads. |
+| `PUBLIC_OBJECT_SEARCH_PATHS` | config | required for object reads | `artifacts/api-server/src/lib/objectStorage.ts` | Comma-separated `/<bucket>/<prefix>` paths. Each prefix must **not** end with `/` (the service joins `${path}/${filePath}`). Canary deploy sets `/legacy-design-tools-prod-objects/public`. |
+| `PRIVATE_OBJECT_DIR` | config | required for object writes | `artifacts/api-server/src/lib/objectStorage.ts` | `/<bucket>/<prefix>`; the API appends `/uploads/<uuid>` itself — use `/legacy-design-tools-prod-objects/.private` so objects live under `.private/uploads/…`, not `…/.private/uploads/uploads/…`. Canary deploy sets that value. |
 | `ADAPTER_CACHE_TTL_MS` | config | optional | `lib/adapterCache.ts` | Has internal default. |
 | `ADAPTER_CACHE_SWEEP_INTERVAL_MS` | config | optional | `lib/adapterCache.ts` | `0` disables the sweeper. |
 | `ADAPTER_CACHE_SWEEP_GRACE_MS` | config | optional | `lib/adapterCache.ts` | |
