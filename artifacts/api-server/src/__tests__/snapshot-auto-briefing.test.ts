@@ -279,7 +279,15 @@ describe("POST /api/snapshots — auto-trigger started/already-in-flight via GUI
     expect(res.body.engagementId).toBe(eng.id);
     expect(res.body.autoCreated).toBe(false);
 
-    expect(kickoffSpy).toHaveBeenCalledTimes(1);
+    // `fireAutoBriefingKickoff` is void-launched and awaits a jurisdiction
+    // read before calling kickoff — same race as geocode tests in
+    // snapshots.test.ts (POST can return before the spy runs).
+    await vi.waitFor(
+      () => {
+        expect(kickoffSpy).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 2000 },
+    );
     expect(kickoffSpy).toHaveBeenCalledWith(
       expect.objectContaining({ engagementId: eng.id }),
     );
