@@ -14,7 +14,9 @@ push to `main` (`build-and-push` job in
 [`.github/workflows/cloud-run-deploy.yml`](../.github/workflows/cloud-run-deploy.yml)).
 Deploys are **manual**: trigger the `deploy-canary` job via
 `workflow_dispatch` and a new Cloud Run revision is created with
-`--no-traffic` (0% canary). Traffic shifts are manual via `gcloud` per
+`--no-traffic` (0% default traffic) and **`--tag=canary`**, which exposes a
+stable smoke URL (`https://canary---<service-host>/...`) without shifting
+production traffic. Traffic shifts are manual via `gcloud` per
 `doc_repo/90_runbooks/cloud_run_canary_deploy.md` — typically 10% → 50% →
 100% with smoke probes between each step.
 
@@ -39,6 +41,15 @@ gcloud services enable \
   iamcredentials.googleapis.com \
   iam.googleapis.com
 ```
+
+**Do not skip `iamcredentials.googleapis.com`.** GitHub Actions uses
+Workload Identity Federation to impersonate the deploy service account when
+`docker push` talks to Artifact Registry. If **IAM Service Account Credentials
+API** is disabled in the project, the push step fails with
+`Unable to acquire impersonated credentials` / `SERVICE_DISABLED` even when
+other APIs are enabled. Enable it in **APIs & Services** or re-run the
+`gcloud services enable` block above, wait a minute for propagation, then
+re-run the failed workflow.
 
 ### 2. Artifact Registry
 
@@ -226,6 +237,37 @@ canary is stable.
 
 ---
 
+## Troubleshooting: GitHub Actions ↔ GCP
+
+### `Push image` fails: IAM Service Account Credentials API / `SERVICE_DISABLED`
+
+Symptom: `gcloud.auth.docker-helper` logs `Unable to acquire impersonated
+credentials` mentioning **`iamcredentials.googleapis.com`**, then
+`docker push` returns **`denied: Unauthenticated`**.
+
+Cause: **IAM Service Account Credentials API** is not enabled (or not yet
+propagated) in the GCP project used by `GCP_PROJECT_ID`.
+
+Fix:
+
+```bash
+gcloud services enable iamcredentials.googleapis.com --project="<your-project-id>"
+```
+
+Wait 1–2 minutes, then **Re-run failed jobs** on the workflow run in GitHub
+Actions, or push any commit to `main` to trigger **build-and-push** again.
+
+### `Validate required secrets` fails on the first step
+
+The **build-and-push** job requires repository secrets **`GCP_PROJECT_ID`**,
+**`GCP_WORKLOAD_IDENTITY_PROVIDER`**, and **`GCP_SERVICE_ACCOUNT`**
+([§7](#7-github-actions-repo-secrets)). **deploy-canary** also requires
+**`GCP_RUNTIME_SERVICE_ACCOUNT`**. If any are unset, the `: "${VAR:?...}"`
+checks fail before checkout — set all values in **Settings → Secrets and
+variables → Actions**, then re-run.
+
+---
+
 ## First deploy procedure
 
 1. Confirm all GCP-side prerequisites (sections 1–7 above) are complete.
@@ -246,19 +288,22 @@ canary is stable.
    ```
 5. Run the `deploy-canary` workflow via `workflow_dispatch`. Use the SHA
    of the just-built image as `image_tag` (preferred) or `latest`.
-6. Confirm the new revision exists at 0% traffic:
+6. Confirm the new revision exists at 0% **default** traffic and is tagged
+   **`canary`** (the workflow passes `--tag=canary` with `--no-traffic`):
    ```bash
    gcloud run services describe api-server \
      --region=us-central1 \
      --format='value(status.traffic)'
    ```
-7. Smoke-probe the canary URL. Cloud Run gives each `--no-traffic`
-   revision its own URL; grab it from `gcloud run revisions describe
-   <revision> --format='value(status.url)'`:
+7. Smoke-probe the **canary tag URL** (printed at the end of the
+   **deploy-canary** job log). It follows
+   `https://canary---<same-host-as-default-service-URL>/api/healthz`, e.g.:
    ```bash
-   curl -s -o /dev/null -w "%{http_code}\n" "<canary-url>/api/healthz"
+   curl -s -o /dev/null -w "%{http_code}\n" "https://canary---<host>/api/healthz"
    # expect: 200
    ```
+   You can also resolve the host from the default service URL:
+   `https://<host>` → `https://canary---<host>/api/healthz`.
 8. Shift traffic per `doc_repo/90_runbooks/cloud_run_canary_deploy.md`.
    Typical pattern: 10% → observe → 50% → observe → 100%.
    ```bash
