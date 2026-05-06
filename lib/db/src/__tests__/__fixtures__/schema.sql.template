@@ -166,14 +166,14 @@ CREATE TABLE @@SCHEMA@@.briefing_sources (
     upload_original_filename text,
     upload_content_type text,
     upload_byte_size integer,
-    note text,
-    superseded_by_id uuid,
-    superseded_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
     dxf_object_path text,
     glb_object_path text,
     conversion_status text,
-    conversion_error text
+    conversion_error text,
+    note text,
+    superseded_by_id uuid,
+    superseded_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -277,9 +277,11 @@ CREATE TABLE @@SCHEMA@@.engagements (
     name_lower text NOT NULL,
     jurisdiction text,
     address text,
+    applicant_firm text,
+    architect_of_record_name text,
+    architect_of_record_email text,
+    architect_of_record_role text,
     status text DEFAULT 'active'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     latitude numeric(9,6),
     longitude numeric(9,6),
     geocoded_at timestamp with time zone,
@@ -293,10 +295,8 @@ CREATE TABLE @@SCHEMA@@.engagements (
     site_context_raw jsonb,
     revit_central_guid text,
     revit_document_path text,
-    applicant_firm text,
-    architect_of_record_name text,
-    architect_of_record_email text,
-    architect_of_record_role text
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -334,13 +334,13 @@ CREATE TABLE @@SCHEMA@@.findings (
     element_ref text,
     source_ref jsonb,
     ai_generated_at timestamp with time zone DEFAULT now() NOT NULL,
+    ai_generated boolean DEFAULT false NOT NULL,
+    accepted_by_reviewer_id text,
+    accepted_at timestamp with time zone,
     revision_of uuid,
     finding_run_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    ai_generated boolean DEFAULT false NOT NULL,
-    accepted_by_reviewer_id text,
-    accepted_at timestamp with time zone,
     CONSTRAINT findings_category_check CHECK ((category = ANY (ARRAY['setback'::text, 'height'::text, 'coverage'::text, 'egress'::text, 'use'::text, 'overlay-conflict'::text, 'divergence-related'::text, 'other'::text]))),
     CONSTRAINT findings_severity_check CHECK ((severity = ANY (ARRAY['blocker'::text, 'concern'::text, 'advisory'::text]))),
     CONSTRAINT findings_status_check CHECK ((status = ANY (ARRAY['ai-produced'::text, 'accepted'::text, 'rejected'::text, 'overridden'::text, 'promoted-to-architect'::text])))
@@ -351,15 +351,23 @@ CREATE TABLE @@SCHEMA@@.findings (
 
 CREATE TABLE @@SCHEMA@@.materializable_elements (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    briefing_id uuid NOT NULL,
+    briefing_id uuid,
+    engagement_id uuid,
+    source_kind text DEFAULT 'briefing-derived'::text NOT NULL,
     element_kind text NOT NULL,
     briefing_source_id uuid,
     label text,
     geometry jsonb DEFAULT '{}'::jsonb NOT NULL,
     glb_object_path text,
     locked boolean DEFAULT true NOT NULL,
+    ifc_global_id text,
+    ifc_type text,
+    property_set jsonb,
+    source_snapshot_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT materializable_elements_provenance_invariants_check CHECK ((((source_kind = 'briefing-derived'::text) AND (briefing_id IS NOT NULL)) OR ((source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])) AND (source_snapshot_id IS NOT NULL) AND (engagement_id IS NOT NULL) AND (ifc_global_id IS NOT NULL) AND (ifc_type IS NOT NULL)))),
+    CONSTRAINT materializable_elements_source_kind_check CHECK ((source_kind = ANY (ARRAY['briefing-derived'::text, 'as-built-ifc'::text, 'as-built-ifc-bundle'::text])))
 );
 
 
@@ -368,8 +376,6 @@ CREATE TABLE @@SCHEMA@@.materializable_elements (
 CREATE TABLE @@SCHEMA@@.parcel_briefings (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     engagement_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     section_a text,
     section_b text,
     section_c text,
@@ -388,7 +394,9 @@ CREATE TABLE @@SCHEMA@@.parcel_briefings (
     prior_section_g text,
     prior_generated_at timestamp with time zone,
     prior_generated_by text,
-    generation_id uuid
+    generation_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -542,8 +550,27 @@ CREATE TABLE @@SCHEMA@@.sheets (
     full_width integer NOT NULL,
     full_height integer NOT NULL,
     sort_order integer NOT NULL,
+    content_body text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: snapshot_ifc_files; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.snapshot_ifc_files (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    snapshot_id uuid NOT NULL,
+    blob_object_path text NOT NULL,
+    gltf_object_path text,
+    file_size_bytes bigint NOT NULL,
+    ifc_version text,
+    export_duration_ms integer,
+    parse_entity_count integer,
+    parsed_at timestamp with time zone,
+    parse_error text,
+    uploaded_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    content_body text
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -562,20 +589,6 @@ CREATE TABLE @@SCHEMA@@.snapshots (
 );
 
 
--- Name: submission_comments; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.submission_comments (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    submission_id uuid NOT NULL,
-    author_role text NOT NULL,
-    author_id text NOT NULL,
-    body text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT submission_comments_author_role_check CHECK ((author_role = ANY (ARRAY['architect'::text, 'reviewer'::text])))
-);
-
-
 -- Name: submission_classifications; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.submission_classifications (
@@ -590,6 +603,20 @@ CREATE TABLE @@SCHEMA@@.submission_classifications (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT submission_classifications_disciplines_check CHECK ((disciplines <@ ARRAY['building'::text, 'electrical'::text, 'mechanical'::text, 'plumbing'::text, 'residential'::text, 'fire-life-safety'::text, 'accessibility'::text])),
     CONSTRAINT submission_classifications_source_check CHECK ((source = ANY (ARRAY['auto'::text, 'reviewer'::text])))
+);
+
+
+-- Name: submission_comments; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.submission_comments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    submission_id uuid NOT NULL,
+    author_role text NOT NULL,
+    author_id text NOT NULL,
+    body text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT submission_comments_author_role_check CHECK ((author_role = ANY (ARRAY['architect'::text, 'reviewer'::text])))
 );
 
 
@@ -619,13 +646,13 @@ CREATE TABLE @@SCHEMA@@.submissions (
     jurisdiction_state text,
     jurisdiction_fips text,
     note text,
+    discipline text,
     submitted_at timestamp with time zone DEFAULT now() NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
     reviewer_comment text,
     responded_at timestamp with time zone,
     response_recorded_at timestamp with time zone,
-    discipline text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT submissions_discipline_check CHECK (((discipline IS NULL) OR (discipline = ANY (ARRAY['building'::text, 'fire'::text, 'zoning'::text, 'civil'::text]))))
 );
 
@@ -637,10 +664,10 @@ CREATE TABLE @@SCHEMA@@.users (
     display_name text NOT NULL,
     email text,
     avatar_url text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     architect_pdf_header text,
     disciplines text[] DEFAULT '{}'::text[] NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT users_disciplines_check CHECK ((disciplines <@ ARRAY['building'::text, 'electrical'::text, 'mechanical'::text, 'plumbing'::text, 'residential'::text, 'fire-life-safety'::text, 'accessibility'::text]))
 );
 
@@ -867,22 +894,34 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_pkey PRIMARY KEY (id);
 
 
+-- Name: snapshot_ifc_files snapshot_ifc_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.snapshot_ifc_files
+    ADD CONSTRAINT snapshot_ifc_files_pkey PRIMARY KEY (id);
+
+
+-- Name: snapshot_ifc_files snapshot_ifc_files_snapshot_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.snapshot_ifc_files
+    ADD CONSTRAINT snapshot_ifc_files_snapshot_id_unique UNIQUE (snapshot_id);
+
+
 -- Name: snapshots snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_pkey PRIMARY KEY (id);
 
 
--- Name: submission_comments submission_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.submission_comments
-    ADD CONSTRAINT submission_comments_pkey PRIMARY KEY (id);
-
-
 -- Name: submission_classifications submission_classifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.submission_classifications
     ADD CONSTRAINT submission_classifications_pkey PRIMARY KEY (submission_id);
+
+
+-- Name: submission_comments submission_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.submission_comments
+    ADD CONSTRAINT submission_comments_pkey PRIMARY KEY (id);
 
 
 -- Name: submission_communications submission_communications_atom_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1085,9 +1124,19 @@ CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree 
 CREATE INDEX materializable_elements_briefing_idx ON @@SCHEMA@@.materializable_elements USING btree (briefing_id);
 
 
+-- Name: materializable_elements_engagement_source_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX materializable_elements_engagement_source_idx ON @@SCHEMA@@.materializable_elements USING btree (engagement_id, source_kind) WHERE (engagement_id IS NOT NULL);
+
+
 -- Name: materializable_elements_kind_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX materializable_elements_kind_idx ON @@SCHEMA@@.materializable_elements USING btree (briefing_id, element_kind);
+
+
+-- Name: materializable_elements_snapshot_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX materializable_elements_snapshot_idx ON @@SCHEMA@@.materializable_elements USING btree (source_snapshot_id) WHERE (source_snapshot_id IS NOT NULL);
 
 
 -- Name: parcel_briefings_engagement_idx; Type: INDEX; Schema: public; Owner: -
@@ -1153,6 +1202,11 @@ CREATE UNIQUE INDEX sheets_snapshot_number_unique ON @@SCHEMA@@.sheets USING btr
 -- Name: sheets_snapshot_sort_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX sheets_snapshot_sort_idx ON @@SCHEMA@@.sheets USING btree (snapshot_id, sort_order);
+
+
+-- Name: snapshot_ifc_files_parsed_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX snapshot_ifc_files_parsed_at_idx ON @@SCHEMA@@.snapshot_ifc_files USING btree (parsed_at);
 
 
 -- Name: snapshots_engagement_idx; Type: INDEX; Schema: public; Owner: -
@@ -1326,6 +1380,18 @@ ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
     ADD CONSTRAINT materializable_elements_briefing_source_id_briefing_sources_id_ FOREIGN KEY (briefing_source_id) REFERENCES @@SCHEMA@@.briefing_sources(id) ON DELETE SET NULL;
 
 
+-- Name: materializable_elements materializable_elements_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
+    ADD CONSTRAINT materializable_elements_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: materializable_elements materializable_elements_source_snapshot_id_snapshots_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
+    ADD CONSTRAINT materializable_elements_source_snapshot_id_snapshots_id_fk FOREIGN KEY (source_snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
+
+
 -- Name: parcel_briefings parcel_briefings_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
@@ -1372,6 +1438,12 @@ ALTER TABLE ONLY @@SCHEMA@@.sheets
 
 ALTER TABLE ONLY @@SCHEMA@@.sheets
     ADD CONSTRAINT sheets_snapshot_id_snapshots_id_fk FOREIGN KEY (snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
+
+
+-- Name: snapshot_ifc_files snapshot_ifc_files_snapshot_id_snapshots_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.snapshot_ifc_files
+    ADD CONSTRAINT snapshot_ifc_files_snapshot_id_snapshots_id_fk FOREIGN KEY (snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
 
 
 -- Name: snapshots snapshots_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
