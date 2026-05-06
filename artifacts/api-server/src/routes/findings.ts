@@ -1389,8 +1389,11 @@ router.get(
  * the transition is forbidden (route maps null → 409).
  *
  * Locked transitions per Phase 1A (refined post-review for override):
- *   - accept  : ai-produced → accepted; accepted → accepted (refresh)
- *   - reject  : ai-produced → rejected; rejected → rejected (refresh)
+ *   - accept  : ai-produced → accepted; accepted → accepted (refresh);
+ *     rejected → accepted (re-accept after reject; Track 1 freeze)
+ *   - reject  : ai-produced → rejected; accepted → rejected (reject
+ *     after accept; frozen first-accept columns unchanged);
+ *     rejected → rejected (refresh)
  *   - override: any state EXCEPT `overridden` can be overridden. A
  *     finding can only be overridden ONCE; a second override returns
  *     409 `finding_already_overridden`. Reviewers act on the revision
@@ -1398,12 +1401,24 @@ router.get(
  *     row — the revision is the new "head" the FE renders.
  */
 function nextStatusForAccept(current: string): "accepted" | null {
-  if (current === "ai-produced" || current === "accepted") return "accepted";
+  if (
+    current === "ai-produced" ||
+    current === "accepted" ||
+    current === "rejected"
+  ) {
+    return "accepted";
+  }
   return null;
 }
 
 function nextStatusForReject(current: string): "rejected" | null {
-  if (current === "ai-produced" || current === "rejected") return "rejected";
+  if (
+    current === "ai-produced" ||
+    current === "accepted" ||
+    current === "rejected"
+  ) {
+    return "rejected";
+  }
   return null;
 }
 
