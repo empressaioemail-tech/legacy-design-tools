@@ -136,17 +136,18 @@ Manager secret and seed it with the current Replit production value
 (export from Replit Secrets manually — these are not in the repo).
 
 ```bash
-# Example for DATABASE_URL. Repeat for each secret-class env var.
-gcloud secrets create DATABASE_URL --replication-policy=automatic
-echo -n "<current-replit-neon-url>" | gcloud secrets versions add DATABASE_URL --data-file=-
+# Example for the Neon connection string (Secret Manager id matches workflow).
+gcloud secrets create DEPLOYMENT_DATABASE_URL --replication-policy=automatic
+echo -n "<current-replit-neon-url>" | gcloud secrets versions add DEPLOYMENT_DATABASE_URL --data-file=-
 ```
 
 Secrets to create (matching the names referenced in
 [`.github/workflows/cloud-run-deploy.yml`](../.github/workflows/cloud-run-deploy.yml)
 `--set-secrets`):
 
-- `DATABASE_URL` (Phase 1A: current Replit Neon URL; Phase 1C: Empressa Neon)
+- `DEPLOYMENT_DATABASE_URL` — workflow maps it to env var `DATABASE_URL` on Cloud Run. Phase 1A: Replit production Neon connection string. Phase 1C: rotate secret value to Empressa Neon (no code change).
 - `AI_INTEGRATIONS_ANTHROPIC_API_KEY`
+- `SESSION_SECRET` — required for Express `sessionMiddleware`.
 - `BIM_MODEL_SHARED_SECRET`
 
 Add as needed per the inventory: `MNML_API_KEY`, `OPENAI_API_KEY`,
@@ -186,13 +187,14 @@ Manager. `Class = config` → Cloud Run env var.
 
 | Var | Class | Required | Source | Notes |
 |---|---|---|---|---|
-| `DATABASE_URL` | secret | hard required at boot | `lib/db/src/index.ts` | Phase 1A value = current Replit Neon URL. Phase 1C swaps to Empressa Neon (Secret Manager value rotation, no code change). |
+| `DATABASE_URL` | secret | hard required at boot | Secret Manager (aliased from `DEPLOYMENT_DATABASE_URL`) | Phase 1A value = Replit production Neon connection string. Phase 1C swaps to Empressa Neon (no code change, secret value rotation only). |
 | `PORT` | config | yes | `artifacts/api-server/src/index.ts` | Cloud Run injects automatically (8080). Hard-fails at boot if unset. |
 | `NODE_ENV` | config | yes | `lib/logger.ts`, multiple | Set to `production` by the workflow. |
 | `LOG_LEVEL` | config | optional | `lib/logger.ts` | Default `info`. Workflow sets `info` explicitly. |
 | `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | secret | hard required at boot | `lib/integrations-anthropic-ai/src/client.ts` | Throws at module import if unset. |
 | `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | config | hard required at boot | `lib/integrations-anthropic-ai/src/client.ts` | Workflow sets `https://api.anthropic.com` — confirm before first deploy. |
-| `BIM_MODEL_SHARED_SECRET` | secret | required for upload flow | `routes/bimModels.ts` | HMAC secret for BIM model uploads. |
+| `SESSION_SECRET` | secret | yes | Secret Manager | Required by `sessionMiddleware`. Recon's `process.env.*` grep missed this — surfaced post-deploy-doc-authoring. |
+| `BIM_MODEL_SHARED_SECRET` | secret | required for upload flow | `routes/bimModels.ts` | HMAC secret for BIM model uploads. Generated fresh during Phase 1A setup (no value existed in Replit). Same value will need to be configured on the Revit Connector side when BIM upload integration is wired end-to-end. |
 | `AIR_FINDING_LLM_MODE` | config | optional | `lib/finding-engine/src/engine.ts` | Default `mock`. `anthropic` requires the AI Integrations env. |
 | `BRIEFING_LLM_MODE` | config | optional | `lib/briefing-engine/src/engine.ts` | Default `mock`. |
 | `MNML_RENDER_MODE` | config | optional | `lib/mnml-client/src/factory.ts` | Default `mock`. `http` requires `MNML_API_URL` + `MNML_API_KEY`. |
@@ -307,6 +309,9 @@ Replit endpoint while the Cloud Run revision is being investigated.
 
 ## Follow-up items surfaced during scaffold
 
+- **Revit Connector ↔ api-server `BIM_MODEL_SHARED_SECRET` sync.** The
+  connector side needs the value loaded into the `BIM_MODEL_SHARED_SECRET`
+  Secret Manager entry's latest version when the BIM upload flow is exercised.
 - **Frontend hosting decision.** Replit autoscale stays for now, but the
   long-term home (Cloud Run, Cloudflare Pages, Vercel, …) is undecided.
 - **Puppeteer service split.** Including Chrome runtime libs roughly
