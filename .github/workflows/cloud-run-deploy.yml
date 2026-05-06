@@ -3,11 +3,11 @@ name: Cloud Run Deploy (api-server)
 # Phase 1A scaffold per docs/deploy.md.
 # - build-and-push fires on every push to main, tags <sha> + latest, pushes
 #   to Artifact Registry. Does NOT deploy.
-# - deploy-canary is workflow_dispatch-only. Deploys a new revision with
-#   --no-traffic (0%) and --tag=canary so the revision has a stable smoke URL
-#   (https://canary---<service-host>/...) without receiving default traffic.
-#   Traffic shifts are manual via gcloud per the canary runbook. NEVER add a
-#   traffic-shifting step here.
+# - deploy-canary is workflow_dispatch-only. Uses --tag=canary for a stable
+#   smoke URL (https://canary---<service-host>/...). Adds --no-traffic only
+#   when the Cloud Run service already exists (gcloud forbids --no-traffic on
+#   the very first create). Traffic shifts are manual via gcloud per the
+#   canary runbook. NEVER add an automatic traffic-shifting step here.
 #
 # Toolchain (pnpm 10, Node 20) intentionally mirrors .github/workflows/pr-checks.yml.
 
@@ -110,7 +110,7 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy revision with --no-traffic (0% canary)
+      - name: Deploy revision (canary tag; first create vs update)
         # NOTE: gcloud run deploy treats --set-env-vars and --update-env-vars
         # as mutually exclusive; combined into one --set-env-vars list.
         # Mock-mode defaults are safe; real-mode env vars (CONVERTER_URL,
@@ -123,13 +123,28 @@ jobs:
         # not end with `/` — search joins `${searchPath}/${filePath}`.
         # PRIVATE_OBJECT_DIR is the prefix before the code-appended
         # `/uploads/<uuid>` (use `.../.private`, not `.../.private/uploads`).
+        #
+        # --allow-unauthenticated: CI is non-interactive; without an explicit
+        # flag, gcloud prompts and fails. Phase 1A uses curl /api/healthz smoke;
+        # tighten to --no-allow-unauthenticated + identity tokens before prod.
         run: |
+          set -euo pipefail
           IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
-          gcloud run deploy ${{ env.CLOUD_RUN_SERVICE }} \
-            --region=${{ env.GCP_REGION }} \
+          SVC="${{ env.CLOUD_RUN_SERVICE }}"
+          RGN="${{ env.GCP_REGION }}"
+
+          DEPLOY_FLAGS=(--tag=canary)
+          if gcloud run services describe "$SVC" --region="$RGN" >/dev/null 2>&1; then
+            DEPLOY_FLAGS+=(--no-traffic)
+            echo "Service exists: adding --no-traffic (new revision gets 0% default-route traffic)."
+          else
+            echo "::warning::First deploy for $SVC: Cloud Run does not support --no-traffic when creating the service. Default URL may route 100% to this revision until you adjust traffic; use the canary tag URL for smoke."
+          fi
+
+          gcloud run deploy "$SVC" \
+            --region="$RGN" \
             --image="${IMAGE}" \
-            --no-traffic \
-            --tag=canary \
+            "${DEPLOY_FLAGS[@]}" \
             --port=8080 \
             --cpu=2 \
             --memory=2Gi \
@@ -138,6 +153,7 @@ jobs:
             --concurrency=80 \
             --timeout=300 \
             --service-account=${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }} \
+            --allow-unauthenticated \
             --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=mock,BRIEFING_LLM_MODE=mock,MNML_RENDER_MODE=mock,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com,PUBLIC_OBJECT_SEARCH_PATHS=/legacy-design-tools-prod-objects/public,PRIVATE_OBJECT_DIR=/legacy-design-tools-prod-objects/.private \
             --set-secrets=DATABASE_URL=DEPLOYMENT_DATABASE_URL:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,SESSION_SECRET=SESSION_SECRET:latest,BIM_MODEL_SHARED_SECRET=BIM_MODEL_SHARED_SECRET:latest
 
@@ -156,5 +172,5 @@ jobs:
           HOST="${BASE_URL#https://}"
           HOST="${HOST#http://}"
           echo ""
-          echo "Canary tag URL (0% default traffic; use for /api/healthz smoke):"
+          echo "Canary tag URL (smoke /api/healthz here; after first deploy, default URL may share traffic — see job log above):"
           echo "  https://canary---${HOST}"

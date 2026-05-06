@@ -13,12 +13,12 @@ GitHub Actions builds and pushes a new image to Artifact Registry on every
 push to `main` (`build-and-push` job in
 [`.github/workflows/cloud-run-deploy.yml`](../.github/workflows/cloud-run-deploy.yml)).
 Deploys are **manual**: trigger the `deploy-canary` job via
-`workflow_dispatch` and a new Cloud Run revision is created with
-`--no-traffic` (0% default traffic) and **`--tag=canary`**, which exposes a
-stable smoke URL (`https://canary---<service-host>/...`) without shifting
-production traffic. Traffic shifts are manual via `gcloud` per
-`doc_repo/90_runbooks/cloud_run_canary_deploy.md` — typically 10% → 50% →
-100% with smoke probes between each step.
+`workflow_dispatch`. Each run creates a revision with **`--tag=canary`**
+(stable smoke URL `https://canary---<service-host>/...`). **`--no-traffic`**
+is applied only after the Cloud Run **service already exists** (Google does
+not allow `--no-traffic` on the very first service create). Traffic shifts are
+manual via `gcloud` per `doc_repo/90_runbooks/cloud_run_canary_deploy.md` —
+typically 10% → 50% → 100% with smoke probes between each step.
 
 ---
 
@@ -265,6 +265,37 @@ The **build-and-push** job requires repository secrets **`GCP_PROJECT_ID`**,
 **`GCP_RUNTIME_SERVICE_ACCOUNT`**. If any are unset, the `: "${VAR:?...}"`
 checks fail before checkout — set all values in **Settings → Secrets and
 variables → Actions**, then re-run.
+
+### `deploy-canary` fails: `--no-traffic` not supported when creating a new service
+
+**Cloud Run** rejects **`--no-traffic`** on the **first** `gcloud run deploy`
+that **creates** the service — the flag only applies when a service already
+exists. The workflow omits `--no-traffic` on that first run (see the job log
+`::warning::`) and adds it on every later deploy so new revisions stay at 0%
+default-route traffic while you smoke the **`canary`** tag URL.
+
+After the **first** successful deploy, confirm traffic in the console or with
+`gcloud run services describe api-server --region=us-central1 --format=yaml`
+and adjust with `gcloud run services update-traffic` per the canary runbook
+if the default URL routed 100% to the new revision.
+
+### `deploy-canary` fails or hangs: `Allow unauthenticated invocations (y/N)?`
+
+`gcloud run deploy` prompts interactively when invoker IAM is ambiguous. In
+GitHub Actions there is no TTY, so the deploy step fails. The workflow passes
+**`--allow-unauthenticated`** so Phase 1A **`curl …/api/healthz`** smoke works
+without an identity token. Before sending real production traffic, switch
+to **`--no-allow-unauthenticated`** (or front the service with IAP / API
+Gateway) and document how callers authenticate.
+
+### `deploy-canary` fails: Cloud Run Admin API disabled
+
+Same pattern as **IAM Credentials** above: enable **`run.googleapis.com`** on
+the project, wait briefly, re-run **deploy-canary**.
+
+```bash
+gcloud services enable run.googleapis.com --project="<your-project-id>"
+```
 
 ---
 
