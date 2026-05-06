@@ -30,6 +30,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import type { EngagementSummary } from "@workspace/api-client-react";
@@ -154,10 +155,18 @@ function mkEngagement(o: MakeOpts): EngagementSummary {
 
 function renderList() {
   const memory = memoryLocation({ path: "/", record: true });
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
   return render(
-    <Router hook={memory.hook}>
-      <EngagementList />
-    </Router>,
+    <QueryClientProvider client={queryClient}>
+      <Router hook={memory.hook}>
+        <EngagementList />
+      </Router>
+    </QueryClientProvider>,
   );
 }
 

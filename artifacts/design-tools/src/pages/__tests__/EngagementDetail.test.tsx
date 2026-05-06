@@ -24,10 +24,10 @@
  * with the design-tools-specific extra hooks (`useGetSnapshot`,
  * `useUpdateEngagement`, `useListEngagements`, atom history/summary)
  * stubbed so the page can render without touching the network. The
- * `@workspace/site-context/client` SiteMap is mocked because its
- * leaflet/CSS side-effects don't survive happy-dom — the Site tab is
- * never activated in these tests, but the import is still pulled in
- * by the page module.
+ * `SiteMap` from `@workspace/site-context/client` is mocked (leaflet
+ * under happy-dom) while `extractBriefingSourceOverlays` is taken from
+ * `@workspace/site-context/client/overlays` so SiteContextTab hooks
+ * run without loading `SiteMap.tsx` through Vite.
  */
 import {
   describe,
@@ -174,12 +174,18 @@ vi.mock("@workspace/api-zod", () => ({
   recordSubmissionResponseBodyReviewerCommentMax: 2048,
 }));
 
-// Stub the SiteMap so leaflet's CSS + image asset side-effects don't
-// have to load under happy-dom. The Site tab is never activated by
-// these tests, but the page module imports the symbol unconditionally.
-vi.mock("@workspace/site-context/client", () => ({
-  SiteMap: () => null,
-}));
+// Stub `SiteMap` (leaflet) but keep the real `extractBriefingSourceOverlays`
+// from the leaf-free subpath — `importOriginal` on the client barrel pulls
+// `SiteMap.tsx` through Vite and breaks under the design-tools config.
+vi.mock("@workspace/site-context/client", async () => {
+  const { extractBriefingSourceOverlays } = await import(
+    "@workspace/site-context/client/overlays"
+  );
+  return {
+    extractBriefingSourceOverlays,
+    SiteMap: () => null,
+  };
+});
 
 // Mock the generated React Query hooks the page (and the dialog it
 // renders) consume.
@@ -329,11 +335,13 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
       }),
     getGetEngagementBriefingGenerationStatusQueryKey: (id: string) =>
       ["getEngagementBriefingGenerationStatus", id] as const,
-    useGetEngagementBimModel: () =>
+    useGetEngagementBimModel: (engagementId: string) =>
       useQuery({
-        queryKey: ["getEngagementBimModel"] as const,
-        queryFn: async () => null,
-        enabled: false,
+        queryKey: (
+          actual as typeof import("@workspace/api-client-react")
+        ).getGetEngagementBimModelQueryKey(engagementId),
+        queryFn: async () => ({ bimModel: null }),
+        enabled: Boolean(engagementId),
       }),
     useGetBimModelRefresh: () =>
       useQuery({
@@ -716,7 +724,7 @@ describe("EngagementDetail submission banner (Task #126)", () => {
     }
   });
 
-  it("renders the Findings tab between Submissions and Settings", () => {
+  it("renders the Findings tab between Submissions and Renders", () => {
     renderPage();
     const tabs = screen
       .getAllByRole("button")
@@ -726,10 +734,12 @@ describe("EngagementDetail submission banner (Task #126)", () => {
       );
     const sub = tabs.indexOf("engagement-tab-submissions");
     const find = tabs.indexOf("engagement-tab-findings");
+    const renders = tabs.indexOf("engagement-tab-renders");
     const settings = tabs.indexOf("engagement-tab-settings");
     expect(sub).toBeGreaterThanOrEqual(0);
     expect(find).toBe(sub + 1);
-    expect(settings).toBe(find + 1);
+    expect(renders).toBe(find + 1);
+    expect(settings).toBe(renders + 1);
   });
 
   it("auto-clears the banner after the 8s timeout and leaves the submission row intact", async () => {
@@ -1158,15 +1168,54 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     ).toBeInTheDocument();
   });
 
-  it("clicking the CAD elementRef link swings the page to the Site Context tab and pre-selects the element in the BIM viewer (Task #437)", () => {
+  it("clicking the CAD elementRef link swings the page to Snapshots and pre-selects the element in the BIM viewer (Task #437)", () => {
     renderPage({
-      seed: seedSubmissionsWithFindings([
-        findingFixture({
-          id: "finding:sub-latest:01",
-          severity: "blocker",
-          elementRef: "door:l2-corridor-9",
-        }),
-      ]),
+      seed: (client) => {
+        seedSubmissionsWithFindings([
+          findingFixture({
+            id: "finding:sub-latest:01",
+            severity: "blocker",
+            elementRef: "door:l2-corridor-9",
+          }),
+        ])(client);
+        client.setQueryData(
+          [`/api/engagements/${hoisted.engagement.id}/bim-model`] as const,
+          {
+            bimModel: {
+              id: "bim-1",
+              engagementId: hoisted.engagement.id,
+              activeBriefingId: "br-1",
+              briefingVersion: 1,
+              materializedAt: "2026-05-01T00:00:00.000Z",
+              revitDocumentPath: null,
+              refreshStatus: "current",
+              createdAt: "2026-05-01T00:00:00.000Z",
+              updatedAt: "2026-05-01T00:00:00.000Z",
+              elements: [
+                {
+                  id: "door:l2-corridor-9",
+                  briefingId: "br-1",
+                  elementKind: "buildable-envelope",
+                  briefingSourceId: null,
+                  label: null,
+                  geometry: {
+                    ring: [
+                      [0, 0],
+                      [10, 0],
+                      [10, 5],
+                      [0, 5],
+                    ],
+                  },
+                  glbObjectPath: null,
+                  locked: true,
+                  createdAt: "2026-05-01T00:00:00.000Z",
+                  updatedAt: "2026-05-01T00:00:00.000Z",
+                },
+              ],
+            },
+          },
+        );
+      },
     });
     gotoFindingsTab();
     // Sanity: the panel rendered the elementRef as a clickable button
@@ -1176,23 +1225,22 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     const link = screen.getByTestId("architect-finding-detail-cad-ref-link");
     expect(link.tagName).toBe("BUTTON");
     fireEvent.click(link);
-    // The page swings the tab strip over to Site Context. We assert
-    // via the page URL contract (`?tab=site-context`) which is the
-    // same channel deep-links use, so a future tab-strip re-render
-    // can't mask a regression here.
-    expect(window.location.search).toContain("tab=site-context");
+    // Default tab is snapshots — `writeTabToUrl` removes `?tab=` rather
+    // than writing `tab=snapshots`, so the URL must not claim site-context.
+    expect(window.location.search).not.toContain("tab=site-context");
+    expect(new URLSearchParams(window.location.search).get("tab")).toBeNull();
     // The findings list/detail is no longer in the DOM — proves the
     // tab actually switched, not just URL-only.
     expect(screen.queryByTestId("findings-tab")).not.toBeInTheDocument();
-    // Flip to the 3D sub-tab so the SiteContextViewer mounts. The
-    // engagement has no ready DXF sources in this fixture, so the
-    // viewer would otherwise default to the legacy Map placeholder
-    // and the badge wouldn't render.
+    expect(screen.getByTestId("snapshots-bim-viewer")).toBeInTheDocument();
+    const viewport = screen.getByTestId("bim-model-viewport");
+    expect(viewport.getAttribute("data-selected-element-id")).toBe(
+      "door:l2-corridor-9",
+    );
+    // Selection is page-level — clear it from Site context (same state
+    // the Snapshots viewport reads).
+    fireEvent.click(screen.getByTestId("engagement-tab-site-context"));
     fireEvent.click(screen.getByTestId("site-context-subtab-3d"));
-    const badge = screen.getByTestId("site-context-viewer-selected-element");
-    expect(badge.textContent).toContain("door:l2-corridor-9");
-    // Clearing the badge wipes the page-level selection state, so
-    // the badge unmounts.
     fireEvent.click(
       screen.getByTestId("site-context-viewer-selected-element-clear"),
     );

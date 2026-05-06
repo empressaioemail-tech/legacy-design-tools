@@ -156,9 +156,15 @@ vi.mock("@workspace/api-zod", () => ({
 // Leaflet's CSS / image side-effects don't survive happy-dom; the
 // page imports SiteMap unconditionally even though the Site tab
 // is never activated here.
-vi.mock("@workspace/site-context/client", () => ({
-  SiteMap: () => null,
-}));
+vi.mock("@workspace/site-context/client", async () => {
+  const { extractBriefingSourceOverlays } = await import(
+    "@workspace/site-context/client/overlays"
+  );
+  return {
+    extractBriefingSourceOverlays,
+    SiteMap: () => null,
+  };
+});
 
 vi.mock("@workspace/api-client-react", async () => {
   const { useQuery } = await import("@tanstack/react-query");

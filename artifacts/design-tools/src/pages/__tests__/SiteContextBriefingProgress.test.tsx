@@ -96,9 +96,15 @@ vi.mock("@workspace/api-zod", () => ({
   recordSubmissionResponseBodyReviewerCommentMax: 2048,
 }));
 
-vi.mock("@workspace/site-context/client", () => ({
-  SiteMap: () => null,
-}));
+vi.mock("@workspace/site-context/client", async () => {
+  const { extractBriefingSourceOverlays } = await import(
+    "@workspace/site-context/client/overlays"
+  );
+  return {
+    extractBriefingSourceOverlays,
+    SiteMap: () => null,
+  };
+});
 
 vi.mock("@workspace/api-client-react", async () => {
   const { useQuery } = await import("@tanstack/react-query");

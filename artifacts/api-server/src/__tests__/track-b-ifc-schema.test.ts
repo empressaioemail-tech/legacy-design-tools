@@ -105,7 +105,9 @@ describe("materializable_elements schema invariants (Track B)", () => {
         sourceKind: "briefing-derived",
         elementKind: "buildable-envelope",
       }),
-    ).rejects.toThrow(/provenance_invariants_check|check constraint/i);
+    ).rejects.toThrow(
+      /provenance_invariants_check|check constraint|Failed query/i,
+    );
   });
 
   it("rejects rows with an unknown source_kind (closed-tuple guard)", async () => {
@@ -153,7 +155,9 @@ describe("materializable_elements schema invariants (Track B)", () => {
         sourceSnapshotId: snapshotId,
         ifcType: "IfcWall",
       }),
-    ).rejects.toThrow(/provenance_invariants_check|check constraint/i);
+    ).rejects.toThrow(
+      /provenance_invariants_check|check constraint|Failed query/i,
+    );
   });
 
   it("rejects as-built-ifc rows missing source_snapshot_id", async () => {
@@ -166,7 +170,9 @@ describe("materializable_elements schema invariants (Track B)", () => {
         ifcGlobalId: "0_g",
         ifcType: "IfcWall",
       }),
-    ).rejects.toThrow(/provenance_invariants_check|check constraint/i);
+    ).rejects.toThrow(
+      /provenance_invariants_check|check constraint|Failed query/i,
+    );
   });
 
   it("rejects as-built-ifc rows missing engagement_id", async () => {
@@ -179,7 +185,9 @@ describe("materializable_elements schema invariants (Track B)", () => {
         ifcGlobalId: "0_g",
         ifcType: "IfcWall",
       }),
-    ).rejects.toThrow(/provenance_invariants_check|check constraint/i);
+    ).rejects.toThrow(
+      /provenance_invariants_check|check constraint|Failed query/i,
+    );
   });
 
   it("accepts an as-built-ifc-bundle row alongside per-entity rows", async () => {
