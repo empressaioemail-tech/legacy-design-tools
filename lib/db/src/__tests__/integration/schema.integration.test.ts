@@ -128,7 +128,11 @@ describe("lib/db schema integration", () => {
         // the matching domain action's atom-history event.
         "reviewer_requests",
         "sheets",
+        // IFC ingest metadata keyed off snapshots (parse status, global ids).
+        "snapshot_ifc_files",
         "snapshots",
+        // Track 1 — per-submission discipline / classification row.
+        "submission_classifications",
         // Task #431 — reviewer↔architect inline reply thread anchored
         // to a submission. Distinct from `reviewer_annotations` (which
         // is reviewer-only scratch notes); this table is the
