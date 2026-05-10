@@ -53,6 +53,15 @@ Thumbs.db
 .cache/
 .local/
 
+# Cursor — local agent runtime (session state; not project source)
+.claude/
+
+# Local one-off test/CI triage captures (e.g. Vitest extracts under artifacts/plan-review)
+.sc-triage/
+
+# One-off git bundle at repo root (keep backups outside the repo)
+/replit-103-commits.bundle
+
 # Conversation transcripts auto-saved by the workspace shouldn't ride along
 # with code changes — they're per-session ephemera, not project artifacts.
 attached_assets/Pasted-*.txt
