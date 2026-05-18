@@ -13,10 +13,12 @@ sprints will use to prove their atoms comply.
 
 ## Eventual extraction
 
-This package is the in-repo staging ground for `@empressaio/atom` v1.0.0,
-the SDK extraction planned for milestone **M2-C**. The directory name
-(`lib/empressa-atom/`) signals the destination; the package name and
-`exports` map already match the future SDK shape.
+This package is the in-repo staging ground for `@hauska/atom-contract`
+v1.0.0, the substrate extraction planned for milestone **M2-C**.
+(Renamed from `@empressaio/atom` on 2026-05-18 per doc_repo ADR-018;
+atom contract is Hauska commercial substrate, not Empressa product,
+per the four structural commitments and the corp-split work landed
+2026-05-16.)
 
 ## Import boundary
 
