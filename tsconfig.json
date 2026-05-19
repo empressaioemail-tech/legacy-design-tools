@@ -49,6 +49,9 @@
       "path": "./lib/finding-engine"
     },
     {
+      "path": "./lib/eval"
+    },
+    {
       "path": "./lib/comment-letter"
     },
     {
