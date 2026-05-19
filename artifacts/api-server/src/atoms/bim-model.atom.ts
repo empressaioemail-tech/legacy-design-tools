@@ -111,13 +111,22 @@ export type BimModelSupportedModes = typeof BIM_MODEL_SUPPORTED_MODES;
  * 51a §2.1. Producers (the materialize / refresh / divergence routes
  * in this sprint) import this constant so a rename here flows
  * through the catalog and every emit site at once.
+ *
+ * **Order is load-bearing.** `routes/bimModels.ts` pins the four
+ * route-side constants (BIM_MODEL_MATERIALIZED_EVENT_TYPE,
+ * BIM_MODEL_REFRESHED_EVENT_TYPE, BIM_MODEL_DIVERGED_EVENT_TYPE,
+ * BIM_MODEL_DIVERGENCE_RESOLVED_EVENT_TYPE) by INDEX into this array
+ * (`BIM_MODEL_EVENT_TYPES[0]`, `[1]`, `[2]`, `[3]`). Treat this list
+ * as append-only — never insert in the middle, or every route-side
+ * constant will silently rebind to the wrong event name and emits
+ * will land on the wrong timeline. New event types go at the END.
  */
 export const BIM_MODEL_EVENT_TYPES = [
   "bim-model.materialized",
-  "bim-model.ingested-from-ifc",
   "bim-model.refreshed",
   "bim-model.diverged",
   "bim-model.divergence-resolved",
+  "bim-model.ingested-from-ifc",
 ] as const;
 
 export type BimModelEventType = (typeof BIM_MODEL_EVENT_TYPES)[number];
