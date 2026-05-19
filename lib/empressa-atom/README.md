@@ -11,14 +11,20 @@ A1+. The deliverable here is the contract, the runtime that enforces it,
 the schema the history layer writes into, and the test scaffolding A1+
 sprints will use to prove their atoms comply.
 
-## Eventual extraction
+## Lineage and current home
 
-This package is the in-repo staging ground for `@hauska/atom-contract`
-v1.0.0, the substrate extraction planned for milestone **M2-C**.
-(Renamed from `@empressaio/atom` on 2026-05-18 per doc_repo ADR-018;
-atom contract is Hauska commercial substrate, not Empressa product,
-per the four structural commitments and the corp-split work landed
-2026-05-16.)
+M2-C extraction landed 2026-05-18. The atom framework now lives at
+[`empressaioemail-tech/hauska-atom-contract`](https://github.com/empressaioemail-tech/hauska-atom-contract)
+and publishes as `@hauska/atom-contract` on npm. This workspace-private
+copy is the historical staging ground; framework work happens upstream.
+
+Per doc_repo [ADR-018](https://github.com/empressaioemail-tech/doc-repo/blob/main/80_adrs/adr_018_atom_contract_substrate_layer.md),
+the atom contract is Hauska commercial substrate, peer to the Hauska SDK,
+not Empressa product. Consumers (this api-server included) depend on
+`@hauska/atom-contract` directly. The workspace-private import path
+(`@workspace/empressa-atom`) remains valid through the Bump 1 transition
+and will be removed once every consumer in this repo pins to the
+published package per the Bump 1 cross-repo PR rollout.
 
 ## Import boundary
 
