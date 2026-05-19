@@ -44,6 +44,19 @@
  *
  * Event types per Spec 51a §2.1:
  *   - `bim-model.materialized`  — emitted when a push succeeds
+ *   - `bim-model.ingested-from-ifc` — DA-BIM-Symmetry: emitted when
+ *      `lib/ifcIngest.ts` successfully persists materializable_elements
+ *      from an architect-uploaded IFC. The as-built peer of
+ *      `bim-model.materialized` (which is the to-be-built / Push-to-Revit
+ *      side). One bim_models row per engagement anchors both event
+ *      streams so the engagement timeline picks both producers up
+ *      without composition changes. Payload carries snapshotId,
+ *      ifcFileId, sourceKind=`as-built-ifc`, ifcBlobObjectPath,
+ *      gltfBundleObjectPath, entityCount, entityTypes. Re-ingest of
+ *      the same IFC appends a new event (atom history is append-only
+ *      per ADR-001) even though the underlying materializable_elements
+ *      rows are delete-and-reinsert today (an open ADR-011 follow-on,
+ *      out of scope for this fix).
  *   - `bim-model.refreshed`     — emitted when refresh diff is
  *      computed (Spec 53 §3 calls this out separately so a refresh
  *      that returns "current" still leaves an audit-trail row).
@@ -101,6 +114,7 @@ export type BimModelSupportedModes = typeof BIM_MODEL_SUPPORTED_MODES;
  */
 export const BIM_MODEL_EVENT_TYPES = [
   "bim-model.materialized",
+  "bim-model.ingested-from-ifc",
   "bim-model.refreshed",
   "bim-model.diverged",
   "bim-model.divergence-resolved",

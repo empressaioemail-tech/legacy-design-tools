@@ -36,6 +36,14 @@ export const SUBMISSION_RESPONSE_ACTOR_ID = "submission-response";
 /** design-tools-driven bim-model writes — `routes/bimModels.ts`. */
 export const BIM_MODEL_PUSH_ACTOR_ID = "bim-model-push";
 
+/**
+ * As-built IFC ingest path — `lib/ifcIngest.ts`. Stamped on
+ * `bim-model.ingested-from-ifc` events so the engagement timeline
+ * distinguishes "architect uploaded IFC" (as-built) from
+ * `bim-model-push` (to-be-built / Push-to-Revit).
+ */
+export const BIM_MODEL_IFC_INGEST_ACTOR_ID = "bim-model-ifc-ingest";
+
 /** Bim-model refresh-diff polling path — `routes/bimModels.ts`. */
 export const BIM_MODEL_REFRESH_ACTOR_ID = "bim-model-refresh";
 
@@ -120,6 +128,7 @@ export const SERVER_ACTOR_IDS = [
   SUBMISSION_INGEST_ACTOR_ID,
   SUBMISSION_RESPONSE_ACTOR_ID,
   BIM_MODEL_PUSH_ACTOR_ID,
+  BIM_MODEL_IFC_INGEST_ACTOR_ID,
   BIM_MODEL_REFRESH_ACTOR_ID,
   BIM_MODEL_DIVERGENCE_ACTOR_ID,
   BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID,

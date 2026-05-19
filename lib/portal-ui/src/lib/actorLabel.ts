@@ -1,6 +1,7 @@
 import {
   BIM_MODEL_DIVERGENCE_ACTOR_ID,
   BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID,
+  BIM_MODEL_IFC_INGEST_ACTOR_ID,
   BIM_MODEL_PUSH_ACTOR_ID,
   BIM_MODEL_REFRESH_ACTOR_ID,
   BRIEFING_ENGINE_ACTOR_ID,
@@ -50,8 +51,9 @@ export const FRIENDLY_AGENT_LABELS: Readonly<Record<string, string>> = {
   [ENGAGEMENT_EDIT_ACTOR_ID]: "Engagement editor",
   [SUBMISSION_INGEST_ACTOR_ID]: "Submission ingest",
   [SUBMISSION_RESPONSE_ACTOR_ID]: "Submission response",
-  // bim-model lifecycle (routes/bimModels.ts)
+  // bim-model lifecycle (routes/bimModels.ts; lib/ifcIngest.ts)
   [BIM_MODEL_PUSH_ACTOR_ID]: "Push-to-Revit automation",
+  [BIM_MODEL_IFC_INGEST_ACTOR_ID]: "IFC ingest automation",
   [BIM_MODEL_REFRESH_ACTOR_ID]: "Revit refresh automation",
   [BIM_MODEL_DIVERGENCE_ACTOR_ID]: "Revit divergence automation",
   [BIM_MODEL_DIVERGENCE_RESOLVE_ACTOR_ID]: "Revit divergence acknowledgement",
