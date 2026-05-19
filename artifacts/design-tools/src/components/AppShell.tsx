@@ -5,6 +5,8 @@ import {
   getListEngagementsQueryKey,
   useListMyNotifications,
   getListMyNotificationsQueryKey,
+  useGetSession,
+  getGetSessionQueryKey,
 } from "@workspace/api-client-react";
 import {
   Activity,
@@ -34,13 +36,26 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
   });
   const engagements = data ?? [];
 
+  // Gate the inbox poll on a real user session — production fail-closes
+  // the session middleware to anonymous (see middlewares/session.ts), so
+  // /me/notifications correctly 401s for any request that lacks a
+  // `requestor.kind === "user"`. Without this gate the side-nav inbox
+  // poll hammers the console with 401s every 5s on prod. Once a verified
+  // auth layer lands (Task #29 follow-up), the session will carry a real
+  // requestor and the gate will let the poll through unchanged.
+  const { data: session } = useGetSession({
+    query: { queryKey: getGetSessionQueryKey() },
+  });
+  const isUserSession = session?.requestor?.kind === "user";
+
   // Poll the architect inbox so the side-nav badge updates without
   // a hard refresh. The 5s cadence matches the engagement-list
   // poll above so a single "tab is active" signal covers both.
   const { data: notifications } = useListMyNotifications(undefined, {
     query: {
       queryKey: getListMyNotificationsQueryKey(),
-      refetchInterval: 5000,
+      refetchInterval: isUserSession ? 5000 : false,
+      enabled: isUserSession,
     },
   });
   const unreadCount = notifications?.unreadCount ?? 0;
