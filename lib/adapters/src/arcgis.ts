@@ -33,7 +33,7 @@ import { fetchWithRetry } from "./retry";
  * with a missing/unrecognized UA.
  */
 const ARC_GIS_USER_AGENT =
-  "smartcity-plan-review/1.0 (+https://prompt-agent-accelerator.replit.app)";
+  "smartcity-plan-review/1.0 (+https://cortex.empressa.io)";
 
 export interface ArcGisPointQueryInput {
   serviceUrl: string;

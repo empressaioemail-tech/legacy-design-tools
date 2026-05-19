@@ -810,10 +810,12 @@ router.post("/qa/triage/bundle", async (req: Request, res: Response) => {
         .orderBy(desc(qaTriageItems.createdAt));
 
   const baseUrl = (() => {
-    const domains = process.env["REPLIT_DOMAINS"];
-    if (!domains) return null;
-    const host = domains.split(",")[0]?.trim();
-    return host ? `https://${host}` : null;
+    // Public origin for deep links in the triage bundle. Set via the
+    // PUBLIC_BASE_URL env var (e.g. https://cortex.empressa.io); null
+    // when unset so the bundle renders without absolute links.
+    const raw = process.env["PUBLIC_BASE_URL"]?.trim();
+    if (!raw) return null;
+    return raw.replace(/\/+$/, "");
   })();
   const markdown = renderTriageBundle(rows, { baseUrl });
   res.json({

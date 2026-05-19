@@ -35,7 +35,7 @@ const EPA_EJSCREEN_LABEL = "EPA EJScreen";
  * a recognized `User-Agent` (production saw this as `fetch failed`).
  */
 const EPA_EJSCREEN_USER_AGENT =
-  "smartcity-plan-review/1.0 (+https://prompt-agent-accelerator.replit.app)";
+  "smartcity-plan-review/1.0 (+https://cortex.empressa.io)";
 
 /**
  * Freshness window for the EPA EJScreen snapshot.
