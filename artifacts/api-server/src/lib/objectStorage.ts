@@ -11,23 +11,44 @@ import {
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
-export const objectStorageClient = new Storage({
-  credentials: {
-    audience: "replit",
-    subject_token_type: "access_token",
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: "external_account",
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: "json",
-        subject_token_field_name: "access_token",
+/**
+ * Cloud Run sets `K_SERVICE` on every instance; Replit does not. The
+ * value discriminates the object-storage auth path during the
+ * Replit → Cloud Run migration window, where the same `main` build
+ * runs in both environments:
+ *
+ *   - Cloud Run: the runtime service account supplies Application
+ *     Default Credentials, so `new Storage()` needs no explicit
+ *     credential block.
+ *   - Replit: auth is brokered by the localhost object-storage
+ *     sidecar via workload-identity-federation external_account
+ *     credentials.
+ *
+ * TODO(post-cutover): once the Replit instance is decommissioned,
+ * drop the sidecar branch (and `REPLIT_SIDECAR_ENDPOINT`) and keep
+ * only the bare `new Storage()`.
+ */
+const isCloudRun = Boolean(process.env.K_SERVICE);
+
+export const objectStorageClient = isCloudRun
+  ? new Storage()
+  : new Storage({
+      credentials: {
+        audience: "replit",
+        subject_token_type: "access_token",
+        token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
+        type: "external_account",
+        credential_source: {
+          url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
+          format: {
+            type: "json",
+            subject_token_field_name: "access_token",
+          },
+        },
+        universe_domain: "googleapis.com",
       },
-    },
-    universe_domain: "googleapis.com",
-  },
-  projectId: "",
-});
+      projectId: "",
+    });
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -485,6 +506,27 @@ async function signObjectURL({
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
 }): Promise<string> {
+  if (isCloudRun) {
+    // Cloud Run: sign via the GCS SDK. V4 signing without a local
+    // key file delegates to the IAM `signBlob` API — the runtime
+    // service account needs `roles/iam.serviceAccountTokenCreator`
+    // on itself (see the C.2.3 IAM setup). HEAD shares the read
+    // action; GCS has no HEAD-specific signed-URL action.
+    const action: "read" | "write" | "delete" =
+      method === "PUT" ? "write" : method === "DELETE" ? "delete" : "read";
+    const [signed] = await objectStorageClient
+      .bucket(bucketName)
+      .file(objectName)
+      .getSignedUrl({
+        version: "v4",
+        action,
+        expires: Date.now() + ttlSec * 1000,
+      });
+    return signed;
+  }
+
+  // Replit: broker the signature through the localhost object-storage
+  // sidecar. TODO(post-cutover): drop this branch with the sidecar.
   const request = {
     bucket_name: bucketName,
     object_name: objectName,
