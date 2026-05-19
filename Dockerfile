@@ -49,13 +49,27 @@ RUN cd artifacts/api-server \
 
 RUN pnpm --filter @workspace/api-server run build
 
+# Build the browser SPAs. Off Replit there is no separate frontend
+# host, so api-server static-serves them (Q2 of the C.2.1 audit). Each
+# vite build defaults its `base` to the right path (design-tools `/`,
+# plan-review `/plan-review/`, qa `/qa/`) so no BASE_PATH is needed.
+# mockup-sandbox is intentionally excluded — dev-only UI sandbox.
+RUN pnpm --filter @workspace/design-tools \
+         --filter @workspace/plan-review \
+         --filter @workspace/qa \
+         run build
+
 
 # ---------- runtime stage ----------
 FROM ${NODE_IMAGE} AS runtime
 
+# SPA_STATIC_ROOT points api-server's mountSpaStatic() at the directory
+# holding the per-SPA `<name>/dist/public` build outputs copied from
+# the build stage. Unset would disable SPA serving (dev-mode behavior).
 ENV NODE_ENV=production \
     PUPPETEER_CACHE_DIR=/app/.puppeteer-cache \
-    PORT=8080
+    PORT=8080 \
+    SPA_STATIC_ROOT=/app/artifacts
 
 WORKDIR /app
 
