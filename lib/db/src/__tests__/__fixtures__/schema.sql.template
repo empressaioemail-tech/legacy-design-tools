@@ -566,7 +566,7 @@ CREATE TABLE @@SCHEMA@@.reviewer_requests (
     withdrawn_at timestamp with time zone,
     withdrawal_reason text,
     resolved_at timestamp with time zone,
-    triggered_action_event_id uuid,
+    triggered_action_event_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT reviewer_requests_kind_check CHECK ((request_kind = ANY (ARRAY['refresh-briefing-source'::text, 'refresh-bim-model'::text, 'regenerate-briefing'::text]))),
