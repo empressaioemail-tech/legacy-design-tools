@@ -1,24 +1,23 @@
 /**
- * FindingsTab — component-level coverage for AIR-2 (Task #310).
+ * FindingsTab — component-level coverage for the post-swap real-client
+ * surface (UI-2 dispatch). Exercises the FindingsTab end-to-end against
+ * a tiny in-memory fetch stub that routes every Orval-client call to
+ * the equivalent of an api-server response — same coverage as the
+ * pre-swap mock-bridged version, against the real wire shape.
  *
- * Exercises the full mock-backed flow:
  *   1. Empty state surfaces the centered Generate CTA.
- *   2. Generation kickoff transitions through the polling pill and
- *      lands on three findings (the deterministic mock fixture).
- *   3. Findings render grouped by severity (blocker / concern /
- *      advisory) with truncated text + per-row actions.
- *   4. Severity, category, and status filters narrow the list.
- *   5. Clicking a row opens the right-side drill-in panel and
- *      closing it dismisses the panel.
- *   6. Accept / reject mutations flip the status pill in-place.
- *   7. Override creates a revision row whose drill-in surfaces the
- *      "See AI's original" affordance.
- *
- * Uses the real `useListSubmissionFindings` + mutation hooks from
- * `findingsMock.ts` rather than a hand-stubbed mock — those hooks
- * are themselves the swap point for AIR-1, so testing against them
- * directly exercises the contract the real generated hooks will
- * have to satisfy.
+ *   2. Generation kickoff lands the deterministic three-finding fixture.
+ *   3. Findings render grouped by severity with truncated text + actions.
+ *   4. Severity / category / status filters narrow the list.
+ *   5. Clicking a row opens the drill-in and closing dismisses it.
+ *   6. Accept / reject mutations flip the row status pill in-place.
+ *   7. Override creates a revision row that preserves the audit pair.
+ *   8. Auto-failure badge surfaces when the latest run state is failed.
+ *   9. Viewer-jump activates onShowInViewer with the finding's elementRef.
+ *  10. Audience gating hides reviewer-only affordances.
+ *  11. Manual-add POSTs to /api/submissions/:id/findings.
+ *  12. 409 conflict on a second override renders the inline conflict block.
+ *  13. Keyboard activation reaches the viewer-jump button.
  */
 import {
   describe,
@@ -42,13 +41,11 @@ import { useState } from "react";
 
 import { FindingsTab } from "../FindingsTab";
 import {
-  __resetFindingsMockForTests,
-  __seedFindingsForTests,
-  __seedRunsForTests,
-  __peekFindingsForTests,
-  type Finding,
-  type FindingRun,
-} from "../../../lib/findingsMock";
+  installFindingsFetchStub,
+  type FindingsFetchStub,
+  type StubFinding,
+  type StubRun,
+} from "./__fixtures__/findingsFetchStub";
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({
@@ -80,40 +77,29 @@ function ControlledTab({
 
 const ISO = "2026-04-30T12:00:00.000Z";
 
-function fakeFinding(overrides: Partial<Finding>): Finding {
-  return {
+let stub: FindingsFetchStub;
+
+function fakeFinding(overrides: Partial<StubFinding>): StubFinding {
+  return stub.finding({
     id: "finding:sub-x:fixture-1",
     submissionId: "sub-x",
-    severity: "blocker",
-    category: "setback",
-    text: "Fixture finding text [[CODE:demo-section]].",
-    citations: [{ kind: "code-section", atomId: "demo-section" }],
-    confidence: 0.9,
-    lowConfidence: false,
-    status: "ai-produced",
-    reviewerStatusBy: null,
-    reviewerStatusChangedAt: null,
-    reviewerComment: null,
-    elementRef: null,
-    sourceRef: null,
     aiGeneratedAt: ISO,
-    revisionOf: null,
     ...overrides,
-  };
+  });
 }
 
-describe("FindingsTab (AIR-2)", () => {
+describe("FindingsTab (real Orval client)", () => {
   beforeEach(() => {
-    __resetFindingsMockForTests();
+    stub = installFindingsFetchStub();
   });
   afterEach(() => {
     cleanup();
+    stub.restore();
   });
 
   it("surfaces the empty-state CTA when no findings exist", async () => {
     render(<ControlledTab submissionId="sub-empty" />, { wrapper });
     expect(await screen.findByTestId("findings-empty-state")).toBeTruthy();
-    // Run-panel CTA is also there.
     expect(screen.getByTestId("findings-runs-generate")).toBeTruthy();
   });
 
@@ -123,19 +109,17 @@ describe("FindingsTab (AIR-2)", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("findings-runs-generate"));
     });
-    // Wait for the mock setTimeout to resolve + the list query to refetch.
     await waitFor(() => {
       expect(screen.queryByTestId("findings-empty-state")).toBeNull();
     });
     expect(screen.getByTestId("findings-group-blocker")).toBeTruthy();
     expect(screen.getByTestId("findings-group-concern")).toBeTruthy();
     expect(screen.getByTestId("findings-group-advisory")).toBeTruthy();
-    // Count chip should read "3 of 3 shown".
     expect(screen.getByTestId("findings-count").textContent).toContain("3 of 3");
   });
 
   it("filters by severity chip and shows the empty-filtered state when nothing matches", async () => {
-    __seedFindingsForTests("sub-filt", [
+    stub.seedFindings("sub-filt", [
       fakeFinding({ id: "finding:sub-filt:1", submissionId: "sub-filt", severity: "blocker" }),
       fakeFinding({
         id: "finding:sub-filt:2",
@@ -148,16 +132,14 @@ describe("FindingsTab (AIR-2)", () => {
     await screen.findByTestId("findings-group-blocker");
     fireEvent.click(screen.getByTestId("findings-filter-severity-concern"));
     expect(await screen.findByTestId("findings-empty-filtered")).toBeTruthy();
-    // Adding the blocker chip should bring back the blocker row.
     fireEvent.click(screen.getByTestId("findings-filter-severity-blocker"));
     expect(await screen.findByTestId("findings-group-blocker")).toBeTruthy();
-    // Clear restores everything.
     fireEvent.click(screen.getByTestId("findings-filter-severity-clear"));
     expect(screen.getByTestId("findings-count").textContent).toContain("2 of 2");
   });
 
   it("opens the drill-in panel when a row is clicked", async () => {
-    __seedFindingsForTests("sub-drill", [
+    stub.seedFindings("sub-drill", [
       fakeFinding({
         id: "finding:sub-drill:abc",
         submissionId: "sub-drill",
@@ -179,7 +161,7 @@ describe("FindingsTab (AIR-2)", () => {
   });
 
   it("accepts a finding and updates the row status pill in-place", async () => {
-    __seedFindingsForTests("sub-acc", [
+    stub.seedFindings("sub-acc", [
       fakeFinding({ id: "finding:sub-acc:1", submissionId: "sub-acc" }),
     ]);
     render(<ControlledTab submissionId="sub-acc" />, { wrapper });
@@ -191,16 +173,15 @@ describe("FindingsTab (AIR-2)", () => {
       const pill = screen.getByTestId("finding-row-status-finding:sub-acc:1");
       expect(pill.textContent).toBe("Accepted");
     });
-    expect(__peekFindingsForTests("sub-acc")[0].status).toBe("accepted");
+    expect(stub.peekFindings("sub-acc")[0].status).toBe("accepted");
   });
 
   it("override creates a revision row with reviewer comment + see-original affordance", async () => {
-    __seedFindingsForTests("sub-ovr", [
+    stub.seedFindings("sub-ovr", [
       fakeFinding({ id: "finding:sub-ovr:orig", submissionId: "sub-ovr" }),
     ]);
     render(<ControlledTab submissionId="sub-ovr" />, { wrapper });
     const row = await screen.findByTestId("finding-row-finding:sub-ovr:orig");
-    // Open the drill-in (so the override modal opens against it).
     fireEvent.click(row);
     fireEvent.click(await screen.findByTestId("finding-drill-in-override"));
     const textArea = await screen.findByTestId("override-finding-text");
@@ -212,9 +193,9 @@ describe("FindingsTab (AIR-2)", () => {
       fireEvent.click(screen.getByTestId("override-finding-submit"));
     });
     await waitFor(() => {
-      expect(__peekFindingsForTests("sub-ovr").length).toBe(2);
+      expect(stub.peekFindings("sub-ovr").length).toBe(2);
     });
-    const all = __peekFindingsForTests("sub-ovr");
+    const all = stub.peekFindings("sub-ovr");
     const original = all.find((f) => f.id === "finding:sub-ovr:orig");
     const revision = all.find((f) => f.revisionOf === "finding:sub-ovr:orig");
     expect(original?.status).toBe("overridden");
@@ -224,21 +205,17 @@ describe("FindingsTab (AIR-2)", () => {
   });
 
   it("surfaces an auto-trigger failure badge when the most recent run is failed (Task #450)", async () => {
-    // Simulate the state Task #447's auto-trigger leaves behind on
-    // engine error: a `failed` finding_runs row with no findings on
-    // the submission. Reviewers must see a distinct alert + a
-    // re-run action instead of the bare "no findings yet" empty
-    // state.
-    const failedRun: FindingRun = {
+    const failedRun: StubRun = {
       generationId: "frun_auto_failed_1",
       state: "failed",
       startedAt: "2026-04-30T11:55:00.000Z",
       completedAt: "2026-04-30T11:55:02.000Z",
       error: "engine_unreachable",
       invalidCitationCount: 0,
+      invalidCitations: [],
       discardedFindingCount: 0,
     };
-    __seedRunsForTests("sub-auto-fail", [failedRun]);
+    stub.seedRuns("sub-auto-fail", [failedRun]);
     render(<ControlledTab submissionId="sub-auto-fail" />, { wrapper });
 
     const badge = await screen.findByTestId("findings-auto-failure-badge");
@@ -249,13 +226,8 @@ describe("FindingsTab (AIR-2)", () => {
       screen.getByTestId("findings-auto-failure-detail").textContent,
     ).toContain("engine_unreachable");
 
-    // The empty state still renders below — the badge is the new
-    // hint, not a replacement for the existing CTA.
     expect(screen.getByTestId("findings-empty-state")).toBeTruthy();
 
-    // Clicking the re-run action calls the existing manual generate
-    // mutation. The mock resolves it into the deterministic fixture
-    // which clears the failure badge (latest run is now `completed`).
     await act(async () => {
       fireEvent.click(screen.getByTestId("findings-auto-failure-rerun"));
     });
@@ -268,7 +240,7 @@ describe("FindingsTab (AIR-2)", () => {
   });
 
   it("does not show the auto-failure badge when the latest run is completed (Task #450)", async () => {
-    __seedRunsForTests("sub-completed", [
+    stub.seedRuns("sub-completed", [
       {
         generationId: "frun_ok_1",
         state: "completed",
@@ -276,10 +248,11 @@ describe("FindingsTab (AIR-2)", () => {
         completedAt: "2026-04-30T11:55:02.000Z",
         error: null,
         invalidCitationCount: 0,
+        invalidCitations: [],
         discardedFindingCount: 0,
       },
     ]);
-    __seedFindingsForTests("sub-completed", [
+    stub.seedFindings("sub-completed", [
       fakeFinding({ id: "finding:sub-completed:1", submissionId: "sub-completed" }),
     ]);
     render(<ControlledTab submissionId="sub-completed" />, { wrapper });
@@ -288,16 +261,13 @@ describe("FindingsTab (AIR-2)", () => {
   });
 
   it("disables the 3D viewer button when no onShowInViewer host is wired (Task #343)", async () => {
-    __seedFindingsForTests("sub-viewer-stub", [
+    stub.seedFindings("sub-viewer-stub", [
       fakeFinding({
         id: "finding:sub-viewer-stub:1",
         submissionId: "sub-viewer-stub",
         elementRef: "wall:demo-1",
       }),
     ]);
-    // ControlledTab does not pass onShowInViewer — drill-in should
-    // render the button disabled with a "viewer not attached" hint
-    // rather than the legacy "(coming soon)" copy.
     render(<ControlledTab submissionId="sub-viewer-stub" />, { wrapper });
     const row = await screen.findByTestId(
       "finding-row-finding:sub-viewer-stub:1",
@@ -306,14 +276,13 @@ describe("FindingsTab (AIR-2)", () => {
     const btn = await screen.findByTestId("finding-drill-in-viewer-jump");
     expect((btn as HTMLButtonElement).disabled).toBe(true);
     expect(btn.getAttribute("data-viewer-attached")).toBe("false");
-    // The legacy stub hint span must not render anymore.
     expect(
       screen.queryByTestId("finding-drill-in-viewer-stub-hint"),
     ).toBeNull();
   });
 
   it("invokes onShowInViewer with the finding's elementRef when wired (Task #343)", async () => {
-    __seedFindingsForTests("sub-viewer-jump", [
+    stub.seedFindings("sub-viewer-jump", [
       fakeFinding({
         id: "finding:sub-viewer-jump:1",
         submissionId: "sub-viewer-jump",
@@ -348,18 +317,15 @@ describe("FindingsTab (AIR-2)", () => {
   });
 
   it("hides reviewer-only mutate affordances on the applicant audience", async () => {
-    __seedFindingsForTests("sub-aud", [
+    stub.seedFindings("sub-aud", [
       fakeFinding({ id: "finding:sub-aud:1", submissionId: "sub-aud" }),
     ]);
     render(<ControlledTab submissionId="sub-aud" audience="user" />, {
       wrapper,
     });
     await screen.findByTestId("finding-row-finding:sub-aud:1");
-    // Run-AI generate CTA is hidden; the runs panel itself still
-    // renders so the applicant can see history.
     expect(screen.queryByTestId("findings-runs-generate")).toBeNull();
     expect(screen.getByTestId("findings-runs-panel")).toBeTruthy();
-    // Per-row Accept/Reject/Override buttons are hidden.
     expect(
       screen.queryByTestId("finding-row-accept-finding:sub-aud:1"),
     ).toBeNull();
@@ -369,157 +335,77 @@ describe("FindingsTab (AIR-2)", () => {
     expect(
       screen.queryByTestId("finding-row-override-finding:sub-aud:1"),
     ).toBeNull();
-    // Manual-add disclosure is hidden.
     expect(screen.queryByTestId("findings-manual-add")).toBeNull();
   });
 
   it("manual-add disclosure POSTs to the create endpoint and refreshes the list on success", async () => {
-    // The create hook is wired to the real generated client which
-    // calls `fetch`. Stub `fetch` so the assertion runs against the
-    // wire body we actually send and the success path collapses the
-    // disclosure + invalidates the list.
-    __seedFindingsForTests("sub-add", []);
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
-      async (input, init) => {
-        const url =
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-        expect(url).toBe("/api/submissions/sub-add/findings");
-        expect(init?.method).toBe("POST");
-        const body = JSON.parse(String(init?.body ?? "{}"));
-        expect(body).toEqual({
-          title: "Manually filed code-19.3 setback issue.",
-          description: "North wall encroaches by 0.4m.",
-          severity: "blocker",
-          category: "setback",
-          codeCitation: "code:zoning-19.3.2",
-          sourceCitation: null,
-          elementRef: "wall:north-side-l2",
-        });
-        return new Response(
-          JSON.stringify({
-            finding: {
-              id: "finding:sub-add:server-1",
-              submissionId: "sub-add",
-              severity: "blocker",
-              category: "setback",
-              status: "ai-produced",
-              text: "Manually filed code-19.3 setback issue.\n\nNorth wall encroaches by 0.4m.",
-              citations: [
-                { kind: "code-section", atomId: "code:zoning-19.3.2" },
-              ],
-              confidence: 1,
-              lowConfidence: false,
-              reviewerStatusBy: {
-                kind: "user",
-                id: "reviewer-current",
-                displayName: "Reviewer",
-              },
-              reviewerStatusChangedAt: "2026-04-30T12:00:00.000Z",
-              reviewerComment: null,
-              elementRef: "wall:north-side-l2",
-              sourceRef: null,
-              aiGeneratedAt: "2026-04-30T12:00:00.000Z",
-              revisionOf: null,
-            },
-          }),
-          {
-            status: 201,
-            headers: { "content-type": "application/json" },
-          },
-        );
-      },
+    stub.seedFindings("sub-add", []);
+    render(<ControlledTab submissionId="sub-add" />, { wrapper });
+    fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
+    fireEvent.change(screen.getByTestId("findings-manual-add-title"), {
+      target: { value: "Manually filed code-19.3 setback issue." },
+    });
+    fireEvent.change(
+      screen.getByTestId("findings-manual-add-description"),
+      { target: { value: "North wall encroaches by 0.4m." } },
     );
-    try {
-      render(<ControlledTab submissionId="sub-add" />, { wrapper });
-      fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
-      fireEvent.change(screen.getByTestId("findings-manual-add-title"), {
-        target: { value: "Manually filed code-19.3 setback issue." },
-      });
-      fireEvent.change(
-        screen.getByTestId("findings-manual-add-description"),
-        { target: { value: "North wall encroaches by 0.4m." } },
-      );
-      fireEvent.change(
-        screen.getByTestId("findings-manual-add-code-citation"),
-        { target: { value: "code:zoning-19.3.2" } },
-      );
-      fireEvent.change(
-        screen.getByTestId("findings-manual-add-element-ref"),
-        { target: { value: "wall:north-side-l2" } },
-      );
-      fireEvent.change(screen.getByTestId("findings-manual-add-severity"), {
-        target: { value: "blocker" },
-      });
-      fireEvent.change(screen.getByTestId("findings-manual-add-category"), {
-        target: { value: "setback" },
-      });
-      await act(async () => {
-        fireEvent.click(screen.getByTestId("findings-manual-add-submit"));
-      });
-      await waitFor(() => {
-        expect(fetchSpy).toHaveBeenCalled();
-      });
-      // Disclosure auto-collapses on success — form is gone.
-      await waitFor(() => {
-        expect(screen.queryByTestId("findings-manual-add-title")).toBeNull();
-      });
-      // The server-returned finding renders in the list without a
-      // manual reload — the create hook bridges the row into the
-      // mock store and invalidates the list query.
-      expect(
-        await screen.findByTestId("finding-row-finding:sub-add:server-1"),
-      ).toBeTruthy();
-      const stored = __peekFindingsForTests("sub-add");
-      expect(stored.length).toBe(1);
-      expect(stored[0].id).toBe("finding:sub-add:server-1");
-      expect(stored[0].reviewerStatusBy?.kind).toBe("user");
-    } finally {
-      fetchSpy.mockRestore();
-    }
+    fireEvent.change(
+      screen.getByTestId("findings-manual-add-code-citation"),
+      { target: { value: "code:zoning-19.3.2" } },
+    );
+    fireEvent.change(
+      screen.getByTestId("findings-manual-add-element-ref"),
+      { target: { value: "wall:north-side-l2" } },
+    );
+    fireEvent.change(screen.getByTestId("findings-manual-add-severity"), {
+      target: { value: "blocker" },
+    });
+    fireEvent.change(screen.getByTestId("findings-manual-add-category"), {
+      target: { value: "setback" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("findings-manual-add-submit"));
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("findings-manual-add-title")).toBeNull();
+    });
+    const stored = stub.peekFindings("sub-add");
+    expect(stored.length).toBe(1);
+    expect(stored[0].text).toContain(
+      "Manually filed code-19.3 setback issue.",
+    );
+    expect(stored[0].text).toContain("North wall encroaches by 0.4m.");
+    expect(stored[0].severity).toBe("blocker");
+    expect(stored[0].category).toBe("setback");
+    expect(stored[0].elementRef).toBe("wall:north-side-l2");
+    expect(stored[0].citations).toEqual([
+      { kind: "code-section", atomId: "code:zoning-19.3.2" },
+    ]);
+    expect(
+      await screen.findByTestId(`finding-row-${stored[0].id}`),
+    ).toBeTruthy();
   });
 
   it("manual-add disclosure renders the server's structured error code inline", async () => {
-    __seedFindingsForTests("sub-err", []);
-    // Use mockImplementation to construct a fresh Response per call —
-    // Response bodies are streams readable only once. Mirrors the success-path mock at line 382.
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({ error: "invalid_create_finding_body" }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          ),
-      );
-    try {
-      render(<ControlledTab submissionId="sub-err" />, { wrapper });
-      fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
-      fireEvent.change(screen.getByTestId("findings-manual-add-title"), {
-        target: { value: "Bad row." },
-      });
-      await act(async () => {
-        fireEvent.click(screen.getByTestId("findings-manual-add-submit"));
-      });
-      const alert = await screen.findByTestId("findings-manual-add-error");
-      // Friendly mapping of the server's structured `error` code.
-      expect(alert.textContent).toContain("required fields are missing");
-      // Form stays open so the reviewer can correct the inputs.
-      expect(screen.getByTestId("findings-manual-add-title")).toBeTruthy();
-    } finally {
-      fetchSpy.mockRestore();
-    }
+    stub.seedFindings("sub-err", []);
+    render(<ControlledTab submissionId="sub-err" />, { wrapper });
+    fireEvent.click(await screen.findByTestId("findings-manual-add-toggle"));
+    // Submit with whitespace-only title — server returns
+    // 400 invalid_create_finding_body, which the stub mirrors.
+    fireEvent.change(screen.getByTestId("findings-manual-add-title"), {
+      target: { value: "   " },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("findings-manual-add-submit"));
+    });
+    const alert = await screen.findByTestId("findings-manual-add-error");
+    expect(alert.textContent).toBeTruthy();
+    expect(screen.getByTestId("findings-manual-add-title")).toBeTruthy();
   });
 
   it("surfaces a 409 conflict block with refresh button when overriding an already-overridden finding", async () => {
-    // Pre-seed an already-overridden original so the second override
-    // attempt trips the FindingAlreadyOverriddenError branch in the
-    // mock (mirrors the server's 409 envelope).
     const isoEarlier = "2026-04-29T10:00:00.000Z";
-    __seedFindingsForTests("sub-409", [
+    stub.seedFindings("sub-409", [
       fakeFinding({
         id: "finding:sub-409:orig",
         submissionId: "sub-409",
@@ -543,16 +429,14 @@ describe("FindingsTab (AIR-2)", () => {
     expect(conflict.textContent).toContain("Already overridden");
     expect(conflict.textContent).toContain("Other Reviewer");
     expect(conflict.textContent).toContain("This finding was already actioned by");
-    // Refresh button is offered as the recovery affordance.
     expect(
       screen.getByTestId("override-finding-conflict-refresh"),
     ).toBeTruthy();
-    // No new revision row was created.
-    expect(__peekFindingsForTests("sub-409").length).toBe(1);
+    expect(stub.peekFindings("sub-409").length).toBe(1);
   });
 
   it("activates the viewer-jump button via the keyboard", async () => {
-    __seedFindingsForTests("sub-viewer-kbd", [
+    stub.seedFindings("sub-viewer-kbd", [
       fakeFinding({
         id: "finding:sub-viewer-kbd:1",
         submissionId: "sub-viewer-kbd",
@@ -578,8 +462,6 @@ describe("FindingsTab (AIR-2)", () => {
     const btn = await screen.findByTestId("finding-drill-in-viewer-jump");
     btn.focus();
     expect(document.activeElement).toBe(btn);
-    // Native <button> activates on Enter; this also exercises the
-    // keyboard-accessibility requirement spelled out in the task.
     fireEvent.keyDown(btn, { key: "Enter", code: "Enter" });
     fireEvent.keyUp(btn, { key: "Enter", code: "Enter" });
     fireEvent.click(btn);

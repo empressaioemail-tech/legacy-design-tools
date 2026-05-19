@@ -17,7 +17,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { listSubmissionFindingsKey } from "./findingsApi";
 import { getListSubmissionFindingsQueryKey } from "@workspace/api-client-react";
 
 export interface PresenceUser {
@@ -74,11 +73,6 @@ export function useSubmissionLiveEvents(
   const invalidateRef = useRef<() => void>(() => {});
   invalidateRef.current = () => {
     if (!submissionId) return;
-    // Invalidate BOTH key shapes: the legacy mock key still backs
-    // the list hook today, and the generated Orval key is what the
-    // post-swap hook will read. Hitting both is a no-op for the
-    // shape that isn't currently in use.
-    qc.invalidateQueries({ queryKey: listSubmissionFindingsKey(submissionId) });
     qc.invalidateQueries({
       queryKey: getListSubmissionFindingsQueryKey(submissionId),
     });

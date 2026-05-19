@@ -36,12 +36,11 @@
  *   2. Insert a `parcel_briefings` row directly so the bim-model
  *      push has an `activeBriefingId` to point at, and so we can
  *      attach a hand-seeded `materializable_elements` row whose
- *      `label` exactly matches the AI fixture finding's
- *      `elementRef` (`wall:north-side-l2` — see
- *      `findingsMock.ts#buildFixtureFindings`). The
- *      `MaterializableElementsList` resolver picks that label up
- *      via its `exactLabel` matcher, which is the most explicit
- *      and stable of the four matchers it tries.
+ *      `label` exactly matches the seeded finding's `elementRef`
+ *      (`wall:north-side-l2`). The `MaterializableElementsList`
+ *      resolver picks that label up via its `exactLabel` matcher,
+ *      which is the most explicit and stable of the four matchers
+ *      it tries.
  *
  *   3. Create a submission via the real
  *      `POST /api/engagements/:id/submissions` route so the
@@ -54,10 +53,9 @@
  *
  *   5. Drive the UI through Playwright: open the engagement page on
  *      the Submissions tab, click the seeded row to open the
- *      detail modal, switch to the Findings tab, click "Generate
- *      findings" to populate the deterministic AI fixture, click
- *      the blocker finding row to open its drill-in, click "Show
- *      in 3D viewer", and assert that:
+ *      detail modal, switch to the Findings tab, click the seeded
+ *      blocker finding row to open its drill-in, click "Show in 3D
+ *      viewer", and assert that:
  *        - the BIM Model tab is now active,
  *        - the row whose `data-element-id` matches our seeded
  *          element has `data-highlighted="true"`,
@@ -71,12 +69,14 @@
  *      `materializable_elements.briefing_id` clean up the
  *      seeded element + briefing rows along with the submission.
  *
- * The Findings module is a client-side mock today
- * (`findingsMock.ts`) so the "Generate findings" click resolves
- * synchronously into the deterministic three-finding fixture; the
- * blocker entry of that fixture is the only one whose `elementRef`
- * we wire up to a real seeded element, so a single click on the
- * blocker row's drill-in is enough to drive the cross-tab jump.
+ * The Findings module talks to the real api-server. Rather than
+ * driving "Generate findings" (which kicks off the async finding
+ * engine and would produce non-deterministic output), the seed pass
+ * POSTs a single manual finding via
+ * `POST /api/submissions/:id/findings` with the exact `elementRef`
+ * we want to jump to. That gives us a single, predictable row to
+ * click without coupling the cross-tab-jump assertion to the
+ * engine's output.
  */
 
 import { test, expect } from "@playwright/test";
@@ -93,14 +93,11 @@ const TEST_PROJECT_NAME = `e2e Findings BIM Jump ${RUN_TAG}`;
 const TEST_NOTE = `e2e-findings-bim-jump ${RUN_TAG}`;
 
 /**
- * Pinned to the AI blocker fixture's `elementRef` in
- * `findingsMock.ts#buildFixtureFindings`. We seed a materializable
- * element whose `label` is this exact string so the
+ * The label we seed on a materializable_elements row AND the
+ * `elementRef` we POST onto a manual finding. The
  * `MaterializableElementsList`'s `exactLabel` matcher resolves the
- * finding's ref to a concrete row — no fuzzy matching, no chance of
- * the test passing for the wrong reason. A regression that drops
- * this fixture's `elementRef` (or renames it) would surface here as
- * a no-match warning instead of a highlighted row.
+ * finding's ref to this exact row — no fuzzy matching, no chance of
+ * the test passing for the wrong reason.
  */
 const FINDING_ELEMENT_REF = "wall:north-side-l2";
 
@@ -202,6 +199,34 @@ test.beforeAll(async ({ request }) => {
         `${pushResp.status()}: ${await pushResp.text()}`,
     );
   }
+
+  // Seed a single manual finding via the reviewer create endpoint so
+  // the Findings tab has exactly one row whose `elementRef` lines up
+  // with the seeded materializable_element. The route's audience
+  // guard requires `internal` — same `x-audience` header workaround
+  // as the bim-model push.
+  const createFindingResp = await request.post(
+    `/api/submissions/${submissionId}/findings`,
+    {
+      data: {
+        title: "Setback violation (e2e seed)",
+        description: "Cross-tab jump seed — anchored to the seeded element.",
+        severity: "blocker",
+        category: "setback",
+        elementRef: FINDING_ELEMENT_REF,
+      },
+      headers: {
+        "content-type": "application/json",
+        "x-audience": "internal",
+      },
+    },
+  );
+  if (createFindingResp.status() !== 201) {
+    throw new Error(
+      `seed: POST /api/submissions/${submissionId}/findings returned ` +
+        `${createFindingResp.status()}: ${await createFindingResp.text()}`,
+    );
+  }
 });
 
 test.afterAll(async () => {
@@ -256,20 +281,16 @@ test("clicking 'Show in 3D viewer' on a Findings drill-in jumps to the BIM Model
   const findingsTab = modal.getByTestId("findings-tab");
   await expect(findingsTab).toBeVisible();
 
-  // Findings module is the client-side mock today — the empty-state
-  // "Generate findings" button seeds the deterministic three-finding
-  // fixture into the in-memory store and the list re-renders. The
-  // run resolves after a short setTimeout in the mock, so we wait
-  // for the empty state to disappear before hunting for the row.
-  await expect(modal.getByTestId("findings-empty-generate")).toBeVisible();
-  await modal.getByTestId("findings-empty-generate").click();
+  // The Findings module talks to the real api-server. The seed pass
+  // POSTed a single manual finding tagged with our `elementRef`, so
+  // the empty-state should NOT be visible — instead, the row is
+  // already rendered under the blocker severity group.
   await expect(modal.getByTestId("findings-empty-state")).toHaveCount(0);
 
-  // The blocker fixture finding is the one that carries our
-  // `elementRef`. Severity grouping puts blockers in their own
-  // testid'd container, so picking the first row inside that
-  // container is the most stable selector — finding atom ids are
-  // ULID-based and not predictable from the test side.
+  // Pick the seeded blocker row. Severity grouping puts blockers in
+  // their own testid'd container, so picking the first row inside
+  // that container is the most stable selector — finding atom ids
+  // are ULID-based and not predictable from the test side.
   const blockerGroup = modal.getByTestId("findings-group-blocker");
   await expect(blockerGroup).toBeVisible();
   const blockerRow = blockerGroup
