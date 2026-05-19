@@ -33,7 +33,7 @@ const FCC_BROADBAND_LABEL = "FCC National Broadband Map";
  * spelling one out keeps the production call from tripping that gate.
  */
 const FCC_BROADBAND_USER_AGENT =
-  "smartcity-plan-review/1.0 (+https://prompt-agent-accelerator.replit.app)";
+  "smartcity-plan-review/1.0 (+https://cortex.empressa.io)";
 
 /**
  * Freshness window for the FCC National Broadband Map snapshot.

@@ -58,7 +58,7 @@ const OSM_OVERPASS_LABEL = "OSM Overpass";
  * of blocking the whole request.
  */
 const ADAPTER_USER_AGENT =
-  "smartcity-plan-review/1.0 (+https://prompt-agent-accelerator.replit.app)";
+  "smartcity-plan-review/1.0 (+https://cortex.empressa.io)";
 
 /**
  * Per-adapter timeout override (ms) for the Grand County roads

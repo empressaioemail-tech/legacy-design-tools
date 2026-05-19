@@ -760,11 +760,12 @@ async function maybeNotifyRedSweep(ctx: NotifyContext): Promise<void> {
 }
 
 function buildDashboardDeepLink(autopilotRunId: string): string | null {
-  const domains = process.env["REPLIT_DOMAINS"];
-  if (!domains) return null;
-  const host = domains.split(",")[0]?.trim();
-  if (!host) return null;
-  return `https://${host}/qa/autopilot?run=${encodeURIComponent(autopilotRunId)}`;
+  // Public origin for the autopilot dashboard deep link. Set via the
+  // PUBLIC_BASE_URL env var (e.g. https://cortex.empressa.io); null
+  // when unset so callers fall back to a run id with no absolute link.
+  const base = process.env["PUBLIC_BASE_URL"]?.trim().replace(/\/+$/, "");
+  if (!base) return null;
+  return `${base}/qa/autopilot?run=${encodeURIComponent(autopilotRunId)}`;
 }
 
 // ---------------------------------------------------------------------------
