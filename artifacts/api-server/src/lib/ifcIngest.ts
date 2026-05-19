@@ -11,7 +11,7 @@
 
 import type { Request, Response } from "express";
 import Busboy from "busboy";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   db,
   bimModels,
@@ -281,10 +281,10 @@ export async function ingestSnapshotIfc(args: {
   let ifcFileId: string;
   try {
     if (previous) {
-      // Replace: clear atoms first so the parse can re-emit cleanly.
-      await db
-        .delete(materializableElements)
-        .where(eq(materializableElements.sourceSnapshotId, snapshot.id));
+      // Re-ingest: prior materializable_elements rows stay in place; the
+      // step-5 transaction stamps them as superseded and links the new
+      // row ids via superseded_by_id (mirrors briefing-sources, preserves
+      // atom history per [[adr-001-atom-architecture]] / [[adr-011]]).
       await db
         .update(snapshotIfcFiles)
         .set({
@@ -359,36 +359,132 @@ export async function ingestSnapshotIfc(args: {
     }
   }
 
-  // 5) Insert per-entity rows + the bundle row carrying the GLB path.
+  // 5) Supersede prior active rows for this snapshot, insert the new
+  //    per-entity rows + bundle row, and patch superseded_by_id on
+  //    matching prior rows so the per-entity history is walkable.
+  //
+  //    Transactional so a partial failure cannot leave prior rows
+  //    flagged superseded with no replacements (or vice-versa). Mirror
+  //    of briefing-sources' supersession contract — see
+  //    [[adr-001-atom-architecture]] / [[adr-011]]: atom history is
+  //    append + supersede, never delete.
   try {
-    if (parseResult.entities.length > 0) {
-      await db.insert(materializableElements).values(
-        parseResult.entities.map((e) => ({
+    await db.transaction(async (tx) => {
+      // 5a) Read prior active rows (if any) so we can patch
+      //     superseded_by_id once new rows have been assigned ids.
+      //     For a first-ingest, this returns []; the rest of the
+      //     transaction degrades to plain inserts.
+      const priorActiveRows = await tx
+        .select({
+          id: materializableElements.id,
+          ifcGlobalId: materializableElements.ifcGlobalId,
+          sourceKind: materializableElements.sourceKind,
+        })
+        .from(materializableElements)
+        .where(
+          and(
+            eq(materializableElements.sourceSnapshotId, snapshot.id),
+            isNull(materializableElements.supersededAt),
+          ),
+        );
+      const priorIdByIdentity = new Map<string, string>();
+      for (const row of priorActiveRows) {
+        if (row.ifcGlobalId === null) continue;
+        priorIdByIdentity.set(
+          `${row.sourceKind}|${row.ifcGlobalId}`,
+          row.id,
+        );
+      }
+
+      // 5b) Stamp supersession on all prior active rows for this
+      //     snapshot up front. The matching new-row id (when one
+      //     exists) gets patched into superseded_by_id in 5e once
+      //     the inserts return; prior rows whose entity no longer
+      //     appears in the re-ingest stay with superseded_by_id =
+      //     null, which is the "tombstoned" lens.
+      if (priorActiveRows.length > 0) {
+        await tx
+          .update(materializableElements)
+          .set({ supersededAt: new Date() })
+          .where(
+            and(
+              eq(materializableElements.sourceSnapshotId, snapshot.id),
+              isNull(materializableElements.supersededAt),
+            ),
+          );
+      }
+
+      // 5c) Insert per-entity rows.
+      const insertedEntities =
+        parseResult.entities.length > 0
+          ? await tx
+              .insert(materializableElements)
+              .values(
+                parseResult.entities.map((e) => ({
+                  engagementId: snapshot.engagementId,
+                  sourceKind: "as-built-ifc" as const,
+                  elementKind: "as-built-ifc" as const,
+                  sourceSnapshotId: snapshot.id,
+                  ifcGlobalId: e.ifcGlobalId,
+                  ifcType: e.ifcType,
+                  label: e.label,
+                  propertySet: e.propertySet,
+                  locked: false,
+                })),
+              )
+              .returning({
+                id: materializableElements.id,
+                ifcGlobalId: materializableElements.ifcGlobalId,
+                sourceKind: materializableElements.sourceKind,
+              })
+          : [];
+
+      // 5d) Bundle row — carries the consolidated glTF for the
+      //     viewer's one-mesh-at-a-time rendering. Synthetic
+      //     ifc_global_id / ifc_type satisfy the CHECK invariant
+      //     without colliding with real GUIDs.
+      const [insertedBundle] = await tx
+        .insert(materializableElements)
+        .values({
           engagementId: snapshot.engagementId,
-          sourceKind: "as-built-ifc" as const,
-          elementKind: "as-built-ifc" as const,
+          sourceKind: "as-built-ifc-bundle",
+          elementKind: "as-built-ifc",
           sourceSnapshotId: snapshot.id,
-          ifcGlobalId: e.ifcGlobalId,
-          ifcType: e.ifcType,
-          label: e.label,
-          propertySet: e.propertySet,
+          ifcGlobalId: `bundle:${snapshot.id}`,
+          ifcType: "<bundle>",
+          label: "As-built IFC bundle",
+          glbObjectPath: gltfObjectPath,
           locked: false,
-        })),
-      );
-    }
-    // Bundle row — carries the consolidated glTF for the viewer's
-    // one-mesh-at-a-time rendering. Synthetic ifc_global_id / ifc_type
-    // satisfy the CHECK invariant without colliding with real GUIDs.
-    await db.insert(materializableElements).values({
-      engagementId: snapshot.engagementId,
-      sourceKind: "as-built-ifc-bundle",
-      elementKind: "as-built-ifc",
-      sourceSnapshotId: snapshot.id,
-      ifcGlobalId: `bundle:${snapshot.id}`,
-      ifcType: "<bundle>",
-      label: "As-built IFC bundle",
-      glbObjectPath: gltfObjectPath,
-      locked: false,
+        })
+        .returning({
+          id: materializableElements.id,
+          ifcGlobalId: materializableElements.ifcGlobalId,
+          sourceKind: materializableElements.sourceKind,
+        });
+      if (!insertedBundle) {
+        throw new Error("bundle insert returned no rows");
+      }
+
+      // 5e) Patch superseded_by_id on prior rows whose entity-identity
+      //     re-appears in the new ingest. N+1 UPDATEs in a transaction
+      //     — re-ingest is a rare operator-initiated path so the
+      //     per-row chatter is acceptable; if profiling shows it as a
+      //     hotspot on large IFCs, swap to a single VALUES-based UPDATE.
+      if (priorIdByIdentity.size > 0) {
+        const freshRows = [...insertedEntities, insertedBundle];
+        for (const fresh of freshRows) {
+          if (fresh.ifcGlobalId === null) continue;
+          const priorId = priorIdByIdentity.get(
+            `${fresh.sourceKind}|${fresh.ifcGlobalId}`,
+          );
+          if (priorId !== undefined) {
+            await tx
+              .update(materializableElements)
+              .set({ supersededById: fresh.id })
+              .where(eq(materializableElements.id, priorId));
+          }
+        }
+      }
     });
   } catch (err) {
     reqLog.error(

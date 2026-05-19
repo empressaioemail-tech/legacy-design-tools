@@ -574,6 +574,11 @@ async function loadAsBuiltIfcElementsForEngagement(
           "as-built-ifc-bundle",
           "as-built-ifc",
         ]),
+        // Active rows only — prior generations from an earlier IFC ingest
+        // of this same snapshot are kept for atom history but must not
+        // surface to the viewer (would render stale entities + a stale
+        // bundle GLB). See [[adr-001-atom-architecture]].
+        isNull(materializableElements.supersededAt),
       ),
     )
     // Bundle first (it carries the GLB), then per-entity rows.

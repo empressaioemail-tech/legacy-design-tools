@@ -6,7 +6,9 @@ import {
   jsonb,
   boolean,
   index,
+  uniqueIndex,
   check,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { parcelBriefings } from "./parcelBriefings";
@@ -212,6 +214,25 @@ export const materializableElements = pgTable(
       () => snapshots.id,
       { onDelete: "cascade" },
     ),
+    /**
+     * Per-entity supersession pointer for IFC re-ingest, modeled after
+     * `briefing_sources.superseded_by_id` (Spec 51 §4 reconciliation).
+     * Null while this row is the current materialization for its
+     * `(source_snapshot_id, ifc_global_id)` slot; set to the new row's
+     * id when a fresh IFC ingest produces a replacement entity. Cycles
+     * cannot form since the supersession is strictly forward-in-time
+     * (a row's superseder is always inserted later than itself).
+     *
+     * Briefing-derived rows do not currently participate in supersession
+     * — the briefing engine continues to refresh layers via the legacy
+     * replace path. The partial unique index below scopes the
+     * "at most one active per identity" guarantee to IFC rows only.
+     */
+    supersededById: uuid("superseded_by_id").references(
+      (): AnyPgColumn => materializableElements.id,
+      { onDelete: "set null" },
+    ),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -235,12 +256,36 @@ export const materializableElements = pgTable(
       .on(t.engagementId, t.sourceKind)
       .where(sql`${t.engagementId} IS NOT NULL`),
     /**
-     * Index for re-upload cleanup — given a snapshot, find the rows it
-     * produced so we can delete them before re-parsing.
+     * Index supporting the IFC re-ingest path's "find prior active
+     * rows for this snapshot" lookup. The re-ingest flow reads
+     * `WHERE source_snapshot_id = $1 AND superseded_at IS NULL` to
+     * stamp supersession on the prior generation before inserting
+     * the new one (no DELETE — see [[adr-001-atom-architecture]] and
+     * the briefing-sources precedent).
      */
     snapshotIdx: index("materializable_elements_snapshot_idx")
       .on(t.sourceSnapshotId)
       .where(sql`${t.sourceSnapshotId} IS NOT NULL`),
+    /**
+     * "One active row per IFC entity-identity" guard — at most one
+     * non-superseded row per `(source_snapshot_id, ifc_global_id)`
+     * among rows whose `source_kind` is an IFC variant. Scoped via
+     * the partial WHERE because briefing-derived rows do not carry
+     * `ifc_global_id` and do not participate in supersession.
+     *
+     * The condition is on `superseded_at` rather than `superseded_by_id`
+     * so the ingest write can stamp supersession before knowing the
+     * replacement row's id (mirroring briefing_sources). The
+     * `superseded_by_id` patch is a follow-up UPDATE once the new row
+     * has been inserted.
+     */
+    activeIfcIdentityUniq: uniqueIndex(
+      "materializable_elements_active_ifc_identity_uniq",
+    )
+      .on(t.sourceSnapshotId, t.ifcGlobalId)
+      .where(
+        sql`${t.supersededAt} IS NULL AND ${t.sourceKind} IN ('as-built-ifc', 'as-built-ifc-bundle')`,
+      ),
     /**
      * source_kind closed-tuple guard. Enforced at the DB so a stray
      * write can't introduce an unknown lens.
@@ -286,6 +331,10 @@ export const materializableElementsRelations = relations(
     sourceSnapshot: one(snapshots, {
       fields: [materializableElements.sourceSnapshotId],
       references: [snapshots.id],
+    }),
+    supersededBy: one(materializableElements, {
+      fields: [materializableElements.supersededById],
+      references: [materializableElements.id],
     }),
   }),
 );

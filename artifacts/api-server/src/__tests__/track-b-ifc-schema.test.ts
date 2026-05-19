@@ -241,6 +241,236 @@ describe("materializable_elements schema invariants (Track B)", () => {
   });
 });
 
+/**
+ * IFC re-ingest supersession (C.1.5) — verifies the schema-level
+ * invariants for the append-and-supersede pattern that replaces the
+ * prior delete-and-reinsert at `ifcIngest.ts` (see [[adr-001-atom-architecture]]
+ * + the briefing-sources precedent).
+ *
+ * Schema-level only: the actual ingest call site is exercised via
+ * `ifc-ingest-bim-model-atom.test.ts`; here we just confirm the new
+ * columns, partial unique index, and self-FK behave as advertised.
+ */
+describe("materializable_elements IFC supersession (C.1.5)", () => {
+  it("permits inserting a new active row once a prior row is flagged superseded (partial unique index respects superseded_at IS NULL)", async () => {
+    const { engagementId, snapshotId } = await seedEngagementSnapshot();
+    // First active row for (snapshot, ifc_global_id).
+    const [prior] = await schema.db
+      .insert(materializableElements)
+      .values({
+        engagementId,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: "0_door_1",
+        ifcType: "IfcDoor",
+      })
+      .returning();
+
+    // A second active row with the same identity must be rejected.
+    await expect(
+      schema.db.insert(materializableElements).values({
+        engagementId,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: "0_door_1",
+        ifcType: "IfcDoor",
+      }),
+    ).rejects.toThrow(/materializable_elements_active_ifc_identity_uniq/i);
+
+    // After superseding the prior row, the same identity is available again.
+    await schema.db
+      .update(materializableElements)
+      .set({ supersededAt: new Date() })
+      .where(eq(materializableElements.id, prior.id));
+
+    const [replacement] = await schema.db
+      .insert(materializableElements)
+      .values({
+        engagementId,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: "0_door_1",
+        ifcType: "IfcDoor",
+      })
+      .returning();
+
+    // Patch the supersession link the way ifcIngest does.
+    await schema.db
+      .update(materializableElements)
+      .set({ supersededById: replacement.id })
+      .where(eq(materializableElements.id, prior.id));
+
+    const rows = await schema.db
+      .select()
+      .from(materializableElements)
+      .where(eq(materializableElements.sourceSnapshotId, snapshotId));
+    expect(rows).toHaveLength(2);
+    const priorRefetched = rows.find((r: MaterializableElement) => r.id === prior.id);
+    const replacementRefetched = rows.find(
+      (r: MaterializableElement) => r.id === replacement.id,
+    );
+    expect(priorRefetched?.supersededAt).not.toBeNull();
+    expect(priorRefetched?.supersededById).toBe(replacement.id);
+    expect(replacementRefetched?.supersededAt).toBeNull();
+    expect(replacementRefetched?.supersededById).toBeNull();
+  });
+
+  it("does not constrain briefing-derived rows (partial index scoped to IFC source_kinds only)", async () => {
+    // briefing-derived rows do not participate in supersession; the
+    // partial unique index must NOT apply to them, so two briefing-
+    // derived rows with the same briefing+kind insert cleanly.
+    const { engagementId } = await seedEngagementSnapshot();
+    const briefingId = await seedBriefing(engagementId);
+    await schema.db.insert(materializableElements).values([
+      {
+        briefingId,
+        elementKind: "buildable-envelope",
+        label: "A",
+      },
+      {
+        briefingId,
+        elementKind: "buildable-envelope",
+        label: "B",
+      },
+    ]);
+    const rows = await schema.db
+      .select()
+      .from(materializableElements)
+      .where(eq(materializableElements.briefingId, briefingId));
+    expect(rows).toHaveLength(2);
+  });
+
+  it("the bimModels viewer-read filter (supersededAt IS NULL) returns only the active generation after a re-ingest cycle", async () => {
+    // Mirror the read at `routes/bimModels.ts:loadAsBuiltIfcElementsForEngagement`
+    // — `superseded_at IS NULL` AND the IFC source_kinds — to confirm
+    // the dispatch's invariant (d): the viewer must see only the active
+    // generation after a re-ingest, even though prior rows survive for
+    // history.
+    const { engagementId, snapshotId } = await seedEngagementSnapshot();
+    const ingestNow = new Date();
+    await schema.db.insert(materializableElements).values([
+      // Two prior superseded rows (an entity row + bundle).
+      {
+        engagementId,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: "0_door_1",
+        ifcType: "IfcDoor",
+        label: "Door (prior)",
+        supersededAt: ingestNow,
+      },
+      {
+        engagementId,
+        sourceKind: "as-built-ifc-bundle",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: `bundle:${snapshotId}`,
+        ifcType: "<bundle>",
+        label: "Bundle (prior)",
+        glbObjectPath: "/objects/uploads/prior-bundle",
+        supersededAt: ingestNow,
+      },
+      // The two active replacements emitted by the re-ingest.
+      {
+        engagementId,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: "0_door_1",
+        ifcType: "IfcDoor",
+        label: "Door (current)",
+      },
+      {
+        engagementId,
+        sourceKind: "as-built-ifc-bundle",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: `bundle:${snapshotId}`,
+        ifcType: "<bundle>",
+        label: "Bundle (current)",
+        glbObjectPath: "/objects/uploads/current-bundle",
+      },
+    ]);
+
+    // The viewer's read filter — same predicate as
+    // `routes/bimModels.ts:loadAsBuiltIfcElementsForEngagement`.
+    const { and, isNull, inArray } = await import("drizzle-orm");
+    const visible = await schema.db
+      .select()
+      .from(materializableElements)
+      .where(
+        and(
+          eq(materializableElements.engagementId, engagementId),
+          eq(materializableElements.sourceSnapshotId, snapshotId),
+          inArray(materializableElements.sourceKind, [
+            "as-built-ifc-bundle",
+            "as-built-ifc",
+          ]),
+          isNull(materializableElements.supersededAt),
+        ),
+      );
+    expect(visible).toHaveLength(2);
+    const labels = visible.map((r: MaterializableElement) => r.label).sort();
+    expect(labels).toEqual(["Bundle (current)", "Door (current)"]);
+  });
+
+  it("supersededById self-FK is set to null when the superseder row is deleted (ON DELETE SET NULL)", async () => {
+    const { engagementId, snapshotId } = await seedEngagementSnapshot();
+    const [prior] = await schema.db
+      .insert(materializableElements)
+      .values({
+        engagementId,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: "0_wall_1",
+        ifcType: "IfcWall",
+      })
+      .returning();
+
+    await schema.db
+      .update(materializableElements)
+      .set({ supersededAt: new Date() })
+      .where(eq(materializableElements.id, prior.id));
+
+    const [replacement] = await schema.db
+      .insert(materializableElements)
+      .values({
+        engagementId,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshotId,
+        ifcGlobalId: "0_wall_1",
+        ifcType: "IfcWall",
+      })
+      .returning();
+    await schema.db
+      .update(materializableElements)
+      .set({ supersededById: replacement.id })
+      .where(eq(materializableElements.id, prior.id));
+
+    // Deleting the superseder (e.g. a future cleanup pass) must not
+    // cascade-delete the prior row — the FK is ON DELETE SET NULL so
+    // the prior row's supersededAt flag is preserved even when its
+    // forward pointer is severed.
+    await schema.db
+      .delete(materializableElements)
+      .where(eq(materializableElements.id, replacement.id));
+
+    const refetched = await schema.db
+      .select()
+      .from(materializableElements)
+      .where(eq(materializableElements.id, prior.id));
+    expect(refetched).toHaveLength(1);
+    expect(refetched[0]?.supersededAt).not.toBeNull();
+    expect(refetched[0]?.supersededById).toBeNull();
+  });
+});
+
 describe("snapshot_ifc_files schema invariants (Track B)", () => {
   it("accepts a row with required fields and defaults the timestamps", async () => {
     const { snapshotId } = await seedEngagementSnapshot();
