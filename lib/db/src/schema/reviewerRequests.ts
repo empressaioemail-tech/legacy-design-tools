@@ -118,7 +118,12 @@ export interface ReviewerRequestActor {
  * `triggered_action_event_id` is set by the implicit-resolve hook to
  * the `id` of the atom-history event that closed the request (e.g.
  * the `briefing-source.refreshed` event id). Null while the request
- * is `pending` or `dismissed`.
+ * is `pending` or `dismissed`. Typed `text` (not `uuid`) because
+ * atom-event ids are ULID-shaped per ADR-011 (matching `atom_events.id`
+ * itself + the precedent on `viewpoint_renders.briefing_atom_event_id`
+ * / `bim_model_atom_event_id`). Same reason `target_entity_id` is
+ * `text` — both columns hold atom-framework identifiers, not Postgres
+ * UUIDs.
  */
 export const reviewerRequests = pgTable(
   "reviewer_requests",
@@ -209,9 +214,11 @@ export const reviewerRequests = pgTable(
     /**
      * The id of the atom-history event that closed the request (e.g.
      * the `briefing-source.refreshed` event id). Stamped by the
-     * implicit-resolve hook in lockstep with `resolved_at`.
+     * implicit-resolve hook in lockstep with `resolved_at`. ULID-
+     * shaped string per ADR-011, so `text` (not `uuid`) — see file
+     * header for the full reasoning.
      */
-    triggeredActionEventId: uuid("triggered_action_event_id"),
+    triggeredActionEventId: text("triggered_action_event_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
