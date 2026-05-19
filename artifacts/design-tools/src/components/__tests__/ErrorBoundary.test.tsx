@@ -8,9 +8,10 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { ErrorBoundary } from "../ErrorBoundary";
 
-function Boom(): JSX.Element {
+function Boom(): ReactNode {
   throw new Error("kaboom");
 }
 

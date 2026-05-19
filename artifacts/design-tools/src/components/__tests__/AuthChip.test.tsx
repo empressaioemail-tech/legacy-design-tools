@@ -5,7 +5,7 @@
  *   2. Clicking sign-out redirects to /logout — the chip's stub
  *      contract until a real /api/me + signOut endpoint lands.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AuthChip } from "../AuthChip";
 
