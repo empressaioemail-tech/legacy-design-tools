@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Bell, Moon, Search, Sun } from "lucide-react";
 import { getTheme, toggleTheme, type ThemeName } from "../lib/theme";
 
@@ -11,6 +11,14 @@ export interface HeaderSearch {
 export interface HeaderProps {
   title?: string;
   search?: HeaderSearch;
+  /**
+   * Optional content rendered at the trailing edge of the top-right
+   * cluster, after the notifications bell. Used by SPAs that need to
+   * add an auth affordance (current user + sign-out) without forcing
+   * every consumer to ship one — passing nothing leaves the original
+   * theme-toggle + bell layout untouched.
+   */
+  trailing?: ReactNode;
 }
 
 function ThemeToggle() {
@@ -74,7 +82,7 @@ function ThemeToggle() {
   );
 }
 
-export function Header({ title, search }: HeaderProps) {
+export function Header({ title, search, trailing }: HeaderProps) {
   return (
     <header
       style={{
@@ -180,6 +188,7 @@ export function Header({ title, search }: HeaderProps) {
         >
           <Bell size={14} />
         </button>
+        {trailing}
       </div>
     </header>
   );

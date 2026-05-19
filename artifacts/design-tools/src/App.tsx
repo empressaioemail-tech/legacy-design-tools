@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
+import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { EngagementList } from "./pages/EngagementList";
 import { EngagementDetail } from "./pages/EngagementDetail";
@@ -10,7 +10,9 @@ import { DevAtoms } from "./pages/DevAtoms";
 import { DevAtomsProbe } from "./pages/DevAtomsProbe";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
+import NotFound from "./pages/not-found";
 import { AppShell } from "./components/AppShell";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const queryClient = new QueryClient();
 
@@ -62,7 +64,7 @@ function Router() {
         </AppShell>
       </Route>
       <Route>
-        <Redirect to="/" />
+        <NotFound />
       </Route>
     </Switch>
   );
@@ -70,11 +72,13 @@ function Router() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-        <Router />
-      </WouterRouter>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          <Router />
+        </WouterRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

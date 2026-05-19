@@ -18,6 +18,8 @@ export interface DashboardLayoutProps {
   navGroups: SidebarGroup[];
   rightPanel?: ReactNode;
   search?: HeaderSearch;
+  /** Pass-through to {@link Header}'s `trailing` slot. */
+  headerTrailing?: ReactNode;
 }
 
 export function DashboardLayout({
@@ -28,6 +30,7 @@ export function DashboardLayout({
   navGroups,
   rightPanel,
   search,
+  headerTrailing,
 }: DashboardLayoutProps) {
   const rightCollapsed = useSidebarState((s) => s.rightCollapsed);
   const rightWidth = useSidebarState((s) => s.rightWidth);
@@ -111,7 +114,7 @@ export function DashboardLayout({
           minWidth: 0,
         }}
       >
-        <Header title={title} search={search} />
+        <Header title={title} search={search} trailing={headerTrailing} />
         <main
           style={{
             flex: 1,
