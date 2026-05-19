@@ -99,13 +99,6 @@ describe("lib/db schema integration", () => {
         // PDF (one row per recorded approval event).
         "decision_pdf_artifacts",
         "engagements",
-        // @workspace/eval harness tables (scaffolded in a8acb35;
-        // landed alongside the per-run scoring + per-fixture
-        // baseline schema). Listed alphabetically to match
-        // `ORDER BY tablename`.
-        "eval_baselines",
-        "eval_runs",
-        "eval_scores",
         // V1-1 / AIR-1 — finding atom row + producing-run row.
         // Supersedes the deleted `findings_code_atoms` placeholder
         // join (citation atomIds are now stored verbatim on

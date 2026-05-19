@@ -14,17 +14,13 @@ import Busboy from "busboy";
 import { eq } from "drizzle-orm";
 import {
   db,
-  bimModels,
   snapshots,
   snapshotIfcFiles,
   materializableElements,
 } from "@workspace/db";
-import { BIM_MODEL_IFC_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
-import type { EventAnchoringService } from "@workspace/empressa-atom";
 import { logger } from "./logger";
 import { ObjectStorageService } from "./objectStorage";
 import { parseIfc, type ParseIfcResult } from "./ifcParser";
-import { getHistoryService } from "../atoms/registry";
 
 /**
  * Upper bound on a single IFC upload. Raised above the sheet caps because
@@ -223,12 +219,6 @@ export interface IngestSnapshotIfcResult {
  *        DELETE FROM materializable_elements WHERE source_snapshot_id = $1
  *        INSERT N+1 rows (per-entity + bundle)
  *        UPDATE snapshot_ifc_files SET parsed_at, gltf_object_path, ...
- *   6b. DA-BIM-Symmetry: UPSERT a `bim_models` row for the engagement
- *       (one-per-engagement per the table's UNIQUE constraint) and
- *       append a `bim-model.ingested-from-ifc` atom event carrying the
- *       IFC provenance. Best-effort: the event append never fails the
- *       ingest. Makes the as-built IFC a first-class peer of the
- *       to-be-built Push-to-Revit side in the engagement atom graph.
  *   7. On parse failure: parse_error populated, blob preserved, 422.
  *
  * Caller (the route) handles secret/auth and the snapshot lookup; this
@@ -420,26 +410,6 @@ export async function ingestSnapshotIfc(args: {
     })
     .where(eq(snapshotIfcFiles.id, ifcFileId));
 
-  // 6b) DA-BIM-Symmetry — produce the `bim-model` atom for this
-  //     engagement so the as-built IFC is a first-class peer of the
-  //     to-be-built Push-to-Revit side in the atom graph. Best-effort:
-  //     mirrors `emitBimModelEvent` in routes/bimModels.ts so an event
-  //     append failure leaves the ingest's row writes intact and the
-  //     response stays 201. Implemented as an exported helper so the
-  //     unit test exercises the producer without driving the full route.
-  await ensureBimModelAndEmitIfcIngestEvent({
-    db,
-    history: getHistoryService(),
-    engagementId: snapshot.engagementId,
-    snapshotId: snapshot.id,
-    ifcFileId,
-    ifcBlobObjectPath: blobObjectPath,
-    gltfBundleObjectPath: gltfObjectPath,
-    entityCount: parseResult.entityCount,
-    entityTypes: distinctIfcTypes(parseResult.entities),
-    log: reqLog,
-  });
-
   // 7) Best-effort cleanup of the previous blobs. After-commit so a delete
   //    failure can't roll back the new write.
   if (previous) {
@@ -473,161 +443,6 @@ export async function ingestSnapshotIfc(args: {
     ifcVersion: parseResult.ifcVersion,
   };
   res.status(201).json(success);
-}
-
-/**
- * Distinct list of IFC types observed in a parsed result, sorted for
- * stability so the atom event payload is deterministic across calls
- * with the same input set (helps test assertions and chain hashing).
- */
-export function distinctIfcTypes(
-  entities: ReadonlyArray<{ ifcType: string }>,
-): string[] {
-  const set = new Set<string>();
-  for (const e of entities) set.add(e.ifcType);
-  return [...set].sort();
-}
-
-/**
- * Payload shape for the `bim-model.ingested-from-ifc` atom event.
- * Exported so test assertions (and any future consumer that wants to
- * narrow on the event payload) can pin the contract instead of typing
- * `Record<string, unknown>` everywhere.
- */
-export interface BimModelIngestedFromIfcPayload {
-  snapshotId: string;
-  ifcFileId: string;
-  sourceKind: "as-built-ifc";
-  ifcBlobObjectPath: string;
-  gltfBundleObjectPath: string | null;
-  entityCount: number;
-  entityTypes: ReadonlyArray<string>;
-}
-
-/**
- * DA-BIM-Symmetry producer — ensures a `bim_models` row exists for the
- * engagement and appends a `bim-model.ingested-from-ifc` atom event
- * with the IFC ingest provenance. Mirrors the best-effort posture of
- * `emitBimModelEvent` in `routes/bimModels.ts`: row writes are the
- * source of truth, event-append failure is logged but never fails the
- * caller.
- *
- * Exported so the test suite can exercise the producer in isolation
- * without driving the full multipart route (the route is exercised by
- * the integration test).
- *
- * Re-ingest of the same IFC appends a new event on the existing
- * bim-model row's chain — the atom history is append-only per ADR-001
- * even though the materializable_elements rows are delete-and-reinsert
- * today (recon §57 / ADR-011 follow-on, out of scope here).
- *
- * Returns the bim-model row id when the upsert succeeded (regardless of
- * event append outcome), or null when even the upsert failed — the
- * caller treats null as "skip the ingest event" and continues.
- */
-export async function ensureBimModelAndEmitIfcIngestEvent(args: {
-  db: typeof db;
-  history: EventAnchoringService;
-  engagementId: string;
-  snapshotId: string;
-  ifcFileId: string;
-  ifcBlobObjectPath: string;
-  gltfBundleObjectPath: string | null;
-  entityCount: number;
-  entityTypes: ReadonlyArray<string>;
-  log: typeof logger;
-}): Promise<string | null> {
-  const {
-    db: dbInst,
-    history,
-    engagementId,
-    snapshotId,
-    ifcFileId,
-    ifcBlobObjectPath,
-    gltfBundleObjectPath,
-    entityCount,
-    entityTypes,
-    log,
-  } = args;
-
-  // UPSERT the bim_models row. The UNIQUE constraint on engagement_id
-  // means at most one row per engagement; ON CONFLICT DO NOTHING leaves
-  // any existing Push-to-Revit-side state (activeBriefingId,
-  // materializedAt, briefingVersion, revitDocumentPath) untouched —
-  // the IFC ingest is as-built provenance and must not clobber the
-  // to-be-built columns.
-  let bimModelId: string | null = null;
-  try {
-    const [inserted] = await dbInst
-      .insert(bimModels)
-      .values({ engagementId })
-      .onConflictDoNothing({ target: bimModels.engagementId })
-      .returning({ id: bimModels.id });
-    if (inserted) {
-      bimModelId = inserted.id;
-    } else {
-      // Pre-existing row (or a race where another writer beat us to the
-      // INSERT). Re-SELECT to recover the id.
-      const existing = await dbInst
-        .select({ id: bimModels.id })
-        .from(bimModels)
-        .where(eq(bimModels.engagementId, engagementId))
-        .limit(1);
-      bimModelId = existing[0]?.id ?? null;
-    }
-  } catch (err) {
-    log.error(
-      { err, engagementId, snapshotId, ifcFileId },
-      "bim-model upsert for IFC ingest failed — skipping atom event",
-    );
-    return null;
-  }
-
-  if (!bimModelId) {
-    log.error(
-      { engagementId, snapshotId, ifcFileId },
-      "bim-model upsert returned no id and no existing row — skipping atom event",
-    );
-    return null;
-  }
-
-  const payload: BimModelIngestedFromIfcPayload = {
-    snapshotId,
-    ifcFileId,
-    sourceKind: "as-built-ifc",
-    ifcBlobObjectPath,
-    gltfBundleObjectPath,
-    entityCount,
-    entityTypes,
-  };
-
-  try {
-    const event = await history.appendEvent({
-      entityType: "bim-model",
-      entityId: bimModelId,
-      eventType: "bim-model.ingested-from-ifc",
-      actor: { kind: "system", id: BIM_MODEL_IFC_INGEST_ACTOR_ID },
-      payload: payload as unknown as Record<string, unknown>,
-    });
-    log.info(
-      {
-        bimModelId,
-        engagementId,
-        snapshotId,
-        ifcFileId,
-        eventId: event.id,
-        chainHash: event.chainHash,
-      },
-      "bim-model.ingested-from-ifc event appended",
-    );
-  } catch (err) {
-    log.error(
-      { err, bimModelId, engagementId, snapshotId, ifcFileId },
-      "bim-model.ingested-from-ifc event append failed — bim_models row kept",
-    );
-  }
-
-  return bimModelId;
 }
 
 /**

@@ -300,49 +300,6 @@ CREATE TABLE @@SCHEMA@@.engagements (
 );
 
 
--- Name: eval_baselines; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.eval_baselines (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    fixture_key text NOT NULL,
-    component_key text NOT NULL,
-    baseline_score numeric(20,6) NOT NULL,
-    regression_threshold numeric(6,4) NOT NULL,
-    last_updated timestamp with time zone DEFAULT now() NOT NULL,
-    commit_hash text NOT NULL
-);
-
-
--- Name: eval_runs; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.eval_runs (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    engagement_id uuid,
-    fixture_key text NOT NULL,
-    engine_version text NOT NULL,
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    completed_at timestamp with time zone,
-    state text NOT NULL,
-    error text,
-    total_cost_usd numeric(12,6),
-    total_duration_ms integer,
-    trigger_source text NOT NULL
-);
-
-
--- Name: eval_scores; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.eval_scores (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    eval_run_id uuid NOT NULL,
-    component_key text NOT NULL,
-    score numeric(20,6) NOT NULL,
-    score_unit text NOT NULL,
-    passed_threshold boolean,
-    details jsonb
-);
-
-
 -- Name: finding_runs; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.finding_runs (
@@ -853,24 +810,6 @@ ALTER TABLE ONLY @@SCHEMA@@.engagements
     ADD CONSTRAINT engagements_pkey PRIMARY KEY (id);
 
 
--- Name: eval_baselines eval_baselines_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.eval_baselines
-    ADD CONSTRAINT eval_baselines_pkey PRIMARY KEY (id);
-
-
--- Name: eval_runs eval_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.eval_runs
-    ADD CONSTRAINT eval_runs_pkey PRIMARY KEY (id);
-
-
--- Name: eval_scores eval_scores_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.eval_scores
-    ADD CONSTRAINT eval_scores_pkey PRIMARY KEY (id);
-
-
 -- Name: finding_runs finding_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.finding_runs
@@ -1160,21 +1099,6 @@ CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (n
 CREATE UNIQUE INDEX engagements_revit_central_guid_uniq ON @@SCHEMA@@.engagements USING btree (revit_central_guid) WHERE (revit_central_guid IS NOT NULL);
 
 
--- Name: eval_baselines_fixture_component_uniq; Type: INDEX; Schema: public; Owner: -
-
-CREATE UNIQUE INDEX eval_baselines_fixture_component_uniq ON @@SCHEMA@@.eval_baselines USING btree (fixture_key, component_key);
-
-
--- Name: eval_runs_fixture_started_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX eval_runs_fixture_started_idx ON @@SCHEMA@@.eval_runs USING btree (fixture_key, started_at);
-
-
--- Name: eval_scores_run_component_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX eval_scores_run_component_idx ON @@SCHEMA@@.eval_scores USING btree (eval_run_id, component_key);
-
-
 -- Name: finding_runs_pending_per_submission_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX finding_runs_pending_per_submission_uniq ON @@SCHEMA@@.finding_runs USING btree (submission_id) WHERE (state = 'pending'::text);
@@ -1418,18 +1342,6 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
     ADD CONSTRAINT decision_pdf_artifacts_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
-
-
--- Name: eval_runs eval_runs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.eval_runs
-    ADD CONSTRAINT eval_runs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE SET NULL;
-
-
--- Name: eval_scores eval_scores_eval_run_id_eval_runs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.eval_scores
-    ADD CONSTRAINT eval_scores_eval_run_id_eval_runs_id_fk FOREIGN KEY (eval_run_id) REFERENCES @@SCHEMA@@.eval_runs(id) ON DELETE CASCADE;
 
 
 -- Name: finding_runs finding_runs_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
