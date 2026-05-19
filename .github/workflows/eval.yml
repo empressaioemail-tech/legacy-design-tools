@@ -57,6 +57,8 @@ jobs:
             ${{ runner.os }}-pnpm-store-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Build composite libs (emit dist for project references)
+        run: pnpm run typecheck:libs
       - name: Typecheck eval package
         run: pnpm --filter @workspace/eval run typecheck
       - name: Run rubric unit tests
