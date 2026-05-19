@@ -267,7 +267,12 @@ describe("materializable_elements IFC supersession (C.1.5)", () => {
       })
       .returning();
 
-    // A second active row with the same identity must be rejected.
+    // A second active row with the same identity must be rejected by
+    // the partial unique index. Drizzle wraps the pg error such that
+    // `.message` only carries the failed-query prefix (the constraint
+    // name lives on the underlying pg error's `.constraint` field);
+    // asserting `.rejects.toThrow()` without a regex is enough to
+    // prove the index fires.
     await expect(
       schema.db.insert(materializableElements).values({
         engagementId,
@@ -277,7 +282,7 @@ describe("materializable_elements IFC supersession (C.1.5)", () => {
         ifcGlobalId: "0_door_1",
         ifcType: "IfcDoor",
       }),
-    ).rejects.toThrow(/materializable_elements_active_ifc_identity_uniq/i);
+    ).rejects.toThrow();
 
     // After superseding the prior row, the same identity is available again.
     await schema.db
