@@ -149,7 +149,56 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("@workspace/api-client-react", async () => {
   const { useQuery } = await import("@tanstack/react-query");
+  // Stubs for the findings-surface symbols that `findingsApi.ts` now
+  // imports directly from the generated client. The modal's
+  // `SubmissionActionHeader` calls `useListSubmissionFindings` +
+  // `useListSubmissionFindingsGenerationRuns` to render the Review
+  // pill — stub both as empty so the pill reads "0 findings · Not yet
+  // run" and the rest of the modal lays out as before the swap.
+  const listSubmissionFindings = async () => ({ findings: [] });
+  const listSubmissionFindingsGenerationRuns = async () => ({ runs: [] });
+  const getSubmissionFindingsGenerationStatus = async () => ({
+    generationId: null,
+    state: "idle" as const,
+    startedAt: null,
+    completedAt: null,
+    error: null,
+    invalidCitationCount: null,
+    invalidCitations: null,
+    discardedFindingCount: null,
+  });
   return {
+    // ─── Findings surface stubs (findingsApi.ts imports) ────────────
+    ApiError: class ApiError extends Error {
+      readonly status: number;
+      readonly data: unknown;
+      constructor(status: number, data: unknown) {
+        super("api error");
+        this.status = status;
+        this.data = data;
+      }
+    },
+    listSubmissionFindings,
+    listSubmissionFindingsGenerationRuns,
+    getSubmissionFindingsGenerationStatus,
+    getListSubmissionFindingsQueryKey: (id: string) => [
+      `/api/submissions/${id}/findings`,
+    ],
+    getListSubmissionFindingsGenerationRunsQueryKey: (id: string) => [
+      `/api/submissions/${id}/findings/runs`,
+    ],
+    getGetSubmissionFindingsGenerationStatusQueryKey: (id: string) => [
+      `/api/submissions/${id}/findings/status`,
+    ],
+    acceptFinding: async () => ({ finding: null }),
+    rejectFinding: async () => ({ finding: null }),
+    overrideFinding: async () => ({ finding: null }),
+    generateSubmissionFindings: async () => ({
+      generationId: "frun_stub",
+      state: "pending" as const,
+    }),
+    createSubmissionFinding: async () => ({ finding: null }),
+    // ─── Engagement / briefing / decisions (original mock surface) ──
     getGetEngagementQueryKey: (id: string) => ["getEngagement", id],
     getGetEngagementBriefingQueryKey: (id: string) => [
       "getEngagementBriefing",

@@ -403,9 +403,9 @@ function toCodeSectionInput(a: RetrievedAtom): CodeSectionInput {
  *
  * `ref` is the row's uuid pk (Phase 1A decision Ask #3 — raw uuid is
  * the wire shape; the FE drill-in resolves uuid → element via
- * existing `/bim-models/...` routes). The mock fixture at
- * `findingsMock.ts:170` uses a typed pointer like `"wall:north-side-l2"`
- * but that was illustrative shorthand — real wire is the uuid.
+ * existing `/bim-models/...` routes). Some legacy fixtures used a
+ * typed pointer like `"wall:north-side-l2"`; the real wire is the
+ * uuid.
  *
  * `label` falls back to `elementKind` when no operator-authored label
  * exists. `description` carries the lock state so the prompt can
