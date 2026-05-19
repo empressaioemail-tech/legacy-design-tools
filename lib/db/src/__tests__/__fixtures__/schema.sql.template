@@ -1197,6 +1197,11 @@ CREATE UNIQUE INDEX findings_atom_id_uniq ON @@SCHEMA@@.findings USING btree (at
 CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree (submission_id, created_at);
 
 
+-- Name: materializable_elements_active_ifc_identity_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX materializable_elements_active_ifc_identity_uniq ON @@SCHEMA@@.materializable_elements USING btree (source_snapshot_id, ifc_global_id) WHERE ((superseded_at IS NULL) AND (source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])));
+
+
 -- Name: materializable_elements_briefing_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX materializable_elements_briefing_idx ON @@SCHEMA@@.materializable_elements USING btree (briefing_id);
@@ -1215,13 +1220,6 @@ CREATE INDEX materializable_elements_kind_idx ON @@SCHEMA@@.materializable_eleme
 -- Name: materializable_elements_snapshot_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX materializable_elements_snapshot_idx ON @@SCHEMA@@.materializable_elements USING btree (source_snapshot_id) WHERE (source_snapshot_id IS NOT NULL);
-
-
---
--- Name: materializable_elements_active_ifc_identity_uniq; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX materializable_elements_active_ifc_identity_uniq ON @@SCHEMA@@.materializable_elements USING btree (source_snapshot_id, ifc_global_id) WHERE ((superseded_at IS NULL) AND (source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])));
 
 
 -- Name: parcel_briefings_engagement_idx; Type: INDEX; Schema: public; Owner: -
@@ -1489,9 +1487,7 @@ ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
     ADD CONSTRAINT materializable_elements_source_snapshot_id_snapshots_id_fk FOREIGN KEY (source_snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
 
 
---
 -- Name: materializable_elements materializable_elements_superseded_by_id_materializable_element; Type: FK CONSTRAINT; Schema: public; Owner: -
---
 
 ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
     ADD CONSTRAINT materializable_elements_superseded_by_id_materializable_element FOREIGN KEY (superseded_by_id) REFERENCES @@SCHEMA@@.materializable_elements(id) ON DELETE SET NULL;
