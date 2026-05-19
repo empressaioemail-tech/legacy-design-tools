@@ -20,11 +20,13 @@
  *     producer wiring is a single function call whose type-safety is
  *     guaranteed by the compiler.
  *   - The materializable-element delete-and-reinsert at
- *     `ifcIngest.ts:260-314` is the recon §57 / ADR-011 follow-on
- *     and is out of scope for DA-BIM-Symmetry. These tests confirm
- *     the `bim-model` atom's history itself is append-only across
- *     re-ingest (one row, N events) even while that lower-level
- *     concern remains open.
+ *     `ifcIngest.ts` (recon §57 / [[adr-011]]) was resolved in C.1.5:
+ *     re-ingest now stamps `superseded_at` + `superseded_by_id` on
+ *     prior rows rather than deleting them. The schema-level
+ *     invariants for that supersession contract are covered in
+ *     `track-b-ifc-schema.test.ts`; this suite continues to focus on
+ *     the `bim-model` atom's own append-only history (one row, N
+ *     events) across re-ingest.
  */
 
 import {

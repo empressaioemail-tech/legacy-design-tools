@@ -407,6 +407,8 @@ CREATE TABLE @@SCHEMA@@.materializable_elements (
     ifc_type text,
     property_set jsonb,
     source_snapshot_id uuid,
+    superseded_by_id uuid,
+    superseded_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT materializable_elements_provenance_invariants_check CHECK ((((source_kind = 'briefing-derived'::text) AND (briefing_id IS NOT NULL)) OR ((source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])) AND (source_snapshot_id IS NOT NULL) AND (engagement_id IS NOT NULL) AND (ifc_global_id IS NOT NULL) AND (ifc_type IS NOT NULL)))),
@@ -1195,6 +1197,11 @@ CREATE UNIQUE INDEX findings_atom_id_uniq ON @@SCHEMA@@.findings USING btree (at
 CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree (submission_id, created_at);
 
 
+-- Name: materializable_elements_active_ifc_identity_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX materializable_elements_active_ifc_identity_uniq ON @@SCHEMA@@.materializable_elements USING btree (source_snapshot_id, ifc_global_id) WHERE ((superseded_at IS NULL) AND (source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])));
+
+
 -- Name: materializable_elements_briefing_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX materializable_elements_briefing_idx ON @@SCHEMA@@.materializable_elements USING btree (briefing_id);
@@ -1478,6 +1485,12 @@ ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
 
 ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
     ADD CONSTRAINT materializable_elements_source_snapshot_id_snapshots_id_fk FOREIGN KEY (source_snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE CASCADE;
+
+
+-- Name: materializable_elements materializable_elements_superseded_by_id_materializable_element; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
+    ADD CONSTRAINT materializable_elements_superseded_by_id_materializable_element FOREIGN KEY (superseded_by_id) REFERENCES @@SCHEMA@@.materializable_elements(id) ON DELETE SET NULL;
 
 
 -- Name: parcel_briefings parcel_briefings_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
