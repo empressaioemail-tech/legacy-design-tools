@@ -17,6 +17,7 @@ import {
   Search,
   Settings as SettingsIcon,
 } from "lucide-react";
+import { AuthChip } from "./AuthChip";
 
 interface AppShellProps {
   title?: string;
@@ -154,6 +155,7 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
       brandProductName="Design Tools"
       navGroups={navGroups}
       rightPanel={rightPanel}
+      headerTrailing={<AuthChip />}
     >
       {children}
     </DashboardLayout>
