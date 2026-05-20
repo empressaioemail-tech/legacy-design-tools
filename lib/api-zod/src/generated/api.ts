@@ -8426,3 +8426,272 @@ export const LinkResponseTaskFindingResponse = zod.object({
       "Cortex L1 `response-task` atom instance. Conforms to\n`RESPONSE_TASK_SCHEMA` in `@workspace\/atoms-l-surface` (mirrored\nfrom `@hauska-engine\/atoms`). The Base-atom provenance fields\n(`sourceAdapter` \/ `sourceUrl` \/ `contentHash` \/ `fetchedAt` \/\n`jurisdictionTenant`) are derived by the api-server at read time\n— see `artifacts\/api-server\/src\/lib\/lSurfaceAtom.ts`.\n",
     ),
 });
+
+/**
+ * Cortex L2 (Lane C.4). Runs the sheet-content extraction pass
+and emits a `sheet-content-extraction` atom (OCR text segments
++ structured annotations). Re-running it upserts the atom for
+that sheet. Dual-auth (hauska-mcp-server bearer OR Cortex SPA
+session).
+
+ * @summary Trigger the structured-content extraction pass on a sheet
+ */
+export const TriggerSheetContentExtractionParams = zod.object({
+  sheetId: zod.coerce.string(),
+});
+
+export const TriggerSheetContentExtractionResponse = zod
+  .object({
+    sheetContentExtraction: zod
+      .object({
+        entityType: zod.enum(["sheet-content-extraction"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        sourceSheetId: zod.string(),
+        engagementId: zod.string().nullable(),
+        pageLabel: zod.string(),
+        extractedTextSegments: zod.array(
+          zod
+            .object({
+              text: zod.string(),
+              boundingBox: zod
+                .object({
+                  x: zod.number(),
+                  y: zod.number(),
+                  width: zod.number(),
+                  height: zod.number(),
+                })
+                .describe("Page-relative bounding box, normalized to [0, 1]."),
+              sourceConfidence: zod.number(),
+            })
+            .describe("One OCR text segment with its page-relative position."),
+        ),
+        structuredAnnotations: zod.array(
+          zod
+            .object({
+              kind: zod
+                .enum([
+                  "revision-cloud",
+                  "dimension",
+                  "schedule-row",
+                  "callout",
+                ])
+                .describe(
+                  "Structured-annotation category extracted from a sheet.",
+                ),
+              position: zod
+                .object({
+                  x: zod.number(),
+                  y: zod.number(),
+                  width: zod.number(),
+                  height: zod.number(),
+                })
+                .describe("Page-relative bounding box, normalized to [0, 1]."),
+              content: zod.string(),
+              sourceConfidence: zod.number(),
+            })
+            .describe("One structured annotation extracted from a sheet."),
+        ),
+        ocrModel: zod.string(),
+        actorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L2a `sheet-content-extraction` atom instance. Conforms to\n`SHEET_CONTENT_EXTRACTION_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the L2a routes. `sheetContentExtraction` is\n`null` when the sheet exists but has not been extracted yet.\n",
+  );
+
+/**
+ * Cortex L2 (Lane C.4). Returns the `sheet-content-extraction`
+atom for the sheet, or `null` when the sheet exists but has not
+been extracted yet (a normal empty result, not a 404).
+
+ * @summary Fetch the sheet-content-extraction atom for a sheet
+ */
+export const GetSheetContentExtractionParams = zod.object({
+  sheetId: zod.coerce.string(),
+});
+
+export const GetSheetContentExtractionResponse = zod
+  .object({
+    sheetContentExtraction: zod
+      .object({
+        entityType: zod.enum(["sheet-content-extraction"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        sourceSheetId: zod.string(),
+        engagementId: zod.string().nullable(),
+        pageLabel: zod.string(),
+        extractedTextSegments: zod.array(
+          zod
+            .object({
+              text: zod.string(),
+              boundingBox: zod
+                .object({
+                  x: zod.number(),
+                  y: zod.number(),
+                  width: zod.number(),
+                  height: zod.number(),
+                })
+                .describe("Page-relative bounding box, normalized to [0, 1]."),
+              sourceConfidence: zod.number(),
+            })
+            .describe("One OCR text segment with its page-relative position."),
+        ),
+        structuredAnnotations: zod.array(
+          zod
+            .object({
+              kind: zod
+                .enum([
+                  "revision-cloud",
+                  "dimension",
+                  "schedule-row",
+                  "callout",
+                ])
+                .describe(
+                  "Structured-annotation category extracted from a sheet.",
+                ),
+              position: zod
+                .object({
+                  x: zod.number(),
+                  y: zod.number(),
+                  width: zod.number(),
+                  height: zod.number(),
+                })
+                .describe("Page-relative bounding box, normalized to [0, 1]."),
+              content: zod.string(),
+              sourceConfidence: zod.number(),
+            })
+            .describe("One structured annotation extracted from a sheet."),
+        ),
+        ocrModel: zod.string(),
+        actorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L2a `sheet-content-extraction` atom instance. Conforms to\n`SHEET_CONTENT_EXTRACTION_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the L2a routes. `sheetContentExtraction` is\n`null` when the sheet exists but has not been extracted yet.\n",
+  );
+
+/**
+ * Cortex L2 (Lane C.4). Returns the engagement's
+`attached-document` atoms, optionally filtered to one document
+type.
+
+ * @summary List the supporting documents attached to an engagement
+ */
+export const ListAttachedDocumentsParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListAttachedDocumentsQueryParams = zod.object({
+  documentType: zod
+    .enum(["specification", "calculation", "product-data", "narrative"])
+    .optional(),
+});
+
+export const ListAttachedDocumentsResponse = zod.object({
+  attachedDocuments: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["attached-document"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        engagementId: zod.string(),
+        title: zod.string(),
+        documentType: zod
+          .enum(["specification", "calculation", "product-data", "narrative"])
+          .describe("Supporting-document category attached to an engagement."),
+        extractedText: zod.string(),
+        originalBlobRef: zod.string(),
+        actorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L2b `attached-document` atom instance. Conforms to\n`ATTACHED_DOCUMENT_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L2 (Lane C.4). Returns the `attached-document` atom
+including its parsed `extractedText` and `originalBlobRef`.
+
+ * @summary Fetch a single attached-document atom
+ */
+export const GetAttachedDocumentParams = zod.object({
+  attachedDocumentId: zod.coerce.string(),
+});
+
+export const GetAttachedDocumentResponse = zod.object({
+  attachedDocument: zod
+    .object({
+      entityType: zod.enum(["attached-document"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      documentType: zod
+        .enum(["specification", "calculation", "product-data", "narrative"])
+        .describe("Supporting-document category attached to an engagement."),
+      extractedText: zod.string(),
+      originalBlobRef: zod.string(),
+      actorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L2b `attached-document` atom instance. Conforms to\n`ATTACHED_DOCUMENT_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});

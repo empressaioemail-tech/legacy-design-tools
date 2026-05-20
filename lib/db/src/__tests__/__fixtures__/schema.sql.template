@@ -46,6 +46,21 @@ CREATE TABLE @@SCHEMA@@.atom_events (
 );
 
 
+-- Name: attached_documents; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.attached_documents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    title text NOT NULL,
+    document_type text NOT NULL,
+    extracted_text text DEFAULT ''::text NOT NULL,
+    original_blob_ref text NOT NULL,
+    actor_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT attached_documents_document_type_check CHECK ((document_type = ANY (ARRAY['specification'::text, 'calculation'::text, 'product-data'::text, 'narrative'::text])))
+);
+
+
 -- Name: autopilot_findings; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.autopilot_findings (
@@ -597,6 +612,22 @@ CREATE TABLE @@SCHEMA@@.reviewer_requests (
 );
 
 
+-- Name: sheet_content_extractions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.sheet_content_extractions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    source_sheet_id uuid NOT NULL,
+    engagement_id uuid NOT NULL,
+    page_label text DEFAULT ''::text NOT NULL,
+    extracted_text_segments jsonb DEFAULT '[]'::jsonb NOT NULL,
+    structured_annotations jsonb DEFAULT '[]'::jsonb NOT NULL,
+    ocr_model text NOT NULL,
+    actor_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: sheets; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.sheets (
@@ -777,6 +808,12 @@ ALTER TABLE ONLY @@SCHEMA@@.architect_notification_reads
 
 ALTER TABLE ONLY @@SCHEMA@@.atom_events
     ADD CONSTRAINT atom_events_pkey PRIMARY KEY (id);
+
+
+-- Name: attached_documents attached_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.attached_documents
+    ADD CONSTRAINT attached_documents_pkey PRIMARY KEY (id);
 
 
 -- Name: autopilot_findings autopilot_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -977,6 +1014,18 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
     ADD CONSTRAINT reviewer_requests_pkey PRIMARY KEY (id);
 
 
+-- Name: sheet_content_extractions sheet_content_extractions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
+    ADD CONSTRAINT sheet_content_extractions_pkey PRIMARY KEY (id);
+
+
+-- Name: sheet_content_extractions sheet_content_extractions_source_sheet_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
+    ADD CONSTRAINT sheet_content_extractions_source_sheet_id_unique UNIQUE (source_sheet_id);
+
+
 -- Name: sheets sheets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.sheets
@@ -1061,6 +1110,11 @@ CREATE UNIQUE INDEX atom_events_chain_hash_uniq ON @@SCHEMA@@.atom_events USING 
 -- Name: atom_events_timeline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX atom_events_timeline_idx ON @@SCHEMA@@.atom_events USING btree (entity_type, entity_id, occurred_at);
+
+
+-- Name: attached_documents_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX attached_documents_engagement_idx ON @@SCHEMA@@.attached_documents USING btree (engagement_id);
 
 
 -- Name: autopilot_findings_run_idx; Type: INDEX; Schema: public; Owner: -
@@ -1303,6 +1357,11 @@ CREATE INDEX reviewer_requests_pending_idx ON @@SCHEMA@@.reviewer_requests USING
 CREATE INDEX reviewer_requests_target_idx ON @@SCHEMA@@.reviewer_requests USING btree (target_entity_type, target_entity_id, status);
 
 
+-- Name: sheet_content_extractions_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX sheet_content_extractions_engagement_idx ON @@SCHEMA@@.sheet_content_extractions USING btree (engagement_id);
+
+
 -- Name: sheets_engagement_number_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX sheets_engagement_number_idx ON @@SCHEMA@@.sheets USING btree (engagement_id, sheet_number);
@@ -1366,6 +1425,12 @@ CREATE INDEX viewpoint_renders_engagement_created_idx ON @@SCHEMA@@.viewpoint_re
 -- Name: viewpoint_renders_status_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX viewpoint_renders_status_idx ON @@SCHEMA@@.viewpoint_renders USING btree (status);
+
+
+-- Name: attached_documents attached_documents_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.attached_documents
+    ADD CONSTRAINT attached_documents_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: autopilot_findings autopilot_findings_autopilot_run_id_autopilot_runs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -1564,6 +1629,18 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
     ADD CONSTRAINT reviewer_requests_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: sheet_content_extractions sheet_content_extractions_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
+    ADD CONSTRAINT sheet_content_extractions_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: sheet_content_extractions sheet_content_extractions_source_sheet_id_sheets_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
+    ADD CONSTRAINT sheet_content_extractions_source_sheet_id_sheets_id_fk FOREIGN KEY (source_sheet_id) REFERENCES @@SCHEMA@@.sheets(id) ON DELETE CASCADE;
 
 
 -- Name: sheets sheets_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

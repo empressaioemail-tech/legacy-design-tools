@@ -1,0 +1,84 @@
+/**
+ * Pure validation + atom-shaping logic for the L2 routes
+ * (`sheet-content-extraction` + `attached-document`). Kept free of
+ * `@workspace/db` and Express imports so it is unit-testable without a
+ * database.
+ *
+ * Endpoint contract:
+ * `doc_repo/_research/2026-05-19_l_surface_endpoint_contracts_cc-agent-M.md`
+ * §L2.
+ */
+
+import {
+  ATTACHED_DOCUMENT_TYPES,
+  type AttachedDocumentType,
+  type SheetTextSegment,
+} from "@workspace/atoms-l-surface";
+
+/** Discriminated result of a query-param parse. */
+export type ParseResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string };
+
+/**
+ * Full-page bounding box (normalized `[0, 1]`). The legacy sheet vision
+ * pass produces a single flat free-text body — not per-region segments
+ * — so the whole body maps to one page-spanning segment.
+ */
+export const FULL_PAGE_BOUNDING_BOX = {
+  x: 0,
+  y: 0,
+  width: 1,
+  height: 1,
+} as const;
+
+/**
+ * Build the L2a `extractedTextSegments` array from a flat OCR body.
+ *
+ * The existing legacy vision pass (`extractSheetContentBody`) returns
+ * one free-text body, not bounding-boxed segments — so the body
+ * becomes a single page-spanning segment. An empty body yields zero
+ * segments. A richer extractor that produces per-region segments +
+ * classified structured annotations is a separate feature (surfaced
+ * to the planner in the C.4.2 PR).
+ */
+export function buildTextSegments(ocrBody: string): SheetTextSegment[] {
+  const trimmed = ocrBody.trim();
+  if (trimmed.length === 0) return [];
+  return [
+    {
+      text: trimmed,
+      boundingBox: { ...FULL_PAGE_BOUNDING_BOX },
+      // The flat pass carries no per-segment confidence; a nominal 1
+      // is used. Revisit when the structured extractor lands.
+      sourceConfidence: 1,
+    },
+  ];
+}
+
+/** True when `v` is one of the four `AttachedDocumentType` values. */
+export function isAttachedDocumentType(
+  v: unknown,
+): v is AttachedDocumentType {
+  return (
+    typeof v === "string" &&
+    (ATTACHED_DOCUMENT_TYPES as readonly string[]).includes(v)
+  );
+}
+
+/**
+ * Validate the optional `?documentType=` filter on the attached-document
+ * list route. A missing filter resolves to `null` (no filtering); an
+ * unknown value is a 400.
+ */
+export function parseDocumentTypeFilter(
+  raw: unknown,
+): ParseResult<AttachedDocumentType | null> {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, value: null };
+  }
+  if (!isAttachedDocumentType(raw)) {
+    return { ok: false, error: "invalid_document_type" };
+  }
+  return { ok: true, value: raw };
+}

@@ -34,6 +34,7 @@ import notificationsRouter from "./notifications";
 import cannedFindingsRouter from "./cannedFindings";
 import qaRouter from "./qa";
 import responseTasksRouter from "./responseTasks";
+import sheetContentRouter from "./sheetContent";
 
 const router: IRouter = Router();
 
@@ -152,5 +153,11 @@ router.use(qaRouter);
 // not match the longer `/engagements/:id/response-tasks` path, so
 // mount ordering relative to engagementsRouter is indifferent.
 router.use(responseTasksRouter);
+// Cortex L2 (Lane C.4 / C.4.2) — sheet-content-extraction +
+// attached-document surface. Mounts `/sheets/:id/content-extraction`,
+// `/engagements/:id/attached-documents`, and `/attached-documents/:id`.
+// None overlap an existing leaf route (the parametric segments differ
+// in depth), so mount ordering is indifferent.
+router.use(sheetContentRouter);
 
 export default router;
