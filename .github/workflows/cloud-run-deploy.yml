@@ -1,6 +1,9 @@
-name: Cloud Run Deploy (api-server)
+name: Cloud Run Deploy (cortex-api)
 
-# Phase 1A scaffold per docs/deploy.md.
+# Cloud Run deploy for the `cortex-api` service — the legacy-design-tools
+# Replit → Cloud Run cutover target (Decision 0.20 ①: net-new service
+# `cortex-api` in the smartcity-os GCP project, us-central1). See
+# docs/deploy.md.
 # - build-and-push fires on every push to main, tags <sha> + latest, pushes
 #   to Artifact Registry. Does NOT deploy.
 # - deploy-canary is workflow_dispatch-only. Uses --tag=canary for a stable
@@ -26,8 +29,8 @@ on:
 env:
   GCP_REGION: us-central1
   ARTIFACT_REGISTRY_REPO: apps
-  IMAGE_NAME: api-server
-  CLOUD_RUN_SERVICE: api-server
+  IMAGE_NAME: cortex-api
+  CLOUD_RUN_SERVICE: cortex-api
 
 jobs:
   build-and-push:
