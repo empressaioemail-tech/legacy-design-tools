@@ -101,6 +101,8 @@ describe("lib/db schema integration", () => {
         // PLR-11 — derived-state side table for the issued plan-set
         // PDF (one row per recorded approval event).
         "decision_pdf_artifacts",
+        // Cortex L3 (Lane C.4 / C.4.3) — deliverable-letter atoms.
+        "deliverable_letters",
         "engagements",
         // @workspace/eval harness tables (scaffolded in a8acb35;
         // landed alongside the per-run scoring + per-fixture

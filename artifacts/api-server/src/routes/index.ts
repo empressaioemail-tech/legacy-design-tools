@@ -35,6 +35,7 @@ import cannedFindingsRouter from "./cannedFindings";
 import qaRouter from "./qa";
 import responseTasksRouter from "./responseTasks";
 import sheetContentRouter from "./sheetContent";
+import deliverableLettersRouter from "./deliverableLetters";
 
 const router: IRouter = Router();
 
@@ -159,5 +160,9 @@ router.use(responseTasksRouter);
 // None overlap an existing leaf route (the parametric segments differ
 // in depth), so mount ordering is indifferent.
 router.use(sheetContentRouter);
+// Cortex L3 (Lane C.4 / C.4.3) — deliverable-letter surface. Mounts
+// `/engagements/:id/deliverable-letters` and `/deliverable-letters/:id*`.
+// No overlap with an existing leaf route, so ordering is indifferent.
+router.use(deliverableLettersRouter);
 
 export default router;

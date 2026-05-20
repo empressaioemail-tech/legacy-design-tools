@@ -1904,6 +1904,156 @@ export interface AttachedDocumentListResponse {
 }
 
 /**
+ * Cortex L3 — deliverable-letter section category.
+ */
+export type LetterSectionKind =
+  (typeof LetterSectionKind)[keyof typeof LetterSectionKind];
+
+export const LetterSectionKind = {
+  cover: "cover",
+  intro: "intro",
+  "per-comment-response": "per-comment-response",
+  signature: "signature",
+} as const;
+
+/**
+ * The L1 / L2 / finding / adjudication atoms that fed a section.
+
+ */
+export interface LetterSectionProvenance {
+  responseTaskIds: string[];
+  sheetContentExtractionIds: string[];
+  findingIds: string[];
+  adjudicationStateIds: string[];
+}
+
+/**
+ * One structured section of a deliverable letter.
+ */
+export interface LetterSection {
+  kind: LetterSectionKind;
+  heading: string;
+  content: string;
+  provenance: LetterSectionProvenance;
+}
+
+/**
+ * Cortex L3 — deliverable-letter lifecycle status.
+ */
+export type DeliverableLetterStatus =
+  (typeof DeliverableLetterStatus)[keyof typeof DeliverableLetterStatus];
+
+export const DeliverableLetterStatus = {
+  draft: "draft",
+  sent: "sent",
+} as const;
+
+export type DeliverableLetterAtomEntityType =
+  (typeof DeliverableLetterAtomEntityType)[keyof typeof DeliverableLetterAtomEntityType];
+
+export const DeliverableLetterAtomEntityType = {
+  "deliverable-letter": "deliverable-letter",
+} as const;
+
+export type DeliverableLetterAtomAccessPolicy =
+  (typeof DeliverableLetterAtomAccessPolicy)[keyof typeof DeliverableLetterAtomAccessPolicy];
+
+export const DeliverableLetterAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L3 `deliverable-letter` atom instance. Conforms to
+`DELIVERABLE_LETTER_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface DeliverableLetterAtom {
+  entityType: DeliverableLetterAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  engagementId: string;
+  title: string;
+  status: DeliverableLetterStatus;
+  recipientActorId: string | null;
+  sections: LetterSection[];
+  createdAt: string;
+  sentAt: string | null;
+  actorId: string | null;
+  principalActorId: string | null;
+  accessPolicy?: DeliverableLetterAtomAccessPolicy;
+}
+
+export interface DeliverableLetterResponse {
+  deliverableLetter: DeliverableLetterAtom;
+}
+
+export interface DeliverableLetterListResponse {
+  deliverableLetters: DeliverableLetterAtom[];
+}
+
+/**
+ * One initial section supplied at letter-create time.
+ */
+export interface CreateDeliverableLetterSection {
+  kind: LetterSectionKind;
+  heading: string;
+  content: string;
+}
+
+/**
+ * Body for `POST /engagements/{id}/deliverable-letters`.
+ */
+export interface CreateDeliverableLetterBody {
+  title: string;
+  sections?: CreateDeliverableLetterSection[];
+  recipientActorId?: string | null;
+  actorId?: string | null;
+  principalActorId?: string | null;
+}
+
+/**
+ * Body for `POST /deliverable-letters/{letterId}/sections`.
+ */
+export interface DeliverableLetterSectionBody {
+  sectionIndex: number;
+  kind: LetterSectionKind;
+  heading: string;
+  content: string;
+}
+
+/**
+ * Body for the provenance-merge route. All keys optional; at
+least one must be supplied.
+
+ */
+export interface DeliverableLetterProvenanceBody {
+  responseTaskIds?: string[];
+  sheetContentExtractionIds?: string[];
+  findingIds?: string[];
+  adjudicationStateIds?: string[];
+}
+
+export interface DeliverableLetterCompletenessResponse {
+  complete: boolean;
+  missing: LetterSectionKind[];
+}
+
+/**
+ * 409 envelope when a send is rejected for incompleteness.
+ */
+export interface DeliverableLetterCompletenessError {
+  error: string;
+  missing: LetterSectionKind[];
+}
+
+/**
  * A row in the `users` profile table — display name / email / avatar
 used to hydrate timeline actor labels. The `id` is the same opaque
 identifier the session layer carries (today: dev cookie ids like
