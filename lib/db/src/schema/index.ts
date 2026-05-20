@@ -6,6 +6,7 @@ export * from "./submissionClassifications";
 export * from "./responseTasks";
 export * from "./sheetContentExtractions";
 export * from "./attachedDocuments";
+export * from "./deliverableLetters";
 export * from "./codeAtomSources";
 export * from "./codeAtoms";
 export * from "./codeAtomFetchQueue";

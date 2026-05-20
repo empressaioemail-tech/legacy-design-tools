@@ -8695,3 +8695,405 @@ export const GetAttachedDocumentResponse = zod.object({
       "Cortex L2b `attached-document` atom instance. Conforms to\n`ATTACHED_DOCUMENT_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
     ),
 });
+
+/**
+ * Cortex L3 (Lane C.4). Creates a comment-response letter.
+ * @summary Create a deliverable letter in draft status
+ */
+export const CreateDeliverableLetterParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const CreateDeliverableLetterBody = zod
+  .object({
+    title: zod.string(),
+    sections: zod
+      .array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+          })
+          .describe("One initial section supplied at letter-create time."),
+      )
+      .optional(),
+    recipientActorId: zod.string().nullish(),
+    actorId: zod.string().nullish(),
+    principalActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/engagements\/{id}\/deliverable-letters`.");
+
+/**
+ * Cortex L3 (Lane C.4). Returns the engagement's deliverable
+letters newest-first. (Read path added in C.4.3 beyond the
+original endpoint contract — the UI cannot list / reload a
+letter without it.)
+
+ * @summary List the deliverable letters for an engagement
+ */
+export const ListDeliverableLettersParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListDeliverableLettersResponse = zod.object({
+  deliverableLetters: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["deliverable-letter"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        engagementId: zod.string(),
+        title: zod.string(),
+        status: zod
+          .enum(["draft", "sent"])
+          .describe("Cortex L3 — deliverable-letter lifecycle status."),
+        recipientActorId: zod.string().nullable(),
+        sections: zod.array(
+          zod
+            .object({
+              kind: zod
+                .enum(["cover", "intro", "per-comment-response", "signature"])
+                .describe("Cortex L3 — deliverable-letter section category."),
+              heading: zod.string(),
+              content: zod.string(),
+              provenance: zod
+                .object({
+                  responseTaskIds: zod.array(zod.string()),
+                  sheetContentExtractionIds: zod.array(zod.string()),
+                  findingIds: zod.array(zod.string()),
+                  adjudicationStateIds: zod.array(zod.string()),
+                })
+                .describe(
+                  "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+                ),
+            })
+            .describe("One structured section of a deliverable letter."),
+        ),
+        createdAt: zod.string(),
+        sentAt: zod.string().nullable(),
+        actorId: zod.string().nullable(),
+        principalActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). (Read path added in C.4.3 beyond the
+original endpoint contract.)
+
+ * @summary Fetch a single deliverable-letter atom
+ */
+export const GetDeliverableLetterParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const GetDeliverableLetterResponse = zod.object({
+  deliverableLetter: zod
+    .object({
+      entityType: zod.enum(["deliverable-letter"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      status: zod
+        .enum(["draft", "sent"])
+        .describe("Cortex L3 — deliverable-letter lifecycle status."),
+      recipientActorId: zod.string().nullable(),
+      sections: zod.array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+            provenance: zod
+              .object({
+                responseTaskIds: zod.array(zod.string()),
+                sheetContentExtractionIds: zod.array(zod.string()),
+                findingIds: zod.array(zod.string()),
+                adjudicationStateIds: zod.array(zod.string()),
+              })
+              .describe(
+                "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+              ),
+          })
+          .describe("One structured section of a deliverable letter."),
+      ),
+      createdAt: zod.string(),
+      sentAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). `sectionIndex` within the current array
+replaces that section (provenance preserved); equal to the
+array length appends; a larger index is a 400.
+
+ * @summary Upsert a deliverable-letter section by index
+ */
+export const UpsertDeliverableLetterSectionParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const UpsertDeliverableLetterSectionBody = zod
+  .object({
+    sectionIndex: zod.number(),
+    kind: zod
+      .enum(["cover", "intro", "per-comment-response", "signature"])
+      .describe("Cortex L3 — deliverable-letter section category."),
+    heading: zod.string(),
+    content: zod.string(),
+  })
+  .describe("Body for `POST \/deliverable-letters\/{letterId}\/sections`.");
+
+export const UpsertDeliverableLetterSectionResponse = zod.object({
+  deliverableLetter: zod
+    .object({
+      entityType: zod.enum(["deliverable-letter"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      status: zod
+        .enum(["draft", "sent"])
+        .describe("Cortex L3 — deliverable-letter lifecycle status."),
+      recipientActorId: zod.string().nullable(),
+      sections: zod.array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+            provenance: zod
+              .object({
+                responseTaskIds: zod.array(zod.string()),
+                sheetContentExtractionIds: zod.array(zod.string()),
+                findingIds: zod.array(zod.string()),
+                adjudicationStateIds: zod.array(zod.string()),
+              })
+              .describe(
+                "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+              ),
+          })
+          .describe("One structured section of a deliverable letter."),
+      ),
+      createdAt: zod.string(),
+      sentAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). Adds the supplied entityIds to the
+section's existing provenance arrays, deduped.
+
+ * @summary Merge atom references into a section's provenance
+ */
+export const MergeDeliverableLetterProvenanceParams = zod.object({
+  letterId: zod.coerce.string(),
+  sectionIndex: zod.coerce.number(),
+});
+
+export const MergeDeliverableLetterProvenanceBody = zod
+  .object({
+    responseTaskIds: zod.array(zod.string()).optional(),
+    sheetContentExtractionIds: zod.array(zod.string()).optional(),
+    findingIds: zod.array(zod.string()).optional(),
+    adjudicationStateIds: zod.array(zod.string()).optional(),
+  })
+  .describe(
+    "Body for the provenance-merge route. All keys optional; at\nleast one must be supplied.\n",
+  );
+
+export const MergeDeliverableLetterProvenanceResponse = zod.object({
+  deliverableLetter: zod
+    .object({
+      entityType: zod.enum(["deliverable-letter"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      status: zod
+        .enum(["draft", "sent"])
+        .describe("Cortex L3 — deliverable-letter lifecycle status."),
+      recipientActorId: zod.string().nullable(),
+      sections: zod.array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+            provenance: zod
+              .object({
+                responseTaskIds: zod.array(zod.string()),
+                sheetContentExtractionIds: zod.array(zod.string()),
+                findingIds: zod.array(zod.string()),
+                adjudicationStateIds: zod.array(zod.string()),
+              })
+              .describe(
+                "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+              ),
+          })
+          .describe("One structured section of a deliverable letter."),
+      ),
+      createdAt: zod.string(),
+      sentAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). A letter is complete when the `cover`,
+`intro`, and `signature` section kinds are each present.
+
+ * @summary Check whether a deliverable letter is complete (sendable)
+ */
+export const GetDeliverableLetterCompletenessParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const GetDeliverableLetterCompletenessResponse = zod.object({
+  complete: zod.boolean(),
+  missing: zod.array(
+    zod
+      .enum(["cover", "intro", "per-comment-response", "signature"])
+      .describe("Cortex L3 — deliverable-letter section category."),
+  ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). Runs the completeness check first; an
+incomplete letter is rejected with a 409.
+
+ * @summary Transition a deliverable letter from draft to sent
+ */
+export const SendDeliverableLetterParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const SendDeliverableLetterResponse = zod.object({
+  deliverableLetter: zod
+    .object({
+      entityType: zod.enum(["deliverable-letter"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      status: zod
+        .enum(["draft", "sent"])
+        .describe("Cortex L3 — deliverable-letter lifecycle status."),
+      recipientActorId: zod.string().nullable(),
+      sections: zod.array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+            provenance: zod
+              .object({
+                responseTaskIds: zod.array(zod.string()),
+                sheetContentExtractionIds: zod.array(zod.string()),
+                findingIds: zod.array(zod.string()),
+                adjudicationStateIds: zod.array(zod.string()),
+              })
+              .describe(
+                "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+              ),
+          })
+          .describe("One structured section of a deliverable letter."),
+      ),
+      createdAt: zod.string(),
+      sentAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});

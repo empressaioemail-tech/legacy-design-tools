@@ -284,6 +284,24 @@ CREATE TABLE @@SCHEMA@@.decision_pdf_artifacts (
 );
 
 
+-- Name: deliverable_letters; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.deliverable_letters (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    title text NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    recipient_actor_id text,
+    sections jsonb DEFAULT '[]'::jsonb NOT NULL,
+    actor_id text,
+    principal_actor_id text,
+    sent_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT deliverable_letters_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'sent'::text])))
+);
+
+
 -- Name: engagements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.engagements (
@@ -906,6 +924,12 @@ ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
     ADD CONSTRAINT decision_pdf_artifacts_pkey PRIMARY KEY (decision_id);
 
 
+-- Name: deliverable_letters deliverable_letters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.deliverable_letters
+    ADD CONSTRAINT deliverable_letters_pkey PRIMARY KEY (id);
+
+
 -- Name: engagements engagements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.engagements
@@ -1232,6 +1256,11 @@ CREATE INDEX code_atoms_source_idx ON @@SCHEMA@@.code_atoms USING btree (source_
 CREATE INDEX decision_pdf_artifacts_submission_idx ON @@SCHEMA@@.decision_pdf_artifacts USING btree (submission_id, rendered_at);
 
 
+-- Name: deliverable_letters_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX deliverable_letters_engagement_created_idx ON @@SCHEMA@@.deliverable_letters USING btree (engagement_id, created_at);
+
+
 -- Name: engagements_name_lower_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (name_lower);
@@ -1521,6 +1550,12 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
     ADD CONSTRAINT decision_pdf_artifacts_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
+
+
+-- Name: deliverable_letters deliverable_letters_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.deliverable_letters
+    ADD CONSTRAINT deliverable_letters_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: eval_runs eval_runs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

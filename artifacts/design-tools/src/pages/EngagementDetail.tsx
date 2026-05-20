@@ -43,6 +43,7 @@ import { SubmissionsTab } from "../components/engagement-detail/SubmissionsTab";
 import { RendersTab } from "../components/engagement-detail/RendersTab";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
 import { ResponseTasksTab } from "../components/engagement-detail/ResponseTasksTab";
+import { DeliverableLettersTab } from "../components/engagement-detail/DeliverableLettersTab";
 import {
   readBackfillFilterFromUrl,
   readTabFromUrl,
@@ -100,6 +101,7 @@ function TabBar({
     { id: "submissions", label: "Submissions" },
     { id: "findings", label: "Findings" },
     { id: "response-tasks", label: "Response tasks" },
+    { id: "deliverable-letters", label: "Deliverable letters" },
     { id: "renders", label: "Renders" },
     { id: "settings", label: "Settings" },
   ];
@@ -736,6 +738,10 @@ export function EngagementDetail() {
 
         {tab === "response-tasks" && (
           <ResponseTasksTab engagementId={engagement.id} />
+        )}
+
+        {tab === "deliverable-letters" && (
+          <DeliverableLettersTab engagementId={engagement.id} />
         )}
 
         {tab === "renders" && (

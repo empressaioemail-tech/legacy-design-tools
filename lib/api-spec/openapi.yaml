@@ -102,6 +102,14 @@ tags:
       structured annotations; supporting documents attached to an
       engagement carry parsed text. Dual-auth (hauska-mcp-server
       bearer token OR a Cortex SPA session).
+  - name: deliverable-letters
+    description: |
+      Cortex L3 (Lane C.4) — deliverable-letter surface. The
+      comment-response letter as a classified atom: structured
+      sections (cover / intro / per-comment-response / signature)
+      with per-section provenance back to the L1 / L2 / finding /
+      adjudication atoms. Lifecycle `draft → sent`, send gated on
+      section completeness. Dual-auth.
 paths:
   /healthz:
     get:
@@ -5873,6 +5881,292 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{engagementId}/deliverable-letters:
+    post:
+      operationId: createDeliverableLetter
+      tags: [deliverable-letters]
+      summary: Create a deliverable letter in draft status
+      description: Cortex L3 (Lane C.4). Creates a comment-response letter.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeliverableLetterBody"
+      responses:
+        "201":
+          description: The newly created deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listDeliverableLetters
+      tags: [deliverable-letters]
+      summary: List the deliverable letters for an engagement
+      description: |
+        Cortex L3 (Lane C.4). Returns the engagement's deliverable
+        letters newest-first. (Read path added in C.4.3 beyond the
+        original endpoint contract — the UI cannot list / reload a
+        letter without it.)
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The engagement's deliverable-letter atoms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterListResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}:
+    get:
+      operationId: getDeliverableLetter
+      tags: [deliverable-letters]
+      summary: Fetch a single deliverable-letter atom
+      description: |
+        Cortex L3 (Lane C.4). (Read path added in C.4.3 beyond the
+        original endpoint contract.)
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/sections:
+    post:
+      operationId: upsertDeliverableLetterSection
+      tags: [deliverable-letters]
+      summary: Upsert a deliverable-letter section by index
+      description: |
+        Cortex L3 (Lane C.4). `sectionIndex` within the current array
+        replaces that section (provenance preserved); equal to the
+        array length appends; a larger index is a 400.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliverableLetterSectionBody"
+      responses:
+        "200":
+          description: The updated deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "400":
+          description: Invalid body or section index out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/sections/{sectionIndex}/provenance:
+    post:
+      operationId: mergeDeliverableLetterProvenance
+      tags: [deliverable-letters]
+      summary: Merge atom references into a section's provenance
+      description: |
+        Cortex L3 (Lane C.4). Adds the supplied entityIds to the
+        section's existing provenance arrays, deduped.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sectionIndex
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliverableLetterProvenanceBody"
+      responses:
+        "200":
+          description: The updated deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "400":
+          description: Invalid body or section index out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/completeness:
+    get:
+      operationId: getDeliverableLetterCompleteness
+      tags: [deliverable-letters]
+      summary: Check whether a deliverable letter is complete (sendable)
+      description: |
+        Cortex L3 (Lane C.4). A letter is complete when the `cover`,
+        `intro`, and `signature` section kinds are each present.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The completeness verdict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterCompletenessResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/send:
+    post:
+      operationId: sendDeliverableLetter
+      tags: [deliverable-letters]
+      summary: Transition a deliverable letter from draft to sent
+      description: |
+        Cortex L3 (Lane C.4). Runs the completeness check first; an
+        incomplete letter is rejected with a 409.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The sent deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            The letter is incomplete
+            (`error: "deliverable_letter_incomplete"`, `missing: [...]`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterCompletenessError"
+
 components:
   schemas:
     HealthStatus:
@@ -8378,6 +8672,256 @@ components:
             $ref: "#/components/schemas/AttachedDocumentAtom"
       required:
         - attachedDocuments
+
+    LetterSectionKind:
+      type: string
+      enum:
+        - cover
+        - intro
+        - per-comment-response
+        - signature
+      description: Cortex L3 — deliverable-letter section category.
+
+    LetterSectionProvenance:
+      description: |
+        The L1 / L2 / finding / adjudication atoms that fed a section.
+      type: object
+      properties:
+        responseTaskIds:
+          type: array
+          items:
+            type: string
+        sheetContentExtractionIds:
+          type: array
+          items:
+            type: string
+        findingIds:
+          type: array
+          items:
+            type: string
+        adjudicationStateIds:
+          type: array
+          items:
+            type: string
+      required:
+        - responseTaskIds
+        - sheetContentExtractionIds
+        - findingIds
+        - adjudicationStateIds
+
+    LetterSection:
+      description: One structured section of a deliverable letter.
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/LetterSectionKind"
+        heading:
+          type: string
+        content:
+          type: string
+        provenance:
+          $ref: "#/components/schemas/LetterSectionProvenance"
+      required:
+        - kind
+        - heading
+        - content
+        - provenance
+
+    DeliverableLetterStatus:
+      type: string
+      enum:
+        - draft
+        - sent
+      description: Cortex L3 — deliverable-letter lifecycle status.
+
+    DeliverableLetterAtom:
+      description: |
+        Cortex L3 `deliverable-letter` atom instance. Conforms to
+        `DELIVERABLE_LETTER_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [deliverable-letter]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        engagementId:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: "#/components/schemas/DeliverableLetterStatus"
+        recipientActorId:
+          type: string
+          nullable: true
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/LetterSection"
+        createdAt:
+          type: string
+        sentAt:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - engagementId
+        - title
+        - status
+        - recipientActorId
+        - sections
+        - createdAt
+        - sentAt
+        - actorId
+        - principalActorId
+
+    DeliverableLetterResponse:
+      type: object
+      properties:
+        deliverableLetter:
+          $ref: "#/components/schemas/DeliverableLetterAtom"
+      required:
+        - deliverableLetter
+
+    DeliverableLetterListResponse:
+      type: object
+      properties:
+        deliverableLetters:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliverableLetterAtom"
+      required:
+        - deliverableLetters
+
+    CreateDeliverableLetterSection:
+      description: One initial section supplied at letter-create time.
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/LetterSectionKind"
+        heading:
+          type: string
+        content:
+          type: string
+      required:
+        - kind
+        - heading
+        - content
+
+    CreateDeliverableLetterBody:
+      description: Body for `POST /engagements/{id}/deliverable-letters`.
+      type: object
+      properties:
+        title:
+          type: string
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateDeliverableLetterSection"
+        recipientActorId:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+      required:
+        - title
+
+    DeliverableLetterSectionBody:
+      description: Body for `POST /deliverable-letters/{letterId}/sections`.
+      type: object
+      properties:
+        sectionIndex:
+          type: integer
+        kind:
+          $ref: "#/components/schemas/LetterSectionKind"
+        heading:
+          type: string
+        content:
+          type: string
+      required:
+        - sectionIndex
+        - kind
+        - heading
+        - content
+
+    DeliverableLetterProvenanceBody:
+      description: |
+        Body for the provenance-merge route. All keys optional; at
+        least one must be supplied.
+      type: object
+      properties:
+        responseTaskIds:
+          type: array
+          items:
+            type: string
+        sheetContentExtractionIds:
+          type: array
+          items:
+            type: string
+        findingIds:
+          type: array
+          items:
+            type: string
+        adjudicationStateIds:
+          type: array
+          items:
+            type: string
+
+    DeliverableLetterCompletenessResponse:
+      type: object
+      properties:
+        complete:
+          type: boolean
+        missing:
+          type: array
+          items:
+            $ref: "#/components/schemas/LetterSectionKind"
+      required:
+        - complete
+        - missing
+
+    DeliverableLetterCompletenessError:
+      description: 409 envelope when a send is rejected for incompleteness.
+      type: object
+      properties:
+        error:
+          type: string
+        missing:
+          type: array
+          items:
+            $ref: "#/components/schemas/LetterSectionKind"
+      required:
+        - error
+        - missing
 
     User:
       description: |
