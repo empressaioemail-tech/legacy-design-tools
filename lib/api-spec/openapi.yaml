@@ -124,6 +124,12 @@ tags:
       evaluation status. The refresh route synchronously re-polls the
       ICC-ES listing and appends to the append-only status history.
       Dual-auth.
+  - name: deliverable-letter-renders
+    description: |
+      Cortex L6 (Lane C.4) — deliverable-letter render surface. The
+      rendered DOCX/PDF artifact of an L3 deliverable letter, as a
+      first-class atom (queryable, provenance-pinned). Render is
+      completeness-gated and synchronous. Dual-auth.
 paths:
   /healthz:
     get:
@@ -6561,6 +6567,128 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /deliverable-letters/{letterId}/renders:
+    post:
+      operationId: renderDeliverableLetter
+      tags: [deliverable-letter-renders]
+      summary: Render an L3 deliverable letter to DOCX or PDF
+      description: |
+        Cortex L6 (Lane C.4). Completeness-gated (an incomplete letter
+        is a 409); generates the document synchronously and persists it
+        as a first-class `deliverable-letter-render` atom.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderDeliverableLetterBody"
+      responses:
+        "201":
+          description: The render atom plus an optional download URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterRenderResponse"
+        "400":
+          description: Invalid request body or unsupported format.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            The letter is incomplete
+            (`error: "deliverable_letter_incomplete"`, `missing: [...]`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterCompletenessError"
+    get:
+      operationId: listDeliverableLetterRenders
+      tags: [deliverable-letter-renders]
+      summary: List every render of a deliverable letter
+      description: Cortex L6 (Lane C.4). Newest-first.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The letter's render atoms, newest-first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterRenderListResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letter-renders/{renderId}/file:
+    get:
+      operationId: downloadDeliverableLetterRender
+      tags: [deliverable-letter-renders]
+      summary: Download the rendered DOCX/PDF bytes
+      description: |
+        Cortex L6 (Lane C.4). Streams the stored render bytes. Added in
+        C.4.6 beyond the original endpoint contract — the UI Download
+        action and the `downloadUrl` resolution need a byte-serving
+        route.
+      parameters:
+        - name: renderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The render file bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Render not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -9778,6 +9906,100 @@ components:
       required:
         - product
         - esrNumber
+
+    RenderFormat:
+      type: string
+      enum:
+        - docx
+        - pdf
+      description: Cortex L6 — deliverable-letter render output format.
+
+    DeliverableLetterRenderAtom:
+      description: |
+        Cortex L6 `deliverable-letter-render` atom instance. Conforms to
+        `DELIVERABLE_LETTER_RENDER_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [deliverable-letter-render]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        sourceLetterRef:
+          type: string
+        sourceLetterVersion:
+          type: string
+        format:
+          $ref: "#/components/schemas/RenderFormat"
+        blobRef:
+          type: string
+        renderedAt:
+          type: string
+        renderedByActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - sourceLetterRef
+        - sourceLetterVersion
+        - format
+        - blobRef
+        - renderedAt
+        - renderedByActorId
+
+    DeliverableLetterRenderResponse:
+      type: object
+      properties:
+        render:
+          $ref: "#/components/schemas/DeliverableLetterRenderAtom"
+        downloadUrl:
+          type: string
+          description: |
+            Optional directly-usable URL the backend resolved from
+            `render.blobRef`.
+      required:
+        - render
+
+    DeliverableLetterRenderListResponse:
+      type: object
+      properties:
+        renders:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliverableLetterRenderAtom"
+      required:
+        - renders
+
+    RenderDeliverableLetterBody:
+      description: Body for `POST /deliverable-letters/{letterId}/renders`.
+      type: object
+      properties:
+        format:
+          $ref: "#/components/schemas/RenderFormat"
+        renderedByActorId:
+          type: string
+          nullable: true
+      required:
+        - format
 
     User:
       description: |

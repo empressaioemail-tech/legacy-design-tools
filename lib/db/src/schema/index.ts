@@ -9,6 +9,7 @@ export * from "./attachedDocuments";
 export * from "./deliverableLetters";
 export * from "./detailCalloutSpecs";
 export * from "./productSpecReferences";
+export * from "./deliverableLetterRenders";
 export * from "./codeAtomSources";
 export * from "./codeAtoms";
 export * from "./codeAtomFetchQueue";

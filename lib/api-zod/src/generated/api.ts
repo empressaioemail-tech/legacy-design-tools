@@ -9818,3 +9818,77 @@ export const RefreshProductSpecReferenceResponse = zod.object({
       "Cortex L5 `product-spec-reference` atom instance. Conforms to\n`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
     ),
 });
+
+/**
+ * Cortex L6 (Lane C.4). Completeness-gated (an incomplete letter
+is a 409); generates the document synchronously and persists it
+as a first-class `deliverable-letter-render` atom.
+
+ * @summary Render an L3 deliverable letter to DOCX or PDF
+ */
+export const RenderDeliverableLetterParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const RenderDeliverableLetterBody = zod
+  .object({
+    format: zod
+      .enum(["docx", "pdf"])
+      .describe("Cortex L6 — deliverable-letter render output format."),
+    renderedByActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/deliverable-letters\/{letterId}\/renders`.");
+
+/**
+ * Cortex L6 (Lane C.4). Newest-first.
+ * @summary List every render of a deliverable letter
+ */
+export const ListDeliverableLetterRendersParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const ListDeliverableLetterRendersResponse = zod.object({
+  renders: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["deliverable-letter-render"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        sourceLetterRef: zod.string(),
+        sourceLetterVersion: zod.string(),
+        format: zod
+          .enum(["docx", "pdf"])
+          .describe("Cortex L6 — deliverable-letter render output format."),
+        blobRef: zod.string(),
+        renderedAt: zod.string(),
+        renderedByActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L6 `deliverable-letter-render` atom instance. Conforms to\n`DELIVERABLE_LETTER_RENDER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L6 (Lane C.4). Streams the stored render bytes. Added in
+C.4.6 beyond the original endpoint contract — the UI Download
+action and the `downloadUrl` resolution need a byte-serving
+route.
+
+ * @summary Download the rendered DOCX/PDF bytes
+ */
+export const DownloadDeliverableLetterRenderParams = zod.object({
+  renderId: zod.coerce.string(),
+});

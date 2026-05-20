@@ -7,8 +7,12 @@ import {
   useUpsertDeliverableLetterSection,
   useMergeDeliverableLetterProvenance,
   useSendDeliverableLetter,
+  useListDeliverableLetterRenders,
+  getListDeliverableLetterRendersQueryKey,
+  useRenderDeliverableLetter,
   ApiError,
   type DeliverableLetterAtom,
+  type DeliverableLetterRenderAtom,
   type LetterSection,
   type LetterSectionKind,
 } from "@workspace/api-client-react";
@@ -429,6 +433,185 @@ function SectionCard({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                       Render section (L6 — C.4.6)                           */
+/* -------------------------------------------------------------------------- */
+
+/** Browser-resolvable download path for a render's bytes. */
+function renderFileUrl(renderId: string): string {
+  return `/api/deliverable-letter-renders/${renderId}/file`;
+}
+
+function RenderSection({
+  letterId,
+  complete,
+}: {
+  letterId: string;
+  complete: boolean;
+}) {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+
+  const { data } = useListDeliverableLetterRenders(letterId, {
+    query: {
+      enabled: !!letterId,
+      queryKey: getListDeliverableLetterRendersQueryKey(letterId),
+    },
+  });
+  const renders: DeliverableLetterRenderAtom[] = data?.renders ?? [];
+
+  const render = useRenderDeliverableLetter({
+    mutation: {
+      onSuccess: async () => {
+        setError(null);
+        await qc.invalidateQueries({
+          queryKey: getListDeliverableLetterRendersQueryKey(letterId),
+        });
+      },
+      onError: (err: unknown) => setError(formatLetterError(err)),
+    },
+  });
+
+  const busy = render.isPending;
+
+  return (
+    <div
+      data-testid="deliverable-letter-renders"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        borderTop: "1px solid var(--border-default)",
+        paddingTop: 12,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="sc-label" style={{ color: "var(--text-secondary)", flex: 1 }}>
+          RENDERS
+        </span>
+        <button
+          type="button"
+          className="sc-btn-ghost sc-btn-sm"
+          disabled={busy || !complete}
+          data-testid="deliverable-letter-render-docx"
+          onClick={() => {
+            setError(null);
+            render.mutate({ letterId, data: { format: "docx" } });
+          }}
+        >
+          Render DOCX
+        </button>
+        <button
+          type="button"
+          className="sc-btn-ghost sc-btn-sm"
+          disabled={busy || !complete}
+          data-testid="deliverable-letter-render-pdf"
+          onClick={() => {
+            setError(null);
+            render.mutate({ letterId, data: { format: "pdf" } });
+          }}
+        >
+          Render PDF
+        </button>
+      </div>
+
+      {!complete && (
+        <div className="sc-meta" style={{ color: "var(--text-muted)", fontSize: 11 }}>
+          Add the required sections to enable rendering.
+        </div>
+      )}
+
+      {renders.length === 0 ? (
+        <div
+          className="sc-meta"
+          data-testid="deliverable-letter-renders-empty"
+          style={{ color: "var(--text-muted)", fontSize: 11 }}
+        >
+          No renders yet.
+        </div>
+      ) : (
+        renders.map((r) => (
+          <div
+            key={r.entityId}
+            data-testid={`deliverable-letter-render-row-${r.entityId}`}
+            style={{ display: "flex", flexDirection: "column", gap: 4 }}
+          >
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                fontSize: 11,
+              }}
+            >
+              <span
+                style={{
+                  padding: "1px 6px",
+                  borderRadius: 999,
+                  background: "var(--info-dim)",
+                  color: "var(--info-text)",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                }}
+              >
+                {r.format}
+              </span>
+              <span style={{ color: "var(--text-secondary)", flex: 1 }}>
+                Rendered {relativeTime(r.renderedAt)}
+              </span>
+              {r.format === "pdf" && (
+                <button
+                  type="button"
+                  className="sc-btn-ghost sc-btn-sm"
+                  data-testid={`deliverable-letter-render-${r.entityId}-preview`}
+                  onClick={() =>
+                    setPreviewId((id) => (id === r.entityId ? null : r.entityId))
+                  }
+                >
+                  {previewId === r.entityId ? "Hide preview" : "Preview"}
+                </button>
+              )}
+              <a
+                href={renderFileUrl(r.entityId)}
+                download
+                className="sc-btn-ghost sc-btn-sm"
+                data-testid={`deliverable-letter-render-${r.entityId}-download`}
+              >
+                Download
+              </a>
+            </div>
+            {previewId === r.entityId && r.format === "pdf" && (
+              <iframe
+                title={`render-preview-${r.entityId}`}
+                data-testid={`deliverable-letter-render-${r.entityId}-preview-frame`}
+                src={renderFileUrl(r.entityId)}
+                style={{
+                  width: "100%",
+                  height: 360,
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                }}
+              />
+            )}
+          </div>
+        ))
+      )}
+
+      {error && (
+        <div
+          data-testid="deliverable-letter-renders-error"
+          role="alert"
+          className="sc-meta"
+          style={{ color: "var(--danger-text)" }}
+        >
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                            Letter detail                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -561,6 +744,9 @@ function LetterDetail({
           </button>
         </div>
       )}
+
+      {/* Cortex L6 (C.4.6) — render the letter to DOCX / PDF. */}
+      <RenderSection letterId={letter.entityId} complete={complete} />
 
       {error && (
         <div

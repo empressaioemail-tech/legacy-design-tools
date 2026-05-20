@@ -21,6 +21,8 @@ const hoisted = vi.hoisted(() => ({
   upsertMutate: vi.fn(),
   mergeMutate: vi.fn(),
   sendMutate: vi.fn(),
+  rendersData: undefined as { renders: unknown[] } | undefined,
+  renderMutate: vi.fn(),
 }));
 
 class MockApiError extends Error {
@@ -55,6 +57,15 @@ vi.mock("@workspace/api-client-react", () => ({
   }),
   useSendDeliverableLetter: () => ({
     mutate: hoisted.sendMutate,
+    isPending: false,
+  }),
+  getListDeliverableLetterRendersQueryKey: (id: string) => [
+    "listDeliverableLetterRenders",
+    id,
+  ],
+  useListDeliverableLetterRenders: () => ({ data: hoisted.rendersData }),
+  useRenderDeliverableLetter: () => ({
+    mutate: hoisted.renderMutate,
     isPending: false,
   }),
 }));
@@ -115,6 +126,8 @@ beforeEach(() => {
   hoisted.upsertMutate.mockReset();
   hoisted.mergeMutate.mockReset();
   hoisted.sendMutate.mockReset();
+  hoisted.rendersData = undefined;
+  hoisted.renderMutate.mockReset();
 });
 
 describe("DeliverableLettersTab", () => {
@@ -226,5 +239,66 @@ describe("DeliverableLettersTab", () => {
         content: "",
       },
     });
+  });
+
+  it("disables the render buttons while the letter is incomplete (L6)", () => {
+    hoisted.listData = { deliverableLetters: [makeLetter()] };
+    renderTab();
+    const docx = screen.getByTestId(
+      "deliverable-letter-render-docx",
+    ) as HTMLButtonElement;
+    expect(docx.disabled).toBe(true);
+  });
+
+  it("renders to PDF via the mutation once complete (L6)", () => {
+    hoisted.listData = {
+      deliverableLetters: [
+        makeLetter({
+          sections: [
+            { kind: "cover", heading: "c", content: "", provenance: emptyProv() },
+            { kind: "intro", heading: "i", content: "", provenance: emptyProv() },
+            {
+              kind: "signature",
+              heading: "s",
+              content: "",
+              provenance: emptyProv(),
+            },
+          ],
+        }),
+      ],
+    };
+    renderTab();
+    const pdf = screen.getByTestId(
+      "deliverable-letter-render-pdf",
+    ) as HTMLButtonElement;
+    expect(pdf.disabled).toBe(false);
+    fireEvent.click(pdf);
+    expect(hoisted.renderMutate).toHaveBeenCalledWith({
+      letterId: "dl-1",
+      data: { format: "pdf" },
+    });
+  });
+
+  it("lists existing renders with a download link (L6)", () => {
+    hoisted.listData = { deliverableLetters: [makeLetter()] };
+    hoisted.rendersData = {
+      renders: [
+        {
+          entityId: "rnd-1",
+          format: "pdf",
+          renderedAt: "2026-05-19T00:00:00.000Z",
+        },
+      ],
+    };
+    renderTab();
+    expect(
+      screen.getByTestId("deliverable-letter-render-row-rnd-1"),
+    ).toBeInTheDocument();
+    const download = screen.getByTestId(
+      "deliverable-letter-render-rnd-1-download",
+    ) as HTMLAnchorElement;
+    expect(download.getAttribute("href")).toBe(
+      "/api/deliverable-letter-renders/rnd-1/file",
+    );
   });
 });

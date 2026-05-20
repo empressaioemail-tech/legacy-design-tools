@@ -38,6 +38,7 @@ import sheetContentRouter from "./sheetContent";
 import deliverableLettersRouter from "./deliverableLetters";
 import detailCalloutSpecsRouter from "./detailCalloutSpecs";
 import productSpecReferencesRouter from "./productSpecReferences";
+import deliverableLetterRendersRouter from "./deliverableLetterRenders";
 
 const router: IRouter = Router();
 
@@ -176,5 +177,12 @@ router.use(detailCalloutSpecsRouter);
 // `/product-spec-references/:id*`. No overlap with an existing leaf
 // route, so ordering is indifferent.
 router.use(productSpecReferencesRouter);
+// Cortex L6 (Lane C.4 / C.4.6) — deliverable-letter-render surface.
+// Mounts `/deliverable-letters/:id/renders` and
+// `/deliverable-letter-renders/:id/file`. The `/renders` path is
+// distinct from L3's `/deliverable-letters/:id/{sections,send,...}`
+// leaves, so ordering relative to deliverableLettersRouter is
+// indifferent.
+router.use(deliverableLetterRendersRouter);
 
 export default router;

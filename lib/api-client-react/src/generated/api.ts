@@ -54,6 +54,8 @@ import type {
   DeliverableLetterCompletenessResponse,
   DeliverableLetterListResponse,
   DeliverableLetterProvenanceBody,
+  DeliverableLetterRenderListResponse,
+  DeliverableLetterRenderResponse,
   DeliverableLetterResponse,
   DeliverableLetterSectionBody,
   DetailCalloutApsRefBody,
@@ -148,6 +150,7 @@ import type {
   ReclassifySubmissionBody,
   RecordBimModelDivergenceBody,
   RecordDecisionBody,
+  RenderDeliverableLetterBody,
   RenderDetailResponse,
   RenderListResponse,
   RendersSweepResponse,
@@ -14992,3 +14995,297 @@ export const useRefreshProductSpecReference = <
 > => {
   return useMutation(getRefreshProductSpecReferenceMutationOptions(options));
 };
+
+/**
+ * Cortex L6 (Lane C.4). Completeness-gated (an incomplete letter
+is a 409); generates the document synchronously and persists it
+as a first-class `deliverable-letter-render` atom.
+
+ * @summary Render an L3 deliverable letter to DOCX or PDF
+ */
+export const getRenderDeliverableLetterUrl = (letterId: string) => {
+  return `/api/deliverable-letters/${letterId}/renders`;
+};
+
+export const renderDeliverableLetter = async (
+  letterId: string,
+  renderDeliverableLetterBody: RenderDeliverableLetterBody,
+  options?: RequestInit,
+): Promise<DeliverableLetterRenderResponse> => {
+  return customFetch<DeliverableLetterRenderResponse>(
+    getRenderDeliverableLetterUrl(letterId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(renderDeliverableLetterBody),
+    },
+  );
+};
+
+export const getRenderDeliverableLetterMutationOptions = <
+  TError = ErrorType<ErrorResponse | DeliverableLetterCompletenessError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof renderDeliverableLetter>>,
+    TError,
+    { letterId: string; data: BodyType<RenderDeliverableLetterBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof renderDeliverableLetter>>,
+  TError,
+  { letterId: string; data: BodyType<RenderDeliverableLetterBody> },
+  TContext
+> => {
+  const mutationKey = ["renderDeliverableLetter"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof renderDeliverableLetter>>,
+    { letterId: string; data: BodyType<RenderDeliverableLetterBody> }
+  > = (props) => {
+    const { letterId, data } = props ?? {};
+
+    return renderDeliverableLetter(letterId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RenderDeliverableLetterMutationResult = NonNullable<
+  Awaited<ReturnType<typeof renderDeliverableLetter>>
+>;
+export type RenderDeliverableLetterMutationBody =
+  BodyType<RenderDeliverableLetterBody>;
+export type RenderDeliverableLetterMutationError = ErrorType<
+  ErrorResponse | DeliverableLetterCompletenessError
+>;
+
+/**
+ * @summary Render an L3 deliverable letter to DOCX or PDF
+ */
+export const useRenderDeliverableLetter = <
+  TError = ErrorType<ErrorResponse | DeliverableLetterCompletenessError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof renderDeliverableLetter>>,
+    TError,
+    { letterId: string; data: BodyType<RenderDeliverableLetterBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof renderDeliverableLetter>>,
+  TError,
+  { letterId: string; data: BodyType<RenderDeliverableLetterBody> },
+  TContext
+> => {
+  return useMutation(getRenderDeliverableLetterMutationOptions(options));
+};
+
+/**
+ * Cortex L6 (Lane C.4). Newest-first.
+ * @summary List every render of a deliverable letter
+ */
+export const getListDeliverableLetterRendersUrl = (letterId: string) => {
+  return `/api/deliverable-letters/${letterId}/renders`;
+};
+
+export const listDeliverableLetterRenders = async (
+  letterId: string,
+  options?: RequestInit,
+): Promise<DeliverableLetterRenderListResponse> => {
+  return customFetch<DeliverableLetterRenderListResponse>(
+    getListDeliverableLetterRendersUrl(letterId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListDeliverableLetterRendersQueryKey = (letterId: string) => {
+  return [`/api/deliverable-letters/${letterId}/renders`] as const;
+};
+
+export const getListDeliverableLetterRendersQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  letterId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListDeliverableLetterRendersQueryKey(letterId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDeliverableLetterRenders>>
+  > = ({ signal }) =>
+    listDeliverableLetterRenders(letterId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!letterId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListDeliverableLetterRendersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDeliverableLetterRenders>>
+>;
+export type ListDeliverableLetterRendersQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List every render of a deliverable letter
+ */
+
+export function useListDeliverableLetterRenders<
+  TData = Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  letterId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListDeliverableLetterRendersQueryOptions(
+    letterId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L6 (Lane C.4). Streams the stored render bytes. Added in
+C.4.6 beyond the original endpoint contract — the UI Download
+action and the `downloadUrl` resolution need a byte-serving
+route.
+
+ * @summary Download the rendered DOCX/PDF bytes
+ */
+export const getDownloadDeliverableLetterRenderUrl = (renderId: string) => {
+  return `/api/deliverable-letter-renders/${renderId}/file`;
+};
+
+export const downloadDeliverableLetterRender = async (
+  renderId: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getDownloadDeliverableLetterRenderUrl(renderId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getDownloadDeliverableLetterRenderQueryKey = (
+  renderId: string,
+) => {
+  return [`/api/deliverable-letter-renders/${renderId}/file`] as const;
+};
+
+export const getDownloadDeliverableLetterRenderQueryOptions = <
+  TData = Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  renderId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getDownloadDeliverableLetterRenderQueryKey(renderId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof downloadDeliverableLetterRender>>
+  > = ({ signal }) =>
+    downloadDeliverableLetterRender(renderId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!renderId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type DownloadDeliverableLetterRenderQueryResult = NonNullable<
+  Awaited<ReturnType<typeof downloadDeliverableLetterRender>>
+>;
+export type DownloadDeliverableLetterRenderQueryError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Download the rendered DOCX/PDF bytes
+ */
+
+export function useDownloadDeliverableLetterRender<
+  TData = Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  renderId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getDownloadDeliverableLetterRenderQueryOptions(
+    renderId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}

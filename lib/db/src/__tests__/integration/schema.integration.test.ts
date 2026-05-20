@@ -101,6 +101,10 @@ describe("lib/db schema integration", () => {
         // PLR-11 — derived-state side table for the issued plan-set
         // PDF (one row per recorded approval event).
         "decision_pdf_artifacts",
+        // Cortex L6 (Lane C.4 / C.4.6) — rendered DOCX/PDF artifacts of
+        // a deliverable letter. Sorts before `deliverable_letters`
+        // (`_` < `s`) per `ORDER BY tablename`.
+        "deliverable_letter_renders",
         // Cortex L3 (Lane C.4 / C.4.3) — deliverable-letter atoms.
         "deliverable_letters",
         // Cortex L4 (Lane C.4 / C.4.4) — Revit detail-callout specs.

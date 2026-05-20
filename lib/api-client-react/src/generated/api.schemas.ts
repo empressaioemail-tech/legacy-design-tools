@@ -2341,6 +2341,75 @@ export interface CreateProductSpecReferenceBody {
 }
 
 /**
+ * Cortex L6 — deliverable-letter render output format.
+ */
+export type RenderFormat = (typeof RenderFormat)[keyof typeof RenderFormat];
+
+export const RenderFormat = {
+  docx: "docx",
+  pdf: "pdf",
+} as const;
+
+export type DeliverableLetterRenderAtomEntityType =
+  (typeof DeliverableLetterRenderAtomEntityType)[keyof typeof DeliverableLetterRenderAtomEntityType];
+
+export const DeliverableLetterRenderAtomEntityType = {
+  "deliverable-letter-render": "deliverable-letter-render",
+} as const;
+
+export type DeliverableLetterRenderAtomAccessPolicy =
+  (typeof DeliverableLetterRenderAtomAccessPolicy)[keyof typeof DeliverableLetterRenderAtomAccessPolicy];
+
+export const DeliverableLetterRenderAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L6 `deliverable-letter-render` atom instance. Conforms to
+`DELIVERABLE_LETTER_RENDER_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface DeliverableLetterRenderAtom {
+  entityType: DeliverableLetterRenderAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  sourceLetterRef: string;
+  sourceLetterVersion: string;
+  format: RenderFormat;
+  blobRef: string;
+  renderedAt: string;
+  renderedByActorId: string | null;
+  accessPolicy?: DeliverableLetterRenderAtomAccessPolicy;
+}
+
+export interface DeliverableLetterRenderResponse {
+  render: DeliverableLetterRenderAtom;
+  /** Optional directly-usable URL the backend resolved from
+`render.blobRef`.
+ */
+  downloadUrl?: string;
+}
+
+export interface DeliverableLetterRenderListResponse {
+  renders: DeliverableLetterRenderAtom[];
+}
+
+/**
+ * Body for `POST /deliverable-letters/{letterId}/renders`.
+ */
+export interface RenderDeliverableLetterBody {
+  format: RenderFormat;
+  renderedByActorId?: string | null;
+}
+
+/**
  * A row in the `users` profile table — display name / email / avatar
 used to hydrate timeline actor labels. The `id` is the same opaque
 identifier the session layer carries (today: dev cookie ids like

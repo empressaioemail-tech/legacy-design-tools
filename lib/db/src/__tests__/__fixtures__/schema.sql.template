@@ -284,6 +284,23 @@ CREATE TABLE @@SCHEMA@@.decision_pdf_artifacts (
 );
 
 
+-- Name: deliverable_letter_renders; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.deliverable_letter_renders (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    letter_id uuid NOT NULL,
+    source_letter_ref text NOT NULL,
+    source_letter_version text NOT NULL,
+    format text NOT NULL,
+    blob_ref text NOT NULL,
+    render_bytes bytea NOT NULL,
+    rendered_by_actor_id text,
+    rendered_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT deliverable_letter_renders_format_check CHECK ((format = ANY (ARRAY['docx'::text, 'pdf'::text])))
+);
+
+
 -- Name: deliverable_letters; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.deliverable_letters (
@@ -965,6 +982,12 @@ ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
     ADD CONSTRAINT decision_pdf_artifacts_pkey PRIMARY KEY (decision_id);
 
 
+-- Name: deliverable_letter_renders deliverable_letter_renders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.deliverable_letter_renders
+    ADD CONSTRAINT deliverable_letter_renders_pkey PRIMARY KEY (id);
+
+
 -- Name: deliverable_letters deliverable_letters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.deliverable_letters
@@ -1309,6 +1332,11 @@ CREATE INDEX code_atoms_source_idx ON @@SCHEMA@@.code_atoms USING btree (source_
 CREATE INDEX decision_pdf_artifacts_submission_idx ON @@SCHEMA@@.decision_pdf_artifacts USING btree (submission_id, rendered_at);
 
 
+-- Name: deliverable_letter_renders_letter_rendered_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX deliverable_letter_renders_letter_rendered_idx ON @@SCHEMA@@.deliverable_letter_renders USING btree (letter_id, rendered_at);
+
+
 -- Name: deliverable_letters_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX deliverable_letters_engagement_created_idx ON @@SCHEMA@@.deliverable_letters USING btree (engagement_id, created_at);
@@ -1613,6 +1641,12 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
     ADD CONSTRAINT decision_pdf_artifacts_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
+
+
+-- Name: deliverable_letter_renders deliverable_letter_renders_letter_id_deliverable_letters_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.deliverable_letter_renders
+    ADD CONSTRAINT deliverable_letter_renders_letter_id_deliverable_letters_id_fk FOREIGN KEY (letter_id) REFERENCES @@SCHEMA@@.deliverable_letters(id) ON DELETE CASCADE;
 
 
 -- Name: deliverable_letters deliverable_letters_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
