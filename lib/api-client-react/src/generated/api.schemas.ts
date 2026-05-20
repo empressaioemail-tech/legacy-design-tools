@@ -1653,6 +1653,106 @@ instead of just the opaque `error` code.
 }
 
 /**
+ * Cortex L1 — response-task lifecycle state.
+ */
+export type ResponseTaskState =
+  (typeof ResponseTaskState)[keyof typeof ResponseTaskState];
+
+export const ResponseTaskState = {
+  open: "open",
+  "in-progress": "in-progress",
+  done: "done",
+  cancelled: "cancelled",
+} as const;
+
+export type ResponseTaskAtomEntityType =
+  (typeof ResponseTaskAtomEntityType)[keyof typeof ResponseTaskAtomEntityType];
+
+export const ResponseTaskAtomEntityType = {
+  "response-task": "response-task",
+} as const;
+
+export type ResponseTaskAtomAccessPolicy =
+  (typeof ResponseTaskAtomAccessPolicy)[keyof typeof ResponseTaskAtomAccessPolicy];
+
+export const ResponseTaskAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L1 `response-task` atom instance. Conforms to
+`RESPONSE_TASK_SCHEMA` in `@workspace/atoms-l-surface` (mirrored
+from `@hauska-engine/atoms`). The Base-atom provenance fields
+(`sourceAdapter` / `sourceUrl` / `contentHash` / `fetchedAt` /
+`jurisdictionTenant`) are derived by the api-server at read time
+— see `artifacts/api-server/src/lib/lSurfaceAtom.ts`.
+
+ */
+export interface ResponseTaskAtom {
+  entityType: ResponseTaskAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  title: string;
+  description: string;
+  state: ResponseTaskState;
+  createdAt: string;
+  dueAt: string | null;
+  completedAt: string | null;
+  sourceClientCommentId: string | null;
+  findingId: string | null;
+  engagementId: string | null;
+  actorId: string | null;
+  principalActorId: string | null;
+  accessPolicy?: ResponseTaskAtomAccessPolicy;
+}
+
+export interface ResponseTaskResponse {
+  responseTask: ResponseTaskAtom;
+}
+
+export interface ResponseTaskListResponse {
+  responseTasks: ResponseTaskAtom[];
+}
+
+/**
+ * Body for `POST /engagements/{engagementId}/response-tasks`.
+ */
+export interface CreateResponseTaskBody {
+  /** Required, non-empty. */
+  title: string;
+  /** Required (may be the empty string). */
+  description: string;
+  sourceClientCommentId?: string | null;
+  findingId?: string | null;
+  /** Optional ISO-8601 deadline. */
+  dueAt?: string | null;
+  actorId?: string | null;
+  principalActorId?: string | null;
+}
+
+/**
+ * Body for `POST /response-tasks/{responseTaskId}/state`.
+ */
+export interface ResponseTaskStateBody {
+  state: ResponseTaskState;
+}
+
+/**
+ * Body for `POST /response-tasks/{responseTaskId}/link-finding`.
+ */
+export interface LinkResponseTaskFindingBody {
+  /** Required, non-empty finding entityId. */
+  findingId: string;
+}
+
+/**
  * A row in the `users` profile table — display name / email / avatar
 used to hydrate timeline actor labels. The `id` is the same opaque
 identifier the session layer carries (today: dev cookie ids like
@@ -5186,4 +5286,11 @@ export type ListQaAutopilotRunsParams = {
 
 export type ListQaTriageItemsParams = {
   status?: QaTriageStatus;
+};
+
+export type ListResponseTasksParams = {
+  /**
+   * Optional filter to a single response-task state.
+   */
+  state?: ResponseTaskState;
 };

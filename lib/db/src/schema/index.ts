@@ -3,6 +3,7 @@ export * from "./snapshots";
 export * from "./sheets";
 export * from "./submissions";
 export * from "./submissionClassifications";
+export * from "./responseTasks";
 export * from "./codeAtomSources";
 export * from "./codeAtoms";
 export * from "./codeAtomFetchQueue";

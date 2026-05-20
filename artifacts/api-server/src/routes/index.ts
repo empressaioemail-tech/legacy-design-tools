@@ -33,6 +33,7 @@ import rendersRouter from "./renders";
 import notificationsRouter from "./notifications";
 import cannedFindingsRouter from "./cannedFindings";
 import qaRouter from "./qa";
+import responseTasksRouter from "./responseTasks";
 
 const router: IRouter = Router();
 
@@ -144,5 +145,12 @@ router.use(notificationsRouter);
 // every other router so ordering is indifferent.
 router.use(cannedFindingsRouter);
 router.use(qaRouter);
+// Cortex L1 (Lane C.4 / C.4.1) — response-task surface. Mounts
+// `/engagements/:engagementId/response-tasks` (create + list) and
+// `/response-tasks/:responseTaskId/*` (state + link-finding).
+// engagementsRouter's `/engagements/:id` handler is a leaf and does
+// not match the longer `/engagements/:id/response-tasks` path, so
+// mount ordering relative to engagementsRouter is indifferent.
+router.use(responseTasksRouter);
 
 export default router;
