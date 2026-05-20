@@ -42,6 +42,7 @@ import { SiteContextTab } from "../components/engagement-detail/SiteContextTab";
 import { SubmissionsTab } from "../components/engagement-detail/SubmissionsTab";
 import { RendersTab } from "../components/engagement-detail/RendersTab";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
+import { ResponseTasksTab } from "../components/engagement-detail/ResponseTasksTab";
 import {
   readBackfillFilterFromUrl,
   readTabFromUrl,
@@ -98,6 +99,7 @@ function TabBar({
     { id: "site-context", label: "Site context" },
     { id: "submissions", label: "Submissions" },
     { id: "findings", label: "Findings" },
+    { id: "response-tasks", label: "Response tasks" },
     { id: "renders", label: "Renders" },
     { id: "settings", label: "Settings" },
   ];
@@ -730,6 +732,10 @@ export function EngagementDetail() {
             initialSubmissionId={latestSubmissionId}
             onElementRefClick={handleElementRefClick}
           />
+        )}
+
+        {tab === "response-tasks" && (
+          <ResponseTasksTab engagementId={engagement.id} />
         )}
 
         {tab === "renders" && (

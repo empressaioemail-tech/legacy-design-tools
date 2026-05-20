@@ -37,6 +37,7 @@ import type {
   CreateCannedFindingBody,
   CreateEngagementSubmissionBody,
   CreateQaTriageItemBody,
+  CreateResponseTaskBody,
   CreateReviewerAnnotationBody,
   CreateReviewerRequestBody,
   CreateSubmissionCommentBody,
@@ -73,6 +74,7 @@ import type {
   JurisdictionSummary,
   KickoffRenderBody,
   KickoffRenderResponse,
+  LinkResponseTaskFindingBody,
   ListBimModelDivergencesResponse,
   ListCannedFindingsParams,
   ListCannedFindingsResponse,
@@ -89,6 +91,7 @@ import type {
   ListQaAutopilotRunsParams,
   ListQaRunsParams,
   ListQaTriageItemsParams,
+  ListResponseTasksParams,
   ListReviewerAnnotationsParams,
   ListReviewerAnnotationsResponse,
   ListReviewerQueueParams,
@@ -130,6 +133,9 @@ import type {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
   ResolveBimModelDivergenceResponse,
+  ResponseTaskListResponse,
+  ResponseTaskResponse,
+  ResponseTaskStateBody,
   RetrievalProbeBody,
   RetrievalProbeResponse,
   ReviewerAnnotationResponse,
@@ -12523,4 +12529,418 @@ export const useResetQaChecklist = <
   TContext
 > => {
   return useMutation(getResetQaChecklistMutationOptions(options));
+};
+
+/**
+ * Cortex L1 (Lane C.4). Opens a response-task — the persistent
+task state for the client-comment response flow. The backend
+assigns the entityId, sets `state` to `open`, stamps
+`createdAt`, and records the `response-task.opened` audit
+event. Returns the full `response-task` atom instance.
+
+Dual-auth: accepts either an `Authorization: Bearer` service
+token (hauska-mcp-server) or a Cortex SPA browser session.
+
+ * @summary Create a response-task within an engagement
+ */
+export const getCreateResponseTaskUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/response-tasks`;
+};
+
+export const createResponseTask = async (
+  engagementId: string,
+  createResponseTaskBody: CreateResponseTaskBody,
+  options?: RequestInit,
+): Promise<ResponseTaskResponse> => {
+  return customFetch<ResponseTaskResponse>(
+    getCreateResponseTaskUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createResponseTaskBody),
+    },
+  );
+};
+
+export const getCreateResponseTaskMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createResponseTask>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateResponseTaskBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createResponseTask>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateResponseTaskBody> },
+  TContext
+> => {
+  const mutationKey = ["createResponseTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createResponseTask>>,
+    { engagementId: string; data: BodyType<CreateResponseTaskBody> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return createResponseTask(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateResponseTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createResponseTask>>
+>;
+export type CreateResponseTaskMutationBody = BodyType<CreateResponseTaskBody>;
+export type CreateResponseTaskMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a response-task within an engagement
+ */
+export const useCreateResponseTask = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createResponseTask>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateResponseTaskBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createResponseTask>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateResponseTaskBody> },
+  TContext
+> => {
+  return useMutation(getCreateResponseTaskMutationOptions(options));
+};
+
+/**
+ * Cortex L1 (Lane C.4). Returns the engagement's response-tasks
+newest-first, optionally filtered to a single state.
+
+ * @summary List the response-tasks for an engagement
+ */
+export const getListResponseTasksUrl = (
+  engagementId: string,
+  params?: ListResponseTasksParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${engagementId}/response-tasks?${stringifiedParams}`
+    : `/api/engagements/${engagementId}/response-tasks`;
+};
+
+export const listResponseTasks = async (
+  engagementId: string,
+  params?: ListResponseTasksParams,
+  options?: RequestInit,
+): Promise<ResponseTaskListResponse> => {
+  return customFetch<ResponseTaskListResponse>(
+    getListResponseTasksUrl(engagementId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListResponseTasksQueryKey = (
+  engagementId: string,
+  params?: ListResponseTasksParams,
+) => {
+  return [
+    `/api/engagements/${engagementId}/response-tasks`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListResponseTasksQueryOptions = <
+  TData = Awaited<ReturnType<typeof listResponseTasks>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListResponseTasksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listResponseTasks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListResponseTasksQueryKey(engagementId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listResponseTasks>>
+  > = ({ signal }) =>
+    listResponseTasks(engagementId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listResponseTasks>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListResponseTasksQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listResponseTasks>>
+>;
+export type ListResponseTasksQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the response-tasks for an engagement
+ */
+
+export function useListResponseTasks<
+  TData = Awaited<ReturnType<typeof listResponseTasks>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListResponseTasksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listResponseTasks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListResponseTasksQueryOptions(
+    engagementId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L1 (Lane C.4). Validates the transition, stamps
+`completedAt` when the new state is `done` (clears it
+otherwise), and records the matching audit event
+(`response-task.progressed` / `.completed` / `.cancelled`).
+A forbidden transition is rejected with a 409.
+
+ * @summary Transition a response-task to a new state
+ */
+export const getUpdateResponseTaskStateUrl = (responseTaskId: string) => {
+  return `/api/response-tasks/${responseTaskId}/state`;
+};
+
+export const updateResponseTaskState = async (
+  responseTaskId: string,
+  responseTaskStateBody: ResponseTaskStateBody,
+  options?: RequestInit,
+): Promise<ResponseTaskResponse> => {
+  return customFetch<ResponseTaskResponse>(
+    getUpdateResponseTaskStateUrl(responseTaskId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(responseTaskStateBody),
+    },
+  );
+};
+
+export const getUpdateResponseTaskStateMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateResponseTaskState>>,
+    TError,
+    { responseTaskId: string; data: BodyType<ResponseTaskStateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateResponseTaskState>>,
+  TError,
+  { responseTaskId: string; data: BodyType<ResponseTaskStateBody> },
+  TContext
+> => {
+  const mutationKey = ["updateResponseTaskState"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateResponseTaskState>>,
+    { responseTaskId: string; data: BodyType<ResponseTaskStateBody> }
+  > = (props) => {
+    const { responseTaskId, data } = props ?? {};
+
+    return updateResponseTaskState(responseTaskId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateResponseTaskStateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateResponseTaskState>>
+>;
+export type UpdateResponseTaskStateMutationBody =
+  BodyType<ResponseTaskStateBody>;
+export type UpdateResponseTaskStateMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Transition a response-task to a new state
+ */
+export const useUpdateResponseTaskState = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateResponseTaskState>>,
+    TError,
+    { responseTaskId: string; data: BodyType<ResponseTaskStateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateResponseTaskState>>,
+  TError,
+  { responseTaskId: string; data: BodyType<ResponseTaskStateBody> },
+  TContext
+> => {
+  return useMutation(getUpdateResponseTaskStateMutationOptions(options));
+};
+
+/**
+ * Cortex L1 (Lane C.4). Sets the response-task's `findingId` and
+records an audit event. Returns the updated atom.
+
+ * @summary Link a response-task to a finding
+ */
+export const getLinkResponseTaskFindingUrl = (responseTaskId: string) => {
+  return `/api/response-tasks/${responseTaskId}/link-finding`;
+};
+
+export const linkResponseTaskFinding = async (
+  responseTaskId: string,
+  linkResponseTaskFindingBody: LinkResponseTaskFindingBody,
+  options?: RequestInit,
+): Promise<ResponseTaskResponse> => {
+  return customFetch<ResponseTaskResponse>(
+    getLinkResponseTaskFindingUrl(responseTaskId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(linkResponseTaskFindingBody),
+    },
+  );
+};
+
+export const getLinkResponseTaskFindingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkResponseTaskFinding>>,
+    TError,
+    { responseTaskId: string; data: BodyType<LinkResponseTaskFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof linkResponseTaskFinding>>,
+  TError,
+  { responseTaskId: string; data: BodyType<LinkResponseTaskFindingBody> },
+  TContext
+> => {
+  const mutationKey = ["linkResponseTaskFinding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof linkResponseTaskFinding>>,
+    { responseTaskId: string; data: BodyType<LinkResponseTaskFindingBody> }
+  > = (props) => {
+    const { responseTaskId, data } = props ?? {};
+
+    return linkResponseTaskFinding(responseTaskId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type LinkResponseTaskFindingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof linkResponseTaskFinding>>
+>;
+export type LinkResponseTaskFindingMutationBody =
+  BodyType<LinkResponseTaskFindingBody>;
+export type LinkResponseTaskFindingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Link a response-task to a finding
+ */
+export const useLinkResponseTaskFinding = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkResponseTaskFinding>>,
+    TError,
+    { responseTaskId: string; data: BodyType<LinkResponseTaskFindingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof linkResponseTaskFinding>>,
+  TError,
+  { responseTaskId: string; data: BodyType<LinkResponseTaskFindingBody> },
+  TContext
+> => {
+  return useMutation(getLinkResponseTaskFindingMutationOptions(options));
 };

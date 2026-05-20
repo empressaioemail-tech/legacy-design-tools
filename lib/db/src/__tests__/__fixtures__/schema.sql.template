@@ -530,6 +530,26 @@ CREATE TABLE @@SCHEMA@@.render_outputs (
 );
 
 
+-- Name: response_tasks; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.response_tasks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    title text NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
+    state text DEFAULT 'open'::text NOT NULL,
+    due_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    source_client_comment_id text,
+    finding_id text,
+    actor_id text,
+    principal_actor_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT response_tasks_state_check CHECK ((state = ANY (ARRAY['open'::text, 'in-progress'::text, 'done'::text, 'cancelled'::text])))
+);
+
+
 -- Name: reviewer_annotations; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.reviewer_annotations (
@@ -939,6 +959,12 @@ ALTER TABLE ONLY @@SCHEMA@@.render_outputs
     ADD CONSTRAINT render_outputs_pkey PRIMARY KEY (id);
 
 
+-- Name: response_tasks response_tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.response_tasks
+    ADD CONSTRAINT response_tasks_pkey PRIMARY KEY (id);
+
+
 -- Name: reviewer_annotations reviewer_annotations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
@@ -1252,6 +1278,11 @@ CREATE UNIQUE INDEX render_outputs_render_role_uniq ON @@SCHEMA@@.render_outputs
 CREATE INDEX render_outputs_viewpoint_render_idx ON @@SCHEMA@@.render_outputs USING btree (viewpoint_render_id);
 
 
+-- Name: response_tasks_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX response_tasks_engagement_created_idx ON @@SCHEMA@@.response_tasks USING btree (engagement_id, created_at);
+
+
 -- Name: reviewer_annotations_parent_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX reviewer_annotations_parent_idx ON @@SCHEMA@@.reviewer_annotations USING btree (parent_annotation_id);
@@ -1509,6 +1540,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
 
 ALTER TABLE ONLY @@SCHEMA@@.render_outputs
     ADD CONSTRAINT render_outputs_viewpoint_render_id_viewpoint_renders_id_fk FOREIGN KEY (viewpoint_render_id) REFERENCES @@SCHEMA@@.viewpoint_renders(id) ON DELETE CASCADE;
+
+
+-- Name: response_tasks response_tasks_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.response_tasks
+    ADD CONSTRAINT response_tasks_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: reviewer_annotations reviewer_annotations_parent_annotation_id_reviewer_annotations_; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -8229,3 +8229,200 @@ export const ResetQaChecklistParams = zod.object({
 export const ResetQaChecklistResponse = zod.object({
   ok: zod.boolean(),
 });
+
+/**
+ * Cortex L1 (Lane C.4). Opens a response-task — the persistent
+task state for the client-comment response flow. The backend
+assigns the entityId, sets `state` to `open`, stamps
+`createdAt`, and records the `response-task.opened` audit
+event. Returns the full `response-task` atom instance.
+
+Dual-auth: accepts either an `Authorization: Bearer` service
+token (hauska-mcp-server) or a Cortex SPA browser session.
+
+ * @summary Create a response-task within an engagement
+ */
+export const CreateResponseTaskParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const CreateResponseTaskBody = zod
+  .object({
+    title: zod.string().describe("Required, non-empty."),
+    description: zod.string().describe("Required (may be the empty string)."),
+    sourceClientCommentId: zod.string().nullish(),
+    findingId: zod.string().nullish(),
+    dueAt: zod.string().nullish().describe("Optional ISO-8601 deadline."),
+    actorId: zod.string().nullish(),
+    principalActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/engagements\/{engagementId}\/response-tasks`.");
+
+/**
+ * Cortex L1 (Lane C.4). Returns the engagement's response-tasks
+newest-first, optionally filtered to a single state.
+
+ * @summary List the response-tasks for an engagement
+ */
+export const ListResponseTasksParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListResponseTasksQueryParams = zod.object({
+  state: zod
+    .enum(["open", "in-progress", "done", "cancelled"])
+    .optional()
+    .describe("Optional filter to a single response-task state."),
+});
+
+export const ListResponseTasksResponse = zod.object({
+  responseTasks: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["response-task"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        title: zod.string(),
+        description: zod.string(),
+        state: zod
+          .enum(["open", "in-progress", "done", "cancelled"])
+          .describe("Cortex L1 — response-task lifecycle state."),
+        createdAt: zod.string(),
+        dueAt: zod.string().nullable(),
+        completedAt: zod.string().nullable(),
+        sourceClientCommentId: zod.string().nullable(),
+        findingId: zod.string().nullable(),
+        engagementId: zod.string().nullable(),
+        actorId: zod.string().nullable(),
+        principalActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L1 `response-task` atom instance. Conforms to\n`RESPONSE_TASK_SCHEMA` in `@workspace\/atoms-l-surface` (mirrored\nfrom `@hauska-engine\/atoms`). The Base-atom provenance fields\n(`sourceAdapter` \/ `sourceUrl` \/ `contentHash` \/ `fetchedAt` \/\n`jurisdictionTenant`) are derived by the api-server at read time\n— see `artifacts\/api-server\/src\/lib\/lSurfaceAtom.ts`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L1 (Lane C.4). Validates the transition, stamps
+`completedAt` when the new state is `done` (clears it
+otherwise), and records the matching audit event
+(`response-task.progressed` / `.completed` / `.cancelled`).
+A forbidden transition is rejected with a 409.
+
+ * @summary Transition a response-task to a new state
+ */
+export const UpdateResponseTaskStateParams = zod.object({
+  responseTaskId: zod.coerce.string(),
+});
+
+export const UpdateResponseTaskStateBody = zod
+  .object({
+    state: zod
+      .enum(["open", "in-progress", "done", "cancelled"])
+      .describe("Cortex L1 — response-task lifecycle state."),
+  })
+  .describe("Body for `POST \/response-tasks\/{responseTaskId}\/state`.");
+
+export const UpdateResponseTaskStateResponse = zod.object({
+  responseTask: zod
+    .object({
+      entityType: zod.enum(["response-task"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      title: zod.string(),
+      description: zod.string(),
+      state: zod
+        .enum(["open", "in-progress", "done", "cancelled"])
+        .describe("Cortex L1 — response-task lifecycle state."),
+      createdAt: zod.string(),
+      dueAt: zod.string().nullable(),
+      completedAt: zod.string().nullable(),
+      sourceClientCommentId: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      engagementId: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L1 `response-task` atom instance. Conforms to\n`RESPONSE_TASK_SCHEMA` in `@workspace\/atoms-l-surface` (mirrored\nfrom `@hauska-engine\/atoms`). The Base-atom provenance fields\n(`sourceAdapter` \/ `sourceUrl` \/ `contentHash` \/ `fetchedAt` \/\n`jurisdictionTenant`) are derived by the api-server at read time\n— see `artifacts\/api-server\/src\/lib\/lSurfaceAtom.ts`.\n",
+    ),
+});
+
+/**
+ * Cortex L1 (Lane C.4). Sets the response-task's `findingId` and
+records an audit event. Returns the updated atom.
+
+ * @summary Link a response-task to a finding
+ */
+export const LinkResponseTaskFindingParams = zod.object({
+  responseTaskId: zod.coerce.string(),
+});
+
+export const LinkResponseTaskFindingBody = zod
+  .object({
+    findingId: zod.string().describe("Required, non-empty finding entityId."),
+  })
+  .describe(
+    "Body for `POST \/response-tasks\/{responseTaskId}\/link-finding`.",
+  );
+
+export const LinkResponseTaskFindingResponse = zod.object({
+  responseTask: zod
+    .object({
+      entityType: zod.enum(["response-task"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      title: zod.string(),
+      description: zod.string(),
+      state: zod
+        .enum(["open", "in-progress", "done", "cancelled"])
+        .describe("Cortex L1 — response-task lifecycle state."),
+      createdAt: zod.string(),
+      dueAt: zod.string().nullable(),
+      completedAt: zod.string().nullable(),
+      sourceClientCommentId: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      engagementId: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L1 `response-task` atom instance. Conforms to\n`RESPONSE_TASK_SCHEMA` in `@workspace\/atoms-l-surface` (mirrored\nfrom `@hauska-engine\/atoms`). The Base-atom provenance fields\n(`sourceAdapter` \/ `sourceUrl` \/ `contentHash` \/ `fetchedAt` \/\n`jurisdictionTenant`) are derived by the api-server at read time\n— see `artifacts\/api-server\/src\/lib\/lSurfaceAtom.ts`.\n",
+    ),
+});

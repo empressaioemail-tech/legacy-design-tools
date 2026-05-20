@@ -193,6 +193,9 @@ importers:
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod
+      '@workspace/atoms-l-surface':
+        specifier: workspace:*
+        version: link:../../lib/atoms-l-surface
       '@workspace/briefing-engine':
         specifier: workspace:*
         version: link:../../lib/briefing-engine

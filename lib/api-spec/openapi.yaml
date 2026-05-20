@@ -86,6 +86,14 @@ tags:
       from this spec (event-stream contracts don't fit the OpenAPI
       request/response shape) — the FE consumes it via a hand-written
       `EventSource` against the same path.
+  - name: response-tasks
+    description: |
+      Cortex L1 (Lane C.4) — response-task surface. Persistent task
+      state for the client-comment response flow: an architect opens
+      response-tasks against an engagement and moves them through
+      `open → in-progress → done` (or `cancelled`) across sessions.
+      Dual-auth (hauska-mcp-server bearer token OR a Cortex SPA
+      session); each mutation appends an atom-event audit record.
 paths:
   /healthz:
     get:
@@ -5508,6 +5516,205 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{engagementId}/response-tasks:
+    post:
+      operationId: createResponseTask
+      tags: [response-tasks]
+      summary: Create a response-task within an engagement
+      description: |
+        Cortex L1 (Lane C.4). Opens a response-task — the persistent
+        task state for the client-comment response flow. The backend
+        assigns the entityId, sets `state` to `open`, stamps
+        `createdAt`, and records the `response-task.opened` audit
+        event. Returns the full `response-task` atom instance.
+
+        Dual-auth: accepts either an `Authorization: Bearer` service
+        token (hauska-mcp-server) or a Cortex SPA browser session.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateResponseTaskBody"
+      responses:
+        "201":
+          description: The newly created response-task atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseTaskResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listResponseTasks
+      tags: [response-tasks]
+      summary: List the response-tasks for an engagement
+      description: |
+        Cortex L1 (Lane C.4). Returns the engagement's response-tasks
+        newest-first, optionally filtered to a single state.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          description: Optional filter to a single response-task state.
+          schema:
+            $ref: "#/components/schemas/ResponseTaskState"
+      responses:
+        "200":
+          description: The engagement's response-task atoms, newest-first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseTaskListResponse"
+        "400":
+          description: Invalid state filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /response-tasks/{responseTaskId}/state:
+    post:
+      operationId: updateResponseTaskState
+      tags: [response-tasks]
+      summary: Transition a response-task to a new state
+      description: |
+        Cortex L1 (Lane C.4). Validates the transition, stamps
+        `completedAt` when the new state is `done` (clears it
+        otherwise), and records the matching audit event
+        (`response-task.progressed` / `.completed` / `.cancelled`).
+        A forbidden transition is rejected with a 409.
+      parameters:
+        - name: responseTaskId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResponseTaskStateBody"
+      responses:
+        "200":
+          description: The updated response-task atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseTaskResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Response-task not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Forbidden state transition
+            (`error: "response_task_transition_forbidden"`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /response-tasks/{responseTaskId}/link-finding:
+    post:
+      operationId: linkResponseTaskFinding
+      tags: [response-tasks]
+      summary: Link a response-task to a finding
+      description: |
+        Cortex L1 (Lane C.4). Sets the response-task's `findingId` and
+        records an audit event. Returns the updated atom.
+      parameters:
+        - name: responseTaskId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkResponseTaskFindingBody"
+      responses:
+        "200":
+          description: The updated response-task atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseTaskResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Response-task not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -7648,6 +7855,159 @@ components:
             instead of just the opaque `error` code.
       required:
         - error
+
+    ResponseTaskState:
+      type: string
+      enum:
+        - open
+        - in-progress
+        - done
+        - cancelled
+      description: Cortex L1 — response-task lifecycle state.
+
+    ResponseTaskAtom:
+      description: |
+        Cortex L1 `response-task` atom instance. Conforms to
+        `RESPONSE_TASK_SCHEMA` in `@workspace/atoms-l-surface` (mirrored
+        from `@hauska-engine/atoms`). The Base-atom provenance fields
+        (`sourceAdapter` / `sourceUrl` / `contentHash` / `fetchedAt` /
+        `jurisdictionTenant`) are derived by the api-server at read time
+        — see `artifacts/api-server/src/lib/lSurfaceAtom.ts`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [response-task]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        state:
+          $ref: "#/components/schemas/ResponseTaskState"
+        createdAt:
+          type: string
+        dueAt:
+          type: string
+          nullable: true
+        completedAt:
+          type: string
+          nullable: true
+        sourceClientCommentId:
+          type: string
+          nullable: true
+        findingId:
+          type: string
+          nullable: true
+        engagementId:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - title
+        - description
+        - state
+        - createdAt
+        - dueAt
+        - completedAt
+        - sourceClientCommentId
+        - findingId
+        - engagementId
+        - actorId
+        - principalActorId
+
+    ResponseTaskResponse:
+      type: object
+      properties:
+        responseTask:
+          $ref: "#/components/schemas/ResponseTaskAtom"
+      required:
+        - responseTask
+
+    ResponseTaskListResponse:
+      type: object
+      properties:
+        responseTasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResponseTaskAtom"
+      required:
+        - responseTasks
+
+    CreateResponseTaskBody:
+      description: Body for `POST /engagements/{engagementId}/response-tasks`.
+      type: object
+      properties:
+        title:
+          type: string
+          description: Required, non-empty.
+        description:
+          type: string
+          description: Required (may be the empty string).
+        sourceClientCommentId:
+          type: string
+          nullable: true
+        findingId:
+          type: string
+          nullable: true
+        dueAt:
+          type: string
+          nullable: true
+          description: Optional ISO-8601 deadline.
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+      required:
+        - title
+        - description
+
+    ResponseTaskStateBody:
+      description: Body for `POST /response-tasks/{responseTaskId}/state`.
+      type: object
+      properties:
+        state:
+          $ref: "#/components/schemas/ResponseTaskState"
+      required:
+        - state
+
+    LinkResponseTaskFindingBody:
+      description: Body for `POST /response-tasks/{responseTaskId}/link-finding`.
+      type: object
+      properties:
+        findingId:
+          type: string
+          description: Required, non-empty finding entityId.
+      required:
+        - findingId
 
     User:
       description: |
