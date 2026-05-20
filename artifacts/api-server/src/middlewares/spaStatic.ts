@@ -49,7 +49,7 @@ function spaRouter(distDir: string): Router {
   );
   // Unmatched GET → index.html so wouter client-side routes resolve.
   // Non-GET falls through (these SPA mounts carry no API).
-  r.get("/*splat", (req, res, next) => {
+  r.get("/{*splat}", (req, res, next) => {
     if (req.method !== "GET") {
       next();
       return;
