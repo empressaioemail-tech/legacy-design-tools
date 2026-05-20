@@ -301,8 +301,9 @@ vi.mock("@workspace/api-client-react", async () => {
   };
 });
 
-const { EngagementDetail, GenerateLayersSummaryBanner } = await import(
-  "../EngagementDetail"
+const { EngagementDetail } = await import("../EngagementDetail");
+const { GenerateLayersSummaryBanner } = await import(
+  "../../components/engagement-detail/GenerateLayersSummaryBanner"
 );
 
 /**
