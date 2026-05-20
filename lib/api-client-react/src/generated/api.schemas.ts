@@ -1753,6 +1753,157 @@ export interface LinkResponseTaskFindingBody {
 }
 
 /**
+ * Page-relative bounding box, normalized to [0, 1].
+ */
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * One OCR text segment with its page-relative position.
+ */
+export interface SheetTextSegment {
+  text: string;
+  boundingBox: BoundingBox;
+  sourceConfidence: number;
+}
+
+/**
+ * Structured-annotation category extracted from a sheet.
+ */
+export type SheetAnnotationKind =
+  (typeof SheetAnnotationKind)[keyof typeof SheetAnnotationKind];
+
+export const SheetAnnotationKind = {
+  "revision-cloud": "revision-cloud",
+  dimension: "dimension",
+  "schedule-row": "schedule-row",
+  callout: "callout",
+} as const;
+
+/**
+ * One structured annotation extracted from a sheet.
+ */
+export interface SheetStructuredAnnotation {
+  kind: SheetAnnotationKind;
+  position: BoundingBox;
+  content: string;
+  sourceConfidence: number;
+}
+
+export type SheetContentExtractionAtomEntityType =
+  (typeof SheetContentExtractionAtomEntityType)[keyof typeof SheetContentExtractionAtomEntityType];
+
+export const SheetContentExtractionAtomEntityType = {
+  "sheet-content-extraction": "sheet-content-extraction",
+} as const;
+
+export type SheetContentExtractionAtomAccessPolicy =
+  (typeof SheetContentExtractionAtomAccessPolicy)[keyof typeof SheetContentExtractionAtomAccessPolicy];
+
+export const SheetContentExtractionAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L2a `sheet-content-extraction` atom instance. Conforms to
+`SHEET_CONTENT_EXTRACTION_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface SheetContentExtractionAtom {
+  entityType: SheetContentExtractionAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  sourceSheetId: string;
+  engagementId: string | null;
+  pageLabel: string;
+  extractedTextSegments: SheetTextSegment[];
+  structuredAnnotations: SheetStructuredAnnotation[];
+  ocrModel: string;
+  actorId: string | null;
+  accessPolicy?: SheetContentExtractionAtomAccessPolicy;
+}
+
+/**
+ * Wire envelope for the L2a routes. `sheetContentExtraction` is
+`null` when the sheet exists but has not been extracted yet.
+
+ */
+export interface SheetContentExtractionResponse {
+  sheetContentExtraction: SheetContentExtractionAtom | null;
+}
+
+/**
+ * Supporting-document category attached to an engagement.
+ */
+export type AttachedDocumentType =
+  (typeof AttachedDocumentType)[keyof typeof AttachedDocumentType];
+
+export const AttachedDocumentType = {
+  specification: "specification",
+  calculation: "calculation",
+  "product-data": "product-data",
+  narrative: "narrative",
+} as const;
+
+export type AttachedDocumentAtomEntityType =
+  (typeof AttachedDocumentAtomEntityType)[keyof typeof AttachedDocumentAtomEntityType];
+
+export const AttachedDocumentAtomEntityType = {
+  "attached-document": "attached-document",
+} as const;
+
+export type AttachedDocumentAtomAccessPolicy =
+  (typeof AttachedDocumentAtomAccessPolicy)[keyof typeof AttachedDocumentAtomAccessPolicy];
+
+export const AttachedDocumentAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L2b `attached-document` atom instance. Conforms to
+`ATTACHED_DOCUMENT_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface AttachedDocumentAtom {
+  entityType: AttachedDocumentAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  engagementId: string;
+  title: string;
+  documentType: AttachedDocumentType;
+  extractedText: string;
+  originalBlobRef: string;
+  actorId: string | null;
+  accessPolicy?: AttachedDocumentAtomAccessPolicy;
+}
+
+export interface AttachedDocumentResponse {
+  attachedDocument: AttachedDocumentAtom;
+}
+
+export interface AttachedDocumentListResponse {
+  attachedDocuments: AttachedDocumentAtom[];
+}
+
+/**
  * A row in the `users` profile table — display name / email / avatar
 used to hydrate timeline actor labels. The `id` is the same opaque
 identifier the session layer carries (today: dev cookie ids like
@@ -5293,4 +5444,8 @@ export type ListResponseTasksParams = {
    * Optional filter to a single response-task state.
    */
   state?: ResponseTaskState;
+};
+
+export type ListAttachedDocumentsParams = {
+  documentType?: AttachedDocumentType;
 };

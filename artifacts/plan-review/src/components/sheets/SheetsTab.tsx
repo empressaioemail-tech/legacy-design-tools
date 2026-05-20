@@ -13,6 +13,8 @@ import {
 } from "@workspace/api-client-react";
 import { SheetNavigatorRail } from "./SheetNavigatorRail";
 import { SheetPreviewPane } from "./SheetPreviewPane";
+import { SheetContentExtractionPanel } from "./SheetContentExtractionPanel";
+import { AttachedDocumentsPanel } from "./AttachedDocumentsPanel";
 
 export interface SheetsTabProps {
   submissionId: string;
@@ -90,26 +92,47 @@ export function SheetsTab({ submissionId }: SheetsTabProps) {
       data-testid="sheets-tab"
       style={{
         display: "flex",
-        flexDirection: "row",
-        gap: 0,
-        height: "min(70vh, 720px)",
-        minHeight: 360,
+        flexDirection: "column",
+        gap: 12,
+        maxHeight: "min(86vh, 980px)",
+        overflowY: "auto",
       }}
     >
-      {showRail && (
-        <SheetNavigatorRail
-          submissionId={submissionId}
-          selectedSheetId={selectedId}
-          onSelect={(s) => setSelectedId(s.id)}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          gap: 0,
+          height: "min(70vh, 720px)",
+          minHeight: 360,
+          flexShrink: 0,
+        }}
+      >
+        {showRail && (
+          <SheetNavigatorRail
+            submissionId={submissionId}
+            selectedSheetId={selectedId}
+            onSelect={(s) => setSelectedId(s.id)}
+          />
+        )}
+        <SheetPreviewPane
+          sheet={selected}
+          siblingSheets={sheets}
+          onJumpToSheet={(s) => setSelectedId(s.id)}
+          contentBody={selected?.contentBody ?? null}
+          crossRefs={selected?.crossRefs ?? []}
         />
+      </div>
+      {/*
+        Cortex L2 (Lane C.4 / C.4.2) — structured extracted content for
+        the selected sheet + the engagement's attached-documents panel.
+      */}
+      {selected && (
+        <>
+          <SheetContentExtractionPanel sheet={selected} />
+          <AttachedDocumentsPanel engagementId={selected.engagementId} />
+        </>
       )}
-      <SheetPreviewPane
-        sheet={selected}
-        siblingSheets={sheets}
-        onJumpToSheet={(s) => setSelectedId(s.id)}
-        contentBody={selected?.contentBody ?? null}
-        crossRefs={selected?.crossRefs ?? []}
-      />
     </div>
   );
 }

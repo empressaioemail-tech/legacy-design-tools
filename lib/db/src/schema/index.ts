@@ -4,6 +4,8 @@ export * from "./sheets";
 export * from "./submissions";
 export * from "./submissionClassifications";
 export * from "./responseTasks";
+export * from "./sheetContentExtractions";
+export * from "./attachedDocuments";
 export * from "./codeAtomSources";
 export * from "./codeAtoms";
 export * from "./codeAtomFetchQueue";

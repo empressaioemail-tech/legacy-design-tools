@@ -70,6 +70,9 @@ describe("lib/db schema integration", () => {
         // /me/notifications/mark-read.
         "architect_notification_reads",
         "atom_events",
+        // Cortex L2 (Lane C.4 / C.4.2) — supporting documents attached
+        // to an engagement (produced by the sheet-ingest pipeline).
+        "attached_documents",
         // Task #482 / #486 — QA autopilot orchestration tables.
         // `autopilot_runs` is one row per kicked-off run;
         // `autopilot_findings` carries per-suite per-test findings; and
@@ -125,6 +128,8 @@ describe("lib/db schema integration", () => {
         // Task #503 — QA triage queue items (forwarded to planning).
         "qa_triage_items",
         "render_outputs",
+        // Cortex L1 (Lane C.4 / C.4.1) — response-task workflow rows.
+        "response_tasks",
         // Spec 307 / Task #307 — reviewer scratch-note surface anchored
         // per (submission, target atom) tuple. Reviewer-only until the
         // bulk-promote endpoint flips `promoted_at`.
@@ -134,6 +139,9 @@ describe("lib/db schema integration", () => {
         // bim-model / regenerate briefing). Resolved implicitly by
         // the matching domain action's atom-history event.
         "reviewer_requests",
+        // Cortex L2 (Lane C.4 / C.4.2) — structured sheet-content
+        // extraction atoms (OCR segments + annotations).
+        "sheet_content_extractions",
         "sheets",
         // IFC ingest metadata keyed off snapshots (parse status, global ids).
         "snapshot_ifc_files",

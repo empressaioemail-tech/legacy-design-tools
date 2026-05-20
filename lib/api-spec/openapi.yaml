@@ -94,6 +94,14 @@ tags:
       `open → in-progress → done` (or `cancelled`) across sessions.
       Dual-auth (hauska-mcp-server bearer token OR a Cortex SPA
       session); each mutation appends an atom-event audit record.
+  - name: sheet-content
+    description: |
+      Cortex L2 (Lane C.4) — sheet-content-extraction +
+      attached-document surface. The sheet-ingest extraction pass
+      classifies a construction sheet into OCR text segments +
+      structured annotations; supporting documents attached to an
+      engagement carry parsed text. Dual-auth (hauska-mcp-server
+      bearer token OR a Cortex SPA session).
 paths:
   /healthz:
     get:
@@ -5715,6 +5723,156 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /sheets/{sheetId}/content-extraction:
+    post:
+      operationId: triggerSheetContentExtraction
+      tags: [sheet-content]
+      summary: Trigger the structured-content extraction pass on a sheet
+      description: |
+        Cortex L2 (Lane C.4). Runs the sheet-content extraction pass
+        and emits a `sheet-content-extraction` atom (OCR text segments
+        + structured annotations). Re-running it upserts the atom for
+        that sheet. Dual-auth (hauska-mcp-server bearer OR Cortex SPA
+        session).
+      parameters:
+        - name: sheetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The produced sheet-content-extraction atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetContentExtractionResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Sheet not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: getSheetContentExtraction
+      tags: [sheet-content]
+      summary: Fetch the sheet-content-extraction atom for a sheet
+      description: |
+        Cortex L2 (Lane C.4). Returns the `sheet-content-extraction`
+        atom for the sheet, or `null` when the sheet exists but has not
+        been extracted yet (a normal empty result, not a 404).
+      parameters:
+        - name: sheetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The sheet-content-extraction atom, or null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetContentExtractionResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Sheet not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/attached-documents:
+    get:
+      operationId: listAttachedDocuments
+      tags: [sheet-content]
+      summary: List the supporting documents attached to an engagement
+      description: |
+        Cortex L2 (Lane C.4). Returns the engagement's
+        `attached-document` atoms, optionally filtered to one document
+        type.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentType
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/AttachedDocumentType"
+      responses:
+        "200":
+          description: The engagement's attached-document atoms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachedDocumentListResponse"
+        "400":
+          description: Invalid documentType filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /attached-documents/{attachedDocumentId}:
+    get:
+      operationId: getAttachedDocument
+      tags: [sheet-content]
+      summary: Fetch a single attached-document atom
+      description: |
+        Cortex L2 (Lane C.4). Returns the `attached-document` atom
+        including its parsed `extractedText` and `originalBlobRef`.
+      parameters:
+        - name: attachedDocumentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The attached-document atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachedDocumentResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Attached document not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -8008,6 +8166,218 @@ components:
           description: Required, non-empty finding entityId.
       required:
         - findingId
+
+    BoundingBox:
+      description: Page-relative bounding box, normalized to [0, 1].
+      type: object
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        width:
+          type: number
+        height:
+          type: number
+      required:
+        - x
+        - y
+        - width
+        - height
+
+    SheetTextSegment:
+      description: One OCR text segment with its page-relative position.
+      type: object
+      properties:
+        text:
+          type: string
+        boundingBox:
+          $ref: "#/components/schemas/BoundingBox"
+        sourceConfidence:
+          type: number
+      required:
+        - text
+        - boundingBox
+        - sourceConfidence
+
+    SheetAnnotationKind:
+      type: string
+      enum:
+        - revision-cloud
+        - dimension
+        - schedule-row
+        - callout
+      description: Structured-annotation category extracted from a sheet.
+
+    SheetStructuredAnnotation:
+      description: One structured annotation extracted from a sheet.
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/SheetAnnotationKind"
+        position:
+          $ref: "#/components/schemas/BoundingBox"
+        content:
+          type: string
+        sourceConfidence:
+          type: number
+      required:
+        - kind
+        - position
+        - content
+        - sourceConfidence
+
+    SheetContentExtractionAtom:
+      description: |
+        Cortex L2a `sheet-content-extraction` atom instance. Conforms to
+        `SHEET_CONTENT_EXTRACTION_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [sheet-content-extraction]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        sourceSheetId:
+          type: string
+        engagementId:
+          type: string
+          nullable: true
+        pageLabel:
+          type: string
+        extractedTextSegments:
+          type: array
+          items:
+            $ref: "#/components/schemas/SheetTextSegment"
+        structuredAnnotations:
+          type: array
+          items:
+            $ref: "#/components/schemas/SheetStructuredAnnotation"
+        ocrModel:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - sourceSheetId
+        - engagementId
+        - pageLabel
+        - extractedTextSegments
+        - structuredAnnotations
+        - ocrModel
+        - actorId
+
+    SheetContentExtractionResponse:
+      type: object
+      description: |
+        Wire envelope for the L2a routes. `sheetContentExtraction` is
+        `null` when the sheet exists but has not been extracted yet.
+      properties:
+        sheetContentExtraction:
+          allOf:
+            - $ref: "#/components/schemas/SheetContentExtractionAtom"
+          nullable: true
+      required:
+        - sheetContentExtraction
+
+    AttachedDocumentType:
+      type: string
+      enum:
+        - specification
+        - calculation
+        - product-data
+        - narrative
+      description: Supporting-document category attached to an engagement.
+
+    AttachedDocumentAtom:
+      description: |
+        Cortex L2b `attached-document` atom instance. Conforms to
+        `ATTACHED_DOCUMENT_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [attached-document]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        engagementId:
+          type: string
+        title:
+          type: string
+        documentType:
+          $ref: "#/components/schemas/AttachedDocumentType"
+        extractedText:
+          type: string
+        originalBlobRef:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - engagementId
+        - title
+        - documentType
+        - extractedText
+        - originalBlobRef
+        - actorId
+
+    AttachedDocumentResponse:
+      type: object
+      properties:
+        attachedDocument:
+          $ref: "#/components/schemas/AttachedDocumentAtom"
+      required:
+        - attachedDocument
+
+    AttachedDocumentListResponse:
+      type: object
+      properties:
+        attachedDocuments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachedDocumentAtom"
+      required:
+        - attachedDocuments
 
     User:
       description: |

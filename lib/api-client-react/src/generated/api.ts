@@ -19,6 +19,8 @@ import type {
 import type {
   AtomHistoryResponse,
   AtomSummary,
+  AttachedDocumentListResponse,
+  AttachedDocumentResponse,
   BackfillCodeEmbeddingsParams,
   BimModelDivergenceResponse,
   BimModelRefreshResponse,
@@ -75,6 +77,7 @@ import type {
   KickoffRenderBody,
   KickoffRenderResponse,
   LinkResponseTaskFindingBody,
+  ListAttachedDocumentsParams,
   ListBimModelDivergencesResponse,
   ListCannedFindingsParams,
   ListCannedFindingsResponse,
@@ -142,6 +145,7 @@ import type {
   ReviewerQueueResponse,
   ReviewerRequestResponse,
   Session,
+  SheetContentExtractionResponse,
   SheetSummary,
   SheetUploadResponse,
   SnapshotDetail,
@@ -12944,3 +12948,420 @@ export const useLinkResponseTaskFinding = <
 > => {
   return useMutation(getLinkResponseTaskFindingMutationOptions(options));
 };
+
+/**
+ * Cortex L2 (Lane C.4). Runs the sheet-content extraction pass
+and emits a `sheet-content-extraction` atom (OCR text segments
++ structured annotations). Re-running it upserts the atom for
+that sheet. Dual-auth (hauska-mcp-server bearer OR Cortex SPA
+session).
+
+ * @summary Trigger the structured-content extraction pass on a sheet
+ */
+export const getTriggerSheetContentExtractionUrl = (sheetId: string) => {
+  return `/api/sheets/${sheetId}/content-extraction`;
+};
+
+export const triggerSheetContentExtraction = async (
+  sheetId: string,
+  options?: RequestInit,
+): Promise<SheetContentExtractionResponse> => {
+  return customFetch<SheetContentExtractionResponse>(
+    getTriggerSheetContentExtractionUrl(sheetId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getTriggerSheetContentExtractionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+    TError,
+    { sheetId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+  TError,
+  { sheetId: string },
+  TContext
+> => {
+  const mutationKey = ["triggerSheetContentExtraction"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+    { sheetId: string }
+  > = (props) => {
+    const { sheetId } = props ?? {};
+
+    return triggerSheetContentExtraction(sheetId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TriggerSheetContentExtractionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof triggerSheetContentExtraction>>
+>;
+
+export type TriggerSheetContentExtractionMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Trigger the structured-content extraction pass on a sheet
+ */
+export const useTriggerSheetContentExtraction = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+    TError,
+    { sheetId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+  TError,
+  { sheetId: string },
+  TContext
+> => {
+  return useMutation(getTriggerSheetContentExtractionMutationOptions(options));
+};
+
+/**
+ * Cortex L2 (Lane C.4). Returns the `sheet-content-extraction`
+atom for the sheet, or `null` when the sheet exists but has not
+been extracted yet (a normal empty result, not a 404).
+
+ * @summary Fetch the sheet-content-extraction atom for a sheet
+ */
+export const getGetSheetContentExtractionUrl = (sheetId: string) => {
+  return `/api/sheets/${sheetId}/content-extraction`;
+};
+
+export const getSheetContentExtraction = async (
+  sheetId: string,
+  options?: RequestInit,
+): Promise<SheetContentExtractionResponse> => {
+  return customFetch<SheetContentExtractionResponse>(
+    getGetSheetContentExtractionUrl(sheetId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetSheetContentExtractionQueryKey = (sheetId: string) => {
+  return [`/api/sheets/${sheetId}/content-extraction`] as const;
+};
+
+export const getGetSheetContentExtractionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSheetContentExtraction>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  sheetId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSheetContentExtraction>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSheetContentExtractionQueryKey(sheetId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSheetContentExtraction>>
+  > = ({ signal }) =>
+    getSheetContentExtraction(sheetId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!sheetId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSheetContentExtraction>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSheetContentExtractionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSheetContentExtraction>>
+>;
+export type GetSheetContentExtractionQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch the sheet-content-extraction atom for a sheet
+ */
+
+export function useGetSheetContentExtraction<
+  TData = Awaited<ReturnType<typeof getSheetContentExtraction>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  sheetId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSheetContentExtraction>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSheetContentExtractionQueryOptions(
+    sheetId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L2 (Lane C.4). Returns the engagement's
+`attached-document` atoms, optionally filtered to one document
+type.
+
+ * @summary List the supporting documents attached to an engagement
+ */
+export const getListAttachedDocumentsUrl = (
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${engagementId}/attached-documents?${stringifiedParams}`
+    : `/api/engagements/${engagementId}/attached-documents`;
+};
+
+export const listAttachedDocuments = async (
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+  options?: RequestInit,
+): Promise<AttachedDocumentListResponse> => {
+  return customFetch<AttachedDocumentListResponse>(
+    getListAttachedDocumentsUrl(engagementId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListAttachedDocumentsQueryKey = (
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+) => {
+  return [
+    `/api/engagements/${engagementId}/attached-documents`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListAttachedDocumentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAttachedDocuments>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAttachedDocuments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListAttachedDocumentsQueryKey(engagementId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAttachedDocuments>>
+  > = ({ signal }) =>
+    listAttachedDocuments(engagementId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAttachedDocuments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAttachedDocumentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAttachedDocuments>>
+>;
+export type ListAttachedDocumentsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the supporting documents attached to an engagement
+ */
+
+export function useListAttachedDocuments<
+  TData = Awaited<ReturnType<typeof listAttachedDocuments>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAttachedDocuments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAttachedDocumentsQueryOptions(
+    engagementId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L2 (Lane C.4). Returns the `attached-document` atom
+including its parsed `extractedText` and `originalBlobRef`.
+
+ * @summary Fetch a single attached-document atom
+ */
+export const getGetAttachedDocumentUrl = (attachedDocumentId: string) => {
+  return `/api/attached-documents/${attachedDocumentId}`;
+};
+
+export const getAttachedDocument = async (
+  attachedDocumentId: string,
+  options?: RequestInit,
+): Promise<AttachedDocumentResponse> => {
+  return customFetch<AttachedDocumentResponse>(
+    getGetAttachedDocumentUrl(attachedDocumentId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAttachedDocumentQueryKey = (attachedDocumentId: string) => {
+  return [`/api/attached-documents/${attachedDocumentId}`] as const;
+};
+
+export const getGetAttachedDocumentQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAttachedDocument>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  attachedDocumentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAttachedDocument>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetAttachedDocumentQueryKey(attachedDocumentId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAttachedDocument>>
+  > = ({ signal }) =>
+    getAttachedDocument(attachedDocumentId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!attachedDocumentId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAttachedDocument>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAttachedDocumentQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAttachedDocument>>
+>;
+export type GetAttachedDocumentQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch a single attached-document atom
+ */
+
+export function useGetAttachedDocument<
+  TData = Awaited<ReturnType<typeof getAttachedDocument>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  attachedDocumentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAttachedDocument>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAttachedDocumentQueryOptions(
+    attachedDocumentId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
