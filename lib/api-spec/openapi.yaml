@@ -117,6 +117,13 @@ tags:
       pushes via APS Design Automation. The spec payload is a
       discriminated union keyed on `detailType`; the push lifecycle
       runs `pending → pushed → applied | rejected-by-user`. Dual-auth.
+  - name: product-spec-references
+    description: |
+      Cortex L5 (Lane C.4) — product-spec-reference surface. A
+      reference to an ICC-ES-evaluated product spec with live
+      evaluation status. The refresh route synchronously re-polls the
+      ICC-ES listing and appends to the append-only status history.
+      Dual-auth.
 paths:
   /healthz:
     get:
@@ -6392,6 +6399,168 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{engagementId}/product-spec-references:
+    post:
+      operationId: createProductSpecReference
+      tags: [product-spec-references]
+      summary: Create a product-spec reference
+      description: |
+        Cortex L5 (Lane C.4). `esrNumber` must match `ESR-<digits>`.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductSpecReferenceBody"
+      responses:
+        "201":
+          description: The newly created product-spec-reference atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSpecReferenceResponse"
+        "400":
+          description: Invalid request body or malformed esrNumber.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listProductSpecReferences
+      tags: [product-spec-references]
+      summary: List the product-spec references for an engagement
+      description: Cortex L5 (Lane C.4).
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ProductSpecStatus"
+      responses:
+        "200":
+          description: The engagement's product-spec-reference atoms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSpecReferenceListResponse"
+        "400":
+          description: Invalid status filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /product-spec-references/{referenceId}:
+    get:
+      operationId: getProductSpecReference
+      tags: [product-spec-references]
+      summary: Fetch a single product-spec-reference atom
+      description: Cortex L5 (Lane C.4). Includes the full statusHistory.
+      parameters:
+        - name: referenceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The product-spec-reference atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSpecReferenceResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Product-spec reference not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /product-spec-references/{referenceId}/refresh:
+    post:
+      operationId: refreshProductSpecReference
+      tags: [product-spec-references]
+      summary: Re-verify a product-spec reference against the live ICC-ES listing
+      description: |
+        Cortex L5 (Lane C.4). Synchronously polls the ICC-ES listing
+        (5-10s timeout). On a status change a new statusHistory entry
+        is appended; `lastVerifiedAt` is always updated. An unreachable
+        ICC-ES returns a 502.
+      parameters:
+        - name: referenceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The refreshed product-spec-reference atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSpecReferenceResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Product-spec reference not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: |
+            ICC-ES could not be reached; the response carries
+            `error: icc_es_unreachable`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -9458,6 +9627,157 @@ components:
         - from
         - to
         - legalNextStates
+
+    ProductSpecStatus:
+      type: string
+      enum:
+        - active
+        - withdrawn
+        - expired
+      description: Cortex L5 — ICC-ES evaluation status.
+
+    ProductIdentifier:
+      description: Structured product identity (never free-text).
+      type: object
+      properties:
+        name:
+          type: string
+        manufacturer:
+          type: string
+      required:
+        - name
+        - manufacturer
+
+    ProductSpecStatusChange:
+      description: One entry in the append-only ESR-status-change chain.
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/ProductSpecStatus"
+        changedAt:
+          type: string
+        sourceUrl:
+          type: string
+      required:
+        - status
+        - changedAt
+        - sourceUrl
+
+    ProductSpecReferenceAtom:
+      description: |
+        Cortex L5 `product-spec-reference` atom instance. Conforms to
+        `PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [product-spec-reference]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        product:
+          $ref: "#/components/schemas/ProductIdentifier"
+        esrNumber:
+          type: string
+        status:
+          $ref: "#/components/schemas/ProductSpecStatus"
+        lastVerifiedAt:
+          type: string
+        statusHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSpecStatusChange"
+        engagementId:
+          type: string
+          nullable: true
+        findingId:
+          type: string
+          nullable: true
+        responseTaskId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - product
+        - esrNumber
+        - status
+        - lastVerifiedAt
+        - statusHistory
+        - engagementId
+        - findingId
+        - responseTaskId
+        - createdAt
+        - actorId
+        - principalActorId
+
+    ProductSpecReferenceResponse:
+      type: object
+      properties:
+        productSpecReference:
+          $ref: "#/components/schemas/ProductSpecReferenceAtom"
+      required:
+        - productSpecReference
+
+    ProductSpecReferenceListResponse:
+      type: object
+      properties:
+        productSpecReferences:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSpecReferenceAtom"
+      required:
+        - productSpecReferences
+
+    CreateProductSpecReferenceBody:
+      description: Body for `POST /engagements/{id}/product-spec-references`.
+      type: object
+      properties:
+        product:
+          $ref: "#/components/schemas/ProductIdentifier"
+        esrNumber:
+          type: string
+          description: ICC-ES ESR number, format `ESR-<digits>`.
+        findingId:
+          type: string
+          nullable: true
+        responseTaskId:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+      required:
+        - product
+        - esrNumber
 
     User:
       description: |

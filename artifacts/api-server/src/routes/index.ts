@@ -37,6 +37,7 @@ import responseTasksRouter from "./responseTasks";
 import sheetContentRouter from "./sheetContent";
 import deliverableLettersRouter from "./deliverableLetters";
 import detailCalloutSpecsRouter from "./detailCalloutSpecs";
+import productSpecReferencesRouter from "./productSpecReferences";
 
 const router: IRouter = Router();
 
@@ -170,5 +171,10 @@ router.use(deliverableLettersRouter);
 // `/detail-callout-specs/:id*`. No overlap with an existing leaf route,
 // so ordering is indifferent.
 router.use(detailCalloutSpecsRouter);
+// Cortex L5 (Lane C.4 / C.4.5) — product-spec-reference surface.
+// Mounts `/engagements/:id/product-spec-references` and
+// `/product-spec-references/:id*`. No overlap with an existing leaf
+// route, so ordering is indifferent.
+router.use(productSpecReferencesRouter);
 
 export default router;

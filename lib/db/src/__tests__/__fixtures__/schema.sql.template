@@ -506,6 +506,28 @@ CREATE TABLE @@SCHEMA@@.permit_counters (
 );
 
 
+-- Name: product_spec_references; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.product_spec_references (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    product_name text NOT NULL,
+    product_manufacturer text NOT NULL,
+    esr_number text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    last_verified_at timestamp with time zone DEFAULT now() NOT NULL,
+    status_history jsonb DEFAULT '[]'::jsonb NOT NULL,
+    icc_es_url text DEFAULT ''::text NOT NULL,
+    finding_id text,
+    response_task_id text,
+    actor_id text,
+    principal_actor_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT product_spec_references_status_check CHECK ((status = ANY (ARRAY['active'::text, 'withdrawn'::text, 'expired'::text])))
+);
+
+
 -- Name: qa_checklist_results; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.qa_checklist_results (
@@ -1015,6 +1037,12 @@ ALTER TABLE ONLY @@SCHEMA@@.permit_counters
     ADD CONSTRAINT permit_counters_tenant_id_year_pk PRIMARY KEY (tenant_id, year);
 
 
+-- Name: product_spec_references product_spec_references_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
+    ADD CONSTRAINT product_spec_references_pkey PRIMARY KEY (id);
+
+
 -- Name: qa_checklist_results qa_checklist_results_checklist_id_item_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.qa_checklist_results
@@ -1366,6 +1394,11 @@ CREATE INDEX materializable_elements_snapshot_idx ON @@SCHEMA@@.materializable_e
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
+-- Name: product_spec_references_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX product_spec_references_engagement_created_idx ON @@SCHEMA@@.product_spec_references USING btree (engagement_id, created_at);
+
+
 -- Name: qa_runs_suite_started_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX qa_runs_suite_started_idx ON @@SCHEMA@@.qa_runs USING btree (suite_id, started_at);
@@ -1670,6 +1703,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
 
 ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
+
+
+-- Name: product_spec_references product_spec_references_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
+    ADD CONSTRAINT product_spec_references_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: render_outputs render_outputs_viewpoint_render_id_viewpoint_renders_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
