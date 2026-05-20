@@ -7,6 +7,7 @@ export * from "./responseTasks";
 export * from "./sheetContentExtractions";
 export * from "./attachedDocuments";
 export * from "./deliverableLetters";
+export * from "./detailCalloutSpecs";
 export * from "./codeAtomSources";
 export * from "./codeAtoms";
 export * from "./codeAtomFetchQueue";

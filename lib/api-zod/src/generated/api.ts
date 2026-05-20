@@ -9097,3 +9097,507 @@ export const SendDeliverableLetterResponse = zod.object({
       "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
     ),
 });
+
+/**
+ * Cortex L4 (Lane C.4). The `spec` payload is validated against
+the discriminated-union schema keyed on `detailType`.
+
+ * @summary Create a detail-callout spec
+ */
+export const CreateDetailCalloutSpecParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const CreateDetailCalloutSpecBody = zod
+  .object({
+    spec: zod
+      .union([
+        zod.object({
+          detailType: zod.enum(["door-schedule"]),
+          rows: zod.array(
+            zod.object({
+              doorMark: zod.string(),
+              doorType: zod.string(),
+              width: zod.string(),
+              height: zod.string(),
+              material: zod.string(),
+              fireRating: zod.string(),
+              hardwareSet: zod.string(),
+            }),
+          ),
+        }),
+        zod.object({
+          detailType: zod.enum(["wall-section"]),
+          sectionMark: zod.string(),
+          cutLocation: zod.string(),
+          assemblyLayers: zod.array(
+            zod.object({
+              material: zod.string(),
+              thickness: zod.string(),
+              function: zod.string(),
+            }),
+          ),
+          baseDatum: zod.string(),
+          topDatum: zod.string(),
+        }),
+        zod.object({
+          detailType: zod.enum(["wall-type"]),
+          typeMark: zod.string(),
+          assemblyLayers: zod.array(
+            zod.object({
+              material: zod.string(),
+              thickness: zod.string(),
+              function: zod.string(),
+            }),
+          ),
+          fireRating: zod.string(),
+          stcRating: zod.string(),
+        }),
+        zod.object({
+          detailType: zod.enum(["room-finish"]),
+          roomName: zod.string(),
+          roomNumber: zod.string(),
+          floorFinish: zod.string(),
+          baseFinish: zod.string(),
+          wallFinish: zod.string(),
+          ceilingFinish: zod.string(),
+          ceilingHeight: zod.string(),
+        }),
+      ])
+      .describe(
+        "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+      ),
+    findingId: zod.string().nullish(),
+    responseTaskId: zod.string().nullish(),
+    actorId: zod.string().nullish(),
+    principalActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/engagements\/{id}\/detail-callout-specs`.");
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary List the detail-callout specs for an engagement
+ */
+export const ListDetailCalloutSpecsParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListDetailCalloutSpecsQueryParams = zod.object({
+  pushState: zod
+    .enum(["pending", "pushed", "applied", "rejected-by-user"])
+    .optional(),
+});
+
+export const ListDetailCalloutSpecsResponse = zod.object({
+  detailCalloutSpecs: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["detail-callout-spec"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        engagementId: zod.string(),
+        spec: zod
+          .union([
+            zod.object({
+              detailType: zod.enum(["door-schedule"]),
+              rows: zod.array(
+                zod.object({
+                  doorMark: zod.string(),
+                  doorType: zod.string(),
+                  width: zod.string(),
+                  height: zod.string(),
+                  material: zod.string(),
+                  fireRating: zod.string(),
+                  hardwareSet: zod.string(),
+                }),
+              ),
+            }),
+            zod.object({
+              detailType: zod.enum(["wall-section"]),
+              sectionMark: zod.string(),
+              cutLocation: zod.string(),
+              assemblyLayers: zod.array(
+                zod.object({
+                  material: zod.string(),
+                  thickness: zod.string(),
+                  function: zod.string(),
+                }),
+              ),
+              baseDatum: zod.string(),
+              topDatum: zod.string(),
+            }),
+            zod.object({
+              detailType: zod.enum(["wall-type"]),
+              typeMark: zod.string(),
+              assemblyLayers: zod.array(
+                zod.object({
+                  material: zod.string(),
+                  thickness: zod.string(),
+                  function: zod.string(),
+                }),
+              ),
+              fireRating: zod.string(),
+              stcRating: zod.string(),
+            }),
+            zod.object({
+              detailType: zod.enum(["room-finish"]),
+              roomName: zod.string(),
+              roomNumber: zod.string(),
+              floorFinish: zod.string(),
+              baseFinish: zod.string(),
+              wallFinish: zod.string(),
+              ceilingFinish: zod.string(),
+              ceilingHeight: zod.string(),
+            }),
+          ])
+          .describe(
+            "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+          ),
+        pushState: zod
+          .enum(["pending", "pushed", "applied", "rejected-by-user"])
+          .describe(
+            "Cortex L4 — detail-callout-spec Revit push lifecycle state.",
+          ),
+        apsTaskRef: zod.string().nullable(),
+        findingId: zod.string().nullable(),
+        responseTaskId: zod.string().nullable(),
+        createdAt: zod.string(),
+        pushedAt: zod.string().nullable(),
+        actorId: zod.string().nullable(),
+        principalActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary Fetch a single detail-callout-spec atom
+ */
+export const GetDetailCalloutSpecParams = zod.object({
+  specId: zod.coerce.string(),
+});
+
+export const GetDetailCalloutSpecResponse = zod.object({
+  detailCalloutSpec: zod
+    .object({
+      entityType: zod.enum(["detail-callout-spec"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      spec: zod
+        .union([
+          zod.object({
+            detailType: zod.enum(["door-schedule"]),
+            rows: zod.array(
+              zod.object({
+                doorMark: zod.string(),
+                doorType: zod.string(),
+                width: zod.string(),
+                height: zod.string(),
+                material: zod.string(),
+                fireRating: zod.string(),
+                hardwareSet: zod.string(),
+              }),
+            ),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-section"]),
+            sectionMark: zod.string(),
+            cutLocation: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            baseDatum: zod.string(),
+            topDatum: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-type"]),
+            typeMark: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            fireRating: zod.string(),
+            stcRating: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["room-finish"]),
+            roomName: zod.string(),
+            roomNumber: zod.string(),
+            floorFinish: zod.string(),
+            baseFinish: zod.string(),
+            wallFinish: zod.string(),
+            ceilingFinish: zod.string(),
+            ceilingHeight: zod.string(),
+          }),
+        ])
+        .describe(
+          "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+        ),
+      pushState: zod
+        .enum(["pending", "pushed", "applied", "rejected-by-user"])
+        .describe(
+          "Cortex L4 — detail-callout-spec Revit push lifecycle state.",
+        ),
+      apsTaskRef: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      pushedAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L4 (Lane C.4). The transition is validated; an illegal
+transition is rejected with a 409.
+
+ * @summary Transition a detail-callout spec to a new push state
+ */
+export const UpdateDetailCalloutSpecPushStateParams = zod.object({
+  specId: zod.coerce.string(),
+});
+
+export const UpdateDetailCalloutSpecPushStateBody = zod.object({
+  pushState: zod
+    .enum(["pending", "pushed", "applied", "rejected-by-user"])
+    .describe("Cortex L4 — detail-callout-spec Revit push lifecycle state."),
+});
+
+export const UpdateDetailCalloutSpecPushStateResponse = zod.object({
+  detailCalloutSpec: zod
+    .object({
+      entityType: zod.enum(["detail-callout-spec"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      spec: zod
+        .union([
+          zod.object({
+            detailType: zod.enum(["door-schedule"]),
+            rows: zod.array(
+              zod.object({
+                doorMark: zod.string(),
+                doorType: zod.string(),
+                width: zod.string(),
+                height: zod.string(),
+                material: zod.string(),
+                fireRating: zod.string(),
+                hardwareSet: zod.string(),
+              }),
+            ),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-section"]),
+            sectionMark: zod.string(),
+            cutLocation: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            baseDatum: zod.string(),
+            topDatum: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-type"]),
+            typeMark: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            fireRating: zod.string(),
+            stcRating: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["room-finish"]),
+            roomName: zod.string(),
+            roomNumber: zod.string(),
+            floorFinish: zod.string(),
+            baseFinish: zod.string(),
+            wallFinish: zod.string(),
+            ceilingFinish: zod.string(),
+            ceilingHeight: zod.string(),
+          }),
+        ])
+        .describe(
+          "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+        ),
+      pushState: zod
+        .enum(["pending", "pushed", "applied", "rejected-by-user"])
+        .describe(
+          "Cortex L4 — detail-callout-spec Revit push lifecycle state.",
+        ),
+      apsTaskRef: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      pushedAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary Write the APS Design Automation work-item ref onto a spec
+ */
+export const AttachDetailCalloutSpecApsRefParams = zod.object({
+  specId: zod.coerce.string(),
+});
+
+export const AttachDetailCalloutSpecApsRefBody = zod.object({
+  apsTaskRef: zod.string(),
+});
+
+export const AttachDetailCalloutSpecApsRefResponse = zod.object({
+  detailCalloutSpec: zod
+    .object({
+      entityType: zod.enum(["detail-callout-spec"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      spec: zod
+        .union([
+          zod.object({
+            detailType: zod.enum(["door-schedule"]),
+            rows: zod.array(
+              zod.object({
+                doorMark: zod.string(),
+                doorType: zod.string(),
+                width: zod.string(),
+                height: zod.string(),
+                material: zod.string(),
+                fireRating: zod.string(),
+                hardwareSet: zod.string(),
+              }),
+            ),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-section"]),
+            sectionMark: zod.string(),
+            cutLocation: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            baseDatum: zod.string(),
+            topDatum: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-type"]),
+            typeMark: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            fireRating: zod.string(),
+            stcRating: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["room-finish"]),
+            roomName: zod.string(),
+            roomNumber: zod.string(),
+            floorFinish: zod.string(),
+            baseFinish: zod.string(),
+            wallFinish: zod.string(),
+            ceilingFinish: zod.string(),
+            ceilingHeight: zod.string(),
+          }),
+        ])
+        .describe(
+          "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+        ),
+      pushState: zod
+        .enum(["pending", "pushed", "applied", "rejected-by-user"])
+        .describe(
+          "Cortex L4 — detail-callout-spec Revit push lifecycle state.",
+        ),
+      apsTaskRef: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      pushedAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});

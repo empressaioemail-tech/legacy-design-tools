@@ -103,6 +103,8 @@ describe("lib/db schema integration", () => {
         "decision_pdf_artifacts",
         // Cortex L3 (Lane C.4 / C.4.3) — deliverable-letter atoms.
         "deliverable_letters",
+        // Cortex L4 (Lane C.4 / C.4.4) — Revit detail-callout specs.
+        "detail_callout_specs",
         "engagements",
         // @workspace/eval harness tables (scaffolded in a8acb35;
         // landed alongside the per-run scoring + per-fixture

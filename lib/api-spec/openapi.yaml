@@ -110,6 +110,13 @@ tags:
       with per-section provenance back to the L1 / L2 / finding /
       adjudication atoms. Lifecycle `draft → sent`, send gated on
       section completeness. Dual-auth.
+  - name: detail-callout-specs
+    description: |
+      Cortex L4 (Lane C.4) — detail-callout-spec surface. A
+      structured spec for a Revit detail callout the Revit Connector
+      pushes via APS Design Automation. The spec payload is a
+      discriminated union keyed on `detailType`; the push lifecycle
+      runs `pending → pushed → applied | rejected-by-user`. Dual-auth.
 paths:
   /healthz:
     get:
@@ -6167,6 +6174,224 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeliverableLetterCompletenessError"
 
+  /engagements/{engagementId}/detail-callout-specs:
+    post:
+      operationId: createDetailCalloutSpec
+      tags: [detail-callout-specs]
+      summary: Create a detail-callout spec
+      description: |
+        Cortex L4 (Lane C.4). The `spec` payload is validated against
+        the discriminated-union schema keyed on `detailType`.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDetailCalloutSpecBody"
+      responses:
+        "201":
+          description: The newly created detail-callout-spec atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecResponse"
+        "400":
+          description: Invalid request body or malformed spec payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listDetailCalloutSpecs
+      tags: [detail-callout-specs]
+      summary: List the detail-callout specs for an engagement
+      description: Cortex L4 (Lane C.4).
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: pushState
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/DetailCalloutPushState"
+      responses:
+        "200":
+          description: The engagement's detail-callout-spec atoms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecListResponse"
+        "400":
+          description: Invalid pushState filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /detail-callout-specs/{specId}:
+    get:
+      operationId: getDetailCalloutSpec
+      tags: [detail-callout-specs]
+      summary: Fetch a single detail-callout-spec atom
+      description: Cortex L4 (Lane C.4).
+      parameters:
+        - name: specId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The detail-callout-spec atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Detail-callout spec not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /detail-callout-specs/{specId}/push-state:
+    post:
+      operationId: updateDetailCalloutSpecPushState
+      tags: [detail-callout-specs]
+      summary: Transition a detail-callout spec to a new push state
+      description: |
+        Cortex L4 (Lane C.4). The transition is validated; an illegal
+        transition is rejected with a 409.
+      parameters:
+        - name: specId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DetailCalloutPushStateBody"
+      responses:
+        "200":
+          description: The updated detail-callout-spec atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Detail-callout spec not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Illegal push transition
+            (`error: "illegal_push_transition"`, with `from` / `to` /
+            `legalNextStates`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IllegalPushTransitionError"
+
+  /detail-callout-specs/{specId}/aps-ref:
+    post:
+      operationId: attachDetailCalloutSpecApsRef
+      tags: [detail-callout-specs]
+      summary: Write the APS Design Automation work-item ref onto a spec
+      description: Cortex L4 (Lane C.4).
+      parameters:
+        - name: specId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DetailCalloutApsRefBody"
+      responses:
+        "200":
+          description: The updated detail-callout-spec atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Detail-callout spec not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -8922,6 +9147,317 @@ components:
       required:
         - error
         - missing
+
+    DetailCalloutType:
+      type: string
+      enum:
+        - door-schedule
+        - wall-section
+        - wall-type
+        - room-finish
+      description: Cortex L4 — detail-callout detail type (the spec discriminant).
+
+    DetailCalloutPushState:
+      type: string
+      enum:
+        - pending
+        - pushed
+        - applied
+        - rejected-by-user
+      description: Cortex L4 — detail-callout-spec Revit push lifecycle state.
+
+    WallAssemblyLayer:
+      type: object
+      properties:
+        material:
+          type: string
+        thickness:
+          type: string
+        function:
+          type: string
+      required:
+        - material
+        - thickness
+        - function
+
+    DoorScheduleRow:
+      type: object
+      properties:
+        doorMark:
+          type: string
+        doorType:
+          type: string
+        width:
+          type: string
+        height:
+          type: string
+        material:
+          type: string
+        fireRating:
+          type: string
+        hardwareSet:
+          type: string
+      required:
+        - doorMark
+        - doorType
+        - width
+        - height
+        - material
+        - fireRating
+        - hardwareSet
+
+    DoorScheduleSpec:
+      type: object
+      properties:
+        detailType:
+          type: string
+          enum: [door-schedule]
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/DoorScheduleRow"
+      required:
+        - detailType
+        - rows
+
+    WallSectionSpec:
+      type: object
+      properties:
+        detailType:
+          type: string
+          enum: [wall-section]
+        sectionMark:
+          type: string
+        cutLocation:
+          type: string
+        assemblyLayers:
+          type: array
+          items:
+            $ref: "#/components/schemas/WallAssemblyLayer"
+        baseDatum:
+          type: string
+        topDatum:
+          type: string
+      required:
+        - detailType
+        - sectionMark
+        - cutLocation
+        - assemblyLayers
+        - baseDatum
+        - topDatum
+
+    WallTypeSpec:
+      type: object
+      properties:
+        detailType:
+          type: string
+          enum: [wall-type]
+        typeMark:
+          type: string
+        assemblyLayers:
+          type: array
+          items:
+            $ref: "#/components/schemas/WallAssemblyLayer"
+        fireRating:
+          type: string
+        stcRating:
+          type: string
+      required:
+        - detailType
+        - typeMark
+        - assemblyLayers
+        - fireRating
+        - stcRating
+
+    RoomFinishSpec:
+      type: object
+      properties:
+        detailType:
+          type: string
+          enum: [room-finish]
+        roomName:
+          type: string
+        roomNumber:
+          type: string
+        floorFinish:
+          type: string
+        baseFinish:
+          type: string
+        wallFinish:
+          type: string
+        ceilingFinish:
+          type: string
+        ceilingHeight:
+          type: string
+      required:
+        - detailType
+        - roomName
+        - roomNumber
+        - floorFinish
+        - baseFinish
+        - wallFinish
+        - ceilingFinish
+        - ceilingHeight
+
+    DetailCalloutSpecPayload:
+      description: |
+        Discriminated detail-callout spec payload, keyed on `detailType`.
+      oneOf:
+        - $ref: "#/components/schemas/DoorScheduleSpec"
+        - $ref: "#/components/schemas/WallSectionSpec"
+        - $ref: "#/components/schemas/WallTypeSpec"
+        - $ref: "#/components/schemas/RoomFinishSpec"
+      discriminator:
+        propertyName: detailType
+        mapping:
+          door-schedule: "#/components/schemas/DoorScheduleSpec"
+          wall-section: "#/components/schemas/WallSectionSpec"
+          wall-type: "#/components/schemas/WallTypeSpec"
+          room-finish: "#/components/schemas/RoomFinishSpec"
+
+    DetailCalloutSpecAtom:
+      description: |
+        Cortex L4 `detail-callout-spec` atom instance. Conforms to
+        `DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [detail-callout-spec]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        engagementId:
+          type: string
+        spec:
+          $ref: "#/components/schemas/DetailCalloutSpecPayload"
+        pushState:
+          $ref: "#/components/schemas/DetailCalloutPushState"
+        apsTaskRef:
+          type: string
+          nullable: true
+        findingId:
+          type: string
+          nullable: true
+        responseTaskId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        pushedAt:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - engagementId
+        - spec
+        - pushState
+        - apsTaskRef
+        - findingId
+        - responseTaskId
+        - createdAt
+        - pushedAt
+        - actorId
+        - principalActorId
+
+    DetailCalloutSpecResponse:
+      type: object
+      properties:
+        detailCalloutSpec:
+          $ref: "#/components/schemas/DetailCalloutSpecAtom"
+      required:
+        - detailCalloutSpec
+
+    DetailCalloutSpecListResponse:
+      type: object
+      properties:
+        detailCalloutSpecs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetailCalloutSpecAtom"
+      required:
+        - detailCalloutSpecs
+
+    CreateDetailCalloutSpecBody:
+      description: Body for `POST /engagements/{id}/detail-callout-specs`.
+      type: object
+      properties:
+        spec:
+          $ref: "#/components/schemas/DetailCalloutSpecPayload"
+        findingId:
+          type: string
+          nullable: true
+        responseTaskId:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+      required:
+        - spec
+
+    DetailCalloutPushStateBody:
+      type: object
+      properties:
+        pushState:
+          $ref: "#/components/schemas/DetailCalloutPushState"
+      required:
+        - pushState
+
+    DetailCalloutApsRefBody:
+      type: object
+      properties:
+        apsTaskRef:
+          type: string
+      required:
+        - apsTaskRef
+
+    IllegalPushTransitionError:
+      description: 409 envelope for an illegal push-state transition.
+      type: object
+      properties:
+        error:
+          type: string
+        from:
+          $ref: "#/components/schemas/DetailCalloutPushState"
+        to:
+          $ref: "#/components/schemas/DetailCalloutPushState"
+        legalNextStates:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetailCalloutPushState"
+      required:
+        - error
+        - from
+        - to
+        - legalNextStates
 
     User:
       description: |

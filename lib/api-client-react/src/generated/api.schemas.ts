@@ -2054,6 +2054,199 @@ export interface DeliverableLetterCompletenessError {
 }
 
 /**
+ * Cortex L4 — detail-callout detail type (the spec discriminant).
+ */
+export type DetailCalloutType =
+  (typeof DetailCalloutType)[keyof typeof DetailCalloutType];
+
+export const DetailCalloutType = {
+  "door-schedule": "door-schedule",
+  "wall-section": "wall-section",
+  "wall-type": "wall-type",
+  "room-finish": "room-finish",
+} as const;
+
+/**
+ * Cortex L4 — detail-callout-spec Revit push lifecycle state.
+ */
+export type DetailCalloutPushState =
+  (typeof DetailCalloutPushState)[keyof typeof DetailCalloutPushState];
+
+export const DetailCalloutPushState = {
+  pending: "pending",
+  pushed: "pushed",
+  applied: "applied",
+  "rejected-by-user": "rejected-by-user",
+} as const;
+
+export interface WallAssemblyLayer {
+  material: string;
+  thickness: string;
+  function: string;
+}
+
+export interface DoorScheduleRow {
+  doorMark: string;
+  doorType: string;
+  width: string;
+  height: string;
+  material: string;
+  fireRating: string;
+  hardwareSet: string;
+}
+
+export type DoorScheduleSpecDetailType =
+  (typeof DoorScheduleSpecDetailType)[keyof typeof DoorScheduleSpecDetailType];
+
+export const DoorScheduleSpecDetailType = {
+  "door-schedule": "door-schedule",
+} as const;
+
+export interface DoorScheduleSpec {
+  detailType: DoorScheduleSpecDetailType;
+  rows: DoorScheduleRow[];
+}
+
+export type WallSectionSpecDetailType =
+  (typeof WallSectionSpecDetailType)[keyof typeof WallSectionSpecDetailType];
+
+export const WallSectionSpecDetailType = {
+  "wall-section": "wall-section",
+} as const;
+
+export interface WallSectionSpec {
+  detailType: WallSectionSpecDetailType;
+  sectionMark: string;
+  cutLocation: string;
+  assemblyLayers: WallAssemblyLayer[];
+  baseDatum: string;
+  topDatum: string;
+}
+
+export type WallTypeSpecDetailType =
+  (typeof WallTypeSpecDetailType)[keyof typeof WallTypeSpecDetailType];
+
+export const WallTypeSpecDetailType = {
+  "wall-type": "wall-type",
+} as const;
+
+export interface WallTypeSpec {
+  detailType: WallTypeSpecDetailType;
+  typeMark: string;
+  assemblyLayers: WallAssemblyLayer[];
+  fireRating: string;
+  stcRating: string;
+}
+
+export type RoomFinishSpecDetailType =
+  (typeof RoomFinishSpecDetailType)[keyof typeof RoomFinishSpecDetailType];
+
+export const RoomFinishSpecDetailType = {
+  "room-finish": "room-finish",
+} as const;
+
+export interface RoomFinishSpec {
+  detailType: RoomFinishSpecDetailType;
+  roomName: string;
+  roomNumber: string;
+  floorFinish: string;
+  baseFinish: string;
+  wallFinish: string;
+  ceilingFinish: string;
+  ceilingHeight: string;
+}
+
+/**
+ * Discriminated detail-callout spec payload, keyed on `detailType`.
+
+ */
+export type DetailCalloutSpecPayload =
+  | DoorScheduleSpec
+  | WallSectionSpec
+  | WallTypeSpec
+  | RoomFinishSpec;
+
+export type DetailCalloutSpecAtomEntityType =
+  (typeof DetailCalloutSpecAtomEntityType)[keyof typeof DetailCalloutSpecAtomEntityType];
+
+export const DetailCalloutSpecAtomEntityType = {
+  "detail-callout-spec": "detail-callout-spec",
+} as const;
+
+export type DetailCalloutSpecAtomAccessPolicy =
+  (typeof DetailCalloutSpecAtomAccessPolicy)[keyof typeof DetailCalloutSpecAtomAccessPolicy];
+
+export const DetailCalloutSpecAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L4 `detail-callout-spec` atom instance. Conforms to
+`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface DetailCalloutSpecAtom {
+  entityType: DetailCalloutSpecAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  engagementId: string;
+  spec: DetailCalloutSpecPayload;
+  pushState: DetailCalloutPushState;
+  apsTaskRef: string | null;
+  findingId: string | null;
+  responseTaskId: string | null;
+  createdAt: string;
+  pushedAt: string | null;
+  actorId: string | null;
+  principalActorId: string | null;
+  accessPolicy?: DetailCalloutSpecAtomAccessPolicy;
+}
+
+export interface DetailCalloutSpecResponse {
+  detailCalloutSpec: DetailCalloutSpecAtom;
+}
+
+export interface DetailCalloutSpecListResponse {
+  detailCalloutSpecs: DetailCalloutSpecAtom[];
+}
+
+/**
+ * Body for `POST /engagements/{id}/detail-callout-specs`.
+ */
+export interface CreateDetailCalloutSpecBody {
+  spec: DetailCalloutSpecPayload;
+  findingId?: string | null;
+  responseTaskId?: string | null;
+  actorId?: string | null;
+  principalActorId?: string | null;
+}
+
+export interface DetailCalloutPushStateBody {
+  pushState: DetailCalloutPushState;
+}
+
+export interface DetailCalloutApsRefBody {
+  apsTaskRef: string;
+}
+
+/**
+ * 409 envelope for an illegal push-state transition.
+ */
+export interface IllegalPushTransitionError {
+  error: string;
+  from: DetailCalloutPushState;
+  to: DetailCalloutPushState;
+  legalNextStates: DetailCalloutPushState[];
+}
+
+/**
  * A row in the `users` profile table — display name / email / avatar
 used to hydrate timeline actor labels. The `id` is the same opaque
 identifier the session layer carries (today: dev cookie ids like
@@ -5598,4 +5791,8 @@ export type ListResponseTasksParams = {
 
 export type ListAttachedDocumentsParams = {
   documentType?: AttachedDocumentType;
+};
+
+export type ListDetailCalloutSpecsParams = {
+  pushState?: DetailCalloutPushState;
 };
