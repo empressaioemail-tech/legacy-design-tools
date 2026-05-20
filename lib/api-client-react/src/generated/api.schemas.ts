@@ -1753,6 +1753,663 @@ export interface LinkResponseTaskFindingBody {
 }
 
 /**
+ * Page-relative bounding box, normalized to [0, 1].
+ */
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * One OCR text segment with its page-relative position.
+ */
+export interface SheetTextSegment {
+  text: string;
+  boundingBox: BoundingBox;
+  sourceConfidence: number;
+}
+
+/**
+ * Structured-annotation category extracted from a sheet.
+ */
+export type SheetAnnotationKind =
+  (typeof SheetAnnotationKind)[keyof typeof SheetAnnotationKind];
+
+export const SheetAnnotationKind = {
+  "revision-cloud": "revision-cloud",
+  dimension: "dimension",
+  "schedule-row": "schedule-row",
+  callout: "callout",
+} as const;
+
+/**
+ * One structured annotation extracted from a sheet.
+ */
+export interface SheetStructuredAnnotation {
+  kind: SheetAnnotationKind;
+  position: BoundingBox;
+  content: string;
+  sourceConfidence: number;
+}
+
+export type SheetContentExtractionAtomEntityType =
+  (typeof SheetContentExtractionAtomEntityType)[keyof typeof SheetContentExtractionAtomEntityType];
+
+export const SheetContentExtractionAtomEntityType = {
+  "sheet-content-extraction": "sheet-content-extraction",
+} as const;
+
+export type SheetContentExtractionAtomAccessPolicy =
+  (typeof SheetContentExtractionAtomAccessPolicy)[keyof typeof SheetContentExtractionAtomAccessPolicy];
+
+export const SheetContentExtractionAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L2a `sheet-content-extraction` atom instance. Conforms to
+`SHEET_CONTENT_EXTRACTION_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface SheetContentExtractionAtom {
+  entityType: SheetContentExtractionAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  sourceSheetId: string;
+  engagementId: string | null;
+  pageLabel: string;
+  extractedTextSegments: SheetTextSegment[];
+  structuredAnnotations: SheetStructuredAnnotation[];
+  ocrModel: string;
+  actorId: string | null;
+  accessPolicy?: SheetContentExtractionAtomAccessPolicy;
+}
+
+/**
+ * Wire envelope for the L2a routes. `sheetContentExtraction` is
+`null` when the sheet exists but has not been extracted yet.
+
+ */
+export interface SheetContentExtractionResponse {
+  sheetContentExtraction: SheetContentExtractionAtom | null;
+}
+
+/**
+ * Supporting-document category attached to an engagement.
+ */
+export type AttachedDocumentType =
+  (typeof AttachedDocumentType)[keyof typeof AttachedDocumentType];
+
+export const AttachedDocumentType = {
+  specification: "specification",
+  calculation: "calculation",
+  "product-data": "product-data",
+  narrative: "narrative",
+} as const;
+
+export type AttachedDocumentAtomEntityType =
+  (typeof AttachedDocumentAtomEntityType)[keyof typeof AttachedDocumentAtomEntityType];
+
+export const AttachedDocumentAtomEntityType = {
+  "attached-document": "attached-document",
+} as const;
+
+export type AttachedDocumentAtomAccessPolicy =
+  (typeof AttachedDocumentAtomAccessPolicy)[keyof typeof AttachedDocumentAtomAccessPolicy];
+
+export const AttachedDocumentAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L2b `attached-document` atom instance. Conforms to
+`ATTACHED_DOCUMENT_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface AttachedDocumentAtom {
+  entityType: AttachedDocumentAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  engagementId: string;
+  title: string;
+  documentType: AttachedDocumentType;
+  extractedText: string;
+  originalBlobRef: string;
+  actorId: string | null;
+  accessPolicy?: AttachedDocumentAtomAccessPolicy;
+}
+
+export interface AttachedDocumentResponse {
+  attachedDocument: AttachedDocumentAtom;
+}
+
+export interface AttachedDocumentListResponse {
+  attachedDocuments: AttachedDocumentAtom[];
+}
+
+/**
+ * Cortex L3 — deliverable-letter section category.
+ */
+export type LetterSectionKind =
+  (typeof LetterSectionKind)[keyof typeof LetterSectionKind];
+
+export const LetterSectionKind = {
+  cover: "cover",
+  intro: "intro",
+  "per-comment-response": "per-comment-response",
+  signature: "signature",
+} as const;
+
+/**
+ * The L1 / L2 / finding / adjudication atoms that fed a section.
+
+ */
+export interface LetterSectionProvenance {
+  responseTaskIds: string[];
+  sheetContentExtractionIds: string[];
+  findingIds: string[];
+  adjudicationStateIds: string[];
+}
+
+/**
+ * One structured section of a deliverable letter.
+ */
+export interface LetterSection {
+  kind: LetterSectionKind;
+  heading: string;
+  content: string;
+  provenance: LetterSectionProvenance;
+}
+
+/**
+ * Cortex L3 — deliverable-letter lifecycle status.
+ */
+export type DeliverableLetterStatus =
+  (typeof DeliverableLetterStatus)[keyof typeof DeliverableLetterStatus];
+
+export const DeliverableLetterStatus = {
+  draft: "draft",
+  sent: "sent",
+} as const;
+
+export type DeliverableLetterAtomEntityType =
+  (typeof DeliverableLetterAtomEntityType)[keyof typeof DeliverableLetterAtomEntityType];
+
+export const DeliverableLetterAtomEntityType = {
+  "deliverable-letter": "deliverable-letter",
+} as const;
+
+export type DeliverableLetterAtomAccessPolicy =
+  (typeof DeliverableLetterAtomAccessPolicy)[keyof typeof DeliverableLetterAtomAccessPolicy];
+
+export const DeliverableLetterAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L3 `deliverable-letter` atom instance. Conforms to
+`DELIVERABLE_LETTER_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface DeliverableLetterAtom {
+  entityType: DeliverableLetterAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  engagementId: string;
+  title: string;
+  status: DeliverableLetterStatus;
+  recipientActorId: string | null;
+  sections: LetterSection[];
+  createdAt: string;
+  sentAt: string | null;
+  actorId: string | null;
+  principalActorId: string | null;
+  accessPolicy?: DeliverableLetterAtomAccessPolicy;
+}
+
+export interface DeliverableLetterResponse {
+  deliverableLetter: DeliverableLetterAtom;
+}
+
+export interface DeliverableLetterListResponse {
+  deliverableLetters: DeliverableLetterAtom[];
+}
+
+/**
+ * One initial section supplied at letter-create time.
+ */
+export interface CreateDeliverableLetterSection {
+  kind: LetterSectionKind;
+  heading: string;
+  content: string;
+}
+
+/**
+ * Body for `POST /engagements/{id}/deliverable-letters`.
+ */
+export interface CreateDeliverableLetterBody {
+  title: string;
+  sections?: CreateDeliverableLetterSection[];
+  recipientActorId?: string | null;
+  actorId?: string | null;
+  principalActorId?: string | null;
+}
+
+/**
+ * Body for `POST /deliverable-letters/{letterId}/sections`.
+ */
+export interface DeliverableLetterSectionBody {
+  sectionIndex: number;
+  kind: LetterSectionKind;
+  heading: string;
+  content: string;
+}
+
+/**
+ * Body for the provenance-merge route. All keys optional; at
+least one must be supplied.
+
+ */
+export interface DeliverableLetterProvenanceBody {
+  responseTaskIds?: string[];
+  sheetContentExtractionIds?: string[];
+  findingIds?: string[];
+  adjudicationStateIds?: string[];
+}
+
+export interface DeliverableLetterCompletenessResponse {
+  complete: boolean;
+  missing: LetterSectionKind[];
+}
+
+/**
+ * 409 envelope when a send is rejected for incompleteness.
+ */
+export interface DeliverableLetterCompletenessError {
+  error: string;
+  missing: LetterSectionKind[];
+}
+
+/**
+ * Cortex L4 — detail-callout detail type (the spec discriminant).
+ */
+export type DetailCalloutType =
+  (typeof DetailCalloutType)[keyof typeof DetailCalloutType];
+
+export const DetailCalloutType = {
+  "door-schedule": "door-schedule",
+  "wall-section": "wall-section",
+  "wall-type": "wall-type",
+  "room-finish": "room-finish",
+} as const;
+
+/**
+ * Cortex L4 — detail-callout-spec Revit push lifecycle state.
+ */
+export type DetailCalloutPushState =
+  (typeof DetailCalloutPushState)[keyof typeof DetailCalloutPushState];
+
+export const DetailCalloutPushState = {
+  pending: "pending",
+  pushed: "pushed",
+  applied: "applied",
+  "rejected-by-user": "rejected-by-user",
+} as const;
+
+export interface WallAssemblyLayer {
+  material: string;
+  thickness: string;
+  function: string;
+}
+
+export interface DoorScheduleRow {
+  doorMark: string;
+  doorType: string;
+  width: string;
+  height: string;
+  material: string;
+  fireRating: string;
+  hardwareSet: string;
+}
+
+export type DoorScheduleSpecDetailType =
+  (typeof DoorScheduleSpecDetailType)[keyof typeof DoorScheduleSpecDetailType];
+
+export const DoorScheduleSpecDetailType = {
+  "door-schedule": "door-schedule",
+} as const;
+
+export interface DoorScheduleSpec {
+  detailType: DoorScheduleSpecDetailType;
+  rows: DoorScheduleRow[];
+}
+
+export type WallSectionSpecDetailType =
+  (typeof WallSectionSpecDetailType)[keyof typeof WallSectionSpecDetailType];
+
+export const WallSectionSpecDetailType = {
+  "wall-section": "wall-section",
+} as const;
+
+export interface WallSectionSpec {
+  detailType: WallSectionSpecDetailType;
+  sectionMark: string;
+  cutLocation: string;
+  assemblyLayers: WallAssemblyLayer[];
+  baseDatum: string;
+  topDatum: string;
+}
+
+export type WallTypeSpecDetailType =
+  (typeof WallTypeSpecDetailType)[keyof typeof WallTypeSpecDetailType];
+
+export const WallTypeSpecDetailType = {
+  "wall-type": "wall-type",
+} as const;
+
+export interface WallTypeSpec {
+  detailType: WallTypeSpecDetailType;
+  typeMark: string;
+  assemblyLayers: WallAssemblyLayer[];
+  fireRating: string;
+  stcRating: string;
+}
+
+export type RoomFinishSpecDetailType =
+  (typeof RoomFinishSpecDetailType)[keyof typeof RoomFinishSpecDetailType];
+
+export const RoomFinishSpecDetailType = {
+  "room-finish": "room-finish",
+} as const;
+
+export interface RoomFinishSpec {
+  detailType: RoomFinishSpecDetailType;
+  roomName: string;
+  roomNumber: string;
+  floorFinish: string;
+  baseFinish: string;
+  wallFinish: string;
+  ceilingFinish: string;
+  ceilingHeight: string;
+}
+
+/**
+ * Discriminated detail-callout spec payload, keyed on `detailType`.
+
+ */
+export type DetailCalloutSpecPayload =
+  | DoorScheduleSpec
+  | WallSectionSpec
+  | WallTypeSpec
+  | RoomFinishSpec;
+
+export type DetailCalloutSpecAtomEntityType =
+  (typeof DetailCalloutSpecAtomEntityType)[keyof typeof DetailCalloutSpecAtomEntityType];
+
+export const DetailCalloutSpecAtomEntityType = {
+  "detail-callout-spec": "detail-callout-spec",
+} as const;
+
+export type DetailCalloutSpecAtomAccessPolicy =
+  (typeof DetailCalloutSpecAtomAccessPolicy)[keyof typeof DetailCalloutSpecAtomAccessPolicy];
+
+export const DetailCalloutSpecAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L4 `detail-callout-spec` atom instance. Conforms to
+`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface DetailCalloutSpecAtom {
+  entityType: DetailCalloutSpecAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  engagementId: string;
+  spec: DetailCalloutSpecPayload;
+  pushState: DetailCalloutPushState;
+  apsTaskRef: string | null;
+  findingId: string | null;
+  responseTaskId: string | null;
+  createdAt: string;
+  pushedAt: string | null;
+  actorId: string | null;
+  principalActorId: string | null;
+  accessPolicy?: DetailCalloutSpecAtomAccessPolicy;
+}
+
+export interface DetailCalloutSpecResponse {
+  detailCalloutSpec: DetailCalloutSpecAtom;
+}
+
+export interface DetailCalloutSpecListResponse {
+  detailCalloutSpecs: DetailCalloutSpecAtom[];
+}
+
+/**
+ * Body for `POST /engagements/{id}/detail-callout-specs`.
+ */
+export interface CreateDetailCalloutSpecBody {
+  spec: DetailCalloutSpecPayload;
+  findingId?: string | null;
+  responseTaskId?: string | null;
+  actorId?: string | null;
+  principalActorId?: string | null;
+}
+
+export interface DetailCalloutPushStateBody {
+  pushState: DetailCalloutPushState;
+}
+
+export interface DetailCalloutApsRefBody {
+  apsTaskRef: string;
+}
+
+/**
+ * 409 envelope for an illegal push-state transition.
+ */
+export interface IllegalPushTransitionError {
+  error: string;
+  from: DetailCalloutPushState;
+  to: DetailCalloutPushState;
+  legalNextStates: DetailCalloutPushState[];
+}
+
+/**
+ * Cortex L5 — ICC-ES evaluation status.
+ */
+export type ProductSpecStatus =
+  (typeof ProductSpecStatus)[keyof typeof ProductSpecStatus];
+
+export const ProductSpecStatus = {
+  active: "active",
+  withdrawn: "withdrawn",
+  expired: "expired",
+} as const;
+
+/**
+ * Structured product identity (never free-text).
+ */
+export interface ProductIdentifier {
+  name: string;
+  manufacturer: string;
+}
+
+/**
+ * One entry in the append-only ESR-status-change chain.
+ */
+export interface ProductSpecStatusChange {
+  status: ProductSpecStatus;
+  changedAt: string;
+  sourceUrl: string;
+}
+
+export type ProductSpecReferenceAtomEntityType =
+  (typeof ProductSpecReferenceAtomEntityType)[keyof typeof ProductSpecReferenceAtomEntityType];
+
+export const ProductSpecReferenceAtomEntityType = {
+  "product-spec-reference": "product-spec-reference",
+} as const;
+
+export type ProductSpecReferenceAtomAccessPolicy =
+  (typeof ProductSpecReferenceAtomAccessPolicy)[keyof typeof ProductSpecReferenceAtomAccessPolicy];
+
+export const ProductSpecReferenceAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L5 `product-spec-reference` atom instance. Conforms to
+`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface ProductSpecReferenceAtom {
+  entityType: ProductSpecReferenceAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  product: ProductIdentifier;
+  esrNumber: string;
+  status: ProductSpecStatus;
+  lastVerifiedAt: string;
+  statusHistory: ProductSpecStatusChange[];
+  engagementId: string | null;
+  findingId: string | null;
+  responseTaskId: string | null;
+  createdAt: string;
+  actorId: string | null;
+  principalActorId: string | null;
+  accessPolicy?: ProductSpecReferenceAtomAccessPolicy;
+}
+
+export interface ProductSpecReferenceResponse {
+  productSpecReference: ProductSpecReferenceAtom;
+}
+
+export interface ProductSpecReferenceListResponse {
+  productSpecReferences: ProductSpecReferenceAtom[];
+}
+
+/**
+ * Body for `POST /engagements/{id}/product-spec-references`.
+ */
+export interface CreateProductSpecReferenceBody {
+  product: ProductIdentifier;
+  /** ICC-ES ESR number, format `ESR-<digits>`. */
+  esrNumber: string;
+  findingId?: string | null;
+  responseTaskId?: string | null;
+  actorId?: string | null;
+  principalActorId?: string | null;
+}
+
+/**
+ * Cortex L6 — deliverable-letter render output format.
+ */
+export type RenderFormat = (typeof RenderFormat)[keyof typeof RenderFormat];
+
+export const RenderFormat = {
+  docx: "docx",
+  pdf: "pdf",
+} as const;
+
+export type DeliverableLetterRenderAtomEntityType =
+  (typeof DeliverableLetterRenderAtomEntityType)[keyof typeof DeliverableLetterRenderAtomEntityType];
+
+export const DeliverableLetterRenderAtomEntityType = {
+  "deliverable-letter-render": "deliverable-letter-render",
+} as const;
+
+export type DeliverableLetterRenderAtomAccessPolicy =
+  (typeof DeliverableLetterRenderAtomAccessPolicy)[keyof typeof DeliverableLetterRenderAtomAccessPolicy];
+
+export const DeliverableLetterRenderAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L6 `deliverable-letter-render` atom instance. Conforms to
+`DELIVERABLE_LETTER_RENDER_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface DeliverableLetterRenderAtom {
+  entityType: DeliverableLetterRenderAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  sourceLetterRef: string;
+  sourceLetterVersion: string;
+  format: RenderFormat;
+  blobRef: string;
+  renderedAt: string;
+  renderedByActorId: string | null;
+  accessPolicy?: DeliverableLetterRenderAtomAccessPolicy;
+}
+
+export interface DeliverableLetterRenderResponse {
+  render: DeliverableLetterRenderAtom;
+  /** Optional directly-usable URL the backend resolved from
+`render.blobRef`.
+ */
+  downloadUrl?: string;
+}
+
+export interface DeliverableLetterRenderListResponse {
+  renders: DeliverableLetterRenderAtom[];
+}
+
+/**
+ * Body for `POST /deliverable-letters/{letterId}/renders`.
+ */
+export interface RenderDeliverableLetterBody {
+  format: RenderFormat;
+  renderedByActorId?: string | null;
+}
+
+/**
  * A row in the `users` profile table — display name / email / avatar
 used to hydrate timeline actor labels. The `id` is the same opaque
 identifier the session layer carries (today: dev cookie ids like
@@ -5293,4 +5950,16 @@ export type ListResponseTasksParams = {
    * Optional filter to a single response-task state.
    */
   state?: ResponseTaskState;
+};
+
+export type ListAttachedDocumentsParams = {
+  documentType?: AttachedDocumentType;
+};
+
+export type ListDetailCalloutSpecsParams = {
+  pushState?: DetailCalloutPushState;
+};
+
+export type ListProductSpecReferencesParams = {
+  status?: ProductSpecStatus;
 };

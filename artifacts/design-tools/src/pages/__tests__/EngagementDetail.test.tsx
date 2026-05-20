@@ -738,8 +738,13 @@ describe("EngagementDetail submission banner (Task #126)", () => {
     const settings = tabs.indexOf("engagement-tab-settings");
     expect(sub).toBeGreaterThanOrEqual(0);
     expect(find).toBe(sub + 1);
-    expect(renders).toBe(find + 1);
-    expect(settings).toBe(renders + 1);
+    // The Cortex L-surface tabs (Lane C.4 — response-tasks,
+    // deliverable-letters, detail-callouts, product-specs) sit between
+    // Findings and Renders, so Renders is no longer findings+1; assert
+    // ordering (Findings before Renders before Settings) rather than
+    // strict adjacency.
+    expect(renders).toBeGreaterThan(find);
+    expect(settings).toBeGreaterThan(renders);
   });
 
   it("auto-clears the banner after the 8s timeout and leaves the submission row intact", async () => {

@@ -43,6 +43,9 @@ import { SubmissionsTab } from "../components/engagement-detail/SubmissionsTab";
 import { RendersTab } from "../components/engagement-detail/RendersTab";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
 import { ResponseTasksTab } from "../components/engagement-detail/ResponseTasksTab";
+import { DeliverableLettersTab } from "../components/engagement-detail/DeliverableLettersTab";
+import { DetailCalloutSpecsTab } from "../components/engagement-detail/DetailCalloutSpecsTab";
+import { ProductSpecReferencesTab } from "../components/engagement-detail/ProductSpecReferencesTab";
 import {
   readBackfillFilterFromUrl,
   readTabFromUrl,
@@ -100,6 +103,9 @@ function TabBar({
     { id: "submissions", label: "Submissions" },
     { id: "findings", label: "Findings" },
     { id: "response-tasks", label: "Response tasks" },
+    { id: "deliverable-letters", label: "Deliverable letters" },
+    { id: "detail-callouts", label: "Detail callouts" },
+    { id: "product-specs", label: "Product specs" },
     { id: "renders", label: "Renders" },
     { id: "settings", label: "Settings" },
   ];
@@ -736,6 +742,18 @@ export function EngagementDetail() {
 
         {tab === "response-tasks" && (
           <ResponseTasksTab engagementId={engagement.id} />
+        )}
+
+        {tab === "deliverable-letters" && (
+          <DeliverableLettersTab engagementId={engagement.id} />
+        )}
+
+        {tab === "detail-callouts" && (
+          <DetailCalloutSpecsTab engagementId={engagement.id} />
+        )}
+
+        {tab === "product-specs" && (
+          <ProductSpecReferencesTab engagementId={engagement.id} />
         )}
 
         {tab === "renders" && (

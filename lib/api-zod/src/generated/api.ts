@@ -8426,3 +8426,1469 @@ export const LinkResponseTaskFindingResponse = zod.object({
       "Cortex L1 `response-task` atom instance. Conforms to\n`RESPONSE_TASK_SCHEMA` in `@workspace\/atoms-l-surface` (mirrored\nfrom `@hauska-engine\/atoms`). The Base-atom provenance fields\n(`sourceAdapter` \/ `sourceUrl` \/ `contentHash` \/ `fetchedAt` \/\n`jurisdictionTenant`) are derived by the api-server at read time\n— see `artifacts\/api-server\/src\/lib\/lSurfaceAtom.ts`.\n",
     ),
 });
+
+/**
+ * Cortex L2 (Lane C.4). Runs the sheet-content extraction pass
+and emits a `sheet-content-extraction` atom (OCR text segments
++ structured annotations). Re-running it upserts the atom for
+that sheet. Dual-auth (hauska-mcp-server bearer OR Cortex SPA
+session).
+
+ * @summary Trigger the structured-content extraction pass on a sheet
+ */
+export const TriggerSheetContentExtractionParams = zod.object({
+  sheetId: zod.coerce.string(),
+});
+
+export const TriggerSheetContentExtractionResponse = zod
+  .object({
+    sheetContentExtraction: zod
+      .object({
+        entityType: zod.enum(["sheet-content-extraction"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        sourceSheetId: zod.string(),
+        engagementId: zod.string().nullable(),
+        pageLabel: zod.string(),
+        extractedTextSegments: zod.array(
+          zod
+            .object({
+              text: zod.string(),
+              boundingBox: zod
+                .object({
+                  x: zod.number(),
+                  y: zod.number(),
+                  width: zod.number(),
+                  height: zod.number(),
+                })
+                .describe("Page-relative bounding box, normalized to [0, 1]."),
+              sourceConfidence: zod.number(),
+            })
+            .describe("One OCR text segment with its page-relative position."),
+        ),
+        structuredAnnotations: zod.array(
+          zod
+            .object({
+              kind: zod
+                .enum([
+                  "revision-cloud",
+                  "dimension",
+                  "schedule-row",
+                  "callout",
+                ])
+                .describe(
+                  "Structured-annotation category extracted from a sheet.",
+                ),
+              position: zod
+                .object({
+                  x: zod.number(),
+                  y: zod.number(),
+                  width: zod.number(),
+                  height: zod.number(),
+                })
+                .describe("Page-relative bounding box, normalized to [0, 1]."),
+              content: zod.string(),
+              sourceConfidence: zod.number(),
+            })
+            .describe("One structured annotation extracted from a sheet."),
+        ),
+        ocrModel: zod.string(),
+        actorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L2a `sheet-content-extraction` atom instance. Conforms to\n`SHEET_CONTENT_EXTRACTION_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the L2a routes. `sheetContentExtraction` is\n`null` when the sheet exists but has not been extracted yet.\n",
+  );
+
+/**
+ * Cortex L2 (Lane C.4). Returns the `sheet-content-extraction`
+atom for the sheet, or `null` when the sheet exists but has not
+been extracted yet (a normal empty result, not a 404).
+
+ * @summary Fetch the sheet-content-extraction atom for a sheet
+ */
+export const GetSheetContentExtractionParams = zod.object({
+  sheetId: zod.coerce.string(),
+});
+
+export const GetSheetContentExtractionResponse = zod
+  .object({
+    sheetContentExtraction: zod
+      .object({
+        entityType: zod.enum(["sheet-content-extraction"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        sourceSheetId: zod.string(),
+        engagementId: zod.string().nullable(),
+        pageLabel: zod.string(),
+        extractedTextSegments: zod.array(
+          zod
+            .object({
+              text: zod.string(),
+              boundingBox: zod
+                .object({
+                  x: zod.number(),
+                  y: zod.number(),
+                  width: zod.number(),
+                  height: zod.number(),
+                })
+                .describe("Page-relative bounding box, normalized to [0, 1]."),
+              sourceConfidence: zod.number(),
+            })
+            .describe("One OCR text segment with its page-relative position."),
+        ),
+        structuredAnnotations: zod.array(
+          zod
+            .object({
+              kind: zod
+                .enum([
+                  "revision-cloud",
+                  "dimension",
+                  "schedule-row",
+                  "callout",
+                ])
+                .describe(
+                  "Structured-annotation category extracted from a sheet.",
+                ),
+              position: zod
+                .object({
+                  x: zod.number(),
+                  y: zod.number(),
+                  width: zod.number(),
+                  height: zod.number(),
+                })
+                .describe("Page-relative bounding box, normalized to [0, 1]."),
+              content: zod.string(),
+              sourceConfidence: zod.number(),
+            })
+            .describe("One structured annotation extracted from a sheet."),
+        ),
+        ocrModel: zod.string(),
+        actorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L2a `sheet-content-extraction` atom instance. Conforms to\n`SHEET_CONTENT_EXTRACTION_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      )
+      .nullable(),
+  })
+  .describe(
+    "Wire envelope for the L2a routes. `sheetContentExtraction` is\n`null` when the sheet exists but has not been extracted yet.\n",
+  );
+
+/**
+ * Cortex L2 (Lane C.4). Returns the engagement's
+`attached-document` atoms, optionally filtered to one document
+type.
+
+ * @summary List the supporting documents attached to an engagement
+ */
+export const ListAttachedDocumentsParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListAttachedDocumentsQueryParams = zod.object({
+  documentType: zod
+    .enum(["specification", "calculation", "product-data", "narrative"])
+    .optional(),
+});
+
+export const ListAttachedDocumentsResponse = zod.object({
+  attachedDocuments: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["attached-document"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        engagementId: zod.string(),
+        title: zod.string(),
+        documentType: zod
+          .enum(["specification", "calculation", "product-data", "narrative"])
+          .describe("Supporting-document category attached to an engagement."),
+        extractedText: zod.string(),
+        originalBlobRef: zod.string(),
+        actorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L2b `attached-document` atom instance. Conforms to\n`ATTACHED_DOCUMENT_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L2 (Lane C.4). Returns the `attached-document` atom
+including its parsed `extractedText` and `originalBlobRef`.
+
+ * @summary Fetch a single attached-document atom
+ */
+export const GetAttachedDocumentParams = zod.object({
+  attachedDocumentId: zod.coerce.string(),
+});
+
+export const GetAttachedDocumentResponse = zod.object({
+  attachedDocument: zod
+    .object({
+      entityType: zod.enum(["attached-document"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      documentType: zod
+        .enum(["specification", "calculation", "product-data", "narrative"])
+        .describe("Supporting-document category attached to an engagement."),
+      extractedText: zod.string(),
+      originalBlobRef: zod.string(),
+      actorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L2b `attached-document` atom instance. Conforms to\n`ATTACHED_DOCUMENT_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). Creates a comment-response letter.
+ * @summary Create a deliverable letter in draft status
+ */
+export const CreateDeliverableLetterParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const CreateDeliverableLetterBody = zod
+  .object({
+    title: zod.string(),
+    sections: zod
+      .array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+          })
+          .describe("One initial section supplied at letter-create time."),
+      )
+      .optional(),
+    recipientActorId: zod.string().nullish(),
+    actorId: zod.string().nullish(),
+    principalActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/engagements\/{id}\/deliverable-letters`.");
+
+/**
+ * Cortex L3 (Lane C.4). Returns the engagement's deliverable
+letters newest-first. (Read path added in C.4.3 beyond the
+original endpoint contract — the UI cannot list / reload a
+letter without it.)
+
+ * @summary List the deliverable letters for an engagement
+ */
+export const ListDeliverableLettersParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListDeliverableLettersResponse = zod.object({
+  deliverableLetters: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["deliverable-letter"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        engagementId: zod.string(),
+        title: zod.string(),
+        status: zod
+          .enum(["draft", "sent"])
+          .describe("Cortex L3 — deliverable-letter lifecycle status."),
+        recipientActorId: zod.string().nullable(),
+        sections: zod.array(
+          zod
+            .object({
+              kind: zod
+                .enum(["cover", "intro", "per-comment-response", "signature"])
+                .describe("Cortex L3 — deliverable-letter section category."),
+              heading: zod.string(),
+              content: zod.string(),
+              provenance: zod
+                .object({
+                  responseTaskIds: zod.array(zod.string()),
+                  sheetContentExtractionIds: zod.array(zod.string()),
+                  findingIds: zod.array(zod.string()),
+                  adjudicationStateIds: zod.array(zod.string()),
+                })
+                .describe(
+                  "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+                ),
+            })
+            .describe("One structured section of a deliverable letter."),
+        ),
+        createdAt: zod.string(),
+        sentAt: zod.string().nullable(),
+        actorId: zod.string().nullable(),
+        principalActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). (Read path added in C.4.3 beyond the
+original endpoint contract.)
+
+ * @summary Fetch a single deliverable-letter atom
+ */
+export const GetDeliverableLetterParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const GetDeliverableLetterResponse = zod.object({
+  deliverableLetter: zod
+    .object({
+      entityType: zod.enum(["deliverable-letter"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      status: zod
+        .enum(["draft", "sent"])
+        .describe("Cortex L3 — deliverable-letter lifecycle status."),
+      recipientActorId: zod.string().nullable(),
+      sections: zod.array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+            provenance: zod
+              .object({
+                responseTaskIds: zod.array(zod.string()),
+                sheetContentExtractionIds: zod.array(zod.string()),
+                findingIds: zod.array(zod.string()),
+                adjudicationStateIds: zod.array(zod.string()),
+              })
+              .describe(
+                "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+              ),
+          })
+          .describe("One structured section of a deliverable letter."),
+      ),
+      createdAt: zod.string(),
+      sentAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). `sectionIndex` within the current array
+replaces that section (provenance preserved); equal to the
+array length appends; a larger index is a 400.
+
+ * @summary Upsert a deliverable-letter section by index
+ */
+export const UpsertDeliverableLetterSectionParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const UpsertDeliverableLetterSectionBody = zod
+  .object({
+    sectionIndex: zod.number(),
+    kind: zod
+      .enum(["cover", "intro", "per-comment-response", "signature"])
+      .describe("Cortex L3 — deliverable-letter section category."),
+    heading: zod.string(),
+    content: zod.string(),
+  })
+  .describe("Body for `POST \/deliverable-letters\/{letterId}\/sections`.");
+
+export const UpsertDeliverableLetterSectionResponse = zod.object({
+  deliverableLetter: zod
+    .object({
+      entityType: zod.enum(["deliverable-letter"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      status: zod
+        .enum(["draft", "sent"])
+        .describe("Cortex L3 — deliverable-letter lifecycle status."),
+      recipientActorId: zod.string().nullable(),
+      sections: zod.array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+            provenance: zod
+              .object({
+                responseTaskIds: zod.array(zod.string()),
+                sheetContentExtractionIds: zod.array(zod.string()),
+                findingIds: zod.array(zod.string()),
+                adjudicationStateIds: zod.array(zod.string()),
+              })
+              .describe(
+                "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+              ),
+          })
+          .describe("One structured section of a deliverable letter."),
+      ),
+      createdAt: zod.string(),
+      sentAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). Adds the supplied entityIds to the
+section's existing provenance arrays, deduped.
+
+ * @summary Merge atom references into a section's provenance
+ */
+export const MergeDeliverableLetterProvenanceParams = zod.object({
+  letterId: zod.coerce.string(),
+  sectionIndex: zod.coerce.number(),
+});
+
+export const MergeDeliverableLetterProvenanceBody = zod
+  .object({
+    responseTaskIds: zod.array(zod.string()).optional(),
+    sheetContentExtractionIds: zod.array(zod.string()).optional(),
+    findingIds: zod.array(zod.string()).optional(),
+    adjudicationStateIds: zod.array(zod.string()).optional(),
+  })
+  .describe(
+    "Body for the provenance-merge route. All keys optional; at\nleast one must be supplied.\n",
+  );
+
+export const MergeDeliverableLetterProvenanceResponse = zod.object({
+  deliverableLetter: zod
+    .object({
+      entityType: zod.enum(["deliverable-letter"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      status: zod
+        .enum(["draft", "sent"])
+        .describe("Cortex L3 — deliverable-letter lifecycle status."),
+      recipientActorId: zod.string().nullable(),
+      sections: zod.array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+            provenance: zod
+              .object({
+                responseTaskIds: zod.array(zod.string()),
+                sheetContentExtractionIds: zod.array(zod.string()),
+                findingIds: zod.array(zod.string()),
+                adjudicationStateIds: zod.array(zod.string()),
+              })
+              .describe(
+                "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+              ),
+          })
+          .describe("One structured section of a deliverable letter."),
+      ),
+      createdAt: zod.string(),
+      sentAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). A letter is complete when the `cover`,
+`intro`, and `signature` section kinds are each present.
+
+ * @summary Check whether a deliverable letter is complete (sendable)
+ */
+export const GetDeliverableLetterCompletenessParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const GetDeliverableLetterCompletenessResponse = zod.object({
+  complete: zod.boolean(),
+  missing: zod.array(
+    zod
+      .enum(["cover", "intro", "per-comment-response", "signature"])
+      .describe("Cortex L3 — deliverable-letter section category."),
+  ),
+});
+
+/**
+ * Cortex L3 (Lane C.4). Runs the completeness check first; an
+incomplete letter is rejected with a 409.
+
+ * @summary Transition a deliverable letter from draft to sent
+ */
+export const SendDeliverableLetterParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const SendDeliverableLetterResponse = zod.object({
+  deliverableLetter: zod
+    .object({
+      entityType: zod.enum(["deliverable-letter"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      title: zod.string(),
+      status: zod
+        .enum(["draft", "sent"])
+        .describe("Cortex L3 — deliverable-letter lifecycle status."),
+      recipientActorId: zod.string().nullable(),
+      sections: zod.array(
+        zod
+          .object({
+            kind: zod
+              .enum(["cover", "intro", "per-comment-response", "signature"])
+              .describe("Cortex L3 — deliverable-letter section category."),
+            heading: zod.string(),
+            content: zod.string(),
+            provenance: zod
+              .object({
+                responseTaskIds: zod.array(zod.string()),
+                sheetContentExtractionIds: zod.array(zod.string()),
+                findingIds: zod.array(zod.string()),
+                adjudicationStateIds: zod.array(zod.string()),
+              })
+              .describe(
+                "The L1 \/ L2 \/ finding \/ adjudication atoms that fed a section.\n",
+              ),
+          })
+          .describe("One structured section of a deliverable letter."),
+      ),
+      createdAt: zod.string(),
+      sentAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L3 `deliverable-letter` atom instance. Conforms to\n`DELIVERABLE_LETTER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L4 (Lane C.4). The `spec` payload is validated against
+the discriminated-union schema keyed on `detailType`.
+
+ * @summary Create a detail-callout spec
+ */
+export const CreateDetailCalloutSpecParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const CreateDetailCalloutSpecBody = zod
+  .object({
+    spec: zod
+      .union([
+        zod.object({
+          detailType: zod.enum(["door-schedule"]),
+          rows: zod.array(
+            zod.object({
+              doorMark: zod.string(),
+              doorType: zod.string(),
+              width: zod.string(),
+              height: zod.string(),
+              material: zod.string(),
+              fireRating: zod.string(),
+              hardwareSet: zod.string(),
+            }),
+          ),
+        }),
+        zod.object({
+          detailType: zod.enum(["wall-section"]),
+          sectionMark: zod.string(),
+          cutLocation: zod.string(),
+          assemblyLayers: zod.array(
+            zod.object({
+              material: zod.string(),
+              thickness: zod.string(),
+              function: zod.string(),
+            }),
+          ),
+          baseDatum: zod.string(),
+          topDatum: zod.string(),
+        }),
+        zod.object({
+          detailType: zod.enum(["wall-type"]),
+          typeMark: zod.string(),
+          assemblyLayers: zod.array(
+            zod.object({
+              material: zod.string(),
+              thickness: zod.string(),
+              function: zod.string(),
+            }),
+          ),
+          fireRating: zod.string(),
+          stcRating: zod.string(),
+        }),
+        zod.object({
+          detailType: zod.enum(["room-finish"]),
+          roomName: zod.string(),
+          roomNumber: zod.string(),
+          floorFinish: zod.string(),
+          baseFinish: zod.string(),
+          wallFinish: zod.string(),
+          ceilingFinish: zod.string(),
+          ceilingHeight: zod.string(),
+        }),
+      ])
+      .describe(
+        "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+      ),
+    findingId: zod.string().nullish(),
+    responseTaskId: zod.string().nullish(),
+    actorId: zod.string().nullish(),
+    principalActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/engagements\/{id}\/detail-callout-specs`.");
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary List the detail-callout specs for an engagement
+ */
+export const ListDetailCalloutSpecsParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListDetailCalloutSpecsQueryParams = zod.object({
+  pushState: zod
+    .enum(["pending", "pushed", "applied", "rejected-by-user"])
+    .optional(),
+});
+
+export const ListDetailCalloutSpecsResponse = zod.object({
+  detailCalloutSpecs: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["detail-callout-spec"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        engagementId: zod.string(),
+        spec: zod
+          .union([
+            zod.object({
+              detailType: zod.enum(["door-schedule"]),
+              rows: zod.array(
+                zod.object({
+                  doorMark: zod.string(),
+                  doorType: zod.string(),
+                  width: zod.string(),
+                  height: zod.string(),
+                  material: zod.string(),
+                  fireRating: zod.string(),
+                  hardwareSet: zod.string(),
+                }),
+              ),
+            }),
+            zod.object({
+              detailType: zod.enum(["wall-section"]),
+              sectionMark: zod.string(),
+              cutLocation: zod.string(),
+              assemblyLayers: zod.array(
+                zod.object({
+                  material: zod.string(),
+                  thickness: zod.string(),
+                  function: zod.string(),
+                }),
+              ),
+              baseDatum: zod.string(),
+              topDatum: zod.string(),
+            }),
+            zod.object({
+              detailType: zod.enum(["wall-type"]),
+              typeMark: zod.string(),
+              assemblyLayers: zod.array(
+                zod.object({
+                  material: zod.string(),
+                  thickness: zod.string(),
+                  function: zod.string(),
+                }),
+              ),
+              fireRating: zod.string(),
+              stcRating: zod.string(),
+            }),
+            zod.object({
+              detailType: zod.enum(["room-finish"]),
+              roomName: zod.string(),
+              roomNumber: zod.string(),
+              floorFinish: zod.string(),
+              baseFinish: zod.string(),
+              wallFinish: zod.string(),
+              ceilingFinish: zod.string(),
+              ceilingHeight: zod.string(),
+            }),
+          ])
+          .describe(
+            "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+          ),
+        pushState: zod
+          .enum(["pending", "pushed", "applied", "rejected-by-user"])
+          .describe(
+            "Cortex L4 — detail-callout-spec Revit push lifecycle state.",
+          ),
+        apsTaskRef: zod.string().nullable(),
+        findingId: zod.string().nullable(),
+        responseTaskId: zod.string().nullable(),
+        createdAt: zod.string(),
+        pushedAt: zod.string().nullable(),
+        actorId: zod.string().nullable(),
+        principalActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary Fetch a single detail-callout-spec atom
+ */
+export const GetDetailCalloutSpecParams = zod.object({
+  specId: zod.coerce.string(),
+});
+
+export const GetDetailCalloutSpecResponse = zod.object({
+  detailCalloutSpec: zod
+    .object({
+      entityType: zod.enum(["detail-callout-spec"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      spec: zod
+        .union([
+          zod.object({
+            detailType: zod.enum(["door-schedule"]),
+            rows: zod.array(
+              zod.object({
+                doorMark: zod.string(),
+                doorType: zod.string(),
+                width: zod.string(),
+                height: zod.string(),
+                material: zod.string(),
+                fireRating: zod.string(),
+                hardwareSet: zod.string(),
+              }),
+            ),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-section"]),
+            sectionMark: zod.string(),
+            cutLocation: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            baseDatum: zod.string(),
+            topDatum: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-type"]),
+            typeMark: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            fireRating: zod.string(),
+            stcRating: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["room-finish"]),
+            roomName: zod.string(),
+            roomNumber: zod.string(),
+            floorFinish: zod.string(),
+            baseFinish: zod.string(),
+            wallFinish: zod.string(),
+            ceilingFinish: zod.string(),
+            ceilingHeight: zod.string(),
+          }),
+        ])
+        .describe(
+          "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+        ),
+      pushState: zod
+        .enum(["pending", "pushed", "applied", "rejected-by-user"])
+        .describe(
+          "Cortex L4 — detail-callout-spec Revit push lifecycle state.",
+        ),
+      apsTaskRef: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      pushedAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L4 (Lane C.4). The transition is validated; an illegal
+transition is rejected with a 409.
+
+ * @summary Transition a detail-callout spec to a new push state
+ */
+export const UpdateDetailCalloutSpecPushStateParams = zod.object({
+  specId: zod.coerce.string(),
+});
+
+export const UpdateDetailCalloutSpecPushStateBody = zod.object({
+  pushState: zod
+    .enum(["pending", "pushed", "applied", "rejected-by-user"])
+    .describe("Cortex L4 — detail-callout-spec Revit push lifecycle state."),
+});
+
+export const UpdateDetailCalloutSpecPushStateResponse = zod.object({
+  detailCalloutSpec: zod
+    .object({
+      entityType: zod.enum(["detail-callout-spec"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      spec: zod
+        .union([
+          zod.object({
+            detailType: zod.enum(["door-schedule"]),
+            rows: zod.array(
+              zod.object({
+                doorMark: zod.string(),
+                doorType: zod.string(),
+                width: zod.string(),
+                height: zod.string(),
+                material: zod.string(),
+                fireRating: zod.string(),
+                hardwareSet: zod.string(),
+              }),
+            ),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-section"]),
+            sectionMark: zod.string(),
+            cutLocation: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            baseDatum: zod.string(),
+            topDatum: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-type"]),
+            typeMark: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            fireRating: zod.string(),
+            stcRating: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["room-finish"]),
+            roomName: zod.string(),
+            roomNumber: zod.string(),
+            floorFinish: zod.string(),
+            baseFinish: zod.string(),
+            wallFinish: zod.string(),
+            ceilingFinish: zod.string(),
+            ceilingHeight: zod.string(),
+          }),
+        ])
+        .describe(
+          "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+        ),
+      pushState: zod
+        .enum(["pending", "pushed", "applied", "rejected-by-user"])
+        .describe(
+          "Cortex L4 — detail-callout-spec Revit push lifecycle state.",
+        ),
+      apsTaskRef: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      pushedAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary Write the APS Design Automation work-item ref onto a spec
+ */
+export const AttachDetailCalloutSpecApsRefParams = zod.object({
+  specId: zod.coerce.string(),
+});
+
+export const AttachDetailCalloutSpecApsRefBody = zod.object({
+  apsTaskRef: zod.string(),
+});
+
+export const AttachDetailCalloutSpecApsRefResponse = zod.object({
+  detailCalloutSpec: zod
+    .object({
+      entityType: zod.enum(["detail-callout-spec"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      engagementId: zod.string(),
+      spec: zod
+        .union([
+          zod.object({
+            detailType: zod.enum(["door-schedule"]),
+            rows: zod.array(
+              zod.object({
+                doorMark: zod.string(),
+                doorType: zod.string(),
+                width: zod.string(),
+                height: zod.string(),
+                material: zod.string(),
+                fireRating: zod.string(),
+                hardwareSet: zod.string(),
+              }),
+            ),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-section"]),
+            sectionMark: zod.string(),
+            cutLocation: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            baseDatum: zod.string(),
+            topDatum: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["wall-type"]),
+            typeMark: zod.string(),
+            assemblyLayers: zod.array(
+              zod.object({
+                material: zod.string(),
+                thickness: zod.string(),
+                function: zod.string(),
+              }),
+            ),
+            fireRating: zod.string(),
+            stcRating: zod.string(),
+          }),
+          zod.object({
+            detailType: zod.enum(["room-finish"]),
+            roomName: zod.string(),
+            roomNumber: zod.string(),
+            floorFinish: zod.string(),
+            baseFinish: zod.string(),
+            wallFinish: zod.string(),
+            ceilingFinish: zod.string(),
+            ceilingHeight: zod.string(),
+          }),
+        ])
+        .describe(
+          "Discriminated detail-callout spec payload, keyed on `detailType`.\n",
+        ),
+      pushState: zod
+        .enum(["pending", "pushed", "applied", "rejected-by-user"])
+        .describe(
+          "Cortex L4 — detail-callout-spec Revit push lifecycle state.",
+        ),
+      apsTaskRef: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      pushedAt: zod.string().nullable(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L5 (Lane C.4). `esrNumber` must match `ESR-<digits>`.
+
+ * @summary Create a product-spec reference
+ */
+export const CreateProductSpecReferenceParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const CreateProductSpecReferenceBody = zod
+  .object({
+    product: zod
+      .object({
+        name: zod.string(),
+        manufacturer: zod.string(),
+      })
+      .describe("Structured product identity (never free-text)."),
+    esrNumber: zod
+      .string()
+      .describe("ICC-ES ESR number, format `ESR-<digits>`."),
+    findingId: zod.string().nullish(),
+    responseTaskId: zod.string().nullish(),
+    actorId: zod.string().nullish(),
+    principalActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/engagements\/{id}\/product-spec-references`.");
+
+/**
+ * Cortex L5 (Lane C.4).
+ * @summary List the product-spec references for an engagement
+ */
+export const ListProductSpecReferencesParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListProductSpecReferencesQueryParams = zod.object({
+  status: zod.enum(["active", "withdrawn", "expired"]).optional(),
+});
+
+export const ListProductSpecReferencesResponse = zod.object({
+  productSpecReferences: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["product-spec-reference"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        product: zod
+          .object({
+            name: zod.string(),
+            manufacturer: zod.string(),
+          })
+          .describe("Structured product identity (never free-text)."),
+        esrNumber: zod.string(),
+        status: zod
+          .enum(["active", "withdrawn", "expired"])
+          .describe("Cortex L5 — ICC-ES evaluation status."),
+        lastVerifiedAt: zod.string(),
+        statusHistory: zod.array(
+          zod
+            .object({
+              status: zod
+                .enum(["active", "withdrawn", "expired"])
+                .describe("Cortex L5 — ICC-ES evaluation status."),
+              changedAt: zod.string(),
+              sourceUrl: zod.string(),
+            })
+            .describe("One entry in the append-only ESR-status-change chain."),
+        ),
+        engagementId: zod.string().nullable(),
+        findingId: zod.string().nullable(),
+        responseTaskId: zod.string().nullable(),
+        createdAt: zod.string(),
+        actorId: zod.string().nullable(),
+        principalActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L5 `product-spec-reference` atom instance. Conforms to\n`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L5 (Lane C.4). Includes the full statusHistory.
+ * @summary Fetch a single product-spec-reference atom
+ */
+export const GetProductSpecReferenceParams = zod.object({
+  referenceId: zod.coerce.string(),
+});
+
+export const GetProductSpecReferenceResponse = zod.object({
+  productSpecReference: zod
+    .object({
+      entityType: zod.enum(["product-spec-reference"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      product: zod
+        .object({
+          name: zod.string(),
+          manufacturer: zod.string(),
+        })
+        .describe("Structured product identity (never free-text)."),
+      esrNumber: zod.string(),
+      status: zod
+        .enum(["active", "withdrawn", "expired"])
+        .describe("Cortex L5 — ICC-ES evaluation status."),
+      lastVerifiedAt: zod.string(),
+      statusHistory: zod.array(
+        zod
+          .object({
+            status: zod
+              .enum(["active", "withdrawn", "expired"])
+              .describe("Cortex L5 — ICC-ES evaluation status."),
+            changedAt: zod.string(),
+            sourceUrl: zod.string(),
+          })
+          .describe("One entry in the append-only ESR-status-change chain."),
+      ),
+      engagementId: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L5 `product-spec-reference` atom instance. Conforms to\n`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L5 (Lane C.4). Synchronously polls the ICC-ES listing
+(5-10s timeout). On a status change a new statusHistory entry
+is appended; `lastVerifiedAt` is always updated. An unreachable
+ICC-ES returns a 502.
+
+ * @summary Re-verify a product-spec reference against the live ICC-ES listing
+ */
+export const RefreshProductSpecReferenceParams = zod.object({
+  referenceId: zod.coerce.string(),
+});
+
+export const RefreshProductSpecReferenceResponse = zod.object({
+  productSpecReference: zod
+    .object({
+      entityType: zod.enum(["product-spec-reference"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      product: zod
+        .object({
+          name: zod.string(),
+          manufacturer: zod.string(),
+        })
+        .describe("Structured product identity (never free-text)."),
+      esrNumber: zod.string(),
+      status: zod
+        .enum(["active", "withdrawn", "expired"])
+        .describe("Cortex L5 — ICC-ES evaluation status."),
+      lastVerifiedAt: zod.string(),
+      statusHistory: zod.array(
+        zod
+          .object({
+            status: zod
+              .enum(["active", "withdrawn", "expired"])
+              .describe("Cortex L5 — ICC-ES evaluation status."),
+            changedAt: zod.string(),
+            sourceUrl: zod.string(),
+          })
+          .describe("One entry in the append-only ESR-status-change chain."),
+      ),
+      engagementId: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L5 `product-spec-reference` atom instance. Conforms to\n`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L6 (Lane C.4). Completeness-gated (an incomplete letter
+is a 409); generates the document synchronously and persists it
+as a first-class `deliverable-letter-render` atom.
+
+ * @summary Render an L3 deliverable letter to DOCX or PDF
+ */
+export const RenderDeliverableLetterParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const RenderDeliverableLetterBody = zod
+  .object({
+    format: zod
+      .enum(["docx", "pdf"])
+      .describe("Cortex L6 — deliverable-letter render output format."),
+    renderedByActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/deliverable-letters\/{letterId}\/renders`.");
+
+/**
+ * Cortex L6 (Lane C.4). Newest-first.
+ * @summary List every render of a deliverable letter
+ */
+export const ListDeliverableLetterRendersParams = zod.object({
+  letterId: zod.coerce.string(),
+});
+
+export const ListDeliverableLetterRendersResponse = zod.object({
+  renders: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["deliverable-letter-render"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        sourceLetterRef: zod.string(),
+        sourceLetterVersion: zod.string(),
+        format: zod
+          .enum(["docx", "pdf"])
+          .describe("Cortex L6 — deliverable-letter render output format."),
+        blobRef: zod.string(),
+        renderedAt: zod.string(),
+        renderedByActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L6 `deliverable-letter-render` atom instance. Conforms to\n`DELIVERABLE_LETTER_RENDER_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L6 (Lane C.4). Streams the stored render bytes. Added in
+C.4.6 beyond the original endpoint contract — the UI Download
+action and the `downloadUrl` resolution need a byte-serving
+route.
+
+ * @summary Download the rendered DOCX/PDF bytes
+ */
+export const DownloadDeliverableLetterRenderParams = zod.object({
+  renderId: zod.coerce.string(),
+});

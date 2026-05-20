@@ -46,6 +46,21 @@ CREATE TABLE @@SCHEMA@@.atom_events (
 );
 
 
+-- Name: attached_documents; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.attached_documents (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    title text NOT NULL,
+    document_type text NOT NULL,
+    extracted_text text DEFAULT ''::text NOT NULL,
+    original_blob_ref text NOT NULL,
+    actor_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT attached_documents_document_type_check CHECK ((document_type = ANY (ARRAY['specification'::text, 'calculation'::text, 'product-data'::text, 'narrative'::text])))
+);
+
+
 -- Name: autopilot_findings; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.autopilot_findings (
@@ -269,6 +284,60 @@ CREATE TABLE @@SCHEMA@@.decision_pdf_artifacts (
 );
 
 
+-- Name: deliverable_letter_renders; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.deliverable_letter_renders (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    letter_id uuid NOT NULL,
+    source_letter_ref text NOT NULL,
+    source_letter_version text NOT NULL,
+    format text NOT NULL,
+    blob_ref text NOT NULL,
+    render_bytes bytea NOT NULL,
+    rendered_by_actor_id text,
+    rendered_at timestamp with time zone DEFAULT now() NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT deliverable_letter_renders_format_check CHECK ((format = ANY (ARRAY['docx'::text, 'pdf'::text])))
+);
+
+
+-- Name: deliverable_letters; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.deliverable_letters (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    title text NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    recipient_actor_id text,
+    sections jsonb DEFAULT '[]'::jsonb NOT NULL,
+    actor_id text,
+    principal_actor_id text,
+    sent_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT deliverable_letters_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'sent'::text])))
+);
+
+
+-- Name: detail_callout_specs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.detail_callout_specs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    spec jsonb NOT NULL,
+    push_state text DEFAULT 'pending'::text NOT NULL,
+    aps_task_ref text,
+    finding_id text,
+    response_task_id text,
+    actor_id text,
+    principal_actor_id text,
+    pushed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT detail_callout_specs_push_state_check CHECK ((push_state = ANY (ARRAY['pending'::text, 'pushed'::text, 'applied'::text, 'rejected-by-user'::text])))
+);
+
+
 -- Name: engagements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.engagements (
@@ -454,6 +523,28 @@ CREATE TABLE @@SCHEMA@@.permit_counters (
 );
 
 
+-- Name: product_spec_references; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.product_spec_references (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    product_name text NOT NULL,
+    product_manufacturer text NOT NULL,
+    esr_number text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    last_verified_at timestamp with time zone DEFAULT now() NOT NULL,
+    status_history jsonb DEFAULT '[]'::jsonb NOT NULL,
+    icc_es_url text DEFAULT ''::text NOT NULL,
+    finding_id text,
+    response_task_id text,
+    actor_id text,
+    principal_actor_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT product_spec_references_status_check CHECK ((status = ANY (ARRAY['active'::text, 'withdrawn'::text, 'expired'::text])))
+);
+
+
 -- Name: qa_checklist_results; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.qa_checklist_results (
@@ -594,6 +685,22 @@ CREATE TABLE @@SCHEMA@@.reviewer_requests (
     CONSTRAINT reviewer_requests_kind_check CHECK ((request_kind = ANY (ARRAY['refresh-briefing-source'::text, 'refresh-bim-model'::text, 'regenerate-briefing'::text]))),
     CONSTRAINT reviewer_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'dismissed'::text, 'resolved'::text, 'withdrawn'::text]))),
     CONSTRAINT reviewer_requests_target_type_check CHECK ((target_entity_type = ANY (ARRAY['briefing-source'::text, 'bim-model'::text, 'parcel-briefing'::text])))
+);
+
+
+-- Name: sheet_content_extractions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.sheet_content_extractions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    source_sheet_id uuid NOT NULL,
+    engagement_id uuid NOT NULL,
+    page_label text DEFAULT ''::text NOT NULL,
+    extracted_text_segments jsonb DEFAULT '[]'::jsonb NOT NULL,
+    structured_annotations jsonb DEFAULT '[]'::jsonb NOT NULL,
+    ocr_model text NOT NULL,
+    actor_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -779,6 +886,12 @@ ALTER TABLE ONLY @@SCHEMA@@.atom_events
     ADD CONSTRAINT atom_events_pkey PRIMARY KEY (id);
 
 
+-- Name: attached_documents attached_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.attached_documents
+    ADD CONSTRAINT attached_documents_pkey PRIMARY KEY (id);
+
+
 -- Name: autopilot_findings autopilot_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.autopilot_findings
@@ -869,6 +982,24 @@ ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
     ADD CONSTRAINT decision_pdf_artifacts_pkey PRIMARY KEY (decision_id);
 
 
+-- Name: deliverable_letter_renders deliverable_letter_renders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.deliverable_letter_renders
+    ADD CONSTRAINT deliverable_letter_renders_pkey PRIMARY KEY (id);
+
+
+-- Name: deliverable_letters deliverable_letters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.deliverable_letters
+    ADD CONSTRAINT deliverable_letters_pkey PRIMARY KEY (id);
+
+
+-- Name: detail_callout_specs detail_callout_specs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.detail_callout_specs
+    ADD CONSTRAINT detail_callout_specs_pkey PRIMARY KEY (id);
+
+
 -- Name: engagements engagements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.engagements
@@ -929,6 +1060,12 @@ ALTER TABLE ONLY @@SCHEMA@@.permit_counters
     ADD CONSTRAINT permit_counters_tenant_id_year_pk PRIMARY KEY (tenant_id, year);
 
 
+-- Name: product_spec_references product_spec_references_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
+    ADD CONSTRAINT product_spec_references_pkey PRIMARY KEY (id);
+
+
 -- Name: qa_checklist_results qa_checklist_results_checklist_id_item_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.qa_checklist_results
@@ -975,6 +1112,18 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
     ADD CONSTRAINT reviewer_requests_pkey PRIMARY KEY (id);
+
+
+-- Name: sheet_content_extractions sheet_content_extractions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
+    ADD CONSTRAINT sheet_content_extractions_pkey PRIMARY KEY (id);
+
+
+-- Name: sheet_content_extractions sheet_content_extractions_source_sheet_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
+    ADD CONSTRAINT sheet_content_extractions_source_sheet_id_unique UNIQUE (source_sheet_id);
 
 
 -- Name: sheets sheets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1061,6 +1210,11 @@ CREATE UNIQUE INDEX atom_events_chain_hash_uniq ON @@SCHEMA@@.atom_events USING 
 -- Name: atom_events_timeline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX atom_events_timeline_idx ON @@SCHEMA@@.atom_events USING btree (entity_type, entity_id, occurred_at);
+
+
+-- Name: attached_documents_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX attached_documents_engagement_idx ON @@SCHEMA@@.attached_documents USING btree (engagement_id);
 
 
 -- Name: autopilot_findings_run_idx; Type: INDEX; Schema: public; Owner: -
@@ -1178,6 +1332,21 @@ CREATE INDEX code_atoms_source_idx ON @@SCHEMA@@.code_atoms USING btree (source_
 CREATE INDEX decision_pdf_artifacts_submission_idx ON @@SCHEMA@@.decision_pdf_artifacts USING btree (submission_id, rendered_at);
 
 
+-- Name: deliverable_letter_renders_letter_rendered_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX deliverable_letter_renders_letter_rendered_idx ON @@SCHEMA@@.deliverable_letter_renders USING btree (letter_id, rendered_at);
+
+
+-- Name: deliverable_letters_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX deliverable_letters_engagement_created_idx ON @@SCHEMA@@.deliverable_letters USING btree (engagement_id, created_at);
+
+
+-- Name: detail_callout_specs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX detail_callout_specs_engagement_created_idx ON @@SCHEMA@@.detail_callout_specs USING btree (engagement_id, created_at);
+
+
 -- Name: engagements_name_lower_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (name_lower);
@@ -1253,6 +1422,11 @@ CREATE INDEX materializable_elements_snapshot_idx ON @@SCHEMA@@.materializable_e
 CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USING btree (engagement_id);
 
 
+-- Name: product_spec_references_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX product_spec_references_engagement_created_idx ON @@SCHEMA@@.product_spec_references USING btree (engagement_id, created_at);
+
+
 -- Name: qa_runs_suite_started_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX qa_runs_suite_started_idx ON @@SCHEMA@@.qa_runs USING btree (suite_id, started_at);
@@ -1301,6 +1475,11 @@ CREATE INDEX reviewer_requests_pending_idx ON @@SCHEMA@@.reviewer_requests USING
 -- Name: reviewer_requests_target_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX reviewer_requests_target_idx ON @@SCHEMA@@.reviewer_requests USING btree (target_entity_type, target_entity_id, status);
+
+
+-- Name: sheet_content_extractions_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX sheet_content_extractions_engagement_idx ON @@SCHEMA@@.sheet_content_extractions USING btree (engagement_id);
 
 
 -- Name: sheets_engagement_number_idx; Type: INDEX; Schema: public; Owner: -
@@ -1366,6 +1545,12 @@ CREATE INDEX viewpoint_renders_engagement_created_idx ON @@SCHEMA@@.viewpoint_re
 -- Name: viewpoint_renders_status_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX viewpoint_renders_status_idx ON @@SCHEMA@@.viewpoint_renders USING btree (status);
+
+
+-- Name: attached_documents attached_documents_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.attached_documents
+    ADD CONSTRAINT attached_documents_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: autopilot_findings autopilot_findings_autopilot_run_id_autopilot_runs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -1458,6 +1643,24 @@ ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
     ADD CONSTRAINT decision_pdf_artifacts_submission_id_submissions_id_fk FOREIGN KEY (submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE CASCADE;
 
 
+-- Name: deliverable_letter_renders deliverable_letter_renders_letter_id_deliverable_letters_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.deliverable_letter_renders
+    ADD CONSTRAINT deliverable_letter_renders_letter_id_deliverable_letters_id_fk FOREIGN KEY (letter_id) REFERENCES @@SCHEMA@@.deliverable_letters(id) ON DELETE CASCADE;
+
+
+-- Name: deliverable_letters deliverable_letters_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.deliverable_letters
+    ADD CONSTRAINT deliverable_letters_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: detail_callout_specs detail_callout_specs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.detail_callout_specs
+    ADD CONSTRAINT detail_callout_specs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
 -- Name: eval_runs eval_runs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.eval_runs
@@ -1536,6 +1739,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
     ADD CONSTRAINT parcel_briefings_generation_id_briefing_generation_jobs_id_fk FOREIGN KEY (generation_id) REFERENCES @@SCHEMA@@.briefing_generation_jobs(id) ON DELETE SET NULL;
 
 
+-- Name: product_spec_references product_spec_references_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
+    ADD CONSTRAINT product_spec_references_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
 -- Name: render_outputs render_outputs_viewpoint_render_id_viewpoint_renders_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.render_outputs
@@ -1564,6 +1773,18 @@ ALTER TABLE ONLY @@SCHEMA@@.reviewer_annotations
 
 ALTER TABLE ONLY @@SCHEMA@@.reviewer_requests
     ADD CONSTRAINT reviewer_requests_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: sheet_content_extractions sheet_content_extractions_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
+    ADD CONSTRAINT sheet_content_extractions_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: sheet_content_extractions sheet_content_extractions_source_sheet_id_sheets_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.sheet_content_extractions
+    ADD CONSTRAINT sheet_content_extractions_source_sheet_id_sheets_id_fk FOREIGN KEY (source_sheet_id) REFERENCES @@SCHEMA@@.sheets(id) ON DELETE CASCADE;
 
 
 -- Name: sheets sheets_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

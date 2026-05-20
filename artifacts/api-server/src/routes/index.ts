@@ -34,6 +34,11 @@ import notificationsRouter from "./notifications";
 import cannedFindingsRouter from "./cannedFindings";
 import qaRouter from "./qa";
 import responseTasksRouter from "./responseTasks";
+import sheetContentRouter from "./sheetContent";
+import deliverableLettersRouter from "./deliverableLetters";
+import detailCalloutSpecsRouter from "./detailCalloutSpecs";
+import productSpecReferencesRouter from "./productSpecReferences";
+import deliverableLetterRendersRouter from "./deliverableLetterRenders";
 
 const router: IRouter = Router();
 
@@ -152,5 +157,32 @@ router.use(qaRouter);
 // not match the longer `/engagements/:id/response-tasks` path, so
 // mount ordering relative to engagementsRouter is indifferent.
 router.use(responseTasksRouter);
+// Cortex L2 (Lane C.4 / C.4.2) — sheet-content-extraction +
+// attached-document surface. Mounts `/sheets/:id/content-extraction`,
+// `/engagements/:id/attached-documents`, and `/attached-documents/:id`.
+// None overlap an existing leaf route (the parametric segments differ
+// in depth), so mount ordering is indifferent.
+router.use(sheetContentRouter);
+// Cortex L3 (Lane C.4 / C.4.3) — deliverable-letter surface. Mounts
+// `/engagements/:id/deliverable-letters` and `/deliverable-letters/:id*`.
+// No overlap with an existing leaf route, so ordering is indifferent.
+router.use(deliverableLettersRouter);
+// Cortex L4 (Lane C.4 / C.4.4) — detail-callout-spec surface. Mounts
+// `/engagements/:id/detail-callout-specs` and
+// `/detail-callout-specs/:id*`. No overlap with an existing leaf route,
+// so ordering is indifferent.
+router.use(detailCalloutSpecsRouter);
+// Cortex L5 (Lane C.4 / C.4.5) — product-spec-reference surface.
+// Mounts `/engagements/:id/product-spec-references` and
+// `/product-spec-references/:id*`. No overlap with an existing leaf
+// route, so ordering is indifferent.
+router.use(productSpecReferencesRouter);
+// Cortex L6 (Lane C.4 / C.4.6) — deliverable-letter-render surface.
+// Mounts `/deliverable-letters/:id/renders` and
+// `/deliverable-letter-renders/:id/file`. The `/renders` path is
+// distinct from L3's `/deliverable-letters/:id/{sections,send,...}`
+// leaves, so ordering relative to deliverableLettersRouter is
+// indifferent.
+router.use(deliverableLetterRendersRouter);
 
 export default router;

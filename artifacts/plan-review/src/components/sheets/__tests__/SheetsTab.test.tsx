@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { SheetSummary } from "@workspace/api-client-react";
 
 const sheets: SheetSummary[] = [
@@ -63,9 +64,28 @@ vi.mock("@workspace/api-client-react", async () => {
 
 import { SheetsTab } from "../SheetsTab";
 
+/**
+ * SheetsTab now mounts the Cortex L2 panels (Lane C.4 —
+ * SheetContentExtractionPanel / AttachedDocumentsPanel), which use
+ * react-query, so the render tree needs a QueryClientProvider.
+ */
+function renderSheetsTab() {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <SheetsTab submissionId="snap-1" />
+    </QueryClientProvider>,
+  );
+}
+
 describe("SheetsTab cross-ref integration (PLR-8)", () => {
   it("renders resolved chip and jumps to referenced sheet on click", () => {
-    render(<SheetsTab submissionId="snap-1" />);
+    renderSheetsTab();
     const chip = screen.getByTestId("sheet-ref-link-s2");
     expect(chip).toHaveTextContent("SEE A-301");
     fireEvent.click(chip);

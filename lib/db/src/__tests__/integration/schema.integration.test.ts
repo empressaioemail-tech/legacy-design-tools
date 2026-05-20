@@ -70,6 +70,9 @@ describe("lib/db schema integration", () => {
         // /me/notifications/mark-read.
         "architect_notification_reads",
         "atom_events",
+        // Cortex L2 (Lane C.4 / C.4.2) — supporting documents attached
+        // to an engagement (produced by the sheet-ingest pipeline).
+        "attached_documents",
         // Task #482 / #486 — QA autopilot orchestration tables.
         // `autopilot_runs` is one row per kicked-off run;
         // `autopilot_findings` carries per-suite per-test findings; and
@@ -98,6 +101,14 @@ describe("lib/db schema integration", () => {
         // PLR-11 — derived-state side table for the issued plan-set
         // PDF (one row per recorded approval event).
         "decision_pdf_artifacts",
+        // Cortex L6 (Lane C.4 / C.4.6) — rendered DOCX/PDF artifacts of
+        // a deliverable letter. Sorts before `deliverable_letters`
+        // (`_` < `s`) per `ORDER BY tablename`.
+        "deliverable_letter_renders",
+        // Cortex L3 (Lane C.4 / C.4.3) — deliverable-letter atoms.
+        "deliverable_letters",
+        // Cortex L4 (Lane C.4 / C.4.4) — Revit detail-callout specs.
+        "detail_callout_specs",
         "engagements",
         // @workspace/eval harness tables (scaffolded in a8acb35;
         // landed alongside the per-run scoring + per-fixture
@@ -116,6 +127,8 @@ describe("lib/db schema integration", () => {
         "parcel_briefings",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",
+        // Cortex L5 (Lane C.4 / C.4.5) — ICC-ES product-spec references.
+        "product_spec_references",
         // Task #481 — QA Dashboard checklist runs and per-item results.
         "qa_checklist_results",
         "qa_runs",
@@ -125,6 +138,8 @@ describe("lib/db schema integration", () => {
         // Task #503 — QA triage queue items (forwarded to planning).
         "qa_triage_items",
         "render_outputs",
+        // Cortex L1 (Lane C.4 / C.4.1) — response-task workflow rows.
+        "response_tasks",
         // Spec 307 / Task #307 — reviewer scratch-note surface anchored
         // per (submission, target atom) tuple. Reviewer-only until the
         // bulk-promote endpoint flips `promoted_at`.
@@ -134,6 +149,9 @@ describe("lib/db schema integration", () => {
         // bim-model / regenerate briefing). Resolved implicitly by
         // the matching domain action's atom-history event.
         "reviewer_requests",
+        // Cortex L2 (Lane C.4 / C.4.2) — structured sheet-content
+        // extraction atoms (OCR segments + annotations).
+        "sheet_content_extractions",
         "sheets",
         // IFC ingest metadata keyed off snapshots (parse status, global ids).
         "snapshot_ifc_files",

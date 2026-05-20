@@ -94,6 +94,42 @@ tags:
       `open → in-progress → done` (or `cancelled`) across sessions.
       Dual-auth (hauska-mcp-server bearer token OR a Cortex SPA
       session); each mutation appends an atom-event audit record.
+  - name: sheet-content
+    description: |
+      Cortex L2 (Lane C.4) — sheet-content-extraction +
+      attached-document surface. The sheet-ingest extraction pass
+      classifies a construction sheet into OCR text segments +
+      structured annotations; supporting documents attached to an
+      engagement carry parsed text. Dual-auth (hauska-mcp-server
+      bearer token OR a Cortex SPA session).
+  - name: deliverable-letters
+    description: |
+      Cortex L3 (Lane C.4) — deliverable-letter surface. The
+      comment-response letter as a classified atom: structured
+      sections (cover / intro / per-comment-response / signature)
+      with per-section provenance back to the L1 / L2 / finding /
+      adjudication atoms. Lifecycle `draft → sent`, send gated on
+      section completeness. Dual-auth.
+  - name: detail-callout-specs
+    description: |
+      Cortex L4 (Lane C.4) — detail-callout-spec surface. A
+      structured spec for a Revit detail callout the Revit Connector
+      pushes via APS Design Automation. The spec payload is a
+      discriminated union keyed on `detailType`; the push lifecycle
+      runs `pending → pushed → applied | rejected-by-user`. Dual-auth.
+  - name: product-spec-references
+    description: |
+      Cortex L5 (Lane C.4) — product-spec-reference surface. A
+      reference to an ICC-ES-evaluated product spec with live
+      evaluation status. The refresh route synchronously re-polls the
+      ICC-ES listing and appends to the append-only status history.
+      Dual-auth.
+  - name: deliverable-letter-renders
+    description: |
+      Cortex L6 (Lane C.4) — deliverable-letter render surface. The
+      rendered DOCX/PDF artifact of an L3 deliverable letter, as a
+      first-class atom (queryable, provenance-pinned). Render is
+      completeness-gated and synchronous. Dual-auth.
 paths:
   /healthz:
     get:
@@ -5715,6 +5751,944 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /sheets/{sheetId}/content-extraction:
+    post:
+      operationId: triggerSheetContentExtraction
+      tags: [sheet-content]
+      summary: Trigger the structured-content extraction pass on a sheet
+      description: |
+        Cortex L2 (Lane C.4). Runs the sheet-content extraction pass
+        and emits a `sheet-content-extraction` atom (OCR text segments
+        + structured annotations). Re-running it upserts the atom for
+        that sheet. Dual-auth (hauska-mcp-server bearer OR Cortex SPA
+        session).
+      parameters:
+        - name: sheetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The produced sheet-content-extraction atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetContentExtractionResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Sheet not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: getSheetContentExtraction
+      tags: [sheet-content]
+      summary: Fetch the sheet-content-extraction atom for a sheet
+      description: |
+        Cortex L2 (Lane C.4). Returns the `sheet-content-extraction`
+        atom for the sheet, or `null` when the sheet exists but has not
+        been extracted yet (a normal empty result, not a 404).
+      parameters:
+        - name: sheetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The sheet-content-extraction atom, or null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetContentExtractionResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Sheet not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/attached-documents:
+    get:
+      operationId: listAttachedDocuments
+      tags: [sheet-content]
+      summary: List the supporting documents attached to an engagement
+      description: |
+        Cortex L2 (Lane C.4). Returns the engagement's
+        `attached-document` atoms, optionally filtered to one document
+        type.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: documentType
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/AttachedDocumentType"
+      responses:
+        "200":
+          description: The engagement's attached-document atoms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachedDocumentListResponse"
+        "400":
+          description: Invalid documentType filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /attached-documents/{attachedDocumentId}:
+    get:
+      operationId: getAttachedDocument
+      tags: [sheet-content]
+      summary: Fetch a single attached-document atom
+      description: |
+        Cortex L2 (Lane C.4). Returns the `attached-document` atom
+        including its parsed `extractedText` and `originalBlobRef`.
+      parameters:
+        - name: attachedDocumentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The attached-document atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachedDocumentResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Attached document not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/deliverable-letters:
+    post:
+      operationId: createDeliverableLetter
+      tags: [deliverable-letters]
+      summary: Create a deliverable letter in draft status
+      description: Cortex L3 (Lane C.4). Creates a comment-response letter.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeliverableLetterBody"
+      responses:
+        "201":
+          description: The newly created deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listDeliverableLetters
+      tags: [deliverable-letters]
+      summary: List the deliverable letters for an engagement
+      description: |
+        Cortex L3 (Lane C.4). Returns the engagement's deliverable
+        letters newest-first. (Read path added in C.4.3 beyond the
+        original endpoint contract — the UI cannot list / reload a
+        letter without it.)
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The engagement's deliverable-letter atoms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterListResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}:
+    get:
+      operationId: getDeliverableLetter
+      tags: [deliverable-letters]
+      summary: Fetch a single deliverable-letter atom
+      description: |
+        Cortex L3 (Lane C.4). (Read path added in C.4.3 beyond the
+        original endpoint contract.)
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/sections:
+    post:
+      operationId: upsertDeliverableLetterSection
+      tags: [deliverable-letters]
+      summary: Upsert a deliverable-letter section by index
+      description: |
+        Cortex L3 (Lane C.4). `sectionIndex` within the current array
+        replaces that section (provenance preserved); equal to the
+        array length appends; a larger index is a 400.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliverableLetterSectionBody"
+      responses:
+        "200":
+          description: The updated deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "400":
+          description: Invalid body or section index out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/sections/{sectionIndex}/provenance:
+    post:
+      operationId: mergeDeliverableLetterProvenance
+      tags: [deliverable-letters]
+      summary: Merge atom references into a section's provenance
+      description: |
+        Cortex L3 (Lane C.4). Adds the supplied entityIds to the
+        section's existing provenance arrays, deduped.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sectionIndex
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliverableLetterProvenanceBody"
+      responses:
+        "200":
+          description: The updated deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "400":
+          description: Invalid body or section index out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/completeness:
+    get:
+      operationId: getDeliverableLetterCompleteness
+      tags: [deliverable-letters]
+      summary: Check whether a deliverable letter is complete (sendable)
+      description: |
+        Cortex L3 (Lane C.4). A letter is complete when the `cover`,
+        `intro`, and `signature` section kinds are each present.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The completeness verdict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterCompletenessResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/send:
+    post:
+      operationId: sendDeliverableLetter
+      tags: [deliverable-letters]
+      summary: Transition a deliverable letter from draft to sent
+      description: |
+        Cortex L3 (Lane C.4). Runs the completeness check first; an
+        incomplete letter is rejected with a 409.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The sent deliverable-letter atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            The letter is incomplete
+            (`error: "deliverable_letter_incomplete"`, `missing: [...]`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterCompletenessError"
+
+  /engagements/{engagementId}/detail-callout-specs:
+    post:
+      operationId: createDetailCalloutSpec
+      tags: [detail-callout-specs]
+      summary: Create a detail-callout spec
+      description: |
+        Cortex L4 (Lane C.4). The `spec` payload is validated against
+        the discriminated-union schema keyed on `detailType`.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDetailCalloutSpecBody"
+      responses:
+        "201":
+          description: The newly created detail-callout-spec atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecResponse"
+        "400":
+          description: Invalid request body or malformed spec payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listDetailCalloutSpecs
+      tags: [detail-callout-specs]
+      summary: List the detail-callout specs for an engagement
+      description: Cortex L4 (Lane C.4).
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: pushState
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/DetailCalloutPushState"
+      responses:
+        "200":
+          description: The engagement's detail-callout-spec atoms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecListResponse"
+        "400":
+          description: Invalid pushState filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /detail-callout-specs/{specId}:
+    get:
+      operationId: getDetailCalloutSpec
+      tags: [detail-callout-specs]
+      summary: Fetch a single detail-callout-spec atom
+      description: Cortex L4 (Lane C.4).
+      parameters:
+        - name: specId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The detail-callout-spec atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Detail-callout spec not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /detail-callout-specs/{specId}/push-state:
+    post:
+      operationId: updateDetailCalloutSpecPushState
+      tags: [detail-callout-specs]
+      summary: Transition a detail-callout spec to a new push state
+      description: |
+        Cortex L4 (Lane C.4). The transition is validated; an illegal
+        transition is rejected with a 409.
+      parameters:
+        - name: specId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DetailCalloutPushStateBody"
+      responses:
+        "200":
+          description: The updated detail-callout-spec atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Detail-callout spec not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            Illegal push transition
+            (`error: "illegal_push_transition"`, with `from` / `to` /
+            `legalNextStates`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IllegalPushTransitionError"
+
+  /detail-callout-specs/{specId}/aps-ref:
+    post:
+      operationId: attachDetailCalloutSpecApsRef
+      tags: [detail-callout-specs]
+      summary: Write the APS Design Automation work-item ref onto a spec
+      description: Cortex L4 (Lane C.4).
+      parameters:
+        - name: specId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DetailCalloutApsRefBody"
+      responses:
+        "200":
+          description: The updated detail-callout-spec atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailCalloutSpecResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Detail-callout spec not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/product-spec-references:
+    post:
+      operationId: createProductSpecReference
+      tags: [product-spec-references]
+      summary: Create a product-spec reference
+      description: |
+        Cortex L5 (Lane C.4). `esrNumber` must match `ESR-<digits>`.
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductSpecReferenceBody"
+      responses:
+        "201":
+          description: The newly created product-spec-reference atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSpecReferenceResponse"
+        "400":
+          description: Invalid request body or malformed esrNumber.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listProductSpecReferences
+      tags: [product-spec-references]
+      summary: List the product-spec references for an engagement
+      description: Cortex L5 (Lane C.4).
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ProductSpecStatus"
+      responses:
+        "200":
+          description: The engagement's product-spec-reference atoms.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSpecReferenceListResponse"
+        "400":
+          description: Invalid status filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /product-spec-references/{referenceId}:
+    get:
+      operationId: getProductSpecReference
+      tags: [product-spec-references]
+      summary: Fetch a single product-spec-reference atom
+      description: Cortex L5 (Lane C.4). Includes the full statusHistory.
+      parameters:
+        - name: referenceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The product-spec-reference atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSpecReferenceResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Product-spec reference not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /product-spec-references/{referenceId}/refresh:
+    post:
+      operationId: refreshProductSpecReference
+      tags: [product-spec-references]
+      summary: Re-verify a product-spec reference against the live ICC-ES listing
+      description: |
+        Cortex L5 (Lane C.4). Synchronously polls the ICC-ES listing
+        (5-10s timeout). On a status change a new statusHistory entry
+        is appended; `lastVerifiedAt` is always updated. An unreachable
+        ICC-ES returns a 502.
+      parameters:
+        - name: referenceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The refreshed product-spec-reference atom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductSpecReferenceResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Product-spec reference not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: |
+            ICC-ES could not be reached; the response carries
+            `error: icc_es_unreachable`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letters/{letterId}/renders:
+    post:
+      operationId: renderDeliverableLetter
+      tags: [deliverable-letter-renders]
+      summary: Render an L3 deliverable letter to DOCX or PDF
+      description: |
+        Cortex L6 (Lane C.4). Completeness-gated (an incomplete letter
+        is a 409); generates the document synchronously and persists it
+        as a first-class `deliverable-letter-render` atom.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderDeliverableLetterBody"
+      responses:
+        "201":
+          description: The render atom plus an optional download URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterRenderResponse"
+        "400":
+          description: Invalid request body or unsupported format.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: |
+            The letter is incomplete
+            (`error: "deliverable_letter_incomplete"`, `missing: [...]`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterCompletenessError"
+    get:
+      operationId: listDeliverableLetterRenders
+      tags: [deliverable-letter-renders]
+      summary: List every render of a deliverable letter
+      description: Cortex L6 (Lane C.4). Newest-first.
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The letter's render atoms, newest-first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableLetterRenderListResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deliverable letter not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /deliverable-letter-renders/{renderId}/file:
+    get:
+      operationId: downloadDeliverableLetterRender
+      tags: [deliverable-letter-renders]
+      summary: Download the rendered DOCX/PDF bytes
+      description: |
+        Cortex L6 (Lane C.4). Streams the stored render bytes. Added in
+        C.4.6 beyond the original endpoint contract — the UI Download
+        action and the `downloadUrl` resolution need a byte-serving
+        route.
+      parameters:
+        - name: renderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The render file bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Render not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -8008,6 +8982,1024 @@ components:
           description: Required, non-empty finding entityId.
       required:
         - findingId
+
+    BoundingBox:
+      description: Page-relative bounding box, normalized to [0, 1].
+      type: object
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        width:
+          type: number
+        height:
+          type: number
+      required:
+        - x
+        - y
+        - width
+        - height
+
+    SheetTextSegment:
+      description: One OCR text segment with its page-relative position.
+      type: object
+      properties:
+        text:
+          type: string
+        boundingBox:
+          $ref: "#/components/schemas/BoundingBox"
+        sourceConfidence:
+          type: number
+      required:
+        - text
+        - boundingBox
+        - sourceConfidence
+
+    SheetAnnotationKind:
+      type: string
+      enum:
+        - revision-cloud
+        - dimension
+        - schedule-row
+        - callout
+      description: Structured-annotation category extracted from a sheet.
+
+    SheetStructuredAnnotation:
+      description: One structured annotation extracted from a sheet.
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/SheetAnnotationKind"
+        position:
+          $ref: "#/components/schemas/BoundingBox"
+        content:
+          type: string
+        sourceConfidence:
+          type: number
+      required:
+        - kind
+        - position
+        - content
+        - sourceConfidence
+
+    SheetContentExtractionAtom:
+      description: |
+        Cortex L2a `sheet-content-extraction` atom instance. Conforms to
+        `SHEET_CONTENT_EXTRACTION_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [sheet-content-extraction]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        sourceSheetId:
+          type: string
+        engagementId:
+          type: string
+          nullable: true
+        pageLabel:
+          type: string
+        extractedTextSegments:
+          type: array
+          items:
+            $ref: "#/components/schemas/SheetTextSegment"
+        structuredAnnotations:
+          type: array
+          items:
+            $ref: "#/components/schemas/SheetStructuredAnnotation"
+        ocrModel:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - sourceSheetId
+        - engagementId
+        - pageLabel
+        - extractedTextSegments
+        - structuredAnnotations
+        - ocrModel
+        - actorId
+
+    SheetContentExtractionResponse:
+      type: object
+      description: |
+        Wire envelope for the L2a routes. `sheetContentExtraction` is
+        `null` when the sheet exists but has not been extracted yet.
+      properties:
+        sheetContentExtraction:
+          allOf:
+            - $ref: "#/components/schemas/SheetContentExtractionAtom"
+          nullable: true
+      required:
+        - sheetContentExtraction
+
+    AttachedDocumentType:
+      type: string
+      enum:
+        - specification
+        - calculation
+        - product-data
+        - narrative
+      description: Supporting-document category attached to an engagement.
+
+    AttachedDocumentAtom:
+      description: |
+        Cortex L2b `attached-document` atom instance. Conforms to
+        `ATTACHED_DOCUMENT_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [attached-document]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        engagementId:
+          type: string
+        title:
+          type: string
+        documentType:
+          $ref: "#/components/schemas/AttachedDocumentType"
+        extractedText:
+          type: string
+        originalBlobRef:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - engagementId
+        - title
+        - documentType
+        - extractedText
+        - originalBlobRef
+        - actorId
+
+    AttachedDocumentResponse:
+      type: object
+      properties:
+        attachedDocument:
+          $ref: "#/components/schemas/AttachedDocumentAtom"
+      required:
+        - attachedDocument
+
+    AttachedDocumentListResponse:
+      type: object
+      properties:
+        attachedDocuments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachedDocumentAtom"
+      required:
+        - attachedDocuments
+
+    LetterSectionKind:
+      type: string
+      enum:
+        - cover
+        - intro
+        - per-comment-response
+        - signature
+      description: Cortex L3 — deliverable-letter section category.
+
+    LetterSectionProvenance:
+      description: |
+        The L1 / L2 / finding / adjudication atoms that fed a section.
+      type: object
+      properties:
+        responseTaskIds:
+          type: array
+          items:
+            type: string
+        sheetContentExtractionIds:
+          type: array
+          items:
+            type: string
+        findingIds:
+          type: array
+          items:
+            type: string
+        adjudicationStateIds:
+          type: array
+          items:
+            type: string
+      required:
+        - responseTaskIds
+        - sheetContentExtractionIds
+        - findingIds
+        - adjudicationStateIds
+
+    LetterSection:
+      description: One structured section of a deliverable letter.
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/LetterSectionKind"
+        heading:
+          type: string
+        content:
+          type: string
+        provenance:
+          $ref: "#/components/schemas/LetterSectionProvenance"
+      required:
+        - kind
+        - heading
+        - content
+        - provenance
+
+    DeliverableLetterStatus:
+      type: string
+      enum:
+        - draft
+        - sent
+      description: Cortex L3 — deliverable-letter lifecycle status.
+
+    DeliverableLetterAtom:
+      description: |
+        Cortex L3 `deliverable-letter` atom instance. Conforms to
+        `DELIVERABLE_LETTER_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [deliverable-letter]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        engagementId:
+          type: string
+        title:
+          type: string
+        status:
+          $ref: "#/components/schemas/DeliverableLetterStatus"
+        recipientActorId:
+          type: string
+          nullable: true
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/LetterSection"
+        createdAt:
+          type: string
+        sentAt:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - engagementId
+        - title
+        - status
+        - recipientActorId
+        - sections
+        - createdAt
+        - sentAt
+        - actorId
+        - principalActorId
+
+    DeliverableLetterResponse:
+      type: object
+      properties:
+        deliverableLetter:
+          $ref: "#/components/schemas/DeliverableLetterAtom"
+      required:
+        - deliverableLetter
+
+    DeliverableLetterListResponse:
+      type: object
+      properties:
+        deliverableLetters:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliverableLetterAtom"
+      required:
+        - deliverableLetters
+
+    CreateDeliverableLetterSection:
+      description: One initial section supplied at letter-create time.
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/LetterSectionKind"
+        heading:
+          type: string
+        content:
+          type: string
+      required:
+        - kind
+        - heading
+        - content
+
+    CreateDeliverableLetterBody:
+      description: Body for `POST /engagements/{id}/deliverable-letters`.
+      type: object
+      properties:
+        title:
+          type: string
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateDeliverableLetterSection"
+        recipientActorId:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+      required:
+        - title
+
+    DeliverableLetterSectionBody:
+      description: Body for `POST /deliverable-letters/{letterId}/sections`.
+      type: object
+      properties:
+        sectionIndex:
+          type: integer
+        kind:
+          $ref: "#/components/schemas/LetterSectionKind"
+        heading:
+          type: string
+        content:
+          type: string
+      required:
+        - sectionIndex
+        - kind
+        - heading
+        - content
+
+    DeliverableLetterProvenanceBody:
+      description: |
+        Body for the provenance-merge route. All keys optional; at
+        least one must be supplied.
+      type: object
+      properties:
+        responseTaskIds:
+          type: array
+          items:
+            type: string
+        sheetContentExtractionIds:
+          type: array
+          items:
+            type: string
+        findingIds:
+          type: array
+          items:
+            type: string
+        adjudicationStateIds:
+          type: array
+          items:
+            type: string
+
+    DeliverableLetterCompletenessResponse:
+      type: object
+      properties:
+        complete:
+          type: boolean
+        missing:
+          type: array
+          items:
+            $ref: "#/components/schemas/LetterSectionKind"
+      required:
+        - complete
+        - missing
+
+    DeliverableLetterCompletenessError:
+      description: 409 envelope when a send is rejected for incompleteness.
+      type: object
+      properties:
+        error:
+          type: string
+        missing:
+          type: array
+          items:
+            $ref: "#/components/schemas/LetterSectionKind"
+      required:
+        - error
+        - missing
+
+    DetailCalloutType:
+      type: string
+      enum:
+        - door-schedule
+        - wall-section
+        - wall-type
+        - room-finish
+      description: Cortex L4 — detail-callout detail type (the spec discriminant).
+
+    DetailCalloutPushState:
+      type: string
+      enum:
+        - pending
+        - pushed
+        - applied
+        - rejected-by-user
+      description: Cortex L4 — detail-callout-spec Revit push lifecycle state.
+
+    WallAssemblyLayer:
+      type: object
+      properties:
+        material:
+          type: string
+        thickness:
+          type: string
+        function:
+          type: string
+      required:
+        - material
+        - thickness
+        - function
+
+    DoorScheduleRow:
+      type: object
+      properties:
+        doorMark:
+          type: string
+        doorType:
+          type: string
+        width:
+          type: string
+        height:
+          type: string
+        material:
+          type: string
+        fireRating:
+          type: string
+        hardwareSet:
+          type: string
+      required:
+        - doorMark
+        - doorType
+        - width
+        - height
+        - material
+        - fireRating
+        - hardwareSet
+
+    DoorScheduleSpec:
+      type: object
+      properties:
+        detailType:
+          type: string
+          enum: [door-schedule]
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/DoorScheduleRow"
+      required:
+        - detailType
+        - rows
+
+    WallSectionSpec:
+      type: object
+      properties:
+        detailType:
+          type: string
+          enum: [wall-section]
+        sectionMark:
+          type: string
+        cutLocation:
+          type: string
+        assemblyLayers:
+          type: array
+          items:
+            $ref: "#/components/schemas/WallAssemblyLayer"
+        baseDatum:
+          type: string
+        topDatum:
+          type: string
+      required:
+        - detailType
+        - sectionMark
+        - cutLocation
+        - assemblyLayers
+        - baseDatum
+        - topDatum
+
+    WallTypeSpec:
+      type: object
+      properties:
+        detailType:
+          type: string
+          enum: [wall-type]
+        typeMark:
+          type: string
+        assemblyLayers:
+          type: array
+          items:
+            $ref: "#/components/schemas/WallAssemblyLayer"
+        fireRating:
+          type: string
+        stcRating:
+          type: string
+      required:
+        - detailType
+        - typeMark
+        - assemblyLayers
+        - fireRating
+        - stcRating
+
+    RoomFinishSpec:
+      type: object
+      properties:
+        detailType:
+          type: string
+          enum: [room-finish]
+        roomName:
+          type: string
+        roomNumber:
+          type: string
+        floorFinish:
+          type: string
+        baseFinish:
+          type: string
+        wallFinish:
+          type: string
+        ceilingFinish:
+          type: string
+        ceilingHeight:
+          type: string
+      required:
+        - detailType
+        - roomName
+        - roomNumber
+        - floorFinish
+        - baseFinish
+        - wallFinish
+        - ceilingFinish
+        - ceilingHeight
+
+    DetailCalloutSpecPayload:
+      description: |
+        Discriminated detail-callout spec payload, keyed on `detailType`.
+      oneOf:
+        - $ref: "#/components/schemas/DoorScheduleSpec"
+        - $ref: "#/components/schemas/WallSectionSpec"
+        - $ref: "#/components/schemas/WallTypeSpec"
+        - $ref: "#/components/schemas/RoomFinishSpec"
+      discriminator:
+        propertyName: detailType
+        mapping:
+          door-schedule: "#/components/schemas/DoorScheduleSpec"
+          wall-section: "#/components/schemas/WallSectionSpec"
+          wall-type: "#/components/schemas/WallTypeSpec"
+          room-finish: "#/components/schemas/RoomFinishSpec"
+
+    DetailCalloutSpecAtom:
+      description: |
+        Cortex L4 `detail-callout-spec` atom instance. Conforms to
+        `DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [detail-callout-spec]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        engagementId:
+          type: string
+        spec:
+          $ref: "#/components/schemas/DetailCalloutSpecPayload"
+        pushState:
+          $ref: "#/components/schemas/DetailCalloutPushState"
+        apsTaskRef:
+          type: string
+          nullable: true
+        findingId:
+          type: string
+          nullable: true
+        responseTaskId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        pushedAt:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - engagementId
+        - spec
+        - pushState
+        - apsTaskRef
+        - findingId
+        - responseTaskId
+        - createdAt
+        - pushedAt
+        - actorId
+        - principalActorId
+
+    DetailCalloutSpecResponse:
+      type: object
+      properties:
+        detailCalloutSpec:
+          $ref: "#/components/schemas/DetailCalloutSpecAtom"
+      required:
+        - detailCalloutSpec
+
+    DetailCalloutSpecListResponse:
+      type: object
+      properties:
+        detailCalloutSpecs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetailCalloutSpecAtom"
+      required:
+        - detailCalloutSpecs
+
+    CreateDetailCalloutSpecBody:
+      description: Body for `POST /engagements/{id}/detail-callout-specs`.
+      type: object
+      properties:
+        spec:
+          $ref: "#/components/schemas/DetailCalloutSpecPayload"
+        findingId:
+          type: string
+          nullable: true
+        responseTaskId:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+      required:
+        - spec
+
+    DetailCalloutPushStateBody:
+      type: object
+      properties:
+        pushState:
+          $ref: "#/components/schemas/DetailCalloutPushState"
+      required:
+        - pushState
+
+    DetailCalloutApsRefBody:
+      type: object
+      properties:
+        apsTaskRef:
+          type: string
+      required:
+        - apsTaskRef
+
+    IllegalPushTransitionError:
+      description: 409 envelope for an illegal push-state transition.
+      type: object
+      properties:
+        error:
+          type: string
+        from:
+          $ref: "#/components/schemas/DetailCalloutPushState"
+        to:
+          $ref: "#/components/schemas/DetailCalloutPushState"
+        legalNextStates:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetailCalloutPushState"
+      required:
+        - error
+        - from
+        - to
+        - legalNextStates
+
+    ProductSpecStatus:
+      type: string
+      enum:
+        - active
+        - withdrawn
+        - expired
+      description: Cortex L5 — ICC-ES evaluation status.
+
+    ProductIdentifier:
+      description: Structured product identity (never free-text).
+      type: object
+      properties:
+        name:
+          type: string
+        manufacturer:
+          type: string
+      required:
+        - name
+        - manufacturer
+
+    ProductSpecStatusChange:
+      description: One entry in the append-only ESR-status-change chain.
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/ProductSpecStatus"
+        changedAt:
+          type: string
+        sourceUrl:
+          type: string
+      required:
+        - status
+        - changedAt
+        - sourceUrl
+
+    ProductSpecReferenceAtom:
+      description: |
+        Cortex L5 `product-spec-reference` atom instance. Conforms to
+        `PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [product-spec-reference]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        product:
+          $ref: "#/components/schemas/ProductIdentifier"
+        esrNumber:
+          type: string
+        status:
+          $ref: "#/components/schemas/ProductSpecStatus"
+        lastVerifiedAt:
+          type: string
+        statusHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSpecStatusChange"
+        engagementId:
+          type: string
+          nullable: true
+        findingId:
+          type: string
+          nullable: true
+        responseTaskId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - product
+        - esrNumber
+        - status
+        - lastVerifiedAt
+        - statusHistory
+        - engagementId
+        - findingId
+        - responseTaskId
+        - createdAt
+        - actorId
+        - principalActorId
+
+    ProductSpecReferenceResponse:
+      type: object
+      properties:
+        productSpecReference:
+          $ref: "#/components/schemas/ProductSpecReferenceAtom"
+      required:
+        - productSpecReference
+
+    ProductSpecReferenceListResponse:
+      type: object
+      properties:
+        productSpecReferences:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSpecReferenceAtom"
+      required:
+        - productSpecReferences
+
+    CreateProductSpecReferenceBody:
+      description: Body for `POST /engagements/{id}/product-spec-references`.
+      type: object
+      properties:
+        product:
+          $ref: "#/components/schemas/ProductIdentifier"
+        esrNumber:
+          type: string
+          description: ICC-ES ESR number, format `ESR-<digits>`.
+        findingId:
+          type: string
+          nullable: true
+        responseTaskId:
+          type: string
+          nullable: true
+        actorId:
+          type: string
+          nullable: true
+        principalActorId:
+          type: string
+          nullable: true
+      required:
+        - product
+        - esrNumber
+
+    RenderFormat:
+      type: string
+      enum:
+        - docx
+        - pdf
+      description: Cortex L6 — deliverable-letter render output format.
+
+    DeliverableLetterRenderAtom:
+      description: |
+        Cortex L6 `deliverable-letter-render` atom instance. Conforms to
+        `DELIVERABLE_LETTER_RENDER_SCHEMA` in `@workspace/atoms-l-surface`.
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [deliverable-letter-render]
+        entityId:
+          type: string
+        jurisdictionTenant:
+          type: string
+        fetchedAt:
+          type: string
+        sourceAdapter:
+          type: string
+        sourceUrl:
+          type: string
+        contentHash:
+          type: string
+        sourceLetterRef:
+          type: string
+        sourceLetterVersion:
+          type: string
+        format:
+          $ref: "#/components/schemas/RenderFormat"
+        blobRef:
+          type: string
+        renderedAt:
+          type: string
+        renderedByActorId:
+          type: string
+          nullable: true
+        accessPolicy:
+          type: string
+          enum: [public-free, public-paid, platform-internal, tenant-private]
+      required:
+        - entityType
+        - entityId
+        - jurisdictionTenant
+        - fetchedAt
+        - sourceAdapter
+        - sourceUrl
+        - contentHash
+        - sourceLetterRef
+        - sourceLetterVersion
+        - format
+        - blobRef
+        - renderedAt
+        - renderedByActorId
+
+    DeliverableLetterRenderResponse:
+      type: object
+      properties:
+        render:
+          $ref: "#/components/schemas/DeliverableLetterRenderAtom"
+        downloadUrl:
+          type: string
+          description: |
+            Optional directly-usable URL the backend resolved from
+            `render.blobRef`.
+      required:
+        - render
+
+    DeliverableLetterRenderListResponse:
+      type: object
+      properties:
+        renders:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliverableLetterRenderAtom"
+      required:
+        - renders
+
+    RenderDeliverableLetterBody:
+      description: Body for `POST /deliverable-letters/{letterId}/renders`.
+      type: object
+      properties:
+        format:
+          $ref: "#/components/schemas/RenderFormat"
+        renderedByActorId:
+          type: string
+          nullable: true
+      required:
+        - format
 
     User:
       description: |

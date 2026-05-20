@@ -19,6 +19,8 @@ import type {
 import type {
   AtomHistoryResponse,
   AtomSummary,
+  AttachedDocumentListResponse,
+  AttachedDocumentResponse,
   BackfillCodeEmbeddingsParams,
   BimModelDivergenceResponse,
   BimModelRefreshResponse,
@@ -35,7 +37,10 @@ import type {
   CodeAtomSummary,
   CreateBriefingSourceBody,
   CreateCannedFindingBody,
+  CreateDeliverableLetterBody,
+  CreateDetailCalloutSpecBody,
   CreateEngagementSubmissionBody,
+  CreateProductSpecReferenceBody,
   CreateQaTriageItemBody,
   CreateResponseTaskBody,
   CreateReviewerAnnotationBody,
@@ -45,6 +50,18 @@ import type {
   CreateSubmissionFindingBody,
   CreateUserBody,
   Decision,
+  DeliverableLetterCompletenessError,
+  DeliverableLetterCompletenessResponse,
+  DeliverableLetterListResponse,
+  DeliverableLetterProvenanceBody,
+  DeliverableLetterRenderListResponse,
+  DeliverableLetterRenderResponse,
+  DeliverableLetterResponse,
+  DeliverableLetterSectionBody,
+  DetailCalloutApsRefBody,
+  DetailCalloutPushStateBody,
+  DetailCalloutSpecListResponse,
+  DetailCalloutSpecResponse,
   DismissReviewerRequestBody,
   DraftSubmissionCommunicationResponse,
   EmbeddingsBackfillResult,
@@ -71,15 +88,18 @@ import type {
   GetRenderOutputFileParams,
   GetSnapshotSheetHistoryParams,
   HealthStatus,
+  IllegalPushTransitionError,
   JurisdictionSummary,
   KickoffRenderBody,
   KickoffRenderResponse,
   LinkResponseTaskFindingBody,
+  ListAttachedDocumentsParams,
   ListBimModelDivergencesResponse,
   ListCannedFindingsParams,
   ListCannedFindingsResponse,
   ListCodeAtomsParams,
   ListDecisionsResponse,
+  ListDetailCalloutSpecsParams,
   ListEngagementBriefingSourcesParams,
   ListEngagementReviewerRequestsParams,
   ListFindingsRunsParams,
@@ -88,6 +108,7 @@ import type {
   ListMyReviewerRequestsParams,
   ListMyReviewerRequestsResponse,
   ListNotificationsResponse,
+  ListProductSpecReferencesParams,
   ListQaAutopilotRunsParams,
   ListQaRunsParams,
   ListQaTriageItemsParams,
@@ -104,6 +125,8 @@ import type {
   MatchEngagementBody,
   MatchEngagementResponse,
   OverrideFindingBody,
+  ProductSpecReferenceListResponse,
+  ProductSpecReferenceResponse,
   PromoteReviewerAnnotationsBody,
   PromoteReviewerAnnotationsResponse,
   PushBimModelBody,
@@ -127,6 +150,7 @@ import type {
   ReclassifySubmissionBody,
   RecordBimModelDivergenceBody,
   RecordDecisionBody,
+  RenderDeliverableLetterBody,
   RenderDetailResponse,
   RenderListResponse,
   RendersSweepResponse,
@@ -142,6 +166,7 @@ import type {
   ReviewerQueueResponse,
   ReviewerRequestResponse,
   Session,
+  SheetContentExtractionResponse,
   SheetSummary,
   SheetUploadResponse,
   SnapshotDetail,
@@ -12944,3 +12969,2323 @@ export const useLinkResponseTaskFinding = <
 > => {
   return useMutation(getLinkResponseTaskFindingMutationOptions(options));
 };
+
+/**
+ * Cortex L2 (Lane C.4). Runs the sheet-content extraction pass
+and emits a `sheet-content-extraction` atom (OCR text segments
++ structured annotations). Re-running it upserts the atom for
+that sheet. Dual-auth (hauska-mcp-server bearer OR Cortex SPA
+session).
+
+ * @summary Trigger the structured-content extraction pass on a sheet
+ */
+export const getTriggerSheetContentExtractionUrl = (sheetId: string) => {
+  return `/api/sheets/${sheetId}/content-extraction`;
+};
+
+export const triggerSheetContentExtraction = async (
+  sheetId: string,
+  options?: RequestInit,
+): Promise<SheetContentExtractionResponse> => {
+  return customFetch<SheetContentExtractionResponse>(
+    getTriggerSheetContentExtractionUrl(sheetId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getTriggerSheetContentExtractionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+    TError,
+    { sheetId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+  TError,
+  { sheetId: string },
+  TContext
+> => {
+  const mutationKey = ["triggerSheetContentExtraction"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+    { sheetId: string }
+  > = (props) => {
+    const { sheetId } = props ?? {};
+
+    return triggerSheetContentExtraction(sheetId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TriggerSheetContentExtractionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof triggerSheetContentExtraction>>
+>;
+
+export type TriggerSheetContentExtractionMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Trigger the structured-content extraction pass on a sheet
+ */
+export const useTriggerSheetContentExtraction = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+    TError,
+    { sheetId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof triggerSheetContentExtraction>>,
+  TError,
+  { sheetId: string },
+  TContext
+> => {
+  return useMutation(getTriggerSheetContentExtractionMutationOptions(options));
+};
+
+/**
+ * Cortex L2 (Lane C.4). Returns the `sheet-content-extraction`
+atom for the sheet, or `null` when the sheet exists but has not
+been extracted yet (a normal empty result, not a 404).
+
+ * @summary Fetch the sheet-content-extraction atom for a sheet
+ */
+export const getGetSheetContentExtractionUrl = (sheetId: string) => {
+  return `/api/sheets/${sheetId}/content-extraction`;
+};
+
+export const getSheetContentExtraction = async (
+  sheetId: string,
+  options?: RequestInit,
+): Promise<SheetContentExtractionResponse> => {
+  return customFetch<SheetContentExtractionResponse>(
+    getGetSheetContentExtractionUrl(sheetId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetSheetContentExtractionQueryKey = (sheetId: string) => {
+  return [`/api/sheets/${sheetId}/content-extraction`] as const;
+};
+
+export const getGetSheetContentExtractionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSheetContentExtraction>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  sheetId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSheetContentExtraction>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSheetContentExtractionQueryKey(sheetId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSheetContentExtraction>>
+  > = ({ signal }) =>
+    getSheetContentExtraction(sheetId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!sheetId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSheetContentExtraction>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSheetContentExtractionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSheetContentExtraction>>
+>;
+export type GetSheetContentExtractionQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch the sheet-content-extraction atom for a sheet
+ */
+
+export function useGetSheetContentExtraction<
+  TData = Awaited<ReturnType<typeof getSheetContentExtraction>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  sheetId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSheetContentExtraction>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSheetContentExtractionQueryOptions(
+    sheetId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L2 (Lane C.4). Returns the engagement's
+`attached-document` atoms, optionally filtered to one document
+type.
+
+ * @summary List the supporting documents attached to an engagement
+ */
+export const getListAttachedDocumentsUrl = (
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${engagementId}/attached-documents?${stringifiedParams}`
+    : `/api/engagements/${engagementId}/attached-documents`;
+};
+
+export const listAttachedDocuments = async (
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+  options?: RequestInit,
+): Promise<AttachedDocumentListResponse> => {
+  return customFetch<AttachedDocumentListResponse>(
+    getListAttachedDocumentsUrl(engagementId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListAttachedDocumentsQueryKey = (
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+) => {
+  return [
+    `/api/engagements/${engagementId}/attached-documents`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListAttachedDocumentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAttachedDocuments>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAttachedDocuments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListAttachedDocumentsQueryKey(engagementId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAttachedDocuments>>
+  > = ({ signal }) =>
+    listAttachedDocuments(engagementId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAttachedDocuments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAttachedDocumentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAttachedDocuments>>
+>;
+export type ListAttachedDocumentsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the supporting documents attached to an engagement
+ */
+
+export function useListAttachedDocuments<
+  TData = Awaited<ReturnType<typeof listAttachedDocuments>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListAttachedDocumentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAttachedDocuments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAttachedDocumentsQueryOptions(
+    engagementId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L2 (Lane C.4). Returns the `attached-document` atom
+including its parsed `extractedText` and `originalBlobRef`.
+
+ * @summary Fetch a single attached-document atom
+ */
+export const getGetAttachedDocumentUrl = (attachedDocumentId: string) => {
+  return `/api/attached-documents/${attachedDocumentId}`;
+};
+
+export const getAttachedDocument = async (
+  attachedDocumentId: string,
+  options?: RequestInit,
+): Promise<AttachedDocumentResponse> => {
+  return customFetch<AttachedDocumentResponse>(
+    getGetAttachedDocumentUrl(attachedDocumentId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAttachedDocumentQueryKey = (attachedDocumentId: string) => {
+  return [`/api/attached-documents/${attachedDocumentId}`] as const;
+};
+
+export const getGetAttachedDocumentQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAttachedDocument>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  attachedDocumentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAttachedDocument>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetAttachedDocumentQueryKey(attachedDocumentId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAttachedDocument>>
+  > = ({ signal }) =>
+    getAttachedDocument(attachedDocumentId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!attachedDocumentId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAttachedDocument>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAttachedDocumentQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAttachedDocument>>
+>;
+export type GetAttachedDocumentQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch a single attached-document atom
+ */
+
+export function useGetAttachedDocument<
+  TData = Awaited<ReturnType<typeof getAttachedDocument>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  attachedDocumentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAttachedDocument>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAttachedDocumentQueryOptions(
+    attachedDocumentId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L3 (Lane C.4). Creates a comment-response letter.
+ * @summary Create a deliverable letter in draft status
+ */
+export const getCreateDeliverableLetterUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/deliverable-letters`;
+};
+
+export const createDeliverableLetter = async (
+  engagementId: string,
+  createDeliverableLetterBody: CreateDeliverableLetterBody,
+  options?: RequestInit,
+): Promise<DeliverableLetterResponse> => {
+  return customFetch<DeliverableLetterResponse>(
+    getCreateDeliverableLetterUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createDeliverableLetterBody),
+    },
+  );
+};
+
+export const getCreateDeliverableLetterMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDeliverableLetter>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateDeliverableLetterBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createDeliverableLetter>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateDeliverableLetterBody> },
+  TContext
+> => {
+  const mutationKey = ["createDeliverableLetter"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createDeliverableLetter>>,
+    { engagementId: string; data: BodyType<CreateDeliverableLetterBody> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return createDeliverableLetter(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateDeliverableLetterMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createDeliverableLetter>>
+>;
+export type CreateDeliverableLetterMutationBody =
+  BodyType<CreateDeliverableLetterBody>;
+export type CreateDeliverableLetterMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a deliverable letter in draft status
+ */
+export const useCreateDeliverableLetter = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDeliverableLetter>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateDeliverableLetterBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createDeliverableLetter>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateDeliverableLetterBody> },
+  TContext
+> => {
+  return useMutation(getCreateDeliverableLetterMutationOptions(options));
+};
+
+/**
+ * Cortex L3 (Lane C.4). Returns the engagement's deliverable
+letters newest-first. (Read path added in C.4.3 beyond the
+original endpoint contract — the UI cannot list / reload a
+letter without it.)
+
+ * @summary List the deliverable letters for an engagement
+ */
+export const getListDeliverableLettersUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/deliverable-letters`;
+};
+
+export const listDeliverableLetters = async (
+  engagementId: string,
+  options?: RequestInit,
+): Promise<DeliverableLetterListResponse> => {
+  return customFetch<DeliverableLetterListResponse>(
+    getListDeliverableLettersUrl(engagementId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListDeliverableLettersQueryKey = (engagementId: string) => {
+  return [`/api/engagements/${engagementId}/deliverable-letters`] as const;
+};
+
+export const getListDeliverableLettersQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDeliverableLetters>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDeliverableLetters>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListDeliverableLettersQueryKey(engagementId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDeliverableLetters>>
+  > = ({ signal }) =>
+    listDeliverableLetters(engagementId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDeliverableLetters>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListDeliverableLettersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDeliverableLetters>>
+>;
+export type ListDeliverableLettersQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the deliverable letters for an engagement
+ */
+
+export function useListDeliverableLetters<
+  TData = Awaited<ReturnType<typeof listDeliverableLetters>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDeliverableLetters>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListDeliverableLettersQueryOptions(
+    engagementId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L3 (Lane C.4). (Read path added in C.4.3 beyond the
+original endpoint contract.)
+
+ * @summary Fetch a single deliverable-letter atom
+ */
+export const getGetDeliverableLetterUrl = (letterId: string) => {
+  return `/api/deliverable-letters/${letterId}`;
+};
+
+export const getDeliverableLetter = async (
+  letterId: string,
+  options?: RequestInit,
+): Promise<DeliverableLetterResponse> => {
+  return customFetch<DeliverableLetterResponse>(
+    getGetDeliverableLetterUrl(letterId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDeliverableLetterQueryKey = (letterId: string) => {
+  return [`/api/deliverable-letters/${letterId}`] as const;
+};
+
+export const getGetDeliverableLetterQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDeliverableLetter>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  letterId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDeliverableLetter>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDeliverableLetterQueryKey(letterId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDeliverableLetter>>
+  > = ({ signal }) =>
+    getDeliverableLetter(letterId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!letterId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDeliverableLetter>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDeliverableLetterQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDeliverableLetter>>
+>;
+export type GetDeliverableLetterQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch a single deliverable-letter atom
+ */
+
+export function useGetDeliverableLetter<
+  TData = Awaited<ReturnType<typeof getDeliverableLetter>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  letterId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDeliverableLetter>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDeliverableLetterQueryOptions(letterId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L3 (Lane C.4). `sectionIndex` within the current array
+replaces that section (provenance preserved); equal to the
+array length appends; a larger index is a 400.
+
+ * @summary Upsert a deliverable-letter section by index
+ */
+export const getUpsertDeliverableLetterSectionUrl = (letterId: string) => {
+  return `/api/deliverable-letters/${letterId}/sections`;
+};
+
+export const upsertDeliverableLetterSection = async (
+  letterId: string,
+  deliverableLetterSectionBody: DeliverableLetterSectionBody,
+  options?: RequestInit,
+): Promise<DeliverableLetterResponse> => {
+  return customFetch<DeliverableLetterResponse>(
+    getUpsertDeliverableLetterSectionUrl(letterId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(deliverableLetterSectionBody),
+    },
+  );
+};
+
+export const getUpsertDeliverableLetterSectionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof upsertDeliverableLetterSection>>,
+    TError,
+    { letterId: string; data: BodyType<DeliverableLetterSectionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof upsertDeliverableLetterSection>>,
+  TError,
+  { letterId: string; data: BodyType<DeliverableLetterSectionBody> },
+  TContext
+> => {
+  const mutationKey = ["upsertDeliverableLetterSection"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof upsertDeliverableLetterSection>>,
+    { letterId: string; data: BodyType<DeliverableLetterSectionBody> }
+  > = (props) => {
+    const { letterId, data } = props ?? {};
+
+    return upsertDeliverableLetterSection(letterId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpsertDeliverableLetterSectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof upsertDeliverableLetterSection>>
+>;
+export type UpsertDeliverableLetterSectionMutationBody =
+  BodyType<DeliverableLetterSectionBody>;
+export type UpsertDeliverableLetterSectionMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Upsert a deliverable-letter section by index
+ */
+export const useUpsertDeliverableLetterSection = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof upsertDeliverableLetterSection>>,
+    TError,
+    { letterId: string; data: BodyType<DeliverableLetterSectionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof upsertDeliverableLetterSection>>,
+  TError,
+  { letterId: string; data: BodyType<DeliverableLetterSectionBody> },
+  TContext
+> => {
+  return useMutation(getUpsertDeliverableLetterSectionMutationOptions(options));
+};
+
+/**
+ * Cortex L3 (Lane C.4). Adds the supplied entityIds to the
+section's existing provenance arrays, deduped.
+
+ * @summary Merge atom references into a section's provenance
+ */
+export const getMergeDeliverableLetterProvenanceUrl = (
+  letterId: string,
+  sectionIndex: number,
+) => {
+  return `/api/deliverable-letters/${letterId}/sections/${sectionIndex}/provenance`;
+};
+
+export const mergeDeliverableLetterProvenance = async (
+  letterId: string,
+  sectionIndex: number,
+  deliverableLetterProvenanceBody: DeliverableLetterProvenanceBody,
+  options?: RequestInit,
+): Promise<DeliverableLetterResponse> => {
+  return customFetch<DeliverableLetterResponse>(
+    getMergeDeliverableLetterProvenanceUrl(letterId, sectionIndex),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(deliverableLetterProvenanceBody),
+    },
+  );
+};
+
+export const getMergeDeliverableLetterProvenanceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof mergeDeliverableLetterProvenance>>,
+    TError,
+    {
+      letterId: string;
+      sectionIndex: number;
+      data: BodyType<DeliverableLetterProvenanceBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof mergeDeliverableLetterProvenance>>,
+  TError,
+  {
+    letterId: string;
+    sectionIndex: number;
+    data: BodyType<DeliverableLetterProvenanceBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["mergeDeliverableLetterProvenance"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof mergeDeliverableLetterProvenance>>,
+    {
+      letterId: string;
+      sectionIndex: number;
+      data: BodyType<DeliverableLetterProvenanceBody>;
+    }
+  > = (props) => {
+    const { letterId, sectionIndex, data } = props ?? {};
+
+    return mergeDeliverableLetterProvenance(
+      letterId,
+      sectionIndex,
+      data,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MergeDeliverableLetterProvenanceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof mergeDeliverableLetterProvenance>>
+>;
+export type MergeDeliverableLetterProvenanceMutationBody =
+  BodyType<DeliverableLetterProvenanceBody>;
+export type MergeDeliverableLetterProvenanceMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Merge atom references into a section's provenance
+ */
+export const useMergeDeliverableLetterProvenance = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof mergeDeliverableLetterProvenance>>,
+    TError,
+    {
+      letterId: string;
+      sectionIndex: number;
+      data: BodyType<DeliverableLetterProvenanceBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof mergeDeliverableLetterProvenance>>,
+  TError,
+  {
+    letterId: string;
+    sectionIndex: number;
+    data: BodyType<DeliverableLetterProvenanceBody>;
+  },
+  TContext
+> => {
+  return useMutation(
+    getMergeDeliverableLetterProvenanceMutationOptions(options),
+  );
+};
+
+/**
+ * Cortex L3 (Lane C.4). A letter is complete when the `cover`,
+`intro`, and `signature` section kinds are each present.
+
+ * @summary Check whether a deliverable letter is complete (sendable)
+ */
+export const getGetDeliverableLetterCompletenessUrl = (letterId: string) => {
+  return `/api/deliverable-letters/${letterId}/completeness`;
+};
+
+export const getDeliverableLetterCompleteness = async (
+  letterId: string,
+  options?: RequestInit,
+): Promise<DeliverableLetterCompletenessResponse> => {
+  return customFetch<DeliverableLetterCompletenessResponse>(
+    getGetDeliverableLetterCompletenessUrl(letterId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDeliverableLetterCompletenessQueryKey = (
+  letterId: string,
+) => {
+  return [`/api/deliverable-letters/${letterId}/completeness`] as const;
+};
+
+export const getGetDeliverableLetterCompletenessQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDeliverableLetterCompleteness>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  letterId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDeliverableLetterCompleteness>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetDeliverableLetterCompletenessQueryKey(letterId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDeliverableLetterCompleteness>>
+  > = ({ signal }) =>
+    getDeliverableLetterCompleteness(letterId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!letterId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDeliverableLetterCompleteness>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDeliverableLetterCompletenessQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDeliverableLetterCompleteness>>
+>;
+export type GetDeliverableLetterCompletenessQueryError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Check whether a deliverable letter is complete (sendable)
+ */
+
+export function useGetDeliverableLetterCompleteness<
+  TData = Awaited<ReturnType<typeof getDeliverableLetterCompleteness>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  letterId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDeliverableLetterCompleteness>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDeliverableLetterCompletenessQueryOptions(
+    letterId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L3 (Lane C.4). Runs the completeness check first; an
+incomplete letter is rejected with a 409.
+
+ * @summary Transition a deliverable letter from draft to sent
+ */
+export const getSendDeliverableLetterUrl = (letterId: string) => {
+  return `/api/deliverable-letters/${letterId}/send`;
+};
+
+export const sendDeliverableLetter = async (
+  letterId: string,
+  options?: RequestInit,
+): Promise<DeliverableLetterResponse> => {
+  return customFetch<DeliverableLetterResponse>(
+    getSendDeliverableLetterUrl(letterId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getSendDeliverableLetterMutationOptions = <
+  TError = ErrorType<ErrorResponse | DeliverableLetterCompletenessError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendDeliverableLetter>>,
+    TError,
+    { letterId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendDeliverableLetter>>,
+  TError,
+  { letterId: string },
+  TContext
+> => {
+  const mutationKey = ["sendDeliverableLetter"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendDeliverableLetter>>,
+    { letterId: string }
+  > = (props) => {
+    const { letterId } = props ?? {};
+
+    return sendDeliverableLetter(letterId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendDeliverableLetterMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendDeliverableLetter>>
+>;
+
+export type SendDeliverableLetterMutationError = ErrorType<
+  ErrorResponse | DeliverableLetterCompletenessError
+>;
+
+/**
+ * @summary Transition a deliverable letter from draft to sent
+ */
+export const useSendDeliverableLetter = <
+  TError = ErrorType<ErrorResponse | DeliverableLetterCompletenessError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendDeliverableLetter>>,
+    TError,
+    { letterId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendDeliverableLetter>>,
+  TError,
+  { letterId: string },
+  TContext
+> => {
+  return useMutation(getSendDeliverableLetterMutationOptions(options));
+};
+
+/**
+ * Cortex L4 (Lane C.4). The `spec` payload is validated against
+the discriminated-union schema keyed on `detailType`.
+
+ * @summary Create a detail-callout spec
+ */
+export const getCreateDetailCalloutSpecUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/detail-callout-specs`;
+};
+
+export const createDetailCalloutSpec = async (
+  engagementId: string,
+  createDetailCalloutSpecBody: CreateDetailCalloutSpecBody,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecResponse> => {
+  return customFetch<DetailCalloutSpecResponse>(
+    getCreateDetailCalloutSpecUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createDetailCalloutSpecBody),
+    },
+  );
+};
+
+export const getCreateDetailCalloutSpecMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> },
+  TContext
+> => {
+  const mutationKey = ["createDetailCalloutSpec"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+    { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return createDetailCalloutSpec(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateDetailCalloutSpecMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createDetailCalloutSpec>>
+>;
+export type CreateDetailCalloutSpecMutationBody =
+  BodyType<CreateDetailCalloutSpecBody>;
+export type CreateDetailCalloutSpecMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a detail-callout spec
+ */
+export const useCreateDetailCalloutSpec = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> },
+  TContext
+> => {
+  return useMutation(getCreateDetailCalloutSpecMutationOptions(options));
+};
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary List the detail-callout specs for an engagement
+ */
+export const getListDetailCalloutSpecsUrl = (
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${engagementId}/detail-callout-specs?${stringifiedParams}`
+    : `/api/engagements/${engagementId}/detail-callout-specs`;
+};
+
+export const listDetailCalloutSpecs = async (
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecListResponse> => {
+  return customFetch<DetailCalloutSpecListResponse>(
+    getListDetailCalloutSpecsUrl(engagementId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListDetailCalloutSpecsQueryKey = (
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+) => {
+  return [
+    `/api/engagements/${engagementId}/detail-callout-specs`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListDetailCalloutSpecsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListDetailCalloutSpecsQueryKey(engagementId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDetailCalloutSpecs>>
+  > = ({ signal }) =>
+    listDetailCalloutSpecs(engagementId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListDetailCalloutSpecsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDetailCalloutSpecs>>
+>;
+export type ListDetailCalloutSpecsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the detail-callout specs for an engagement
+ */
+
+export function useListDetailCalloutSpecs<
+  TData = Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListDetailCalloutSpecsQueryOptions(
+    engagementId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary Fetch a single detail-callout-spec atom
+ */
+export const getGetDetailCalloutSpecUrl = (specId: string) => {
+  return `/api/detail-callout-specs/${specId}`;
+};
+
+export const getDetailCalloutSpec = async (
+  specId: string,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecResponse> => {
+  return customFetch<DetailCalloutSpecResponse>(
+    getGetDetailCalloutSpecUrl(specId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDetailCalloutSpecQueryKey = (specId: string) => {
+  return [`/api/detail-callout-specs/${specId}`] as const;
+};
+
+export const getGetDetailCalloutSpecQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  specId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDetailCalloutSpecQueryKey(specId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDetailCalloutSpec>>
+  > = ({ signal }) =>
+    getDetailCalloutSpec(specId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!specId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDetailCalloutSpecQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDetailCalloutSpec>>
+>;
+export type GetDetailCalloutSpecQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch a single detail-callout-spec atom
+ */
+
+export function useGetDetailCalloutSpec<
+  TData = Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  specId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDetailCalloutSpecQueryOptions(specId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L4 (Lane C.4). The transition is validated; an illegal
+transition is rejected with a 409.
+
+ * @summary Transition a detail-callout spec to a new push state
+ */
+export const getUpdateDetailCalloutSpecPushStateUrl = (specId: string) => {
+  return `/api/detail-callout-specs/${specId}/push-state`;
+};
+
+export const updateDetailCalloutSpecPushState = async (
+  specId: string,
+  detailCalloutPushStateBody: DetailCalloutPushStateBody,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecResponse> => {
+  return customFetch<DetailCalloutSpecResponse>(
+    getUpdateDetailCalloutSpecPushStateUrl(specId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(detailCalloutPushStateBody),
+    },
+  );
+};
+
+export const getUpdateDetailCalloutSpecPushStateMutationOptions = <
+  TError = ErrorType<ErrorResponse | IllegalPushTransitionError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+    TError,
+    { specId: string; data: BodyType<DetailCalloutPushStateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+  TError,
+  { specId: string; data: BodyType<DetailCalloutPushStateBody> },
+  TContext
+> => {
+  const mutationKey = ["updateDetailCalloutSpecPushState"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+    { specId: string; data: BodyType<DetailCalloutPushStateBody> }
+  > = (props) => {
+    const { specId, data } = props ?? {};
+
+    return updateDetailCalloutSpecPushState(specId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateDetailCalloutSpecPushStateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>
+>;
+export type UpdateDetailCalloutSpecPushStateMutationBody =
+  BodyType<DetailCalloutPushStateBody>;
+export type UpdateDetailCalloutSpecPushStateMutationError = ErrorType<
+  ErrorResponse | IllegalPushTransitionError
+>;
+
+/**
+ * @summary Transition a detail-callout spec to a new push state
+ */
+export const useUpdateDetailCalloutSpecPushState = <
+  TError = ErrorType<ErrorResponse | IllegalPushTransitionError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+    TError,
+    { specId: string; data: BodyType<DetailCalloutPushStateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+  TError,
+  { specId: string; data: BodyType<DetailCalloutPushStateBody> },
+  TContext
+> => {
+  return useMutation(
+    getUpdateDetailCalloutSpecPushStateMutationOptions(options),
+  );
+};
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary Write the APS Design Automation work-item ref onto a spec
+ */
+export const getAttachDetailCalloutSpecApsRefUrl = (specId: string) => {
+  return `/api/detail-callout-specs/${specId}/aps-ref`;
+};
+
+export const attachDetailCalloutSpecApsRef = async (
+  specId: string,
+  detailCalloutApsRefBody: DetailCalloutApsRefBody,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecResponse> => {
+  return customFetch<DetailCalloutSpecResponse>(
+    getAttachDetailCalloutSpecApsRefUrl(specId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(detailCalloutApsRefBody),
+    },
+  );
+};
+
+export const getAttachDetailCalloutSpecApsRefMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+    TError,
+    { specId: string; data: BodyType<DetailCalloutApsRefBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+  TError,
+  { specId: string; data: BodyType<DetailCalloutApsRefBody> },
+  TContext
+> => {
+  const mutationKey = ["attachDetailCalloutSpecApsRef"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+    { specId: string; data: BodyType<DetailCalloutApsRefBody> }
+  > = (props) => {
+    const { specId, data } = props ?? {};
+
+    return attachDetailCalloutSpecApsRef(specId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AttachDetailCalloutSpecApsRefMutationResult = NonNullable<
+  Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>
+>;
+export type AttachDetailCalloutSpecApsRefMutationBody =
+  BodyType<DetailCalloutApsRefBody>;
+export type AttachDetailCalloutSpecApsRefMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Write the APS Design Automation work-item ref onto a spec
+ */
+export const useAttachDetailCalloutSpecApsRef = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+    TError,
+    { specId: string; data: BodyType<DetailCalloutApsRefBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+  TError,
+  { specId: string; data: BodyType<DetailCalloutApsRefBody> },
+  TContext
+> => {
+  return useMutation(getAttachDetailCalloutSpecApsRefMutationOptions(options));
+};
+
+/**
+ * Cortex L5 (Lane C.4). `esrNumber` must match `ESR-<digits>`.
+
+ * @summary Create a product-spec reference
+ */
+export const getCreateProductSpecReferenceUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/product-spec-references`;
+};
+
+export const createProductSpecReference = async (
+  engagementId: string,
+  createProductSpecReferenceBody: CreateProductSpecReferenceBody,
+  options?: RequestInit,
+): Promise<ProductSpecReferenceResponse> => {
+  return customFetch<ProductSpecReferenceResponse>(
+    getCreateProductSpecReferenceUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createProductSpecReferenceBody),
+    },
+  );
+};
+
+export const getCreateProductSpecReferenceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createProductSpecReference>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createProductSpecReference>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> },
+  TContext
+> => {
+  const mutationKey = ["createProductSpecReference"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createProductSpecReference>>,
+    { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return createProductSpecReference(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateProductSpecReferenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createProductSpecReference>>
+>;
+export type CreateProductSpecReferenceMutationBody =
+  BodyType<CreateProductSpecReferenceBody>;
+export type CreateProductSpecReferenceMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a product-spec reference
+ */
+export const useCreateProductSpecReference = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createProductSpecReference>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createProductSpecReference>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> },
+  TContext
+> => {
+  return useMutation(getCreateProductSpecReferenceMutationOptions(options));
+};
+
+/**
+ * Cortex L5 (Lane C.4).
+ * @summary List the product-spec references for an engagement
+ */
+export const getListProductSpecReferencesUrl = (
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${engagementId}/product-spec-references?${stringifiedParams}`
+    : `/api/engagements/${engagementId}/product-spec-references`;
+};
+
+export const listProductSpecReferences = async (
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+  options?: RequestInit,
+): Promise<ProductSpecReferenceListResponse> => {
+  return customFetch<ProductSpecReferenceListResponse>(
+    getListProductSpecReferencesUrl(engagementId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListProductSpecReferencesQueryKey = (
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+) => {
+  return [
+    `/api/engagements/${engagementId}/product-spec-references`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListProductSpecReferencesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listProductSpecReferences>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listProductSpecReferences>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListProductSpecReferencesQueryKey(engagementId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listProductSpecReferences>>
+  > = ({ signal }) =>
+    listProductSpecReferences(engagementId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listProductSpecReferences>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListProductSpecReferencesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listProductSpecReferences>>
+>;
+export type ListProductSpecReferencesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the product-spec references for an engagement
+ */
+
+export function useListProductSpecReferences<
+  TData = Awaited<ReturnType<typeof listProductSpecReferences>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listProductSpecReferences>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListProductSpecReferencesQueryOptions(
+    engagementId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L5 (Lane C.4). Includes the full statusHistory.
+ * @summary Fetch a single product-spec-reference atom
+ */
+export const getGetProductSpecReferenceUrl = (referenceId: string) => {
+  return `/api/product-spec-references/${referenceId}`;
+};
+
+export const getProductSpecReference = async (
+  referenceId: string,
+  options?: RequestInit,
+): Promise<ProductSpecReferenceResponse> => {
+  return customFetch<ProductSpecReferenceResponse>(
+    getGetProductSpecReferenceUrl(referenceId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetProductSpecReferenceQueryKey = (referenceId: string) => {
+  return [`/api/product-spec-references/${referenceId}`] as const;
+};
+
+export const getGetProductSpecReferenceQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProductSpecReference>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  referenceId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductSpecReference>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetProductSpecReferenceQueryKey(referenceId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProductSpecReference>>
+  > = ({ signal }) =>
+    getProductSpecReference(referenceId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!referenceId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProductSpecReference>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProductSpecReferenceQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProductSpecReference>>
+>;
+export type GetProductSpecReferenceQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch a single product-spec-reference atom
+ */
+
+export function useGetProductSpecReference<
+  TData = Awaited<ReturnType<typeof getProductSpecReference>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  referenceId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductSpecReference>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProductSpecReferenceQueryOptions(
+    referenceId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L5 (Lane C.4). Synchronously polls the ICC-ES listing
+(5-10s timeout). On a status change a new statusHistory entry
+is appended; `lastVerifiedAt` is always updated. An unreachable
+ICC-ES returns a 502.
+
+ * @summary Re-verify a product-spec reference against the live ICC-ES listing
+ */
+export const getRefreshProductSpecReferenceUrl = (referenceId: string) => {
+  return `/api/product-spec-references/${referenceId}/refresh`;
+};
+
+export const refreshProductSpecReference = async (
+  referenceId: string,
+  options?: RequestInit,
+): Promise<ProductSpecReferenceResponse> => {
+  return customFetch<ProductSpecReferenceResponse>(
+    getRefreshProductSpecReferenceUrl(referenceId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getRefreshProductSpecReferenceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof refreshProductSpecReference>>,
+    TError,
+    { referenceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof refreshProductSpecReference>>,
+  TError,
+  { referenceId: string },
+  TContext
+> => {
+  const mutationKey = ["refreshProductSpecReference"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof refreshProductSpecReference>>,
+    { referenceId: string }
+  > = (props) => {
+    const { referenceId } = props ?? {};
+
+    return refreshProductSpecReference(referenceId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RefreshProductSpecReferenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof refreshProductSpecReference>>
+>;
+
+export type RefreshProductSpecReferenceMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Re-verify a product-spec reference against the live ICC-ES listing
+ */
+export const useRefreshProductSpecReference = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof refreshProductSpecReference>>,
+    TError,
+    { referenceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof refreshProductSpecReference>>,
+  TError,
+  { referenceId: string },
+  TContext
+> => {
+  return useMutation(getRefreshProductSpecReferenceMutationOptions(options));
+};
+
+/**
+ * Cortex L6 (Lane C.4). Completeness-gated (an incomplete letter
+is a 409); generates the document synchronously and persists it
+as a first-class `deliverable-letter-render` atom.
+
+ * @summary Render an L3 deliverable letter to DOCX or PDF
+ */
+export const getRenderDeliverableLetterUrl = (letterId: string) => {
+  return `/api/deliverable-letters/${letterId}/renders`;
+};
+
+export const renderDeliverableLetter = async (
+  letterId: string,
+  renderDeliverableLetterBody: RenderDeliverableLetterBody,
+  options?: RequestInit,
+): Promise<DeliverableLetterRenderResponse> => {
+  return customFetch<DeliverableLetterRenderResponse>(
+    getRenderDeliverableLetterUrl(letterId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(renderDeliverableLetterBody),
+    },
+  );
+};
+
+export const getRenderDeliverableLetterMutationOptions = <
+  TError = ErrorType<ErrorResponse | DeliverableLetterCompletenessError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof renderDeliverableLetter>>,
+    TError,
+    { letterId: string; data: BodyType<RenderDeliverableLetterBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof renderDeliverableLetter>>,
+  TError,
+  { letterId: string; data: BodyType<RenderDeliverableLetterBody> },
+  TContext
+> => {
+  const mutationKey = ["renderDeliverableLetter"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof renderDeliverableLetter>>,
+    { letterId: string; data: BodyType<RenderDeliverableLetterBody> }
+  > = (props) => {
+    const { letterId, data } = props ?? {};
+
+    return renderDeliverableLetter(letterId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RenderDeliverableLetterMutationResult = NonNullable<
+  Awaited<ReturnType<typeof renderDeliverableLetter>>
+>;
+export type RenderDeliverableLetterMutationBody =
+  BodyType<RenderDeliverableLetterBody>;
+export type RenderDeliverableLetterMutationError = ErrorType<
+  ErrorResponse | DeliverableLetterCompletenessError
+>;
+
+/**
+ * @summary Render an L3 deliverable letter to DOCX or PDF
+ */
+export const useRenderDeliverableLetter = <
+  TError = ErrorType<ErrorResponse | DeliverableLetterCompletenessError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof renderDeliverableLetter>>,
+    TError,
+    { letterId: string; data: BodyType<RenderDeliverableLetterBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof renderDeliverableLetter>>,
+  TError,
+  { letterId: string; data: BodyType<RenderDeliverableLetterBody> },
+  TContext
+> => {
+  return useMutation(getRenderDeliverableLetterMutationOptions(options));
+};
+
+/**
+ * Cortex L6 (Lane C.4). Newest-first.
+ * @summary List every render of a deliverable letter
+ */
+export const getListDeliverableLetterRendersUrl = (letterId: string) => {
+  return `/api/deliverable-letters/${letterId}/renders`;
+};
+
+export const listDeliverableLetterRenders = async (
+  letterId: string,
+  options?: RequestInit,
+): Promise<DeliverableLetterRenderListResponse> => {
+  return customFetch<DeliverableLetterRenderListResponse>(
+    getListDeliverableLetterRendersUrl(letterId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListDeliverableLetterRendersQueryKey = (letterId: string) => {
+  return [`/api/deliverable-letters/${letterId}/renders`] as const;
+};
+
+export const getListDeliverableLetterRendersQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  letterId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListDeliverableLetterRendersQueryKey(letterId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDeliverableLetterRenders>>
+  > = ({ signal }) =>
+    listDeliverableLetterRenders(letterId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!letterId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListDeliverableLetterRendersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDeliverableLetterRenders>>
+>;
+export type ListDeliverableLetterRendersQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List every render of a deliverable letter
+ */
+
+export function useListDeliverableLetterRenders<
+  TData = Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  letterId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDeliverableLetterRenders>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListDeliverableLetterRendersQueryOptions(
+    letterId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L6 (Lane C.4). Streams the stored render bytes. Added in
+C.4.6 beyond the original endpoint contract — the UI Download
+action and the `downloadUrl` resolution need a byte-serving
+route.
+
+ * @summary Download the rendered DOCX/PDF bytes
+ */
+export const getDownloadDeliverableLetterRenderUrl = (renderId: string) => {
+  return `/api/deliverable-letter-renders/${renderId}/file`;
+};
+
+export const downloadDeliverableLetterRender = async (
+  renderId: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getDownloadDeliverableLetterRenderUrl(renderId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getDownloadDeliverableLetterRenderQueryKey = (
+  renderId: string,
+) => {
+  return [`/api/deliverable-letter-renders/${renderId}/file`] as const;
+};
+
+export const getDownloadDeliverableLetterRenderQueryOptions = <
+  TData = Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  renderId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getDownloadDeliverableLetterRenderQueryKey(renderId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof downloadDeliverableLetterRender>>
+  > = ({ signal }) =>
+    downloadDeliverableLetterRender(renderId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!renderId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type DownloadDeliverableLetterRenderQueryResult = NonNullable<
+  Awaited<ReturnType<typeof downloadDeliverableLetterRender>>
+>;
+export type DownloadDeliverableLetterRenderQueryError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Download the rendered DOCX/PDF bytes
+ */
+
+export function useDownloadDeliverableLetterRender<
+  TData = Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  renderId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof downloadDeliverableLetterRender>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getDownloadDeliverableLetterRenderQueryOptions(
+    renderId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
