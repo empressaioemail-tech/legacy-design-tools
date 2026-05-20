@@ -71,8 +71,10 @@ import {
   getListSubmissionDecisionsQueryKey,
   type EngagementSubmissionSummary,
   type SubmissionStatus,
+  type SubmissionClassification,
 } from "@workspace/api-client-react";
 import { BimModelTab } from "./BimModelTab";
+import { ReclassifySubmissionDialog } from "./ReclassifySubmissionDialog";
 import { SheetsTab } from "./sheets/SheetsTab";
 import { EngagementContextTab } from "./EngagementContextTab";
 import { relativeTime } from "../lib/relativeTime";
@@ -145,6 +147,15 @@ export interface SubmissionDetailModalProps {
    * `GET /communications/{id}/pdf`.
    */
   lastCommunicatedPdfId?: string | null;
+  /**
+   * UI-4 — the submission's current classification atom. Pre-fills
+   * the Reclassify dialog and drives the Reclassify action-header
+   * pill. Optional: callers that don't have the classification on
+   * hand (the SubmissionDetailModal call sites today) omit it and
+   * the Reclassify dialog opens with a blank form. The reclassify
+   * action itself is reviewer-only and works regardless.
+   */
+  classification?: SubmissionClassification | null;
 }
 
 const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
@@ -174,8 +185,15 @@ export function SubmissionDetailModal({
   onDecide,
   lastCommunicatedAt = null,
   lastCommunicatedPdfId = null,
+  classification = null,
 }: SubmissionDetailModalProps) {
   const isOpen = submission !== null;
+
+  // UI-4 — Reclassify dialog open state. Reviewer-only; the dialog
+  // is mounted on demand (see the conditional render below the Tabs)
+  // so non-reviewer audiences never instantiate the reclassify
+  // mutation hook.
+  const [reclassifyOpen, setReclassifyOpen] = useState(false);
 
   // PLR-9 — open the live SSE channel while the modal is open and
   // the caller is reviewer-audience. Drives the presence chips in
@@ -322,6 +340,8 @@ export function SubmissionDetailModal({
             onCommunicate={onCommunicate}
             onDecide={handleDecide}
             decideHandlerProvided={onDecide != null}
+            onReclassify={() => setReclassifyOpen(true)}
+            classification={classification}
             lastCommunicatedAt={lastCommunicatedAt}
             lastCommunicatedPdfId={lastCommunicatedPdfId}
             audience={audience}
@@ -507,6 +527,20 @@ export function SubmissionDetailModal({
           </Tabs>
         )}
         {/*
+         * UI-4 — reviewer Reclassify dialog. Mounted on demand
+         * (reviewer audience + open) so non-reviewers never set up
+         * the reclassify mutation hook. Radix stacks it over the
+         * detail modal the same way DecideModal does.
+         */}
+        {submission && audience === "internal" && reclassifyOpen && (
+          <ReclassifySubmissionDialog
+            submissionId={submission.id}
+            currentClassification={classification}
+            open
+            onClose={() => setReclassifyOpen(false)}
+          />
+        )}
+        {/*
          * Close affordance is the built-in `DialogPrimitive.Close`
          * inside `DialogContent` (the shadcn primitive renders the
          * X-icon button at top-right). We intentionally do not stack
@@ -530,6 +564,8 @@ function SubmissionActionHeader({
   onCommunicate,
   onDecide,
   decideHandlerProvided,
+  onReclassify,
+  classification,
   lastCommunicatedAt,
   lastCommunicatedPdfId,
   audience,
@@ -539,6 +575,8 @@ function SubmissionActionHeader({
   onCommunicate?: () => void;
   onDecide: () => void;
   decideHandlerProvided: boolean;
+  onReclassify: () => void;
+  classification: SubmissionClassification | null;
   lastCommunicatedAt: string | null;
   lastCommunicatedPdfId: string | null;
   audience: NonNullable<SubmissionDetailModalProps["audience"]>;
@@ -590,6 +628,17 @@ function SubmissionActionHeader({
     ? "Record verdict"
     : "Decide is reviewer-only";
 
+  // UI-4 — reclassify is reviewer-only. Unlike Decide (parent-gated
+  // via `decideHandlerProvided`), the Reclassify dialog is mounted
+  // by this modal itself, so the audience check lives here.
+  const reclassifyEnabled = audience === "internal";
+  const reclassifyPill = classification
+    ? `${classification.source === "reviewer" ? "Reviewer-set" : "Auto"} · ${classification.projectType}`
+    : "Not classified";
+  const reclassifyTitle = reclassifyEnabled
+    ? "Correct project type & disciplines"
+    : "Reclassify is reviewer-only";
+
   return (
     <div
       data-testid="submission-action-header"
@@ -632,6 +681,15 @@ function SubmissionActionHeader({
         downloadHref={issuedPdfAvailable ? issuedPdfHref : null}
         downloadLabel="Download stamped PDF"
         downloadTestId="submission-action-decide-pdf"
+      />
+      <ActionHeaderButton
+        testId="submission-action-reclassify"
+        label="Reclassify"
+        statusLabel={reclassifyPill}
+        statusTestId="submission-action-reclassify-status"
+        onClick={onReclassify}
+        disabled={!reclassifyEnabled}
+        title={reclassifyTitle}
       />
     </div>
   );
