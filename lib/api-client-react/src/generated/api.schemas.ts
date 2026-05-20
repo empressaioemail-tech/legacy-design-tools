@@ -2247,6 +2247,100 @@ export interface IllegalPushTransitionError {
 }
 
 /**
+ * Cortex L5 — ICC-ES evaluation status.
+ */
+export type ProductSpecStatus =
+  (typeof ProductSpecStatus)[keyof typeof ProductSpecStatus];
+
+export const ProductSpecStatus = {
+  active: "active",
+  withdrawn: "withdrawn",
+  expired: "expired",
+} as const;
+
+/**
+ * Structured product identity (never free-text).
+ */
+export interface ProductIdentifier {
+  name: string;
+  manufacturer: string;
+}
+
+/**
+ * One entry in the append-only ESR-status-change chain.
+ */
+export interface ProductSpecStatusChange {
+  status: ProductSpecStatus;
+  changedAt: string;
+  sourceUrl: string;
+}
+
+export type ProductSpecReferenceAtomEntityType =
+  (typeof ProductSpecReferenceAtomEntityType)[keyof typeof ProductSpecReferenceAtomEntityType];
+
+export const ProductSpecReferenceAtomEntityType = {
+  "product-spec-reference": "product-spec-reference",
+} as const;
+
+export type ProductSpecReferenceAtomAccessPolicy =
+  (typeof ProductSpecReferenceAtomAccessPolicy)[keyof typeof ProductSpecReferenceAtomAccessPolicy];
+
+export const ProductSpecReferenceAtomAccessPolicy = {
+  "public-free": "public-free",
+  "public-paid": "public-paid",
+  "platform-internal": "platform-internal",
+  "tenant-private": "tenant-private",
+} as const;
+
+/**
+ * Cortex L5 `product-spec-reference` atom instance. Conforms to
+`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace/atoms-l-surface`.
+
+ */
+export interface ProductSpecReferenceAtom {
+  entityType: ProductSpecReferenceAtomEntityType;
+  entityId: string;
+  jurisdictionTenant: string;
+  fetchedAt: string;
+  sourceAdapter: string;
+  sourceUrl: string;
+  contentHash: string;
+  product: ProductIdentifier;
+  esrNumber: string;
+  status: ProductSpecStatus;
+  lastVerifiedAt: string;
+  statusHistory: ProductSpecStatusChange[];
+  engagementId: string | null;
+  findingId: string | null;
+  responseTaskId: string | null;
+  createdAt: string;
+  actorId: string | null;
+  principalActorId: string | null;
+  accessPolicy?: ProductSpecReferenceAtomAccessPolicy;
+}
+
+export interface ProductSpecReferenceResponse {
+  productSpecReference: ProductSpecReferenceAtom;
+}
+
+export interface ProductSpecReferenceListResponse {
+  productSpecReferences: ProductSpecReferenceAtom[];
+}
+
+/**
+ * Body for `POST /engagements/{id}/product-spec-references`.
+ */
+export interface CreateProductSpecReferenceBody {
+  product: ProductIdentifier;
+  /** ICC-ES ESR number, format `ESR-<digits>`. */
+  esrNumber: string;
+  findingId?: string | null;
+  responseTaskId?: string | null;
+  actorId?: string | null;
+  principalActorId?: string | null;
+}
+
+/**
  * A row in the `users` profile table — display name / email / avatar
 used to hydrate timeline actor labels. The `id` is the same opaque
 identifier the session layer carries (today: dev cookie ids like
@@ -5795,4 +5889,8 @@ export type ListAttachedDocumentsParams = {
 
 export type ListDetailCalloutSpecsParams = {
   pushState?: DetailCalloutPushState;
+};
+
+export type ListProductSpecReferencesParams = {
+  status?: ProductSpecStatus;
 };

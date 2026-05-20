@@ -40,6 +40,7 @@ import type {
   CreateDeliverableLetterBody,
   CreateDetailCalloutSpecBody,
   CreateEngagementSubmissionBody,
+  CreateProductSpecReferenceBody,
   CreateQaTriageItemBody,
   CreateResponseTaskBody,
   CreateReviewerAnnotationBody,
@@ -105,6 +106,7 @@ import type {
   ListMyReviewerRequestsParams,
   ListMyReviewerRequestsResponse,
   ListNotificationsResponse,
+  ListProductSpecReferencesParams,
   ListQaAutopilotRunsParams,
   ListQaRunsParams,
   ListQaTriageItemsParams,
@@ -121,6 +123,8 @@ import type {
   MatchEngagementBody,
   MatchEngagementResponse,
   OverrideFindingBody,
+  ProductSpecReferenceListResponse,
+  ProductSpecReferenceResponse,
   PromoteReviewerAnnotationsBody,
   PromoteReviewerAnnotationsResponse,
   PushBimModelBody,
@@ -14581,4 +14585,410 @@ export const useAttachDetailCalloutSpecApsRef = <
   TContext
 > => {
   return useMutation(getAttachDetailCalloutSpecApsRefMutationOptions(options));
+};
+
+/**
+ * Cortex L5 (Lane C.4). `esrNumber` must match `ESR-<digits>`.
+
+ * @summary Create a product-spec reference
+ */
+export const getCreateProductSpecReferenceUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/product-spec-references`;
+};
+
+export const createProductSpecReference = async (
+  engagementId: string,
+  createProductSpecReferenceBody: CreateProductSpecReferenceBody,
+  options?: RequestInit,
+): Promise<ProductSpecReferenceResponse> => {
+  return customFetch<ProductSpecReferenceResponse>(
+    getCreateProductSpecReferenceUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createProductSpecReferenceBody),
+    },
+  );
+};
+
+export const getCreateProductSpecReferenceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createProductSpecReference>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createProductSpecReference>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> },
+  TContext
+> => {
+  const mutationKey = ["createProductSpecReference"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createProductSpecReference>>,
+    { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return createProductSpecReference(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateProductSpecReferenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createProductSpecReference>>
+>;
+export type CreateProductSpecReferenceMutationBody =
+  BodyType<CreateProductSpecReferenceBody>;
+export type CreateProductSpecReferenceMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a product-spec reference
+ */
+export const useCreateProductSpecReference = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createProductSpecReference>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createProductSpecReference>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateProductSpecReferenceBody> },
+  TContext
+> => {
+  return useMutation(getCreateProductSpecReferenceMutationOptions(options));
+};
+
+/**
+ * Cortex L5 (Lane C.4).
+ * @summary List the product-spec references for an engagement
+ */
+export const getListProductSpecReferencesUrl = (
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${engagementId}/product-spec-references?${stringifiedParams}`
+    : `/api/engagements/${engagementId}/product-spec-references`;
+};
+
+export const listProductSpecReferences = async (
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+  options?: RequestInit,
+): Promise<ProductSpecReferenceListResponse> => {
+  return customFetch<ProductSpecReferenceListResponse>(
+    getListProductSpecReferencesUrl(engagementId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListProductSpecReferencesQueryKey = (
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+) => {
+  return [
+    `/api/engagements/${engagementId}/product-spec-references`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListProductSpecReferencesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listProductSpecReferences>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listProductSpecReferences>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListProductSpecReferencesQueryKey(engagementId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listProductSpecReferences>>
+  > = ({ signal }) =>
+    listProductSpecReferences(engagementId, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listProductSpecReferences>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListProductSpecReferencesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listProductSpecReferences>>
+>;
+export type ListProductSpecReferencesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the product-spec references for an engagement
+ */
+
+export function useListProductSpecReferences<
+  TData = Awaited<ReturnType<typeof listProductSpecReferences>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListProductSpecReferencesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listProductSpecReferences>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListProductSpecReferencesQueryOptions(
+    engagementId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L5 (Lane C.4). Includes the full statusHistory.
+ * @summary Fetch a single product-spec-reference atom
+ */
+export const getGetProductSpecReferenceUrl = (referenceId: string) => {
+  return `/api/product-spec-references/${referenceId}`;
+};
+
+export const getProductSpecReference = async (
+  referenceId: string,
+  options?: RequestInit,
+): Promise<ProductSpecReferenceResponse> => {
+  return customFetch<ProductSpecReferenceResponse>(
+    getGetProductSpecReferenceUrl(referenceId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetProductSpecReferenceQueryKey = (referenceId: string) => {
+  return [`/api/product-spec-references/${referenceId}`] as const;
+};
+
+export const getGetProductSpecReferenceQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProductSpecReference>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  referenceId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductSpecReference>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetProductSpecReferenceQueryKey(referenceId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProductSpecReference>>
+  > = ({ signal }) =>
+    getProductSpecReference(referenceId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!referenceId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProductSpecReference>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProductSpecReferenceQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProductSpecReference>>
+>;
+export type GetProductSpecReferenceQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch a single product-spec-reference atom
+ */
+
+export function useGetProductSpecReference<
+  TData = Awaited<ReturnType<typeof getProductSpecReference>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  referenceId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductSpecReference>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProductSpecReferenceQueryOptions(
+    referenceId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L5 (Lane C.4). Synchronously polls the ICC-ES listing
+(5-10s timeout). On a status change a new statusHistory entry
+is appended; `lastVerifiedAt` is always updated. An unreachable
+ICC-ES returns a 502.
+
+ * @summary Re-verify a product-spec reference against the live ICC-ES listing
+ */
+export const getRefreshProductSpecReferenceUrl = (referenceId: string) => {
+  return `/api/product-spec-references/${referenceId}/refresh`;
+};
+
+export const refreshProductSpecReference = async (
+  referenceId: string,
+  options?: RequestInit,
+): Promise<ProductSpecReferenceResponse> => {
+  return customFetch<ProductSpecReferenceResponse>(
+    getRefreshProductSpecReferenceUrl(referenceId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getRefreshProductSpecReferenceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof refreshProductSpecReference>>,
+    TError,
+    { referenceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof refreshProductSpecReference>>,
+  TError,
+  { referenceId: string },
+  TContext
+> => {
+  const mutationKey = ["refreshProductSpecReference"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof refreshProductSpecReference>>,
+    { referenceId: string }
+  > = (props) => {
+    const { referenceId } = props ?? {};
+
+    return refreshProductSpecReference(referenceId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RefreshProductSpecReferenceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof refreshProductSpecReference>>
+>;
+
+export type RefreshProductSpecReferenceMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Re-verify a product-spec reference against the live ICC-ES listing
+ */
+export const useRefreshProductSpecReference = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof refreshProductSpecReference>>,
+    TError,
+    { referenceId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof refreshProductSpecReference>>,
+  TError,
+  { referenceId: string },
+  TContext
+> => {
+  return useMutation(getRefreshProductSpecReferenceMutationOptions(options));
 };

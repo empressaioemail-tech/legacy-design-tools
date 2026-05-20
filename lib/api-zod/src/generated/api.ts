@@ -9601,3 +9601,220 @@ export const AttachDetailCalloutSpecApsRefResponse = zod.object({
       "Cortex L4 `detail-callout-spec` atom instance. Conforms to\n`DETAIL_CALLOUT_SPEC_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
     ),
 });
+
+/**
+ * Cortex L5 (Lane C.4). `esrNumber` must match `ESR-<digits>`.
+
+ * @summary Create a product-spec reference
+ */
+export const CreateProductSpecReferenceParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const CreateProductSpecReferenceBody = zod
+  .object({
+    product: zod
+      .object({
+        name: zod.string(),
+        manufacturer: zod.string(),
+      })
+      .describe("Structured product identity (never free-text)."),
+    esrNumber: zod
+      .string()
+      .describe("ICC-ES ESR number, format `ESR-<digits>`."),
+    findingId: zod.string().nullish(),
+    responseTaskId: zod.string().nullish(),
+    actorId: zod.string().nullish(),
+    principalActorId: zod.string().nullish(),
+  })
+  .describe("Body for `POST \/engagements\/{id}\/product-spec-references`.");
+
+/**
+ * Cortex L5 (Lane C.4).
+ * @summary List the product-spec references for an engagement
+ */
+export const ListProductSpecReferencesParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const ListProductSpecReferencesQueryParams = zod.object({
+  status: zod.enum(["active", "withdrawn", "expired"]).optional(),
+});
+
+export const ListProductSpecReferencesResponse = zod.object({
+  productSpecReferences: zod.array(
+    zod
+      .object({
+        entityType: zod.enum(["product-spec-reference"]),
+        entityId: zod.string(),
+        jurisdictionTenant: zod.string(),
+        fetchedAt: zod.string(),
+        sourceAdapter: zod.string(),
+        sourceUrl: zod.string(),
+        contentHash: zod.string(),
+        product: zod
+          .object({
+            name: zod.string(),
+            manufacturer: zod.string(),
+          })
+          .describe("Structured product identity (never free-text)."),
+        esrNumber: zod.string(),
+        status: zod
+          .enum(["active", "withdrawn", "expired"])
+          .describe("Cortex L5 — ICC-ES evaluation status."),
+        lastVerifiedAt: zod.string(),
+        statusHistory: zod.array(
+          zod
+            .object({
+              status: zod
+                .enum(["active", "withdrawn", "expired"])
+                .describe("Cortex L5 — ICC-ES evaluation status."),
+              changedAt: zod.string(),
+              sourceUrl: zod.string(),
+            })
+            .describe("One entry in the append-only ESR-status-change chain."),
+        ),
+        engagementId: zod.string().nullable(),
+        findingId: zod.string().nullable(),
+        responseTaskId: zod.string().nullable(),
+        createdAt: zod.string(),
+        actorId: zod.string().nullable(),
+        principalActorId: zod.string().nullable(),
+        accessPolicy: zod
+          .enum([
+            "public-free",
+            "public-paid",
+            "platform-internal",
+            "tenant-private",
+          ])
+          .optional(),
+      })
+      .describe(
+        "Cortex L5 `product-spec-reference` atom instance. Conforms to\n`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * Cortex L5 (Lane C.4). Includes the full statusHistory.
+ * @summary Fetch a single product-spec-reference atom
+ */
+export const GetProductSpecReferenceParams = zod.object({
+  referenceId: zod.coerce.string(),
+});
+
+export const GetProductSpecReferenceResponse = zod.object({
+  productSpecReference: zod
+    .object({
+      entityType: zod.enum(["product-spec-reference"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      product: zod
+        .object({
+          name: zod.string(),
+          manufacturer: zod.string(),
+        })
+        .describe("Structured product identity (never free-text)."),
+      esrNumber: zod.string(),
+      status: zod
+        .enum(["active", "withdrawn", "expired"])
+        .describe("Cortex L5 — ICC-ES evaluation status."),
+      lastVerifiedAt: zod.string(),
+      statusHistory: zod.array(
+        zod
+          .object({
+            status: zod
+              .enum(["active", "withdrawn", "expired"])
+              .describe("Cortex L5 — ICC-ES evaluation status."),
+            changedAt: zod.string(),
+            sourceUrl: zod.string(),
+          })
+          .describe("One entry in the append-only ESR-status-change chain."),
+      ),
+      engagementId: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L5 `product-spec-reference` atom instance. Conforms to\n`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
+
+/**
+ * Cortex L5 (Lane C.4). Synchronously polls the ICC-ES listing
+(5-10s timeout). On a status change a new statusHistory entry
+is appended; `lastVerifiedAt` is always updated. An unreachable
+ICC-ES returns a 502.
+
+ * @summary Re-verify a product-spec reference against the live ICC-ES listing
+ */
+export const RefreshProductSpecReferenceParams = zod.object({
+  referenceId: zod.coerce.string(),
+});
+
+export const RefreshProductSpecReferenceResponse = zod.object({
+  productSpecReference: zod
+    .object({
+      entityType: zod.enum(["product-spec-reference"]),
+      entityId: zod.string(),
+      jurisdictionTenant: zod.string(),
+      fetchedAt: zod.string(),
+      sourceAdapter: zod.string(),
+      sourceUrl: zod.string(),
+      contentHash: zod.string(),
+      product: zod
+        .object({
+          name: zod.string(),
+          manufacturer: zod.string(),
+        })
+        .describe("Structured product identity (never free-text)."),
+      esrNumber: zod.string(),
+      status: zod
+        .enum(["active", "withdrawn", "expired"])
+        .describe("Cortex L5 — ICC-ES evaluation status."),
+      lastVerifiedAt: zod.string(),
+      statusHistory: zod.array(
+        zod
+          .object({
+            status: zod
+              .enum(["active", "withdrawn", "expired"])
+              .describe("Cortex L5 — ICC-ES evaluation status."),
+            changedAt: zod.string(),
+            sourceUrl: zod.string(),
+          })
+          .describe("One entry in the append-only ESR-status-change chain."),
+      ),
+      engagementId: zod.string().nullable(),
+      findingId: zod.string().nullable(),
+      responseTaskId: zod.string().nullable(),
+      createdAt: zod.string(),
+      actorId: zod.string().nullable(),
+      principalActorId: zod.string().nullable(),
+      accessPolicy: zod
+        .enum([
+          "public-free",
+          "public-paid",
+          "platform-internal",
+          "tenant-private",
+        ])
+        .optional(),
+    })
+    .describe(
+      "Cortex L5 `product-spec-reference` atom instance. Conforms to\n`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+    ),
+});
