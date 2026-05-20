@@ -6,6 +6,7 @@ import { startQueueWorker } from "@workspace/codes";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
+import { mountSpaStatic } from "./middlewares/spaStatic";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
 import { startAdapterCacheSweepWorker } from "./lib/adapterCache";
 
@@ -59,5 +60,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
 
 app.use("/api", router);
+
+// Production single-service static-serve: when SPA_STATIC_ROOT is set
+// (the Cloud Run image), api-server also serves the built Vite SPAs.
+// MUST come after the /api router so the root SPA catch-all cannot
+// swallow API requests. No-op in local dev (env var unset).
+mountSpaStatic(app);
 
 export default app;
