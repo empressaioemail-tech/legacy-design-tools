@@ -38,6 +38,7 @@ import type {
   CreateBriefingSourceBody,
   CreateCannedFindingBody,
   CreateDeliverableLetterBody,
+  CreateDetailCalloutSpecBody,
   CreateEngagementSubmissionBody,
   CreateQaTriageItemBody,
   CreateResponseTaskBody,
@@ -54,6 +55,10 @@ import type {
   DeliverableLetterProvenanceBody,
   DeliverableLetterResponse,
   DeliverableLetterSectionBody,
+  DetailCalloutApsRefBody,
+  DetailCalloutPushStateBody,
+  DetailCalloutSpecListResponse,
+  DetailCalloutSpecResponse,
   DismissReviewerRequestBody,
   DraftSubmissionCommunicationResponse,
   EmbeddingsBackfillResult,
@@ -80,6 +85,7 @@ import type {
   GetRenderOutputFileParams,
   GetSnapshotSheetHistoryParams,
   HealthStatus,
+  IllegalPushTransitionError,
   JurisdictionSummary,
   KickoffRenderBody,
   KickoffRenderResponse,
@@ -90,6 +96,7 @@ import type {
   ListCannedFindingsResponse,
   ListCodeAtomsParams,
   ListDecisionsResponse,
+  ListDetailCalloutSpecsParams,
   ListEngagementBriefingSourcesParams,
   ListEngagementReviewerRequestsParams,
   ListFindingsRunsParams,
@@ -14074,4 +14081,504 @@ export const useSendDeliverableLetter = <
   TContext
 > => {
   return useMutation(getSendDeliverableLetterMutationOptions(options));
+};
+
+/**
+ * Cortex L4 (Lane C.4). The `spec` payload is validated against
+the discriminated-union schema keyed on `detailType`.
+
+ * @summary Create a detail-callout spec
+ */
+export const getCreateDetailCalloutSpecUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/detail-callout-specs`;
+};
+
+export const createDetailCalloutSpec = async (
+  engagementId: string,
+  createDetailCalloutSpecBody: CreateDetailCalloutSpecBody,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecResponse> => {
+  return customFetch<DetailCalloutSpecResponse>(
+    getCreateDetailCalloutSpecUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createDetailCalloutSpecBody),
+    },
+  );
+};
+
+export const getCreateDetailCalloutSpecMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> },
+  TContext
+> => {
+  const mutationKey = ["createDetailCalloutSpec"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+    { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return createDetailCalloutSpec(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateDetailCalloutSpecMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createDetailCalloutSpec>>
+>;
+export type CreateDetailCalloutSpecMutationBody =
+  BodyType<CreateDetailCalloutSpecBody>;
+export type CreateDetailCalloutSpecMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a detail-callout spec
+ */
+export const useCreateDetailCalloutSpec = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createDetailCalloutSpec>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateDetailCalloutSpecBody> },
+  TContext
+> => {
+  return useMutation(getCreateDetailCalloutSpecMutationOptions(options));
+};
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary List the detail-callout specs for an engagement
+ */
+export const getListDetailCalloutSpecsUrl = (
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/engagements/${engagementId}/detail-callout-specs?${stringifiedParams}`
+    : `/api/engagements/${engagementId}/detail-callout-specs`;
+};
+
+export const listDetailCalloutSpecs = async (
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecListResponse> => {
+  return customFetch<DetailCalloutSpecListResponse>(
+    getListDetailCalloutSpecsUrl(engagementId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListDetailCalloutSpecsQueryKey = (
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+) => {
+  return [
+    `/api/engagements/${engagementId}/detail-callout-specs`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListDetailCalloutSpecsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListDetailCalloutSpecsQueryKey(engagementId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDetailCalloutSpecs>>
+  > = ({ signal }) =>
+    listDetailCalloutSpecs(engagementId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListDetailCalloutSpecsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDetailCalloutSpecs>>
+>;
+export type ListDetailCalloutSpecsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List the detail-callout specs for an engagement
+ */
+
+export function useListDetailCalloutSpecs<
+  TData = Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  params?: ListDetailCalloutSpecsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listDetailCalloutSpecs>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListDetailCalloutSpecsQueryOptions(
+    engagementId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary Fetch a single detail-callout-spec atom
+ */
+export const getGetDetailCalloutSpecUrl = (specId: string) => {
+  return `/api/detail-callout-specs/${specId}`;
+};
+
+export const getDetailCalloutSpec = async (
+  specId: string,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecResponse> => {
+  return customFetch<DetailCalloutSpecResponse>(
+    getGetDetailCalloutSpecUrl(specId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDetailCalloutSpecQueryKey = (specId: string) => {
+  return [`/api/detail-callout-specs/${specId}`] as const;
+};
+
+export const getGetDetailCalloutSpecQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  specId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDetailCalloutSpecQueryKey(specId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDetailCalloutSpec>>
+  > = ({ signal }) =>
+    getDetailCalloutSpec(specId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!specId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDetailCalloutSpecQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDetailCalloutSpec>>
+>;
+export type GetDetailCalloutSpecQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Fetch a single detail-callout-spec atom
+ */
+
+export function useGetDetailCalloutSpec<
+  TData = Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  specId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDetailCalloutSpec>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDetailCalloutSpecQueryOptions(specId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Cortex L4 (Lane C.4). The transition is validated; an illegal
+transition is rejected with a 409.
+
+ * @summary Transition a detail-callout spec to a new push state
+ */
+export const getUpdateDetailCalloutSpecPushStateUrl = (specId: string) => {
+  return `/api/detail-callout-specs/${specId}/push-state`;
+};
+
+export const updateDetailCalloutSpecPushState = async (
+  specId: string,
+  detailCalloutPushStateBody: DetailCalloutPushStateBody,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecResponse> => {
+  return customFetch<DetailCalloutSpecResponse>(
+    getUpdateDetailCalloutSpecPushStateUrl(specId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(detailCalloutPushStateBody),
+    },
+  );
+};
+
+export const getUpdateDetailCalloutSpecPushStateMutationOptions = <
+  TError = ErrorType<ErrorResponse | IllegalPushTransitionError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+    TError,
+    { specId: string; data: BodyType<DetailCalloutPushStateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+  TError,
+  { specId: string; data: BodyType<DetailCalloutPushStateBody> },
+  TContext
+> => {
+  const mutationKey = ["updateDetailCalloutSpecPushState"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+    { specId: string; data: BodyType<DetailCalloutPushStateBody> }
+  > = (props) => {
+    const { specId, data } = props ?? {};
+
+    return updateDetailCalloutSpecPushState(specId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateDetailCalloutSpecPushStateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>
+>;
+export type UpdateDetailCalloutSpecPushStateMutationBody =
+  BodyType<DetailCalloutPushStateBody>;
+export type UpdateDetailCalloutSpecPushStateMutationError = ErrorType<
+  ErrorResponse | IllegalPushTransitionError
+>;
+
+/**
+ * @summary Transition a detail-callout spec to a new push state
+ */
+export const useUpdateDetailCalloutSpecPushState = <
+  TError = ErrorType<ErrorResponse | IllegalPushTransitionError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+    TError,
+    { specId: string; data: BodyType<DetailCalloutPushStateBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateDetailCalloutSpecPushState>>,
+  TError,
+  { specId: string; data: BodyType<DetailCalloutPushStateBody> },
+  TContext
+> => {
+  return useMutation(
+    getUpdateDetailCalloutSpecPushStateMutationOptions(options),
+  );
+};
+
+/**
+ * Cortex L4 (Lane C.4).
+ * @summary Write the APS Design Automation work-item ref onto a spec
+ */
+export const getAttachDetailCalloutSpecApsRefUrl = (specId: string) => {
+  return `/api/detail-callout-specs/${specId}/aps-ref`;
+};
+
+export const attachDetailCalloutSpecApsRef = async (
+  specId: string,
+  detailCalloutApsRefBody: DetailCalloutApsRefBody,
+  options?: RequestInit,
+): Promise<DetailCalloutSpecResponse> => {
+  return customFetch<DetailCalloutSpecResponse>(
+    getAttachDetailCalloutSpecApsRefUrl(specId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(detailCalloutApsRefBody),
+    },
+  );
+};
+
+export const getAttachDetailCalloutSpecApsRefMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+    TError,
+    { specId: string; data: BodyType<DetailCalloutApsRefBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+  TError,
+  { specId: string; data: BodyType<DetailCalloutApsRefBody> },
+  TContext
+> => {
+  const mutationKey = ["attachDetailCalloutSpecApsRef"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+    { specId: string; data: BodyType<DetailCalloutApsRefBody> }
+  > = (props) => {
+    const { specId, data } = props ?? {};
+
+    return attachDetailCalloutSpecApsRef(specId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AttachDetailCalloutSpecApsRefMutationResult = NonNullable<
+  Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>
+>;
+export type AttachDetailCalloutSpecApsRefMutationBody =
+  BodyType<DetailCalloutApsRefBody>;
+export type AttachDetailCalloutSpecApsRefMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Write the APS Design Automation work-item ref onto a spec
+ */
+export const useAttachDetailCalloutSpecApsRef = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+    TError,
+    { specId: string; data: BodyType<DetailCalloutApsRefBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof attachDetailCalloutSpecApsRef>>,
+  TError,
+  { specId: string; data: BodyType<DetailCalloutApsRefBody> },
+  TContext
+> => {
+  return useMutation(getAttachDetailCalloutSpecApsRefMutationOptions(options));
 };

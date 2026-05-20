@@ -36,6 +36,7 @@ import qaRouter from "./qa";
 import responseTasksRouter from "./responseTasks";
 import sheetContentRouter from "./sheetContent";
 import deliverableLettersRouter from "./deliverableLetters";
+import detailCalloutSpecsRouter from "./detailCalloutSpecs";
 
 const router: IRouter = Router();
 
@@ -164,5 +165,10 @@ router.use(sheetContentRouter);
 // `/engagements/:id/deliverable-letters` and `/deliverable-letters/:id*`.
 // No overlap with an existing leaf route, so ordering is indifferent.
 router.use(deliverableLettersRouter);
+// Cortex L4 (Lane C.4 / C.4.4) — detail-callout-spec surface. Mounts
+// `/engagements/:id/detail-callout-specs` and
+// `/detail-callout-specs/:id*`. No overlap with an existing leaf route,
+// so ordering is indifferent.
+router.use(detailCalloutSpecsRouter);
 
 export default router;

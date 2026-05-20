@@ -302,6 +302,25 @@ CREATE TABLE @@SCHEMA@@.deliverable_letters (
 );
 
 
+-- Name: detail_callout_specs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.detail_callout_specs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    spec jsonb NOT NULL,
+    push_state text DEFAULT 'pending'::text NOT NULL,
+    aps_task_ref text,
+    finding_id text,
+    response_task_id text,
+    actor_id text,
+    principal_actor_id text,
+    pushed_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT detail_callout_specs_push_state_check CHECK ((push_state = ANY (ARRAY['pending'::text, 'pushed'::text, 'applied'::text, 'rejected-by-user'::text])))
+);
+
+
 -- Name: engagements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.engagements (
@@ -930,6 +949,12 @@ ALTER TABLE ONLY @@SCHEMA@@.deliverable_letters
     ADD CONSTRAINT deliverable_letters_pkey PRIMARY KEY (id);
 
 
+-- Name: detail_callout_specs detail_callout_specs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.detail_callout_specs
+    ADD CONSTRAINT detail_callout_specs_pkey PRIMARY KEY (id);
+
+
 -- Name: engagements engagements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.engagements
@@ -1261,6 +1286,11 @@ CREATE INDEX decision_pdf_artifacts_submission_idx ON @@SCHEMA@@.decision_pdf_ar
 CREATE INDEX deliverable_letters_engagement_created_idx ON @@SCHEMA@@.deliverable_letters USING btree (engagement_id, created_at);
 
 
+-- Name: detail_callout_specs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX detail_callout_specs_engagement_created_idx ON @@SCHEMA@@.detail_callout_specs USING btree (engagement_id, created_at);
+
+
 -- Name: engagements_name_lower_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (name_lower);
@@ -1556,6 +1586,12 @@ ALTER TABLE ONLY @@SCHEMA@@.decision_pdf_artifacts
 
 ALTER TABLE ONLY @@SCHEMA@@.deliverable_letters
     ADD CONSTRAINT deliverable_letters_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: detail_callout_specs detail_callout_specs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.detail_callout_specs
+    ADD CONSTRAINT detail_callout_specs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: eval_runs eval_runs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
