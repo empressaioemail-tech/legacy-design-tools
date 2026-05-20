@@ -235,7 +235,7 @@ vi.mock("@workspace/api-client-react", async (importOriginal) => {
 });
 
 const { BriefingDivergencesPanel, PushToRevitAffordance } = await import(
-  "../EngagementDetail"
+  "../../components/engagement-detail/PushToRevitAffordance"
 );
 
 function makeQueryClient() {
