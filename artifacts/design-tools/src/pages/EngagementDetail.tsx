@@ -709,7 +709,7 @@ export function EngagementDetail() {
                 sitting at the bottom of the tab under the raw JSON.
               */}
               <div className="col-span-2 min-h-0">
-                {!hasSnapshots ? (
+                {!hasSnapshots && bimElements.length === 0 ? (
                   <div className="sc-card p-8 h-full flex items-center justify-center">
                     <div className="sc-prose text-center opacity-70">
                       No snapshots yet. Send one from Revit.
