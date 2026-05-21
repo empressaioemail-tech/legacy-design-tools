@@ -150,7 +150,7 @@ jobs:
             "${DEPLOY_FLAGS[@]}" \
             --port=8080 \
             --cpu=2 \
-            --memory=2Gi \
+            --memory=8Gi \
             --min-instances=0 \
             --max-instances=10 \
             --concurrency=80 \
