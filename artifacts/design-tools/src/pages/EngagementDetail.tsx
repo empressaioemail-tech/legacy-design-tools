@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetEngagement,
   useGetEngagementBimModel,
   useGetSnapshot,
   useListEngagementSubmissions,
   useListSubmissionFindings,
+  useUpdateEngagement,
   getGetEngagementQueryKey,
   getGetSnapshotQueryKey,
+  getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
   getGetBriefingSourceGlbUrl,
@@ -95,19 +98,29 @@ function TabBar({
    */
   findingsBadgeCount?: number | undefined;
 }) {
-  const tabs: Array<{ id: TabId; label: string }> = [
-    { id: "snapshots", label: "Snapshots" },
-    { id: "sheets", label: "Sheets" },
-    { id: "site", label: "Site" },
-    { id: "site-context", label: "Site context" },
-    { id: "submissions", label: "Submissions" },
-    { id: "findings", label: "Findings" },
-    { id: "response-tasks", label: "Response tasks" },
-    { id: "deliverable-letters", label: "Deliverable letters" },
-    { id: "detail-callouts", label: "Detail callouts" },
-    { id: "product-specs", label: "Product specs" },
-    { id: "renders", label: "Renders" },
-    { id: "settings", label: "Settings" },
+  // Tabs are grouped into visual sections (model & source, site,
+  // review, deliverables, config). A thin separator is drawn at each
+  // group boundary so the 13-tab row reads as organized sections
+  // rather than one long undifferentiated strip (QA-01 / WSB.1). The
+  // row scrolls horizontally rather than clipping if it cannot fit.
+  const tabs: Array<{ id: TabId; label: string; group: string }> = [
+    { id: "snapshots", label: "Snapshots", group: "model" },
+    { id: "sheets", label: "Sheets", group: "model" },
+    { id: "model-3d", label: "3D model", group: "model" },
+    { id: "site", label: "Site", group: "site" },
+    { id: "site-context", label: "Site context", group: "site" },
+    { id: "submissions", label: "Submissions", group: "review" },
+    { id: "findings", label: "Findings", group: "review" },
+    { id: "response-tasks", label: "Response tasks", group: "review" },
+    {
+      id: "deliverable-letters",
+      label: "Deliverable letters",
+      group: "deliverables",
+    },
+    { id: "detail-callouts", label: "Detail callouts", group: "deliverables" },
+    { id: "product-specs", label: "Product specs", group: "deliverables" },
+    { id: "renders", label: "Renders", group: "deliverables" },
+    { id: "settings", label: "Settings", group: "config" },
   ];
   return (
     <div
@@ -115,63 +128,81 @@ function TabBar({
         display: "flex",
         gap: 4,
         borderBottom: "1px solid var(--border-default)",
+        overflowX: "auto",
       }}
     >
-      {tabs.map((t) => {
+      {tabs.map((t, i) => {
         const isActive = active === t.id;
         const showBadge =
           t.id === "findings" &&
           typeof findingsBadgeCount === "number" &&
           findingsBadgeCount > 0;
+        const groupBreak = i > 0 && tabs[i - 1].group !== t.group;
         return (
-          <button
-            key={t.id}
-            onClick={() => onChange(t.id)}
-            className="sc-tab"
-            data-testid={`engagement-tab-${t.id}`}
-            style={{
-              padding: "8px 14px",
-              background: "transparent",
-              border: "none",
-              borderBottom: isActive
-                ? "2px solid var(--cyan)"
-                : "2px solid transparent",
-              color: isActive
-                ? "var(--text-primary)"
-                : "var(--text-secondary)",
-              fontFamily: "Inter, sans-serif",
-              fontSize: 12,
-              cursor: "pointer",
-              transition: "color 0.12s, border-color 0.12s",
-              marginBottom: -1,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {t.label}
-            {showBadge && (
-              <span
-                data-testid="engagement-tab-findings-badge"
+          <Fragment key={t.id}>
+            {groupBreak && (
+              <div
+                aria-hidden="true"
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minWidth: 16,
+                  alignSelf: "center",
+                  flexShrink: 0,
+                  width: 1,
                   height: 16,
-                  padding: "0 5px",
-                  borderRadius: 8,
-                  background: "rgba(239, 68, 68, 0.18)",
-                  color: "#ef4444",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  lineHeight: 1,
+                  background: "var(--border-default)",
+                  margin: "0 4px",
                 }}
-              >
-                {findingsBadgeCount}
-              </span>
+              />
             )}
-          </button>
+            <button
+              onClick={() => onChange(t.id)}
+              className="sc-tab"
+              data-testid={`engagement-tab-${t.id}`}
+              style={{
+                flexShrink: 0,
+                padding: "8px 12px",
+                background: "transparent",
+                border: "none",
+                borderBottom: isActive
+                  ? "2px solid var(--cyan)"
+                  : "2px solid transparent",
+                color: isActive
+                  ? "var(--text-primary)"
+                  : "var(--text-secondary)",
+                fontFamily: "Inter, sans-serif",
+                fontSize: 12,
+                cursor: "pointer",
+                transition: "color 0.12s, border-color 0.12s",
+                marginBottom: -1,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {t.label}
+              {showBadge && (
+                <span
+                  data-testid="engagement-tab-findings-badge"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: 16,
+                    height: 16,
+                    padding: "0 5px",
+                    borderRadius: 8,
+                    background: "rgba(239, 68, 68, 0.18)",
+                    color: "#ef4444",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    lineHeight: 1,
+                  }}
+                >
+                  {findingsBadgeCount}
+                </span>
+              )}
+            </button>
+          </Fragment>
         );
       })}
     </div>
@@ -181,7 +212,9 @@ function TabBar({
 export function EngagementDetail() {
   const params = useParams();
   const id = params.id as string;
-  const [jsonExpanded, setJsonExpanded] = useState(true);
+  // Raw snapshot JSON is collapsed by default — it is a developer /
+  // debug view, not the Snapshots tab's primary content (QA-12 / WSB.3).
+  const [jsonExpanded, setJsonExpanded] = useState(false);
   // Initialize tab from `?tab=…` so deep links land on the right tab
   // without a flicker. Sync on every change via `setTabAndSyncUrl`
   // (defined below) — we deliberately do NOT subscribe to `popstate`,
@@ -239,6 +272,23 @@ export function EngagementDetail() {
   );
 
   const bimModelQuery = useGetEngagementBimModel(id);
+
+  // Archive / unarchive (QA-02 / WSB.2). PATCHes the engagement's
+  // status; the engagements list filters archived projects out by
+  // default, so this is how a project leaves / re-enters that list.
+  const queryClient = useQueryClient();
+  const archiveMutation = useUpdateEngagement({
+    mutation: {
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: getGetEngagementQueryKey(id),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: getListEngagementsQueryKey(),
+        });
+      },
+    },
+  });
   const bimModel = bimModelQuery.data?.bimModel ?? null;
   const bimElements = useMemo(() => bimModel?.elements ?? [], [bimModel]);
   // Resolve a GLB URL for the architect's BIM building. Architect-
@@ -445,6 +495,50 @@ export function EngagementDetail() {
     setModalOpen(false);
   };
 
+  // BIM model viewer panel — shared by the Snapshots tab (where WSB.3
+  // moves it up beside the snapshot timeline) and the dedicated
+  // "3D model" tab (WSB.1). Tabs render conditionally so only one
+  // instance ever mounts. Keeps `data-testid="snapshots-bim-viewer"`
+  // so the finding-citation deep-link regression test still resolves.
+  const bimModelPanel = (
+    <div
+      className="sc-card flex flex-col h-full"
+      data-testid="snapshots-bim-viewer"
+      style={{ minHeight: 420 }}
+    >
+      <div className="sc-card-header sc-row-sb">
+        <span className="sc-label">BIM MODEL</span>
+        <span className="sc-meta">
+          {bimElements.length}{" "}
+          {bimElements.length === 1 ? "element" : "elements"}
+        </span>
+      </div>
+      <div
+        className="flex-1"
+        style={{
+          borderTop: "1px solid var(--border-default)",
+          padding: 8,
+          display: "flex",
+          minHeight: 0,
+        }}
+      >
+        {bimModelQuery.isLoading ? (
+          <div className="sc-prose opacity-60 m-auto">Loading BIM model…</div>
+        ) : bimElements.length === 0 ? (
+          <div className="sc-prose opacity-70 m-auto text-center">
+            No BIM elements yet. Push this engagement&apos;s briefing to Revit
+            to populate the 3D viewer.
+          </div>
+        ) : (
+          <BimModelViewport
+            elements={bimElements}
+            selectedElementRef={selectedElementRef ?? null}
+          />
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <AppShell
       title={engagement.name}
@@ -481,6 +575,29 @@ export function EngagementDetail() {
             </Link>
             <button className="sc-btn-ghost" onClick={openEdit}>
               Edit details
+            </button>
+            <button
+              type="button"
+              className="sc-btn-ghost"
+              data-testid="engagement-archive-toggle"
+              disabled={archiveMutation.isPending}
+              onClick={() =>
+                archiveMutation.mutate({
+                  id,
+                  data: {
+                    status:
+                      engagement.status === "archived"
+                        ? "active"
+                        : "archived",
+                  },
+                })
+              }
+            >
+              {archiveMutation.isPending
+                ? "Saving…"
+                : engagement.status === "archived"
+                  ? "Unarchive"
+                  : "Archive"}
             </button>
             <button
               type="button"
@@ -586,94 +703,75 @@ export function EngagementDetail() {
                 </div>
               </div>
 
+              {/*
+                QA-12 / WSB.3 — the BIM model is promoted into the
+                primary column beside the snapshot timeline instead of
+                sitting at the bottom of the tab under the raw JSON.
+              */}
               <div className="col-span-2 min-h-0">
-                {!hasSnapshots ? (
+                {!hasSnapshots && bimElements.length === 0 ? (
                   <div className="sc-card p-8 h-full flex items-center justify-center">
                     <div className="sc-prose text-center opacity-70">
                       No snapshots yet. Send one from Revit.
                     </div>
                   </div>
-                ) : !snapshotDetail ? (
-                  <div className="sc-card p-8 h-full flex items-center justify-center">
-                    <div className="sc-prose opacity-60">Loading snapshot…</div>
-                  </div>
                 ) : (
-                  <div className="sc-card flex flex-col h-full">
-                    <div className="sc-card-header sc-row-sb">
-                      <span className="sc-label">RAW JSON</span>
-                      <button
-                        className="sc-btn-sm"
-                        onClick={() => setJsonExpanded(!jsonExpanded)}
-                      >
-                        {jsonExpanded ? "Collapse" : "Expand"}
-                      </button>
-                    </div>
-                    {jsonExpanded && (
-                      <div
-                        className="flex-1 overflow-hidden"
-                        style={{
-                          borderTop: "1px solid var(--border-default)",
-                        }}
-                      >
-                        <pre
-                          className="sc-mono-sm sc-scroll m-0"
-                          style={{
-                            background: "var(--bg-input)",
-                            padding: 12,
-                            maxHeight: 600,
-                            overflow: "auto",
-                            whiteSpace: "pre-wrap",
-                            wordWrap: "break-word",
-                          }}
-                        >
-                          {JSON.stringify(snapshotDetail.payload, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
+                  bimModelPanel
                 )}
               </div>
             </div>
 
-            <div
-              className="sc-card flex flex-col"
-              data-testid="snapshots-bim-viewer"
-              style={{ minHeight: 420 }}
-            >
-              <div className="sc-card-header sc-row-sb">
-                <span className="sc-label">BIM MODEL</span>
-                <span className="sc-meta">
-                  {bimElements.length}{" "}
-                  {bimElements.length === 1 ? "element" : "elements"}
-                </span>
+            {/*
+              QA-12 / WSB.3 — raw snapshot JSON demoted to a secondary,
+              collapsed-by-default card below the model. It stays
+              available for debugging without dominating the tab.
+            */}
+            {hasSnapshots && (
+              <div className="sc-card flex flex-col">
+                <div className="sc-card-header sc-row-sb">
+                  <span className="sc-label">RAW JSON</span>
+                  <button
+                    className="sc-btn-sm"
+                    onClick={() => setJsonExpanded(!jsonExpanded)}
+                  >
+                    {jsonExpanded ? "Collapse" : "Expand"}
+                  </button>
+                </div>
+                {jsonExpanded &&
+                  (!snapshotDetail ? (
+                    <div
+                      className="p-4 sc-prose opacity-60"
+                      style={{ borderTop: "1px solid var(--border-default)" }}
+                    >
+                      Loading snapshot…
+                    </div>
+                  ) : (
+                    <div
+                      className="flex-1 overflow-hidden"
+                      style={{ borderTop: "1px solid var(--border-default)" }}
+                    >
+                      <pre
+                        className="sc-mono-sm sc-scroll m-0"
+                        style={{
+                          background: "var(--bg-input)",
+                          padding: 12,
+                          maxHeight: 600,
+                          overflow: "auto",
+                          whiteSpace: "pre-wrap",
+                          wordWrap: "break-word",
+                        }}
+                      >
+                        {JSON.stringify(snapshotDetail.payload, null, 2)}
+                      </pre>
+                    </div>
+                  ))}
               </div>
-              <div
-                className="flex-1"
-                style={{
-                  borderTop: "1px solid var(--border-default)",
-                  padding: 8,
-                  display: "flex",
-                  minHeight: 0,
-                }}
-              >
-                {bimModelQuery.isLoading ? (
-                  <div className="sc-prose opacity-60 m-auto">
-                    Loading BIM model…
-                  </div>
-                ) : bimElements.length === 0 ? (
-                  <div className="sc-prose opacity-70 m-auto text-center">
-                    No BIM elements yet. Push this engagement&apos;s briefing
-                    to Revit to populate the 3D viewer.
-                  </div>
-                ) : (
-                  <BimModelViewport
-                    elements={bimElements}
-                    selectedElementRef={selectedElementRef ?? null}
-                  />
-                )}
-              </div>
-            </div>
+            )}
           </>
+        )}
+
+        {tab === "model-3d" && (
+          <div className="flex flex-col flex-1 min-h-0">{bimModelPanel}</div>
         )}
 
         {tab === "sheets" && (
@@ -691,11 +789,11 @@ export function EngagementDetail() {
                 className="sc-btn-ghost"
                 data-testid="sheets-tab-view-in-3d"
                 disabled={bimElements.length === 0}
-                onClick={() => setTab("snapshots")}
+                onClick={() => setTab("model-3d")}
                 title={
                   bimElements.length === 0
                     ? "Push this engagement's briefing to Revit to enable the 3D viewer."
-                    : "Open the 3D BIM viewer on the Snapshots tab."
+                    : "Open the dedicated 3D model tab."
                 }
               >
                 View in 3D

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   useSidebarState,
   LEFT_SIDEBAR_DEFAULT_WIDTH,
@@ -65,6 +65,8 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
   const width = useSidebarState((s) => s.leftWidth);
   const setLeftWidth = useSidebarState((s) => s.setLeftWidth);
   const resetLeftWidth = useSidebarState((s) => s.resetLeftWidth);
+  const collapsedGroups = useSidebarState((s) => s.collapsedGroups);
+  const toggleGroup = useSidebarState((s) => s.toggleGroup);
 
   // Cmd/Ctrl+B keyboard shortcut (VS Code convention)
   useEffect(() => {
@@ -203,19 +205,43 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
 
       {/* Groups */}
       <nav style={{ flex: 1, padding: "14px 0 24px" }}>
-        {groups.map((group) => (
+        {groups.map((group) => {
+          // Per-section collapse applies only while the sidebar is
+          // expanded; in icon-rail mode there are no group headers, so
+          // every group's items stay visible as icons.
+          const groupCollapsed =
+            !collapsed && collapsedGroups[group.label] === true;
+          return (
           <div key={group.label} style={{ marginBottom: 18 }}>
             {!collapsed && (
-              <div
+              <button
+                type="button"
                 className="sc-label"
+                onClick={() => toggleGroup(group.label)}
+                aria-expanded={!groupCollapsed}
+                data-testid={`sidebar-group-toggle-${group.label}`}
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  width: "100%",
+                  background: "transparent",
+                  border: "none",
                   color: "var(--chrome-text-sec)",
+                  cursor: "pointer",
                   padding: "0 18px 6px 18px",
+                  textAlign: "left",
                 }}
               >
-                {group.label}
-              </div>
+                {groupCollapsed ? (
+                  <ChevronRight size={11} />
+                ) : (
+                  <ChevronDown size={11} />
+                )}
+                <span style={{ flex: 1 }}>{group.label}</span>
+              </button>
             )}
+            {!groupCollapsed && (
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {group.items.map((item) => {
                 const active = isActive(location, item.href);
@@ -306,8 +332,10 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
                 );
               })}
             </ul>
+            )}
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Collapse toggle */}

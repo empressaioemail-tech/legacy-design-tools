@@ -5,7 +5,8 @@
  * under `https://services.arcgis.com/<org>/...` (no API key required
  * for the public endpoints we hit). We expose three:
  *
- *   - `ugrc:dem`            — the statewide 5m DEM layer (point sample).
+ *   - `ugrc:dem`            — statewide generalized 200ft elevation
+ *                             contour polygons (point-in-polygon sample).
  *   - `ugrc:parcels`        — the statewide unified parcel layer.
  *   - `ugrc:address-points` — the statewide address point layer.
  *
@@ -28,7 +29,14 @@ import {
  * here so a future endpoint move is a one-line change.
  */
 const UGRC_ENDPOINTS = {
-  dem: "https://services1.arcgis.com/99lidPhWCzftIe9K/arcgis/rest/services/Utah_Elevation_Contours/FeatureServer/0",
+  // `ugrc:dem` resolves to UGRC's statewide generalized 200ft
+  // elevation-contour polygon layer. The prior URL pointed at a
+  // `Utah_Elevation_Contours` FeatureServer that does not exist on the
+  // UGRC ArcGIS org — every run 400'd with ArcGIS "Invalid URL"
+  // (QA-03 / WSA.4, 2026-05-20). `ContoursGeneralized200Ft` is the
+  // published statewide product; its layer 0 is polygon bands, so a
+  // parcel point reliably intersects exactly one elevation band.
+  dem: "https://services1.arcgis.com/99lidPhWCzftIe9K/arcgis/rest/services/ContoursGeneralized200Ft/FeatureServer/0",
   parcels:
     "https://services1.arcgis.com/99lidPhWCzftIe9K/arcgis/rest/services/UtahStatewideParcels/FeatureServer/0",
   addressPoints:
@@ -42,11 +50,11 @@ const UGRC_ENDPOINTS = {
  * badge on stale state-tier rows that Task #222 added on the federal
  * tier.
  *
- *   - `dem` (24mo): Utah's statewide 5m DEM is rebuilt as new lidar
- *     collections complete; absolute elevation at a point is stable,
- *     so the snapshot is only stale once the *raster product* has
- *     been replaced. 24 months matches the cadence UGRC publishes
- *     new DEM tiles. Mirrors the USGS NED window for the same reason.
+ *   - `dem` (24mo): the statewide generalized contour layer is
+ *     rebuilt only when UGRC reprocesses its base DEM; elevation at a
+ *     point is stable, so the snapshot is only stale once the contour
+ *     product itself has been republished. 24 months matches that
+ *     cadence. Mirrors the USGS NED window for the same reason.
  *   - `parcels` (12mo): the statewide Unified Parcel layer aggregates
  *     county pushes on a roughly quarterly cadence; 12 months keeps
  *     the badge tight enough that a year-old read prompts a re-run

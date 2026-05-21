@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListDeliverableLetters,
@@ -134,7 +135,13 @@ function CreateLetterDialog({
   const submitting = mutation.isPending;
   const canSubmit = title.trim().length > 0 && !submitting;
 
-  return (
+  // Portal to <body>. This dialog is `position: fixed`, but the tab
+  // mounts it inside the `deliverable-letters-tab` `.sc-card`, and
+  // `.sc-card:hover` applies a `transform` — a transformed ancestor
+  // becomes the containing block for fixed descendants, so without the
+  // portal the modal would jump to cover only the card box and get
+  // clipped by the card's `overflow: hidden` (QA-11 / WSB.4).
+  return createPortal(
     <div
       onClick={() => !submitting && onClose()}
       data-testid="create-deliverable-letter-dialog"
@@ -216,7 +223,8 @@ function CreateLetterDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

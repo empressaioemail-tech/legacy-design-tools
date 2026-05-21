@@ -166,12 +166,22 @@ export function EngagementList() {
   // resolves to no applicable adapters so an architect can focus
   // triage on the actionable subset.
   const [hideOutOfPilot, setHideOutOfPilot] = useState(false);
-  const visibleEngagements = useMemo(
-    () =>
-      hideOutOfPilot
-        ? sortedEngagements.filter((e) => eligibilityById.get(e.id)?.isInPilot)
-        : sortedEngagements,
-    [sortedEngagements, eligibilityById, hideOutOfPilot],
+  // Archived projects are hidden by default so the list does not grow
+  // unbounded (QA-02 / WSB.2); the "Show archived" toggle reveals them.
+  const [showArchived, setShowArchived] = useState(false);
+  const visibleEngagements = useMemo(() => {
+    let list = sortedEngagements;
+    if (!showArchived) {
+      list = list.filter((e) => e.status !== "archived");
+    }
+    if (hideOutOfPilot) {
+      list = list.filter((e) => eligibilityById.get(e.id)?.isInPilot);
+    }
+    return list;
+  }, [sortedEngagements, eligibilityById, hideOutOfPilot, showArchived]);
+  const archivedCount = useMemo(
+    () => engagements.filter((e) => e.status === "archived").length,
+    [engagements],
   );
   const outOfPilotCount = engagements.length - visibleEngagementsInPilotCount(
     engagements,
@@ -202,6 +212,15 @@ export function EngagementList() {
                   </span>
                 </>
               ) : null}
+              {archivedCount > 0 && !showArchived ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <span data-testid="engagements-archived-tally">
+                    {archivedCount} archived hidden
+                  </span>
+                </>
+              ) : null}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -216,6 +235,18 @@ export function EngagementList() {
                 onChange={(e) => setHideOutOfPilot(e.target.checked)}
               />
               Show only in-pilot
+            </label>
+            <label
+              className="sc-body opacity-80 flex items-center gap-2"
+              style={{ cursor: "pointer", userSelect: "none" }}
+            >
+              <input
+                type="checkbox"
+                data-testid="engagements-filter-show-archived"
+                checked={showArchived}
+                onChange={(e) => setShowArchived(e.target.checked)}
+              />
+              Show archived
             </label>
             <button
               className="sc-btn-ghost"

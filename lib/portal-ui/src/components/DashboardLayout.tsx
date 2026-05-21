@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Sidebar, type SidebarGroup } from "./Sidebar";
-import { Header, type HeaderSearch } from "./Header";
+import { Header, type HeaderSearch, type HeaderNotifications } from "./Header";
 import {
   useSidebarState,
   RIGHT_SIDEBAR_MAX_WIDTH,
@@ -18,6 +18,8 @@ export interface DashboardLayoutProps {
   navGroups: SidebarGroup[];
   rightPanel?: ReactNode;
   search?: HeaderSearch;
+  /** Pass-through to {@link Header}'s `notifications` slot — wires the bell. */
+  headerNotifications?: HeaderNotifications;
   /** Pass-through to {@link Header}'s `trailing` slot. */
   headerTrailing?: ReactNode;
 }
@@ -30,6 +32,7 @@ export function DashboardLayout({
   navGroups,
   rightPanel,
   search,
+  headerNotifications,
   headerTrailing,
 }: DashboardLayoutProps) {
   const rightCollapsed = useSidebarState((s) => s.rightCollapsed);
@@ -114,7 +117,12 @@ export function DashboardLayout({
           minWidth: 0,
         }}
       >
-        <Header title={title} search={search} trailing={headerTrailing} />
+        <Header
+          title={title}
+          search={search}
+          notifications={headerNotifications}
+          trailing={headerTrailing}
+        />
         <main
           style={{
             flex: 1,
