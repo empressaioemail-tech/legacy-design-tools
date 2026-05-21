@@ -34,11 +34,16 @@ export function getIfcApi(): Promise<IfcAPI> {
     // resolve to dist/ where the wasm doesn't exist (issue #268).
     const WebIFC: typeof import("web-ifc") = localRequire("web-ifc");
     const api = new WebIFC.IfcAPI();
-    // web-ifc 0.0.71's exports map blocks require.resolve("web-ifc/package.json").
-    // The require condition's main entry IS exported, and the wasm files live in
-    // the same directory as the entry point, so resolving the entry gives us the
-    // package root reliably. See https://github.com/IFCjs/web-ifc/issues/268.
-    const entryPath = localRequire.resolve("web-ifc/web-ifc-api-node.js");
+    // web-ifc 0.0.71's `exports` map exposes ONLY the `.` entry — every
+    // explicit subpath (`web-ifc/package.json`, and — the bug this line
+    // fixes — `web-ifc/web-ifc-api-node.js`) throws
+    // ERR_PACKAGE_PATH_NOT_EXPORTED. Resolve the `.` entry instead: under
+    // the `require` condition it maps to the CJS Node entry file, and
+    // web-ifc ships its `.wasm` artifacts in that same directory, so
+    // `dirname` of the resolved entry is the wasm dir SetWasmPath needs.
+    // `localRequire("web-ifc")` just above proves the `.` entry resolves.
+    // See https://github.com/IFCjs/web-ifc/issues/268.
+    const entryPath = localRequire.resolve("web-ifc");
     const wasmDir = path.dirname(entryPath);
     api.SetWasmPath(wasmDir + path.sep, /*absolute=*/ true);
     await api.Init();
