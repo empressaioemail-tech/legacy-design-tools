@@ -7,6 +7,7 @@ import {
   keyFromEngagement,
   retrieveAtomsForQuestion,
   getAtomsByIds,
+  countAtomsForJurisdiction,
   buildChatPrompt,
   MAX_SNAPSHOT_FOCUS_TOTAL_PAYLOAD_CHARS,
   type RetrievedAtom,
@@ -26,6 +27,10 @@ import {
   type ToolContext,
   type ToolRunResult,
 } from "./chatAgentTools";
+import {
+  buildCoverageGuardrail,
+  type JurisdictionCoverage,
+} from "./coverageGuardrail";
 
 /**
  * Render-mode token the inline-reference syntax uses to opt a chat
@@ -631,6 +636,53 @@ router.post("/chat", async (req: Request, res: Response) => {
   }
   const allAtoms = [...explicitAtoms, ...retrievedAtoms];
 
+  // QA-23 — jurisdiction coverage honesty guardrail. Determine whether
+  // this engagement's jurisdiction has real, ingested code coverage. If
+  // it does not, the agent must flag every code answer as ungrounded /
+  // model-knowledge-only instead of presenting a fabricated section
+  // number as a confident citation. `allAtoms.length > 0` is already
+  // proof of coverage (atoms were just retrieved for this jurisdiction);
+  // only the empty-retrieval case needs the count query to tell a
+  // genuinely uncovered jurisdiction apart from a question that missed.
+  let jurisdictionCoverage: JurisdictionCoverage;
+  if (!jurisdictionKey) {
+    jurisdictionCoverage = "unrecognized";
+  } else if (allAtoms.length > 0) {
+    jurisdictionCoverage = "covered";
+  } else {
+    try {
+      const atomCount = await countAtomsForJurisdiction(jurisdictionKey);
+      jurisdictionCoverage = atomCount > 0 ? "covered" : "no_atoms";
+    } catch (err) {
+      // Fail safe: if coverage cannot be confirmed, assume none. An
+      // over-cautious "ungrounded" flag is harmless; a wrongly-confident
+      // citation is exactly the QA-23 bug.
+      logger.warn(
+        { err, engagementId, jurisdictionKey },
+        "chat: jurisdiction coverage check failed — treating as no coverage",
+      );
+      jurisdictionCoverage = "no_atoms";
+    }
+  }
+  const jurisdictionLabel =
+    engagementTyped.jurisdiction?.trim() ||
+    [engagementTyped.jurisdictionCity, engagementTyped.jurisdictionState]
+      .filter((s): s is string => Boolean(s && s.trim()))
+      .join(", ") ||
+    engagementTyped.address?.trim() ||
+    "this engagement's location";
+  if (jurisdictionCoverage !== "covered") {
+    logger.info(
+      {
+        engagementId,
+        jurisdictionKey,
+        jurisdictionLabel,
+        coverage: jurisdictionCoverage,
+      },
+      "chat: jurisdiction has no grounded code coverage — honesty guardrail engaged",
+    );
+  }
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
@@ -775,6 +827,12 @@ router.post("/chat", async (req: Request, res: Response) => {
     buildAgentToolGuidance({
       engagementName: engagementTyped.name ?? engagementId,
       activeTab,
+    }) +
+    // QA-23 — appended last so the grounding rule is the final, most
+    // salient instruction. Empty string when the jurisdiction is covered.
+    buildCoverageGuardrail({
+      coverage: jurisdictionCoverage,
+      jurisdictionLabel,
     });
 
   const toolContext: ToolContext = {

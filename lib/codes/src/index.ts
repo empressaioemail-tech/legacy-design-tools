@@ -21,6 +21,7 @@ export { startQueueWorker, stopQueueWorker } from "./queue";
 export {
   retrieveAtomsForQuestion,
   getAtomsByIds,
+  countAtomsForJurisdiction,
   MIN_VECTOR_SCORE,
   type RetrievedAtom,
   type RetrieveOptions,

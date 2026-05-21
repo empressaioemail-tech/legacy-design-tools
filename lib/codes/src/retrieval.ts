@@ -199,6 +199,24 @@ export async function retrieveAtomsForQuestion(
 }
 
 /**
+ * Count the code atoms ingested for a jurisdiction, independent of any
+ * question. The chat route's honesty guardrail (QA-23) uses this to tell
+ * "this jurisdiction has grounded code coverage" apart from "a specific
+ * question retrieved nothing this turn": a zero count means the agent must
+ * flag any code answer as model-knowledge-only rather than presenting a
+ * fabricated section number as a grounded citation.
+ */
+export async function countAtomsForJurisdiction(
+  jurisdictionKey: string,
+): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(codeAtoms)
+    .where(eq(codeAtoms.jurisdictionKey, jurisdictionKey));
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
  * Look up a small set of atoms by id, scoped to a jurisdiction. Used by the
  * chat route to expand user-attached referencedAtomIds.
  */
