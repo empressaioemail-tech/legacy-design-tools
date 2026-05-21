@@ -387,6 +387,116 @@ describe("ClaudeChat", () => {
     );
   });
 
+  // ── QA-19 — streaming auto-scroll ───────────────────────────────────────
+
+  /**
+   * happy-dom does no layout, so scroll metrics default to 0. Pin them so
+   * the component's distance-from-bottom math has real numbers to work with.
+   */
+  function mockScrollMetrics(
+    el: HTMLElement,
+    metrics: { scrollHeight: number; clientHeight: number },
+  ) {
+    Object.defineProperty(el, "scrollHeight", {
+      value: metrics.scrollHeight,
+      configurable: true,
+    });
+    Object.defineProperty(el, "clientHeight", {
+      value: metrics.clientHeight,
+      configurable: true,
+    });
+  }
+
+  it("auto-scrolls the message list to the bottom as a response streams in", () => {
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "question" },
+        { role: "assistant", content: "partial" },
+      ] as Array<{ role: string; content: string }>,
+    };
+    const { rerender } = render(
+      <ClaudeChat engagementId="eng-1" hasSnapshots={true} />,
+    );
+    const scrollEl = screen.getByTestId("claude-chat-scroll");
+    mockScrollMetrics(scrollEl, { scrollHeight: 1000, clientHeight: 300 });
+
+    // A streamed token grows the last assistant message.
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "question" },
+        {
+          role: "assistant",
+          content: "partial answer that has now grown much longer",
+        },
+      ] as Array<{ role: string; content: string }>,
+    };
+    rerender(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+
+    expect(scrollEl.scrollTop).toBe(1000);
+  });
+
+  it("stops auto-scrolling once the user deliberately scrolls up", () => {
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "question" },
+        { role: "assistant", content: "answer" },
+      ] as Array<{ role: string; content: string }>,
+    };
+    const { rerender } = render(
+      <ClaudeChat engagementId="eng-1" hasSnapshots={true} />,
+    );
+    const scrollEl = screen.getByTestId("claude-chat-scroll");
+    mockScrollMetrics(scrollEl, { scrollHeight: 1000, clientHeight: 300 });
+
+    // The operator scrolls up to re-read earlier output.
+    scrollEl.scrollTop = 100;
+    fireEvent.scroll(scrollEl);
+
+    // The response keeps streaming.
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "question" },
+        { role: "assistant", content: "answer with a lot more text now" },
+      ] as Array<{ role: string; content: string }>,
+    };
+    rerender(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+
+    // Suppressed — the operator is left where they scrolled to.
+    expect(scrollEl.scrollTop).toBe(100);
+  });
+
+  it("re-arms auto-scroll when the user scrolls back to the bottom", () => {
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "question" },
+        { role: "assistant", content: "answer" },
+      ] as Array<{ role: string; content: string }>,
+    };
+    const { rerender } = render(
+      <ClaudeChat engagementId="eng-1" hasSnapshots={true} />,
+    );
+    const scrollEl = screen.getByTestId("claude-chat-scroll");
+    mockScrollMetrics(scrollEl, { scrollHeight: 1000, clientHeight: 300 });
+
+    // Scroll up — auto-follow suppressed.
+    scrollEl.scrollTop = 100;
+    fireEvent.scroll(scrollEl);
+
+    // Scroll back down to the bottom — auto-follow re-armed.
+    scrollEl.scrollTop = 700; // 1000 - 300 = bottom
+    fireEvent.scroll(scrollEl);
+
+    stores.messagesByEngagement = {
+      "eng-1": [
+        { role: "user", content: "question" },
+        { role: "assistant", content: "answer that keeps on streaming in" },
+      ] as Array<{ role: string; content: string }>,
+    };
+    rerender(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+
+    expect(scrollEl.scrollTop).toBe(1000);
+  });
+
   it("falls back to the engagement detail href when only one snapshot is in focus", () => {
     // Single-focus turns have nothing to compare against, so the chip
     // routes back to the engagement detail (where the latest snapshot
