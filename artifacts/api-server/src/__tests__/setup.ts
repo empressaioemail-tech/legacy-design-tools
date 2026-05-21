@@ -102,6 +102,10 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // truncating the table doesn't trip a cascade chain.
   "findings",
   "finding_runs",
+  // WS-C — the in-app agent's `create_response_tasks` tool writes L1
+  // response-tasks. Cascades off `engagements`, but listed explicitly
+  // per the "if a route writes to it, it's in this list" invariant.
+  "response_tasks",
   // Track 1 — auto-classification row (one-to-one with submissions).
   // Cascades off `submissions`, but listed explicitly per the
   // "if a route writes to it, it's in this list" invariant.

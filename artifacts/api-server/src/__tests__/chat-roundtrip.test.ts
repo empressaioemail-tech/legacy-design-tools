@@ -81,6 +81,23 @@ vi.mock("@workspace/integrations-anthropic-ai", () => ({
               yield e;
             }
           },
+          // WS-C: the route's tool-use loop calls `finalMessage()` after
+          // draining the stream. This round-trip scripts only text deltas,
+          // so the final message reconstructs that text and stops with
+          // `end_turn`.
+          finalMessage: async () => {
+            const text = [...events].map((e) => e.delta.text).join("");
+            return {
+              id: "msg_test",
+              type: "message",
+              role: "assistant",
+              model: "claude-sonnet-4-6",
+              stop_reason: "end_turn",
+              stop_sequence: null,
+              content: text ? [{ type: "text", text }] : [],
+              usage: { input_tokens: 0, output_tokens: 0 },
+            };
+          },
         };
       },
     },

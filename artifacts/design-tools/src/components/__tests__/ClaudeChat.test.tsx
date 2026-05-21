@@ -15,6 +15,7 @@ const stores = vi.hoisted(() => ({
   attachedSheetsByEngagement: {} as Record<string, unknown[]>,
   pendingChatInputByEngagement: {} as Record<string, string>,
   focusSnapshotIdsByEngagement: {} as Record<string, string[]>,
+  agentActionsByEngagement: {} as Record<string, unknown[]>,
   streaming: false,
   rightCollapsed: false,
 }));
@@ -28,12 +29,14 @@ vi.mock("../../store/engagements", () => ({
       attachedSheetsByEngagement: stores.attachedSheetsByEngagement,
       pendingChatInputByEngagement: stores.pendingChatInputByEngagement,
       focusSnapshotIdsByEngagement: stores.focusSnapshotIdsByEngagement,
+      agentActionsByEngagement: stores.agentActionsByEngagement,
       streaming: stores.streaming,
       sendMessage,
       detachSheet: vi.fn(),
       clearAttachedSheets: vi.fn(),
       toggleFocusSnapshot,
       clearFocusSnapshots,
+      reverseAgentAction: vi.fn(),
       consumePendingChatInput: () => null,
     }),
 }));

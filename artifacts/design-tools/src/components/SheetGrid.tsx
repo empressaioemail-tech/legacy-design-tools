@@ -6,15 +6,31 @@ import {
 } from "@workspace/api-client-react";
 import { SheetThumbnail } from "./SheetThumbnail";
 import { SheetViewer } from "./SheetViewer";
+import { useEngagementsStore } from "../store/engagements";
 
 interface SheetGridProps {
   snapshotId: string | null;
+  /** Engagement the sheets belong to — keys the chat-context selection. */
+  engagementId: string;
   onAskClaude: (sheet: SheetSummary) => void;
 }
 
-export function SheetGrid({ snapshotId, onAskClaude }: SheetGridProps) {
+export function SheetGrid({
+  snapshotId,
+  engagementId,
+  onAskClaude,
+}: SheetGridProps) {
   const [filter, setFilter] = useState("");
   const [viewerSheetId, setViewerSheetId] = useState<string | null>(null);
+  // WS-C (QA-07) — sheets ticked here are pushed into the in-app agent's
+  // chat context (reuses the same `attachedSheets` path the "Ask Claude"
+  // affordance uses).
+  const attachedSheetsByEngagement = useEngagementsStore(
+    (s) => s.attachedSheetsByEngagement,
+  );
+  const attachSheet = useEngagementsStore((s) => s.attachSheet);
+  const detachSheet = useEngagementsStore((s) => s.detachSheet);
+  const attachedSheets = attachedSheetsByEngagement[engagementId] ?? [];
 
   const enabled = !!snapshotId;
   const { data, isLoading } = useGetSnapshotSheets(snapshotId ?? "", {
@@ -105,13 +121,51 @@ export function SheetGrid({ snapshotId, onAskClaude }: SheetGridProps) {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-          {filtered.map((sheet) => (
-            <SheetThumbnail
-              key={sheet.id}
-              sheet={sheet}
-              onClick={() => setViewerSheetId(sheet.id)}
-            />
-          ))}
+          {filtered.map((sheet) => {
+            const selected = attachedSheets.some((s) => s.id === sheet.id);
+            return (
+              <div key={sheet.id} style={{ position: "relative" }}>
+                <label
+                  data-testid={`sheet-select-${sheet.id}`}
+                  title={
+                    selected
+                      ? "Sheet is in chat context — untick to remove"
+                      : "Tick to send this sheet to chat context"
+                  }
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    left: 6,
+                    zIndex: 2,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    background: "var(--bg-card)",
+                    border: `1px solid ${
+                      selected ? "var(--cyan)" : "var(--border-default)"
+                    }`,
+                    borderRadius: 4,
+                    padding: "3px 5px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    aria-label={`Send sheet ${sheet.sheetNumber} to chat context`}
+                    onChange={() =>
+                      selected
+                        ? detachSheet(engagementId, sheet.id)
+                        : attachSheet(engagementId, sheet)
+                    }
+                  />
+                </label>
+                <SheetThumbnail
+                  sheet={sheet}
+                  onClick={() => setViewerSheetId(sheet.id)}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 

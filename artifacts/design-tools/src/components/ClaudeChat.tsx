@@ -7,7 +7,10 @@ import {
   ChevronLeft,
   ChevronDown,
   ChevronRight,
+  CheckCircle2,
   Telescope,
+  Undo2,
+  Wrench,
   X,
 } from "lucide-react";
 import type { SnapshotSummary } from "@workspace/api-client-react";
@@ -42,6 +45,25 @@ function HexGlyph({ size = 18 }: { size?: number }) {
   );
 }
 
+/**
+ * Human labels for the WS-C agent tools — keeps the tool-activity status
+ * lines readable instead of echoing raw snake_case tool names.
+ */
+const TOOL_LABELS: Record<string, string> = {
+  list_sheets: "Listed sheets",
+  read_sheet: "Read a sheet",
+  list_findings: "Read findings",
+  list_submissions: "Read submissions",
+  list_snapshots: "Read snapshots",
+  list_response_tasks: "Read response tasks",
+  list_detail_callout_specs: "Read detail callouts",
+  list_product_spec_references: "Read product specs",
+  read_site_context: "Read site context",
+  create_response_tasks: "Created response tasks",
+  draft_detail_callout_spec: "Drafted a detail callout",
+  draft_product_spec_reference: "Drafted a product spec",
+};
+
 interface ClaudeChatProps {
   engagementId: string;
   hasSnapshots: boolean;
@@ -54,12 +76,19 @@ interface ClaudeChatProps {
    * non-comparison call sites don't have to thread the prop through.
    */
   snapshots?: ReadonlyArray<SnapshotSummary>;
+  /**
+   * WS-C — the engagement-detail tab the operator is currently viewing,
+   * forwarded to the chat route as ambient context so the agent knows
+   * where the operator is without being told.
+   */
+  activeTab?: string;
 }
 
 export function ClaudeChat({
   engagementId,
   hasSnapshots,
   snapshots = [],
+  activeTab,
 }: ClaudeChatProps) {
   const messagesByEngagement = useEngagementsStore(
     (s) => s.messagesByEngagement,
@@ -86,6 +115,10 @@ export function ClaudeChat({
   const clearFocusSnapshots = useEngagementsStore(
     (s) => s.clearFocusSnapshots,
   );
+  const agentActionsByEngagement = useEngagementsStore(
+    (s) => s.agentActionsByEngagement,
+  );
+  const reverseAgentAction = useEngagementsStore((s) => s.reverseAgentAction);
   const collapsed = useSidebarState((s) => s.rightCollapsed);
   const toggleRight = useSidebarState((s) => s.toggleRight);
   const [input, setInput] = useState("");
@@ -101,6 +134,11 @@ export function ClaudeChat({
   const messages = messagesByEngagement[engagementId] || [];
   const attachedSheets = attachedSheetsByEngagement[engagementId] ?? [];
   const focusSnapshotIds = focusSnapshotIdsByEngagement[engagementId] ?? [];
+  // WS-C — agent-action log for this engagement (WSC.5). The engagement
+  // page watches the same list to refresh the Response Tasks query and
+  // navigate there once a create turn settles, so this component itself
+  // stays free of react-query.
+  const agentActions = agentActionsByEngagement[engagementId] ?? [];
 
   // Lookup table for chip tooltips and picker rows. Memoized so the
   // SnapshotFocusChip components don't get a fresh map identity on every
@@ -139,6 +177,7 @@ export function ClaudeChat({
       ...(stagedFocusIds.length > 0
         ? { snapshotFocusIds: stagedFocusIds }
         : {}),
+      ...(activeTab ? { activeTab } : {}),
     });
     setInput("");
     setSnapshotFocus(false);
@@ -322,6 +361,31 @@ export function ClaudeChat({
           return (
             <div key={i} className="self-start max-w-[90%]">
               <div className="sc-card sc-accent-cyan px-3.5 py-2.5">
+                {msg.toolActivity && msg.toolActivity.length > 0 && (
+                  <div
+                    className="flex flex-col gap-1"
+                    style={{ marginBottom: 6 }}
+                  >
+                    {msg.toolActivity.map((tool, ti) => (
+                      <span
+                        key={ti}
+                        className="sc-meta"
+                        data-testid="claude-tool-activity"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          fontSize: 11,
+                          color: "var(--text-secondary)",
+                          opacity: 0.85,
+                        }}
+                      >
+                        <Wrench size={10} />
+                        {TOOL_LABELS[tool] ?? tool}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="claude-md">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -364,6 +428,88 @@ export function ClaudeChat({
           );
         })}
       </div>
+
+      {agentActions.length > 0 && (
+        <div
+          className="flex-shrink-0 border-t"
+          data-testid="agent-action-log"
+          style={{
+            borderColor: "var(--border-default)",
+            padding: "10px 12px",
+          }}
+        >
+          <div
+            className="sc-label"
+            style={{ color: "var(--text-secondary)", marginBottom: 6 }}
+          >
+            AGENT ACTIONS THIS SESSION
+          </div>
+          <div
+            className="flex flex-col gap-1.5 sc-scroll"
+            style={{ maxHeight: 132, overflowY: "auto" }}
+          >
+            {agentActions.map((action) => (
+              <div
+                key={action.entityId}
+                data-testid={`agent-action-${action.entityId}`}
+                className="flex items-center gap-2"
+                style={{ fontSize: 11.5, color: "var(--text-secondary)" }}
+              >
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={`Created response task: ${action.label}`}
+                >
+                  Created task: {action.label}
+                </span>
+                {action.reversed ? (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      color: "var(--text-muted)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <CheckCircle2 size={11} />
+                    Reversed
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid={`agent-action-reverse-${action.entityId}`}
+                    onClick={() => {
+                      void reverseAgentAction(engagementId, action.entityId);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      flexShrink: 0,
+                      background: "transparent",
+                      border: "1px solid var(--border-default)",
+                      color: "var(--text-secondary)",
+                      borderRadius: 3,
+                      padding: "2px 6px",
+                      cursor: "pointer",
+                      fontSize: 11,
+                    }}
+                  >
+                    <Undo2 size={11} />
+                    Reverse
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div
         className="p-4 border-t flex-shrink-0 flex flex-col gap-2"

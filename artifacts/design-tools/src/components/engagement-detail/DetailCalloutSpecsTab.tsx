@@ -15,6 +15,7 @@ import {
   type DoorScheduleRow,
 } from "@workspace/api-client-react";
 import { relativeTime } from "../../lib/relativeTime";
+import type { SpecDraftEntry } from "../../store/engagements";
 
 /**
  * Cortex L4 (Lane C.4 / C.4.4) — architect-side detail-callout-spec
@@ -141,14 +142,90 @@ const EMPTY_LAYER: WallAssemblyLayer = {
   function: "",
 };
 
+/**
+ * WS-C (WSC.4) — decompose an agent-drafted spec payload into the
+ * dialog's editable form state (detail type + flat fields + door rows +
+ * assembly layers). The operator then reviews and edits before saving;
+ * nothing is persisted until they submit the form.
+ */
+function seedDialogFromSpec(spec: DetailCalloutSpecPayload): {
+  detailType: DetailCalloutType;
+  flat: Record<string, string>;
+  rows: DoorScheduleRow[];
+  layers: WallAssemblyLayer[];
+} {
+  switch (spec.detailType) {
+    case "room-finish":
+      return {
+        detailType: "room-finish",
+        flat: {
+          roomName: spec.roomName,
+          roomNumber: spec.roomNumber,
+          floorFinish: spec.floorFinish,
+          baseFinish: spec.baseFinish,
+          wallFinish: spec.wallFinish,
+          ceilingFinish: spec.ceilingFinish,
+          ceilingHeight: spec.ceilingHeight,
+        },
+        rows: [{ ...EMPTY_DOOR_ROW }],
+        layers: [{ ...EMPTY_LAYER }],
+      };
+    case "wall-section":
+      return {
+        detailType: "wall-section",
+        flat: {
+          sectionMark: spec.sectionMark,
+          cutLocation: spec.cutLocation,
+          baseDatum: spec.baseDatum,
+          topDatum: spec.topDatum,
+        },
+        rows: [{ ...EMPTY_DOOR_ROW }],
+        layers:
+          spec.assemblyLayers.length > 0
+            ? spec.assemblyLayers.map((l) => ({ ...l }))
+            : [{ ...EMPTY_LAYER }],
+      };
+    case "wall-type":
+      return {
+        detailType: "wall-type",
+        flat: {
+          typeMark: spec.typeMark,
+          fireRating: spec.fireRating,
+          stcRating: spec.stcRating,
+        },
+        rows: [{ ...EMPTY_DOOR_ROW }],
+        layers:
+          spec.assemblyLayers.length > 0
+            ? spec.assemblyLayers.map((l) => ({ ...l }))
+            : [{ ...EMPTY_LAYER }],
+      };
+    case "door-schedule":
+      return {
+        detailType: "door-schedule",
+        flat: {},
+        rows:
+          spec.rows.length > 0
+            ? spec.rows.map((r) => ({ ...r }))
+            : [{ ...EMPTY_DOOR_ROW }],
+        layers: [{ ...EMPTY_LAYER }],
+      };
+  }
+}
+
 function CreateDetailCalloutSpecDialog({
   engagementId,
   isOpen,
   onClose,
+  initialSpec,
+  aiReasoning,
 }: {
   engagementId: string;
   isOpen: boolean;
   onClose: () => void;
+  /** WS-C — agent-drafted spec to pre-fill the form with (WSC.4). */
+  initialSpec?: DetailCalloutSpecPayload | null;
+  /** WS-C — the agent's rationale, shown in the AI-populated banner. */
+  aiReasoning?: string | null;
 }) {
   const qc = useQueryClient();
   const [detailType, setDetailType] = useState<DetailCalloutType>("room-finish");
@@ -160,14 +237,22 @@ function CreateDetailCalloutSpecDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    if (initialSpec) {
+      // WS-C — open pre-filled from the agent's draft for operator review.
+      const seed = seedDialogFromSpec(initialSpec);
+      setDetailType(seed.detailType);
+      setFlat(seed.flat);
+      setRows(seed.rows);
+      setLayers(seed.layers);
+    } else {
       setDetailType("room-finish");
       setFlat({});
       setRows([{ ...EMPTY_DOOR_ROW }]);
       setLayers([{ ...EMPTY_LAYER }]);
-      setError(null);
     }
-  }, [isOpen]);
+    setError(null);
+  }, [isOpen, initialSpec]);
 
   const mutation = useCreateDetailCalloutSpec({
     mutation: {
@@ -274,9 +359,27 @@ function CreateDetailCalloutSpecDialog({
           <span
             style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}
           >
-            New detail-callout spec
+            {initialSpec ? "Review AI-drafted spec" : "New detail-callout spec"}
           </span>
         </div>
+
+        {initialSpec && (
+          <div
+            data-testid="detail-callout-ai-banner"
+            style={{
+              margin: "12px 16px 0",
+              padding: "8px 10px",
+              borderRadius: 4,
+              background: "var(--cyan-accent-bg)",
+              border: "1px solid var(--cyan)",
+              color: "var(--cyan)",
+              fontSize: 11.5,
+            }}
+          >
+            AI-populated by the Cortex agent — review every field before saving.
+            {aiReasoning ? ` ${aiReasoning}` : ""}
+          </div>
+        )}
 
         <div className="p-4 flex flex-col" style={{ gap: 10 }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -630,10 +733,37 @@ function SpecRow({
 
 export function DetailCalloutSpecsTab({
   engagementId,
+  aiDraft,
+  onAiDraftConsumed,
 }: {
   engagementId: string;
+  /** WS-C — an agent-prepared L4 draft routed in from the chat panel. */
+  aiDraft?: SpecDraftEntry | null;
+  /** Called once the draft has been taken into the create dialog. */
+  onAiDraftConsumed?: () => void;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [draftSpec, setDraftSpec] = useState<DetailCalloutSpecPayload | null>(
+    null,
+  );
+  const [draftReasoning, setDraftReasoning] = useState<string | null>(null);
+
+  // WS-C (WSC.4) — when the chat agent routes a detail-callout draft in,
+  // open the create dialog pre-filled with it for operator review.
+  useEffect(() => {
+    if (!aiDraft) return;
+    const spec = (aiDraft.payload as { spec?: unknown }).spec;
+    if (spec) {
+      setDraftSpec(spec as DetailCalloutSpecPayload);
+      setDraftReasoning(aiDraft.reasoning);
+      setCreateOpen(true);
+    }
+    onAiDraftConsumed?.();
+    // `aiDraft` is the trigger; `onAiDraftConsumed` is a callback we
+    // invoke, not a dependency that should re-run this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiDraft]);
+
   const { data, isLoading } = useListDetailCalloutSpecs(
     engagementId,
     undefined,
@@ -703,7 +833,13 @@ export function DetailCalloutSpecsTab({
       <CreateDetailCalloutSpecDialog
         engagementId={engagementId}
         isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
+        initialSpec={draftSpec}
+        aiReasoning={draftReasoning}
+        onClose={() => {
+          setCreateOpen(false);
+          setDraftSpec(null);
+          setDraftReasoning(null);
+        }}
       />
     </>
   );

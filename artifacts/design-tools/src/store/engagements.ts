@@ -11,6 +11,44 @@ export interface ChatMessage {
   // turn (Task #48). Stored on the user message so the transcript can show a
   // "Compared N pushes" chip even after the focus picker resets.
   snapshotFocusIds?: string[];
+  // WS-C — tool names the in-app agent invoked while producing this
+  // assistant turn, in call order. Rendered as muted "used <tool>" status
+  // lines so the operator can see what the agent did.
+  toolActivity?: string[];
+}
+
+/**
+ * WS-C — one write the in-app agent performed this session. Fed by the
+ * `agent_action` SSE event the chat route emits; surfaced in the chat
+ * panel's agent-action log with a one-click reverse (WSC.5).
+ */
+export interface AgentActionEntry {
+  kind: "response-task-created";
+  entityType: "response-task";
+  entityId: string;
+  engagementId: string;
+  /** Human label for the log row (the response-task title). */
+  label: string;
+  /** `cancel` → reverse transitions the task to the L1 `cancelled` state. */
+  reverseHint: "cancel";
+  /** Set once the operator has reversed the write. */
+  reversed?: boolean;
+}
+
+/**
+ * WS-C — a spec draft the in-app agent prepared (L4 detail-callout-spec
+ * or L5 product-spec-reference). Fed by the `agent_draft` SSE event; the
+ * engagement page routes it to the matching manual form, pre-filled for
+ * operator review and save (WSC.4). Nothing is persisted until the
+ * operator submits that form.
+ */
+export interface SpecDraftEntry {
+  draftKind: "detail-callout-spec" | "product-spec-reference";
+  engagementId: string;
+  /** Validated draft payload the manual form pre-fills from. */
+  payload: Record<string, unknown>;
+  /** The agent's one-line rationale, shown in the form banner. */
+  reasoning: string;
 }
 
 interface EngagementsUiState {
@@ -22,6 +60,12 @@ interface EngagementsUiState {
   // engagement (Task #48). One-shot: cleared after each successful send so
   // follow-up turns don't accidentally keep paying the focus cost.
   focusSnapshotIdsByEngagement: Record<string, string[]>;
+  // WS-C — the session agent-action log, keyed by engagement. Accumulates
+  // across the session (session-only, like the chat transcript itself).
+  agentActionsByEngagement: Record<string, AgentActionEntry[]>;
+  // WS-C — the latest pending spec draft per engagement, awaiting the
+  // engagement page to route it to the L4/L5 form. `null`/absent == none.
+  specDraftByEngagement: Record<string, SpecDraftEntry | null>;
   streaming: boolean;
 
   selectSnapshot: (engagementId: string, snapshotId: string | null) => void;
@@ -32,10 +76,26 @@ interface EngagementsUiState {
   consumePendingChatInput: (engagementId: string) => string | null;
   toggleFocusSnapshot: (engagementId: string, snapshotId: string) => void;
   clearFocusSnapshots: (engagementId: string) => void;
+  /** Pull (and clear) the pending spec draft for an engagement. */
+  consumeSpecDraft: (engagementId: string) => SpecDraftEntry | null;
+  /**
+   * Reverse an agent-created response-task by transitioning it to the L1
+   * `cancelled` state. Resolves `true` on success and marks the
+   * agent-action log entry reversed.
+   */
+  reverseAgentAction: (
+    engagementId: string,
+    entityId: string,
+  ) => Promise<boolean>;
   sendMessage: (
     engagementId: string,
     question: string,
-    options?: { snapshotFocus?: boolean; snapshotFocusIds?: string[] },
+    options?: {
+      snapshotFocus?: boolean;
+      snapshotFocusIds?: string[];
+      /** The engagement-detail tab the operator is currently viewing. */
+      activeTab?: string;
+    },
   ) => Promise<void>;
 }
 
@@ -47,6 +107,8 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
   attachedSheetsByEngagement: {},
   pendingChatInputByEngagement: {},
   focusSnapshotIdsByEngagement: {},
+  agentActionsByEngagement: {},
+  specDraftByEngagement: {},
   streaming: false,
 
   selectSnapshot: (engagementId, snapshotId) =>
@@ -132,9 +194,49 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
       },
     })),
 
+  consumeSpecDraft: (engagementId) => {
+    const draft = get().specDraftByEngagement[engagementId] ?? null;
+    if (draft) {
+      set((state) => {
+        const next = { ...state.specDraftByEngagement };
+        delete next[engagementId];
+        return { specDraftByEngagement: next };
+      });
+    }
+    return draft;
+  },
+
+  reverseAgentAction: async (engagementId, entityId) => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/response-tasks/${entityId}/state`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: "cancelled" }),
+        },
+      );
+      if (!res.ok) return false;
+      set((state) => ({
+        agentActionsByEngagement: {
+          ...state.agentActionsByEngagement,
+          [engagementId]: (
+            state.agentActionsByEngagement[engagementId] ?? []
+          ).map((a) =>
+            a.entityId === entityId ? { ...a, reversed: true } : a,
+          ),
+        },
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   sendMessage: async (engagementId, question, options) => {
     const snapshotFocus = options?.snapshotFocus === true;
     const snapshotFocusIds = options?.snapshotFocusIds ?? [];
+    const activeTab = options?.activeTab;
     set((state) => {
       const msgs = state.messagesByEngagement[engagementId] || [];
       const userMsg: ChatMessage = { role: "user", content: question };
@@ -189,6 +291,8 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
           ...(referencedSheetIds.length > 0 ? { referencedSheetIds } : {}),
           ...(snapshotFocus ? { snapshotFocus: true } : {}),
           ...(snapshotFocusIds.length > 0 ? { snapshotFocusIds } : {}),
+          // WS-C — ambient context: which tab the operator is on.
+          ...(activeTab ? { activeTab } : {}),
         }),
       });
 
@@ -239,7 +343,54 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
 
             try {
               const parsed = JSON.parse(payload);
-              if (parsed.text) {
+              if (parsed.type === "tool_use" && typeof parsed.tool === "string") {
+                // WS-C — agent invoked a tool; record it on the streaming
+                // assistant message as a status line.
+                set((state) => {
+                  const msgs = [
+                    ...(state.messagesByEngagement[engagementId] || []),
+                  ];
+                  const lastIdx = msgs.length - 1;
+                  if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+                    const prev = msgs[lastIdx].toolActivity ?? [];
+                    msgs[lastIdx] = {
+                      ...msgs[lastIdx],
+                      toolActivity: [...prev, parsed.tool],
+                    };
+                  }
+                  return {
+                    messagesByEngagement: {
+                      ...state.messagesByEngagement,
+                      [engagementId]: msgs,
+                    },
+                  };
+                });
+              } else if (parsed.type === "agent_action" && parsed.action) {
+                // WS-C — agent performed a write; append to the action log.
+                set((state) => {
+                  const existing =
+                    state.agentActionsByEngagement[engagementId] ?? [];
+                  const action = parsed.action as AgentActionEntry;
+                  if (existing.some((a) => a.entityId === action.entityId)) {
+                    return {};
+                  }
+                  return {
+                    agentActionsByEngagement: {
+                      ...state.agentActionsByEngagement,
+                      [engagementId]: [...existing, action],
+                    },
+                  };
+                });
+              } else if (parsed.type === "agent_draft" && parsed.draft) {
+                // WS-C — agent prepared an L4/L5 spec draft; stage it for
+                // the engagement page to route to the manual form.
+                set((state) => ({
+                  specDraftByEngagement: {
+                    ...state.specDraftByEngagement,
+                    [engagementId]: parsed.draft as SpecDraftEntry,
+                  },
+                }));
+              } else if (parsed.text) {
                 set((state) => {
                   const msgs = [
                     ...(state.messagesByEngagement[engagementId] || []),
