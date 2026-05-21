@@ -15,7 +15,14 @@ async function buildAll() {
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    // Two entry points: the server itself, and the IFC parse worker
+    // (QA-16). esbuild's outbase is their common ancestor `src/`, so they
+    // land at `dist/index.mjs` and `dist/lib/ifcParser/ifcParseWorker.mjs`
+    // respectively — the path `workerClient.ts` resolves at runtime.
+    entryPoints: [
+      path.resolve(artifactDir, "src/index.ts"),
+      path.resolve(artifactDir, "src/lib/ifcParser/ifcParseWorker.ts"),
+    ],
     platform: "node",
     bundle: true,
     format: "esm",
