@@ -1002,7 +1002,16 @@ router.post("/snapshots/:id/ifc", async (req: Request, res: Response) => {
     res.status(400).json({ error: "missing_snapshot_id" });
     return;
   }
-  const snapshot = await lookupSnapshotForIfc(String(snapshotId));
+  // Guarded: an unguarded DB error in the lookup would surface as an
+  // opaque HTML 500 rather than the route's clean JSON (QA-04 / QA-16).
+  let snapshot: { id: string; engagementId: string } | null;
+  try {
+    snapshot = await lookupSnapshotForIfc(String(snapshotId));
+  } catch (err) {
+    logger.error({ err, snapshotId }, "ifc ingest: snapshot lookup failed");
+    res.status(500).json({ error: "db_error" });
+    return;
+  }
   if (!snapshot) {
     res.status(404).json({ error: "snapshot_not_found" });
     return;

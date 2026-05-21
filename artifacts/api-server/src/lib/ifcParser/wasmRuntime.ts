@@ -9,11 +9,12 @@
  * regardless of how this module is loaded (esbuild bundle, tsx, vitest).
  *
  * Singleton: the WASM module is heavy to instantiate (~sub-second) and the
- * IfcAPI holds native heap; we cache it per process and reuse across parses.
+ * IfcAPI holds native heap; we cache it for the lifetime of the thread.
  * IfcAPI is NOT reentrant — concurrent OpenModel calls on the same instance
- * race on shared state. Inline-mode callers must await each parse end-to-end
- * (CloseModel) before starting another. A worker-pool upgrade is the cure for
- * concurrent parses; documented in {@link ../index.ts}.
+ * race on shared state. Since QA-16 this module is loaded ONLY inside the
+ * one-shot IFC parse worker ({@link ./ifcParseWorker}): the singleton is
+ * therefore per-worker, instantiated once, and discarded with the thread,
+ * so a WASM trap that corrupts it can never be carried into the next parse.
  */
 
 import { createRequire } from "node:module";

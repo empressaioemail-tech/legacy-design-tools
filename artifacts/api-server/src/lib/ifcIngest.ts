@@ -29,10 +29,10 @@ import { getHistoryService } from "../atoms/registry";
 /**
  * Upper bound on a single IFC upload. Raised above the sheet caps because
  * a federated Revit IFC for a multi-discipline project can run 50-100 MB
- * even after compression. Above this the parser's transient heap during
- * `LoadAllGeometry` starts pushing the api-server process toward the 1-2
- * GB Replit ceiling — the worker_threads upgrade documented in
- * `lib/ifcParser/index.ts` is the cure if real-world projects exceed it.
+ * even after compression. The parser's transient heap during
+ * `LoadAllGeometry` runs ~10x the file size; since QA-16 that heap lives
+ * in a one-shot `worker_threads` worker, so an oversized IFC OOM-kills
+ * only that worker — the api-server instance keeps serving.
  */
 const MAX_IFC_BYTES = 100 * 1024 * 1024;
 
@@ -267,16 +267,30 @@ export async function ingestSnapshotIfc(args: {
 
   // 2) Upsert snapshot_ifc_files. On re-upload, capture the previous blob
   //    paths so we can best-effort delete them after the new row commits.
-  const previousRows = await db
-    .select({
-      id: snapshotIfcFiles.id,
-      blobObjectPath: snapshotIfcFiles.blobObjectPath,
-      gltfObjectPath: snapshotIfcFiles.gltfObjectPath,
-    })
-    .from(snapshotIfcFiles)
-    .where(eq(snapshotIfcFiles.snapshotId, snapshot.id))
-    .limit(1);
-  const previous = previousRows[0] ?? null;
+  //    Guarded: an unguarded DB error here is exactly what made QA-04's
+  //    Layer 1 surface as an opaque HTML 500 instead of clean JSON.
+  let previous:
+    | { id: string; blobObjectPath: string; gltfObjectPath: string | null }
+    | null;
+  try {
+    const previousRows = await db
+      .select({
+        id: snapshotIfcFiles.id,
+        blobObjectPath: snapshotIfcFiles.blobObjectPath,
+        gltfObjectPath: snapshotIfcFiles.gltfObjectPath,
+      })
+      .from(snapshotIfcFiles)
+      .where(eq(snapshotIfcFiles.snapshotId, snapshot.id))
+      .limit(1);
+    previous = previousRows[0] ?? null;
+  } catch (err) {
+    reqLog.error(
+      { err, snapshotId: snapshot.id },
+      "ifc ingest: snapshot_ifc_files lookup failed",
+    );
+    res.status(500).json({ error: "db_error" });
+    return;
+  }
 
   let ifcFileId: string;
   try {
@@ -323,7 +337,10 @@ export async function ingestSnapshotIfc(args: {
     return;
   }
 
-  // 3) Parse. Inline (Phase 1; see lib/ifcParser/index.ts for upgrade path).
+  // 3) Parse. Runs in a one-shot worker_threads worker (QA-16) — a hang,
+  //    a WASM trap, or an OOM kills only that worker, never this instance.
+  //    Any rejection (malformed IFC, parse timeout, worker crash) lands
+  //    here and is recorded as the row's parse_error.
   let parseResult: ParseIfcResult;
   try {
     parseResult = await parseIfc({ bytes });
@@ -502,19 +519,29 @@ export async function ingestSnapshotIfc(args: {
     return;
   }
 
-  // 6) Mark the row parsed.
+  // 6) Mark the row parsed. Guarded so a DB error here returns the
+  //    route's clean `db_error` JSON rather than an opaque HTML 500.
   const parsedAt = new Date();
-  await db
-    .update(snapshotIfcFiles)
-    .set({
-      parsedAt,
-      gltfObjectPath,
-      ifcVersion: parseResult.ifcVersion,
-      parseEntityCount: parseResult.entityCount,
-      parseError: null,
-      updatedAt: parsedAt,
-    })
-    .where(eq(snapshotIfcFiles.id, ifcFileId));
+  try {
+    await db
+      .update(snapshotIfcFiles)
+      .set({
+        parsedAt,
+        gltfObjectPath,
+        ifcVersion: parseResult.ifcVersion,
+        parseEntityCount: parseResult.entityCount,
+        parseError: null,
+        updatedAt: parsedAt,
+      })
+      .where(eq(snapshotIfcFiles.id, ifcFileId));
+  } catch (err) {
+    reqLog.error(
+      { err, snapshotId: snapshot.id, ifcFileId },
+      "ifc ingest: parsed-row update failed",
+    );
+    res.status(500).json({ error: "db_error" });
+    return;
+  }
 
   // 6b) DA-BIM-Symmetry — produce the `bim-model` atom for this
   //     engagement so the as-built IFC is a first-class peer of the
