@@ -24,6 +24,7 @@ import {
   type Request,
   type Response,
 } from "express";
+import Busboy from "busboy";
 import {
   db,
   sheets,
@@ -42,6 +43,7 @@ import {
   type AttachedDocumentType,
 } from "@workspace/atoms-l-surface";
 import { logger } from "../lib/logger";
+import { ObjectStorageService } from "../lib/objectStorage";
 import { requireServiceTokenOrSession } from "../middlewares/serviceAuth";
 import { L_SURFACE_SOURCE_ADAPTER, contentHashOf } from "../lib/lSurfaceAtom";
 import {
@@ -54,9 +56,23 @@ import {
   extractSheetContentBody,
   SHEET_CONTENT_ANTHROPIC_MODEL,
 } from "../lib/sheetContentExtractor";
-import { buildTextSegments, parseDocumentTypeFilter } from "./sheetContent.logic";
+import {
+  buildTextSegments,
+  parseDocumentTypeFilter,
+  parseUploadedDocumentType,
+  isAcceptedDocumentMime,
+  isTextMime,
+  resolveDocumentTitle,
+} from "./sheetContent.logic";
 
 const router: IRouter = Router();
+
+/** Upper bound on a single attached-document upload (client PDFs/photos). */
+const MAX_ATTACHED_DOCUMENT_BYTES = 25 * 1024 * 1024;
+/** Cap on the extracted text persisted on the row (and fed to the agent). */
+const MAX_EXTRACTED_TEXT_CHARS = 200_000;
+/** Hard cap on the operator-supplied note field. */
+const MAX_DOCUMENT_NOTE_CHARS = 32 * 1024;
 
 router.use(requireServiceTokenOrSession);
 
@@ -321,6 +337,277 @@ router.get(
     } catch (err) {
       reqLog.error({ err, engagementId }, "list attached-documents failed");
       res.status(500).json({ error: "Failed to list attached documents" });
+    }
+  },
+);
+
+/* -------------------------------------------------------------------------- */
+/*  POST /api/engagements/:engagementId/attached-documents  — operator upload  */
+/*  (QA-18 — engagement-scoped client PDF / photo / note upload)              */
+/* -------------------------------------------------------------------------- */
+
+interface DocumentUploadParts {
+  fileBytes: Buffer;
+  filename: string;
+  mimeType: string;
+  title: string | null;
+  documentType: string | null;
+  note: string;
+}
+
+/**
+ * Drive the Busboy multipart parse for the attached-document upload to
+ * completion. Collects one `file` part plus the `title` / `documentType`
+ * / `note` text fields. Mirrors the IFC ingest's `consumeUpload` shape.
+ */
+function consumeDocumentUpload(
+  req: Request,
+): Promise<
+  | { ok: true; parts: DocumentUploadParts }
+  | { ok: false; status: number; error: string }
+> {
+  return new Promise((resolve) => {
+    let busboy: Busboy.Busboy;
+    try {
+      busboy = Busboy({
+        headers: req.headers,
+        limits: {
+          fileSize: MAX_ATTACHED_DOCUMENT_BYTES,
+          files: 1,
+          fields: 8,
+        },
+      });
+    } catch (err) {
+      logger.warn({ err }, "attached-document upload: busboy init failed");
+      resolve({ ok: false, status: 400, error: "invalid_multipart" });
+      return;
+    }
+
+    const fields: Record<string, string> = {};
+    const fileChunks: Buffer[] = [];
+    let fileBytes = 0;
+    let fileTruncated = false;
+    let fileSeen = false;
+    let filename = "";
+    let mimeType = "";
+    let aborted = false;
+
+    function abort(status: number, error: string) {
+      if (aborted) return;
+      aborted = true;
+      try {
+        req.unpipe(busboy);
+      } catch {
+        /* ignore */
+      }
+      resolve({ ok: false, status, error });
+    }
+
+    busboy.on("field", (name, value) => {
+      if (aborted) return;
+      if (name === "title" || name === "documentType" || name === "note") {
+        fields[name] = value;
+      }
+    });
+
+    busboy.on(
+      "file",
+      (
+        name: string,
+        stream: NodeJS.ReadableStream,
+        info: { mimeType: string; filename: string },
+      ) => {
+        if (aborted || name !== "file") {
+          stream.resume();
+          return;
+        }
+        fileSeen = true;
+        filename = info.filename ?? "";
+        mimeType = info.mimeType ?? "";
+        stream.on("data", (chunk: Buffer) => {
+          fileBytes += chunk.length;
+          if (fileBytes > MAX_ATTACHED_DOCUMENT_BYTES) {
+            fileTruncated = true;
+            return;
+          }
+          fileChunks.push(chunk);
+        });
+        stream.on("limit", () => {
+          fileTruncated = true;
+        });
+        stream.on("error", (err) => {
+          logger.warn(
+            { err, filename },
+            "attached-document upload: file stream error",
+          );
+        });
+      },
+    );
+
+    busboy.on("error", (err) => {
+      logger.warn({ err }, "attached-document upload: busboy error");
+      abort(400, "multipart_parse_failed");
+    });
+
+    busboy.on("finish", () => {
+      if (aborted) return;
+      if (!fileSeen) {
+        abort(400, "missing_file_part");
+        return;
+      }
+      if (fileTruncated) {
+        abort(413, "file_too_large");
+        return;
+      }
+      resolve({
+        ok: true,
+        parts: {
+          fileBytes: Buffer.concat(fileChunks, fileBytes),
+          filename,
+          mimeType,
+          title: fields.title ?? null,
+          documentType: fields.documentType ?? null,
+          note: (fields.note ?? "").slice(0, MAX_DOCUMENT_NOTE_CHARS),
+        },
+      });
+    });
+
+    req.pipe(busboy);
+  });
+}
+
+router.post(
+  "/engagements/:engagementId/attached-documents",
+  async (req: Request, res: Response): Promise<void> => {
+    const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+    const engagementId =
+      typeof req.params.engagementId === "string"
+        ? req.params.engagementId
+        : "";
+
+    if (!UUID_RE.test(engagementId)) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+    const contentType = req.headers["content-type"] ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      res.status(415).json({ error: "expected_multipart" });
+      return;
+    }
+
+    // The engagement must exist before we accept a blob bound to it.
+    let engagementExists: boolean;
+    try {
+      const rows = await db
+        .select({ id: engagements.id })
+        .from(engagements)
+        .where(eq(engagements.id, engagementId))
+        .limit(1);
+      engagementExists = rows.length > 0;
+    } catch (err) {
+      reqLog.error(
+        { err, engagementId },
+        "attached-document upload: engagement lookup failed",
+      );
+      res.status(500).json({ error: "db_error" });
+      return;
+    }
+    if (!engagementExists) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+
+    const consumed = await consumeDocumentUpload(req);
+    if (!consumed.ok) {
+      res.status(consumed.status).json({ error: consumed.error });
+      return;
+    }
+    const { parts } = consumed;
+
+    if (parts.fileBytes.length === 0) {
+      res.status(400).json({ error: "empty_file" });
+      return;
+    }
+    if (!isAcceptedDocumentMime(parts.mimeType)) {
+      res
+        .status(415)
+        .json({ error: "unsupported_document_type", detail: parts.mimeType });
+      return;
+    }
+    const typeParse = parseUploadedDocumentType(parts.documentType);
+    if (!typeParse.ok) {
+      res.status(400).json({ error: typeParse.error });
+      return;
+    }
+    const documentType = typeParse.value;
+    const title = resolveDocumentTitle(parts.title, parts.filename);
+
+    // `extractedText` — what the in-app agent reads. A text/* upload's
+    // own decoded body becomes the text (so a client note is readable);
+    // a PDF / image carries the operator's note, if they gave one.
+    let extractedText = parts.note.trim();
+    if (isTextMime(parts.mimeType)) {
+      const decoded = parts.fileBytes.toString("utf-8");
+      extractedText = extractedText
+        ? `${extractedText}\n\n${decoded}`
+        : decoded;
+    }
+    extractedText = extractedText.slice(0, MAX_EXTRACTED_TEXT_CHARS);
+
+    // Persist the original blob first so a later DB failure still leaves
+    // the bytes recoverable for triage.
+    let originalBlobRef: string;
+    try {
+      originalBlobRef = await new ObjectStorageService().uploadObjectEntityFromBuffer(
+        parts.fileBytes,
+        parts.mimeType || "application/octet-stream",
+      );
+    } catch (err) {
+      reqLog.error(
+        { err, engagementId },
+        "attached-document upload: blob store failed",
+      );
+      res.status(500).json({ error: "storage_error" });
+      return;
+    }
+
+    const actor = resolveEventActor(req);
+    try {
+      const [row] = await db
+        .insert(attachedDocuments)
+        .values({
+          engagementId,
+          title,
+          documentType,
+          extractedText,
+          originalBlobRef,
+          actorId: actor.id,
+        })
+        .returning();
+      if (!row) throw new Error("attached_documents insert returned no row");
+
+      const atom = toAttachedDocumentAtom(row, resolveTenantId(req));
+      await recordLSurfaceEvent(reqLog, {
+        entityType: "attached-document",
+        entityId: row.id,
+        eventType: "attached-document.attached",
+        actor,
+        payload: {
+          engagementId,
+          documentType,
+          title,
+          mimeType: parts.mimeType,
+          fileSizeBytes: parts.fileBytes.length,
+        },
+      });
+
+      res.status(201).json({ attachedDocument: atom });
+    } catch (err) {
+      reqLog.error(
+        { err, engagementId },
+        "attached-document upload: db insert failed",
+      );
+      res.status(500).json({ error: "db_error" });
     }
   },
 );

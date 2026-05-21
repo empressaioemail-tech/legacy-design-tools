@@ -10,6 +10,10 @@ import {
   buildTextSegments,
   isAttachedDocumentType,
   parseDocumentTypeFilter,
+  parseUploadedDocumentType,
+  isAcceptedDocumentMime,
+  isTextMime,
+  resolveDocumentTitle,
 } from "../routes/sheetContent.logic";
 
 describe("FULL_PAGE_BOUNDING_BOX", () => {
@@ -84,5 +88,90 @@ describe("parseDocumentTypeFilter", () => {
       ok: false,
       error: "invalid_document_type",
     });
+  });
+});
+
+// ── QA-18 — operator-driven attached-document upload ──────────────────────
+
+describe("parseUploadedDocumentType", () => {
+  it("defaults a missing or empty type to 'narrative'", () => {
+    expect(parseUploadedDocumentType(undefined)).toEqual({
+      ok: true,
+      value: "narrative",
+    });
+    expect(parseUploadedDocumentType("")).toEqual({
+      ok: true,
+      value: "narrative",
+    });
+    expect(parseUploadedDocumentType(null)).toEqual({
+      ok: true,
+      value: "narrative",
+    });
+  });
+
+  it("accepts a valid document type", () => {
+    expect(parseUploadedDocumentType("specification")).toEqual({
+      ok: true,
+      value: "specification",
+    });
+  });
+
+  it("rejects an unknown document type", () => {
+    expect(parseUploadedDocumentType("photo")).toMatchObject({
+      ok: false,
+      error: "invalid_document_type",
+    });
+  });
+});
+
+describe("isAcceptedDocumentMime", () => {
+  it("accepts PDFs, any image, and any text type", () => {
+    expect(isAcceptedDocumentMime("application/pdf")).toBe(true);
+    expect(isAcceptedDocumentMime("image/png")).toBe(true);
+    expect(isAcceptedDocumentMime("image/jpeg")).toBe(true);
+    expect(isAcceptedDocumentMime("text/plain")).toBe(true);
+    expect(isAcceptedDocumentMime("text/markdown; charset=utf-8")).toBe(true);
+  });
+
+  it("rejects unrelated and empty MIME types", () => {
+    expect(isAcceptedDocumentMime("application/zip")).toBe(false);
+    expect(isAcceptedDocumentMime("application/octet-stream")).toBe(false);
+    expect(isAcceptedDocumentMime("")).toBe(false);
+  });
+});
+
+describe("isTextMime", () => {
+  it("is true only for text/* types", () => {
+    expect(isTextMime("text/plain")).toBe(true);
+    expect(isTextMime("text/markdown; charset=utf-8")).toBe(true);
+    expect(isTextMime("application/pdf")).toBe(false);
+    expect(isTextMime("image/png")).toBe(false);
+  });
+});
+
+describe("resolveDocumentTitle", () => {
+  it("prefers the operator-provided title", () => {
+    expect(resolveDocumentTitle("  Soil report  ", "upload.pdf")).toBe(
+      "Soil report",
+    );
+  });
+
+  it("falls back to the filename when no title is given", () => {
+    expect(resolveDocumentTitle("", "client-notes.pdf")).toBe(
+      "client-notes.pdf",
+    );
+    expect(resolveDocumentTitle(undefined, "photo.jpg")).toBe("photo.jpg");
+  });
+
+  it("falls back to a generic default when neither is present", () => {
+    expect(resolveDocumentTitle(null, "")).toBe("Untitled document");
+    expect(resolveDocumentTitle(undefined, undefined)).toBe(
+      "Untitled document",
+    );
+  });
+
+  it("caps a pathologically long title", () => {
+    const long = "x".repeat(500);
+    expect(resolveDocumentTitle(long, undefined).length).toBe(200);
   });
 });

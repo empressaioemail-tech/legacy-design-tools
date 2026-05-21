@@ -8,6 +8,8 @@ import {
   ChevronDown,
   ChevronRight,
   CheckCircle2,
+  FileText,
+  Paperclip,
   Telescope,
   Undo2,
   Wrench,
@@ -70,7 +72,16 @@ const TOOL_LABELS: Record<string, string> = {
   create_response_tasks: "Created response tasks",
   draft_detail_callout_spec: "Drafted a detail callout",
   draft_product_spec_reference: "Drafted a product spec",
+  list_attached_documents: "Read attached documents",
+  read_attached_document: "Read an attached document",
 };
+
+/**
+ * File types the "Attach file" picker offers (QA-18). The server accepts
+ * any `application/pdf`, `image/*`, or `text/*` upload — this `accept`
+ * string just nudges the OS picker toward client PDFs, photos, and notes.
+ */
+const DOCUMENT_UPLOAD_ACCEPT = ".pdf,application/pdf,image/*,.txt,.md,text/plain";
 
 interface ClaudeChatProps {
   engagementId: string;
@@ -127,6 +138,22 @@ export function ClaudeChat({
     (s) => s.agentActionsByEngagement,
   );
   const reverseAgentAction = useEngagementsStore((s) => s.reverseAgentAction);
+  // QA-18 — engagement-scoped client documents.
+  const attachedDocumentsByEngagement = useEngagementsStore(
+    (s) => s.attachedDocumentsByEngagement,
+  );
+  const uploadingDocumentByEngagement = useEngagementsStore(
+    (s) => s.uploadingDocumentByEngagement,
+  );
+  const documentUploadErrorByEngagement = useEngagementsStore(
+    (s) => s.documentUploadErrorByEngagement,
+  );
+  const loadAttachedDocuments = useEngagementsStore(
+    (s) => s.loadAttachedDocuments,
+  );
+  const uploadAttachedDocument = useEngagementsStore(
+    (s) => s.uploadAttachedDocument,
+  );
   const collapsed = useSidebarState((s) => s.rightCollapsed);
   const toggleRight = useSidebarState((s) => s.toggleRight);
   const [input, setInput] = useState("");
@@ -136,6 +163,8 @@ export function ClaudeChat({
   // yanks an operator away from earlier output they are reading.
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
+  // QA-18 — hidden file input driven by the "Attach file" button.
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Snapshot focus opts in for one turn at a time. It's intentionally off by
   // default and resets after each send so users don't pay the focus cost on
   // every follow-up.
@@ -153,6 +182,12 @@ export function ClaudeChat({
   // navigate there once a create turn settles, so this component itself
   // stays free of react-query.
   const agentActions = agentActionsByEngagement[engagementId] ?? [];
+  // QA-18 — persisted client documents for this engagement.
+  const attachedDocuments = attachedDocumentsByEngagement[engagementId] ?? [];
+  const uploadingDocument =
+    uploadingDocumentByEngagement[engagementId] ?? false;
+  const documentUploadError =
+    documentUploadErrorByEngagement[engagementId] ?? null;
 
   // Lookup table for chip tooltips and picker rows. Memoized so the
   // SnapshotFocusChip components don't get a fresh map identity on every
@@ -211,6 +246,23 @@ export function ClaudeChat({
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     setStickToBottom(distanceFromBottom <= SCROLL_STICK_THRESHOLD_PX);
+  };
+
+  // QA-18 — load the engagement's persisted client documents so the
+  // chip row shows what the in-app agent can reach.
+  useEffect(() => {
+    void loadAttachedDocuments(engagementId);
+  }, [engagementId, loadAttachedDocuments]);
+
+  const handleAttachClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Clear the value so re-selecting the same file still fires onChange.
+    e.target.value = "";
+    if (file) void uploadAttachedDocument(engagementId, file);
   };
 
   const handleSend = () => {
@@ -771,6 +823,53 @@ export function ClaudeChat({
             )}
           </div>
         )}
+        {attachedDocuments.length > 0 && (
+          <div
+            className="flex items-center gap-2 flex-wrap"
+            aria-label="Attached client documents"
+          >
+            {attachedDocuments.map((doc) => (
+              <span
+                key={doc.id}
+                className="sc-pill"
+                data-testid={`attached-document-${doc.id}`}
+                title={`${doc.title} — ${doc.documentType}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  maxWidth: 200,
+                  background: "var(--bg-input)",
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border-default)",
+                  fontSize: 11,
+                  padding: "3px 8px",
+                  borderRadius: 4,
+                }}
+              >
+                <FileText size={11} style={{ flexShrink: 0 }} />
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {doc.title}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+        {documentUploadError && (
+          <div
+            className="sc-meta"
+            role="alert"
+            style={{ color: "var(--danger)", fontSize: 11 }}
+          >
+            {documentUploadError}
+          </div>
+        )}
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -800,6 +899,45 @@ export function ClaudeChat({
               : ""}
           </div>
           <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={DOCUMENT_UPLOAD_ACCEPT}
+              onChange={handleFileSelected}
+              data-testid="claude-chat-file-input"
+              aria-hidden="true"
+              style={{ display: "none" }}
+            />
+            <button
+              type="button"
+              onClick={handleAttachClick}
+              disabled={!hasSnapshots || streaming || uploadingDocument}
+              aria-label="Attach a client document"
+              title="Attach a client PDF, photo, or note to this engagement"
+              className="sc-ui"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                padding: "4px 8px",
+                borderRadius: 4,
+                cursor:
+                  !hasSnapshots || streaming || uploadingDocument
+                    ? "not-allowed"
+                    : "pointer",
+                background: "transparent",
+                border: "1px solid var(--border-default)",
+                color: "var(--text-secondary)",
+                opacity:
+                  !hasSnapshots || streaming || uploadingDocument ? 0.5 : 1,
+              }}
+            >
+              <Paperclip size={12} />
+              {uploadingDocument ? "Uploading…" : "Attach"}
+            </button>
             <button
               type="button"
               onClick={() => setPickerOpen((v) => !v)}

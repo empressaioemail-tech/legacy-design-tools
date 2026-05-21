@@ -82,3 +82,85 @@ export function parseDocumentTypeFilter(
   }
   return { ok: true, value: raw };
 }
+
+/* -------------------------------------------------------------------------- */
+/*  QA-18 — operator-driven attached-document upload                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Document category an operator upload defaults to when none is given —
+ * "narrative" is the catch-all for client-supplied material (PDFs,
+ * photos, notes) that is not a spec / calculation / product-data sheet.
+ */
+export const DEFAULT_ATTACHED_DOCUMENT_TYPE: AttachedDocumentType =
+  "narrative";
+
+/** Upper bound on a stored document title; defends the `text` column. */
+export const MAX_DOCUMENT_TITLE_CHARS = 200;
+
+/**
+ * Resolve the `documentType` field on an attached-document upload. A
+ * missing / empty value defaults to {@link DEFAULT_ATTACHED_DOCUMENT_TYPE};
+ * a present but unrecognized value is a 400.
+ */
+export function parseUploadedDocumentType(
+  raw: unknown,
+): ParseResult<AttachedDocumentType> {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, value: DEFAULT_ATTACHED_DOCUMENT_TYPE };
+  }
+  if (!isAttachedDocumentType(raw)) {
+    return { ok: false, error: "invalid_document_type" };
+  }
+  return { ok: true, value: raw };
+}
+
+/**
+ * MIME families the attached-document upload accepts — client PDFs,
+ * photos, and text notes (QA-18). Everything else is a 415.
+ */
+const ACCEPTED_DOCUMENT_MIME: ReadonlyArray<string> = [
+  "application/pdf",
+  "image/", // any image/* — png, jpeg, webp, gif, heic…
+  "text/", // any text/* — plain, markdown…
+];
+
+/** Normalize a Content-Type header value down to the bare MIME type. */
+function bareMime(mime: string): string {
+  return (mime.toLowerCase().split(";")[0] ?? "").trim();
+}
+
+/** True when an uploaded file's MIME type is an accepted document kind. */
+export function isAcceptedDocumentMime(mime: string): boolean {
+  const m = bareMime(mime);
+  if (m.length === 0) return false;
+  return ACCEPTED_DOCUMENT_MIME.some((p) =>
+    p.endsWith("/") ? m.startsWith(p) : m === p,
+  );
+}
+
+/**
+ * True for a `text/*` upload — its decoded body is stored directly as the
+ * atom's `extractedText` so the in-app agent can read a client note.
+ * PDFs and images instead carry the operator's note (if any) there.
+ */
+export function isTextMime(mime: string): boolean {
+  return bareMime(mime).startsWith("text/");
+}
+
+/**
+ * Resolve the stored document title: the operator-provided title, else
+ * the uploaded filename, else a generic default. Trimmed and length-
+ * capped so a pathological filename cannot bloat the row.
+ */
+export function resolveDocumentTitle(
+  providedTitle: unknown,
+  filename: string | undefined,
+): string {
+  const fromField =
+    typeof providedTitle === "string" ? providedTitle.trim() : "";
+  if (fromField) return fromField.slice(0, MAX_DOCUMENT_TITLE_CHARS);
+  const fromFile = (filename ?? "").trim();
+  if (fromFile) return fromFile.slice(0, MAX_DOCUMENT_TITLE_CHARS);
+  return "Untitled document";
+}

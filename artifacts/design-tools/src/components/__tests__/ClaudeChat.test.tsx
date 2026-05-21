@@ -10,9 +10,17 @@ const sendMessage = vi.hoisted(() => vi.fn());
 const toggleRight = vi.hoisted(() => vi.fn());
 const toggleFocusSnapshot = vi.hoisted(() => vi.fn());
 const clearFocusSnapshots = vi.hoisted(() => vi.fn());
+const loadAttachedDocuments = vi.hoisted(() => vi.fn());
+const uploadAttachedDocument = vi.hoisted(() => vi.fn());
 const stores = vi.hoisted(() => ({
   messagesByEngagement: {} as Record<string, Array<{ role: string; content: string; snapshotFocusIds?: string[] }>>,
   attachedSheetsByEngagement: {} as Record<string, unknown[]>,
+  attachedDocumentsByEngagement: {} as Record<
+    string,
+    Array<{ id: string; title: string; documentType: string }>
+  >,
+  uploadingDocumentByEngagement: {} as Record<string, boolean>,
+  documentUploadErrorByEngagement: {} as Record<string, string | null>,
   pendingChatInputByEngagement: {} as Record<string, string>,
   focusSnapshotIdsByEngagement: {} as Record<string, string[]>,
   agentActionsByEngagement: {} as Record<string, unknown[]>,
@@ -27,6 +35,9 @@ vi.mock("../../store/engagements", () => ({
     sel({
       messagesByEngagement: stores.messagesByEngagement,
       attachedSheetsByEngagement: stores.attachedSheetsByEngagement,
+      attachedDocumentsByEngagement: stores.attachedDocumentsByEngagement,
+      uploadingDocumentByEngagement: stores.uploadingDocumentByEngagement,
+      documentUploadErrorByEngagement: stores.documentUploadErrorByEngagement,
       pendingChatInputByEngagement: stores.pendingChatInputByEngagement,
       focusSnapshotIdsByEngagement: stores.focusSnapshotIdsByEngagement,
       agentActionsByEngagement: stores.agentActionsByEngagement,
@@ -34,6 +45,8 @@ vi.mock("../../store/engagements", () => ({
       sendMessage,
       detachSheet: vi.fn(),
       clearAttachedSheets: vi.fn(),
+      loadAttachedDocuments,
+      uploadAttachedDocument,
       toggleFocusSnapshot,
       clearFocusSnapshots,
       reverseAgentAction: vi.fn(),
@@ -53,10 +66,15 @@ describe("ClaudeChat", () => {
     sendMessage.mockClear();
     toggleFocusSnapshot.mockClear();
     clearFocusSnapshots.mockClear();
+    loadAttachedDocuments.mockClear();
+    uploadAttachedDocument.mockClear();
     stores.streaming = false;
     stores.rightCollapsed = false;
     stores.messagesByEngagement = {};
     stores.focusSnapshotIdsByEngagement = {};
+    stores.attachedDocumentsByEngagement = {};
+    stores.uploadingDocumentByEngagement = {};
+    stores.documentUploadErrorByEngagement = {};
   });
 
   it("calls sendMessage with the typed input when Send is clicked (snapshot present)", () => {
@@ -526,5 +544,53 @@ describe("ClaudeChat", () => {
     expect(chip.tagName).toBe("A");
     expect(chip.getAttribute("href")).toMatch(/engagements\/eng-1$/);
     expect(chip.getAttribute("href")).not.toContain("compare");
+  });
+
+  // ── QA-18 — client document upload ──────────────────────────────────────
+
+  it("loads the engagement's attached documents on mount", () => {
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+    expect(loadAttachedDocuments).toHaveBeenCalledWith("eng-1");
+  });
+
+  it("uploads a selected file via uploadAttachedDocument", () => {
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+    const input = screen.getByTestId("claude-chat-file-input");
+    const file = new File(["client note"], "site-notes.pdf", {
+      type: "application/pdf",
+    });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(uploadAttachedDocument).toHaveBeenCalledWith("eng-1", file);
+  });
+
+  it("renders a chip for each attached client document", () => {
+    stores.attachedDocumentsByEngagement = {
+      "eng-1": [
+        { id: "doc-1", title: "Soil report.pdf", documentType: "narrative" },
+        { id: "doc-2", title: "Owner notes", documentType: "narrative" },
+      ],
+    };
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+    expect(screen.getByTestId("attached-document-doc-1")).toHaveTextContent(
+      "Soil report.pdf",
+    );
+    expect(screen.getByTestId("attached-document-doc-2")).toHaveTextContent(
+      "Owner notes",
+    );
+  });
+
+  it("disables the Attach button when there is no snapshot", () => {
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={false} />);
+    expect(
+      screen.getByRole("button", { name: /Attach a client document/i }),
+    ).toBeDisabled();
+  });
+
+  it("surfaces an upload error to the operator", () => {
+    stores.documentUploadErrorByEngagement = {
+      "eng-1": "That file is too large (max 25 MB).",
+    };
+    render(<ClaudeChat engagementId="eng-1" hasSnapshots={true} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(/too large/i);
   });
 });
