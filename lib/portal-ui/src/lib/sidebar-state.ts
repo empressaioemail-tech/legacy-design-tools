@@ -30,6 +30,13 @@ export interface SidebarStateValue {
   rightCollapsed: boolean;
   leftWidth: number;
   rightWidth: number;
+  /**
+   * Per-section collapse state for the left sidebar nav groups,
+   * keyed by the group's label. A missing key means expanded (the
+   * default), so a brand-new group is open until the user collapses
+   * it. Persisted alongside the width/collapsed state.
+   */
+  collapsedGroups: Record<string, boolean>;
   toggleLeft: () => void;
   toggleRight: () => void;
   setLeft: (collapsed: boolean) => void;
@@ -38,6 +45,8 @@ export interface SidebarStateValue {
   setRightWidth: (width: number) => void;
   resetLeftWidth: () => void;
   resetRightWidth: () => void;
+  /** Toggle the collapsed state of one left-sidebar nav group. */
+  toggleGroup: (label: string) => void;
 }
 
 export const useSidebarState = create<SidebarStateValue>()(
@@ -47,6 +56,7 @@ export const useSidebarState = create<SidebarStateValue>()(
       rightCollapsed: false,
       leftWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
       rightWidth: RIGHT_SIDEBAR_DEFAULT_WIDTH,
+      collapsedGroups: {},
       toggleLeft: () =>
         set((s) => ({ leftCollapsed: !s.leftCollapsed })),
       toggleRight: () =>
@@ -57,6 +67,13 @@ export const useSidebarState = create<SidebarStateValue>()(
       setRightWidth: (width) => set({ rightWidth: clampRight(width) }),
       resetLeftWidth: () => set({ leftWidth: LEFT_SIDEBAR_DEFAULT_WIDTH }),
       resetRightWidth: () => set({ rightWidth: RIGHT_SIDEBAR_DEFAULT_WIDTH }),
+      toggleGroup: (label) =>
+        set((s) => ({
+          collapsedGroups: {
+            ...s.collapsedGroups,
+            [label]: !s.collapsedGroups[label],
+          },
+        })),
     }),
     {
       name: "portal-ui:sidebars",
@@ -66,6 +83,7 @@ export const useSidebarState = create<SidebarStateValue>()(
         rightCollapsed: s.rightCollapsed,
         leftWidth: s.leftWidth,
         rightWidth: s.rightWidth,
+        collapsedGroups: s.collapsedGroups,
       }),
       // Re-clamp persisted widths so a corrupted/stale value (or a
       // value saved under older min/max bounds) can't render the

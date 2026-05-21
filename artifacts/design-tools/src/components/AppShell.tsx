@@ -170,6 +170,7 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
       brandProductName="Design Tools"
       navGroups={navGroups}
       rightPanel={rightPanel}
+      headerNotifications={{ href: "/notifications", unreadCount }}
       headerTrailing={<AuthChip />}
     >
       {children}

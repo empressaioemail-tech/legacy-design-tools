@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Link } from "wouter";
 import { Bell, Moon, Search, Sun } from "lucide-react";
 import { getTheme, toggleTheme, type ThemeName } from "../lib/theme";
 
@@ -8,9 +9,27 @@ export interface HeaderSearch {
   onChange?: (value: string) => void;
 }
 
+/**
+ * Wires the header notification bell to a real destination. The bell
+ * is only rendered when this is supplied — a consuming SPA without a
+ * notifications surface gets no bell rather than a dead control
+ * (QA-14 / WSB.5). `href` is the in-app route the bell links to;
+ * `unreadCount` drives the unread badge (omit / 0 → no badge).
+ */
+export interface HeaderNotifications {
+  href: string;
+  unreadCount?: number;
+}
+
 export interface HeaderProps {
   title?: string;
   search?: HeaderSearch;
+  /**
+   * Notification-bell wiring. When present the bell renders as a link
+   * to {@link HeaderNotifications.href} with an unread badge; when
+   * absent the bell is omitted entirely.
+   */
+  notifications?: HeaderNotifications;
   /**
    * Optional content rendered at the trailing edge of the top-right
    * cluster, after the notifications bell. Used by SPAs that need to
@@ -19,6 +38,76 @@ export interface HeaderProps {
    * theme-toggle + bell layout untouched.
    */
   trailing?: ReactNode;
+}
+
+/**
+ * Header notification bell. A `wouter` link styled to match the
+ * theme-toggle button, with an unread-count badge pinned to the
+ * top-right corner. Rendered only when {@link HeaderProps.notifications}
+ * is supplied (see WSB.5).
+ */
+function NotificationsBell({ href, unreadCount = 0 }: HeaderNotifications) {
+  const hasUnread = unreadCount > 0;
+  return (
+    <Link
+      href={href}
+      aria-label={
+        hasUnread
+          ? `Notifications, ${unreadCount} unread`
+          : "Notifications"
+      }
+      data-testid="header-notifications-bell"
+      style={{
+        position: "relative",
+        width: 32,
+        height: 32,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "transparent",
+        border: "1px solid var(--border-default)",
+        borderRadius: 6,
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        textDecoration: "none",
+        transition: "background 0.12s, color 0.12s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--depth-hover-bg)";
+        e.currentTarget.style.color = "var(--text-primary)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.color = "var(--text-secondary)";
+      }}
+    >
+      <Bell size={14} />
+      {hasUnread && (
+        <span
+          data-testid="header-notifications-badge"
+          style={{
+            position: "absolute",
+            top: -5,
+            right: -5,
+            minWidth: 16,
+            height: 16,
+            padding: "0 4px",
+            borderRadius: 8,
+            background: "#C0392B",
+            color: "#FFF",
+            fontSize: 9,
+            fontWeight: 700,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            lineHeight: 1,
+          }}
+        >
+          {unreadCount > 99 ? "99+" : unreadCount}
+        </span>
+      )}
+    </Link>
+  );
 }
 
 function ThemeToggle() {
@@ -82,7 +171,7 @@ function ThemeToggle() {
   );
 }
 
-export function Header({ title, search, trailing }: HeaderProps) {
+export function Header({ title, search, notifications, trailing }: HeaderProps) {
   return (
     <header
       style={{
@@ -161,33 +250,7 @@ export function Header({ title, search, trailing }: HeaderProps) {
           </div>
         )}
         <ThemeToggle />
-        <button
-          type="button"
-          aria-label="Notifications"
-          style={{
-            width: 32,
-            height: 32,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "transparent",
-            border: "1px solid var(--border-default)",
-            borderRadius: 6,
-            color: "var(--text-secondary)",
-            cursor: "pointer",
-            transition: "background 0.12s, color 0.12s",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--depth-hover-bg)";
-            e.currentTarget.style.color = "var(--text-primary)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "var(--text-secondary)";
-          }}
-        >
-          <Bell size={14} />
-        </button>
+        {notifications && <NotificationsBell {...notifications} />}
         {trailing}
       </div>
     </header>

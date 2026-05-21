@@ -11,6 +11,7 @@ import {
 export type TabId =
   | "snapshots"
   | "sheets"
+  | "model-3d"
   | "site"
   | "site-context"
   | "submissions"
@@ -40,6 +41,7 @@ export function readTabFromUrl(): TabId {
   if (
     raw === "snapshots" ||
     raw === "sheets" ||
+    raw === "model-3d" ||
     raw === "site" ||
     raw === "site-context" ||
     raw === "submissions" ||
