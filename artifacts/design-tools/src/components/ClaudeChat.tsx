@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -29,6 +29,14 @@ import "./claude-markdown.css";
 // the cap directly in the picker and disable additional checkboxes once
 // it's reached.
 const MAX_FOCUS_SNAPSHOTS = 4;
+
+/**
+ * Distance (px) from the bottom of the message list within which the user
+ * still counts as "at the bottom" and the panel keeps auto-following the
+ * streaming response (QA-19). Generous enough that a near-bottom read is
+ * not treated as a deliberate scroll-up.
+ */
+const SCROLL_STICK_THRESHOLD_PX = 64;
 
 function HexGlyph({ size = 18 }: { size?: number }) {
   return (
@@ -122,6 +130,12 @@ export function ClaudeChat({
   const collapsed = useSidebarState((s) => s.rightCollapsed);
   const toggleRight = useSidebarState((s) => s.toggleRight);
   const [input, setInput] = useState("");
+  // QA-19 — auto-scroll. `scrollRef` is the message list; `stickToBottom`
+  // is true while the user is at (or near) the bottom and flips to false
+  // the moment they deliberately scroll up, so a streaming response never
+  // yanks an operator away from earlier output they are reading.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [stickToBottom, setStickToBottom] = useState(true);
   // Snapshot focus opts in for one turn at a time. It's intentionally off by
   // default and resets after each send so users don't pay the focus cost on
   // every follow-up.
@@ -165,6 +179,39 @@ export function ClaudeChat({
     pendingChatInputByEngagement,
     consumePendingChatInput,
   ]);
+
+  // QA-19 — a primitive that changes on every streamed token (the last
+  // message grows) and on every new turn (the count grows), so the
+  // auto-scroll effect re-runs as the response streams in.
+  const lastMessage = messages[messages.length - 1];
+  const streamSignal = `${messages.length}:${lastMessage?.content.length ?? 0}`;
+
+  // Auto-scroll the message list to the bottom as content streams in.
+  // Skipped while `stickToBottom` is false — i.e. the operator has
+  // scrolled up to read earlier output and must not be pulled back down.
+  useEffect(() => {
+    if (collapsed || !stickToBottom) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [streamSignal, collapsed, stickToBottom]);
+
+  // Switching engagements opens a different conversation — re-arm
+  // auto-scroll so the new thread starts pinned to its latest message.
+  useEffect(() => {
+    setStickToBottom(true);
+  }, [engagementId]);
+
+  // Track whether the user is at the bottom. A deliberate scroll-up
+  // suppresses auto-follow; scrolling back down within the threshold
+  // re-arms it. Programmatic scroll-to-bottom lands within the threshold
+  // and simply keeps the flag true — no feedback loop.
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setStickToBottom(distanceFromBottom <= SCROLL_STICK_THRESHOLD_PX);
+  };
 
   const handleSend = () => {
     if (!input.trim() || !hasSnapshots || streaming) return;
@@ -271,7 +318,12 @@ export function ClaudeChat({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto sc-scroll p-4 flex flex-col gap-4">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        data-testid="claude-chat-scroll"
+        className="flex-1 overflow-y-auto sc-scroll p-4 flex flex-col gap-4"
+      >
         {messages.map((msg, i) => {
           const isUser = msg.role === "user";
           const isLastAssistant = !isUser && i === messages.length - 1;
