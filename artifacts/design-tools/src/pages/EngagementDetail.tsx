@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,6 +20,7 @@ import {
   getListEngagementsQueryKey,
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
+  getListResponseTasksQueryKey,
   getGetBriefingSourceGlbUrl,
   getGetMaterializableElementGlbUrl,
   type EngagementSubmissionSummary,
@@ -35,7 +43,7 @@ import {
   countUnaddressedFindings,
   useSidebarState,
 } from "@workspace/portal-ui";
-import { useEngagementsStore } from "../store/engagements";
+import { useEngagementsStore, type SpecDraftEntry } from "../store/engagements";
 import { relativeTime } from "../lib/relativeTime";
 import type { BackfillFilter } from "../lib/submissionBackfill";
 import { StatusPill } from "../components/engagement-detail/StatusPill";
@@ -222,10 +230,10 @@ export function EngagementDetail() {
   // sprint needs back-button-aware tabs, it can wrap this state in a
   // `useSyncExternalStore` against `popstate`.
   const [tab, setTabState] = useState<TabId>(() => readTabFromUrl());
-  const setTab = (next: TabId): void => {
+  const setTab = useCallback((next: TabId): void => {
     setTabState(next);
     writeTabToUrl(next);
-  };
+  }, []);
   // Backfill filter (Task #124) for the engagement timeline of past
   // submissions. Lifted to the page so the URL param survives tab
   // switches and so the same setter pattern as `tab` keeps the URL
@@ -270,6 +278,14 @@ export function EngagementDetail() {
   const [selectedElementRef, setSelectedElementRef] = useState<string | null>(
     null,
   );
+  // WS-C (WSC.4) — AI-prepared spec drafts routed from the chat agent
+  // to the L4 / L5 manual forms. EngagementDetail consumes the store
+  // draft, switches to the matching tab, and hands it to the tab, which
+  // opens its create dialog pre-filled for operator review.
+  const [detailCalloutDraft, setDetailCalloutDraft] =
+    useState<SpecDraftEntry | null>(null);
+  const [productSpecDraft, setProductSpecDraft] =
+    useState<SpecDraftEntry | null>(null);
 
   const bimModelQuery = useGetEngagementBimModel(id);
 
@@ -354,6 +370,52 @@ export function EngagementDetail() {
   const setPendingChatInput = useEngagementsStore(
     (s) => s.setPendingChatInput,
   );
+  const specDraftByEngagement = useEngagementsStore(
+    (s) => s.specDraftByEngagement,
+  );
+  const consumeSpecDraft = useEngagementsStore((s) => s.consumeSpecDraft);
+  const agentActionsByEngagement = useEngagementsStore(
+    (s) => s.agentActionsByEngagement,
+  );
+  const chatStreaming = useEngagementsStore((s) => s.streaming);
+
+  // WS-C (WSC.4) — when the chat agent stages a spec draft, route it to
+  // the matching L4 / L5 tab and hand it to that tab for form pre-fill.
+  useEffect(() => {
+    if (!specDraftByEngagement[id]) return;
+    const draft = consumeSpecDraft(id);
+    if (!draft) return;
+    if (draft.draftKind === "detail-callout-spec") {
+      setDetailCalloutDraft(draft);
+      setTab("detail-callouts");
+    } else {
+      setProductSpecDraft(draft);
+      setTab("product-specs");
+    }
+  }, [specDraftByEngagement, id, consumeSpecDraft, setTab]);
+
+  // WS-C (WSC.3) — when the chat agent writes response-tasks, refresh
+  // the Response Tasks query so the tab reflects them, and once the turn
+  // settles navigate the operator there (the chosen "results land in the
+  // Response Tasks tab" behaviour). `lastAgentNavCount` is tracked per
+  // engagement so switching engagements never fires a spurious nav.
+  const lastAgentNavCount = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const actions = agentActionsByEngagement[id] ?? [];
+    if (actions.length === 0) return;
+    // Any change to the action set (a fresh create, or a reverse
+    // flipping an entry) refreshes the L1 list so the tab stays accurate.
+    void queryClient.invalidateQueries({
+      queryKey: getListResponseTasksQueryKey(id),
+    });
+    if (
+      actions.length > (lastAgentNavCount.current[id] ?? 0) &&
+      !chatStreaming
+    ) {
+      lastAgentNavCount.current[id] = actions.length;
+      setTab("response-tasks");
+    }
+  }, [agentActionsByEngagement, id, chatStreaming, queryClient, setTab]);
   const rightCollapsed = useSidebarState((s) => s.rightCollapsed);
   const toggleRight = useSidebarState((s) => s.toggleRight);
 
@@ -547,6 +609,7 @@ export function EngagementDetail() {
           engagementId={id}
           hasSnapshots={hasSnapshots}
           snapshots={snapshots}
+          activeTab={tab}
         />
       }
     >
@@ -801,6 +864,7 @@ export function EngagementDetail() {
             </div>
             <SheetGrid
               snapshotId={selectedSnapshotId}
+              engagementId={id}
               onAskClaude={handleAskClaudeAboutSheet}
             />
           </div>
@@ -847,11 +911,19 @@ export function EngagementDetail() {
         )}
 
         {tab === "detail-callouts" && (
-          <DetailCalloutSpecsTab engagementId={engagement.id} />
+          <DetailCalloutSpecsTab
+            engagementId={engagement.id}
+            aiDraft={detailCalloutDraft}
+            onAiDraftConsumed={() => setDetailCalloutDraft(null)}
+          />
         )}
 
         {tab === "product-specs" && (
-          <ProductSpecReferencesTab engagementId={engagement.id} />
+          <ProductSpecReferencesTab
+            engagementId={engagement.id}
+            aiDraft={productSpecDraft}
+            onAiDraftConsumed={() => setProductSpecDraft(null)}
+          />
         )}
 
         {tab === "renders" && (

@@ -10,6 +10,14 @@ import {
   type ProductSpecStatus,
 } from "@workspace/api-client-react";
 import { relativeTime } from "../../lib/relativeTime";
+import type { SpecDraftEntry } from "../../store/engagements";
+
+/** WS-C — pre-fill values an agent-drafted L5 reference seeds the form with. */
+interface ProductSpecDraftInitial {
+  name: string;
+  manufacturer: string;
+  esrNumber: string;
+}
 
 /**
  * Cortex L5 (Lane C.4 / C.4.5) — architect-side product-spec-reference
@@ -85,10 +93,16 @@ function CreateProductSpecReferenceDialog({
   engagementId,
   isOpen,
   onClose,
+  initialDraft,
+  aiReasoning,
 }: {
   engagementId: string;
   isOpen: boolean;
   onClose: () => void;
+  /** WS-C — agent-drafted values to pre-fill the form with (WSC.4). */
+  initialDraft?: ProductSpecDraftInitial | null;
+  /** WS-C — the agent's rationale, shown in the AI-populated banner. */
+  aiReasoning?: string | null;
 }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
@@ -97,13 +111,19 @@ function CreateProductSpecReferenceDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    if (initialDraft) {
+      // WS-C — open pre-filled from the agent's draft for operator review.
+      setName(initialDraft.name);
+      setManufacturer(initialDraft.manufacturer);
+      setEsrNumber(initialDraft.esrNumber);
+    } else {
       setName("");
       setManufacturer("");
       setEsrNumber("");
-      setError(null);
     }
-  }, [isOpen]);
+    setError(null);
+  }, [isOpen, initialDraft]);
 
   const mutation = useCreateProductSpecReference({
     mutation: {
@@ -150,9 +170,28 @@ function CreateProductSpecReferenceDialog({
       >
         <div className="sc-card-header">
           <span style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}>
-            New product-spec reference
+            {initialDraft
+              ? "Review AI-drafted reference"
+              : "New product-spec reference"}
           </span>
         </div>
+        {initialDraft && (
+          <div
+            data-testid="product-spec-ai-banner"
+            style={{
+              margin: "12px 16px 0",
+              padding: "8px 10px",
+              borderRadius: 4,
+              background: "var(--cyan-accent-bg)",
+              border: "1px solid var(--cyan)",
+              color: "var(--cyan)",
+              fontSize: 11.5,
+            }}
+          >
+            AI-populated by the Cortex agent — review every field before saving.
+            {aiReasoning ? ` ${aiReasoning}` : ""}
+          </div>
+        )}
         <div className="p-4 flex flex-col" style={{ gap: 10 }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span className="sc-label" style={{ color: "var(--text-secondary)" }}>
@@ -404,10 +443,49 @@ function ReferenceRow({
 
 export function ProductSpecReferencesTab({
   engagementId,
+  aiDraft,
+  onAiDraftConsumed,
 }: {
   engagementId: string;
+  /** WS-C — an agent-prepared L5 draft routed in from the chat panel. */
+  aiDraft?: SpecDraftEntry | null;
+  /** Called once the draft has been taken into the create dialog. */
+  onAiDraftConsumed?: () => void;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [draftInitial, setDraftInitial] =
+    useState<ProductSpecDraftInitial | null>(null);
+  const [draftReasoning, setDraftReasoning] = useState<string | null>(null);
+
+  // WS-C (WSC.4) — when the chat agent routes a product-spec draft in,
+  // open the create dialog pre-filled with it for operator review.
+  useEffect(() => {
+    if (!aiDraft) return;
+    const payload = aiDraft.payload as {
+      product?: { name?: unknown; manufacturer?: unknown };
+      esrNumber?: unknown;
+    };
+    const product = payload.product;
+    if (
+      product &&
+      typeof product.name === "string" &&
+      typeof product.manufacturer === "string" &&
+      typeof payload.esrNumber === "string"
+    ) {
+      setDraftInitial({
+        name: product.name,
+        manufacturer: product.manufacturer,
+        esrNumber: payload.esrNumber,
+      });
+      setDraftReasoning(aiDraft.reasoning);
+      setCreateOpen(true);
+    }
+    onAiDraftConsumed?.();
+    // `aiDraft` is the trigger; `onAiDraftConsumed` is a callback we
+    // invoke, not a dependency that should re-run this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiDraft]);
+
   const { data, isLoading } = useListProductSpecReferences(
     engagementId,
     undefined,
@@ -481,7 +559,13 @@ export function ProductSpecReferencesTab({
       <CreateProductSpecReferenceDialog
         engagementId={engagementId}
         isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
+        initialDraft={draftInitial}
+        aiReasoning={draftReasoning}
+        onClose={() => {
+          setCreateOpen(false);
+          setDraftInitial(null);
+          setDraftReasoning(null);
+        }}
       />
     </>
   );

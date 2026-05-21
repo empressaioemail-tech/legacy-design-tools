@@ -19,6 +19,13 @@ import { logger } from "../lib/logger";
 import { getAtomRegistry } from "../atoms/registry";
 import type { EngagementTypedPayload } from "../atoms/engagement.atom";
 import { SNAPSHOT_SUPPORTED_MODES } from "../atoms/snapshot.atom";
+import {
+  CHAT_AGENT_TOOLS,
+  executeAgentTool,
+  buildAgentToolGuidance,
+  type ToolContext,
+  type ToolRunResult,
+} from "./chatAgentTools";
 
 /**
  * Render-mode token the inline-reference syntax uses to opt a chat
@@ -154,6 +161,17 @@ router.post("/chat", async (req: Request, res: Response) => {
     snapshotFocus: explicitSnapshotFocus,
     snapshotFocusIds: explicitSnapshotFocusIds,
   } = parse.data;
+
+  // `activeTab` is the ambient "which tab is the operator viewing" signal
+  // for the WS-C in-app agent. It is not part of the Orval-generated
+  // `SendChatMessageBody` schema, so it is read directly off the body —
+  // `SendChatMessageBody` is a non-strict `z.object`, so the extra key
+  // passes validation and is simply stripped from `parse.data`. A
+  // non-string value is ignored.
+  const activeTab =
+    typeof (req.body as { activeTab?: unknown }).activeTab === "string"
+      ? (req.body as { activeTab: string }).activeTab
+      : null;
 
   // Resolve the engagement through the framework registry instead of a
   // hand-rolled Drizzle read (sprint A3 follow-up). Two reasons this
@@ -743,24 +761,148 @@ router.post("/chat", async (req: Request, res: Response) => {
     }
   }
 
-  try {
-    const stream = anthropic.messages.stream({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: systemPrompt,
-      // The SDK accepts string OR content-block arrays for user content; the
-      // type union here is wider than the generated typings expose.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      messages: messages as any,
+  // WS-C — tool-use agentic loop. The chat route is no longer a single
+  // text stream: the model may call tools (read platform state, create
+  // response-tasks, draft L4/L5 specs), the route executes each in-process
+  // against cortex-api's own tables, appends the `tool_result`, and
+  // continues until the model returns a final text turn. SSE text deltas
+  // still stream to the panel exactly as before; tool calls + agent writes
+  // are surfaced as their own SSE event types (`tool_use`, `agent_action`,
+  // `agent_draft`). A plain question that needs no tool takes one pass,
+  // identical to the pre-WS-C behaviour.
+  const augmentedSystemPrompt =
+    systemPrompt +
+    buildAgentToolGuidance({
+      engagementName: engagementTyped.name ?? engagementId,
+      activeTab,
     });
 
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+  const toolContext: ToolContext = {
+    engagementId: engagementTyped.id,
+    scope,
+    req,
+    reqLog: (req as Request & { log?: typeof logger }).log ?? logger,
+  };
+
+  /** Bound the loop so a misbehaving model cannot call tools forever. */
+  const MAX_AGENT_ITERATIONS = 8;
+
+  // `buildChatPrompt` returns `PromptOutputMessage[]`; the loop appends
+  // assistant tool_use turns and user tool_result turns whose content-block
+  // shapes are wider than that type. The SDK's accepted message union is
+  // wider than the generated typings, so the working array is loosely typed
+  // (same pattern as the pre-WS-C `messages as any` cast).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convo: any[] = [...messages];
+
+  try {
+    let iterations = 0;
+    while (true) {
+      iterations += 1;
+      const stream = anthropic.messages.stream({
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        system: augmentedSystemPrompt,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        messages: convo as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tools: CHAT_AGENT_TOOLS as any,
+      });
+
+      for await (const event of stream) {
+        if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "text_delta"
+        ) {
+          res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+        }
       }
+
+      const finalMessage = await stream.finalMessage();
+      if (finalMessage.stop_reason !== "tool_use") break;
+
+      // Record the model's tool-calling turn verbatim, then run each tool.
+      convo.push({ role: "assistant", content: finalMessage.content });
+      const toolUseBlocks = finalMessage.content.filter(
+        (b): b is Extract<typeof b, { type: "tool_use" }> =>
+          b.type === "tool_use",
+      );
+
+      // Iteration budget spent: feed the model an error result for every
+      // pending tool call so it closes out with a text turn instead of
+      // calling more tools.
+      if (iterations >= MAX_AGENT_ITERATIONS) {
+        convo.push({
+          role: "user",
+          content: toolUseBlocks.map((b) => ({
+            type: "tool_result" as const,
+            tool_use_id: b.id,
+            content:
+              "Tool-call budget for this turn is exhausted. Summarize what you have and finish.",
+            is_error: true,
+          })),
+        });
+        const closing = anthropic.messages.stream({
+          model: "claude-sonnet-4-6",
+          max_tokens: 4096,
+          system: augmentedSystemPrompt,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          messages: convo as any,
+        });
+        for await (const event of closing) {
+          if (
+            event.type === "content_block_delta" &&
+            event.delta.type === "text_delta"
+          ) {
+            res.write(
+              `data: ${JSON.stringify({ text: event.delta.text })}\n\n`,
+            );
+          }
+        }
+        break;
+      }
+
+      const toolResults: Array<{
+        type: "tool_result";
+        tool_use_id: string;
+        content: string;
+        is_error?: boolean;
+      }> = [];
+      for (const block of toolUseBlocks) {
+        // Status line so the panel can show "Reading findings…".
+        res.write(
+          `data: ${JSON.stringify({ type: "tool_use", tool: block.name })}\n\n`,
+        );
+        let run: ToolRunResult;
+        try {
+          run = await executeAgentTool(
+            block.name,
+            block.input,
+            toolContext,
+          );
+        } catch (toolErr) {
+          toolContext.reqLog.error(
+            { err: toolErr, tool: block.name, engagementId },
+            "chat agent tool threw",
+          );
+          run = {
+            resultText: `Error: the "${block.name}" tool failed unexpectedly.`,
+            isError: true,
+          };
+        }
+        // Surface writes + drafts to the panel (agent-action log / form
+        // pre-fill) before the model's next turn.
+        for (const eff of run.events ?? []) {
+          res.write(`data: ${JSON.stringify(eff)}\n\n`);
+        }
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: block.id,
+          content: run.resultText,
+          ...(run.isError ? { is_error: true } : {}),
+        });
+      }
+      convo.push({ role: "user", content: toolResults });
     }
 
     res.write("data: [DONE]\n\n");

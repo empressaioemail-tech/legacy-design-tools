@@ -35,6 +35,15 @@ import { relativeTime } from "../../lib/relativeTime";
  * whether they go through the UI or an agent.
  */
 
+/**
+ * `actorId` the WS-C in-app agent stamps onto every response-task it
+ * creates. Kept in lock-step with `AI_AGENT_ACTOR_ID` in
+ * `api-server/src/routes/chatAgentTools.ts` — the marker that makes an
+ * agent-created task visibly distinct from an operator-created one
+ * (WSC.5).
+ */
+const AI_AGENT_ACTOR_ID = "cortex-in-app-agent";
+
 const RESPONSE_TASK_STATE_LABELS: Record<ResponseTaskState, string> = {
   open: "Open",
   "in-progress": "In progress",
@@ -441,6 +450,28 @@ function ResponseTaskRow({
         >
           {task.title}
         </span>
+        {task.actorId === AI_AGENT_ACTOR_ID && (
+          <span
+            data-testid={`response-task-ai-badge-${task.entityId}`}
+            title="Drafted by the Cortex in-app agent — review before relying on it"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 7px",
+              borderRadius: 999,
+              background: "var(--cyan-accent-bg)",
+              color: "var(--cyan)",
+              border: "1px solid var(--cyan)",
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: 0.3,
+              textTransform: "uppercase",
+              lineHeight: 1.4,
+            }}
+          >
+            AI-drafted
+          </span>
+        )}
         <ResponseTaskStateBadge state={state} />
       </div>
 

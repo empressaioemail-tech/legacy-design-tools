@@ -78,14 +78,14 @@ describe("SheetGrid", () => {
   it("renders a placeholder when no snapshot is selected", () => {
     sheetsState.data = undefined;
     sheetsState.isLoading = false;
-    render(<SheetGrid snapshotId={null} onAskClaude={vi.fn()} />);
+    render(<SheetGrid snapshotId={null} engagementId="eng-1" onAskClaude={vi.fn()} />);
     expect(screen.getByText(/Select a snapshot/i)).toBeInTheDocument();
   });
 
   it("renders the empty-state when the snapshot has zero sheets", () => {
     sheetsState.data = [];
     sheetsState.isLoading = false;
-    render(<SheetGrid snapshotId="snap-1" onAskClaude={vi.fn()} />);
+    render(<SheetGrid snapshotId="snap-1" engagementId="eng-1" onAskClaude={vi.fn()} />);
     expect(screen.getByText(/No sheets uploaded yet/i)).toBeInTheDocument();
   });
 
@@ -96,7 +96,7 @@ describe("SheetGrid", () => {
       mkSheet({ id: "3", sheetNumber: "S1.0", sheetName: "Structural Plans" }),
     ];
     sheetsState.isLoading = false;
-    render(<SheetGrid snapshotId="snap-1" onAskClaude={vi.fn()} />);
+    render(<SheetGrid snapshotId="snap-1" engagementId="eng-1" onAskClaude={vi.fn()} />);
 
     expect(screen.getByTestId("thumb-1")).toBeInTheDocument();
     expect(screen.getByTestId("thumb-2")).toBeInTheDocument();
@@ -121,7 +121,7 @@ describe("SheetGrid", () => {
   it("opens the viewer when a thumbnail is clicked", () => {
     sheetsState.data = [mkSheet({ id: "abc", sheetNumber: "A0.0" })];
     sheetsState.isLoading = false;
-    render(<SheetGrid snapshotId="snap-1" onAskClaude={vi.fn()} />);
+    render(<SheetGrid snapshotId="snap-1" engagementId="eng-1" onAskClaude={vi.fn()} />);
 
     expect(screen.queryByTestId("viewer-open")).toBeNull();
     fireEvent.click(screen.getByTestId("thumb-abc"));
