@@ -12,13 +12,13 @@ not a code change.
 GitHub Actions builds and pushes a new image to Artifact Registry on every
 push to `main` (`build-and-push` job in
 [`.github/workflows/cloud-run-deploy.yml`](../.github/workflows/cloud-run-deploy.yml)).
-Deploys are **manual**: trigger the `deploy-canary` job via
-`workflow_dispatch`. Each run creates a revision with **`--tag=canary`**
-(stable smoke URL `https://canary---<service-host>/...`). **`--no-traffic`**
-is applied only after the Cloud Run **service already exists** (Google does
-not allow `--no-traffic` on the very first service create). Traffic shifts are
-manual via `gcloud` per `doc_repo/90_runbooks/cloud_run_canary_deploy.md` —
-typically 10% → 50% → 100% with smoke probes between each step.
+**Push never deploys.** Every deploy is a deliberate operator action via
+`workflow_dispatch` with one of four `action` inputs — `deploy-canary`,
+`run-migrations`, `shift-traffic`, `rollback` — runnable end to end from
+`gh workflow run` with no local `gcloud`. The canonical canary sequence is
+**deploy-canary → run-migrations → smoke → shift-traffic** (four separate
+dispatches). See [Operator deploy lifecycle](#operator-deploy-lifecycle-workflow_dispatch-actions)
+below and `doc_repo/90_runbooks/cloud_run_canary_deploy.md`.
 
 ---
 
@@ -347,12 +347,86 @@ gcloud services enable run.googleapis.com --project="<your-project-id>"
 
 ---
 
+## Operator deploy lifecycle (workflow_dispatch actions)
+
+Phase 2 (`2026-05-22_cc-agent-C_cortex_qa_build` P2-1 + P2-2) makes the
+cortex-api deploy fully runnable as an operator-supervised agent dispatch:
+the workflow exposes an `action` input that gates exactly one job per
+dispatch. All four are unreachable from `push` — push only runs
+`build-and-push` (image only).
+
+| `action` input | Job | What it does |
+|---|---|---|
+| `deploy-canary` (default) | Deploy 0% canary | Creates a new revision tagged `canary` (with `--no-traffic` when the service already exists). Reads `image_tag` (sha preferred; `latest` = the most recent build-and-push). |
+| `run-migrations` | Apply pending DB migrations | Applies pending `lib/db/drizzle/*.sql` files via `lib/db/scripts/migrate-prod.mjs`. Tracks applied filenames in `_schema_migrations`. **First run requires `bootstrap: true`** to seed the tracker against a DB that is already at the head (after the Phase 1 P0-1 manual apply). |
+| `shift-traffic` | Shift 100% to canary | Runs `gcloud run services update-traffic cortex-api --to-tags=canary=100`, echoes the resulting traffic split, then smoke-probes the **production** URL's `/api/healthz`. Fails the job if the probe is not 200. |
+| `rollback` | Roll traffic back | Runs `gcloud run services update-traffic cortex-api --to-revisions=<rollback_revision>=100`. Requires the `rollback_revision` input (e.g. `cortex-api-00017-gex`). |
+
+### Canonical canary sequence
+
+Four separate dispatches, in order:
+
+1. **`deploy-canary`** — `gh workflow run "Cloud Run Deploy (cortex-api)" -f action=deploy-canary -f image_tag=<sha>` (or `latest`).
+2. **`run-migrations`** — `gh workflow run "Cloud Run Deploy (cortex-api)" -f action=run-migrations`. On the very first ever execution against a given DB, add `-f bootstrap=true` to seed `_schema_migrations` with everything already at the head; subsequent runs default `bootstrap=false`.
+3. **Smoke probe** — `curl -s -o /dev/null -w "%{http_code}\n" "https://canary---<service-host>/api/healthz"` (the canary URL is printed at the end of the `deploy-canary` job log).
+4. **`shift-traffic`** — `gh workflow run "Cloud Run Deploy (cortex-api)" -f action=shift-traffic`. This also smoke-probes the production URL.
+
+This sequence is mirrored in `doc_repo/90_runbooks/cloud_run_canary_deploy.md` so the runbook and the workflow agree on the canary discipline.
+
+### Migration model — `lib/db/scripts/migrate-prod.mjs`
+
+The `run-migrations` job applies the numbered `lib/db/drizzle/*.sql`
+files in filename order, tracked by a `_schema_migrations` table
+(columns: `name text PRIMARY KEY`, `applied_at timestamptz`). Each file
+runs in its own transaction; an exception inside a file rolls back that
+transaction and fails the job with the file name. This is intentionally
+**not** `drizzle-kit push` — push diffs the live DB against the TS schema
+and can perform destructive operations (drop column, drop table) without
+a named, reviewable artifact. The numbered SQL files in `lib/db/drizzle/`
+are the prod-apply sequence (0009–0014 were applied that way during the
+QA-04 cutover; 0015 the same way during the Phase 1 P0-1 pass), and the
+script just continues that pattern in CI.
+
+`lib/db/scripts/track-b-ifc-ingest.sql` (the QA-04 IFC-ingest add) is
+intentionally NOT in the tracked set — it was hand-applied during the
+cutover and is treated as part of the bootstrap baseline. Future schema
+changes go into `lib/db/drizzle/NNNN_*.sql`.
+
+The script's other env vars (for use outside the workflow):
+- `BOOTSTRAP=true` — first-run only (see above).
+- `PLAN_ONLY=true` — echo the pending list and exit 0 without applying. Useful for previewing in a separate workflow run by hand (the `action=run-migrations` job does not currently set this; set it locally if you want to dry-run from a workstation).
+
+### Hard constraints — do not relax
+
+- Traffic shifts and DB migrations are **never coupled to `push`.**
+  `shift-traffic`, `rollback`, and `run-migrations` are
+  `workflow_dispatch`-only and gate on `inputs.action`; they are
+  unreachable from a push event.
+- `build-and-push` stays push-triggered and image-only. It does not
+  deploy, does not migrate, and does not shift traffic.
+- The four canary-sequence actions are separate deliberate operator
+  dispatches; the workflow never chains them together.
+- `deploy-canary`'s deploy flags / env vars / secrets are unchanged by
+  Phase 2 — only the gating `if:` condition was added.
+
+---
+
 ## Rollback
 
-The previous revision stays warm. Instant rollback:
+The previous revision stays warm. Use the **`rollback`** action — it is
+the operator-runnable equivalent of the manual `gcloud` rollback below
+and avoids needing a local `gcloud`:
 
 ```bash
-gcloud run services update-traffic api-server \
+gh workflow run "Cloud Run Deploy (cortex-api)" \
+  -f action=rollback \
+  -f rollback_revision=<previous-revision>
+```
+
+If a workstation `gcloud` is available, the manual form is unchanged:
+
+```bash
+gcloud run services update-traffic cortex-api \
   --region=us-central1 \
   --to-revisions=<previous-revision>=100
 ```
@@ -375,7 +449,7 @@ Replit endpoint while the Cloud Run revision is being investigated.
 - **No frontend migration** — `design-tools`, `plan-review`,
   `mockup-sandbox`, `qa` artifacts continue running on Replit. A separate
   phase handles their migration.
-- **No Drizzle migrate adoption** — Phase 3.
+- **Drizzle migrate adoption.** Phase 2 (2026-05-22) added a numbered-SQL migration runner (`lib/db/scripts/migrate-prod.mjs`) wired to the `run-migrations` workflow_dispatch action — see [Operator deploy lifecycle](#operator-deploy-lifecycle-workflow_dispatch-actions). The runner intentionally does NOT use `drizzle-kit push` (destructive without named artifacts); it applies the numbered `lib/db/drizzle/*.sql` files in order, tracked by `_schema_migrations`.
 - **No puppeteer-as-separate-service split** — image carries Chrome runtime
   libs for now (see follow-up below).
 - **No automatic traffic shifting in the GHA workflow** — every traffic
