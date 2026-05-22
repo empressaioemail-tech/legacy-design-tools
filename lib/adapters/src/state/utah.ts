@@ -16,6 +16,7 @@
  */
 
 import { arcgisPointQuery } from "../arcgis";
+import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
 import {
   AdapterRunError,
   type Adapter,
@@ -83,6 +84,10 @@ export const utahDemAdapter: Adapter = {
   layerKind: "ugrc-dem",
   provider: "Utah Geospatial Resource Center (UGRC)",
   jurisdictionGate: { state: "utah" },
+  // P1-3 — UGRC's ArcGIS Online statewide feeds answer slower than the
+  // 15s runner default; widen this adapter's budget so a slow-but-
+  // healthy query (and its retry ladder) is not cut off as a `timeout`.
+  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
   appliesTo: utahApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const result = await arcgisPointQuery({
@@ -122,6 +127,10 @@ export const utahParcelsAdapter: Adapter = {
   layerKind: "ugrc-parcels",
   provider: "Utah Geospatial Resource Center (UGRC)",
   jurisdictionGate: { state: "utah" },
+  // P1-3 — UGRC's ArcGIS Online statewide feeds answer slower than the
+  // 15s runner default; widen this adapter's budget so a slow-but-
+  // healthy query (and its retry ladder) is not cut off as a `timeout`.
+  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
   appliesTo: utahApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const result = await arcgisPointQuery({
@@ -172,6 +181,10 @@ export const utahAddressPointsAdapter: Adapter = {
   layerKind: "ugrc-address-points",
   provider: "Utah Geospatial Resource Center (UGRC)",
   jurisdictionGate: { state: "utah" },
+  // P1-3 — UGRC's ArcGIS Online statewide feeds answer slower than the
+  // 15s runner default; widen this adapter's budget so a slow-but-
+  // healthy query (and its retry ladder) is not cut off as a `timeout`.
+  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
   appliesTo: utahApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const result = await arcgisPointQuery({
