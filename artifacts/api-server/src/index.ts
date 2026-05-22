@@ -4,6 +4,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { bootstrapAtomRegistry } from "./atoms/registry";
 import { validateConverterEnvAtBoot } from "./lib/converterClient";
+import { validateHauskaSubstrateEnvAtBoot } from "./lib/hauskaSubstrateClient";
 import { validateFindingEngineEnvAtBoot } from "./lib/findingLlmClient";
 import { validateSheetContentEnvAtBoot } from "./lib/sheetContentLlmClient";
 import { reconcileOrphanedAutopilotRuns } from "./lib/qa/autopilot";
@@ -91,6 +92,22 @@ try {
   logger.error(
     { err },
     "sheet-content env validation failed — refusing to start",
+  );
+  process.exit(1);
+}
+
+// Fail-fast on misconfigured Hauska substrate env (QA-17): when
+// HAUSKA_SUBSTRATE_MODE=mcp we require HAUSKA_MCP_URL and HAUSKA_MCP_KEY
+// (the Code Library's live-catalog read path). Mock mode is the default
+// and boots clean with no env config. Same try/catch + process.exit(1)
+// pattern as above because pino + the background sweepers are already
+// running.
+try {
+  validateHauskaSubstrateEnvAtBoot();
+} catch (err) {
+  logger.error(
+    { err },
+    "Hauska substrate env validation failed — refusing to start",
   );
   process.exit(1);
 }

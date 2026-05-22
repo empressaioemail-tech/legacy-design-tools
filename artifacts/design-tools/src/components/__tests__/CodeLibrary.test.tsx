@@ -121,6 +121,15 @@ vi.mock("@tanstack/react-query", () => ({
   }),
 }));
 
+// The QA-17 substrate panel has its own dedicated test
+// (SubstrateCatalogPanel.test.tsx). Stub it here so these tests stay
+// scoped to the cortex-prod-local Code Library behavior and don't fire
+// the panel's `/api/substrate/jurisdictions` fetch.
+vi.mock("../SubstrateCatalogPanel", () => ({
+  SubstrateCatalogPanel: () => null,
+  default: () => null,
+}));
+
 const { CodeLibrary } = await import("../../pages/CodeLibrary");
 
 beforeEach(() => {
