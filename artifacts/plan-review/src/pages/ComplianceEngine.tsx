@@ -585,6 +585,7 @@ export default function ComplianceEngine() {
     <DashboardLayout
       title="Compliance Engine"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
       search={{

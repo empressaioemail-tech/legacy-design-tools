@@ -27,6 +27,12 @@ import type {
 } from "@workspace/codes-sources";
 import type pg from "pg";
 
+// Cleanup batch — these Postgres integration tests (per-test schema
+// create + queue/orchestrator cycles) run past the 10s default under
+// CI-runner load and intermittently flaked unrelated PRs. Widen this
+// file's per-test and per-hook budget.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 // Hoisted state shared between mocks and the test bodies.
 const mocks = vi.hoisted(() => ({
   db: null as unknown,

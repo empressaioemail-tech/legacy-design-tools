@@ -110,6 +110,7 @@ export function AccessDenied({
     <DashboardLayout
       title={title}
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >
@@ -155,6 +156,7 @@ function PermissionLoading() {
   return (
     <DashboardLayout
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >

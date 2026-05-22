@@ -10,6 +10,7 @@ export default function StyleProbe() {
     <DashboardLayout
       title="Style Probe"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >

@@ -100,6 +100,7 @@ export default function CodeLibrary() {
     <DashboardLayout
       title="Code Library"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >

@@ -6,6 +6,7 @@ export default function ComingSoon() {
   return (
     <DashboardLayout
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >

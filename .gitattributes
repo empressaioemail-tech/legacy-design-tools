@@ -1,0 +1,35 @@
+# Line-ending normalization (QA-26).
+#
+# legacy-design-tools is developed on a mix of Windows and Linux
+# clones, several with `core.autocrlf=true`. Without a `.gitattributes`
+# that produced recurring phantom CRLF-only diffs and content-empty
+# stashes that repeatedly bit cc-agent sessions. `text=auto eol=lf`
+# stores LF in the repo and checks out LF everywhere, which overrides
+# a clone's autocrlf setting and makes line endings deterministic.
+#
+# Note: this normalizes line endings going forward only. A one-time
+# repo-wide `git add --renormalize .` to rewrite already-committed
+# CRLF blobs is intentionally NOT done here (it would be pure,
+# unreviewable churn) — see the cleanup-batch session report.
+
+* text=auto eol=lf
+
+# Binary assets — never normalize line endings.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.avif  binary
+*.pdf   binary
+*.glb   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+*.zip   binary
+*.gz    binary
+*.wasm  binary
+*.node  binary
