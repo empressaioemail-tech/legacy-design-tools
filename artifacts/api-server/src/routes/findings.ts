@@ -1,7 +1,13 @@
 /**
  * V1-1 / AIR-1 — finding endpoints.
  *
- * Seven routes, all reviewer-only (`session.audience === "internal"`):
+ * Eight routes. Seven serve the architect's pre-submittal compliance
+ * review — the workflow the architect runs from the design-tools
+ * Findings tab (operator decision 2026-05-22, codex review-surface
+ * relocation). Those carry no audience gate, consistent with the other
+ * architect-workflow routes (generate-layers, briefings). Only
+ * `POST /submissions/{id}/findings` — a reviewer manually authoring a
+ * finding the engine missed — stays reviewer-only.
  *
  *   - POST /submissions/{id}/findings/generate
  *       Kicks off an async run of the finding engine
@@ -121,10 +127,15 @@ function isUniqueViolation(err: unknown): boolean {
 type FindingRunState = "pending" | "completed" | "failed";
 
 /**
- * Reviewer-only audience gate. Mirrors the helper at
- * `routes/reviewerAnnotations.ts:108-114` verbatim — kept inline
- * (not in a shared `audienceGuards.ts` module) so each route is
- * self-contained and grep-able.
+ * Reviewer-only audience gate. As of the 2026-05-22 review-surface
+ * relocation this guards a single route — `POST /submissions/{id}/
+ * findings`, where a reviewer manually authors a finding the engine
+ * missed. The seven architect-workflow routes (generate / status /
+ * list / runs / accept / reject / override) no longer call it: the
+ * pre-submittal compliance review is an architect workflow and runs
+ * from the design-tools Findings tab. P1-5 — those routes used to
+ * 403 for every architect because production fails every session
+ * closed to `audience: "user"` (see middlewares/session.ts).
  *
  * Returns `true` once the guard sent a 403 so the caller can
  * early-return.
@@ -991,7 +1002,6 @@ export async function kickoffFindingGenerationForSubmission(
 router.post(
   "/submissions/:submissionId/findings/generate",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
     const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
     const params = GenerateSubmissionFindingsParams.safeParse(req.params);
     if (!params.success) {
@@ -1041,7 +1051,6 @@ router.post(
 router.get(
   "/submissions/:submissionId/findings/status",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
     const params = GetSubmissionFindingsGenerationStatusParams.safeParse(
       req.params,
     );
@@ -1101,7 +1110,6 @@ router.get(
 router.get(
   "/submissions/:submissionId/findings",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
     const params = ListSubmissionFindingsParams.safeParse(req.params);
     if (!params.success) {
       res.status(400).json({ error: "invalid_submission_id" });
@@ -1340,7 +1348,6 @@ router.post(
 router.get(
   "/submissions/:submissionId/findings/runs",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
     const params = ListSubmissionFindingsGenerationRunsParams.safeParse(
       req.params,
     );
@@ -1425,7 +1432,6 @@ function nextStatusForReject(current: string): "rejected" | null {
 router.post(
   "/findings/:findingId/accept",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
     const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
     const params = AcceptFindingParams.safeParse(req.params);
     if (!params.success) {
@@ -1519,7 +1525,6 @@ router.post(
 router.post(
   "/findings/:findingId/reject",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
     const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
     const params = RejectFindingParams.safeParse(req.params);
     if (!params.success) {
@@ -1602,7 +1607,6 @@ router.post(
 router.post(
   "/findings/:findingId/override",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireReviewerAudience(req, res)) return;
     const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
     const params = OverrideFindingParams.safeParse(req.params);
     if (!params.success) {
