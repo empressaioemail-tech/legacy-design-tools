@@ -59,7 +59,7 @@ import {
   type ContextSummary,
   type EventAnchoringService,
   type KeyMetric,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 import type { db as ProdDb } from "@workspace/db";
 
 /** Hard cap on the prose summary so we don't blow up token budget. */

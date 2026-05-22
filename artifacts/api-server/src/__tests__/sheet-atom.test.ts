@@ -35,7 +35,7 @@ const { createTestSchema, dropTestSchema } = await import(
 const dbModule = await import("@workspace/db");
 const { engagements, snapshots, sheets } = dbModule;
 const { runAtomContractTests } = await import(
-  "@workspace/empressa-atom/testing"
+  "@hauska/atom-contract/testing"
 );
 const { makeSheetAtom } = await import("../atoms/sheet.atom");
 

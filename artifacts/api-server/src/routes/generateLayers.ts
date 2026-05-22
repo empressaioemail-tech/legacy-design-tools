@@ -53,7 +53,7 @@ import {
 } from "@workspace/adapters";
 import { GenerateEngagementLayersParams } from "@workspace/api-zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import type { EventAnchoringService } from "@workspace/empressa-atom";
+import type { EventAnchoringService } from "@hauska/atom-contract";
 import { logger } from "../lib/logger";
 import { createAdapterResponseCache } from "../lib/adapterCache";
 import { resolveMatchingReviewerRequests } from "../lib/reviewerRequestResolution";

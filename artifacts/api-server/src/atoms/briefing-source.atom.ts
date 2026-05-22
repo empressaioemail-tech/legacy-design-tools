@@ -33,7 +33,7 @@ import {
   type AtomRegistration,
   type ContextSummary,
   type EventAnchoringService,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 
 /** Hard cap on the prose summary. */
 export const BRIEFING_SOURCE_PROSE_MAX_CHARS = 400;

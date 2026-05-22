@@ -32,7 +32,7 @@
  * fail to compile rather than silently emit a stale name.
  */
 
-import type { EventAnchoringService } from "@workspace/empressa-atom";
+import type { EventAnchoringService } from "@hauska/atom-contract";
 import type { Logger } from "pino";
 import type { SubmissionStatus } from "@workspace/db";
 import { keyFromEngagement } from "@workspace/codes";

@@ -72,7 +72,7 @@ import {
   ObjectNotFoundError,
 } from "../lib/objectStorage";
 import { requireArchitectAudience } from "../lib/audienceGuards";
-import type { EventAnchoringService } from "@workspace/empressa-atom";
+import type { EventAnchoringService } from "@hauska/atom-contract";
 import {
   BIM_MODEL_PUSH_ACTOR_ID,
   BIM_MODEL_REFRESH_ACTOR_ID,

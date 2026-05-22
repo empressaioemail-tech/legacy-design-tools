@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
+    "@hauska/atom-contract": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@workspace/adapters": "workspace:*",
     "@workspace/api-zod": "workspace:*",
@@ -21,7 +22,6 @@
     "@workspace/codes": "workspace:*",
     "@workspace/comment-letter": "workspace:*",
     "@workspace/db": "workspace:*",
-    "@workspace/empressa-atom": "workspace:*",
     "@workspace/finding-engine": "workspace:*",
     "@workspace/integrations-anthropic-ai": "workspace:*",
     "@workspace/mnml-client": "workspace:*",

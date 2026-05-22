@@ -15,7 +15,7 @@ import { describe, it, expect } from "vitest";
 import {
   runAtomContractTests,
   createInMemoryEventService,
-} from "@workspace/empressa-atom/testing";
+} from "@hauska/atom-contract/testing";
 import {
   makeBriefingSourceAtom,
   BRIEFING_SOURCE_EVENT_TYPES,

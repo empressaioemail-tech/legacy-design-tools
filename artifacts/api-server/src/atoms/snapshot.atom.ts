@@ -1,6 +1,6 @@
 /**
  * The `snapshot` atom registration — second catalog atom against
- * `@workspace/empressa-atom` (Spec 20 §4 + §6, A2 sprint).
+ * `@hauska/atom-contract` (Spec 20 §4 + §6, A2 sprint).
  *
  * A *snapshot* is a single Revit push: one row in `snapshots` plus its
  * child `sheets` rows. Registering snapshot exercises the framework's
@@ -28,7 +28,7 @@ import {
   type ContextSummary,
   type EventAnchoringService,
   type KeyMetric,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 import type { db as ProdDb } from "@workspace/db";
 
 /**

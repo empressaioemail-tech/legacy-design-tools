@@ -57,7 +57,7 @@ import {
   type EventAnchoringService,
   type KeyMetric,
   type Scope,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 
 /** Hard cap on the prose summary. */
 export const RENDER_OUTPUT_PROSE_MAX_CHARS = 400;
