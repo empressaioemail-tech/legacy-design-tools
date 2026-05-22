@@ -52,11 +52,13 @@ RUN pnpm --filter @workspace/api-server run build
 # Build the browser SPAs. Off Replit there is no separate frontend
 # host, so api-server static-serves them (Q2 of the C.2.1 audit). Each
 # vite build defaults its `base` to the right path (design-tools `/`,
-# plan-review `/plan-review/`, qa `/qa/`) so no BASE_PATH is needed.
-# mockup-sandbox is intentionally excluded — dev-only UI sandbox.
+# plan-review `/plan-review/`, qa `/qa/`, codex-reviewer-qa
+# `/codex-reviewer-qa/`) so no BASE_PATH is needed. mockup-sandbox is
+# intentionally excluded — dev-only UI sandbox.
 RUN pnpm --filter @workspace/design-tools \
          --filter @workspace/plan-review \
          --filter @workspace/qa \
+         --filter @workspace/codex-reviewer-qa \
          run build
 
 

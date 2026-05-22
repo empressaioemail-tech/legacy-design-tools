@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/codex-reviewer-qa/"
+title = "Codex Reviewer QA"
+version = "1.0.0"
+id = "artifacts/codex-reviewer-qa"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/codex-reviewer-qa/" ]
+localPort = 19592
+
+[services.development]
+run = "pnpm --filter @workspace/codex-reviewer-qa run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/codex-reviewer-qa", "run", "build" ]
+publicDir = "artifacts/codex-reviewer-qa/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19592"
+BASE_PATH = "/codex-reviewer-qa/"
