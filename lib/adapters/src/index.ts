@@ -27,6 +27,11 @@ export {
 export { runAdapters, type RunAdaptersInput } from "./runner";
 
 export {
+  DEFAULT_ADAPTER_TIMEOUT_MS,
+  SLOW_UPSTREAM_TIMEOUT_MS,
+} from "./timeouts";
+
+export {
   toCacheKey,
   CACHE_COORDINATE_PRECISION,
   FEDERAL_TIER_CACHE_PREDICATE,

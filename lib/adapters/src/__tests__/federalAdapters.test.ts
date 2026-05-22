@@ -26,6 +26,7 @@ import {
   femaNfhlFeature,
 } from "../__fixtures__/federalFixtures";
 import type { AdapterContext } from "../types";
+import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
 
 const moab: AdapterContext = {
   parcel: { latitude: 38.5733, longitude: -109.5498 },
@@ -470,5 +471,24 @@ describe("federal adapter gating (PL-04)", () => {
     });
     expect(outcomes.every((o) => o.status === "ok")).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("QA-22 — slow-upstream per-adapter timeout floors", () => {
+  it("EPA EJScreen carries the widened SLOW_UPSTREAM_TIMEOUT_MS budget", () => {
+    expect(epaEjscreenAdapter.timeoutMs).toBe(SLOW_UPSTREAM_TIMEOUT_MS);
+  });
+
+  it("FCC broadband carries the widened SLOW_UPSTREAM_TIMEOUT_MS budget", () => {
+    expect(fccBroadbandAdapter.timeoutMs).toBe(SLOW_UPSTREAM_TIMEOUT_MS);
+  });
+
+  it("the fast federal adapters keep the runner default (no per-adapter floor)", () => {
+    // FEMA NFHL + USGS EPQS answer well inside the 15s default;
+    // leaving their `timeoutMs` unset documents that the widened
+    // budget is targeted at the known-slow upstreams, not a blanket
+    // bump across every adapter.
+    expect(femaNfhlAdapter.timeoutMs).toBeUndefined();
+    expect(usgsNedAdapter.timeoutMs).toBeUndefined();
   });
 });

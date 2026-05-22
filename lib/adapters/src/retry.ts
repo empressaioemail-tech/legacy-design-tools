@@ -120,7 +120,7 @@ export async function fetchWithRetry(
     if (isCallerAbort(opts.signal)) {
       throw new AdapterRunError(
         "timeout",
-        `${label} request was cancelled by the caller before attempt ${attempt}.`,
+        `${label} did not respond in time — the request exceeded its time budget before attempt ${attempt} could start. Use Force refresh to retry.`,
       );
     }
     let res: Response;
@@ -131,7 +131,7 @@ export async function fetchWithRetry(
       if (isCallerAbort(opts.signal)) {
         throw new AdapterRunError(
           "timeout",
-          `${label} request was cancelled by the caller during attempt ${attempt}.`,
+          `${label} did not respond in time — the request exceeded its time budget during attempt ${attempt}. Use Force refresh to retry.`,
         );
       }
       const transient =
