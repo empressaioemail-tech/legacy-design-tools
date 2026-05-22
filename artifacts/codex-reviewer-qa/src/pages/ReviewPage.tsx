@@ -1,5 +1,5 @@
 /**
- * Codex Reviewer QA — CDX-3 one-click AI review pass.
+ * Codex Reviewer QA — the engine review surface (CDX-3 / CDX-4 / CDX-5).
  *
  * Pick an engagement and one of its submissions, trigger an engine
  * compliance full-pass, and render the findings it produces. Consumes
@@ -11,8 +11,10 @@
  * → poll GET .../findings/status until state leaves "pending"
  * → GET .../findings renders the result as FindingCards.
  *
- * CDX-4 (per-finding accept/edit/reject) and CDX-5 (jurisdiction
- * switcher) are the sequenced follow-on PRs; this page is CDX-3 only.
+ * CDX-3 — the one-click pass + findings render.
+ * CDX-4 — per-finding accept / edit / reject, wired into each card.
+ * CDX-5 — the engagement/submission switcher: jurisdiction follows the
+ *   engagement (no runtime override), surfaced by the JurisdictionBar.
  */
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -22,11 +24,13 @@ import {
   getListEngagementSubmissionsQueryKey,
   getListSubmissionFindingsQueryKey,
   useGetSubmissionFindingsGenerationStatus,
+  useListCodeJurisdictions,
   useListEngagements,
   useListEngagementSubmissions,
   useListSubmissionFindings,
 } from "@workspace/api-client-react";
 import { FindingCard } from "../components/FindingCard";
+import { JurisdictionBar } from "../components/JurisdictionBar";
 import { sortFindings } from "../lib/findings";
 import {
   describeOverrideError,
@@ -74,6 +78,18 @@ export default function ReviewPage() {
     },
   });
   const submissions = submissionsQuery.data ?? [];
+
+  // CDX-5 — jurisdiction follows the engagement (planner ruling
+  // 2026-05-21); there is no runtime override. The corpus list is
+  // global; the JurisdictionBar matches the engagement's recorded
+  // jurisdiction against it for read-only context.
+  const jurisdictionsQuery = useListCodeJurisdictions();
+  const jurisdictions = jurisdictionsQuery.data ?? [];
+
+  const selectedEngagement =
+    engagements.find((engagement) => engagement.id === engagementId) ?? null;
+  const selectedSubmission =
+    submissions.find((submission) => submission.id === submissionId) ?? null;
 
   const statusQuery = useGetSubmissionFindingsGenerationStatus(submissionId, {
     query: {
@@ -175,8 +191,9 @@ export default function ReviewPage() {
             fontSize: 13,
           }}
         >
-          One-click AI review pass (CDX-3). Pick a submission, run the
-          engine compliance pass, and review every finding it produces.
+          Pick an engagement and submission, run the engine compliance
+          pass, and adjudicate every finding against the engagement&rsquo;s
+          jurisdiction.
         </p>
       </header>
 
@@ -203,7 +220,9 @@ export default function ReviewPage() {
             </option>
             {engagements.map((engagement) => (
               <option key={engagement.id} value={engagement.id}>
-                {engagement.name}
+                {engagement.jurisdiction
+                  ? `${engagement.name} — ${engagement.jurisdiction}`
+                  : engagement.name}
               </option>
             ))}
           </select>
@@ -256,6 +275,15 @@ export default function ReviewPage() {
           {isGenerating || runMutation.isPending ? "Running…" : "Run review"}
         </button>
       </section>
+
+      {/* CDX-5 — the jurisdiction the engagement (and so the engine
+          pass) is judged against; updates as the engagement switches. */}
+      <JurisdictionBar
+        engagement={selectedEngagement}
+        submission={selectedSubmission}
+        jurisdictions={jurisdictions}
+        corpusLoading={jurisdictionsQuery.isLoading}
+      />
 
       {runMutation.isError ? (
         <div
