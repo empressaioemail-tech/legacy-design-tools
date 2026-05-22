@@ -5,6 +5,13 @@
  *   POST {baseUrl}/v1/archDiffusion-v43   — multipart, single image render
  *   POST {baseUrl}/v1/video-ai            — multipart, Kling 5/10s clip
  *   GET  {baseUrl}/v1/status/{id}         — shared status poll
+ *   GET  {baseUrl}/v1/credits             — account credit balance
+ *   POST {baseUrl}/v1/prompt-generator    — multipart, synchronous prompt gen
+ *
+ * `credits` and `prompt-generator` were added by the doc 40c gap-fill;
+ * both verified live against `mnmlai.dev/docs` on 2026-05-22. Unlike
+ * archdiffusion / video-ai, neither is async — there is no job id and
+ * no status poll.
  *
  * Auth: `Authorization: Bearer {apiKey}` on every request. Multipart
  * Content-Type is set by the runtime's FormData wiring (we MUST NOT
@@ -41,9 +48,12 @@ import {
   MnmlError,
   noopMnmlLogger,
   type ArchDiffusionRequest,
+  type CreditsResult,
   type MnmlClient,
   type MnmlErrorKind,
   type MnmlLogger,
+  type PromptGeneratorRequest,
+  type PromptGeneratorResult,
   type RenderRequest,
   type RenderStatus,
   type RenderStatusResult,
@@ -102,6 +112,20 @@ interface MnmlErrorResponseBody {
   code?: string;
   message?: string;
   details?: Record<string, unknown>;
+}
+
+interface MnmlCreditsResponseBody {
+  status?: string;
+  /** Remaining account credit balance. */
+  credits?: number;
+}
+
+interface MnmlPromptGeneratorResponseBody {
+  status?: string;
+  /** The generated, optimized prompt. */
+  message?: string;
+  /** Echo of the caller's keyword input. */
+  prompt?: string;
 }
 
 export class HttpMnmlClient implements MnmlClient {
@@ -260,12 +284,125 @@ export class HttpMnmlClient implements MnmlClient {
     return result;
   }
 
+  async getCredits(): Promise<CreditsResult> {
+    const url = `${this.baseUrl}/v1/credits`;
+    const startedAt = Date.now();
+    // Credits is a tiny GET — the status-poll timeout budget fits it.
+    const response = await this.doFetch(
+      "GET",
+      url,
+      null,
+      this.statusTimeoutMs,
+      "getCredits",
+    );
+    const durationMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      const err = await mapErrorResponse(response);
+      this.logger.warn(
+        {
+          op: "getCredits",
+          url,
+          status: response.status,
+          durationMs,
+          mnmlKind: err.kind,
+          code: err.code,
+        },
+        "mnml.ai credits fetch failed",
+      );
+      throw err;
+    }
+
+    const body = (await safeJson<MnmlCreditsResponseBody>(response)) ?? {};
+    if (typeof body.credits !== "number") {
+      const err = new MnmlError(
+        "validation",
+        "MISSING_CREDITS",
+        "mnml.ai credits response had no numeric `credits` field",
+      );
+      this.logger.warn(
+        { op: "getCredits", url, status: response.status, durationMs },
+        "mnml.ai credits response malformed",
+      );
+      throw err;
+    }
+    this.logger.info(
+      {
+        op: "getCredits",
+        url,
+        status: response.status,
+        durationMs,
+        credits: body.credits,
+      },
+      "mnml.ai credits fetch ok",
+    );
+    return { credits: body.credits };
+  }
+
+  async generatePrompt(
+    input: PromptGeneratorRequest,
+  ): Promise<PromptGeneratorResult> {
+    const url = `${this.baseUrl}/v1/prompt-generator`;
+    const form = buildPromptGeneratorForm(input);
+    const startedAt = Date.now();
+    // Prompt-generator uploads an image and runs synchronous AI work —
+    // the trigger timeout budget (which also spans an image upload)
+    // fits it better than the tiny status-poll budget.
+    const response = await this.doFetch(
+      "POST",
+      url,
+      form,
+      this.triggerTimeoutMs,
+      "generatePrompt",
+    );
+    const durationMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      const err = await mapErrorResponse(response);
+      this.logger.warn(
+        {
+          op: "generatePrompt",
+          url,
+          status: response.status,
+          durationMs,
+          mnmlKind: err.kind,
+          code: err.code,
+        },
+        "mnml.ai prompt-generator failed",
+      );
+      throw err;
+    }
+
+    const body =
+      (await safeJson<MnmlPromptGeneratorResponseBody>(response)) ?? {};
+    // mnml returns the generated prompt in `message`; the body's
+    // `prompt` field just echoes the caller's keyword input.
+    const generated = body.message;
+    if (typeof generated !== "string" || generated.trim().length === 0) {
+      const err = new MnmlError(
+        "validation",
+        "MISSING_PROMPT",
+        "mnml.ai prompt-generator response had no `message` prompt",
+      );
+      this.logger.warn(
+        { op: "generatePrompt", url, status: response.status, durationMs },
+        "mnml.ai prompt-generator response malformed",
+      );
+      throw err;
+    }
+    this.logger.info(
+      { op: "generatePrompt", url, status: response.status, durationMs },
+      "mnml.ai prompt-generator ok",
+    );
+    return { prompt: generated };
+  }
+
   private async doFetch(
     method: "GET" | "POST",
     url: string,
     body: FormData | null,
     timeoutMs: number,
-    op: "triggerRender" | "getRenderStatus",
+    op: "triggerRender" | "getRenderStatus" | "getCredits" | "generatePrompt",
   ): Promise<Response> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
@@ -374,6 +511,18 @@ function buildVideoForm(req: VideoAiRequest): FormData {
   if (req.movementType) form.append("movement_type", req.movementType);
   if (req.direction) form.append("direction", req.direction);
   if (req.seed !== undefined) form.append("seed", String(req.seed));
+  return form;
+}
+
+/**
+ * `POST /v1/prompt-generator` multipart body. `image` carries the
+ * source bytes; `keywords` (optional) maps to mnml's `prompt` form
+ * field — the keyword hints, NOT the generated prompt.
+ */
+function buildPromptGeneratorForm(req: PromptGeneratorRequest): FormData {
+  const form = new FormData();
+  form.append("image", asFormBlob(req.image), "input.jpg");
+  if (req.keywords) form.append("prompt", req.keywords);
   return form;
 }
 

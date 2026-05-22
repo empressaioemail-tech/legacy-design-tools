@@ -81,6 +81,7 @@ import type {
   GenerateBriefingResponse,
   GenerateEngagementLayersParams,
   GenerateLayersResponse,
+  GenerateRenderPromptBody,
   GenerateSubmissionFindingsBody,
   GenerateSubmissionFindingsResponse,
   GetAtomHistoryParams,
@@ -129,6 +130,7 @@ import type {
   ProductSpecReferenceResponse,
   PromoteReviewerAnnotationsBody,
   PromoteReviewerAnnotationsResponse,
+  PromptGeneratorResponse,
   PushBimModelBody,
   QaAutopilotNotificationTestResult,
   QaAutopilotRunDetail,
@@ -150,6 +152,7 @@ import type {
   ReclassifySubmissionBody,
   RecordBimModelDivergenceBody,
   RecordDecisionBody,
+  RenderCreditsResponse,
   RenderDeliverableLetterBody,
   RenderDetailResponse,
   RenderListResponse,
@@ -9943,6 +9946,190 @@ export function useListEngagementRenders<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * doc 40c B.6 — the running-balance display the Renders tab
+shows. Architect-audience-only and behind `RENDERS_PROD_ENABLED`
+in production (returns 503 `renders_preview_disabled` until the
+operator flips the flag). No engagement scope — the balance is
+account-wide.
+
+ * @summary Get the mnml.ai account credit balance
+ */
+export const getGetRenderCreditsUrl = () => {
+  return `/api/renders/credits`;
+};
+
+export const getRenderCredits = async (
+  options?: RequestInit,
+): Promise<RenderCreditsResponse> => {
+  return customFetch<RenderCreditsResponse>(getGetRenderCreditsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRenderCreditsQueryKey = () => {
+  return [`/api/renders/credits`] as const;
+};
+
+export const getGetRenderCreditsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRenderCredits>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRenderCredits>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRenderCreditsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRenderCredits>>
+  > = ({ signal }) => getRenderCredits({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRenderCredits>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRenderCreditsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRenderCredits>>
+>;
+export type GetRenderCreditsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get the mnml.ai account credit balance
+ */
+
+export function useGetRenderCredits<
+  TData = Awaited<ReturnType<typeof getRenderCredits>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRenderCredits>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRenderCreditsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * doc 40c B.1 concept-imagery flow. The architect uploads a
+source image (hand sketch, bubble diagram, massing, reference
+photo) and mnml.ai's Prompt Generator returns an optimized
+render prompt. Synchronous — no viewpoint_renders row and no
+polling; the architect feeds the returned prompt into a normal
+render kickoff. Architect-audience-only, behind
+`RENDERS_PROD_ENABLED`, costs 1 mnml credit.
+
+multipart/form-data body: a required `image` file part
+(JPEG/PNG/GIF/WebP, ≤8MB) plus an optional `keywords` text
+field. The FE builds the multipart body by hand.
+
+ * @summary Generate a render prompt from a source image
+ */
+export const getGenerateRenderPromptUrl = () => {
+  return `/api/renders/prompt-generator`;
+};
+
+export const generateRenderPrompt = async (
+  generateRenderPromptBody: GenerateRenderPromptBody,
+  options?: RequestInit,
+): Promise<PromptGeneratorResponse> => {
+  const formData = new FormData();
+  if (generateRenderPromptBody.keywords !== undefined) {
+    formData.append(`keywords`, generateRenderPromptBody.keywords);
+  }
+
+  return customFetch<PromptGeneratorResponse>(getGenerateRenderPromptUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getGenerateRenderPromptMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateRenderPrompt>>,
+    TError,
+    { data: BodyType<GenerateRenderPromptBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateRenderPrompt>>,
+  TError,
+  { data: BodyType<GenerateRenderPromptBody> },
+  TContext
+> => {
+  const mutationKey = ["generateRenderPrompt"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateRenderPrompt>>,
+    { data: BodyType<GenerateRenderPromptBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return generateRenderPrompt(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateRenderPromptMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateRenderPrompt>>
+>;
+export type GenerateRenderPromptMutationBody =
+  BodyType<GenerateRenderPromptBody>;
+export type GenerateRenderPromptMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Generate a render prompt from a source image
+ */
+export const useGenerateRenderPrompt = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateRenderPrompt>>,
+    TError,
+    { data: BodyType<GenerateRenderPromptBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateRenderPrompt>>,
+  TError,
+  { data: BodyType<GenerateRenderPromptBody> },
+  TContext
+> => {
+  return useMutation(getGenerateRenderPromptMutationOptions(options));
+};
 
 /**
  * Returns the row's status (`queued | rendering | ready |

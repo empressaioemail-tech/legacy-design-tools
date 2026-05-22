@@ -20,12 +20,20 @@
  * internal balance by the static cost from Spec 54 v2 §4 (3 credits
  * for archdiffusion, 10 for video). Tests asserting against the
  * balance can pin the starting value via {@link MockMnmlClientOptions.startingCredits}.
+ *
+ * `getCredits` reports the live simulated balance; `generatePrompt`
+ * (doc 40c gap-fill) is synchronous, decrements the balance by 1, and
+ * returns a deterministic prompt. `alwaysFail` also forces
+ * `generatePrompt` down its failure branch.
  */
 
 import { randomUUID } from "node:crypto";
 import {
   MnmlError,
+  type CreditsResult,
   type MnmlClient,
+  type PromptGeneratorRequest,
+  type PromptGeneratorResult,
   type RenderRequest,
   type RenderStatus,
   type RenderStatusResult,
@@ -34,6 +42,9 @@ import {
 
 /** Spec 54 v2 §4 — static per-operation credit cost. */
 const COST_PER_KIND = { archdiffusion: 3, video: 10 } as const;
+
+/** doc 40c — Prompt Generator costs 1 credit per call. */
+const PROMPT_GENERATOR_COST = 1;
 
 /** Spec 54 v2 §6.5 mock-client construction options. */
 export interface MockMnmlClientOptions {
@@ -145,6 +156,34 @@ export class MockMnmlClient implements MnmlClient {
       status: "ready",
       outputUrls: buildMockOutputUrls(state.request),
       seed: MOCK_SEED,
+    };
+  }
+
+  async getCredits(): Promise<CreditsResult> {
+    return { credits: this.remainingCredits };
+  }
+
+  async generatePrompt(
+    input: PromptGeneratorRequest,
+  ): Promise<PromptGeneratorResult> {
+    if (this.alwaysFail) {
+      // Mirror the render forced-failure surface so route tests can
+      // exercise the prompt-generator error branch with the mock.
+      throw new MnmlError(
+        "validation",
+        "MOCK_FORCED",
+        "MockMnmlClient: forced prompt-generator failure (alwaysFail=true)",
+      );
+    }
+    this.remainingCredits -= PROMPT_GENERATOR_COST;
+    // Deterministic prompt — folds in the caller's keywords when given
+    // so a test can assert the hint round-tripped.
+    const base =
+      "modern architectural rendering, photorealistic lighting, " +
+      "professional exterior view, high detail";
+    const keywords = input.keywords?.trim();
+    return {
+      prompt: keywords ? `${keywords}, ${base}` : base,
     };
   }
 

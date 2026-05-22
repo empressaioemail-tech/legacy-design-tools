@@ -128,12 +128,19 @@ const { resetAtomRegistryForTests } = await import("../atoms/registry");
 interface FakeMnml {
   triggerRender: ReturnType<typeof vi.fn>;
   getRenderStatus: ReturnType<typeof vi.fn>;
+  // The polling worker never calls these two — present only so the
+  // fake structurally satisfies the (doc 40c-widened) MnmlClient
+  // interface that `setMnmlClient` expects.
+  getCredits: ReturnType<typeof vi.fn>;
+  generatePrompt: ReturnType<typeof vi.fn>;
 }
 
 function makeFakeMnml(): FakeMnml {
   return {
     triggerRender: vi.fn(),
     getRenderStatus: vi.fn(),
+    getCredits: vi.fn(),
+    generatePrompt: vi.fn(),
   };
 }
 

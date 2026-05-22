@@ -366,6 +366,141 @@ describe("HttpMnmlClient — getRenderStatus", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
+// getCredits / generatePrompt — doc 40c gap-fill
+// ─────────────────────────────────────────────────────────────────────
+
+describe("HttpMnmlClient — getCredits", () => {
+  it("GETs /v1/credits with Bearer auth and returns the balance", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", credits: 485 }),
+    ]);
+    const client = new HttpMnmlClient({
+      baseUrl: BASE_URL,
+      apiKey: API_KEY,
+      fetcher,
+    });
+    const result = await client.getCredits();
+    expect(result).toEqual({ credits: 485 });
+    expect(calls[0]!.url).toBe(`${BASE_URL}/v1/credits`);
+    expect(calls[0]!.method).toBe("GET");
+    expect(calls[0]!.authorization).toBe(`Bearer ${API_KEY}`);
+  });
+
+  it("throws MnmlError(validation, MISSING_CREDITS) when credits is absent", async () => {
+    const { fetcher } = captureFetcher([jsonResponse({ status: "success" })]);
+    const client = new HttpMnmlClient({
+      baseUrl: BASE_URL,
+      apiKey: API_KEY,
+      fetcher,
+    });
+    await expect(client.getCredits()).rejects.toMatchObject({
+      name: "MnmlError",
+      kind: "validation",
+      code: "MISSING_CREDITS",
+    });
+  });
+
+  it("maps a 401 to MnmlError(auth)", async () => {
+    const { fetcher } = captureFetcher([
+      jsonResponse(
+        { status: "error", code: "invalid_api_key", message: "bad key" },
+        401,
+      ),
+    ]);
+    const client = new HttpMnmlClient({
+      baseUrl: BASE_URL,
+      apiKey: API_KEY,
+      fetcher,
+    });
+    await expect(client.getCredits()).rejects.toMatchObject({ kind: "auth" });
+  });
+});
+
+describe("HttpMnmlClient — generatePrompt", () => {
+  it("POSTs multipart to /v1/prompt-generator and returns the generated prompt", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({
+        status: "success",
+        message: "modern glass facade, photoreal, golden hour",
+        prompt: "modern glass",
+      }),
+    ]);
+    const client = new HttpMnmlClient({
+      baseUrl: BASE_URL,
+      apiKey: API_KEY,
+      fetcher,
+    });
+    const result = await client.generatePrompt({
+      image: imageBlob(),
+      keywords: "modern glass",
+    });
+    // mnml returns the generated prompt in `message`; the body's
+    // `prompt` field just echoes the caller's keyword input.
+    expect(result).toEqual({
+      prompt: "modern glass facade, photoreal, golden hour",
+    });
+    expect(calls[0]!.url).toBe(`${BASE_URL}/v1/prompt-generator`);
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.authorization).toBe(`Bearer ${API_KEY}`);
+    expect(calls[0]!.contentType).toBeUndefined();
+    expect(calls[0]!.formFiles).toContain("image");
+    expect(calls[0]!.formFields).toMatchObject({ prompt: "modern glass" });
+  });
+
+  it("omits the keywords form field when no keywords are given", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", message: "a generated prompt" }),
+    ]);
+    const client = new HttpMnmlClient({
+      baseUrl: BASE_URL,
+      apiKey: API_KEY,
+      fetcher,
+    });
+    await client.generatePrompt({ image: imageBlob() });
+    expect(calls[0]!.formFiles).toContain("image");
+    expect(calls[0]!.formFields).toEqual({});
+  });
+
+  it("throws MnmlError(validation, MISSING_PROMPT) when message is absent", async () => {
+    const { fetcher } = captureFetcher([
+      jsonResponse({ status: "success", prompt: "echo only" }),
+    ]);
+    const client = new HttpMnmlClient({
+      baseUrl: BASE_URL,
+      apiKey: API_KEY,
+      fetcher,
+    });
+    await expect(
+      client.generatePrompt({ image: imageBlob() }),
+    ).rejects.toMatchObject({
+      name: "MnmlError",
+      kind: "validation",
+      code: "MISSING_PROMPT",
+    });
+  });
+
+  it("maps a 403 to MnmlError(insufficient_credits)", async () => {
+    const { fetcher } = captureFetcher([
+      jsonResponse(
+        { status: "error", code: "NO_CREDITS", message: "out of credits" },
+        403,
+      ),
+    ]);
+    const client = new HttpMnmlClient({
+      baseUrl: BASE_URL,
+      apiKey: API_KEY,
+      fetcher,
+    });
+    await expect(
+      client.generatePrompt({ image: imageBlob() }),
+    ).rejects.toMatchObject({
+      kind: "insufficient_credits",
+      code: "NO_CREDITS",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
 // Error mapping — Spec 54 v2 §5 (7 buckets)
 // ─────────────────────────────────────────────────────────────────────
 
