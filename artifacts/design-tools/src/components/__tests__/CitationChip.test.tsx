@@ -28,10 +28,20 @@ vi.mock("../../store/engagements", () => ({
     pendingChatInputByEngagement: stores.pendingChatInputByEngagement,
     focusSnapshotIdsByEngagement: {} as Record<string, string[]>,
     agentActionsByEngagement: {} as Record<string, unknown[]>,
+    // QA-18 — ClaudeChat reads three engagement-scoped document slices and
+    // the loader/uploader. The real store inits all three records to {},
+    // and `loadAttachedDocuments` fires from a mount effect, so the mock
+    // must supply it as a function. Mirrors the complete mock in
+    // ClaudeChat.test.tsx.
+    attachedDocumentsByEngagement: {} as Record<string, unknown[]>,
+    uploadingDocumentByEngagement: {} as Record<string, boolean>,
+    documentUploadErrorByEngagement: {} as Record<string, string | null>,
     streaming: stores.streaming,
     sendMessage: vi.fn(),
     detachSheet: vi.fn(),
     clearAttachedSheets: vi.fn(),
+    loadAttachedDocuments: vi.fn(),
+    uploadAttachedDocument: vi.fn(),
     toggleFocusSnapshot: vi.fn(),
     clearFocusSnapshots: vi.fn(),
     reverseAgentAction: vi.fn(),
