@@ -4,6 +4,7 @@ import {
   Marker,
   Popup,
   Polygon,
+  Polyline,
   CircleMarker,
 } from "react-leaflet";
 import L from "leaflet";
@@ -124,6 +125,17 @@ export function SiteMap({
               >
                 <Popup>{popupBody}</Popup>
               </Polygon>
+            );
+          }
+          if (overlay.kind === "polyline") {
+            return (
+              <Polyline
+                key={`${overlay.sourceId}-${idx}`}
+                positions={overlay.positions}
+                pathOptions={{ color: style.color, weight: 3 }}
+              >
+                <Popup>{popupBody}</Popup>
+              </Polyline>
             );
           }
           return (

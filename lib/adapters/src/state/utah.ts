@@ -90,7 +90,10 @@ export const utahDemAdapter: Adapter = {
       latitude: ctx.parcel.latitude,
       longitude: ctx.parcel.longitude,
       outFields: "*",
-      returnGeometry: false,
+      // P1-1 — return the elevation-band polygon geometry so the Site
+      // Context map can draw the band the parcel sits in. Layer 0 is
+      // polygon bands, so this is a single ring, not a heavy payload.
+      returnGeometry: true,
       fetchImpl: ctx.fetchImpl,
       signal: ctx.signal,
     });
