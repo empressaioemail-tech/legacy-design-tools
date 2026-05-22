@@ -52,6 +52,7 @@ import {
   type AdapterRunOutcome,
 } from "@workspace/adapters";
 import { GenerateEngagementLayersParams } from "@workspace/api-zod";
+import { geocodeAddress } from "@workspace/site-context/server";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { EventAnchoringService } from "@hauska/atom-contract";
 import { logger } from "../lib/logger";
@@ -418,6 +419,56 @@ router.post(
     if (!engRow) {
       res.status(404).json({ error: "engagement_not_found" });
       return;
+    }
+
+    // P0-2 self-heal. A verified failure mode: an engagement has an
+    // address but no persisted geocode — the address-set-time geocode
+    // missed (a rural street Nominatim could not resolve at house-number
+    // granularity) and nothing recovered it, so the Site tab, the parcel
+    // map, the 3D view, and every spatial adapter dead-end. If we find
+    // that state here, geocode now and persist the result back to the
+    // engagement row so every consumer — including this run's adapters —
+    // sees coordinates. Best-effort: a geocode miss/outage must not fail
+    // the layer run (a jurisdiction-scoped adapter can still apply).
+    if (engRow.address && (!engRow.latitude || !engRow.longitude)) {
+      try {
+        const geo = await geocodeAddress(engRow.address);
+        if (geo) {
+          await db
+            .update(engagements)
+            .set({
+              latitude: String(geo.latitude),
+              longitude: String(geo.longitude),
+              geocodedAt: new Date(geo.geocodedAt),
+              geocodeSource: geo.source,
+              jurisdictionCity: geo.jurisdictionCity,
+              jurisdictionState: geo.jurisdictionState,
+              jurisdictionFips: geo.jurisdictionFips,
+              siteContextRaw: geo.raw ?? null,
+            })
+            .where(eq(engagements.id, engRow.id));
+          engRow.latitude = String(geo.latitude);
+          engRow.longitude = String(geo.longitude);
+          engRow.jurisdictionCity =
+            geo.jurisdictionCity ?? engRow.jurisdictionCity;
+          engRow.jurisdictionState =
+            geo.jurisdictionState ?? engRow.jurisdictionState;
+          reqLog.info(
+            { engagementId, source: geo.source },
+            "generate-layers: self-healed a missing engagement geocode",
+          );
+        } else {
+          reqLog.warn(
+            { engagementId },
+            "generate-layers: geocode self-heal found no match for the address",
+          );
+        }
+      } catch (err) {
+        reqLog.warn(
+          { err, engagementId },
+          "generate-layers: geocode self-heal failed (continuing without coordinates)",
+        );
+      }
     }
 
     // Resolve the jurisdiction from whatever site-context fields the

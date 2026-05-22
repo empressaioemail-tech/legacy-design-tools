@@ -44,16 +44,59 @@ export interface GeocodeOptions {
   signal?: AbortSignal;
 }
 
-export async function geocodeAddress(
-  address: string,
-  opts: GeocodeOptions = {},
-): Promise<Geocode | null> {
-  const trimmed = address.trim();
-  if (!trimmed) return null;
+/**
+ * Collapse all internal whitespace (newlines, tabs, runs of spaces) to a
+ * single space. Engagement addresses arrive multi-line — e.g.
+ * "1144 NORTH KAYENTA DR\nMoab UT 84532" — and an embedded newline reaches
+ * Nominatim percent-encoded as `%0A`, degrading the free-text match.
+ */
+function normalizeWhitespace(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
 
+/**
+ * Build the broaden-on-miss query ladder for a US address.
+ *
+ * Nominatim free-text search with `limit=1` misses many rural street
+ * addresses that simply are not in OSM at house-number granularity — that
+ * is the verified P0-2 failure mode (the Musgrave engagement's
+ * "1144 NORTH KAYENTA DR, Moab UT 84532" returned no hit, so the engagement
+ * was left with no coordinates and the whole site-context loop dead-ended).
+ *
+ * Falling back to a city- or ZIP-level query still yields a usable
+ * engagement-level geocode: the map centres on the right town and the
+ * jurisdiction-scoped adapters run. The ladder is ordered most- to
+ * least-specific; the first hit wins, so a precise street match is still
+ * preferred whenever OSM has one.
+ */
+export function buildQueryLadder(rawAddress: string): string[] {
+  const lines = rawAddress
+    .split(/\r?\n/)
+    .map((l) => normalizeWhitespace(l))
+    .filter(Boolean);
+  const full = normalizeWhitespace(rawAddress);
+  const ladder: string[] = [];
+  const push = (q: string) => {
+    if (q && !ladder.includes(q)) ladder.push(q);
+  };
+
+  if (full) push(full);
+  // The last line of a conventional US address is "City ST ZIP".
+  if (lines.length > 1) push(lines[lines.length - 1]!);
+  // Coarsest fallback: the bare 5-digit ZIP.
+  const zip = full.match(/\b(\d{5})(?:-\d{4})?\b/);
+  if (zip) push(`${zip[1]}, USA`);
+
+  return ladder;
+}
+
+async function queryNominatim(
+  q: string,
+  signal?: AbortSignal,
+): Promise<Geocode | null> {
   return enqueue(async () => {
     const url = new URL(NOMINATIM_URL);
-    url.searchParams.set("q", trimmed);
+    url.searchParams.set("q", q);
     url.searchParams.set("format", "json");
     url.searchParams.set("addressdetails", "1");
     url.searchParams.set("limit", "1");
@@ -63,7 +106,7 @@ export async function geocodeAddress(
         "User-Agent": USER_AGENT,
         Accept: "application/json",
       },
-      signal: opts.signal,
+      signal,
     });
 
     if (!res.ok) {
@@ -93,4 +136,41 @@ export async function geocodeAddress(
       raw: hit,
     };
   });
+}
+
+/**
+ * Geocode a US address to coordinates + a resolved city/state.
+ *
+ * Walks the broaden-on-miss ladder (full address → city/ZIP line → bare
+ * ZIP) and returns the first hit. Returns `null` only when every rung
+ * misses. A hard upstream error on one rung does not abort the ladder — a
+ * coarser query may still succeed — but a caller-aborted signal ends it
+ * immediately and rethrows.
+ */
+export async function geocodeAddress(
+  address: string,
+  opts: GeocodeOptions = {},
+): Promise<Geocode | null> {
+  const ladder = buildQueryLadder(address);
+  if (ladder.length === 0) return null;
+
+  let lastErr: unknown = null;
+  let sawCleanMiss = false;
+  for (const q of ladder) {
+    if (opts.signal?.aborted) break;
+    try {
+      const hit = await queryNominatim(q, opts.signal);
+      if (hit) return hit;
+      sawCleanMiss = true; // Nominatim was reachable; it just had no match.
+    } catch (err) {
+      lastErr = err;
+      // Caller cancelled — stop the ladder and surface the abort.
+      if (opts.signal?.aborted) throw err;
+    }
+  }
+  // If at least one rung came back as a clean "no match", the address is
+  // genuinely unfindable — return null. Only throw when every rung errored,
+  // so callers can distinguish "service unavailable" from "not found".
+  if (!sawCleanMiss && lastErr) throw lastErr;
+  return null;
 }
