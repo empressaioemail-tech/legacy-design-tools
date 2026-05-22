@@ -43,6 +43,7 @@ import {
 } from "@workspace/db";
 import {
   ALL_ADAPTERS,
+  DEFAULT_ADAPTER_TIMEOUT_MS,
   filterApplicableAdapters,
   noApplicableAdaptersMessage,
   resolveJurisdiction,
@@ -450,7 +451,12 @@ router.post(
           // coverage" with "engagement was missing a geocode".
           { latitude: NaN, longitude: NaN },
       jurisdiction,
-      timeoutMs: 15_000,
+      // QA-22 — per-adapter network budget floor. `resolveAdapterTimeoutMs`
+      // reads the optional `ADAPTER_TIMEOUT_MS` env override; the runner
+      // takes `max(adapter.timeoutMs, context.timeoutMs)`, so the
+      // known-slow adapters' own `timeoutMs` floors still win when this
+      // is left at the default.
+      timeoutMs: resolveAdapterTimeoutMs(),
     };
 
     if (!haveCoords) {
@@ -791,6 +797,29 @@ function parseAdapterKeyQuery(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const v = raw.trim();
   return v.length > 0 ? v : null;
+}
+
+/**
+ * QA-22 — resolve the per-adapter network budget the runner caps each
+ * adapter at. Defaults to {@link DEFAULT_ADAPTER_TIMEOUT_MS} (15s) and
+ * is overridable via the `ADAPTER_TIMEOUT_MS` env var so ops can widen
+ * the floor for every adapter without a code deploy when a new upstream
+ * turns slow. Known-slow upstreams (EPA EJScreen, FCC, Grand County)
+ * already carry a per-adapter `timeoutMs` floor in `@workspace/adapters`
+ * and the runner takes the max, so this env var can only widen — never
+ * undercut — those. A missing, empty, non-numeric, or non-positive
+ * value falls back to the default.
+ */
+function resolveAdapterTimeoutMs(): number {
+  const raw = process.env["ADAPTER_TIMEOUT_MS"];
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return DEFAULT_ADAPTER_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_ADAPTER_TIMEOUT_MS;
+  }
+  return Math.floor(parsed);
 }
 
 export default router;

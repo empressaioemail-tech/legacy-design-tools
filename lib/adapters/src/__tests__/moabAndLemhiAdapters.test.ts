@@ -20,6 +20,7 @@ import {
   osmRoadsResponse,
 } from "../__fixtures__/arcgisFixtures";
 import type { AdapterContext } from "../types";
+import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
 
 const moab: AdapterContext = {
   parcel: { latitude: 38.5733, longitude: -109.5498 },
@@ -247,5 +248,22 @@ describe("Salmon / Lemhi County ID adapter chain", () => {
     const byKey = Object.fromEntries(outcomes.map((o) => [o.adapterKey, o]));
     expect(byKey["lemhi-county-id:parcels"].status).toBe("ok");
     expect(byKey["lemhi-county-id:zoning"].status).toBe("failed");
+  });
+});
+
+describe("QA-22 — Grand County per-adapter timeout floors", () => {
+  it("parcels and zoning carry the widened SLOW_UPSTREAM_TIMEOUT_MS budget", () => {
+    expect(grandCountyParcelsAdapter.timeoutMs).toBe(SLOW_UPSTREAM_TIMEOUT_MS);
+    expect(grandCountyZoningAdapter.timeoutMs).toBe(SLOW_UPSTREAM_TIMEOUT_MS);
+  });
+
+  it("roads keeps its larger Overpass-sized budget, above the shared slow floor", () => {
+    // Roads falls back to OSM Overpass, whose server-side
+    // `[timeout:25]` directive needs more headroom than the shared
+    // slow-upstream floor — so it is deliberately a distinct, larger
+    // value rather than the shared constant.
+    expect(grandCountyRoadsAdapter.timeoutMs).toBeGreaterThan(
+      SLOW_UPSTREAM_TIMEOUT_MS,
+    );
   });
 });

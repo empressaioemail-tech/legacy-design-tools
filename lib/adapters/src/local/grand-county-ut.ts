@@ -26,6 +26,7 @@ import {
   type AdapterResult,
 } from "../types";
 import { fetchWithRetry } from "../retry";
+import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
 
 /**
  * Grand County GIS — service URLs as published in the county's REST
@@ -127,6 +128,10 @@ export const grandCountyParcelsAdapter: Adapter = {
   layerKind: "grand-county-ut-parcels",
   provider: "Grand County, UT GIS",
   jurisdictionGate: { local: "grand-county-ut" },
+  // QA-22 — the Grand County county ArcGIS server routinely answers
+  // slower than the 15s runner default; widen this adapter's budget so
+  // a slow-but-healthy parcels query is not cut off as a `timeout`.
+  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
   appliesTo: grandCountyApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const result = await arcgisPointQuery({
@@ -167,6 +172,10 @@ export const grandCountyZoningAdapter: Adapter = {
   layerKind: "grand-county-ut-zoning",
   provider: "Grand County, UT GIS",
   jurisdictionGate: { local: "grand-county-ut" },
+  // QA-22 — the Grand County county ArcGIS server routinely answers
+  // slower than the 15s runner default; widen this adapter's budget so
+  // a slow-but-healthy zoning query is not cut off as a `timeout`.
+  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
   appliesTo: grandCountyApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const result = await arcgisPointQuery({

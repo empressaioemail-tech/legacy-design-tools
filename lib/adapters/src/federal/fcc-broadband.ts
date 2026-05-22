@@ -17,6 +17,7 @@ import {
   type AdapterResult,
 } from "../types";
 import { fetchWithRetry } from "../retry";
+import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
 
 /**
  * BDC v2 published JSON endpoint. Documented at
@@ -172,6 +173,10 @@ export const fccBroadbandAdapter: Adapter = {
   layerKind: "fcc-broadband-availability",
   provider: "FCC National Broadband Map",
   jurisdictionGate: {},
+  // QA-22 — the FCC National Broadband Map API routinely answers
+  // slower than the 15s runner default; widen this adapter's budget so
+  // a slow-but-healthy NBM response is not cut off as a `timeout`.
+  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
   appliesTo: federalApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const url = new URL(FCC_BDC_AVAILABILITY_ENDPOINT);

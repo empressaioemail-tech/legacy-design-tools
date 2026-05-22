@@ -31,9 +31,7 @@ import {
   type AdapterCachePredicate,
   type AdapterResultCache,
 } from "./cache";
-
-/** Default per-adapter network timeout. */
-const DEFAULT_TIMEOUT_MS = 15_000;
+import { DEFAULT_ADAPTER_TIMEOUT_MS } from "./timeouts";
 
 export interface RunAdaptersInput {
   adapters: ReadonlyArray<Adapter>;
@@ -155,7 +153,7 @@ async function runOne(
   // Per-adapter timeout: max(runner default, adapter override) so a
   // longer caller-provided budget still wins and adapters can only
   // widen, never tighten, the per-call window.
-  const baseTimeoutMs = context.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const baseTimeoutMs = context.timeoutMs ?? DEFAULT_ADAPTER_TIMEOUT_MS;
   const timeoutMs =
     typeof adapter.timeoutMs === "number" && adapter.timeoutMs > baseTimeoutMs
       ? adapter.timeoutMs

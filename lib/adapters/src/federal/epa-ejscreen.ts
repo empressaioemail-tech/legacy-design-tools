@@ -24,6 +24,7 @@ import {
   type AdapterResult,
 } from "../types";
 import { fetchWithRetry } from "../retry";
+import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
 
 const EPA_EJSCREEN_BROKER =
   "https://ejscreen.epa.gov/mapper/ejscreenRESTbroker3.aspx";
@@ -69,6 +70,10 @@ export const epaEjscreenAdapter: Adapter = {
   layerKind: "epa-ejscreen-blockgroup",
   provider: "EPA EJScreen",
   jurisdictionGate: {},
+  // QA-22 — the EJScreen broker routinely answers slower than the 15s
+  // runner default; widen this adapter's budget so a slow-but-healthy
+  // broker response is not cut off as a `timeout` failure.
+  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
   appliesTo: federalApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const url = new URL(EPA_EJSCREEN_BROKER);
