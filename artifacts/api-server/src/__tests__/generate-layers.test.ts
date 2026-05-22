@@ -49,6 +49,17 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
+// The route's P0-2 self-heal calls `geocodeAddress`. Mock it so the test
+// never touches the real Nominatim service; it resolves `null` by default
+// (self-heal no-ops), and individual tests override per-call as needed.
+vi.mock("@workspace/site-context/server", async () => {
+  const actual =
+    await vi.importActual<typeof import("@workspace/site-context/server")>(
+      "@workspace/site-context/server",
+    );
+  return { ...actual, geocodeAddress: vi.fn().mockResolvedValue(null) };
+});
+
 interface FakeAdapter {
   readonly adapterKey: string;
   readonly tier: "federal" | "state" | "local";
@@ -292,6 +303,8 @@ const {
   adapterResponseCache,
 } = await import("@workspace/db");
 const { eq, and } = await import("drizzle-orm");
+const { geocodeAddress } = await import("@workspace/site-context/server");
+const mockedGeocodeAddress = vi.mocked(geocodeAddress);
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -401,6 +414,58 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     expect(res.body.message).toBe(
       "Add an address to enable site context layers.",
     );
+  });
+
+  it("P0-2: self-heals a missing geocode — geocodes the address and persists the coordinates", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const name = "Self-heal Engagement";
+    const [eng] = await ctx.schema.db
+      .insert(engagements)
+      .values({
+        name,
+        nameLower: name.trim().toLowerCase(),
+        jurisdiction: "Moab, UT",
+        jurisdictionCity: "Moab",
+        jurisdictionState: "UT",
+        address: "1144 N Kayenta Dr\nMoab UT 84532",
+        latitude: null,
+        longitude: null,
+        status: "active",
+      })
+      .returning();
+
+    mockedGeocodeAddress.mockResolvedValueOnce({
+      latitude: 38.573,
+      longitude: -109.549,
+      jurisdictionCity: "Moab",
+      jurisdictionState: "Utah",
+      jurisdictionFips: null,
+      source: "nominatim",
+      geocodedAt: new Date().toISOString(),
+      raw: { display_name: "Moab, UT" },
+    });
+
+    const res = await request(getApp()).post(
+      `/api/engagements/${eng.id}/generate-layers`,
+    );
+    expect(res.status).toBe(200);
+    expect(mockedGeocodeAddress).toHaveBeenCalledWith(
+      "1144 N Kayenta Dr\nMoab UT 84532",
+    );
+
+    // The geocode result is persisted back to the engagement row, so the
+    // Site tab, the parcel map, and the 3D view all see coordinates.
+    const [row] = await ctx.schema.db
+      .select({
+        latitude: engagements.latitude,
+        longitude: engagements.longitude,
+        geocodedAt: engagements.geocodedAt,
+      })
+      .from(engagements)
+      .where(eq(engagements.id, eng.id));
+    expect(Number(row!.latitude)).toBeCloseTo(38.573, 3);
+    expect(Number(row!.longitude)).toBeCloseTo(-109.549, 3);
+    expect(row!.geocodedAt).not.toBeNull();
   });
 
   it("Bastrop TX parcel runs Texas state + Bastrop local adapters and persists ok rows", async () => {

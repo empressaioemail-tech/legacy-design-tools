@@ -1218,7 +1218,9 @@ export function SiteContextTab({
               justifyContent: "center",
             }}
           >
-            Add an address on the Site tab to load the parcel map.
+            {engagement.address
+              ? "This address hasn't been geocoded yet. Run Generate Layers to resolve the parcel map."
+              : "Add an address on the Site tab to load the parcel map."}
           </div>
         ) : (
           <div
