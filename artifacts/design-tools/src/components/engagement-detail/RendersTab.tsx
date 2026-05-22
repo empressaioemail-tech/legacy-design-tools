@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { RenderGallery, RenderKickoffDialog } from "@workspace/portal-ui";
+import {
+  RenderCreditsBadge,
+  RenderGallery,
+  RenderKickoffDialog,
+} from "@workspace/portal-ui";
 
 /**
  * Architect-only "Renders" tab. Wraps the shared `RenderGallery`
@@ -37,14 +41,17 @@ export function RendersTab({
             short videos all run on the same polling worker.
           </span>
         </div>
-        <button
-          type="button"
-          className="sc-btn-primary"
-          onClick={() => setKickoffOpen(true)}
-          data-testid="renders-tab-new-render"
-        >
-          New render
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <RenderCreditsBadge />
+          <button
+            type="button"
+            className="sc-btn-primary"
+            onClick={() => setKickoffOpen(true)}
+            data-testid="renders-tab-new-render"
+          >
+            New render
+          </button>
+        </div>
       </div>
       <RenderGallery
         engagementId={engagementId}

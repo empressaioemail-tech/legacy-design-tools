@@ -55,6 +55,10 @@ export { RenderGallery } from "./components/RenderGallery";
 export type { RenderGalleryProps } from "./components/RenderGallery";
 export { RenderKickoffDialog } from "./components/RenderKickoffDialog";
 export type { RenderKickoffDialogProps } from "./components/RenderKickoffDialog";
+// doc 40c B.6 — credit-balance chip for the Renders tab. Reads
+// `GET /api/renders/credits`; renders nothing when the renders preview
+// is disabled (the gallery owns that message).
+export { RenderCreditsBadge } from "./components/RenderCreditsBadge";
 
 // Promoted from artifacts/plan-review so design-tools can mount the
 // same read-only Three.js BIM viewer on its Snapshots tab without
