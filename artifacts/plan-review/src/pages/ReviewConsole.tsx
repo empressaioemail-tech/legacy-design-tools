@@ -156,6 +156,7 @@ export default function ReviewConsole() {
     <DashboardLayout
       title="Review Console"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
       rightPanel={<AIBriefingPanel />}

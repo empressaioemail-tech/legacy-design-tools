@@ -40,6 +40,7 @@ export default function Users() {
     <DashboardLayout
       title="Users & Roles"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >

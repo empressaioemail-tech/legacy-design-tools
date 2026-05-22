@@ -288,6 +288,7 @@ export default function OutstandingRequests() {
     <DashboardLayout
       title="Outstanding Requests"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >

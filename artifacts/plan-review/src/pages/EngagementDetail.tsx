@@ -429,6 +429,7 @@ export default function EngagementDetail() {
     <DashboardLayout
       title={title}
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
       search={{

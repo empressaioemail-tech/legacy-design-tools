@@ -16,6 +16,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
+// Cleanup batch — these Postgres integration tests (per-test schema
+// create + queue/orchestrator cycles) run past the 10s default under
+// CI-runner load and intermittently flaked unrelated PRs. Widen this
+// file's per-test and per-hook budget.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const mocks = vi.hoisted(() => ({
   db: null as unknown,
 }));

@@ -7,6 +7,7 @@ export default function FindingsLibrary() {
     <DashboardLayout
       title="Saved Findings"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >

@@ -131,6 +131,7 @@ export default function CannedFindingsPage() {
     <DashboardLayout
       title="Canned Findings"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
     >

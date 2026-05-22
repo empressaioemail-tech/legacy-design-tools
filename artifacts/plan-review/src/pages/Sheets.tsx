@@ -34,6 +34,7 @@ export default function Sheets() {
     <DashboardLayout
       title="Sheets"
       navGroups={navGroups}
+      headerNotifications={{ href: "/requests" }}
       brandLabel="SMARTCITY OS"
       brandProductName="Plan Review"
       search={{
