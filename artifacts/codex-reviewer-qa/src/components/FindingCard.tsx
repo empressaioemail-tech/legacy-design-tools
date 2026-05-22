@@ -1,5 +1,5 @@
 /**
- * Codex Reviewer QA — one rendered finding (CDX-3).
+ * Codex Reviewer QA — one rendered finding (CDX-3 + CDX-4).
  *
  * Structural commitment 1 — sell reasoning, not data. This card never
  * collapses a finding to a bare pass/fail verdict: it always shows the
@@ -10,20 +10,25 @@
  * finding wire carries NO separately-structured "reasoning chain"
  * field. The engine's reasoning IS the finding `text` — free-text with
  * inline citation tokens, already validator-stripped of unresolvable
- * ids. The card therefore renders `text` in full and unabbreviated as
- * the reasoning surface, alongside the structured `citations`,
- * `confidence`, and `aiGeneratedAt`. A distinct structured
- * reasoning-chain field would require an engine + api-server change —
- * out of scope for a reviewer-surface dispatch; see the CDX-3 report.
+ * ids. The card renders `text` in full as the reasoning surface.
+ *
+ * CDX-4 — when the adjudication handlers are supplied the card also
+ * renders the accept / edit / reject action row, the inline override
+ * editor, and the server-stamped adjudication attribution + timestamp.
+ * A card with no handlers is read-only (used by the FindingCard tests).
  */
+import { useState, type CSSProperties } from "react";
 import type { Finding, FindingSeverity } from "@workspace/api-client-react";
 import {
   CATEGORY_LABELS,
   SEVERITY_LABELS,
   STATUS_LABELS,
   citationLabel,
+  describeAdjudication,
   formatConfidence,
+  type OverrideDraft,
 } from "../lib/findings";
+import { OverrideEditor } from "./OverrideEditor";
 
 const SEVERITY_COLORS: Record<FindingSeverity, { bg: string; fg: string }> = {
   blocker: { bg: "var(--danger-dim)", fg: "var(--danger-text)" },
@@ -31,7 +36,7 @@ const SEVERITY_COLORS: Record<FindingSeverity, { bg: string; fg: string }> = {
   advisory: { bg: "var(--info-dim)", fg: "var(--info-text)" },
 };
 
-const badge: React.CSSProperties = {
+const badge: CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
   padding: "2px 8px",
@@ -39,8 +44,42 @@ const badge: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-export function FindingCard({ finding }: { finding: Finding }) {
+const actionButton: CSSProperties = {
+  padding: "5px 12px",
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+  border: "1px solid var(--border-subtle)",
+};
+
+export interface FindingCardProps {
+  finding: Finding;
+  /** CDX-4 — accept the finding. When omitted the card is read-only. */
+  onAccept?: (findingId: string) => void;
+  /** CDX-4 — reject the finding. */
+  onReject?: (findingId: string) => void;
+  /** CDX-4 — override (edit) the finding. */
+  onOverride?: (findingId: string, draft: OverrideDraft) => void;
+  /** True while an adjudication mutation for this finding is in flight. */
+  busy?: boolean;
+  /** Override-failure message for this finding, if any. */
+  overrideError?: string | null;
+}
+
+export function FindingCard({
+  finding,
+  onAccept,
+  onReject,
+  onOverride,
+  busy,
+  overrideError,
+}: FindingCardProps) {
+  const [isEditing, setIsEditing] = useState(false);
   const severity = SEVERITY_COLORS[finding.severity];
+  const hasActions = Boolean(onAccept && onReject && onOverride);
+  const adjudication = describeAdjudication(finding);
+
   return (
     <article
       data-testid="finding-card"
@@ -154,6 +193,106 @@ export function FindingCard({ finding }: { finding: Finding }) {
         ) : null}
         <span>{finding.aiGenerated ? "AI-generated" : "Reviewer-authored"}</span>
       </footer>
+
+      {/* CDX-4 — server-stamped adjudication attribution + timestamp. */}
+      {adjudication ? (
+        <div
+          data-testid="finding-adjudication"
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            borderTop: "1px solid var(--border-subtle)",
+            paddingTop: 8,
+          }}
+        >
+          {adjudication}
+          {finding.reviewerComment ? (
+            <span
+              data-testid="finding-reviewer-comment"
+              style={{ display: "block", marginTop: 2, color: "var(--text-muted)" }}
+            >
+              “{finding.reviewerComment}”
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {overrideError ? (
+        <div
+          role="alert"
+          data-testid="finding-override-error"
+          style={{
+            fontSize: 12,
+            padding: "6px 8px",
+            borderRadius: 4,
+            background: "var(--danger-dim)",
+            color: "var(--danger-text)",
+          }}
+        >
+          {overrideError}
+        </div>
+      ) : null}
+
+      {/* CDX-4 — accept / edit / reject. */}
+      {hasActions && isEditing ? (
+        <OverrideEditor
+          finding={finding}
+          busy={busy}
+          onSubmit={(draft) => {
+            onOverride?.(finding.id, draft);
+            setIsEditing(false);
+          }}
+          onCancel={() => setIsEditing(false)}
+        />
+      ) : hasActions ? (
+        <div
+          data-testid="finding-actions"
+          style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
+        >
+          <button
+            type="button"
+            data-testid="finding-accept"
+            onClick={() => onAccept?.(finding.id)}
+            disabled={busy === true}
+            style={{
+              ...actionButton,
+              background: "var(--success-dim, var(--info-dim))",
+              color: "var(--success-text, var(--info-text))",
+              opacity: busy === true ? 0.5 : 1,
+            }}
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            data-testid="finding-edit"
+            onClick={() => setIsEditing(true)}
+            disabled={busy === true}
+            style={{
+              ...actionButton,
+              background: "transparent",
+              color: "var(--text-secondary)",
+              opacity: busy === true ? 0.5 : 1,
+            }}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            data-testid="finding-reject"
+            onClick={() => onReject?.(finding.id)}
+            disabled={busy === true}
+            style={{
+              ...actionButton,
+              background: "var(--danger-dim)",
+              color: "var(--danger-text)",
+              opacity: busy === true ? 0.5 : 1,
+            }}
+          >
+            Reject
+          </button>
+        </div>
+      ) : null}
     </article>
   );
 }

@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { makeFinding } from "../__fixtures__/findings";
-import { citationLabel, formatConfidence, sortFindings } from "./findings";
+import { makeActor, makeFinding } from "../__fixtures__/findings";
+import {
+  actorLabel,
+  citationLabel,
+  describeAdjudication,
+  formatConfidence,
+  sortFindings,
+} from "./findings";
 
 describe("formatConfidence", () => {
   it("renders a 0-1 score as a whole percent", () => {
@@ -58,5 +64,47 @@ describe("sortFindings", () => {
     const before = input.map((f) => f.id);
     sortFindings(input);
     expect(input.map((f) => f.id)).toEqual(before);
+  });
+});
+
+describe("actorLabel", () => {
+  it("returns the actor display name", () => {
+    expect(actorLabel(makeActor({ displayName: "Dana Cole" }))).toBe(
+      "Dana Cole",
+    );
+  });
+
+  it("falls back when there is no actor", () => {
+    expect(actorLabel(null)).toBe("a reviewer");
+  });
+});
+
+describe("describeAdjudication", () => {
+  it("returns null for an un-adjudicated finding", () => {
+    expect(
+      describeAdjudication(makeFinding({ status: "ai-produced" })),
+    ).toBeNull();
+  });
+
+  it("summarizes an accepted finding with the reviewer and time", () => {
+    const line = describeAdjudication(
+      makeFinding({
+        status: "accepted",
+        acceptedBy: makeActor({ displayName: "Dana Cole" }),
+        acceptedAt: "2026-05-21T09:00:00.000Z",
+      }),
+    );
+    expect(line).toMatch(/^Accepted by Dana Cole · /);
+  });
+
+  it("summarizes a rejected finding", () => {
+    const line = describeAdjudication(
+      makeFinding({
+        status: "rejected",
+        reviewerStatusBy: makeActor({ displayName: "Dana Cole" }),
+        reviewerStatusChangedAt: "2026-05-21T09:00:00.000Z",
+      }),
+    );
+    expect(line).toMatch(/^Rejected by Dana Cole · /);
   });
 });

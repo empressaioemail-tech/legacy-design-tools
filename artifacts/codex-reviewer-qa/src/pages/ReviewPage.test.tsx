@@ -34,6 +34,10 @@ vi.mock("@workspace/api-client-react", () => ({
     generationId: "gen-1",
     state: "pending",
   })),
+  acceptFinding: vi.fn(async () => ({ finding: makeFinding() })),
+  rejectFinding: vi.fn(async () => ({ finding: makeFinding() })),
+  overrideFinding: vi.fn(async () => ({ finding: makeFinding() })),
+  ApiError: class ApiError extends Error {},
   getListEngagementSubmissionsQueryKey: (id: string) => [
     `/api/engagements/${id}/submissions`,
   ],
@@ -102,6 +106,9 @@ describe("ReviewPage", () => {
     });
 
     expect(screen.getAllByTestId("finding-card")).toHaveLength(2);
+    // CDX-4 — ReviewPage wires the adjudication handlers, so every card
+    // renders its accept / edit / reject action row.
+    expect(screen.getAllByTestId("finding-accept")).toHaveLength(2);
     expect(
       screen.getByText("Setback shortfall on the front yard."),
     ).toBeTruthy();

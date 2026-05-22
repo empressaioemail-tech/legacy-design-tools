@@ -3,7 +3,7 @@
  * FindingCard and ReviewPage test suites so the wire shape is pinned
  * in one place.
  */
-import type { Finding } from "@workspace/api-client-react";
+import type { Finding, FindingActor } from "@workspace/api-client-react";
 
 export function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
@@ -32,6 +32,15 @@ export function makeFinding(overrides: Partial<Finding> = {}): Finding {
     acceptedByReviewerId: null,
     acceptedAt: null,
     acceptedBy: null,
+    ...overrides,
+  };
+}
+
+export function makeActor(overrides: Partial<FindingActor> = {}): FindingActor {
+  return {
+    kind: "user",
+    id: "reviewer-1",
+    displayName: "Sam Lee",
     ...overrides,
   };
 }
