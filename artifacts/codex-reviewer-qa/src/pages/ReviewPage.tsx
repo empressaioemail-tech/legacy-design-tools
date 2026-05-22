@@ -28,6 +28,12 @@ import {
 } from "@workspace/api-client-react";
 import { FindingCard } from "../components/FindingCard";
 import { sortFindings } from "../lib/findings";
+import {
+  describeOverrideError,
+  useAcceptFinding,
+  useOverrideFinding,
+  useRejectFinding,
+} from "../lib/reviewApi";
 
 const fieldStyle: CSSProperties = {
   display: "flex",
@@ -118,6 +124,31 @@ export default function ReviewPage() {
   });
 
   const canRun = submissionId !== "" && !isGenerating && !runMutation.isPending;
+
+  // CDX-4 — per-finding adjudication. One mutation each; the active
+  // finding is identified by the mutation's in-flight `variables`.
+  const acceptMutation = useAcceptFinding(submissionId);
+  const rejectMutation = useRejectFinding(submissionId);
+  const overrideMutation = useOverrideFinding(submissionId);
+
+  function findingBusy(findingId: string): boolean {
+    return (
+      (acceptMutation.isPending && acceptMutation.variables === findingId) ||
+      (rejectMutation.isPending && rejectMutation.variables === findingId) ||
+      (overrideMutation.isPending &&
+        overrideMutation.variables?.findingId === findingId)
+    );
+  }
+
+  function findingOverrideError(findingId: string): string | null {
+    if (
+      overrideMutation.isError &&
+      overrideMutation.variables?.findingId === findingId
+    ) {
+      return describeOverrideError(overrideMutation.error);
+    }
+    return null;
+  }
 
   function handleEngagementChange(next: string) {
     setEngagementId(next);
@@ -283,7 +314,17 @@ export default function ReviewPage() {
               style={{ display: "flex", flexDirection: "column", gap: 12 }}
             >
               {findings.map((finding) => (
-                <FindingCard key={finding.id} finding={finding} />
+                <FindingCard
+                  key={finding.id}
+                  finding={finding}
+                  onAccept={(id) => acceptMutation.mutate(id)}
+                  onReject={(id) => rejectMutation.mutate(id)}
+                  onOverride={(id, draft) =>
+                    overrideMutation.mutate({ findingId: id, draft })
+                  }
+                  busy={findingBusy(finding.id)}
+                  overrideError={findingOverrideError(finding.id)}
+                />
               ))}
             </div>
           </>
