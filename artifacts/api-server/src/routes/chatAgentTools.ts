@@ -42,6 +42,7 @@ import {
   parcelBriefings,
   briefingSources,
   sheetContentExtractions,
+  attachedDocuments,
 } from "@workspace/db";
 import { and, desc, eq } from "drizzle-orm";
 import type { Scope } from "@workspace/empressa-atom";
@@ -303,6 +304,28 @@ export const CHAT_AGENT_TOOLS: AgentToolDefinition[] = [
     input_schema: EMPTY_INPUT,
   },
   {
+    name: "list_attached_documents",
+    description:
+      "List the client documents the operator has uploaded to the current engagement — PDFs, photos, and notes (id, title, document type, upload time, whether it carries readable text). Use this to see what client material is available, then read_attached_document to read one.",
+    input_schema: EMPTY_INPUT,
+  },
+  {
+    name: "read_attached_document",
+    description:
+      "Read one uploaded client document of the current engagement: its title, type, and extracted/operator-supplied text. Pass an attachedDocumentId returned by list_attached_documents. Use this to ground answers in client-supplied material instead of asking the operator to re-paste it.",
+    input_schema: {
+      type: "object",
+      properties: {
+        attachedDocumentId: {
+          type: "string",
+          description: "Attached-document id from list_attached_documents.",
+        },
+      },
+      required: ["attachedDocumentId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "create_response_tasks",
     description:
       "Create one or more response tasks (L1) on the current engagement. Use this to push review findings or client-comment responses onto the Response Tasks board. Each task is created with state 'open', is reversible (it can be cancelled), and is stamped as AI-drafted. Always provide a one-line `reasoning`, and cite the source finding/comment plus its severity/confidence when the task derives from one.",
@@ -442,8 +465,12 @@ export function buildAgentToolGuidance(input: {
     `The operator has the engagement "${input.engagementName}" open.${tabLine} ` +
     "Use the read tools (list_sheets, read_sheet, list_findings, list_submissions, " +
     "list_snapshots, list_response_tasks, list_detail_callout_specs, " +
-    "list_product_spec_references, read_site_context) to ground answers in real " +
-    "data instead of asking the operator to paste it.\n\n" +
+    "list_product_spec_references, read_site_context, list_attached_documents, " +
+    "read_attached_document) to ground answers in real data instead of asking " +
+    "the operator to paste it.\n\n" +
+    "Client documents the operator uploaded to this engagement (PDFs, photos, " +
+    "notes) are available via list_attached_documents / read_attached_document — " +
+    "check there before assuming a piece of client material was not provided.\n\n" +
     "When the operator asks you to push review findings or comment responses to " +
     "the task board, call create_response_tasks (it accepts one task or a batch). " +
     "Every task you create must carry a one-line `reasoning`; when a task derives " +
@@ -703,6 +730,85 @@ async function handleReadSiteContext(ctx: ToolContext): Promise<ToolRunResult> {
       },
       sourceCount: sources.length,
       sources,
+    }),
+  };
+}
+
+async function handleListAttachedDocuments(
+  ctx: ToolContext,
+): Promise<ToolRunResult> {
+  const rows = await db
+    .select({
+      id: attachedDocuments.id,
+      title: attachedDocuments.title,
+      documentType: attachedDocuments.documentType,
+      extractedText: attachedDocuments.extractedText,
+      createdAt: attachedDocuments.createdAt,
+    })
+    .from(attachedDocuments)
+    .where(eq(attachedDocuments.engagementId, ctx.engagementId))
+    .orderBy(desc(attachedDocuments.createdAt))
+    .limit(MAX_LIST_ROWS);
+  return {
+    resultText: asJson({
+      attachedDocumentCount: rows.length,
+      attachedDocuments: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        documentType: r.documentType,
+        uploadedAt: r.createdAt,
+        hasReadableText: r.extractedText.trim().length > 0,
+        textPreview: r.extractedText.slice(0, 200),
+      })),
+    }),
+  };
+}
+
+async function handleReadAttachedDocument(
+  ctx: ToolContext,
+  input: unknown,
+): Promise<ToolRunResult> {
+  const attachedDocumentId = isRecord(input)
+    ? optionalString(input.attachedDocumentId)
+    : null;
+  if (!attachedDocumentId) {
+    return {
+      resultText: "Error: `attachedDocumentId` is required.",
+      isError: true,
+    };
+  }
+  const [doc] = await db
+    .select({
+      id: attachedDocuments.id,
+      title: attachedDocuments.title,
+      documentType: attachedDocuments.documentType,
+      extractedText: attachedDocuments.extractedText,
+      createdAt: attachedDocuments.createdAt,
+    })
+    .from(attachedDocuments)
+    .where(
+      and(
+        eq(attachedDocuments.id, attachedDocumentId),
+        eq(attachedDocuments.engagementId, ctx.engagementId),
+      ),
+    )
+    .limit(1);
+  if (!doc) {
+    return {
+      resultText: `Error: attached document ${attachedDocumentId} not found on this engagement.`,
+      isError: true,
+    };
+  }
+  return {
+    resultText: asJson({
+      id: doc.id,
+      title: doc.title,
+      documentType: doc.documentType,
+      uploadedAt: doc.createdAt,
+      extractedText:
+        doc.extractedText.trim().length > 0
+          ? doc.extractedText
+          : "(no readable text — this document was stored as a binary file with no note)",
     }),
   };
 }
@@ -997,6 +1103,10 @@ export async function executeAgentTool(
       return handleListProductSpecReferences(ctx);
     case "read_site_context":
       return handleReadSiteContext(ctx);
+    case "list_attached_documents":
+      return handleListAttachedDocuments(ctx);
+    case "read_attached_document":
+      return handleReadAttachedDocument(ctx, input);
     case "create_response_tasks":
       return handleCreateResponseTasks(ctx, input);
     case "draft_detail_callout_spec":

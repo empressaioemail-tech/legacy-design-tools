@@ -51,10 +51,27 @@ export interface SpecDraftEntry {
   reasoning: string;
 }
 
+/**
+ * QA-18 — a client document attached to an engagement (PDF, photo, or
+ * note). The chat panel lists these so the operator can see what client
+ * material the in-app agent can reach; the agent reads them via its
+ * `list_attached_documents` / `read_attached_document` tools.
+ */
+export interface AttachedDocumentSummary {
+  id: string;
+  title: string;
+  documentType: string;
+}
+
 interface EngagementsUiState {
   selectedSnapshotIdByEngagement: Record<string, string | null>;
   messagesByEngagement: Record<string, ChatMessage[]>;
   attachedSheetsByEngagement: Record<string, SheetSummary[]>;
+  // QA-18 — persisted client documents per engagement, the upload-in-
+  // flight flag, and the last upload error (cleared when one succeeds).
+  attachedDocumentsByEngagement: Record<string, AttachedDocumentSummary[]>;
+  uploadingDocumentByEngagement: Record<string, boolean>;
+  documentUploadErrorByEngagement: Record<string, string | null>;
   pendingChatInputByEngagement: Record<string, string>;
   // Snapshot ids the user has staged for the next comparison turn, keyed by
   // engagement (Task #48). One-shot: cleared after each successful send so
@@ -72,6 +89,10 @@ interface EngagementsUiState {
   attachSheet: (engagementId: string, sheet: SheetSummary) => void;
   detachSheet: (engagementId: string, sheetId: string) => void;
   clearAttachedSheets: (engagementId: string) => void;
+  /** QA-18 — load the engagement's persisted client documents. */
+  loadAttachedDocuments: (engagementId: string) => Promise<void>;
+  /** QA-18 — upload a client PDF / photo / note to the engagement. */
+  uploadAttachedDocument: (engagementId: string, file: File) => Promise<void>;
   setPendingChatInput: (engagementId: string, value: string) => void;
   consumePendingChatInput: (engagementId: string) => string | null;
   toggleFocusSnapshot: (engagementId: string, snapshotId: string) => void;
@@ -101,10 +122,31 @@ interface EngagementsUiState {
 
 const API_BASE = `${import.meta.env.BASE_URL}api`;
 
+/** QA-18 — map an upload route error code to an operator-facing message. */
+function uploadErrorMessage(code: unknown, status: number): string {
+  switch (code) {
+    case "file_too_large":
+      return "That file is too large (max 25 MB).";
+    case "unsupported_document_type":
+      return "Unsupported file type — upload a PDF, image, or text note.";
+    case "empty_file":
+      return "That file is empty.";
+    case "missing_file_part":
+      return "No file was selected.";
+    case "engagement_not_found":
+      return "Engagement not found.";
+    default:
+      return `Upload failed (HTTP ${status}).`;
+  }
+}
+
 export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
   selectedSnapshotIdByEngagement: {},
   messagesByEngagement: {},
   attachedSheetsByEngagement: {},
+  attachedDocumentsByEngagement: {},
+  uploadingDocumentByEngagement: {},
+  documentUploadErrorByEngagement: {},
   pendingChatInputByEngagement: {},
   focusSnapshotIdsByEngagement: {},
   agentActionsByEngagement: {},
@@ -149,6 +191,108 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
         [engagementId]: [],
       },
     })),
+
+  loadAttachedDocuments: async (engagementId) => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/engagements/${engagementId}/attached-documents`,
+      );
+      if (!res.ok) return;
+      const body = await res.json();
+      const raw = Array.isArray(body?.attachedDocuments)
+        ? (body.attachedDocuments as Array<Record<string, unknown>>)
+        : [];
+      const docs: AttachedDocumentSummary[] = raw.map((d) => ({
+        id: String(d.entityId ?? ""),
+        title: String(d.title ?? "Untitled document"),
+        documentType: String(d.documentType ?? "narrative"),
+      }));
+      set((state) => ({
+        attachedDocumentsByEngagement: {
+          ...state.attachedDocumentsByEngagement,
+          [engagementId]: docs,
+        },
+      }));
+    } catch {
+      // Best-effort: a load failure just leaves the panel showing no
+      // documents — the upload path still works.
+    }
+  },
+
+  uploadAttachedDocument: async (engagementId, file) => {
+    set((state) => ({
+      uploadingDocumentByEngagement: {
+        ...state.uploadingDocumentByEngagement,
+        [engagementId]: true,
+      },
+      documentUploadErrorByEngagement: {
+        ...state.documentUploadErrorByEngagement,
+        [engagementId]: null,
+      },
+    }));
+    try {
+      const form = new FormData();
+      // The server defaults the title to the filename and the
+      // documentType to "narrative" — a bare file upload is enough.
+      form.append("file", file);
+      const res = await fetch(
+        `${API_BASE}/engagements/${engagementId}/attached-documents`,
+        { method: "POST", body: form },
+      );
+      if (!res.ok) {
+        let code: unknown;
+        try {
+          code = (await res.json())?.error;
+        } catch {
+          // body not JSON
+        }
+        set((state) => ({
+          documentUploadErrorByEngagement: {
+            ...state.documentUploadErrorByEngagement,
+            [engagementId]: uploadErrorMessage(code, res.status),
+          },
+        }));
+        return;
+      }
+      const atom = (await res.json())?.attachedDocument as
+        | Record<string, unknown>
+        | undefined;
+      if (atom) {
+        const summary: AttachedDocumentSummary = {
+          id: String(atom.entityId ?? ""),
+          title: String(atom.title ?? file.name),
+          documentType: String(atom.documentType ?? "narrative"),
+        };
+        set((state) => {
+          const existing =
+            state.attachedDocumentsByEngagement[engagementId] ?? [];
+          return {
+            attachedDocumentsByEngagement: {
+              ...state.attachedDocumentsByEngagement,
+              [engagementId]: [
+                summary,
+                ...existing.filter((d) => d.id !== summary.id),
+              ],
+            },
+          };
+        });
+      }
+    } catch {
+      set((state) => ({
+        documentUploadErrorByEngagement: {
+          ...state.documentUploadErrorByEngagement,
+          [engagementId]: "Upload failed — check your connection and retry.",
+        },
+      }));
+    } finally {
+      set((state) => ({
+        uploadingDocumentByEngagement: {
+          ...state.uploadingDocumentByEngagement,
+          [engagementId]: false,
+        },
+      }));
+    }
+  },
 
   setPendingChatInput: (engagementId, value) =>
     set((state) => ({
