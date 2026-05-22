@@ -34,13 +34,41 @@ const kickoff = createMutationCapture<
   { id: string; data: Record<string, unknown> }
 >();
 
+// Hoisted so the `vi.mock` factory below can close over it — `vi.mock`
+// is hoisted to the top of the file before any other `const`s.
+const customFetchMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@workspace/api-client-react", () => {
   return {
     ApiError: MockApiError,
     ...createQueryKeyStubs([
       "getListEngagementRendersQueryKey",
+      // doc 40c B.6 — the kickoff invalidates the credits key on
+      // success so the RenderCreditsBadge refreshes.
+      "getGetRenderCreditsQueryKey",
     ] as const),
     useKickoffRender: makeCapturingMutationHook(kickoff),
+    // doc 40c B.1 Prompt Generator wiring.
+    getGenerateRenderPromptUrl: () => "/api/renders/prompt-generator",
+    customFetch: customFetchMock,
+    KickoffRenderCommonFieldsExpertName: {
+      exterior: "exterior",
+      interior: "interior",
+      masterplan: "masterplan",
+      landscape: "landscape",
+      plan: "plan",
+      product: "product",
+    },
+    KickoffRenderCommonFieldsRenderStyle: {
+      raw: "raw",
+      photoreal: "photoreal",
+      cgi_render: "cgi_render",
+      cad: "cad",
+      freehand_sketch: "freehand_sketch",
+      clay_model: "clay_model",
+      illustration: "illustration",
+      watercolor: "watercolor",
+    },
   };
 });
 
@@ -75,6 +103,7 @@ function renderDialog(opts?: { onClose?: () => void; onKickedOff?: () => void })
 
 beforeEach(() => {
   kickoff.reset();
+  customFetchMock.mockReset();
 });
 
 afterEach(() => cleanup());
@@ -216,6 +245,132 @@ describe("RenderKickoffDialog", () => {
     expect(screen.getByTestId("render-kickoff-error")).toHaveTextContent(
       "Camera position is required.",
     );
+  });
+
+  // ───────────────────────────────────────────────────────────────────
+  // doc 40c gap-fill — intent / expert / style / Prompt Generator
+  // ───────────────────────────────────────────────────────────────────
+
+  it("defaults to the deliverable intent with exterior + photoreal", () => {
+    renderDialog();
+    const expert = screen.getByTestId(
+      "render-kickoff-expert",
+    ) as HTMLSelectElement;
+    const style = screen.getByTestId(
+      "render-kickoff-style",
+    ) as HTMLSelectElement;
+    expect(expert.value).toBe("exterior");
+    expect(style.value).toBe("photoreal");
+    expect(
+      screen.getByTestId("render-kickoff-intent-deliverable"),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("flips expert + style to the concept-imagery defaults when the architect picks the concept intent", () => {
+    renderDialog();
+    fireEvent.click(screen.getByTestId("render-kickoff-intent-concept"));
+    const expert = screen.getByTestId(
+      "render-kickoff-expert",
+    ) as HTMLSelectElement;
+    const style = screen.getByTestId(
+      "render-kickoff-style",
+    ) as HTMLSelectElement;
+    expect(expert.value).toBe("plan");
+    expect(style.value).toBe("freehand_sketch");
+    expect(
+      screen.getByTestId("render-kickoff-intent-concept"),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("submits expertName + renderStyle as part of the kickoff body", () => {
+    renderDialog();
+    fireEvent.click(screen.getByTestId("render-kickoff-intent-concept"));
+    fireEvent.change(screen.getByTestId("render-kickoff-prompt"), {
+      target: { value: "single-story bungalow plan" },
+    });
+    fireEvent.click(screen.getByTestId("render-kickoff-confirm"));
+    expect(kickoff.mutate).toHaveBeenCalledTimes(1);
+    const call = kickoff.mutate.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(call.data).toMatchObject({
+      kind: "still",
+      expertName: "plan",
+      renderStyle: "freehand_sketch",
+    });
+  });
+
+  it("disables the Prompt Generator button until an image is picked", () => {
+    renderDialog();
+    const generateBtn = screen.getByTestId(
+      "render-kickoff-pg-generate",
+    ) as HTMLButtonElement;
+    expect(generateBtn).toBeDisabled();
+    const fileInput = screen.getByTestId(
+      "render-kickoff-pg-file",
+    ) as HTMLInputElement;
+    const file = new File(
+      [new Uint8Array([0xff, 0xd8, 0xff])],
+      "sketch.png",
+      { type: "image/png" },
+    );
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    expect(generateBtn).not.toBeDisabled();
+  });
+
+  it("uploads the picked image to /api/renders/prompt-generator and drops the result into the prompt textarea", async () => {
+    customFetchMock.mockResolvedValueOnce({
+      prompt:
+        "modern desert house with a courtyard, golden hour, photoreal",
+    });
+    renderDialog();
+    const fileInput = screen.getByTestId(
+      "render-kickoff-pg-file",
+    ) as HTMLInputElement;
+    const file = new File(
+      [new Uint8Array([0xff, 0xd8, 0xff])],
+      "sketch.png",
+      { type: "image/png" },
+    );
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("render-kickoff-pg-generate"));
+    });
+    expect(customFetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = customFetchMock.mock.calls[0] as [
+      string,
+      { method: string; body: FormData },
+    ];
+    expect(url).toBe("/api/renders/prompt-generator");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("image")).toBeInstanceOf(File);
+    const promptField = screen.getByTestId(
+      "render-kickoff-prompt",
+    ) as HTMLTextAreaElement;
+    expect(promptField.value).toBe(
+      "modern desert house with a courtyard, golden hour, photoreal",
+    );
+  });
+
+  it("surfaces an oversize-image error without calling customFetch", async () => {
+    renderDialog();
+    const fileInput = screen.getByTestId(
+      "render-kickoff-pg-file",
+    ) as HTMLInputElement;
+    const tooBig = new File(
+      [new Uint8Array(9 * 1024 * 1024)],
+      "huge.png",
+      { type: "image/png" },
+    );
+    fireEvent.change(fileInput, { target: { files: [tooBig] } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("render-kickoff-pg-generate"));
+    });
+    expect(customFetchMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("render-kickoff-pg-error"),
+    ).toHaveTextContent(/too large/i);
   });
 
   it("calls onClose and onKickedOff after a successful kickoff", async () => {
