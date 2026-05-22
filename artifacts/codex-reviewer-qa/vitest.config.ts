@@ -29,7 +29,7 @@ export default defineConfig({
       // Workspace TS packages must be inlined so vite transforms their
       // JSX/TS source.
       deps: {
-        inline: ["@workspace/portal-ui"],
+        inline: ["@workspace/portal-ui", "@workspace/api-client-react"],
       },
     },
   },

@@ -1,26 +1,24 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import ReviewerQaHome from "./pages/ReviewerQaHome";
+import ReviewPage from "./pages/ReviewPage";
 import NotFound from "./pages/not-found";
 
 /**
- * Codex Reviewer QA — app shell (CDX-Phase1-1 scaffold).
+ * Codex Reviewer QA — app shell.
  *
- * The `QueryClientProvider` + wouter router are wired now so the
- * Phase 2 reviewer surfaces — CDX-3 one-click review, CDX-4 finding
- * accept/edit/reject loop, CDX-5 jurisdiction switcher, CDX-9
- * comment-letter draft — drop in as additional `<Route>`s without
- * re-plumbing the shell. Those surfaces will read cortex-api's
- * in-process L-surface via `@workspace/api-client-react`, the same
- * path `plan-review` and `design-tools` use; that client is added in
- * the Phase 2 dispatch when the first data-bound page lands.
+ * Phase 2 CDX-3 (one-click AI review pass) is the first data-bound
+ * surface: `ReviewPage` at `/` consumes cortex-api's in-process
+ * L-surface via `@workspace/api-client-react` — the same generated
+ * client `plan-review` and `design-tools` use, not the MCP server.
+ * CDX-4 (accept/edit/reject loop) and CDX-5 (jurisdiction switcher)
+ * register as additional routes here in the follow-on PRs.
  */
 const queryClient = new QueryClient();
 
 function AppRouter() {
   return (
     <Switch>
-      <Route path="/" component={ReviewerQaHome} />
+      <Route path="/" component={ReviewPage} />
       <Route component={NotFound} />
     </Switch>
   );
