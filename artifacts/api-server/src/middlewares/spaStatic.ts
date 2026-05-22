@@ -24,6 +24,7 @@ import { logger } from "../lib/logger";
 const SUBPATH_SPAS = [
   { name: "plan-review", mount: "/plan-review" },
   { name: "qa", mount: "/qa" },
+  { name: "codex-reviewer-qa", mount: "/codex-reviewer-qa" },
 ] as const;
 
 /** The root SPA — its catch-all must mount LAST (see mountSpaStatic). */
