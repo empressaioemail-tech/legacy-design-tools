@@ -45,7 +45,7 @@ import {
   attachedDocuments,
 } from "@workspace/db";
 import { and, desc, eq } from "drizzle-orm";
-import type { Scope } from "@workspace/empressa-atom";
+import type { Scope } from "@hauska/atom-contract";
 import {
   DETAIL_CALLOUT_SPEC_PAYLOAD_SCHEMA,
   ESR_NUMBER_RE,

@@ -23,7 +23,7 @@ import {
   WithdrawReviewerRequestBody,
   WithdrawReviewerRequestParams,
 } from "@workspace/api-zod";
-import type { EventAnchoringService } from "@workspace/empressa-atom";
+import type { EventAnchoringService } from "@hauska/atom-contract";
 import type { Logger } from "pino";
 import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";

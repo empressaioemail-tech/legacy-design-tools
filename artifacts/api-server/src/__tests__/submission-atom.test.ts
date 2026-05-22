@@ -47,9 +47,9 @@ const { createTestSchema, dropTestSchema, truncateAll } = await import(
 const dbModule = await import("@workspace/db");
 const { engagements, submissions } = dbModule;
 const { runAtomContractTests, createInMemoryEventService } = await import(
-  "@workspace/empressa-atom/testing"
+  "@hauska/atom-contract/testing"
 );
-const { defaultScope } = await import("@workspace/empressa-atom");
+const { defaultScope } = await import("@hauska/atom-contract");
 const { makeSubmissionAtom } = await import("../atoms/submission.atom");
 
 const lazyDb = new Proxy({} as typeof dbModule.db, {

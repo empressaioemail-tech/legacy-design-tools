@@ -187,6 +187,9 @@ importers:
       '@google-cloud/storage':
         specifier: ^7.19.0
         version: 7.19.0
+      '@hauska/atom-contract':
+        specifier: ^1.1.0
+        version: 1.1.0(@types/pg@8.18.0)(pg@8.20.0)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -214,9 +217,6 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
-      '@workspace/empressa-atom':
-        specifier: workspace:*
-        version: link:../../lib/empressa-atom
       '@workspace/finding-engine':
         specifier: workspace:*
         version: link:../../lib/finding-engine
@@ -2003,6 +2003,10 @@ packages:
   '@google-cloud/storage@7.19.0':
     resolution: {integrity: sha512-n2FjE7NAOYyshogdc7KQOl/VZb4sneqPjWouSyia9CMDdMhRX5+RIbqalNmC7LOLzuLAN89VlF2HvG8na9G+zQ==}
     engines: {node: '>=14'}
+
+  '@hauska/atom-contract@1.1.0':
+    resolution: {integrity: sha512-vhJdXwlhf0finvxzfvqXQ1bAJx3zwDSEO1m3SNXkVuD68IziibfMTWwNWabvl7DuEBZkaEGIJM02ZXnG+F2eUg==}
+    engines: {node: '>=18.18.0'}
 
   '@hono/node-server@1.19.14':
     resolution: {integrity: sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw==}
@@ -6344,6 +6348,40 @@ snapshots:
     transitivePeerDependencies:
       - encoding
       - supports-color
+
+  '@hauska/atom-contract@1.1.0(@types/pg@8.18.0)(pg@8.20.0)':
+    dependencies:
+      drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
+    transitivePeerDependencies:
+      - '@aws-sdk/client-rds-data'
+      - '@cloudflare/workers-types'
+      - '@electric-sql/pglite'
+      - '@libsql/client'
+      - '@libsql/client-wasm'
+      - '@neondatabase/serverless'
+      - '@op-engineering/op-sqlite'
+      - '@opentelemetry/api'
+      - '@planetscale/database'
+      - '@prisma/client'
+      - '@tidbcloud/serverless'
+      - '@types/better-sqlite3'
+      - '@types/pg'
+      - '@types/sql.js'
+      - '@upstash/redis'
+      - '@vercel/postgres'
+      - '@xata.io/client'
+      - better-sqlite3
+      - bun-types
+      - expo-sqlite
+      - gel
+      - knex
+      - kysely
+      - mysql2
+      - pg
+      - postgres
+      - prisma
+      - sql.js
+      - sqlite3
 
   '@hono/node-server@1.19.14(hono@4.12.21)':
     dependencies:

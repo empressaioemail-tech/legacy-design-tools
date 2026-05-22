@@ -21,7 +21,7 @@ import { describe, it, expect } from "vitest";
 import {
   runAtomContractTests,
   createInMemoryEventService,
-} from "@workspace/empressa-atom/testing";
+} from "@hauska/atom-contract/testing";
 import { db } from "@workspace/db";
 import {
   makeViewpointRenderAtom,

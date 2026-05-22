@@ -51,7 +51,7 @@ import {
   type EventAnchoringService,
   type KeyMetric,
   type Scope,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 import type { db as ProdDb } from "@workspace/db";
 
 /** Hard cap on the prose summary length so we don't blow up token budget. */
@@ -70,7 +70,7 @@ export type EngagementSupportedModes = typeof ENGAGEMENT_SUPPORTED_MODES;
 
 /**
  * Single source of truth for engagement-domain event types. Declared here
- * (not in `@workspace/empressa-atom`, which is per-atom-agnostic) so that
+ * (not in `@hauska/atom-contract`, which is per-atom-agnostic) so that
  * producers — snapshot ingest's create-new branch, the jurisdiction
  * resolver, the submission flow — can import the same constant rather
  * than open-coding the strings. The full vocabulary is also surfaced via

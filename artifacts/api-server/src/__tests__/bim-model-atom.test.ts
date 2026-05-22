@@ -52,7 +52,7 @@ const {
   briefingDivergences,
 } = dbModule;
 const { runAtomContractTests } = await import(
-  "@workspace/empressa-atom/testing"
+  "@hauska/atom-contract/testing"
 );
 const { makeBimModelAtom } = await import("../atoms/bim-model.atom");
 const { makeMaterializableElementAtom } = await import(

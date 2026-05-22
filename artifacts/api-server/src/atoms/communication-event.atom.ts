@@ -31,7 +31,7 @@ import {
   type ContextSummary,
   type EventAnchoringService,
   type KeyMetric,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 import type { db as ProdDb } from "@workspace/db";
 
 export const COMMUNICATION_EVENT_PROSE_MAX_CHARS = 600;

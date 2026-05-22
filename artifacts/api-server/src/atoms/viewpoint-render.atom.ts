@@ -74,7 +74,7 @@ import {
   type EventAnchoringService,
   type KeyMetric,
   type Scope,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 
 /** Hard cap on the prose summary so we don't blow up token budget. */
 export const VIEWPOINT_RENDER_PROSE_MAX_CHARS = 600;

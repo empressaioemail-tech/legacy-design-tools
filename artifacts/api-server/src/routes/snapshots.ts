@@ -26,7 +26,7 @@ import {
   keyFromEngagement,
   enqueueWarmupForJurisdiction,
 } from "@workspace/codes";
-import type { EventAnchoringService } from "@workspace/empressa-atom";
+import type { EventAnchoringService } from "@hauska/atom-contract";
 import { SNAPSHOT_INGEST_ACTOR_ID } from "@workspace/server-actor-ids";
 import { logger } from "../lib/logger";
 import { getSnapshotSecret } from "../lib/snapshotSecret";

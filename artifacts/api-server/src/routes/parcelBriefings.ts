@@ -54,7 +54,7 @@ import {
   RestoreEngagementBriefingSourceParams,
   RetryBriefingSourceConversionParams,
 } from "@workspace/api-zod";
-import type { EventAnchoringService } from "@workspace/empressa-atom";
+import type { EventAnchoringService } from "@hauska/atom-contract";
 import {
   BRIEFING_MANUAL_UPLOAD_ACTOR_ID,
   BRIEFING_ENGINE_ACTOR_ID,
