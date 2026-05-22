@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { makeFinding } from "../__fixtures__/findings";
 
@@ -28,6 +28,17 @@ const hookState = vi.hoisted(() => ({
   }>,
   status: null as { state: string; error: string | null } | null,
   findings: [] as ReturnType<typeof makeFinding>[],
+  // CDX-9 — the L3 draft endpoints the comment-letter action calls.
+  createDeliverableLetter: vi.fn(
+    async (_engagementId: string, _body: unknown) => ({
+      deliverableLetter: { entityId: "letter-1" },
+    }),
+  ),
+  mergeDeliverableLetterProvenance: vi.fn(
+    async (_letterId: string, _sectionIndex: number, _body: unknown) => ({
+      deliverableLetter: { entityId: "letter-1" },
+    }),
+  ),
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
@@ -55,6 +66,8 @@ vi.mock("@workspace/api-client-react", () => ({
   acceptFinding: vi.fn(async () => ({ finding: makeFinding() })),
   rejectFinding: vi.fn(async () => ({ finding: makeFinding() })),
   overrideFinding: vi.fn(async () => ({ finding: makeFinding() })),
+  createDeliverableLetter: hookState.createDeliverableLetter,
+  mergeDeliverableLetterProvenance: hookState.mergeDeliverableLetterProvenance,
   ApiError: class ApiError extends Error {},
   getListEngagementSubmissionsQueryKey: (id: string) => [
     `/api/engagements/${id}/submissions`,
@@ -86,6 +99,8 @@ beforeEach(() => {
   hookState.jurisdictions = [];
   hookState.status = null;
   hookState.findings = [];
+  hookState.createDeliverableLetter.mockClear();
+  hookState.mergeDeliverableLetterProvenance.mockClear();
 });
 
 describe("ReviewPage", () => {
@@ -208,5 +223,72 @@ describe("ReviewPage — jurisdiction switcher (CDX-5)", () => {
     expect(
       screen.getByTestId("jurisdiction-snapshot-warning").textContent,
     ).toContain("Grand County");
+  });
+});
+
+describe("ReviewPage — comment-letter draft (CDX-9)", () => {
+  function seedAndSelect(findings: ReturnType<typeof makeFinding>[]) {
+    hookState.engagements = [
+      { id: "e1", name: "Musgrave Residence", jurisdiction: "Grand County" },
+    ];
+    hookState.submissions = [
+      { id: "sub-1", submittedAt: "2026-05-20T00:00:00.000Z", status: "pending" },
+    ];
+    hookState.status = { state: "completed", error: null };
+    hookState.findings = findings;
+    renderPage();
+    fireEvent.change(screen.getByTestId("engagement-select"), {
+      target: { value: "e1" },
+    });
+    fireEvent.change(screen.getByTestId("submission-select"), {
+      target: { value: "sub-1" },
+    });
+  }
+
+  it("disables the draft button until a finding is adjudicated", () => {
+    seedAndSelect([makeFinding({ id: "f1", status: "ai-produced" })]);
+    expect(
+      screen.getByTestId<HTMLButtonElement>("draft-comment-letter-button")
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("enables the draft button once a finding is accepted or edited", () => {
+    seedAndSelect([makeFinding({ id: "f1", status: "accepted" })]);
+    expect(
+      screen.getByTestId<HTMLButtonElement>("draft-comment-letter-button")
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("drafts the letter from the accepted findings and attaches provenance", async () => {
+    seedAndSelect([
+      makeFinding({ id: "finding:sub-1:01", status: "accepted" }),
+      makeFinding({ id: "finding:sub-1:02", status: "rejected" }),
+    ]);
+    fireEvent.click(screen.getByTestId("draft-comment-letter-button"));
+
+    await waitFor(() =>
+      expect(hookState.createDeliverableLetter).toHaveBeenCalledTimes(1),
+    );
+    const call = hookState.createDeliverableLetter.mock.calls[0]!;
+    expect(call[0]).toBe("e1");
+    const body = call[1] as { sections: Array<{ kind: string }> };
+    // cover + intro + 1 per-comment (the rejected finding is excluded)
+    // + signature.
+    expect(body.sections.map((s) => s.kind)).toEqual([
+      "cover",
+      "intro",
+      "per-comment-response",
+      "signature",
+    ]);
+
+    await waitFor(() =>
+      expect(hookState.mergeDeliverableLetterProvenance).toHaveBeenCalledWith(
+        "letter-1",
+        2,
+        { findingIds: ["finding:sub-1:01"] },
+      ),
+    );
   });
 });

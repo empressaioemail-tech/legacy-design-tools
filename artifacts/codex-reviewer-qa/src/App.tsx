@@ -1,6 +1,7 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReviewPage from "./pages/ReviewPage";
+import CommentLetterPage from "./pages/CommentLetterPage";
 import NotFound from "./pages/not-found";
 
 /**
@@ -11,7 +12,9 @@ import NotFound from "./pages/not-found";
  * L-surface via `@workspace/api-client-react` — the same generated
  * client `plan-review` and `design-tools` use, not the MCP server.
  * CDX-4 (accept/edit/reject loop) and CDX-5 (jurisdiction switcher)
- * register as additional routes here in the follow-on PRs.
+ * extend that surface. CDX-9 (comment-letter auto-draft) adds
+ * `/letter/:letterId` — the drafted Cortex L3 `deliverable-letter`
+ * view, reusing the L3/L6 endpoints.
  */
 const queryClient = new QueryClient();
 
@@ -19,6 +22,9 @@ function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={ReviewPage} />
+      <Route path="/letter/:letterId">
+        {(params) => <CommentLetterPage letterId={params.letterId} />}
+      </Route>
       <Route component={NotFound} />
     </Switch>
   );

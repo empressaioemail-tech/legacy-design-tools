@@ -17,6 +17,7 @@
  *   engagement (no runtime override), surfaced by the JurisdictionBar.
  */
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useLocation } from "wouter";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   generateSubmissionFindings,
@@ -38,6 +39,11 @@ import {
   useOverrideFinding,
   useRejectFinding,
 } from "../lib/reviewApi";
+import {
+  composeCommentLetterDraft,
+  letterEligibleFindings,
+} from "../lib/commentLetter";
+import { useDraftCommentLetter } from "../lib/commentLetterApi";
 
 const fieldStyle: CSSProperties = {
   display: "flex",
@@ -169,6 +175,29 @@ export default function ReviewPage() {
   function handleEngagementChange(next: string) {
     setEngagementId(next);
     setSubmissionId("");
+  }
+
+  // CDX-9 — comment-letter auto-draft. The accepted + edited findings
+  // for this submission compose a Cortex L3 `deliverable-letter`; the
+  // draft persists through the existing L3 endpoints and the reviewer
+  // is routed to the letter view to edit / render it.
+  const [, navigate] = useLocation();
+  const draftLetter = useDraftCommentLetter();
+  const letterEligible = letterEligibleFindings(findings);
+  const canDraftLetter = letterEligible.length > 0 && !draftLetter.isPending;
+
+  function handleDraftLetter() {
+    if (!selectedEngagement || letterEligible.length === 0) return;
+    const draft = composeCommentLetterDraft({
+      engagementName: selectedEngagement.name,
+      jurisdiction: selectedEngagement.jurisdiction ?? null,
+      submittedAt: selectedSubmission?.submittedAt ?? null,
+      findings,
+    });
+    draftLetter.mutate(
+      { engagementId, draft },
+      { onSuccess: (letterId) => navigate(`/letter/${letterId}`) },
+    );
   }
 
   return (
@@ -330,13 +359,71 @@ export default function ReviewPage() {
           <>
             <div
               style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--text-secondary)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
               }}
             >
-              {findings.length} finding{findings.length === 1 ? "" : "s"}
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                  flex: 1,
+                }}
+              >
+                {findings.length} finding{findings.length === 1 ? "" : "s"}
+                {letterEligible.length > 0
+                  ? ` · ${letterEligible.length} adjudicated for the letter`
+                  : ""}
+              </span>
+              {/* CDX-9 — draft a comment letter from the accepted +
+                  edited findings. Disabled until at least one finding
+                  is adjudicated (accept or edit). */}
+              <button
+                type="button"
+                data-testid="draft-comment-letter-button"
+                onClick={handleDraftLetter}
+                disabled={!canDraftLetter}
+                title={
+                  letterEligible.length === 0
+                    ? "Accept or edit at least one finding to draft a comment letter"
+                    : undefined
+                }
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 6,
+                  border: "1px solid var(--border-subtle)",
+                  background: "var(--accent, var(--info-text))",
+                  color: "var(--accent-contrast, #fff)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: canDraftLetter ? "pointer" : "not-allowed",
+                  opacity: canDraftLetter ? 1 : 0.5,
+                }}
+              >
+                {draftLetter.isPending
+                  ? "Drafting…"
+                  : "Draft comment letter"}
+              </button>
             </div>
+
+            {draftLetter.isError ? (
+              <div
+                role="alert"
+                data-testid="draft-comment-letter-error"
+                style={{
+                  fontSize: 12,
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  background: "var(--danger-dim)",
+                  color: "var(--danger-text)",
+                }}
+              >
+                Could not draft the comment letter. Try again.
+              </div>
+            ) : null}
+
             <div
               data-testid="findings-list"
               style={{ display: "flex", flexDirection: "column", gap: 12 }}
