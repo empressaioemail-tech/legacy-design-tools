@@ -34,6 +34,9 @@ vi.mock("@workspace/api-client-react", () => ({
     generationId: "gen-1",
     state: "pending",
   })),
+  getListEngagementSubmissionsQueryKey: (id: string) => [
+    `/api/engagements/${id}/submissions`,
+  ],
   getListSubmissionFindingsQueryKey: (id: string) => [
     `/api/submissions/${id}/findings`,
   ],
