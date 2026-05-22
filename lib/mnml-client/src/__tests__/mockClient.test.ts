@@ -196,3 +196,46 @@ describe("MockMnmlClient — failure + unknown-id paths", () => {
     });
   });
 });
+
+describe("MockMnmlClient — getCredits (doc 40c gap-fill)", () => {
+  it("reports the pinned starting balance", async () => {
+    const client = new MockMnmlClient({ startingCredits: 250 });
+    expect(await client.getCredits()).toEqual({ credits: 250 });
+  });
+
+  it("reflects the live balance after triggers debit it", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100 });
+    await client.triggerRender(ARCHDIFFUSION_STILL); // -3
+    await client.triggerRender(VIDEO); // -10
+    expect(await client.getCredits()).toEqual({ credits: 87 });
+  });
+});
+
+describe("MockMnmlClient — generatePrompt (doc 40c gap-fill)", () => {
+  it("returns a deterministic prompt and debits 1 credit", async () => {
+    const client = new MockMnmlClient({ startingCredits: 50 });
+    const result = await client.generatePrompt({
+      image: new Blob([new Uint8Array([0xff, 0xd8, 0xff])]),
+    });
+    expect(result.prompt.length).toBeGreaterThan(0);
+    expect(await client.getCredits()).toEqual({ credits: 49 });
+  });
+
+  it("folds the caller's keywords into the generated prompt", async () => {
+    const client = new MockMnmlClient();
+    const result = await client.generatePrompt({
+      image: new Blob([new Uint8Array([0xff, 0xd8, 0xff])]),
+      keywords: "desert house, courtyard",
+    });
+    expect(result.prompt).toContain("desert house, courtyard");
+  });
+
+  it("throws MnmlError(MOCK_FORCED) when alwaysFail is set", async () => {
+    const client = new MockMnmlClient({ alwaysFail: true });
+    await expect(
+      client.generatePrompt({
+        image: new Blob([new Uint8Array([0xff, 0xd8, 0xff])]),
+      }),
+    ).rejects.toMatchObject({ name: "MnmlError", code: "MOCK_FORCED" });
+  });
+});

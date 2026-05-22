@@ -7133,6 +7133,62 @@ export const ListEngagementRendersResponse = zod
   );
 
 /**
+ * doc 40c B.6 — the running-balance display the Renders tab
+shows. Architect-audience-only and behind `RENDERS_PROD_ENABLED`
+in production (returns 503 `renders_preview_disabled` until the
+operator flips the flag). No engagement scope — the balance is
+account-wide.
+
+ * @summary Get the mnml.ai account credit balance
+ */
+export const getRenderCreditsResponseCreditsMin = 0;
+
+export const GetRenderCreditsResponse = zod
+  .object({
+    credits: zod
+      .number()
+      .min(getRenderCreditsResponseCreditsMin)
+      .describe("Remaining mnml.ai account credit balance."),
+  })
+  .describe(
+    "Wire envelope for `GET \/renders\/credits` (doc 40c B.6). The\nmnml.ai account credit balance, surfaced as the running-balance\ndisplay in the Renders tab. mnml's own response carries a\n`status` field; the route strips it and returns only the count.\n",
+  );
+
+/**
+ * doc 40c B.1 concept-imagery flow. The architect uploads a
+source image (hand sketch, bubble diagram, massing, reference
+photo) and mnml.ai's Prompt Generator returns an optimized
+render prompt. Synchronous — no viewpoint_renders row and no
+polling; the architect feeds the returned prompt into a normal
+render kickoff. Architect-audience-only, behind
+`RENDERS_PROD_ENABLED`, costs 1 mnml credit.
+
+multipart/form-data body: a required `image` file part
+(JPEG/PNG/GIF/WebP, ≤8MB) plus an optional `keywords` text
+field. The FE builds the multipart body by hand.
+
+ * @summary Generate a render prompt from a source image
+ */
+export const GenerateRenderPromptBody = zod.object({
+  keywords: zod
+    .string()
+    .optional()
+    .describe("Optional keyword hints for the generator to\nemphasize.\n"),
+});
+
+export const GenerateRenderPromptResponse = zod
+  .object({
+    prompt: zod
+      .string()
+      .describe(
+        "The generated, optimized prompt. Ready to drop into a\nrender kickoff's `prompt` field; the architect may edit it\nfirst.\n",
+      ),
+  })
+  .describe(
+    "Wire envelope for `POST \/renders\/prompt-generator` (doc 40c\nB.1). The optimized render prompt mnml generated from the\nuploaded source image. Synchronous — no job id, no polling.\n",
+  );
+
+/**
  * Returns the row's status (`queued | rendering | ready |
 failed | cancelled`), the upstream-snapshot atom_event_ids
 (freshness anchors per Spec 54 §6), the per-direction

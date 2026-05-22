@@ -4897,6 +4897,35 @@ V1-4 (V1-5 follow-up).
   durationMs: number;
 }
 
+/**
+ * Wire envelope for `GET /renders/credits` (doc 40c B.6). The
+mnml.ai account credit balance, surfaced as the running-balance
+display in the Renders tab. mnml's own response carries a
+`status` field; the route strips it and returns only the count.
+
+ */
+export interface RenderCreditsResponse {
+  /**
+   * Remaining mnml.ai account credit balance.
+   * @minimum 0
+   */
+  credits: number;
+}
+
+/**
+ * Wire envelope for `POST /renders/prompt-generator` (doc 40c
+B.1). The optimized render prompt mnml generated from the
+uploaded source image. Synchronous — no job id, no polling.
+
+ */
+export interface PromptGeneratorResponse {
+  /** The generated, optimized prompt. Ready to drop into a
+render kickoff's `prompt` field; the architect may edit it
+first.
+ */
+  prompt: string;
+}
+
 export type NotificationItemKind =
   (typeof NotificationItemKind)[keyof typeof NotificationItemKind];
 
@@ -5899,6 +5928,13 @@ export const ListMyReviewerRequestsStatus = {
   resolved: "resolved",
   all: "all",
 } as const;
+
+export type GenerateRenderPromptBody = {
+  /** Optional keyword hints for the generator to
+emphasize.
+ */
+  keywords?: string;
+};
 
 export type GetRenderOutputFileParams = {
   download?: GetRenderOutputFileDownload;

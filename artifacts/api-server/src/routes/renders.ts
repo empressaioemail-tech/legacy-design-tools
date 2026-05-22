@@ -46,6 +46,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod/v4";
+import Busboy from "busboy";
 import {
   bimModels,
   briefingSources,
@@ -97,6 +98,17 @@ const STEADY_POLL_DELAY_MS = 5_000;
  * leaves comfortable headroom for 5-10s videos which can take longer.
  */
 const MAX_POLL_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Prompt Generator upload caps (doc 40c gap-fill). mnml's
+ * `prompt-generator` accepts JPEG/PNG/GIF/WebP up to 8MB (verified
+ * against mnmlai.dev/docs 2026-05-22); the upload is capped at the
+ * same ceiling so an oversize image fails fast on our side rather
+ * than burning a round-trip to mnml. The keyword hint is advisory —
+ * kept short.
+ */
+const MAX_PROMPT_GENERATOR_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_PROMPT_GENERATOR_KEYWORDS_CHARS = 500;
 
 /**
  * Elevation-set conventions. mnml's `camera_direction` enum is camera-
@@ -1106,6 +1118,126 @@ function delay(ms: number): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Prompt Generator upload (doc 40c gap-fill)
+// ─────────────────────────────────────────────────────────────────────
+
+interface PromptGeneratorUploadParts {
+  imageBytes: Buffer;
+  keywords: string | null;
+}
+
+/**
+ * Drive the Busboy multipart parse for the Prompt Generator upload to
+ * completion: one `image` file part plus an optional `keywords` text
+ * field. Mirrors the attached-document upload's `consumeDocumentUpload`
+ * in `sheetContent.ts`.
+ */
+function consumePromptGeneratorUpload(
+  req: Request,
+): Promise<
+  | { ok: true; parts: PromptGeneratorUploadParts }
+  | { ok: false; status: number; error: string }
+> {
+  return new Promise((resolve) => {
+    let busboy: Busboy.Busboy;
+    try {
+      busboy = Busboy({
+        headers: req.headers,
+        limits: {
+          fileSize: MAX_PROMPT_GENERATOR_IMAGE_BYTES,
+          files: 1,
+          fields: 4,
+        },
+      });
+    } catch (err) {
+      logger.warn({ err }, "prompt-generator upload: busboy init failed");
+      resolve({ ok: false, status: 400, error: "invalid_multipart" });
+      return;
+    }
+
+    let keywords: string | null = null;
+    const fileChunks: Buffer[] = [];
+    let fileBytes = 0;
+    let fileTruncated = false;
+    let fileSeen = false;
+    let aborted = false;
+
+    function abort(status: number, error: string) {
+      if (aborted) return;
+      aborted = true;
+      try {
+        req.unpipe(busboy);
+      } catch {
+        /* ignore */
+      }
+      resolve({ ok: false, status, error });
+    }
+
+    busboy.on("field", (name: string, value: string) => {
+      if (aborted) return;
+      if (name === "keywords") {
+        keywords = value.slice(0, MAX_PROMPT_GENERATOR_KEYWORDS_CHARS);
+      }
+    });
+
+    busboy.on(
+      "file",
+      (name: string, stream: NodeJS.ReadableStream) => {
+        if (aborted || name !== "image") {
+          stream.resume();
+          return;
+        }
+        fileSeen = true;
+        stream.on("data", (chunk: Buffer) => {
+          fileBytes += chunk.length;
+          if (fileBytes > MAX_PROMPT_GENERATOR_IMAGE_BYTES) {
+            fileTruncated = true;
+            return;
+          }
+          fileChunks.push(chunk);
+        });
+        stream.on("limit", () => {
+          fileTruncated = true;
+        });
+        stream.on("error", (err) => {
+          logger.warn(
+            { err },
+            "prompt-generator upload: file stream error",
+          );
+        });
+      },
+    );
+
+    busboy.on("error", (err) => {
+      logger.warn({ err }, "prompt-generator upload: busboy error");
+      abort(400, "multipart_parse_failed");
+    });
+
+    busboy.on("finish", () => {
+      if (aborted) return;
+      if (!fileSeen) {
+        abort(400, "missing_image_part");
+        return;
+      }
+      if (fileTruncated) {
+        abort(413, "image_too_large");
+        return;
+      }
+      if (fileBytes === 0) {
+        abort(400, "empty_image");
+        return;
+      }
+      resolve({
+        ok: true,
+        parts: { imageBytes: Buffer.concat(fileChunks, fileBytes), keywords },
+      });
+    });
+
+    req.pipe(busboy);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────────────
 
@@ -1211,6 +1343,99 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
     cost,
   });
 });
+
+/**
+ * GET /api/renders/credits — mnml.ai account credit balance.
+ *
+ * doc 40c B.6 — the running-balance display the Renders tab shows.
+ * Architect-audience-only and prod-flag-gated like kickoff, so a
+ * half-built Renders tab never calls mnml in production.
+ *
+ * MUST register before `GET /renders/:id` below: Express matches
+ * routes in registration order, and the `:id` parametric route would
+ * otherwise swallow the literal `credits` segment (and 400 on its
+ * UUID check). Keep this handler physically above `/renders/:id`.
+ */
+router.get("/renders/credits", async (req: Request, res: Response) => {
+  if (requireArchitectAudience(req, res)) return;
+  if (!rendersProdGateOpen()) {
+    res.status(503).json({
+      error: "renders_preview_disabled",
+      message: "Renders are not yet enabled in production. Coming soon.",
+    });
+    return;
+  }
+  try {
+    const { credits } = await getMnmlClient().getCredits();
+    res.json({ credits });
+  } catch (err) {
+    if (err instanceof MnmlError) {
+      res
+        .status(mnmlErrorToHttpStatus(err))
+        .json({ error: mnmlErrorToCode(err), message: err.message });
+      return;
+    }
+    logger.error({ err }, "renders credits: unexpected failure");
+    res.status(500).json({ error: "renders_credits_failed" });
+  }
+});
+
+/**
+ * POST /api/renders/prompt-generator — mnml.ai Prompt Generator.
+ *
+ * doc 40c B.1 concept-imagery flow. The architect uploads a source
+ * image (hand sketch, bubble diagram, massing, reference photo) and
+ * gets an optimized render prompt back. Synchronous — no
+ * viewpoint_renders row and no polling worker; the architect feeds the
+ * returned prompt into a normal render kickoff, which records it in
+ * `requestPayload`, so generation provenance still lands on the
+ * render-output atom the regular way.
+ *
+ * multipart/form-data: `image` (required file, ≤8MB), `keywords`
+ * (optional text hint). Architect-audience-only, prod-flag-gated;
+ * costs 1 mnml credit.
+ */
+router.post(
+  "/renders/prompt-generator",
+  async (req: Request, res: Response) => {
+    if (requireArchitectAudience(req, res)) return;
+    if (!rendersProdGateOpen()) {
+      res.status(503).json({
+        error: "renders_preview_disabled",
+        message: "Renders are not yet enabled in production. Coming soon.",
+      });
+      return;
+    }
+    const contentType = req.headers["content-type"] ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      res.status(415).json({ error: "expected_multipart" });
+      return;
+    }
+
+    const upload = await consumePromptGeneratorUpload(req);
+    if (!upload.ok) {
+      res.status(upload.status).json({ error: upload.error });
+      return;
+    }
+
+    try {
+      const { prompt } = await getMnmlClient().generatePrompt({
+        image: upload.parts.imageBytes,
+        ...(upload.parts.keywords ? { keywords: upload.parts.keywords } : {}),
+      });
+      res.json({ prompt });
+    } catch (err) {
+      if (err instanceof MnmlError) {
+        res
+          .status(mnmlErrorToHttpStatus(err))
+          .json({ error: mnmlErrorToCode(err), message: err.message });
+        return;
+      }
+      logger.error({ err }, "prompt-generator: unexpected failure");
+      res.status(500).json({ error: "prompt_generator_failed" });
+    }
+  },
+);
 
 /**
  * GET /api/renders/:id — status + outputs. Architect-audience-only;

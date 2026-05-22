@@ -19,7 +19,9 @@ import {
 import { HttpMnmlClient } from "../httpClient";
 import { MockMnmlClient } from "../mockClient";
 import type {
+  CreditsResult,
   MnmlClient,
+  PromptGeneratorResult,
   RenderStatusResult,
   TriggerRenderResult,
 } from "../types";
@@ -141,6 +143,10 @@ describe("getMnmlClient + setMnmlClient singleton", () => {
         renderId,
         status: "ready",
       }),
+      getCredits: async (): Promise<CreditsResult> => ({ credits: 100 }),
+      generatePrompt: async (): Promise<PromptGeneratorResult> => ({
+        prompt: "fake",
+      }),
     };
     setMnmlClient(fake);
     expect(getMnmlClient()).toBe(fake);
@@ -156,6 +162,10 @@ describe("getMnmlClient + setMnmlClient singleton", () => {
       getRenderStatus: async (renderId: string): Promise<RenderStatusResult> => ({
         renderId,
         status: "ready",
+      }),
+      getCredits: async (): Promise<CreditsResult> => ({ credits: 0 }),
+      generatePrompt: async (): Promise<PromptGeneratorResult> => ({
+        prompt: "x",
       }),
     };
     setMnmlClient(fake);

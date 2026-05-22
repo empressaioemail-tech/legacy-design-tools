@@ -4700,6 +4700,139 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /renders/credits:
+    get:
+      operationId: getRenderCredits
+      tags: [renders]
+      summary: Get the mnml.ai account credit balance
+      description: |
+        doc 40c B.6 — the running-balance display the Renders tab
+        shows. Architect-audience-only and behind `RENDERS_PROD_ENABLED`
+        in production (returns 503 `renders_preview_disabled` until the
+        operator flips the flag). No engagement scope — the balance is
+        account-wide.
+      responses:
+        "200":
+          description: Current mnml.ai credit balance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenderCreditsResponse"
+        "402":
+          description: mnml.ai rejected the request for insufficient credits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Audience is not architect.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: mnml.ai upstream error (auth / not-found).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: |
+            Production feature flag `RENDERS_PROD_ENABLED` is off, or
+            mnml.ai is rate-limiting / unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /renders/prompt-generator:
+    post:
+      operationId: generateRenderPrompt
+      tags: [renders]
+      summary: Generate a render prompt from a source image
+      description: |
+        doc 40c B.1 concept-imagery flow. The architect uploads a
+        source image (hand sketch, bubble diagram, massing, reference
+        photo) and mnml.ai's Prompt Generator returns an optimized
+        render prompt. Synchronous — no viewpoint_renders row and no
+        polling; the architect feeds the returned prompt into a normal
+        render kickoff. Architect-audience-only, behind
+        `RENDERS_PROD_ENABLED`, costs 1 mnml credit.
+
+        multipart/form-data body: a required `image` file part
+        (JPEG/PNG/GIF/WebP, ≤8MB) plus an optional `keywords` text
+        field. The FE builds the multipart body by hand.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              # The required `image` file part is described in the
+              # endpoint `description` above and is intentionally NOT
+              # declared as a `format: binary` schema property — the
+              # codegen (orval) has no DOM lib, so a File/Blob body
+              # type would not compile. Mirrors the snapshot multipart
+              # upload, whose file parts are also prose-only.
+              properties:
+                keywords:
+                  type: string
+                  description: |
+                    Optional keyword hints for the generator to
+                    emphasize.
+      responses:
+        "200":
+          description: Generated render prompt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptGeneratorResponse"
+        "400":
+          description: |
+            Malformed multipart body, or missing / empty `image` part.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "402":
+          description: mnml.ai rejected the request for insufficient credits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Audience is not architect.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Uploaded image exceeds the 8MB ceiling.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Request was not multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: mnml.ai upstream error (auth / not-found).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: |
+            Production feature flag `RENDERS_PROD_ENABLED` is off, or
+            mnml.ai is rate-limiting / unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /renders/{id}:
     get:
       operationId: getRender
@@ -13313,6 +13446,35 @@ components:
           type: integer
           minimum: 0
       required: [rescuedStuck, reapedTerminal, warnedIncompleteMirror, durationMs]
+
+    RenderCreditsResponse:
+      type: object
+      description: |
+        Wire envelope for `GET /renders/credits` (doc 40c B.6). The
+        mnml.ai account credit balance, surfaced as the running-balance
+        display in the Renders tab. mnml's own response carries a
+        `status` field; the route strips it and returns only the count.
+      properties:
+        credits:
+          type: integer
+          minimum: 0
+          description: Remaining mnml.ai account credit balance.
+      required: [credits]
+
+    PromptGeneratorResponse:
+      type: object
+      description: |
+        Wire envelope for `POST /renders/prompt-generator` (doc 40c
+        B.1). The optimized render prompt mnml generated from the
+        uploaded source image. Synchronous — no job id, no polling.
+      properties:
+        prompt:
+          type: string
+          description: |
+            The generated, optimized prompt. Ready to drop into a
+            render kickoff's `prompt` field; the architect may edit it
+            first.
+      required: [prompt]
 
     NotificationItem:
       type: object

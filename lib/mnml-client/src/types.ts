@@ -225,6 +225,50 @@ export class MnmlError extends Error {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Credits + Prompt Generator (doc 40c gap-fill)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * {@link MnmlClient.getCredits} return shape — `GET /v1/credits`.
+ * mnml's wire body is `{ status, credits }`; the client strips
+ * `status` and surfaces only the balance.
+ */
+export interface CreditsResult {
+  /** Remaining account credit balance. */
+  credits: number;
+}
+
+/**
+ * {@link MnmlClient.generatePrompt} input — `POST /v1/prompt-generator`.
+ *
+ * The Prompt Generator turns a source image into an optimized,
+ * SDXL-style render prompt. It powers the concept-imagery flow: an
+ * architect uploads a sketch / massing / reference photo and gets a
+ * usable `archDiffusion-v43` prompt back. Unlike a render, the call is
+ * synchronous — no job id, no polling.
+ */
+export interface PromptGeneratorRequest {
+  /** Source image — JPEG/PNG/GIF/WebP, 1KB–8MB. */
+  image: Buffer | Blob;
+  /**
+   * Optional keywords the generator should emphasize. Maps to mnml's
+   * `prompt` form field; named `keywords` here to keep it distinct
+   * from the *generated* prompt returned in {@link PromptGeneratorResult}.
+   */
+  keywords?: string;
+}
+
+/** {@link MnmlClient.generatePrompt} return shape. */
+export interface PromptGeneratorResult {
+  /**
+   * The generated, optimized prompt — mnml returns this in the wire
+   * body's `message` field. Ready to feed straight into a render
+   * request's `prompt`.
+   */
+  prompt: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Client interface
 // ─────────────────────────────────────────────────────────────────────
 
@@ -240,6 +284,22 @@ export class MnmlError extends Error {
 export interface MnmlClient {
   triggerRender(input: RenderRequest): Promise<TriggerRenderResult>;
   getRenderStatus(renderId: string): Promise<RenderStatusResult>;
+  /**
+   * Account credit balance — `GET /v1/credits`. Synchronous, no
+   * polling. Surfaces the running balance for the Renders tab
+   * (doc 40c B.6). Costs no credits.
+   */
+  getCredits(): Promise<CreditsResult>;
+  /**
+   * Prompt Generator — `POST /v1/prompt-generator`. Synchronous
+   * (unlike {@link triggerRender}, there is no job id and no poll):
+   * takes a source image plus optional keywords, returns an optimized
+   * render prompt. Powers the concept-imagery flow (doc 40c B.1).
+   * Costs 1 credit per call.
+   */
+  generatePrompt(
+    input: PromptGeneratorRequest,
+  ): Promise<PromptGeneratorResult>;
 }
 
 // ─────────────────────────────────────────────────────────────────────
