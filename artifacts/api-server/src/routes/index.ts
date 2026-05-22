@@ -6,6 +6,7 @@ import snapshotsRouter from "./snapshots";
 import sheetsRouter from "./sheets";
 import chatRouter from "./chat";
 import codesRouter from "./codes";
+import substrateRouter from "./substrate";
 import devAtomsRouter from "./devAtoms";
 import atomsRouter from "./atoms";
 import usersRouter from "./users";
@@ -75,6 +76,10 @@ router.use(snapshotsRouter);
 router.use(sheetsRouter);
 router.use(chatRouter);
 router.use(codesRouter);
+// QA-17 — live Hauska substrate catalog at `/substrate/jurisdictions`.
+// Distinct path subtree from `/codes/*` (the cortex-prod-local corpus)
+// so ordering relative to codesRouter is indifferent.
+router.use(substrateRouter);
 router.use(devAtomsRouter);
 router.use(atomsRouter);
 router.use(usersRouter);

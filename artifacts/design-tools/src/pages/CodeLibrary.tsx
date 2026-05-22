@@ -13,6 +13,7 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { BookOpen, ExternalLink, RefreshCw, X } from "lucide-react";
+import { SubstrateCatalogPanel } from "../components/SubstrateCatalogPanel";
 
 function relativeTime(iso: string | null | undefined): string {
   if (!iso) return "never";
@@ -256,6 +257,15 @@ export function CodeLibrary() {
         browse its atoms, click a book pill to filter, or open one to see the
         full text and source link.
       </p>
+
+      {/* QA-17 — every jurisdiction in the Hauska substrate, read live via
+          the MCP catalog surface. Sits above the cortex-prod-local corpus
+          (which still owns warmup + atom browsing). */}
+      <SubstrateCatalogPanel />
+
+      <h2 className="sc-label" style={{ marginTop: 8 }}>
+        Cortex-local corpus
+      </h2>
 
       {isLoading && <div className="sc-body">Loading jurisdictions…</div>}
 
