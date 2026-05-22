@@ -4,13 +4,37 @@ name: Cloud Run Deploy (cortex-api)
 # Replit → Cloud Run cutover target (Decision 0.20 ①: net-new service
 # `cortex-api` in the smartcity-os GCP project, us-central1). See
 # docs/deploy.md.
-# - build-and-push fires on every push to main, tags <sha> + latest, pushes
-#   to Artifact Registry. Does NOT deploy.
-# - deploy-canary is workflow_dispatch-only. Uses --tag=canary for a stable
-#   smoke URL (https://canary---<service-host>/...). Adds --no-traffic only
-#   when the Cloud Run service already exists (gcloud forbids --no-traffic on
-#   the very first create). Traffic shifts are manual via gcloud per the
-#   canary runbook. NEVER add an automatic traffic-shifting step here.
+#
+# Two trigger surfaces:
+# - `push` to `main` runs `build-and-push` only — tags <sha> + latest and
+#   pushes the image to Artifact Registry. Does NOT deploy, NOT migrate,
+#   NOT touch traffic. The image just sits in the registry until a
+#   deliberate `workflow_dispatch` picks it up.
+# - `workflow_dispatch` with an `action` input runs exactly one of four
+#   deliberate operator-triggered jobs (Phase 2, P2-1 + P2-2):
+#     * `deploy-canary`   — create a new revision tagged `canary` at 0%
+#       traffic (adds --no-traffic when the service already exists; the
+#       first-ever create cannot use --no-traffic per gcloud).
+#     * `run-migrations`  — apply pending lib/db/drizzle/*.sql files
+#       to the production DB via `_schema_migrations` tracking. First
+#       run requires `bootstrap=true` to seed the tracker on a DB that
+#       is already at the migration head.
+#     * `shift-traffic`   — route 100% traffic to the canary-tagged
+#       revision and smoke-probe production /api/healthz.
+#     * `rollback`        — route 100% traffic back to a named prior
+#       revision (`rollback_revision` input).
+#
+# HARD CONSTRAINTS — do not relax:
+# - Traffic shifts and DB migrations are NEVER coupled to `push`. The
+#   shift-traffic / rollback / run-migrations jobs only run on
+#   workflow_dispatch and gate on `inputs.action`; they are unreachable
+#   from a push event. Every traffic change and every DB migration is a
+#   separate deliberate operator action.
+# - build-and-push stays push-triggered and image-only. It does not
+#   deploy, it does not migrate, it does not shift traffic.
+# - Canary discipline: the canonical canary sequence is deploy-canary →
+#   run-migrations → smoke → shift-traffic, separate dispatches each.
+#   See 90_runbooks/cloud_run_canary_deploy.md.
 #
 # Toolchain (pnpm 10, Node 20) intentionally mirrors .github/workflows/pr-checks.yml.
 
@@ -20,11 +44,31 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      action:
+        description: "Which operator-triggered job to run"
+        required: true
+        default: deploy-canary
+        type: choice
+        options:
+          - deploy-canary
+          - run-migrations
+          - shift-traffic
+          - rollback
       image_tag:
-        description: "Image tag to deploy (sha preferred; 'latest' for the most recent build-and-push)"
+        description: "deploy-canary only — image tag (sha preferred; 'latest' = the most recent build-and-push)"
         required: false
         default: latest
         type: string
+      rollback_revision:
+        description: "rollback only — revision name to send 100% traffic to (e.g. cortex-api-00017-gex)"
+        required: false
+        default: ""
+        type: string
+      bootstrap:
+        description: "run-migrations only — first-run flag: seed _schema_migrations with every existing file marked applied (use when the DB is already at the head)"
+        required: false
+        default: false
+        type: boolean
 
 env:
   GCP_REGION: us-central1
@@ -83,7 +127,7 @@ jobs:
 
   deploy-canary:
     name: Deploy 0% canary
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'deploy-canary'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -177,3 +221,187 @@ jobs:
           echo ""
           echo "Canary tag URL (smoke /api/healthz here; after first deploy, default URL may share traffic — see job log above):"
           echo "  https://canary---${HOST}"
+
+  # ────────────────────────────────────────────────────────────────────
+  # Phase 2 — operator-triggered deploy lifecycle jobs.
+  # ────────────────────────────────────────────────────────────────────
+  # Each gates on `inputs.action`; only ever reachable from a deliberate
+  # workflow_dispatch. Never from a push.
+
+  run-migrations:
+    name: Apply pending DB migrations
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'run-migrations'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate required secrets
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          : "${GCP_PROJECT_ID:?GCP_PROJECT_ID secret is required (see docs/deploy.md)}"
+          : "${GCP_WORKLOAD_IDENTITY_PROVIDER:?GCP_WORKLOAD_IDENTITY_PROVIDER secret is required (see docs/deploy.md)}"
+          : "${GCP_SERVICE_ACCOUNT:?GCP_SERVICE_ACCOUNT secret is required (see docs/deploy.md)}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch DATABASE_URL from Secret Manager
+        # `::add-mask::` keeps the connection string out of the GHA log.
+        # The deploy SA has `roles/secretmanager.secretAccessor` per
+        # docs/deploy.md §4; the same binding the Cloud Run runtime uses.
+        run: |
+          set -euo pipefail
+          URL=$(gcloud secrets versions access latest \
+            --secret=DEPLOYMENT_DATABASE_URL \
+            --project=${{ secrets.GCP_PROJECT_ID }})
+          echo "::add-mask::$URL"
+          echo "DATABASE_URL=$URL" >> "$GITHUB_ENV"
+
+      - name: Plan + apply pending migrations
+        # The script echoes the pending list before applying and the
+        # applied state after (Phase 2 dispatch P2-2 contract). First
+        # ever run requires `bootstrap=true` to seed _schema_migrations
+        # against a DB that is already at the migration head; the script
+        # aborts with explicit instructions otherwise.
+        env:
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+        run: pnpm --filter @workspace/db run migrate:prod
+
+  shift-traffic:
+    name: Shift 100% traffic to the canary tag
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'shift-traffic'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate required secrets
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          : "${GCP_PROJECT_ID:?GCP_PROJECT_ID secret is required (see docs/deploy.md)}"
+          : "${GCP_WORKLOAD_IDENTITY_PROVIDER:?GCP_WORKLOAD_IDENTITY_PROVIDER secret is required (see docs/deploy.md)}"
+          : "${GCP_SERVICE_ACCOUNT:?GCP_SERVICE_ACCOUNT secret is required (see docs/deploy.md)}"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Shift 100% traffic to the canary tag
+        run: |
+          set -euo pipefail
+          SVC="${{ env.CLOUD_RUN_SERVICE }}"
+          RGN="${{ env.GCP_REGION }}"
+          echo "Shifting 100% traffic on ${SVC} to the canary tag..."
+          gcloud run services update-traffic "$SVC" \
+            --region="$RGN" \
+            --to-tags=canary=100
+          echo ""
+          echo "Resulting traffic split:"
+          gcloud run services describe "$SVC" --region="$RGN" \
+            --format='value(status.traffic)'
+
+      - name: Smoke-probe production /api/healthz
+        run: |
+          set -euo pipefail
+          SVC="${{ env.CLOUD_RUN_SERVICE }}"
+          RGN="${{ env.GCP_REGION }}"
+          BASE_URL=$(gcloud run services describe "$SVC" --region="$RGN" \
+            --format='value(status.url)')
+          echo "Production URL: ${BASE_URL}"
+          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/api/healthz")
+          echo "GET ${BASE_URL}/api/healthz -> HTTP ${STATUS}"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Production /api/healthz returned HTTP ${STATUS} after traffic shift — investigate before declaring the shift done"
+            exit 1
+          fi
+
+  rollback:
+    name: Roll traffic back to a prior revision
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'rollback'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate inputs + secrets
+        env:
+          ROLLBACK_REV: ${{ inputs.rollback_revision }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          : "${ROLLBACK_REV:?rollback_revision input is required when action=rollback (e.g. cortex-api-00017-gex)}"
+          : "${GCP_PROJECT_ID:?GCP_PROJECT_ID secret is required (see docs/deploy.md)}"
+          : "${GCP_WORKLOAD_IDENTITY_PROVIDER:?GCP_WORKLOAD_IDENTITY_PROVIDER secret is required (see docs/deploy.md)}"
+          : "${GCP_SERVICE_ACCOUNT:?GCP_SERVICE_ACCOUNT secret is required (see docs/deploy.md)}"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Roll 100% traffic back to ${{ inputs.rollback_revision }}
+        run: |
+          set -euo pipefail
+          SVC="${{ env.CLOUD_RUN_SERVICE }}"
+          RGN="${{ env.GCP_REGION }}"
+          REV="${{ inputs.rollback_revision }}"
+          echo "Rolling traffic on ${SVC} to revision ${REV}..."
+          gcloud run services update-traffic "$SVC" \
+            --region="$RGN" \
+            --to-revisions="${REV}=100"
+          echo ""
+          echo "Resulting traffic split:"
+          gcloud run services describe "$SVC" --region="$RGN" \
+            --format='value(status.traffic)'
