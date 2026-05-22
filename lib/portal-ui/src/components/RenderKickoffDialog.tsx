@@ -7,10 +7,10 @@ import {
   getGenerateRenderPromptUrl,
   customFetch,
   ApiError,
-  KickoffRenderCommonFieldsExpertName,
-  KickoffRenderCommonFieldsRenderStyle,
   type DomainRenderKind,
   type KickoffRenderBody,
+  type KickoffRenderCommonFieldsExpertName,
+  type KickoffRenderCommonFieldsRenderStyle,
   type KickoffRenderResponse,
   type PromptGeneratorResponse,
   type RenderListItem,
@@ -86,6 +86,11 @@ const INTENT_HINT: Record<RenderIntent, string> = {
     "Early-design exploration — floor plans, massing, sketch and illustration styles.",
 };
 
+// String literals (not the imported const objects) so this module has
+// no runtime dependency on `KickoffRenderCommonFieldsExpertName` /
+// `KickoffRenderCommonFieldsRenderStyle` — that lets unrelated tests
+// `vi.mock("@workspace/api-client-react")` without having to mirror
+// every const export. The types still pin the literals to the schema.
 const INTENT_DEFAULTS: Record<
   RenderIntent,
   {
@@ -93,14 +98,8 @@ const INTENT_DEFAULTS: Record<
     style: KickoffRenderCommonFieldsRenderStyle;
   }
 > = {
-  deliverable: {
-    expert: KickoffRenderCommonFieldsExpertName.exterior,
-    style: KickoffRenderCommonFieldsRenderStyle.photoreal,
-  },
-  concept: {
-    expert: KickoffRenderCommonFieldsExpertName.plan,
-    style: KickoffRenderCommonFieldsRenderStyle.freehand_sketch,
-  },
+  deliverable: { expert: "exterior", style: "photoreal" },
+  concept: { expert: "plan", style: "freehand_sketch" },
 };
 
 const EXPERT_LABEL: Record<KickoffRenderCommonFieldsExpertName, string> = {
