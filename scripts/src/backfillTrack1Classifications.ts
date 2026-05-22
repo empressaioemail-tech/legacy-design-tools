@@ -90,7 +90,7 @@ import {
 import {
   PostgresEventAnchoringService,
   type EventAnchoringService,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 import { PLAN_REVIEW_DISCIPLINE_VALUES } from "@workspace/api-zod";
 import {
   classificationAtomId,

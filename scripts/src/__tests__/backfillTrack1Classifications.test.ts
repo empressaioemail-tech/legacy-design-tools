@@ -33,7 +33,7 @@ import { withTestSchema, type TestSchemaContext } from "@workspace/db/testing";
 import {
   PostgresEventAnchoringService,
   type EventAnchoringService,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 import { backfill, parseArgs } from "../backfillTrack1Classifications";
 
 function makeDb(ctx: TestSchemaContext): Parameters<typeof backfill>[1] {

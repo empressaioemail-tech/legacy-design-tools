@@ -44,7 +44,7 @@ import { db as defaultDb, pool, sheets } from "@workspace/db";
 import {
   PostgresEventAnchoringService,
   type EventAnchoringService,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 
 export interface CliOptions {
   dryRun: boolean;

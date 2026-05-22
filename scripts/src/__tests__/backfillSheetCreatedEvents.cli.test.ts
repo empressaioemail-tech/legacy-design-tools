@@ -75,7 +75,7 @@ interface CliResult {
  * `pnpm exec`) because pnpm adds ~2-3s of startup overhead per
  * invocation that compounds across the suite. Using the workspace's
  * own `node_modules/.bin/tsx` keeps node_modules resolution intact
- * for `@workspace/db` and `@workspace/empressa-atom`.
+ * for `@workspace/db` and `@hauska/atom-contract`.
  *
  * The child inherits `process.env` so `PATH`, `NODE_ENV`, etc.
  * remain available, but `DATABASE_URL` is overridden to point at the

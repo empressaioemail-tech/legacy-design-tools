@@ -23,7 +23,7 @@ import {
 import {
   PostgresEventAnchoringService,
   type EventAnchoringService,
-} from "@workspace/empressa-atom";
+} from "@hauska/atom-contract";
 import {
   withTestSchema,
   type TestDb,
