@@ -176,23 +176,30 @@ async function waitForStatus(
   );
 }
 
-describe("findings — audience gate", () => {
-  it("403s on non-internal audience for every endpoint", async () => {
+describe("findings — architect-workflow routes (P1-5)", () => {
+  it("generate / status / list are reachable without an internal audience", async () => {
+    // The pre-submittal compliance review is an architect workflow
+    // (operator decision 2026-05-22, review-surface relocation). The
+    // generate / status / list routes no longer require a reviewer
+    // (internal) audience — production fails every session closed to
+    // audience:"user", so the reviewer gate dead-ended the entire
+    // architect Findings tab in prod.
     const { submission } = await seedEngagementSubmission();
-    const r1 = await request(getApp()).get(
+
+    const list = await request(getApp()).get(
       `/api/submissions/${submission.id}/findings`,
     );
-    expect(r1.status).toBe(403);
+    expect(list.status).not.toBe(403);
 
-    const r2 = await request(getApp())
+    const generate = await request(getApp())
       .post(`/api/submissions/${submission.id}/findings/generate`)
       .send({});
-    expect(r2.status).toBe(403);
+    expect(generate.status).not.toBe(403);
 
-    const r3 = await request(getApp()).get(
+    const status = await request(getApp()).get(
       `/api/submissions/${submission.id}/findings/status`,
     );
-    expect(r3.status).toBe(403);
+    expect(status.status).not.toBe(403);
   });
 });
 
