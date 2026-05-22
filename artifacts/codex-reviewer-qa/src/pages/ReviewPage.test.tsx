@@ -10,8 +10,22 @@ import { makeFinding } from "../__fixtures__/findings";
  * `useQueryClient` stay real (provided by a QueryClientProvider).
  */
 const hookState = vi.hoisted(() => ({
-  engagements: [] as Array<{ id: string; name: string }>,
-  submissions: [] as Array<{ id: string; submittedAt: string; status: string }>,
+  engagements: [] as Array<{
+    id: string;
+    name: string;
+    jurisdiction?: string | null;
+  }>,
+  submissions: [] as Array<{
+    id: string;
+    submittedAt: string;
+    status: string;
+    jurisdiction?: string | null;
+  }>,
+  jurisdictions: [] as Array<{
+    key: string;
+    displayName: string;
+    atomCount: number;
+  }>,
   status: null as { state: string; error: string | null } | null,
   findings: [] as ReturnType<typeof makeFinding>[],
 }));
@@ -26,6 +40,10 @@ vi.mock("@workspace/api-client-react", () => ({
     isLoading: false,
   }),
   useGetSubmissionFindingsGenerationStatus: () => ({ data: hookState.status }),
+  useListCodeJurisdictions: () => ({
+    data: hookState.jurisdictions,
+    isLoading: false,
+  }),
   useListSubmissionFindings: () => ({
     data: { findings: hookState.findings },
     isLoading: false,
@@ -65,6 +83,7 @@ function renderPage() {
 beforeEach(() => {
   hookState.engagements = [];
   hookState.submissions = [];
+  hookState.jurisdictions = [];
   hookState.status = null;
   hookState.findings = [];
 });
@@ -112,5 +131,82 @@ describe("ReviewPage", () => {
     expect(
       screen.getByText("Setback shortfall on the front yard."),
     ).toBeTruthy();
+  });
+});
+
+describe("ReviewPage — jurisdiction switcher (CDX-5)", () => {
+  it("shows no jurisdiction bar until an engagement is picked", () => {
+    hookState.engagements = [{ id: "e1", name: "Musgrave Residence" }];
+    renderPage();
+    expect(screen.queryByTestId("jurisdiction-bar")).toBeNull();
+  });
+
+  it("surfaces the engagement's jurisdiction and its indexed corpus", () => {
+    hookState.engagements = [
+      { id: "e1", name: "Musgrave Residence", jurisdiction: "Grand County" },
+    ];
+    hookState.jurisdictions = [
+      { key: "grand-county", displayName: "Grand County", atomCount: 1240 },
+    ];
+    renderPage();
+
+    fireEvent.change(screen.getByTestId("engagement-select"), {
+      target: { value: "e1" },
+    });
+
+    expect(screen.getByTestId("jurisdiction-name").textContent).toBe(
+      "Grand County",
+    );
+    expect(screen.getByTestId("jurisdiction-corpus").textContent).toContain(
+      "indexed code atoms",
+    );
+  });
+
+  it("updates the jurisdiction when the engagement switches", () => {
+    hookState.engagements = [
+      { id: "e1", name: "Musgrave Residence", jurisdiction: "Grand County" },
+      { id: "e2", name: "Bastrop Infill", jurisdiction: "Bastrop UDC" },
+    ];
+    renderPage();
+
+    fireEvent.change(screen.getByTestId("engagement-select"), {
+      target: { value: "e1" },
+    });
+    expect(screen.getByTestId("jurisdiction-name").textContent).toBe(
+      "Grand County",
+    );
+
+    fireEvent.change(screen.getByTestId("engagement-select"), {
+      target: { value: "e2" },
+    });
+    expect(screen.getByTestId("jurisdiction-name").textContent).toBe(
+      "Bastrop UDC",
+    );
+  });
+
+  it("warns when a submission was filed under a stale jurisdiction", () => {
+    hookState.engagements = [
+      { id: "e1", name: "Bastrop Infill", jurisdiction: "Bastrop UDC" },
+    ];
+    hookState.submissions = [
+      {
+        id: "sub-1",
+        submittedAt: "2026-05-20T00:00:00.000Z",
+        status: "pending",
+        jurisdiction: "Grand County",
+      },
+    ];
+    renderPage();
+
+    fireEvent.change(screen.getByTestId("engagement-select"), {
+      target: { value: "e1" },
+    });
+    fireEvent.change(screen.getByTestId("submission-select"), {
+      target: { value: "sub-1" },
+    });
+
+    expect(
+      screen.getByTestId("jurisdiction-snapshot-warning").textContent,
+    ).toContain("Grand County");
   });
 });
