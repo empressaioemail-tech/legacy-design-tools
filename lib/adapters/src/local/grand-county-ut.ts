@@ -229,7 +229,9 @@ export const grandCountyRoadsAdapter: Adapter = {
         latitude: ctx.parcel.latitude,
         longitude: ctx.parcel.longitude,
         outFields: "*",
-        returnGeometry: false,
+        // P1-1 — return the road polyline geometry so the Site Context
+        // map can draw the road centerlines as polylines.
+        returnGeometry: true,
         fetchImpl: ctx.fetchImpl,
         signal: ctx.signal,
         upstreamLabel: "Grand County, UT GIS roads",

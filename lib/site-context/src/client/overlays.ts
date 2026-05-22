@@ -2,13 +2,19 @@
  * Briefing-source → SiteMap overlay extraction.
  *
  * Recognized payload shapes (catalogued from `lib/adapters/src/**`):
- *   - `payload.parcel.geometry`, `payload.zoning.geometry`,
- *     `payload.features[].geometry` — ArcGIS polygon rings (wkid
- *     4326 or 102100/3857; the latter is unprojected to WGS84).
+ *   - `payload.parcel.geometry`, `payload.zoning.geometry` — ArcGIS
+ *     polygon rings.
+ *   - `payload.features[].geometry` — ArcGIS features carrying polygon
+ *     `rings` (e.g. `ugrc:dem` elevation bands) or polyline `paths`
+ *     (e.g. county-GIS roads).
+ *   - `payload.elements[].geometry` — OpenStreetMap Overpass ways
+ *     (`{lat, lon}` vertex arrays — the `grand-county-ut:roads` OSM
+ *     fallback).
  *   - `payload.location.{x, y}` — WGS84 point (e.g. USGS NED).
  *
- * Anything malformed, missing, or of an unknown shape is skipped so
- * the map falls back to the parcel pin instead of throwing.
+ * Coordinates are wkid 4326 or 102100/3857 (the latter unprojected to
+ * WGS84). Anything malformed, missing, or of an unknown shape is
+ * skipped so the map falls back to the parcel pin instead of throwing.
  */
 
 // Local structural type so site-context does not depend on
@@ -33,6 +39,14 @@ export type SiteMapOverlayTier = "federal" | "state" | "local" | "manual";
 export type SiteMapOverlay =
   | {
       kind: "polygon";
+      sourceId: string;
+      layerKind: string;
+      provider: string | null;
+      tier: SiteMapOverlayTier;
+      positions: Array<Array<[number, number]>>;
+    }
+  | {
+      kind: "polyline";
       sourceId: string;
       layerKind: string;
       provider: string | null;
@@ -91,28 +105,83 @@ function projectRingPoint(
   return [y, x];
 }
 
-function extractRingsFromArcGisGeometry(
+function resolveWkid(geometry: Record<string, unknown>): number {
+  const sr = geometry.spatialReference;
+  if (isRecord(sr) && isFiniteNumber(sr.wkid)) return sr.wkid;
+  if (isRecord(sr) && isFiniteNumber(sr.latestWkid)) return sr.latestWkid;
+  return 4326;
+}
+
+/**
+ * Extract WGS84 line-strings from an ArcGIS geometry's `rings` (polygon)
+ * or `paths` (polyline) member. `minPoints` is 3 for a polygon ring,
+ * 2 for a polyline path.
+ */
+function extractArcGisLineStrings(
   geometry: unknown,
+  key: "rings" | "paths",
+  minPoints: number,
 ): Array<Array<[number, number]>> {
   if (!isRecord(geometry)) return [];
-  const rings = geometry.rings;
-  if (!Array.isArray(rings)) return [];
-  let wkid = 4326;
-  const sr = geometry.spatialReference;
-  if (isRecord(sr) && isFiniteNumber(sr.wkid)) {
-    wkid = sr.wkid;
-  } else if (isRecord(sr) && isFiniteNumber(sr.latestWkid)) {
-    wkid = sr.latestWkid;
-  }
+  const lineStrings = geometry[key];
+  if (!Array.isArray(lineStrings)) return [];
+  const wkid = resolveWkid(geometry);
   const out: Array<Array<[number, number]>> = [];
-  for (const ring of rings) {
-    if (!Array.isArray(ring)) continue;
+  for (const lineString of lineStrings) {
+    if (!Array.isArray(lineString)) continue;
     const projected: Array<[number, number]> = [];
-    for (const pair of ring) {
+    for (const pair of lineString) {
       const point = projectRingPoint(pair, wkid);
       if (point) projected.push(point);
     }
-    if (projected.length >= 3) out.push(projected);
+    if (projected.length >= minPoints) out.push(projected);
+  }
+  return out;
+}
+
+function extractRingsFromArcGisGeometry(
+  geometry: unknown,
+): Array<Array<[number, number]>> {
+  return extractArcGisLineStrings(geometry, "rings", 3);
+}
+
+function extractPathsFromArcGisGeometry(
+  geometry: unknown,
+): Array<Array<[number, number]>> {
+  return extractArcGisLineStrings(geometry, "paths", 2);
+}
+
+/**
+ * Extract WGS84 polylines from an OpenStreetMap Overpass `elements`
+ * array. `out body geom` ways carry an inline `geometry` array of
+ * `{lat, lon}` vertices.
+ */
+function extractPolylinesFromOsmElements(
+  elements: unknown,
+): Array<Array<[number, number]>> {
+  if (!Array.isArray(elements)) return [];
+  const out: Array<Array<[number, number]>> = [];
+  for (const el of elements) {
+    if (!isRecord(el)) continue;
+    const geom = el.geometry;
+    if (!Array.isArray(geom)) continue;
+    const line: Array<[number, number]> = [];
+    for (const pt of geom) {
+      if (!isRecord(pt)) continue;
+      const lat = pt.lat;
+      const lon = pt.lon;
+      if (
+        isFiniteNumber(lat) &&
+        isFiniteNumber(lon) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lon >= -180 &&
+        lon <= 180
+      ) {
+        line.push([lat, lon]);
+      }
+    }
+    if (line.length >= 2) out.push(line);
   }
   return out;
 }
@@ -149,6 +218,9 @@ function overlaysFromSource(
     }
   }
 
+  // ArcGIS feature arrays — `ugrc:dem` bands carry polygon `rings`;
+  // county-GIS roads carry polyline `paths`. A feature may carry
+  // either; emit whichever it has.
   if (Array.isArray(payload.features)) {
     for (const feat of payload.features) {
       if (!isRecord(feat)) continue;
@@ -156,6 +228,19 @@ function overlaysFromSource(
       if (rings.length > 0) {
         out.push({ kind: "polygon", ...base, positions: rings });
       }
+      const paths = extractPathsFromArcGisGeometry(feat.geometry);
+      if (paths.length > 0) {
+        out.push({ kind: "polyline", ...base, positions: paths });
+      }
+    }
+  }
+
+  // OpenStreetMap Overpass ways — the `grand-county-ut:roads` OSM
+  // fallback. All ways collapse into one polyline overlay.
+  if (Array.isArray(payload.elements)) {
+    const lines = extractPolylinesFromOsmElements(payload.elements);
+    if (lines.length > 0) {
+      out.push({ kind: "polyline", ...base, positions: lines });
     }
   }
 
