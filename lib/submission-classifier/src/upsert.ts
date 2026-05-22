@@ -22,7 +22,7 @@ import {
   submissionClassifications,
   type SubmissionClassification,
 } from "@workspace/db";
-import type { EventAnchoringService } from "@workspace/empressa-atom";
+import type { EventAnchoringService } from "@hauska/atom-contract";
 import {
   classificationAtomId,
   SUBMISSION_CLASSIFICATION_EVENT_TYPES,
