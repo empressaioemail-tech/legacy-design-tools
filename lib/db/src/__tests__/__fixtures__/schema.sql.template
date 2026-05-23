@@ -854,6 +854,9 @@ CREATE TABLE @@SCHEMA@@.viewpoint_renders (
     bim_model_id uuid,
     bim_model_atom_event_id text,
     kind text NOT NULL,
+    source_type text DEFAULT 'model-capture'::text NOT NULL,
+    source_upload_url text,
+    parent_render_output_id uuid,
     request_payload jsonb NOT NULL,
     status text NOT NULL,
     mnml_job_id text,
@@ -864,10 +867,7 @@ CREATE TABLE @@SCHEMA@@.viewpoint_renders (
     requested_by text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    completed_at timestamp with time zone,
-    source_type text DEFAULT 'model-capture'::text NOT NULL,
-    source_upload_url text,
-    parent_render_output_id uuid
+    completed_at timestamp with time zone
 );
 
 
