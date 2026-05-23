@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchWithRetry, TRANSIENT_STATUS_CODES } from "../retry";
+import {
+  BODY_EXCERPT_MAX_CHARS,
+  fetchWithRetry,
+  TRANSIENT_STATUS_CODES,
+} from "../retry";
 import { AdapterRunError } from "../types";
 
 const noSleep = (_ms: number): Promise<void> => Promise.resolve();
@@ -8,6 +12,13 @@ function ok(body: unknown = {}, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+function textRes(body: string, status: number, contentType = "text/plain"): Response {
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": contentType },
   });
 }
 
@@ -154,5 +165,124 @@ describe("fetchWithRetry", () => {
     );
     expect(response.status).toBe(200);
     expect(attempts).toBe(2);
+  });
+
+  // QA-22 reopen — body-excerpt capture so adapter failure pills can
+  // carry the upstream's actual error text without operators needing
+  // Cloud Run log access for every triage round.
+  describe("bodyExcerpt capture (QA-22)", () => {
+    it("captures the body excerpt on transient-status retry exhaustion", async () => {
+      const fetchImpl = vi.fn(async () =>
+        textRes("Service is down for scheduled maintenance until 22:00 UTC.", 503),
+      );
+      const { response, attempts, bodyExcerpt } = await fetchWithRetry(
+        "https://example.test/x",
+        undefined,
+        { fetchImpl, sleepImpl: noSleep, maxAttempts: 3 },
+      );
+      expect(response.status).toBe(503);
+      expect(attempts).toBe(3);
+      expect(bodyExcerpt).toBe(
+        "Service is down for scheduled maintenance until 22:00 UTC.",
+      );
+    });
+
+    it("captures the body excerpt on a hard 4xx (single attempt, no retry)", async () => {
+      const fetchImpl = vi.fn(async () =>
+        textRes(
+          JSON.stringify({ error: { code: 400, message: "Layer 0 not found" } }),
+          400,
+          "application/json",
+        ),
+      );
+      const { response, attempts, bodyExcerpt } = await fetchWithRetry(
+        "https://example.test/x",
+        undefined,
+        { fetchImpl, sleepImpl: noSleep, maxAttempts: 3 },
+      );
+      expect(response.status).toBe(400);
+      expect(attempts).toBe(1);
+      expect(bodyExcerpt).toContain("Layer 0 not found");
+    });
+
+    it("collapses whitespace so a pretty-printed HTML error stays compact", async () => {
+      const html = `
+        <html>
+          <body>
+            <h1>503 Service Unavailable</h1>
+            <p>The upstream is overloaded.</p>
+          </body>
+        </html>
+      `;
+      const fetchImpl = vi.fn(async () => textRes(html, 503, "text/html"));
+      const { bodyExcerpt } = await fetchWithRetry(
+        "https://example.test/x",
+        undefined,
+        { fetchImpl, sleepImpl: noSleep, maxAttempts: 1 },
+      );
+      expect(bodyExcerpt).toBeDefined();
+      // No double-space runs left after the collapse — the excerpt is
+      // one line regardless of how the upstream pretty-printed.
+      expect(bodyExcerpt).not.toMatch(/ {2,}/);
+      // And the visible characters survive in order.
+      expect(bodyExcerpt).toContain("503 Service Unavailable");
+      expect(bodyExcerpt).toContain("The upstream is overloaded.");
+    });
+
+    it(`truncates excerpts longer than BODY_EXCERPT_MAX_CHARS (${BODY_EXCERPT_MAX_CHARS}) with a trailing ellipsis`, async () => {
+      const long = "x".repeat(BODY_EXCERPT_MAX_CHARS * 2);
+      const fetchImpl = vi.fn(async () => textRes(long, 502));
+      const { bodyExcerpt } = await fetchWithRetry(
+        "https://example.test/x",
+        undefined,
+        { fetchImpl, sleepImpl: noSleep, maxAttempts: 1 },
+      );
+      expect(bodyExcerpt).toBeDefined();
+      // The visible-character cap is exact; the appended ellipsis is the
+      // single character `…`, so total length is +1.
+      expect(bodyExcerpt!.length).toBe(BODY_EXCERPT_MAX_CHARS + 1);
+      expect(bodyExcerpt!.endsWith("…")).toBe(true);
+    });
+
+    it("returns bodyExcerpt undefined when the body is empty", async () => {
+      const fetchImpl = vi.fn(async () => textRes("", 502));
+      const { bodyExcerpt } = await fetchWithRetry(
+        "https://example.test/x",
+        undefined,
+        { fetchImpl, sleepImpl: noSleep, maxAttempts: 1 },
+      );
+      expect(bodyExcerpt).toBeUndefined();
+    });
+
+    it("does NOT populate bodyExcerpt on a successful (2xx) response", async () => {
+      const fetchImpl = vi.fn(async () => ok({ ok: true }));
+      const { response, bodyExcerpt } = await fetchWithRetry(
+        "https://example.test/x",
+        undefined,
+        { fetchImpl, sleepImpl: noSleep, maxAttempts: 3 },
+      );
+      expect(response.status).toBe(200);
+      expect(bodyExcerpt).toBeUndefined();
+    });
+
+    it("returns undefined excerpt when the body read itself throws", async () => {
+      // Build a Response whose .text() rejects, simulating a transport
+      // reset mid-read. Constructing this requires reaching into the
+      // Response prototype because Response is designed to be inert
+      // until consumed.
+      const res = textRes("ignored", 503);
+      Object.defineProperty(res, "text", {
+        value: async () => {
+          throw new TypeError("network reset mid-read");
+        },
+      });
+      const fetchImpl = vi.fn(async () => res);
+      const { bodyExcerpt } = await fetchWithRetry(
+        "https://example.test/x",
+        undefined,
+        { fetchImpl, sleepImpl: noSleep, maxAttempts: 1 },
+      );
+      expect(bodyExcerpt).toBeUndefined();
+    });
   });
 });

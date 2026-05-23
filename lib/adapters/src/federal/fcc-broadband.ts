@@ -183,7 +183,7 @@ export const fccBroadbandAdapter: Adapter = {
     url.searchParams.set("lat", String(ctx.parcel.latitude));
     url.searchParams.set("lng", String(ctx.parcel.longitude));
 
-    const { response: res, attempts } = await fetchWithRetry(
+    const { response: res, attempts, bodyExcerpt } = await fetchWithRetry(
       url.toString(),
       {
         signal: ctx.signal,
@@ -202,9 +202,15 @@ export const fccBroadbandAdapter: Adapter = {
       },
     );
     if (!res.ok) {
+      // QA-22 reopen: append the upstream body excerpt so a non-OK
+      // from the FCC BDC v2 endpoint surfaces its actual response
+      // (envelope error, HTML error page, empty body) in the layer-
+      // failure pill — operators don't need Cloud Run access to tell
+      // schema drift from transient flakiness.
+      const suffix = bodyExcerpt ? ` Upstream response: ${bodyExcerpt}` : "";
       throw new AdapterRunError(
         "upstream-error",
-        `FCC National Broadband Map responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
+        `FCC National Broadband Map responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}.${suffix} Use Force refresh to retry.`,
       );
     }
     let json: unknown;

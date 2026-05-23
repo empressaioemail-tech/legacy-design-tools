@@ -98,7 +98,7 @@ export async function arcgisPointQuery(
     input.returnGeometry ? "true" : "false",
   );
 
-  const { response: res, attempts } = await fetchWithRetry(
+  const { response: res, attempts, bodyExcerpt } = await fetchWithRetry(
     url.toString(),
     {
       signal: input.signal,
@@ -119,9 +119,15 @@ export async function arcgisPointQuery(
     },
   );
   if (!res.ok) {
+    // QA-22 reopen: append the upstream body excerpt so the layer-
+    // failure pill carries the ArcGIS error envelope's `message`
+    // (or a Cloudflare interstitial / maintenance-window banner /
+    // empty body) — operators don't need Cloud Run access to choose
+    // between schema-drift and transient-blip diagnoses.
+    const suffix = bodyExcerpt ? ` Upstream response: ${bodyExcerpt}` : "";
     throw new AdapterRunError(
       "upstream-error",
-      `${label} responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
+      `${label} responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}.${suffix} Use Force refresh to retry.`,
     );
   }
 
