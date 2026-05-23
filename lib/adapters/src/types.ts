@@ -31,13 +31,18 @@ export type AdapterTier = "federal" | "state" | "local";
 
 /**
  * Wire-compatible producer flavor written to `briefing_sources.source_kind`.
- * `manual-upload` and `federal-adapter` are pre-existing values; this sprint
- * adds `state-adapter` and `local-adapter`.
+ * `manual-upload` and `federal-adapter` are pre-existing values; the
+ * DA-PI-4 sprint added `state-adapter` and `local-adapter`; the
+ * Cortex prop-intel SCOPE B (2026-05-23) adds `national-aggregator`
+ * for Regrid and any future national public-records aggregator that
+ * is neither a federal agency direct-publish (USGS / FEMA / FCC / EPA)
+ * nor a per-jurisdiction GIS feed.
  */
 export type AdapterSourceKind =
   | "federal-adapter"
   | "state-adapter"
-  | "local-adapter";
+  | "local-adapter"
+  | "national-aggregator";
 
 /**
  * Minimal parcel descriptor an adapter needs to decide coverage and run a
@@ -57,10 +62,25 @@ export interface AdapterParcelContext {
  * county/city the engagement's parcel falls in. Both fields use the same
  * stable lowercase slug convention as `@workspace/codes` jurisdictions
  * (e.g. `utah`, `grand-county-ut`).
+ *
+ * `partnerCity` — Cortex prop-intel SCOPE B (2026-05-23). True when the
+ * engagement's local jurisdiction has signed up as a Hauska substrate
+ * partner city (Bastrop, TX today; more in follow-on). Gates the
+ * per-county GIS adapters as opportunistic ENRICHMENT layers — for
+ * non-partner jurisdictions the per-county adapters are skipped
+ * entirely and Regrid (the national aggregator) is the sole baseline.
+ * For partner cities, both fire: the per-county adapter as enrichment,
+ * Regrid as baseline.
+ *
+ * Default is `false` / `undefined`. The api-server route that builds
+ * the AdapterContext is responsible for stamping the flag from the
+ * engagement record's partner-city marker (or from a hard-coded list
+ * until a `partner_city` column lands).
  */
 export interface AdapterJurisdiction {
   stateKey: AdapterStateKey | null;
   localKey: AdapterLocalKey | null;
+  partnerCity?: boolean;
 }
 
 /** Stable slug per pilot state covered by DA-PI-4. */

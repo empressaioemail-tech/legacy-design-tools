@@ -208,4 +208,179 @@ describe("extractBriefingSourceOverlays", () => {
       ]),
     ).toEqual([]);
   });
+
+  // Cortex prop-intel SCOPE B (2026-05-23) — Regrid emits parcel +
+  // zoning as full GeoJSON Feature wrappers (not the ArcGIS feature
+  // shape the county-GIS adapters emit). These cases pin the
+  // GeoJSON-side extraction so the SiteMap renders Regrid overlays.
+
+  it("renders a Regrid GeoJSON Polygon parcel (Feature wrapper, [lng,lat] → [lat,lng])", () => {
+    const overlays = extractBriefingSourceOverlays([
+      source(
+        {
+          kind: "parcel",
+          parcel: {
+            type: "Feature",
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [-109.55, 38.57],
+                  [-109.54, 38.57],
+                  [-109.54, 38.58],
+                  [-109.55, 38.58],
+                  [-109.55, 38.57],
+                ],
+              ],
+            },
+            properties: { headline: "1144 N Kayenta Dr" },
+          },
+        },
+        { sourceKind: "national-aggregator" },
+      ),
+    ]);
+    expect(overlays).toHaveLength(1);
+    expect(overlays[0]!.kind).toBe("polygon");
+    // GeoJSON is [lng, lat]; Leaflet expects [lat, lng]. Verify the swap.
+    expect(
+      overlays[0]!.kind === "polygon" && overlays[0]!.positions[0]![0],
+    ).toEqual([38.57, -109.55]);
+    // national-aggregator source_kind renders into the federal tier
+    // pill bucket (per the SCOPE B comment in overlays.ts).
+    expect(overlays[0]!.tier).toBe("federal");
+  });
+
+  it("renders a Regrid GeoJSON MultiPolygon parcel (flattens to multiple polygon rings)", () => {
+    const overlays = extractBriefingSourceOverlays([
+      source(
+        {
+          kind: "parcel",
+          parcel: {
+            type: "Feature",
+            geometry: {
+              type: "MultiPolygon",
+              coordinates: [
+                [
+                  [
+                    [-109.55, 38.57],
+                    [-109.54, 38.57],
+                    [-109.54, 38.58],
+                    [-109.55, 38.57],
+                  ],
+                ],
+                [
+                  [
+                    [-109.53, 38.59],
+                    [-109.52, 38.59],
+                    [-109.52, 38.60],
+                    [-109.53, 38.59],
+                  ],
+                ],
+              ],
+            },
+            properties: {},
+          },
+        },
+        { sourceKind: "national-aggregator" },
+      ),
+    ]);
+    expect(overlays).toHaveLength(1);
+    // Each disjoint polygon's outer ring becomes its own positions entry.
+    expect(
+      overlays[0]!.kind === "polygon" && overlays[0]!.positions.length,
+    ).toBe(2);
+  });
+
+  it("renders Regrid GeoJSON zoning Feature alongside parcel from the same source row", () => {
+    const overlays = extractBriefingSourceOverlays([
+      source(
+        {
+          kind: "zoning",
+          zoning: {
+            type: "Feature",
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [-109.55, 38.57],
+                  [-109.54, 38.57],
+                  [-109.54, 38.58],
+                  [-109.55, 38.57],
+                ],
+              ],
+            },
+            properties: {
+              fields: { zoning_type: "residential" },
+            },
+          },
+        },
+        { sourceKind: "national-aggregator", layerKind: "regrid-zoning" },
+      ),
+    ]);
+    expect(overlays).toHaveLength(1);
+    expect(overlays[0]!.kind).toBe("polygon");
+    expect(overlays[0]!.layerKind).toBe("regrid-zoning");
+  });
+
+  it("falls back to ArcGIS rings when payload.parcel is the county-GIS shape (no Feature wrapper)", () => {
+    // Regression test — extending overlays.ts for GeoJSON must not
+    // break the existing ArcGIS-side branch the county-GIS adapters
+    // (grand-county-ut:* etc.) emit.
+    const overlays = extractBriefingSourceOverlays([
+      source({
+        kind: "parcel",
+        parcel: {
+          // No `type: "Feature"` wrapper — `attributes` + `geometry` shape.
+          attributes: { PARCEL_ID: "01-12345" },
+          geometry: {
+            rings: [
+              [
+                [-109.55, 38.57],
+                [-109.54, 38.57],
+                [-109.54, 38.58],
+                [-109.55, 38.57],
+              ],
+            ],
+            spatialReference: { wkid: 4326 },
+          },
+        },
+      }),
+    ]);
+    expect(overlays).toHaveLength(1);
+    expect(overlays[0]!.kind).toBe("polygon");
+  });
+
+  it("skips GeoJSON Features with malformed coordinates without throwing", () => {
+    // Mixed valid + invalid points in the ring — valid ones still
+    // render if enough remain to meet the 3-point minimum.
+    const overlays = extractBriefingSourceOverlays([
+      source(
+        {
+          kind: "parcel",
+          parcel: {
+            type: "Feature",
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [-109.55, 38.57],
+                  [-109.54, 38.57],
+                  [-200, 999], // out-of-range → skipped
+                  [-109.54, 38.58],
+                  [-109.55, 38.57],
+                ],
+              ],
+            },
+            properties: {},
+          },
+        },
+        { sourceKind: "national-aggregator" },
+      ),
+    ]);
+    // 5 ring vertices → 1 dropped → 4 valid (still ≥ 3-point min).
+    expect(overlays).toHaveLength(1);
+    expect(
+      overlays[0]!.kind === "polygon" && overlays[0]!.positions[0]!.length,
+    ).toBe(4);
+  });
 });

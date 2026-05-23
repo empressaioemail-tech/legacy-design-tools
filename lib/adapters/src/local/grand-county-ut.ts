@@ -113,8 +113,44 @@ export const GRAND_COUNTY_PARCELS_FRESHNESS_THRESHOLD_MONTHS = 6;
 export const GRAND_COUNTY_ZONING_FRESHNESS_THRESHOLD_MONTHS = 6;
 export const GRAND_COUNTY_ROADS_FRESHNESS_THRESHOLD_MONTHS = 12;
 
+/**
+ * DEPRECATED AS BASELINE per Cortex prop-intel SCOPE B
+ * (2026-05-23). These Grand County, UT adapters used to be the
+ * sole parcel + zoning source for Moab-area engagements. After
+ * SCOPE B, Regrid (`regrid:parcels` + `regrid:zoning`) is the
+ * national baseline and fires for EVERY geocoded engagement.
+ *
+ * The per-county adapters in this file are now opportunistic
+ * ENRICHMENT layers that fire ONLY when the engagement's
+ * jurisdiction carries `partnerCity: true`. Grand County, UT is
+ * NOT currently a Hauska substrate partner city (Bastrop, TX is
+ * the canonical partner; see `doc_repo/_decisions/2026-05-23_
+ * partnership_first_scoping.md`), so on a default engagement
+ * these adapters return `no-coverage` and Regrid is the sole
+ * authoritative source.
+ *
+ * The adapters are kept in tree (not deleted) because:
+ *   1. If Grand County onboards as a partner city, flipping
+ *      `partnerCity = true` in the engagement jurisdiction
+ *      record re-activates them as enrichment with no other code
+ *      change.
+ *   2. The Grand County GIS firewall recon work (QA-22 SCOPE C)
+ *      may yet enable direct egress through a Cloud Run VPC +
+ *      NAT, at which point these are the live integration.
+ *   3. The OSM-fallback roads adapter is genuinely useful even
+ *      without partner status — but the `partnerCity` gate
+ *      applies to all three uniformly here for simplicity;
+ *      revisit if a real customer-zero case needs roads-only
+ *      without parcel/zoning.
+ *
+ * Re-enabling as baseline: drop the `partnerCity` clause in
+ * {@link grandCountyApplies} and document the rationale.
+ */
 function grandCountyApplies(ctx: AdapterContext): boolean {
-  return ctx.jurisdiction.localKey === "grand-county-ut";
+  return (
+    ctx.jurisdiction.localKey === "grand-county-ut" &&
+    ctx.jurisdiction.partnerCity === true
+  );
 }
 
 function nowIso(): string {
