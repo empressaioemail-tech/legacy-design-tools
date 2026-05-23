@@ -230,11 +230,15 @@ describe("ensureBimModelAndEmitIfcIngestEvent — unit", () => {
       .where(eq(bimModels.engagementId, fx.engagementId));
     expect(bmRows).toHaveLength(1);
     expect(bmRows[0]!.id).toBe(returnedId);
-    // The IFC ingest must NOT populate the Push-to-Revit-side columns
-    // (those belong to `routes/bimModels.ts` writes). The atom history
-    // is the substantive carrier of IFC provenance.
+    // QA-32 (2026-05-23): `materializedAt` IS stamped on the IFC
+    // ingest's UPSERT so the design-tools BIM viewer surfaces the
+    // engagement's as-built rows on the IFC-without-briefing path
+    // (the Musgrave_Residence_B verify on cortex-api-00017-jnn).
+    // The other Push-to-Revit-side columns (activeBriefingId,
+    // briefingVersion, revitDocumentPath) stay untouched — IFC
+    // ingest still has no opinion about them.
     expect(bmRows[0]!.activeBriefingId).toBeNull();
-    expect(bmRows[0]!.materializedAt).toBeNull();
+    expect(bmRows[0]!.materializedAt).toBeInstanceOf(Date);
     expect(bmRows[0]!.briefingVersion).toBe(0);
     expect(bmRows[0]!.revitDocumentPath).toBeNull();
 
@@ -284,36 +288,45 @@ describe("ensureBimModelAndEmitIfcIngestEvent — unit", () => {
 });
 
 describe("ensureBimModelAndEmitIfcIngestEvent — integration with prior Push-to-Revit state", () => {
-  it("preserves activeBriefingId / materializedAt when a Push-to-Revit row already exists", async () => {
+  it("refreshes materializedAt but preserves activeBriefingId / briefingVersion / revitDocumentPath when a Push-to-Revit row already exists (QA-32)", async () => {
     const fx = await seedEngagementSnapshotAndIfcRow();
 
     // Simulate a prior Push-to-Revit emission against this engagement —
     // the bim_models row exists with materializedAt / briefingVersion set.
-    const materializedAt = new Date("2026-04-01T12:00:00Z");
+    const priorMaterializedAt = new Date("2026-04-01T12:00:00Z");
     const [pushed] = await ctx.schema!.db
       .insert(bimModels)
       .values({
         engagementId: fx.engagementId,
-        materializedAt,
+        materializedAt: priorMaterializedAt,
         briefingVersion: 3,
         revitDocumentPath: "C:/projects/musgrave.rvt",
       })
       .returning();
+    const beforeIfcIngest = Date.now();
 
     const args = makeProducerArgs(fx);
     const returnedId = await ensureBimModelAndEmitIfcIngestEvent(args);
 
     expect(returnedId).toBe(pushed!.id);
 
-    // The row stays one-per-engagement and the Push-to-Revit-side state
-    // is intact — UPSERT must not clobber the to-be-built columns.
+    // QA-32: materializedAt IS refreshed on every successful IFC ingest
+    // so the design-tools BIM viewer reflects "the most recent
+    // successful materialization (briefing OR IFC)". The to-be-built
+    // columns (briefingVersion, revitDocumentPath) and the
+    // briefing-pointer (activeBriefingId) stay untouched — IFC ingest
+    // continues to have no opinion about them.
     const bmRows = await ctx.schema!.db
       .select()
       .from(bimModels)
       .where(eq(bimModels.engagementId, fx.engagementId));
     expect(bmRows).toHaveLength(1);
-    expect(bmRows[0]!.materializedAt?.toISOString()).toBe(
-      materializedAt.toISOString(),
+    expect(bmRows[0]!.materializedAt).toBeInstanceOf(Date);
+    expect(bmRows[0]!.materializedAt!.getTime()).toBeGreaterThanOrEqual(
+      beforeIfcIngest,
+    );
+    expect(bmRows[0]!.materializedAt!.toISOString()).not.toBe(
+      priorMaterializedAt.toISOString(),
     );
     expect(bmRows[0]!.briefingVersion).toBe(3);
     expect(bmRows[0]!.revitDocumentPath).toBe("C:/projects/musgrave.rvt");

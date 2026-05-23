@@ -496,7 +496,7 @@ async function loadActiveBriefingUpdatedAt(
  * Track B sprint: filter to `source_kind = 'briefing-derived'` so the
  * C#-facing read does NOT surface IFC-derived rows the add-in cannot
  * materialize. IFC rows are surfaced via the engagement-level read in
- * {@link loadAsBuiltIfcElementsForEngagement}.
+ * {@link loadActiveAsBuiltIfcElementsForEngagement}.
  */
 async function loadElementsForBriefing(
   briefingId: string,
@@ -514,23 +514,66 @@ async function loadElementsForBriefing(
 }
 
 /**
- * Load the as-built-ifc rows for an engagement's most-recently-parsed
- * snapshot IFC ingest (Track B sprint). Returns the bundle row first
- * (the one carrying the consolidated glTF `glb_object_path`) so the
- * viewer's "first row with glb_object_path wins" preference picks it
- * up, followed by the per-IFC-entity rows.
+ * Load the active as-built-ifc elements for an engagement (Track B
+ * sprint). Returns the bundle row first (the one carrying the
+ * consolidated glTF `glb_object_path`) so the viewer's "first row with
+ * glb_object_path wins" preference picks it up, followed by the
+ * per-IFC-entity rows. Returns `[]` for an engagement that has no
+ * as-built ingest.
  *
- * Returns `null` if the engagement has no parsed IFC. Returns `[]` if
- * the most-recent IFC parsed cleanly but produced zero entities (a
- * legitimate edge case for an empty / shell-only IFC).
+ * QA-32 (2026-05-23): scoped only by `engagement_id + active +
+ * source_kind`. Earlier this helper additionally joined `snapshot_
+ * ifc_files` and required `parsed_at IS NOT NULL`, then filtered
+ * elements by `source_snapshot_id = (latest parsed snapshot)`. That
+ * gate dropped as-built elements during the brief window between the
+ * elements transaction committing (step 5 of {@link ingestSnapshotIfc})
+ * and `snapshot_ifc_files.parsed_at` being stamped (step 6), and also
+ * hid the as-built rows on an engagement whose `bim_models` row had
+ * `active_briefing_id = NULL` (the IFC-without-briefing path the
+ * Musgrave_Residence_B verify on cortex-api-00017-jnn surfaced).
+ * Element-level supersession (`superseded_at IS NULL`) already keeps
+ * a re-ingest from surfacing stale entities, so the snapshot scope
+ * the prior implementation added was redundant.
  */
-async function loadAsBuiltIfcElementsForEngagement(
+async function loadActiveAsBuiltIfcElementsForEngagement(
+  engagementId: string,
+): Promise<MaterializableElement[]> {
+  return db
+    .select()
+    .from(materializableElements)
+    .where(
+      and(
+        eq(materializableElements.engagementId, engagementId),
+        isNull(materializableElements.supersededAt),
+        inArray(materializableElements.sourceKind, [
+          "as-built-ifc-bundle",
+          "as-built-ifc",
+        ]),
+      ),
+    )
+    // Bundle first (it carries the GLB), then per-entity rows.
+    .orderBy(
+      sql`CASE WHEN ${materializableElements.sourceKind} = 'as-built-ifc-bundle' THEN 0 ELSE 1 END`,
+      materializableElements.createdAt,
+    );
+}
+
+/**
+ * Resolve the engagement's most-recently-parsed `snapshot_ifc_files`
+ * row, used by {@link synthesizeBimModelWireFromIfc} to populate the
+ * synthetic wire's `materializedAt` + synthetic id when no `bim_models`
+ * row exists. The element load (above) no longer depends on this — it
+ * scopes by engagement only — but the synthesize path still needs the
+ * snapshot identity to mint a stable wire id.
+ */
+async function loadLatestParsedIfcFileForEngagement(
   engagementId: string,
 ): Promise<{
-  ifcFile: { snapshotId: string; parsedAt: Date | null; gltfObjectPath: string | null } | null;
-  elements: MaterializableElement[];
-}> {
-  const ifcRows = await db
+  snapshotId: string;
+  parsedAt: Date | null;
+  gltfObjectPath: string | null;
+} | null> {
+  const rows = await db
     .select({
       snapshotId: snapshotIfcFiles.snapshotId,
       parsedAt: snapshotIfcFiles.parsedAt,
@@ -546,34 +589,7 @@ async function loadAsBuiltIfcElementsForEngagement(
     )
     .orderBy(desc(snapshotIfcFiles.parsedAt))
     .limit(1);
-  const ifcFile = ifcRows[0] ?? null;
-  if (!ifcFile) return { ifcFile: null, elements: [] };
-
-  const elements = await db
-    .select()
-    .from(materializableElements)
-    .where(
-      and(
-        eq(materializableElements.engagementId, engagementId),
-        eq(materializableElements.sourceSnapshotId, ifcFile.snapshotId),
-        inArray(materializableElements.sourceKind, [
-          "as-built-ifc-bundle",
-          "as-built-ifc",
-        ]),
-        // Active rows only — prior generations from an earlier IFC ingest
-        // of this same snapshot are kept for atom history but must not
-        // surface to the viewer (would render stale entities + a stale
-        // bundle GLB). See [[adr-001-atom-architecture]].
-        isNull(materializableElements.supersededAt),
-      ),
-    )
-    // Bundle first (it carries the GLB), then per-entity rows.
-    .orderBy(
-      sql`CASE WHEN ${materializableElements.sourceKind} = 'as-built-ifc-bundle' THEN 0 ELSE 1 END`,
-      materializableElements.createdAt,
-    );
-
-  return { ifcFile, elements };
+  return rows[0] ?? null;
 }
 
 async function toBimModelWire(bm: BimModel): Promise<BimModelWire> {
@@ -581,13 +597,19 @@ async function toBimModelWire(bm: BimModel): Promise<BimModelWire> {
   const briefingElements = bm.activeBriefingId
     ? await loadElementsForBriefing(bm.activeBriefingId)
     : [];
-  const ifcView = await loadAsBuiltIfcElementsForEngagement(bm.engagementId);
+  // QA-32: union in the engagement's active as-built-ifc rows
+  // independently of `bm.activeBriefingId`. The briefing-derived path
+  // continues to scope by `briefingId`; the as-built path is
+  // engagement-scoped because the IFC ingest emits rows without a
+  // briefing on the IFC-without-briefing path.
+  const asBuiltElements =
+    await loadActiveAsBuiltIfcElementsForEngagement(bm.engagementId);
   // Order: IFC bundle first (so the viewer's "first row with glb wins"
   // picks it up), then briefing-derived elements, then per-IFC-entity rows.
-  const ifcBundle = ifcView.elements.filter(
+  const ifcBundle = asBuiltElements.filter(
     (e) => e.sourceKind === "as-built-ifc-bundle",
   );
-  const ifcEntities = ifcView.elements.filter(
+  const ifcEntities = asBuiltElements.filter(
     (e) => e.sourceKind === "as-built-ifc",
   );
   const elements = [...ifcBundle, ...briefingElements, ...ifcEntities];
@@ -616,21 +638,23 @@ async function toBimModelWire(bm: BimModel): Promise<BimModelWire> {
 async function synthesizeBimModelWireFromIfc(
   engagementId: string,
 ): Promise<BimModelWire | null> {
-  const ifcView = await loadAsBuiltIfcElementsForEngagement(engagementId);
-  if (!ifcView.ifcFile) return null;
-  const ifcBundle = ifcView.elements.filter(
+  const ifcFile = await loadLatestParsedIfcFileForEngagement(engagementId);
+  if (!ifcFile) return null;
+  const asBuiltElements =
+    await loadActiveAsBuiltIfcElementsForEngagement(engagementId);
+  const ifcBundle = asBuiltElements.filter(
     (e) => e.sourceKind === "as-built-ifc-bundle",
   );
-  const ifcEntities = ifcView.elements.filter(
+  const ifcEntities = asBuiltElements.filter(
     (e) => e.sourceKind === "as-built-ifc",
   );
   const elements = [...ifcBundle, ...ifcEntities];
-  const parsedAt = ifcView.ifcFile.parsedAt;
+  const parsedAt = ifcFile.parsedAt;
   const stamp = parsedAt ? parsedAt.toISOString() : new Date(0).toISOString();
   return {
     // Synthetic id — `<ifc:snapshotId>` so admin tools can recognize the
     // row as a viewer-side fallback rather than a real bim_models row.
-    id: `ifc:${ifcView.ifcFile.snapshotId}`,
+    id: `ifc:${ifcFile.snapshotId}`,
     engagementId,
     activeBriefingId: null,
     briefingVersion: 0,
