@@ -51,11 +51,20 @@ export function RenderPowerToolDialog({
 
   if (!isOpen) return null;
 
+  async function loadParentImageFile(): Promise<File> {
+    const res = await fetch(previewUrl);
+    if (!res.ok) throw new Error("Could not load parent render image.");
+    const blob = await res.blob();
+    const ext = blob.type.includes("png") ? "png" : "jpg";
+    return new File([blob], `parent.${ext}`, { type: blob.type || "image/png" });
+  }
+
   async function handleSubmit() {
     setBusy(true);
     setError(null);
     try {
       const form = new FormData();
+      form.append("image", await loadParentImageFile());
       if (tool === "enhance" || tool === "inpaint" || tool === "style_transfer") {
         if (!prompt.trim()) {
           setError("Prompt is required.");

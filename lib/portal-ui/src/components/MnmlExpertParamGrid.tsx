@@ -70,7 +70,7 @@ function ParamControl({
           disabled={disabled}
           min={def.range.min}
           max={def.range.max}
-          step={def.range.step ?? 1}
+          step={1}
           value={n}
           onChange={(e) => onChange(e.target.value)}
           data-testid={`mnml-param-${def.name}`}
@@ -85,7 +85,7 @@ function ParamControl({
         disabled={disabled}
         min={def.range?.min}
         max={def.range?.max}
-        step={def.range?.step ?? 1}
+        step={1}
         value={n}
         onChange={(e) => onChange(e.target.value)}
         data-testid={`mnml-param-${def.name}`}
@@ -132,7 +132,7 @@ export function MnmlExpertParamGrid({
     const errs: string[] = [];
     for (const def of defs) {
       const raw = values[def.name] ?? defaultFor(def);
-      if (raw === "" && !def.required) continue;
+      if (raw === "" && !("required" in def && def.required)) continue;
       const r = validateMnmlParamValue(def, raw);
       if (!r.ok) errs.push(r.reason);
     }

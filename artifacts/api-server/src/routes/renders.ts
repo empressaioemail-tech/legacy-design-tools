@@ -1528,7 +1528,9 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
       ? `${requestor.kind}:${requestor.id}`
       : `${RENDER_SYSTEM_ACTOR.kind}:${RENDER_SYSTEM_ACTOR.id}`;
 
-  const uploadSource = isStillUploadBody(body.data);
+  const kickoff = body.data;
+  const uploadSource = isStillUploadBody(kickoff);
+  const sourceUploadUrl = uploadSource ? kickoff.sourceUploadUrl : null;
 
   let inserted: ViewpointRender;
   try {
@@ -1540,9 +1542,9 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
         bimModelId: bimModel.id,
         briefingAtomEventId: snapshots.briefingAtomEventId,
         bimModelAtomEventId: snapshots.bimModelAtomEventId,
-        kind: body.data.kind,
+        kind: kickoff.kind,
         sourceType: uploadSource ? "upload" : "model-capture",
-        sourceUploadUrl: uploadSource ? body.data.sourceUploadUrl : null,
+        sourceUploadUrl,
         requestPayload: body.data,
         status: "queued",
         requestedBy,

@@ -8,10 +8,8 @@ import type {
   RenderStatus,
 } from "@workspace/api-client-react";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
-import {
-  RenderPowerToolDialog,
-  type PowerToolKind,
-} from "./render-tools/RenderPowerToolDialog";
+import { RenderPowerToolDialog } from "./render-tools/RenderPowerToolDialog";
+import type { PowerToolKind } from "./render-tools/powerToolKickoff";
 
 /**
  * Shared render card. Presentational only; the parent owns selection
