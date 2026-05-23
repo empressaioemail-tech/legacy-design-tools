@@ -128,11 +128,18 @@ const { resetAtomRegistryForTests } = await import("../atoms/registry");
 interface FakeMnml {
   triggerRender: ReturnType<typeof vi.fn>;
   getRenderStatus: ReturnType<typeof vi.fn>;
-  // The polling worker never calls these two — present only so the
-  // fake structurally satisfies the (doc 40c-widened) MnmlClient
-  // interface that `setMnmlClient` expects.
+  // The polling worker never calls these — present only so the fake
+  // structurally satisfies the MnmlClient interface that
+  // `setMnmlClient` expects. Widened across two iterations:
+  // doc 40c gap-fill added `getCredits` + `generatePrompt`; doc 40e A.1
+  // added the five power-tool methods.
   getCredits: ReturnType<typeof vi.fn>;
   generatePrompt: ReturnType<typeof vi.fn>;
+  enhance: ReturnType<typeof vi.fn>;
+  upscale: ReturnType<typeof vi.fn>;
+  aiErase: ReturnType<typeof vi.fn>;
+  inpaint: ReturnType<typeof vi.fn>;
+  styleTransfer: ReturnType<typeof vi.fn>;
 }
 
 function makeFakeMnml(): FakeMnml {
@@ -141,6 +148,11 @@ function makeFakeMnml(): FakeMnml {
     getRenderStatus: vi.fn(),
     getCredits: vi.fn(),
     generatePrompt: vi.fn(),
+    enhance: vi.fn(),
+    upscale: vi.fn(),
+    aiErase: vi.fn(),
+    inpaint: vi.fn(),
+    styleTransfer: vi.fn(),
   };
 }
 

@@ -147,6 +147,26 @@ describe("getMnmlClient + setMnmlClient singleton", () => {
       generatePrompt: async (): Promise<PromptGeneratorResult> => ({
         prompt: "fake",
       }),
+      enhance: async (): Promise<TriggerRenderResult> => ({
+        renderId: "fake",
+        remainingCredits: 100,
+      }),
+      upscale: async (): Promise<TriggerRenderResult> => ({
+        renderId: "fake",
+        remainingCredits: 100,
+      }),
+      aiErase: async (): Promise<TriggerRenderResult> => ({
+        renderId: "fake",
+        remainingCredits: 100,
+      }),
+      inpaint: async (): Promise<TriggerRenderResult> => ({
+        renderId: "fake",
+        remainingCredits: 100,
+      }),
+      styleTransfer: async (): Promise<TriggerRenderResult> => ({
+        renderId: "fake",
+        remainingCredits: 100,
+      }),
     };
     setMnmlClient(fake);
     expect(getMnmlClient()).toBe(fake);
@@ -166,6 +186,26 @@ describe("getMnmlClient + setMnmlClient singleton", () => {
       getCredits: async (): Promise<CreditsResult> => ({ credits: 0 }),
       generatePrompt: async (): Promise<PromptGeneratorResult> => ({
         prompt: "x",
+      }),
+      enhance: async (): Promise<TriggerRenderResult> => ({
+        renderId: "x",
+        remainingCredits: 0,
+      }),
+      upscale: async (): Promise<TriggerRenderResult> => ({
+        renderId: "x",
+        remainingCredits: 0,
+      }),
+      aiErase: async (): Promise<TriggerRenderResult> => ({
+        renderId: "x",
+        remainingCredits: 0,
+      }),
+      inpaint: async (): Promise<TriggerRenderResult> => ({
+        renderId: "x",
+        remainingCredits: 0,
+      }),
+      styleTransfer: async (): Promise<TriggerRenderResult> => ({
+        renderId: "x",
+        remainingCredits: 0,
       }),
     };
     setMnmlClient(fake);

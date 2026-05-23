@@ -88,6 +88,14 @@ function throwingClient(err: InstanceType<typeof MnmlError>): MnmlClient {
     getRenderStatus: reject as () => Promise<RenderStatusResult>,
     getCredits: reject as () => Promise<CreditsResult>,
     generatePrompt: reject as () => Promise<PromptGeneratorResult>,
+    // doc 40e A.1 — power-tool methods inherit the same forced-throw
+    // affordance so this test factory can drive route-side error
+    // mapping for them too once their routes land in A.2.
+    enhance: reject as () => Promise<TriggerRenderResult>,
+    upscale: reject as () => Promise<TriggerRenderResult>,
+    aiErase: reject as () => Promise<TriggerRenderResult>,
+    inpaint: reject as () => Promise<TriggerRenderResult>,
+    styleTransfer: reject as () => Promise<TriggerRenderResult>,
   };
 }
 
