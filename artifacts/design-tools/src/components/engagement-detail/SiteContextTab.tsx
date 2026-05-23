@@ -986,11 +986,19 @@ export function SiteContextTab({
         </div>
       ) : eligibility.variant === "federal-only" ? (
         // Partial-coverage banner: federal adapters will load (FEMA
-        // flood, USGS topo, EPA EJSCREEN, FCC broadband) but no
-        // state/local pilot is wired for this parcel yet. The button
-        // remains enabled — clicking it runs the federal four — and
-        // the supported-pilots list keeps the dead-end systemic
-        // rather than specific to this engagement.
+        // flood, USGS topo, EPA EJSCREEN) but no state/local pilot is
+        // wired for this parcel yet. The button remains enabled —
+        // clicking it runs the federal trio — and the supported-
+        // pilots list keeps the dead-end systemic rather than
+        // specific to this engagement.
+        //
+        // QA-22 SCOPE B closeout (2026-05-23): `fcc:broadband` was the
+        // fourth federal adapter and is now gated off by default. If
+        // the operator flips `FCC_ENABLED=true`, re-add the FCC
+        // clause to this comment, the banner copy at
+        // `data-testid="generate-layers-federal-only-message"` below,
+        // AND the matching assertion in
+        // `src/pages/__tests__/SiteContextTab.test.tsx`.
         <div
           role="status"
           data-testid="generate-layers-federal-only-banner"
