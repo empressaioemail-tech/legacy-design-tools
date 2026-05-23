@@ -64,6 +64,7 @@ const {
   materializableElements,
   briefingDivergences,
   atomEvents,
+  snapshots,
   users,
 } = await import("@workspace/db");
 const { eq, desc } = await import("drizzle-orm");
@@ -161,6 +162,85 @@ describe("GET /api/engagements/:id/bim-model", () => {
       `/api/engagements/${engagementId}/bim-model`,
     );
     expect(res.status).not.toBe(403);
+  });
+
+  it("QA-32: surfaces active as-built-ifc elements when the bim_models row has no active_briefing_id", async () => {
+    // The Musgrave_Residence_B path that surfaced QA-32: a Revit-side
+    // IFC push lands a `bim_models` row with `active_briefing_id =
+    // NULL` (no prior briefing) plus active `materializable_elements`
+    // rows with `source_kind` in ('as-built-ifc-bundle', 'as-built-ifc').
+    // The GET must union those in regardless of `active_briefing_id`,
+    // bundle-first so the viewer's "first row with glb wins"
+    // preference picks the consolidated glTF up.
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    const name = "QA-32 IFC-without-briefing engagement";
+    const [eng] = await db
+      .insert(engagements)
+      .values({
+        name,
+        nameLower: name.trim().toLowerCase(),
+        jurisdiction: "Moab, UT",
+        address: "1144 N Kayenta Dr",
+        status: "active",
+      })
+      .returning();
+    // No parcel_briefings row — this is the IFC-without-briefing path.
+    // The bim_models row mirrors what the IFC ingest writes:
+    // engagement-scoped only, no active_briefing_id.
+    await db
+      .insert(bimModels)
+      .values({ engagementId: eng!.id, materializedAt: new Date() });
+    const [snapshot] = await db
+      .insert(snapshots)
+      .values({
+        engagementId: eng!.id,
+        projectName: "musgrave.rvt",
+        payload: {},
+      })
+      .returning();
+    await db.insert(materializableElements).values([
+      {
+        engagementId: eng!.id,
+        sourceKind: "as-built-ifc-bundle",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshot!.id,
+        ifcGlobalId: "0_bundle",
+        ifcType: "IfcProject",
+        glbObjectPath: "/objects/uploads/musgrave-bundle.glb",
+      },
+      {
+        engagementId: eng!.id,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshot!.id,
+        ifcGlobalId: "0_e1",
+        ifcType: "IfcWall",
+      },
+      {
+        engagementId: eng!.id,
+        sourceKind: "as-built-ifc",
+        elementKind: "as-built-ifc",
+        sourceSnapshotId: snapshot!.id,
+        ifcGlobalId: "0_e2",
+        ifcType: "IfcSlab",
+      },
+    ]);
+
+    const res = await asArchitect(
+      request(getApp()).get(`/api/engagements/${eng!.id}/bim-model`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.bimModel.engagementId).toBe(eng!.id);
+    expect(res.body.bimModel.activeBriefingId).toBeNull();
+    expect(res.body.bimModel.elements).toHaveLength(3);
+    // Bundle ordered first so the viewer's GLB-preference picks it up.
+    expect(res.body.bimModel.elements[0].sourceKind).toBe(
+      "as-built-ifc-bundle",
+    );
+    // The two per-entity rows follow, deterministically by created_at.
+    expect(res.body.bimModel.elements[1].sourceKind).toBe("as-built-ifc");
+    expect(res.body.bimModel.elements[2].sourceKind).toBe("as-built-ifc");
   });
 });
 

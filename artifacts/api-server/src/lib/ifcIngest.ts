@@ -674,30 +674,34 @@ export async function ensureBimModelAndEmitIfcIngestEvent(args: {
   } = args;
 
   // UPSERT the bim_models row. The UNIQUE constraint on engagement_id
-  // means at most one row per engagement; ON CONFLICT DO NOTHING leaves
-  // any existing Push-to-Revit-side state (activeBriefingId,
-  // materializedAt, briefingVersion, revitDocumentPath) untouched —
-  // the IFC ingest is as-built provenance and must not clobber the
-  // to-be-built columns.
+  // means at most one row per engagement.
+  //
+  // QA-32 (2026-05-23): stamp `materializedAt` on every successful IFC
+  // ingest — on INSERT and on CONFLICT. Prior behaviour was ON CONFLICT
+  // DO NOTHING on the rationale that "IFC ingest is as-built provenance
+  // and must not clobber to-be-built columns"; the Musgrave_Residence_B
+  // verify on cortex-api-00017-jnn surfaced the failure mode that
+  // protected: an engagement pushed straight from Revit (no prior
+  // briefing-driven Push-to-Revit) ended up with `materialized_at =
+  // NULL`, which the design-tools BIM-viewer FE treats (alongside zero
+  // elements) as "no model yet". `materialized_at` now means
+  // "the most recent successful materialization (briefing OR IFC)" —
+  // the briefing-push handler already sets it the same way. The other
+  // to-be-built columns (`activeBriefingId`, `briefingVersion`,
+  // `revitDocumentPath`) are intentionally NOT touched here; the IFC
+  // ingest still has no opinion about them.
+  const materializedAt = new Date();
   let bimModelId: string | null = null;
   try {
-    const [inserted] = await dbInst
+    const [upserted] = await dbInst
       .insert(bimModels)
-      .values({ engagementId })
-      .onConflictDoNothing({ target: bimModels.engagementId })
+      .values({ engagementId, materializedAt, updatedAt: materializedAt })
+      .onConflictDoUpdate({
+        target: bimModels.engagementId,
+        set: { materializedAt, updatedAt: materializedAt },
+      })
       .returning({ id: bimModels.id });
-    if (inserted) {
-      bimModelId = inserted.id;
-    } else {
-      // Pre-existing row (or a race where another writer beat us to the
-      // INSERT). Re-SELECT to recover the id.
-      const existing = await dbInst
-        .select({ id: bimModels.id })
-        .from(bimModels)
-        .where(eq(bimModels.engagementId, engagementId))
-        .limit(1);
-      bimModelId = existing[0]?.id ?? null;
-    }
+    bimModelId = upserted?.id ?? null;
   } catch (err) {
     log.error(
       { err, engagementId, snapshotId, ifcFileId },
