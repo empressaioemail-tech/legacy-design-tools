@@ -1117,10 +1117,26 @@ export function BimModelViewport({
     };
     animate();
 
+    // QA-33 — defensive guard for the inverse class of the QA-33 bug.
+    // QA-33 itself was a canvas that grew *too tall* (parent layout
+    // didn't cap height + `aspectRatio` derived a giant height from a
+    // wide width). The opposite failure mode — a canvas that mounts at
+    // a clientHeight near zero because a flex ancestor never
+    // propagated min-height — would render a frame the operator
+    // perceives as "no canvas at all". Warn once when we observe a
+    // suspiciously small height so the next person debugging this
+    // class of bug has a console hint rather than an invisible canvas.
+    let smallHeightWarned = false;
     const resize = () => {
       const w = container.clientWidth;
       const h = container.clientHeight;
       if (w === 0 || h === 0) return;
+      if (h < 100 && !smallHeightWarned) {
+        smallHeightWarned = true;
+        console.warn(
+          `[BimModelViewport] canvas wrapper clientHeight=${h}px (<100) — check ancestor flex chain for missing min-height; building geometry may render off-screen.`,
+        );
+      }
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -1510,6 +1526,19 @@ export function BimModelViewport({
           borderRadius: 4,
           overflow: "hidden",
           minHeight: 280,
+          // QA-33 — the `aspectRatio: 16/9` styling derives the canvas
+          // wrapper height from its width. On a wide modal (the plan-
+          // review `DialogContent` with `max-w-3xl` plus larger viewports)
+          // that produces a 400–600px height, and a real as-built IFC
+          // (Musgrave: 5MB GLB) renders a building centered in that box.
+          // Nothing in the ancestor chain — `DialogContent` →
+          // `TabsContent` → `BimModelTab` → this component's outer
+          // `viewportRef` — capped the canvas wrapper, so the modal
+          // scrolled the building below the fold and the operator saw
+          // an empty viewport on cortex-api-00020-85n. Cap at 60vh so
+          // the canvas is always visible inside `DialogContent`'s own
+          // 90vh budget regardless of how wide the modal grows.
+          maxHeight: "60vh",
           aspectRatio: "16 / 9",
         }}
       >

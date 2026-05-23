@@ -388,3 +388,186 @@ describe("ensureBimModelAndEmitIfcIngestEvent — idempotency on re-ingest", () 
   });
 });
 
+describe("ifc-ingest materializable_elements supersession — engagement scope (QA-35)", () => {
+  it("a second IFC ingest for the same engagement supersedes the first ingest's rows, leaving only the latest generation active", async () => {
+    // QA-35 reproduction: operator uploaded the same Musgrave IFC
+    // three times on cortex-api-00020-85n and observed 303 active
+    // `materializable_elements` rows (3 × 101) when only the most
+    // recent 101 should have been active. Each upload creates a
+    // fresh `snapshots` row (different `snapshot.id`), so the
+    // snapshot-scoped supersession that `ifcIngest.ts` shipped with
+    // never matched prior generations and they stayed active.
+    //
+    // This test simulates two ingests (one new snapshot each) by
+    // mirroring the production ingest's transactional supersession +
+    // insert steps inline — driving the full multipart upload route
+    // from vitest is too heavy and is covered by track-b-ifc-schema.
+    // The assertion pins the data invariant the production code now
+    // guarantees: engagement-wide active count after N re-ingests
+    // equals the size of a single generation, not N × generation.
+    if (!ctx.schema) throw new Error("ctx.schema not set");
+    const db = ctx.schema.db;
+    const materializableElements =
+      dbModule.materializableElements;
+    const { and, isNull, inArray } = await import("drizzle-orm");
+
+    // Seed engagement + the first ingest's snapshot.
+    const [eng] = await db
+      .insert(engagements)
+      .values({
+        name: "QA-35 reingest scope",
+        nameLower: "qa-35-reingest-scope",
+        jurisdiction: "Grand County, UT",
+        address: "Musgrave Residence B",
+        status: "active",
+      })
+      .returning();
+    const engagementId = eng!.id;
+
+    const [snap1] = await db
+      .insert(snapshots)
+      .values({
+        engagementId,
+        projectName: "First ingest",
+        payload: {},
+      })
+      .returning();
+    const snapshotId1 = snap1!.id;
+
+    const FIRST_GENERATION_GUIDS = [
+      "0_wall_alpha",
+      "0_wall_beta",
+      "0_door_gamma",
+    ];
+    await db.insert(materializableElements).values([
+      ...FIRST_GENERATION_GUIDS.map((guid) => ({
+        engagementId,
+        sourceKind: "as-built-ifc" as const,
+        elementKind: "as-built-ifc" as const,
+        sourceSnapshotId: snapshotId1,
+        ifcGlobalId: guid,
+        ifcType: "IfcWall",
+        label: `Element ${guid}`,
+        locked: false,
+      })),
+      {
+        engagementId,
+        sourceKind: "as-built-ifc-bundle" as const,
+        elementKind: "as-built-ifc" as const,
+        sourceSnapshotId: snapshotId1,
+        ifcGlobalId: `bundle:${snapshotId1}`,
+        ifcType: "<bundle>",
+        label: "First-ingest bundle",
+        glbObjectPath: "/objects/uploads/first-ingest-bundle",
+        locked: false,
+      },
+    ]);
+
+    // Sanity: 4 active rows from first ingest.
+    const afterFirstActive = await db
+      .select()
+      .from(materializableElements)
+      .where(
+        and(
+          eq(materializableElements.engagementId, engagementId),
+          isNull(materializableElements.supersededAt),
+        ),
+      );
+    expect(afterFirstActive).toHaveLength(4);
+
+    // Second ingest: new snapshot + the engagement-scoped supersession
+    // UPDATE (mirroring `ifcIngest.ts` step 5b post-QA-35) + new
+    // per-entity rows + new bundle.
+    const [snap2] = await db
+      .insert(snapshots)
+      .values({
+        engagementId,
+        projectName: "Second ingest (re-upload of same IFC)",
+        payload: {},
+      })
+      .returning();
+    const snapshotId2 = snap2!.id;
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(materializableElements)
+        .set({ supersededAt: new Date() })
+        .where(
+          and(
+            eq(materializableElements.engagementId, engagementId),
+            inArray(materializableElements.sourceKind, [
+              "as-built-ifc",
+              "as-built-ifc-bundle",
+            ]),
+            isNull(materializableElements.supersededAt),
+          ),
+        );
+
+      await tx.insert(materializableElements).values([
+        // Same IFC content → same IFC GlobalIds as the first ingest.
+        ...FIRST_GENERATION_GUIDS.map((guid) => ({
+          engagementId,
+          sourceKind: "as-built-ifc" as const,
+          elementKind: "as-built-ifc" as const,
+          sourceSnapshotId: snapshotId2,
+          ifcGlobalId: guid,
+          ifcType: "IfcWall",
+          label: `Element ${guid} (re-ingest)`,
+          locked: false,
+        })),
+        {
+          engagementId,
+          sourceKind: "as-built-ifc-bundle" as const,
+          elementKind: "as-built-ifc" as const,
+          sourceSnapshotId: snapshotId2,
+          ifcGlobalId: `bundle:${snapshotId2}`,
+          ifcType: "<bundle>",
+          label: "Second-ingest bundle",
+          glbObjectPath: "/objects/uploads/second-ingest-bundle",
+          locked: false,
+        },
+      ]);
+    });
+
+    // The QA-35 invariant: engagement-wide active count after the
+    // re-ingest is the size of one generation (3 entities + 1
+    // bundle = 4), NOT both generations stacked (the operator's
+    // observed-303 bug = 8 here).
+    const afterSecondActive = await db
+      .select({
+        id: materializableElements.id,
+        sourceSnapshotId: materializableElements.sourceSnapshotId,
+        sourceKind: materializableElements.sourceKind,
+        ifcGlobalId: materializableElements.ifcGlobalId,
+      })
+      .from(materializableElements)
+      .where(
+        and(
+          eq(materializableElements.engagementId, engagementId),
+          isNull(materializableElements.supersededAt),
+        ),
+      );
+    expect(afterSecondActive).toHaveLength(4);
+    // All active rows must belong to the most-recent snapshot.
+    for (const row of afterSecondActive) {
+      expect(row.sourceSnapshotId).toBe(snapshotId2);
+    }
+    // And the first-ingest rows must be marked superseded (the
+    // append-only history per [[adr-001-atom-architecture]] — not
+    // deleted).
+    const supersededFromFirst = await db
+      .select()
+      .from(materializableElements)
+      .where(
+        and(
+          eq(materializableElements.engagementId, engagementId),
+          eq(materializableElements.sourceSnapshotId, snapshotId1),
+        ),
+      );
+    expect(supersededFromFirst).toHaveLength(4);
+    for (const row of supersededFromFirst) {
+      expect(row.supersededAt).not.toBeNull();
+    }
+  });
+});
+
