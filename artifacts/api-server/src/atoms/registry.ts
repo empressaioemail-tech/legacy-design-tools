@@ -39,6 +39,7 @@ import { makeFindingAtom } from "./finding.atom";
 import { makeCommunicationEventAtom } from "./communication-event.atom";
 import { makeDecisionEventAtom } from "./decision-event.atom";
 import { makeSubmissionClassificationAtom } from "./submission-classification.atom";
+import { makeSiteTopographyAtom } from "./site-topography.atom";
 import { setClassifierLogger } from "@workspace/submission-classifier";
 import { logger as pinoLogger } from "../lib/logger";
 
@@ -228,6 +229,14 @@ export function getAtomRegistry(): AtomRegistry {
   // registered after `submission` so the boot-log tail surfaces the
   // dependency order naturally.
   registry.register(makeSubmissionClassificationAtom({ db, history }));
+  // 2D-site-context Phase 2D.1.3 — site-topography atom. Shape-only:
+  // the DEM ingest + contour derivation worker (Phase 2D.1.2, stacked
+  // on the USGS 3DEP client from PR #98) emits the actual provenance
+  // events through `history`. Composes `engagement` (concrete), which
+  // is registered above so validate() finds it. Registered after the
+  // long list of plan-review atoms so the boot-log tail surfaces the
+  // sprint-level dependency order naturally.
+  registry.register(makeSiteTopographyAtom({ history }));
   _registry = registry;
   return registry;
 }
