@@ -90,15 +90,17 @@ async function seedSubmission(
 }
 
 describe("GET /api/submissions/:id/comments", () => {
-  it("403s when the caller is not internal audience", async () => {
+  it("is reachable without an internal audience (QA-30/31)", async () => {
+    // QA-30/31 (PR mirroring #77) relaxed the audience gate on the
+    // submission-comments thread — production fails every session
+    // closed to audience:"user", which dead-locked the architect's
+    // own SubmissionDetailModal comment view. The route now reaches
+    // its handler without an `x-audience: internal` header.
     const { submissionId } = await seedSubmission();
     const res = await request(getApp()).get(
       `/api/submissions/${submissionId}/comments`,
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe(
-      "submission_comments_require_internal_audience",
-    );
+    expect(res.status).not.toBe(403);
   });
 
   it("returns an empty list for a fresh submission", async () => {
@@ -122,15 +124,18 @@ describe("GET /api/submissions/:id/comments", () => {
 });
 
 describe("POST /api/submissions/:id/comments", () => {
-  it("403s when the caller is not internal audience", async () => {
+  it("is reachable without an internal audience (QA-30/31)", async () => {
+    // QA-30/31 (PR mirroring #77) relaxed the audience gate on the
+    // submission-comments thread — production fails every session
+    // closed to audience:"user", which dead-locked the architect's
+    // own reply path. The route now reaches its handler without an
+    // `x-audience: internal` header (a missing session requestor will
+    // surface as 400 missing_session_requestor, not 403).
     const { submissionId } = await seedSubmission();
     const res = await request(getApp())
       .post(`/api/submissions/${submissionId}/comments`)
       .send({ authorRole: "architect", body: "Reply." });
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe(
-      "submission_comments_require_internal_audience",
-    );
+    expect(res.status).not.toBe(403);
   });
 
   it("400s when the request body is invalid", async () => {

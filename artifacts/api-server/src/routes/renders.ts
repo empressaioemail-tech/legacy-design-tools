@@ -26,10 +26,14 @@
  *   (which has long since returned 202). Mirrors the runBriefingGeneration
  *   pattern in parcelBriefings.ts.
  *
- * Audience guard: `requireArchitectAudience` is inlined here pending
- * V1-3 PR #2's `audienceGuards.ts` extract. Once V1-3 merges and we
- * rebase, the local function flips to a single-line import. Per the
- * Phase 1A path-(b) recommendation.
+ * Audience posture: the renders / credits / prompt-generator routes
+ * were formerly gated by an inline `requireArchitectAudience` helper.
+ * QA-30/31 (2026-05-22, PR mirroring #77) dropped that gate — in
+ * production every session is `audience: "user"`, which dead-locked
+ * the architect's own Renders tab + credits badge + prompt
+ * generator. The original V1-3 security-review concern stands as a
+ * follow-up: restore behind a real-auth layer that can verify the
+ * engagement's own architect.
  *
  * Production feature flag: `RENDERS_PROD_ENABLED=true` is required to
  * accept kickoffs when NODE_ENV=production. Mock mode (the default)
@@ -137,20 +141,6 @@ const RENDER_SYSTEM_ACTOR: { kind: "system"; id: string } = {
 // ─────────────────────────────────────────────────────────────────────
 // Audience guard (inline pending V1-3's audienceGuards.ts)
 // ─────────────────────────────────────────────────────────────────────
-
-/**
- * Architect-only routes. Returns `true` and sends a 403 when the
- * caller's session audience is not internal; the caller early-returns
- * on `true`. Mirrors the bimModels.ts `requireArchitectAudience`
- * pattern verbatim — V1-3 PR #2 extracts both copies into a shared
- * `audienceGuards.ts`; the post-merge rebase here is a single-line
- * swap to an import.
- */
-function requireArchitectAudience(req: Request, res: Response): boolean {
-  if (req.session.audience === "internal") return false;
-  res.status(403).json({ error: "renders_requires_architect_audience" });
-  return true;
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // Feature flag
@@ -1249,7 +1239,6 @@ const router: IRouter = Router();
  * `runRenderPolling`.
  */
 router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
-  if (requireArchitectAudience(req, res)) return;
   if (!rendersProdGateOpen()) {
     res.status(503).json({
       error: "renders_preview_disabled",
@@ -1357,7 +1346,6 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
  * UUID check). Keep this handler physically above `/renders/:id`.
  */
 router.get("/renders/credits", async (req: Request, res: Response) => {
-  if (requireArchitectAudience(req, res)) return;
   if (!rendersProdGateOpen()) {
     res.status(503).json({
       error: "renders_preview_disabled",
@@ -1398,8 +1386,7 @@ router.get("/renders/credits", async (req: Request, res: Response) => {
 router.post(
   "/renders/prompt-generator",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res)) return;
-    if (!rendersProdGateOpen()) {
+      if (!rendersProdGateOpen()) {
       res.status(503).json({
         error: "renders_preview_disabled",
         message: "Renders are not yet enabled in production. Coming soon.",
@@ -1442,7 +1429,6 @@ router.post(
  * the FE polls this while the row is non-terminal.
  */
 router.get("/renders/:id", async (req: Request, res: Response) => {
-  if (requireArchitectAudience(req, res)) return;
   const params = RenderIdParamsSchema.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "invalid_render_id" });
@@ -1503,8 +1489,7 @@ router.get("/renders/:id", async (req: Request, res: Response) => {
 router.get(
   "/render-outputs/:id/file",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res)) return;
-    const params = z
+      const params = z
       .object({ id: z.string().uuid() })
       .safeParse(req.params);
     if (!params.success) {
@@ -1587,7 +1572,6 @@ function contentTypeForFormat(format: string): string {
  * for the architect's render-history UI).
  */
 router.get("/engagements/:id/renders", async (req: Request, res: Response) => {
-  if (requireArchitectAudience(req, res)) return;
   const params = EngagementIdParamsSchema.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "invalid_engagement_id" });
@@ -1622,7 +1606,6 @@ router.get("/engagements/:id/renders", async (req: Request, res: Response) => {
  * partial run.
  */
 router.post("/renders/:id/cancel", async (req: Request, res: Response) => {
-  if (requireArchitectAudience(req, res)) return;
   const params = RenderIdParamsSchema.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: "invalid_render_id" });

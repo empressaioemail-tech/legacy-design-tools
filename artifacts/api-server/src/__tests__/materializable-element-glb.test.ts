@@ -117,19 +117,18 @@ async function seedElement(opts: {
 }
 
 describe("GET /api/materializable-elements/:id/glb", () => {
-  it("403s when the caller is not architect-audience (default applicant session)", async () => {
-    // No `x-audience: internal` header → the request lands as the
-    // anonymous applicant default the sessionMiddleware emits, and
-    // the architect-scoped guard refuses to surface the bytes
-    // (V1-3). The handler must short-circuit before the row lookup,
-    // so the storage mock should never be called.
+  it("is reachable without an internal audience (QA-30/31)", async () => {
+    // QA-30/31 (PR mirroring #77) relaxed the architect-audience gate
+    // on /materializable-elements/:id/glb — production fails every
+    // session closed to audience:"user", which dead-locked the
+    // architect's own BIM viewer. The route now reaches its handler
+    // without an `x-audience: internal` header (the happy-path
+    // streaming + header test below covers the rest of the contract).
     const id = await seedElement({ glbObjectPath: "/objects/element-mesh-1" });
     const res = await request(getApp()).get(
       `/api/materializable-elements/${id}/glb`,
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("bim_model_requires_architect_audience");
-    expect(getObjectEntityBytesMock).not.toHaveBeenCalled();
+    expect(res.status).not.toBe(403);
   });
 
   it("200 streams model/gltf-binary with SHA-1 ETag + immutable cache header", async () => {

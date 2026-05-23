@@ -8,18 +8,20 @@
  * stays JSON) means a freshly-uploaded source doesn't bloat the
  * Site Context tab's first paint.
  *
- * Auth posture: gated by `requireArchitectAudience` (V1-3). Earlier
- * revisions left this route open on the rationale that "the bytes
- * are content-addressed by the row id alone" — V1-3 retired that
- * posture along with the matching gate on
- * `/materializable-elements/:id/glb` so the two GLB surfaces fail
- * closed in production until real auth lands. Why still a top-level
- * `/briefing-sources/:id/glb` rather than nesting under engagements:
- * the gate is audience-shaped (no engagement-membership table
- * exists in this codebase), and the viewer holds the row id
- * directly from the briefing read. Mirrors the
- * `/api/sheets/:id/full.png` precedent (`routes/sheets.ts:846-851`)
- * for "fetch bytes by id" without an engagement prefix.
+ * Auth posture: formerly gated by `requireArchitectAudience` (V1-3).
+ * QA-30/31 (2026-05-22, PR mirroring #77) relaxed that gate — in
+ * production every session is `audience: "user"`, which dead-locked
+ * the architect's own Site Context 3D viewer (the BIM viewport
+ * reads this endpoint to load briefing-source GLBs). The original
+ * V1-3 security-review concern stands as a follow-up: restore the
+ * gate behind a real-auth layer that can verify the engagement's
+ * own architect. Why still a top-level `/briefing-sources/:id/glb`
+ * rather than nesting under engagements: the gate was
+ * audience-shaped (no engagement-membership table exists in this
+ * codebase), and the viewer holds the row id directly from the
+ * briefing read. Mirrors the `/api/sheets/:id/full.png` precedent
+ * (`routes/sheets.ts:846-851`) for "fetch bytes by id" without an
+ * engagement prefix.
  *
  * Caching contract:
  *   - ETag is `"<sha1(bytes)>"`. Re-running conversion against the
@@ -43,11 +45,6 @@ import {
   ObjectStorageService,
   ObjectNotFoundError,
 } from "../lib/objectStorage";
-import { requireArchitectAudience } from "../lib/audienceGuards";
-
-const BRIEFING_SOURCE_AUDIENCE_ERROR =
-  "briefing_source_requires_architect_audience";
-
 const router: IRouter = Router();
 
 /**
@@ -64,9 +61,6 @@ function objectStorage(): ObjectStorageService {
 router.get(
   "/briefing-sources/:id/glb",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res, BRIEFING_SOURCE_AUDIENCE_ERROR)) {
-      return;
-    }
     const paramsParse = GetBriefingSourceGlbParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_briefing_source_id" });
