@@ -39,21 +39,7 @@ import {
 } from "@workspace/api-zod";
 import type { Logger } from "pino";
 import { logger } from "../lib/logger";
-import { requireArchitectAudience } from "../lib/audienceGuards";
-
 const router: IRouter = Router();
-
-/**
- * Per-route 403 error string. The shared audience guard accepts the
- * error code as a parameter so each surface attributes its own 403
- * — `reviewer_annotations_require_internal_audience` for the
- * reviewer-only scratch-note surface, this one for the cross-audience
- * comment thread. The naming is intentionally route-prefixed so a
- * future split (architect-only audience vs reviewer-only audience)
- * is a one-line change at the call site.
- */
-const SUBMISSION_COMMENTS_AUDIENCE_ERROR =
-  "submission_comments_require_internal_audience";
 
 /**
  * Wire shape returned by every comment endpoint. Mirrors the
@@ -94,11 +80,6 @@ async function loadSubmission(submissionId: string) {
 router.get(
   "/submissions/:submissionId/comments",
   async (req: Request, res: Response): Promise<void> => {
-    if (
-      requireArchitectAudience(req, res, SUBMISSION_COMMENTS_AUDIENCE_ERROR)
-    ) {
-      return;
-    }
     const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
     const params = ListSubmissionCommentsParams.safeParse(req.params);
     if (!params.success) {
@@ -128,11 +109,6 @@ router.get(
 router.post(
   "/submissions/:submissionId/comments",
   async (req: Request, res: Response): Promise<void> => {
-    if (
-      requireArchitectAudience(req, res, SUBMISSION_COMMENTS_AUDIENCE_ERROR)
-    ) {
-      return;
-    }
     const reqLog: Logger = (req as Request & { log?: Logger }).log ?? logger;
     const params = CreateSubmissionCommentParams.safeParse(req.params);
     if (!params.success) {

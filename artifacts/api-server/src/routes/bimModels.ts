@@ -71,7 +71,6 @@ import {
   ObjectStorageService,
   ObjectNotFoundError,
 } from "../lib/objectStorage";
-import { requireArchitectAudience } from "../lib/audienceGuards";
 import type { EventAnchoringService } from "@hauska/atom-contract";
 import {
   BIM_MODEL_PUSH_ACTOR_ID,
@@ -472,19 +471,6 @@ function computeElementDiff(
     unchangedCount,
   };
 }
-
-/**
- * Per-file 403 error string for the architect-audience gate. The
- * shared guard in `lib/audienceGuards.ts` takes the error string as
- * a parameter so each route file can attribute a 403 back to its
- * own surface; this constant pins the value the existing test
- * suite asserts on (`bim-models.test.ts`).
- *
- * The S2S divergence route is exempt from the gate: it carries its
- * own HMAC-SHA256 trust contract and runs as a system actor, not a
- * browser session.
- */
-const BIM_MODEL_AUDIENCE_ERROR = "bim_model_requires_architect_audience";
 
 /**
  * Load the active briefing's `updatedAt` (if any) for a bim-model.
@@ -969,18 +955,19 @@ function objectStorage(): ObjectStorageService {
  * which is what the reviewer expects when they jump to a terrain / setback
  * / neighbor-mass element from a finding.
  *
- * Auth posture: gated by `requireArchitectAudience`, matching the rest of
- * `bimModels.ts`. Per the security review on V1-3, content-addressing the
- * bytes by row id is not sufficient — the row id is leaked in the briefing
- * payload alongside the engagement context, and an applicant who reaches
- * that payload should not be able to fetch the materialized geometry. The
- * gate is the same audience check the parent `bim-model` GET applies; the
- * divergence S2S route remains exempt because of its HMAC contract.
+ * Auth posture: QA-30/31 (2026-05-22, PR mirroring #77) relaxed the
+ * architect-audience gate on the browser-facing bim-model routes —
+ * production fails every session closed to `audience: "user"`, which
+ * dead-locked the architect's own BIM viewer (the `Loading BIM model…`
+ * spinner the 21:05-21:08 UTC log surfaced was the empty-state for 13
+ * × 403). The original V1-3 security-review concern stands as a
+ * follow-up: restore the gate behind a real-auth layer that can
+ * verify the engagement's own architect. The divergence S2S route
+ * remains exempt because of its HMAC contract.
  */
 router.get(
   "/materializable-elements/:id/glb",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = GetMaterializableElementGlbParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_materializable_element_id" });
@@ -1050,7 +1037,6 @@ router.get(
 router.get(
   "/engagements/:id/bim-model",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = GetEngagementBimModelParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_engagement_id" });
@@ -1095,7 +1081,6 @@ router.get(
 router.post(
   "/engagements/:id/bim-model",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = PushEngagementBimModelParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_engagement_id" });
@@ -1215,7 +1200,6 @@ router.post(
 router.get(
   "/bim-models/:id/refresh",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = GetBimModelRefreshParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_bim_model_id" });
@@ -1310,9 +1294,10 @@ router.get(
  * design-tools Site Context tab can group by element kind/label
  * without a follow-up fetch.
  *
- * Browser-facing — gated by the architect-audience guard the rest
- * of the bim-model surface uses; the S2S divergence POST is the
- * only writer and carries its own HMAC trust contract.
+ * Browser-facing — formerly gated by the architect-audience guard
+ * the rest of the bim-model surface uses; QA-30/31 (2026-05-22)
+ * relaxed that gate. The S2S divergence POST is the only writer and
+ * carries its own HMAC trust contract.
  *
  * The join is intentionally a left join: the
  * `briefing_divergences.materializable_element_id` FK has
@@ -1325,7 +1310,6 @@ router.get(
 router.get(
   "/bim-models/:id/divergences",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = ListBimModelDivergencesParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_bim_model_id" });
@@ -1416,8 +1400,9 @@ router.get(
  * the transaction returns so an idempotent re-resolve never
  * double-emits.
  *
- * Engagement-scoped: gated by the same architect-audience guard
- * the rest of the bim-model browser surface uses. The resolve is
+ * Engagement-scoped: formerly gated by the same architect-audience
+ * guard the rest of the bim-model browser surface uses; QA-30/31
+ * (2026-05-22) relaxed that gate. The resolve is
  * attributed to `req.session.requestor` when present so the
  * timeline can show who acknowledged it; an unauthenticated dev
  * request still resolves the row but lands with
@@ -1428,7 +1413,6 @@ router.get(
 router.post(
   "/bim-models/:id/divergences/:divergenceId/resolve",
   async (req: Request, res: Response) => {
-    if (requireArchitectAudience(req, res, BIM_MODEL_AUDIENCE_ERROR)) return;
     const paramsParse = ResolveBimModelDivergenceParams.safeParse(req.params);
     if (!paramsParse.success) {
       res.status(400).json({ error: "invalid_divergence_path" });

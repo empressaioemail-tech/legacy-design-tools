@@ -96,10 +96,15 @@ function throwingClient(err: InstanceType<typeof MnmlError>): MnmlClient {
 // ─────────────────────────────────────────────────────────────────────
 
 describe("GET /api/renders/credits", () => {
-  it("403s when the caller is not architect-audience", async () => {
+  it("is reachable without an internal audience (QA-30/31)", async () => {
+    // QA-30/31 (PR mirroring #77) relaxed the architect-audience gate
+    // on /renders/credits — production fails every session closed to
+    // audience:"user", which dead-locked the architect's own credits
+    // badge. The route now reaches its handler without an
+    // `x-audience: internal` header.
+    setMnmlClient(new MockMnmlClient({ startingCredits: 0 }));
     const res = await request(getApp()).get("/api/renders/credits");
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("renders_requires_architect_audience");
+    expect(res.status).not.toBe(403);
   });
 
   it("200s with the mnml account balance", async () => {
@@ -153,12 +158,16 @@ describe("GET /api/renders/credits", () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe("POST /api/renders/prompt-generator", () => {
-  it("403s when the caller is not architect-audience", async () => {
+  it("is reachable without an internal audience (QA-30/31)", async () => {
+    // QA-30/31 (PR mirroring #77) relaxed the architect-audience gate
+    // on /renders/prompt-generator — production fails every session
+    // closed to audience:"user", which dead-locked the architect's
+    // own Prompt Generator. The route now reaches its handler without
+    // an `x-audience: internal` header.
     const res = await request(getApp())
       .post("/api/renders/prompt-generator")
       .attach("image", PNG_BYTES, "sketch.png");
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("renders_requires_architect_audience");
+    expect(res.status).not.toBe(403);
   });
 
   it("415s when the body is not multipart/form-data", async () => {
@@ -222,5 +231,53 @@ describe("POST /api/renders/prompt-generator", () => {
     ).attach("image", PNG_BYTES, "sketch.png");
     expect(res.status).toBe(402);
     expect(res.body.error).toBe("insufficient_credits");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// QA-30/31 — every architect-loop renders route reachable without
+// an internal audience.
+//
+// Mirrors PR #77's consolidated "architect-workflow routes (P1-5)"
+// describe block for findings.ts. Each route here was formerly gated
+// by the inline `requireArchitectAudience` helper that QA-30/31
+// removed. The tests just call the route without an `x-audience:
+// internal` header and assert the response is NOT 403 — the route's
+// own validation may surface 400 (bad UUID) or 404 (no such row),
+// but the audience gate no longer short-circuits before the handler.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("QA-30/31 — renders routes reachable without an internal audience", () => {
+  const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+
+  it("POST /api/engagements/:id/renders is not 403", async () => {
+    const res = await request(getApp())
+      .post(`/api/engagements/${NIL_UUID}/renders`)
+      .send({});
+    expect(res.status).not.toBe(403);
+  });
+
+  it("GET /api/renders/:id is not 403", async () => {
+    const res = await request(getApp()).get(`/api/renders/${NIL_UUID}`);
+    expect(res.status).not.toBe(403);
+  });
+
+  it("GET /api/render-outputs/:id/file is not 403", async () => {
+    const res = await request(getApp()).get(
+      `/api/render-outputs/${NIL_UUID}/file`,
+    );
+    expect(res.status).not.toBe(403);
+  });
+
+  it("GET /api/engagements/:id/renders is not 403", async () => {
+    const res = await request(getApp()).get(
+      `/api/engagements/${NIL_UUID}/renders`,
+    );
+    expect(res.status).not.toBe(403);
+  });
+
+  it("POST /api/renders/:id/cancel is not 403", async () => {
+    const res = await request(getApp()).post(`/api/renders/${NIL_UUID}/cancel`);
+    expect(res.status).not.toBe(403);
   });
 });

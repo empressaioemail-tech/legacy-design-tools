@@ -150,16 +150,17 @@ describe("GET /api/engagements/:id/bim-model", () => {
     expect(res.body.error).toBe("engagement_not_found");
   });
 
-  it("403s when the caller is not architect-audience (default applicant session)", async () => {
-    // No `x-audience: internal` header → the request lands as the
-    // anonymous applicant default the sessionMiddleware emits, and
-    // the architect-scoped guard refuses to surface the bim-model.
+  it("is reachable without an internal audience — default applicant session (QA-30/31)", async () => {
+    // QA-30/31 (PR mirroring #77) relaxed the architect-audience gate
+    // on the browser-facing bim-model routes — production fails every
+    // session closed to audience:"user", which dead-locked the
+    // architect's own BIM viewer. The route now reaches its handler
+    // without an `x-audience: internal` header.
     const { engagementId } = await seedEngagementAndBriefing();
     const res = await request(getApp()).get(
       `/api/engagements/${engagementId}/bim-model`,
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("bim_model_requires_architect_audience");
+    expect(res.status).not.toBe(403);
   });
 });
 
@@ -186,13 +187,12 @@ describe("POST /api/engagements/:id/bim-model", () => {
     );
   });
 
-  it("403s when the caller is not architect-audience", async () => {
+  it("is reachable without an internal audience (QA-30/31)", async () => {
     const { engagementId } = await seedEngagementAndBriefing();
     const res = await request(getApp())
       .post(`/api/engagements/${engagementId}/bim-model`)
       .send({});
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("bim_model_requires_architect_audience");
+    expect(res.status).not.toBe(403);
   });
 
   it("is idempotent at the engagement-id level (re-push updates, not inserts)", async () => {
@@ -343,7 +343,7 @@ describe("GET /api/bim-models/:id/refresh", () => {
     expect(res.body.error).toBe("bim_model_not_found");
   });
 
-  it("403s when the caller is not architect-audience", async () => {
+  it("is reachable without an internal audience (QA-30/31)", async () => {
     const { engagementId } = await seedEngagementAndBriefing();
     const push = await asArchitect(
       request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
@@ -353,8 +353,7 @@ describe("GET /api/bim-models/:id/refresh", () => {
     const res = await request(getApp()).get(
       `/api/bim-models/${bimModelId}/refresh`,
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("bim_model_requires_architect_audience");
+    expect(res.status).not.toBe(403);
   });
 });
 
@@ -440,7 +439,7 @@ describe("GET /api/bim-models/:id/divergences", () => {
     expect(res.body.error).toBe("bim_model_not_found");
   });
 
-  it("403s when the caller is not architect-audience", async () => {
+  it("is reachable without an internal audience (QA-30/31)", async () => {
     const { engagementId } = await seedEngagementAndBriefing();
     const push = await asArchitect(
       request(getApp()).post(`/api/engagements/${engagementId}/bim-model`),
@@ -450,8 +449,7 @@ describe("GET /api/bim-models/:id/divergences", () => {
     const res = await request(getApp()).get(
       `/api/bim-models/${bimModelId}/divergences`,
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("bim_model_requires_architect_audience");
+    expect(res.status).not.toBe(403);
   });
 
   it(
@@ -750,13 +748,12 @@ describe("POST /api/bim-models/:id/divergences/:divergenceId/resolve", () => {
     expect(listRes.body.divergences[1].resolvedAt).not.toBeNull();
   });
 
-  it("403s when the caller is not architect-audience", async () => {
+  it("is reachable without an internal audience (QA-30/31)", async () => {
     const { bimModelId, divergenceId } = await setupOpenDivergence();
     const res = await request(getApp()).post(
       `/api/bim-models/${bimModelId}/divergences/${divergenceId}/resolve`,
     );
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("bim_model_requires_architect_audience");
+    expect(res.status).not.toBe(403);
   });
 
   it("404s on unknown bim-model id", async () => {
