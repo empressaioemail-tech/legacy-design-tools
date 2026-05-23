@@ -6,11 +6,14 @@
  * timeout, and `AdapterRunError` translation paths are covered too.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { femaNfhlAdapter } from "../federal/fema-nfhl";
 import { usgsNedAdapter } from "../federal/usgs-ned";
 import { epaEjscreenAdapter } from "../federal/epa-ejscreen";
-import { fccBroadbandAdapter } from "../federal/fcc-broadband";
+import {
+  fccBroadbandAdapter,
+  __resetFccInMemCacheForTests,
+} from "../federal/fcc-broadband";
 import { runAdapters } from "../runner";
 import {
   arcgisEmpty,
@@ -365,6 +368,16 @@ describe("EPA EJScreen adapter", () => {
 });
 
 describe("FCC broadband adapter", () => {
+  // QA-22 upstream-probe (2026-05-23) — the adapter holds a
+  // module-scoped 15-minute in-memory cache to catch the
+  // operator-reload-within-15min case. Tests share the same vitest
+  // worker, all run against the same `moab` coordinates, and would
+  // therefore see cache hits leaking across cases without an explicit
+  // reset between each one.
+  beforeEach(() => {
+    __resetFccInMemCacheForTests();
+  });
+
   it("rolls up provider rows into a fastest-tier summary", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(fccBroadbandFeatures));
     const outcomes = await runAdapters({
@@ -433,6 +446,80 @@ describe("FCC broadband adapter", () => {
     expect(outcomes[0].status).toBe("ok");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+
+  // QA-22 upstream-probe — Per-adapter timeout floor was raised from
+  // the shared `SLOW_UPSTREAM_TIMEOUT_MS` (45s) to a dedicated 90s
+  // for `fcc:broadband` only, because the BDC v2 endpoint
+  // legitimately answers slower than the shared floor from Cloud
+  // Run egress (cortex-api-00020-85n pill: "did not respond in time
+  // during attempt 1"). EPA / Grand County intentionally stay at the
+  // shared floor because their failure modes are different (DNS,
+  // TCP connect-timeout).
+  it("carries the QA-22 upstream-probe 90s timeout floor (above SLOW_UPSTREAM_TIMEOUT_MS)", () => {
+    expect(fccBroadbandAdapter.timeoutMs).toBe(90_000);
+    expect(fccBroadbandAdapter.timeoutMs).toBeGreaterThan(
+      SLOW_UPSTREAM_TIMEOUT_MS,
+    );
+  });
+
+  // QA-22 upstream-probe — second call to the same parcel within
+  // the 15-minute TTL must hit the module-scoped in-memory cache and
+  // skip the outbound fetch entirely. This is the cache-key contract
+  // (rounded lat/lng, matching CACHE_COORDINATE_PRECISION) that the
+  // operator-reload case depends on; if the assertion drifts, the
+  // operator-reload-within-15min path quietly stops working and
+  // each Generate Layers re-run pays the full FCC 90s timeout again.
+  it("second call within 15-min TTL hits the in-memory cache and skips the outbound fetch", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(fccBroadbandFeatures));
+    const first = await runAdapters({
+      adapters: [fccBroadbandAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(first[0].status).toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    // Second invocation at the same coordinates — cache hit, no
+    // additional fetch. Result payload must equal the first call's
+    // (modulo snapshotDate, which is re-stamped on every cache hit
+    // so downstream freshness math sees "now" rather than the
+    // cache-write timestamp).
+    const second = await runAdapters({
+      adapters: [fccBroadbandAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(second[0].status).toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(second[0].result?.payload).toEqual(first[0].result?.payload);
+  });
+
+  // QA-22 upstream-probe — slightly-different coordinates rounded to
+  // the same `CACHE_COORDINATE_PRECISION` (5 d.p., ~1.1m at the
+  // equator) must collapse to a cache hit; a geocoded parcel that
+  // drifts a fraction of a meter between Generate Layers runs still
+  // dedups.
+  it("treats two coordinates that round to the same cache key as the same parcel", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(fccBroadbandFeatures));
+    await runAdapters({
+      adapters: [fccBroadbandAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    // Move the parcel by 1e-7 degrees on each axis — well below the
+    // 5-decimal-place rounding window, so the cache key is identical.
+    const moabDrift: AdapterContext = {
+      ...moab,
+      parcel: {
+        latitude: moab.parcel.latitude + 1e-7,
+        longitude: moab.parcel.longitude - 1e-7,
+      },
+      fetchImpl,
+    };
+    await runAdapters({
+      adapters: [fccBroadbandAdapter],
+      context: moabDrift,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("federal adapter gating (PL-04)", () => {
@@ -479,8 +566,14 @@ describe("QA-22 — slow-upstream per-adapter timeout floors", () => {
     expect(epaEjscreenAdapter.timeoutMs).toBe(SLOW_UPSTREAM_TIMEOUT_MS);
   });
 
-  it("FCC broadband carries the widened SLOW_UPSTREAM_TIMEOUT_MS budget", () => {
-    expect(fccBroadbandAdapter.timeoutMs).toBe(SLOW_UPSTREAM_TIMEOUT_MS);
+  // QA-22 upstream-probe (2026-05-23) — FCC was bumped off the
+  // shared `SLOW_UPSTREAM_TIMEOUT_MS` to a dedicated 90s floor. See
+  // the `carries the QA-22 upstream-probe 90s timeout floor` test in
+  // the FCC describe block above for the rationale.
+  it("FCC broadband carries a per-adapter floor strictly larger than SLOW_UPSTREAM_TIMEOUT_MS (QA-22 upstream-probe)", () => {
+    expect(fccBroadbandAdapter.timeoutMs).toBeGreaterThan(
+      SLOW_UPSTREAM_TIMEOUT_MS,
+    );
   });
 
   it("the fast federal adapters keep the runner default (no per-adapter floor)", () => {
