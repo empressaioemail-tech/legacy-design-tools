@@ -219,11 +219,20 @@ export function summarizeUsgsNedPayload(payload: unknown): string | null {
  * reporting) and tucks the headline pollution percentile (PM2.5)
  * after it when both are present.
  *
- * Examples:
- *   - both present:                    "EJ Index 65th pctile · PM2.5 72nd pctile"
- *   - only demographic index:          "EJ Index 65th pctile"
- *   - only pollution percentile:       "PM2.5 72nd pctile"
- *   - neither:                         "EJScreen indicators unavailable"
+ * Percentile basis: as of the 2026-05-23 CalEPA-mirror opt-in (see
+ * `federal/epa-ejscreen.ts` STATUS + DELTA #2), the percentiles are
+ * STATE-distribution, not US-distribution. The chip surfaces this with
+ * a "state-pctile" suffix wherever a percentile renders so the reader
+ * cannot silently misread a state-relative value as a nationwide one.
+ * If/when the adapter swaps back to a US-percentile source, the
+ * adapter's `payload.percentileBasis` field flips to "us" and this
+ * chip drops back to the bare "pctile" wording.
+ *
+ * Examples (state-basis, current default):
+ *   - both present:              "EJ Index 65th state-pctile · PM2.5 72nd state-pctile"
+ *   - only demographic index:    "EJ Index 65th state-pctile"
+ *   - only pollution percentile: "PM2.5 72nd state-pctile"
+ *   - neither:                   "EJScreen indicators unavailable"
  */
 export function summarizeEpaEjscreenPayload(
   payload: unknown,
@@ -232,9 +241,10 @@ export function summarizeEpaEjscreenPayload(
   if (payload["kind"] !== "ejscreen-blockgroup") return null;
   const demo = pickNumber(payload["demographicIndexPercentile"]);
   const pm25 = pickNumber(payload["pm25Percentile"]);
+  const basis = payload["percentileBasis"] === "state" ? "state-pctile" : "pctile";
   const parts: string[] = [];
-  if (demo !== null) parts.push(`EJ Index ${ordinal(demo)} pctile`);
-  if (pm25 !== null) parts.push(`PM2.5 ${ordinal(pm25)} pctile`);
+  if (demo !== null) parts.push(`EJ Index ${ordinal(demo)} ${basis}`);
+  if (pm25 !== null) parts.push(`PM2.5 ${ordinal(pm25)} ${basis}`);
   if (parts.length === 0) return "EJScreen indicators unavailable";
   return parts.join(" · ");
 }
@@ -370,9 +380,13 @@ const FEDERAL_PAYLOAD_FIELDS: Record<
     },
   ],
   "epa-ejscreen-blockgroup": [
+    // QA-22 SCOPE A CalEPA-mirror opt-in (2026-05-23) — labels include
+    // "(state %ile)" so the rerun-delta table surfaces the percentile
+    // basis the same way the inline summary chip does. Reader cannot
+    // silently misread a state-relative value as a US-relative one.
     {
       key: "demographicIndexPercentile",
-      label: "EJ Index",
+      label: "EJ Index (state %ile)",
       format: (p) => {
         const v = pickNumber(p["demographicIndexPercentile"]);
         return v === null ? NONE : `${ordinal(v)} pctile`;
@@ -380,7 +394,7 @@ const FEDERAL_PAYLOAD_FIELDS: Record<
     },
     {
       key: "pm25Percentile",
-      label: "PM2.5",
+      label: "PM2.5 (state %ile)",
       format: (p) => {
         const v = pickNumber(p["pm25Percentile"]);
         return v === null ? NONE : `${ordinal(v)} pctile`;

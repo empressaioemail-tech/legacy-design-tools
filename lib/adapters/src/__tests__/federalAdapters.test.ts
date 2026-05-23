@@ -9,7 +9,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { femaNfhlAdapter } from "../federal/fema-nfhl";
 import { usgsNedAdapter } from "../federal/usgs-ned";
-import { epaEjscreenAdapter } from "../federal/epa-ejscreen";
+import {
+  epaEjscreenAdapter,
+  EPA_EJSCREEN_DATASET_VERSION,
+  EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS,
+  EPA_EJSCREEN_PROVIDER_LABEL,
+} from "../federal/epa-ejscreen";
 import {
   fccBroadbandAdapter,
   __resetFccInMemCacheForTests,
@@ -300,27 +305,91 @@ describe("USGS NED elevation adapter", () => {
   });
 });
 
-describe("EPA EJScreen adapter", () => {
-  it("emits the normalized block-group indicators alongside the raw envelope", async () => {
+describe("EPA EJScreen adapter (CalEPA mirror opt-in, 2026-05-23)", () => {
+  it("emits the normalized block-group indicators alongside the raw attribute map", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(ejscreenBlockGroup));
     const outcomes = await runAdapters({
       adapters: [epaEjscreenAdapter],
-      context: { ...bastrop, fetchImpl },
+      context: { ...moab, fetchImpl },
     });
     expect(outcomes[0].status).toBe("ok");
     const payload = outcomes[0].result?.payload as {
       kind: string;
+      blockGroupId: string | null;
+      stateName: string | null;
       population: number | null;
+      demographicIndexPercentile: number | null;
+      supplementalDemographicIndexPercentile: number | null;
       pm25Percentile: number | null;
+      ozonePercentile: number | null;
+      leadPaintPercentile: number | null;
       raw: Record<string, unknown>;
     };
     expect(payload.kind).toBe("ejscreen-blockgroup");
-    expect(payload.population).toBe(1234);
-    expect(payload.pm25Percentile).toBeCloseTo(72, 0);
+    // Values mirror the live Moab UT recon result (BG 490190002004)
+    // recorded in 2026-05-23's QA-22 SCOPE A session note — schema
+    // covers 5/5 indicators the old broker exposed plus the new
+    // supplemental demographic-index variant.
+    expect(payload.blockGroupId).toBe("490190002004");
+    expect(payload.stateName).toBe("Utah");
+    expect(payload.population).toBe(1179);
+    expect(payload.demographicIndexPercentile).toBe(83);
+    expect(payload.supplementalDemographicIndexPercentile).toBe(79);
+    expect(payload.pm25Percentile).toBe(3);
+    expect(payload.ozonePercentile).toBe(4);
+    expect(payload.leadPaintPercentile).toBe(76);
     expect(payload.raw).toBeDefined();
   });
 
-  it("treats an empty `data.main` envelope as no-coverage", async () => {
+  it("targets the CalEPA EJSCREEN_2023_BG FeatureServer (NOT the decommissioned ejscreen.epa.gov broker)", async () => {
+    // The dead-end ledger in `epa-ejscreen.ts` lists the decommissioned
+    // broker as a known-bad URL; guard against any regression that
+    // accidentally re-points the adapter at it.
+    const fetchImpl = vi.fn(async () => jsonResponse(ejscreenBlockGroup));
+    await runAdapters({
+      adapters: [epaEjscreenAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    const calledUrl = String(fetchImpl.mock.calls[0][0]);
+    expect(calledUrl).toContain("services2.arcgis.com");
+    expect(calledUrl).toContain(
+      "EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI_gdb/FeatureServer/0",
+    );
+    expect(calledUrl).not.toContain("ejscreen.epa.gov");
+    expect(calledUrl).not.toContain("ejscreenRESTbroker3.aspx");
+  });
+
+  it("sends an ArcGIS point-intersects query with the EJScreen 2023 outFields list", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(ejscreenBlockGroup));
+    await runAdapters({
+      adapters: [epaEjscreenAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    const calledUrl = String(fetchImpl.mock.calls[0][0]);
+    expect(calledUrl).toMatch(/[?&]geometryType=esriGeometryPoint\b/);
+    expect(calledUrl).toMatch(/[?&]spatialRel=esriSpatialRelIntersects\b/);
+    expect(calledUrl).toMatch(/[?&]inSR=4326\b/);
+    expect(calledUrl).toMatch(/[?&]returnGeometry=false\b/);
+    // Every field the payload reads must be in the outFields list so
+    // a typo doesn't silently drop one indicator from the briefing.
+    expect(calledUrl).toContain("ID");
+    expect(calledUrl).toContain("STATE_NAME");
+    expect(calledUrl).toContain("ACSTOTPOP");
+    expect(calledUrl).toContain("P_DEMOGIDX_2");
+    expect(calledUrl).toContain("P_DEMOGIDX_5");
+    expect(calledUrl).toContain("P_PM25");
+    expect(calledUrl).toContain("P_OZONE");
+    expect(calledUrl).toContain("P_LDPNT");
+    // Geometry payload encodes the parcel's lat/lng in the WGS84 point
+    // shape arcgisPointQuery builds.
+    const geometryMatch = /[?&]geometry=([^&]+)/.exec(calledUrl);
+    expect(geometryMatch).not.toBeNull();
+    const geometry = JSON.parse(decodeURIComponent(geometryMatch![1]));
+    expect(geometry.x).toBe(moab.parcel.longitude);
+    expect(geometry.y).toBe(moab.parcel.latitude);
+  });
+
+  it("translates an empty features array to a no-coverage failed outcome", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(ejscreenEmpty));
     const outcomes = await runAdapters({
       adapters: [epaEjscreenAdapter],
@@ -330,40 +399,101 @@ describe("EPA EJScreen adapter", () => {
     expect(outcomes[0].error?.code).toBe("no-coverage");
   });
 
-  it("translates a broker error envelope into an upstream-error", async () => {
+  it("translates an ArcGIS error envelope into an upstream-error", async () => {
+    // services2.arcgis.com surfaces in-band errors as
+    // `{ error: { code, message } }` with HTTP 200 — the arcgisPointQuery
+    // helper rejects that as upstream-error rather than letting it
+    // round-trip as a "successful" empty response.
     const fetchImpl = vi.fn(async () =>
-      jsonResponse({ error: "geometry out of bounds" }),
+      jsonResponse({
+        error: { code: 400, message: "Invalid geometry" },
+      }),
     );
     const outcomes = await runAdapters({
       adapters: [epaEjscreenAdapter],
-      context: { ...bastrop, fetchImpl },
+      context: { ...moab, fetchImpl },
     });
     expect(outcomes[0].status).toBe("failed");
     expect(outcomes[0].error?.code).toBe("upstream-error");
-    expect(outcomes[0].error?.message).toMatch(/geometry/);
+    expect(outcomes[0].error?.message).toMatch(/Invalid geometry/);
   });
 
-  it("targets the broker3 endpoint (legacy `.aspx` deprecated 2023)", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse(ejscreenBlockGroup));
-    await runAdapters({
-      adapters: [epaEjscreenAdapter],
-      context: { ...bastrop, fetchImpl },
-    });
-    const calledUrl = String(fetchImpl.mock.calls[0][0]);
-    expect(calledUrl).toContain("ejscreenRESTbroker3.aspx");
-  });
-
-  it("retries a transient HTTP 503 from the broker before succeeding", async () => {
+  it("retries a transient HTTP 503 from the CalEPA mirror before succeeding", async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({}, 503))
       .mockResolvedValueOnce(jsonResponse(ejscreenBlockGroup));
     const outcomes = await runAdapters({
       adapters: [epaEjscreenAdapter],
-      context: { ...bastrop, fetchImpl },
+      context: { ...moab, fetchImpl },
     });
     expect(outcomes[0].status).toBe("ok");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  // ─── State-percentile disclosure (decision-record requirement #2) ────
+  // The CalEPA mirror's `P_*` fields are state-distribution percentiles,
+  // NOT US-distribution. The payload must carry an explicit basis flag
+  // so the UI / chip / markdown digest can surface "state-pctile" and
+  // not silently drift to the more-familiar US-percentile reading.
+  it("stamps `percentileBasis: \"state\"` on the payload so the UI can disclose state-vs-US semantics", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(ejscreenBlockGroup));
+    const outcomes = await runAdapters({
+      adapters: [epaEjscreenAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    const payload = outcomes[0].result?.payload as {
+      percentileBasis: unknown;
+    };
+    expect(payload.percentileBasis).toBe("state");
+  });
+
+  // ─── Source-attribution disclosure (decision-record requirement #1) ──
+  // Provider field MUST NOT read just "EJScreen" — the federal-tier
+  // promise on Redd softens via attribution, it does not silently
+  // erase. Guard against any regression that strips the CalEPA-mirror
+  // attribution from the persisted briefing-source row.
+  it("attributes the source as the CalEPA mirror in the persisted provider field", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(ejscreenBlockGroup));
+    const outcomes = await runAdapters({
+      adapters: [epaEjscreenAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    expect(outcomes[0].result?.provider).toBe(EPA_EJSCREEN_PROVIDER_LABEL);
+    // Negative assertion: must not regress to the old broker-era
+    // bare "EPA EJScreen" wording that hid the third-party hosting.
+    expect(outcomes[0].result?.provider).not.toBe("EPA EJScreen");
+    // Must mention both the third-party host and the EPA-retired
+    // context so the reader can interpret the federal-tier softening.
+    expect(outcomes[0].result?.provider).toMatch(/CalEPA mirror/);
+    expect(outcomes[0].result?.provider).toMatch(/EPA EJScreen API retired/i);
+  });
+
+  // ─── Data-vintage disclosure (decision-record requirement #1 + #2) ───
+  // The CalEPA mirror is a frozen 2023 snapshot, not a live feed.
+  // Exposing the dataset version on the payload lets the UI surface
+  // "what year of EJScreen this is" independently of the `snapshotDate`
+  // timestamp (which measures fetch time, not data publication time).
+  it("exposes the dataset version on the payload so the UI can render a data-vintage footer", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(ejscreenBlockGroup));
+    const outcomes = await runAdapters({
+      adapters: [epaEjscreenAdapter],
+      context: { ...moab, fetchImpl },
+    });
+    const payload = outcomes[0].result?.payload as {
+      upstreamDatasetVersion: unknown;
+    };
+    expect(payload.upstreamDatasetVersion).toBe(EPA_EJSCREEN_DATASET_VERSION);
+    expect(payload.upstreamDatasetVersion).toMatch(/EJScreen 2023/);
+    expect(payload.upstreamDatasetVersion).toMatch(/2024-01-29/);
+  });
+
+  // ─── Freshness threshold (decision-record requirement #3) ────────────
+  it("carries the widened 24-month freshness threshold for the CalEPA mirror's frozen-snapshot cadence", () => {
+    // 24 vs the old broker's 18 reflects the absence of a published
+    // CalEPA refresh cadence — see the FRESHNESS THRESHOLD CHOICE
+    // section in the adapter docstring for the rationale.
+    expect(EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS).toBe(24);
   });
 });
 
@@ -562,10 +692,6 @@ describe("federal adapter gating (PL-04)", () => {
 });
 
 describe("QA-22 — slow-upstream per-adapter timeout floors", () => {
-  it("EPA EJScreen carries the widened SLOW_UPSTREAM_TIMEOUT_MS budget", () => {
-    expect(epaEjscreenAdapter.timeoutMs).toBe(SLOW_UPSTREAM_TIMEOUT_MS);
-  });
-
   // QA-22 upstream-probe (2026-05-23) — FCC was bumped off the
   // shared `SLOW_UPSTREAM_TIMEOUT_MS` to a dedicated 90s floor. See
   // the `carries the QA-22 upstream-probe 90s timeout floor` test in
@@ -576,12 +702,15 @@ describe("QA-22 — slow-upstream per-adapter timeout floors", () => {
     );
   });
 
-  it("the fast federal adapters keep the runner default (no per-adapter floor)", () => {
-    // FEMA NFHL + USGS EPQS answer well inside the 15s default;
-    // leaving their `timeoutMs` unset documents that the widened
-    // budget is targeted at the known-slow upstreams, not a blanket
-    // bump across every adapter.
+  // QA-22 SCOPE A opt-in (2026-05-23) — EPA EJScreen dropped its
+  // SLOW_UPSTREAM_TIMEOUT_MS floor when the adapter swapped from the
+  // (now decommissioned) ejscreen.epa.gov broker to the CalEPA
+  // FeatureServer mirror. The mirror answers in ~300-600ms on the
+  // recorded operator-workstation probe, well inside the runner
+  // default; the wider budget would have been safety theater.
+  it("the fast federal adapters (FEMA + USGS + EPA EJScreen) keep the runner default (no per-adapter floor)", () => {
     expect(femaNfhlAdapter.timeoutMs).toBeUndefined();
     expect(usgsNedAdapter.timeoutMs).toBeUndefined();
+    expect(epaEjscreenAdapter.timeoutMs).toBeUndefined();
   });
 });
