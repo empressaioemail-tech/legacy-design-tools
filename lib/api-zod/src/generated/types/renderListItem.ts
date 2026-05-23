@@ -7,6 +7,7 @@
  */
 import type { DomainRenderKind } from "./domainRenderKind";
 import type { RenderStatus } from "./renderStatus";
+import type { ViewpointRenderSourceType } from "./viewpointRenderSourceType";
 
 /**
  * One row in the per-engagement render history. Slimmer than
@@ -17,6 +18,8 @@ the detail shape — outputs are NOT included; clients fetch
 export interface RenderListItem {
   id: string;
   kind: DomainRenderKind;
+  sourceType?: ViewpointRenderSourceType;
+  parentRenderOutputId?: string | null;
   status: RenderStatus;
   errorCode: string | null;
   requestedBy: string;

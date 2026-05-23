@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  ConstellationCanvas,
   RenderCreditsBadge,
   RenderGallery,
   RenderKickoffDialog,
@@ -25,8 +26,9 @@ export function RendersTab({
   return (
     <div
       data-testid="renders-tab"
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+      style={{ display: "flex", flexDirection: "column", gap: 12, position: "relative" }}
     >
+      <ConstellationCanvas />
       <div className="flex items-center justify-between">
         <div className="flex flex-col gap-1">
           <span
@@ -56,6 +58,7 @@ export function RendersTab({
       <RenderGallery
         engagementId={engagementId}
         canCancel
+        showPowerTools
         emptyStateHint="No renders yet. Click 'New render' to kick off your first one."
       />
       <RenderKickoffDialog

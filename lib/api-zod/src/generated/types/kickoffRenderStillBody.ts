@@ -6,7 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { KickoffRenderCommonFields } from "./kickoffRenderCommonFields";
-import type { KickoffRenderStillBodyKind } from "./kickoffRenderStillBodyKind";
 import type { Vec3 } from "./vec3";
 
 export type KickoffRenderStillBody = KickoffRenderCommonFields & {
@@ -19,6 +18,4 @@ export type KickoffRenderStillBody = KickoffRenderCommonFields & {
    * @maximum 120
    */
   fov?: number;
-} & {
-  kind: KickoffRenderStillBodyKind;
 };

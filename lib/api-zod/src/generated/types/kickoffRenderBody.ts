@@ -7,9 +7,17 @@
  */
 import type { KickoffRenderElevationSetBody } from "./kickoffRenderElevationSetBody";
 import type { KickoffRenderStillBody } from "./kickoffRenderStillBody";
+import type { KickoffRenderStillUploadBody } from "./kickoffRenderStillUploadBody";
 import type { KickoffRenderVideoBody } from "./kickoffRenderVideoBody";
 
+/**
+ * Union by `kind`. Two `still` shapes share the same discriminator
+value — GLB capture (`glbUrl` + camera) vs upload (`sourceUploadUrl`);
+clients disambiguate on presence of those fields (doc 40e A.5).
+
+ */
 export type KickoffRenderBody =
   | KickoffRenderStillBody
+  | KickoffRenderStillUploadBody
   | KickoffRenderElevationSetBody
   | KickoffRenderVideoBody;

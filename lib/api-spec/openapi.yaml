@@ -4596,7 +4596,7 @@ paths:
       summary: Upload a source image for upload-as-render-source
       description: |
         doc 40e A.5 / B.2 — stores a source image under
-        `/objects/uploads/<uuid>` and returns the canonical
+        /objects/uploads/{uuid} and returns the canonical
         `sourceUploadUrl` for a subsequent `still` kickoff. Multipart
         `image` file part, ≤15MB. Behind `RENDERS_PROD_ENABLED`.
       parameters:
@@ -13436,7 +13436,7 @@ components:
       properties:
         sourceUploadUrl:
           type: string
-          description: `/objects/uploads/<uuid>` path for kickoff.
+          description: /objects/uploads/{uuid} path for kickoff.
       required: [sourceUploadUrl]
 
     KickoffRenderStillBody:
@@ -13474,7 +13474,7 @@ components:
               type: string
               description: |
                 Path returned by `POST .../renders/source-upload`
-                (`/objects/uploads/<uuid>`).
+                (/objects/uploads/{uuid}).
           required: [kind, sourceUploadUrl]
 
     KickoffRenderElevationSetBody:
@@ -13546,12 +13546,10 @@ components:
         - $ref: "#/components/schemas/KickoffRenderStillUploadBody"
         - $ref: "#/components/schemas/KickoffRenderElevationSetBody"
         - $ref: "#/components/schemas/KickoffRenderVideoBody"
-      discriminator:
-        propertyName: kind
-        mapping:
-          still: "#/components/schemas/KickoffRenderStillBody"
-          elevation-set: "#/components/schemas/KickoffRenderElevationSetBody"
-          video: "#/components/schemas/KickoffRenderVideoBody"
+      description: |
+        Union by `kind`. Two `still` shapes share the same discriminator
+        value — GLB capture (`glbUrl` + camera) vs upload (`sourceUploadUrl`);
+        clients disambiguate on presence of those fields (doc 40e A.5).
 
     KickoffRenderResponse:
       type: object

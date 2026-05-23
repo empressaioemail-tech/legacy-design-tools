@@ -39,6 +39,8 @@ export interface RenderGalleryProps {
    * the underlying render at native resolution.
    */
   openPreviewInNewTab?: boolean;
+  /** Architect Renders tab: enable Enhance / Upscale / … on ready stills. */
+  showPowerTools?: boolean;
 }
 
 const POLL_INTERVAL_MS = 3000;
@@ -49,6 +51,7 @@ export function RenderGallery({
   canCancel = true,
   emptyStateHint,
   openPreviewInNewTab = false,
+  showPowerTools = false,
 }: RenderGalleryProps) {
   const listQuery = useListEngagementRenders(engagementId, {
     query: {
@@ -59,6 +62,12 @@ export function RenderGallery({
   });
 
   const items: RenderListItem[] = listQuery.data?.items ?? [];
+  const sortedItems = [...items].sort((a, b) => {
+    const aChild = a.parentRenderOutputId ? 1 : 0;
+    const bChild = b.parentRenderOutputId ? 1 : 0;
+    if (aChild !== bChild) return aChild - bChild;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
 
   if (listQuery.isLoading) {
     return (
@@ -127,13 +136,14 @@ export function RenderGallery({
         alignItems: "start",
       }}
     >
-      {items.map((item) => (
+      {sortedItems.map((item) => (
         <RenderGalleryCard
           key={item.id}
           engagementId={engagementId}
           listItem={item}
           canCancel={canCancel}
           openPreviewInNewTab={openPreviewInNewTab}
+          showPowerTools={showPowerTools}
         />
       ))}
     </div>
@@ -151,11 +161,13 @@ function RenderGalleryCard({
   listItem,
   canCancel,
   openPreviewInNewTab,
+  showPowerTools,
 }: {
   engagementId: string;
   listItem: RenderListItem;
   canCancel: boolean;
   openPreviewInNewTab: boolean;
+  showPowerTools: boolean;
 }) {
   const qc = useQueryClient();
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -230,6 +242,8 @@ function RenderGalleryCard({
       cancelError={cancelError}
       onCancel={handleCancel}
       openPreviewInNewTab={openPreviewInNewTab}
+      showPowerTools={showPowerTools}
+      engagementId={engagementId}
     />
   );
 }

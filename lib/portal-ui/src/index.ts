@@ -59,6 +59,18 @@ export type { RenderKickoffDialogProps } from "./components/RenderKickoffDialog"
 // `GET /api/renders/credits`; renders nothing when the renders preview
 // is disabled (the gallery owns that message).
 export { RenderCreditsBadge } from "./components/RenderCreditsBadge";
+export { DragDropUpload } from "./components/DragDropUpload";
+export type { DragDropUploadProps } from "./components/DragDropUpload";
+export { MaskCanvas } from "./components/MaskCanvas";
+export type { MaskCanvasProps } from "./components/MaskCanvas";
+export { BeforeAfterSlider } from "./components/BeforeAfterSlider";
+export type { BeforeAfterSliderProps } from "./components/BeforeAfterSlider";
+export { MnmlExpertParamGrid } from "./components/MnmlExpertParamGrid";
+export type { MnmlExpertParamGridProps } from "./components/MnmlExpertParamGrid";
+export { ConstellationCanvas } from "./components/ConstellationCanvas";
+export type { ConstellationCanvasProps } from "./components/ConstellationCanvas";
+export { RenderPowerToolDialog } from "./components/render-tools/RenderPowerToolDialog";
+export type { RenderPowerToolDialogProps } from "./components/render-tools/RenderPowerToolDialog";
 
 // Promoted from artifacts/plan-review so design-tools can mount the
 // same read-only Three.js BIM viewer on its Snapshots tab without
