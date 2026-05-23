@@ -45,11 +45,45 @@ import {
   bastropFloodAdapter,
 } from "./local/bastrop-tx";
 
+/**
+ * QA-22 SCOPE B closeout (2026-05-23) — `fcc:broadband` is gated off
+ * by default. PR #96's structured logging confirmed the FCC BDC v2
+ * endpoint is Akamai-WAF-gated: server RSTs at ~19s or holds 60s
+ * with zero bytes for any client UA, both from Cloud Run egress AND
+ * a workstation curl. PR #94's 90s timeout + 15-min cache can't
+ * help because no successful response ever arrives, so the cache
+ * never warms.
+ *
+ * The adapter binding stays imported + exported so its unit tests
+ * keep running, and so an operator can flip the flag back via env
+ * var without a code redeploy if a future use case re-emerges (e.g.
+ * FCC ships a non-WAF-fronted programmatic endpoint, or we move to
+ * the BDC bulk-download CSV path).
+ *
+ * Set `FCC_ENABLED=true` in the Cloud Run service env to re-register
+ * the adapter. Default is "off" — `process.env.FCC_ENABLED` undefined
+ * OR any value other than the literal string `"true"` keeps FCC out
+ * of {@link FEDERAL_ADAPTERS} and therefore out of every
+ * `runAdapters(...)` outcome list (no pill rendered, no failure
+ * surfaced).
+ *
+ * Session summary: doc_repo/_sessions/2026-05-23_qa22_fcc_recon_cc-agent-C.md
+ */
+export function isFccEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.FCC_ENABLED === "true";
+}
+
 export const FEDERAL_ADAPTERS: ReadonlyArray<Adapter> = [
   femaNfhlAdapter,
   usgsNedAdapter,
   epaEjscreenAdapter,
-  fccBroadbandAdapter,
+  // QA-22 SCOPE B closeout (PR #102) — see `isFccEnabled` docstring
+  // above. FCC is gated off by default; the binding is only spread
+  // in when the operator flips `FCC_ENABLED=true` on the Cloud Run
+  // service env.
+  ...(isFccEnabled() ? [fccBroadbandAdapter] : []),
   // Cortex prop-intel SCOPE B (2026-05-23) — Regrid national
   // parcel + zoning baseline. Tier-housed under FEDERAL_ADAPTERS
   // for cache-predicate reuse (the runner's default cache predicate

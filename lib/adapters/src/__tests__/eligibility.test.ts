@@ -21,13 +21,19 @@ function ctxFor(
   };
 }
 
+// QA-22 SCOPE B closeout (2026-05-23) — `fcc:broadband` is gated off
+// by default; see `isFccEnabled` in
+// `lib/adapters/src/registry.ts` and the registry-test invariants
+// in `registry.test.ts`. The applicable-adapter lists below
+// therefore exclude `fcc:broadband` even though FCC's `appliesTo`
+// would still return true for a geocoded engagement — the gate
+// removes it from `ALL_ADAPTERS` upstream of this filter.
 describe("filterApplicableAdapters", () => {
   it("returns Bastrop TX's federal + Texas state + Bastrop local adapters", () => {
     const applicable = filterApplicableAdapters(ctxFor("texas", "bastrop-tx"));
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
@@ -55,7 +61,6 @@ describe("filterApplicableAdapters", () => {
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
@@ -72,13 +77,18 @@ describe("filterApplicableAdapters", () => {
     // When the engagement carries `partnerCity: true` (Hauska
     // substrate partner status), the per-county adapters return as
     // opportunistic enrichment alongside the Regrid baseline.
+    //
+    // `fcc:broadband` is NOT in this list even though Grand County
+    // is flagged partnerCity — the FCC gate
+    // (QA-22 SCOPE B closeout, PR #102) is independent of the
+    // partnerCity flag and stays off by default until the operator
+    // flips `FCC_ENABLED=true` on the Cloud Run service env.
     const applicable = filterApplicableAdapters(
       ctxFor("utah", "grand-county-ut", { partnerCity: true }),
     );
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
@@ -101,7 +111,6 @@ describe("filterApplicableAdapters", () => {
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
@@ -120,17 +129,23 @@ describe("filterApplicableAdapters", () => {
     );
   });
 
-  it("returns the federal six for an out-of-pilot but geocoded context (PL-04 + SCOPE B)", () => {
+  it("returns the federal five (FEMA + USGS + EPA + Regrid trio + duo) for an out-of-pilot but geocoded context (PL-04 + SCOPE B)", () => {
     // Boulder CO style: stateKey null, but the parcel is geocoded
-    // (lat/lng baked into ctxFor's defaults). Federal adapters now
-    // apply to any finite-coords engagement. After SCOPE B
-    // (2026-05-23), the Regrid baseline (parcels + zoning) is part
-    // of the federal-tier "every geocoded engagement" set.
+    // (lat/lng baked into ctxFor's defaults). Federal adapters apply
+    // to any finite-coords engagement.
+    //
+    // The federal-tier set after the 2026-05-23 changes:
+    //   - FEMA NFHL + USGS NED + EPA EJScreen — the original
+    //     ungated federal trio.
+    //   - `regrid:parcels` + `regrid:zoning` — Cortex prop-intel
+    //     SCOPE B (PR #104) national baseline; tier-housed under
+    //     federal for cache-predicate reuse.
+    //   - `fcc:broadband` — gated off by default (QA-22 SCOPE B
+    //     closeout, PR #102). Re-enables when `FCC_ENABLED=true`.
     const applicable = filterApplicableAdapters(ctxFor(null, null));
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
