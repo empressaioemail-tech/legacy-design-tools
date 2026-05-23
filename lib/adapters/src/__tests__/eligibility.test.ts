@@ -13,10 +13,11 @@ import type {
 function ctxFor(
   stateKey: AdapterContext["jurisdiction"]["stateKey"],
   localKey: AdapterContext["jurisdiction"]["localKey"],
+  opts: { partnerCity?: boolean } = {},
 ): AdapterContext {
   return {
     parcel: { latitude: 0, longitude: 0 },
-    jurisdiction: { stateKey, localKey },
+    jurisdiction: { stateKey, localKey, partnerCity: opts.partnerCity },
   };
 }
 
@@ -30,6 +31,10 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
+        // Cortex prop-intel SCOPE B (2026-05-23) — Regrid national
+        // parcel + zoning baseline fires for every geocoded engagement.
+        "regrid:parcels",
+        "regrid:zoning",
         "tceq:edwards-aquifer",
         "bastrop-tx:parcels",
         "bastrop-tx:zoning",
@@ -38,7 +43,12 @@ describe("filterApplicableAdapters", () => {
     );
   });
 
-  it("returns Moab UT's federal + Utah state + Grand County local adapters", () => {
+  it("returns Moab UT's federal + Utah state adapters (grand-county-ut gated off by default after SCOPE B)", () => {
+    // Cortex prop-intel SCOPE B (2026-05-23) — grand-county-ut:* now
+    // require `partnerCity: true` and Grand County is not currently a
+    // partner. The default Moab context (no partnerCity) gets the
+    // federal baseline (including Regrid) + UGRC state-tier, with
+    // grand-county-ut adapters skipped via appliesTo === false.
     const applicable = filterApplicableAdapters(
       ctxFor("utah", "grand-county-ut"),
     );
@@ -49,6 +59,31 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
+        "regrid:parcels",
+        "regrid:zoning",
+        "ugrc:dem",
+        "ugrc:parcels",
+        "ugrc:address-points",
+      ].sort(),
+    );
+  });
+
+  it("returns Moab UT + grand-county-ut local adapters when partnerCity=true", () => {
+    // When the engagement carries `partnerCity: true` (Hauska
+    // substrate partner status), the per-county adapters return as
+    // opportunistic enrichment alongside the Regrid baseline.
+    const applicable = filterApplicableAdapters(
+      ctxFor("utah", "grand-county-ut", { partnerCity: true }),
+    );
+    const keys = applicable.map((a) => a.adapterKey).sort();
+    expect(keys).toEqual(
+      [
+        "fcc:broadband",
+        "fema:nfhl-flood-zone",
+        "epa:ejscreen",
+        "usgs:ned-elevation",
+        "regrid:parcels",
+        "regrid:zoning",
         "ugrc:dem",
         "ugrc:parcels",
         "ugrc:address-points",
@@ -70,6 +105,12 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
+        // Cortex prop-intel SCOPE B (2026-05-23) — Regrid baseline.
+        // lemhi-county-id adapters are NOT gated on partnerCity in
+        // SCOPE B (the dispatch named grand-county-ut specifically);
+        // a follow-on can widen the gate uniformly if desired.
+        "regrid:parcels",
+        "regrid:zoning",
         "inside-idaho:dem",
         "inside-idaho:parcels",
         "lemhi-county-id:parcels",
@@ -79,10 +120,12 @@ describe("filterApplicableAdapters", () => {
     );
   });
 
-  it("returns the federal four for an out-of-pilot but geocoded context (PL-04)", () => {
+  it("returns the federal six for an out-of-pilot but geocoded context (PL-04 + SCOPE B)", () => {
     // Boulder CO style: stateKey null, but the parcel is geocoded
     // (lat/lng baked into ctxFor's defaults). Federal adapters now
-    // apply to any finite-coords engagement.
+    // apply to any finite-coords engagement. After SCOPE B
+    // (2026-05-23), the Regrid baseline (parcels + zoning) is part
+    // of the federal-tier "every geocoded engagement" set.
     const applicable = filterApplicableAdapters(ctxFor(null, null));
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
@@ -91,6 +134,8 @@ describe("filterApplicableAdapters", () => {
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
+        "regrid:parcels",
+        "regrid:zoning",
       ].sort(),
     );
   });

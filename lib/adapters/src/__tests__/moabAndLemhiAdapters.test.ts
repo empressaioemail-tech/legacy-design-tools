@@ -22,9 +22,18 @@ import {
 import type { AdapterContext } from "../types";
 import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
 
+// Cortex prop-intel SCOPE B (2026-05-23): grand-county-ut adapters
+// now gate on `partnerCity: true` — the test fixture flips the flag
+// so the existing per-county chain still fires here. Real engagements
+// only get `partnerCity: true` when the jurisdiction is a Hauska
+// substrate partner; today the moab fixture is the only such test case.
 const moab: AdapterContext = {
   parcel: { latitude: 38.5733, longitude: -109.5498 },
-  jurisdiction: { stateKey: "utah", localKey: "grand-county-ut" },
+  jurisdiction: {
+    stateKey: "utah",
+    localKey: "grand-county-ut",
+    partnerCity: true,
+  },
 };
 const salmon: AdapterContext = {
   parcel: { latitude: 45.1755, longitude: -113.8957 },

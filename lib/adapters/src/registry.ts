@@ -16,6 +16,10 @@ import { usgsNedAdapter } from "./federal/usgs-ned";
 import { epaEjscreenAdapter } from "./federal/epa-ejscreen";
 import { fccBroadbandAdapter } from "./federal/fcc-broadband";
 import {
+  regridParcelsAdapter,
+  regridZoningAdapter,
+} from "./national/regrid";
+import {
   utahDemAdapter,
   utahParcelsAdapter,
   utahAddressPointsAdapter,
@@ -46,6 +50,13 @@ export const FEDERAL_ADAPTERS: ReadonlyArray<Adapter> = [
   usgsNedAdapter,
   epaEjscreenAdapter,
   fccBroadbandAdapter,
+  // Cortex prop-intel SCOPE B (2026-05-23) — Regrid national
+  // parcel + zoning baseline. Tier-housed under FEDERAL_ADAPTERS
+  // for cache-predicate reuse (the runner's default cache predicate
+  // caches federal-tier outcomes). The operator-visible attribution
+  // is source_kind = "national-aggregator", which the UI reads.
+  regridParcelsAdapter,
+  regridZoningAdapter,
 ];
 
 // TODO: state-tier gates on localKey not stateKey — see PL-04

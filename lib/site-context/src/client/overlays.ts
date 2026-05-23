@@ -68,6 +68,13 @@ function tierForSource(
   if (kind === "federal-adapter") return "federal";
   if (kind === "state-adapter") return "state";
   if (kind === "local-adapter") return "local";
+  // Cortex prop-intel SCOPE B (2026-05-23) — `national-aggregator` is
+  // the source kind written by the Regrid baseline adapter. UI-side
+  // we render it in the same "federal"-style pill as the other
+  // nationwide-scope sources (USGS / FEMA / FCC / EPA), since a real
+  // `"national"` overlay tier would require a cross-cutting TIER_*
+  // map update in SiteMap.tsx — deferred until UX flags it.
+  if (kind === "national-aggregator") return "federal";
   return "manual";
 }
 
@@ -152,6 +159,101 @@ function extractPathsFromArcGisGeometry(
 }
 
 /**
+ * Project a single GeoJSON coordinate pair `[lng, lat]` (WGS84 — the
+ * only CRS GeoJSON permits per RFC 7946) into the Leaflet
+ * `[lat, lng]` order. Returns null on out-of-range or malformed
+ * coordinates so a single bad vertex skips rather than rejecting
+ * the whole polygon.
+ */
+function projectGeoJsonPoint(pair: unknown): [number, number] | null {
+  if (!Array.isArray(pair) || pair.length < 2) return null;
+  const lng = pair[0];
+  const lat = pair[1];
+  if (!isFiniteNumber(lng) || !isFiniteNumber(lat)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return [lat, lng];
+}
+
+/**
+ * Extract Leaflet-shaped polygon rings (`Array<Array<[lat, lng]>>`)
+ * from a GeoJSON `Polygon` or `MultiPolygon` geometry. Cortex
+ * prop-intel SCOPE B (2026-05-23) adds this because the Regrid
+ * national parcel + zoning baseline returns GeoJSON Polygon /
+ * MultiPolygon on every `/parcels/point` response — the existing
+ * ArcGIS-rings path only covers the per-jurisdiction county-GIS
+ * adapters. Future federal/national adapters are likely to follow
+ * Regrid's lead so this branch covers them too.
+ *
+ * `Polygon` coordinates: `[ ring, ring, ... ]` where each ring is
+ * `[ [lng,lat], [lng,lat], ... ]`. First ring is the outer
+ * boundary; subsequent rings are holes — Leaflet handles them by
+ * convention if we pass the array as-is, so we just project every
+ * ring.
+ *
+ * `MultiPolygon` coordinates: `[ polygon, polygon, ... ]` where
+ * each polygon is `[ ring, ring, ... ]`. Each polygon's rings get
+ * flattened into the output (Leaflet renders multiple polygons by
+ * passing multiple ring arrays alongside each other).
+ *
+ * `minPoints` is 3 for a polygon ring (a triangle is the minimum
+ * valid polygon).
+ */
+function extractRingsFromGeoJsonGeometry(
+  geometry: unknown,
+): Array<Array<[number, number]>> {
+  if (!isRecord(geometry)) return [];
+  const type = geometry.type;
+  const coordinates = geometry.coordinates;
+  if (!Array.isArray(coordinates)) return [];
+  const out: Array<Array<[number, number]>> = [];
+  if (type === "Polygon") {
+    for (const ring of coordinates) {
+      if (!Array.isArray(ring)) continue;
+      const projected: Array<[number, number]> = [];
+      for (const pair of ring) {
+        const point = projectGeoJsonPoint(pair);
+        if (point) projected.push(point);
+      }
+      if (projected.length >= 3) out.push(projected);
+    }
+    return out;
+  }
+  if (type === "MultiPolygon") {
+    for (const polygon of coordinates) {
+      if (!Array.isArray(polygon)) continue;
+      for (const ring of polygon) {
+        if (!Array.isArray(ring)) continue;
+        const projected: Array<[number, number]> = [];
+        for (const pair of ring) {
+          const point = projectGeoJsonPoint(pair);
+          if (point) projected.push(point);
+        }
+        if (projected.length >= 3) out.push(projected);
+      }
+    }
+    return out;
+  }
+  return [];
+}
+
+/**
+ * Detect whether a `payload.parcel` / `payload.zoning` value is a
+ * GeoJSON Feature wrapper (`{ type: "Feature", geometry: {...} }`) and
+ * return its geometry, or null if the value is some other shape (e.g.
+ * an ArcGIS feature with `attributes` + `geometry.rings`).
+ *
+ * Regrid emits `payload.parcel` as a full GeoJSON Feature; the
+ * county-GIS adapters emit `payload.parcel = ArcGisFeature` with
+ * `{ attributes, geometry: { rings } }`. The two shapes coexist on
+ * the wire after Cortex prop-intel SCOPE B.
+ */
+function geoJsonGeometryFromFeature(value: unknown): unknown | null {
+  if (!isRecord(value)) return null;
+  if (value.type !== "Feature") return null;
+  return value.geometry ?? null;
+}
+
+/**
  * Extract WGS84 polylines from an OpenStreetMap Overpass `elements`
  * array. `out body geom` ways carry an inline `geometry` array of
  * `{lat, lon}` vertices.
@@ -201,18 +303,38 @@ function overlaysFromSource(
   const out: SiteMapOverlay[] = [];
 
   if (isRecord(payload.parcel)) {
-    const rings = extractRingsFromArcGisGeometry(
-      (payload.parcel as Record<string, unknown>).geometry,
-    );
+    const parcel = payload.parcel as Record<string, unknown>;
+    // Cortex prop-intel SCOPE B (2026-05-23) — Regrid emits parcel
+    // as a full GeoJSON Feature wrapper; the county-GIS adapters
+    // emit parcel as an ArcGIS feature with `{ attributes,
+    // geometry: { rings } }`. Try the GeoJSON branch first (the
+    // wrapper is unambiguous via `type: "Feature"`); fall back to
+    // the ArcGIS-rings extractor.
+    const geoJsonGeometry = geoJsonGeometryFromFeature(parcel);
+    let rings: Array<Array<[number, number]>> = [];
+    if (geoJsonGeometry) {
+      rings = extractRingsFromGeoJsonGeometry(geoJsonGeometry);
+    }
+    if (rings.length === 0) {
+      rings = extractRingsFromArcGisGeometry(parcel.geometry);
+    }
     if (rings.length > 0) {
       out.push({ kind: "polygon", ...base, positions: rings });
     }
   }
 
   if (isRecord(payload.zoning)) {
-    const rings = extractRingsFromArcGisGeometry(
-      (payload.zoning as Record<string, unknown>).geometry,
-    );
+    const zoning = payload.zoning as Record<string, unknown>;
+    // Same dual-shape handling as `payload.parcel` above — Regrid's
+    // zoning is a GeoJSON Feature; county-GIS zoning is ArcGIS.
+    const geoJsonGeometry = geoJsonGeometryFromFeature(zoning);
+    let rings: Array<Array<[number, number]>> = [];
+    if (geoJsonGeometry) {
+      rings = extractRingsFromGeoJsonGeometry(geoJsonGeometry);
+    }
+    if (rings.length === 0) {
+      rings = extractRingsFromArcGisGeometry(zoning.geometry);
+    }
     if (rings.length > 0) {
       out.push({ kind: "polygon", ...base, positions: rings });
     }
