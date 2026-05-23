@@ -15,7 +15,15 @@
 import { describe, expect, it } from "vitest";
 import { MockMnmlClient } from "../mockClient";
 import { MnmlError } from "../types";
-import type { ArchDiffusionRequest, VideoAiRequest } from "../types";
+import type {
+  AiEraserRequest,
+  ArchDiffusionRequest,
+  InpaintRequest,
+  RenderEnhancerRequest,
+  StyleTransferRequest,
+  UpscaleRequest,
+  VideoAiRequest,
+} from "../types";
 
 const ARCHDIFFUSION_STILL: ArchDiffusionRequest = {
   kind: "archdiffusion",
@@ -208,6 +216,133 @@ describe("MockMnmlClient — getCredits (doc 40c gap-fill)", () => {
     await client.triggerRender(ARCHDIFFUSION_STILL); // -3
     await client.triggerRender(VIDEO); // -10
     expect(await client.getCredits()).toEqual({ credits: 87 });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Power tools (doc 40e A.1)
+// ─────────────────────────────────────────────────────────────────────
+
+const IMAGE_BLOB = () => new Blob([new Uint8Array([0xff, 0xd8, 0xff])]);
+const MASK_BLOB = () => new Blob([new Uint8Array([0x89, 0x50, 0x4e])]); // PNG header bytes
+
+const ENHANCE_REQ: RenderEnhancerRequest = {
+  image: IMAGE_BLOB(),
+  prompt: "make it crisper",
+  geometry: 1,
+  creativity: 0.3,
+  dynamic: 5,
+  sharpen: 0.5,
+};
+
+const UPSCALE_REQ: UpscaleRequest = {
+  image: IMAGE_BLOB(),
+  scale: 4,
+  faceEnhance: true,
+};
+
+const ERASER_REQ: AiEraserRequest = {
+  image: IMAGE_BLOB(),
+  mask: MASK_BLOB(),
+  outputFormat: "png",
+};
+
+const INPAINT_REQ: InpaintRequest = {
+  image: IMAGE_BLOB(),
+  mask: MASK_BLOB(),
+  prompt: "replace with a wood door",
+  maskType: "manual",
+};
+
+const STYLE_REQ: StyleTransferRequest = {
+  image: IMAGE_BLOB(),
+  referenceImage: IMAGE_BLOB(),
+  strength: 0.7,
+  preserveStructure: true,
+};
+
+describe("MockMnmlClient — power tools (doc 40e A.1)", () => {
+  it("enhance trigger registers a render id and debits 1 credit", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100, readyAfterMs: 0 });
+    const { renderId, remainingCredits } = await client.enhance(ENHANCE_REQ);
+    expect(renderId).toMatch(/.+/);
+    expect(remainingCredits).toBe(99);
+    const status = await client.getRenderStatus(renderId);
+    expect(status.status).toBe("ready");
+    expect(status.outputUrls).toEqual(["https://mnml.ai/mock/enhance.png"]);
+  });
+
+  it("upscale trigger registers a render id, debits 1 credit, returns upscale fixture", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100, readyAfterMs: 0 });
+    const { remainingCredits, renderId } = await client.upscale(UPSCALE_REQ);
+    expect(remainingCredits).toBe(99);
+    const status = await client.getRenderStatus(renderId);
+    expect(status.outputUrls).toEqual(["https://mnml.ai/mock/upscale.png"]);
+  });
+
+  it("aiErase trigger registers a render id, debits 1 credit, returns ai-eraser fixture", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100, readyAfterMs: 0 });
+    const { remainingCredits, renderId } = await client.aiErase(ERASER_REQ);
+    expect(remainingCredits).toBe(99);
+    const status = await client.getRenderStatus(renderId);
+    expect(status.outputUrls).toEqual(["https://mnml.ai/mock/ai-eraser.png"]);
+  });
+
+  it("inpaint trigger registers a render id, debits 1 credit, returns inpaint fixture", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100, readyAfterMs: 0 });
+    const { remainingCredits, renderId } = await client.inpaint(INPAINT_REQ);
+    expect(remainingCredits).toBe(99);
+    const status = await client.getRenderStatus(renderId);
+    expect(status.outputUrls).toEqual(["https://mnml.ai/mock/inpaint.png"]);
+  });
+
+  it("styleTransfer trigger registers a render id, debits 1 credit, returns style-transfer fixture", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100, readyAfterMs: 0 });
+    const { remainingCredits, renderId } = await client.styleTransfer(STYLE_REQ);
+    expect(remainingCredits).toBe(99);
+    const status = await client.getRenderStatus(renderId);
+    expect(status.outputUrls).toEqual([
+      "https://mnml.ai/mock/style-transfer.png",
+    ]);
+  });
+
+  it("tool jobs walk the same queued → rendering → ready transition as render jobs", async () => {
+    let now = 1_000;
+    const client = new MockMnmlClient({ readyAfterMs: 200, now: () => now });
+    const { renderId } = await client.enhance(ENHANCE_REQ);
+
+    expect((await client.getRenderStatus(renderId)).status).toBe("queued");
+    now = 1_100;
+    expect((await client.getRenderStatus(renderId)).status).toBe("rendering");
+    now = 1_200;
+    expect((await client.getRenderStatus(renderId)).status).toBe("ready");
+  });
+
+  it("alwaysFail flips tool jobs to failed (MOCK_FORCED) too", async () => {
+    const client = new MockMnmlClient({ alwaysFail: true, readyAfterMs: 0 });
+    const { renderId } = await client.upscale(UPSCALE_REQ);
+    const status = await client.getRenderStatus(renderId);
+    expect(status.status).toBe("failed");
+    expect(status.error?.code).toBe("MOCK_FORCED");
+  });
+
+  it("getCredits reflects tool debits alongside render debits", async () => {
+    const client = new MockMnmlClient({ startingCredits: 100 });
+    await client.enhance(ENHANCE_REQ); // -1
+    await client.upscale(UPSCALE_REQ); // -1
+    await client.aiErase(ERASER_REQ); // -1
+    await client.inpaint(INPAINT_REQ); // -1
+    await client.styleTransfer(STYLE_REQ); // -1
+    expect(await client.getCredits()).toEqual({ credits: 95 });
+  });
+
+  it("fixedRenderId pins the renderId across tool methods", async () => {
+    const client = new MockMnmlClient({ fixedRenderId: "tool-abc" });
+    const a = await client.enhance(ENHANCE_REQ);
+    expect(a.renderId).toBe("tool-abc");
+    // The state is keyed by id, so subsequent triggers overwrite — this
+    // is the documented behavior for fixedRenderId (matches the
+    // triggerRender precedent above).
   });
 });
 

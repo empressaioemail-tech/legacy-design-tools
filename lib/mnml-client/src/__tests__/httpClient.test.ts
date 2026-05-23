@@ -15,7 +15,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HttpMnmlClient } from "../httpClient";
 import { MnmlError } from "../types";
-import type { ArchDiffusionRequest, VideoAiRequest } from "../types";
+import type {
+  AiEraserRequest,
+  ArchDiffusionRequest,
+  InpaintRequest,
+  RenderEnhancerRequest,
+  StyleTransferRequest,
+  UpscaleRequest,
+  VideoAiRequest,
+} from "../types";
 
 const BASE_URL = "https://api.mnmlai.dev";
 const API_KEY = "test-key-abc";
@@ -496,6 +504,234 @@ describe("HttpMnmlClient — generatePrompt", () => {
     ).rejects.toMatchObject({
       kind: "insufficient_credits",
       code: "NO_CREDITS",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Power tools (doc 40e A.1)
+// ─────────────────────────────────────────────────────────────────────
+
+const ENHANCE_REQ: RenderEnhancerRequest = {
+  image: imageBlob(),
+  prompt: "make it crisper, photoreal",
+  geometry: 1,
+  creativity: 0.3,
+  dynamic: 5,
+  seed: 42,
+  sharpen: 0.5,
+};
+
+const UPSCALE_REQ: UpscaleRequest = {
+  image: imageBlob(),
+  scale: 4,
+  faceEnhance: true,
+};
+
+const ERASER_REQ: AiEraserRequest = {
+  image: imageBlob(),
+  mask: imageBlob(),
+  outputFormat: "jpg",
+};
+
+const INPAINT_REQ: InpaintRequest = {
+  image: imageBlob(),
+  mask: imageBlob(),
+  prompt: "replace with a wood door",
+  negativePrompt: "no people",
+  seed: 7,
+  maskType: "manual",
+};
+
+const STYLE_REQ: StyleTransferRequest = {
+  image: imageBlob(),
+  referenceImage: imageBlob(),
+  prompt: "match this style",
+  strength: 0.7,
+  preserveStructure: true,
+  colorPreservation: 0.3,
+};
+
+describe("HttpMnmlClient — enhance (POST /v1/render/enhancer)", () => {
+  it("POSTs multipart with Bearer auth, returns renderId + credits, writes all form fields", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "enh-1", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    const result = await client.enhance(ENHANCE_REQ);
+    expect(result).toEqual({ renderId: "enh-1", remainingCredits: 99 });
+    expect(calls[0]!.url).toBe(`${BASE_URL}/v1/render/enhancer`);
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.authorization).toBe(`Bearer ${API_KEY}`);
+    expect(calls[0]!.contentType).toBeUndefined();
+    expect(calls[0]!.formFiles).toContain("image");
+    expect(calls[0]!.formFields).toMatchObject({
+      prompt: "make it crisper, photoreal",
+      geometry: "1",
+      creativity: "0.3",
+      dynamic: "5",
+      seed: "42",
+      sharpen: "0.5",
+    });
+  });
+
+  it("omits optional numeric fields when not provided", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "enh-2", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    await client.enhance({ image: imageBlob(), prompt: "basic" });
+    expect(calls[0]!.formFields).toEqual({ prompt: "basic" });
+  });
+
+  it("propagates a 4xx as MnmlError(validation)", async () => {
+    const { fetcher } = captureFetcher([
+      jsonResponse({ code: "INVALID_IMAGE_TYPE", message: "bad image" }, 400),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    await expect(client.enhance(ENHANCE_REQ)).rejects.toMatchObject({
+      name: "MnmlError",
+      kind: "validation",
+      code: "INVALID_IMAGE_TYPE",
+    });
+  });
+});
+
+describe("HttpMnmlClient — upscale (POST /v1/upscale)", () => {
+  it("POSTs multipart with scale + face_enhance form fields", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "up-1", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    const result = await client.upscale(UPSCALE_REQ);
+    expect(result).toEqual({ renderId: "up-1", remainingCredits: 99 });
+    expect(calls[0]!.url).toBe(`${BASE_URL}/v1/upscale`);
+    expect(calls[0]!.formFiles).toContain("image");
+    expect(calls[0]!.formFields).toMatchObject({
+      scale: "4",
+      face_enhance: "true",
+    });
+  });
+
+  it("omits optional fields when not given", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "up-2", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    await client.upscale({ image: imageBlob() });
+    expect(calls[0]!.formFields).toEqual({});
+  });
+
+  it("returns -1 remainingCredits when mnml omits the credits field", async () => {
+    const { fetcher } = captureFetcher([jsonResponse({ status: "success", id: "up-3" })]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    const result = await client.upscale(UPSCALE_REQ);
+    expect(result.remainingCredits).toBe(-1);
+  });
+
+  it("throws MnmlError(validation, MISSING_ID) when mnml response has no id", async () => {
+    const { fetcher } = captureFetcher([jsonResponse({ status: "success" })]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    await expect(client.upscale(UPSCALE_REQ)).rejects.toMatchObject({
+      name: "MnmlError",
+      kind: "validation",
+      code: "MISSING_ID",
+    });
+  });
+});
+
+describe("HttpMnmlClient — aiErase (POST /v1/ai-eraser)", () => {
+  it("POSTs multipart with image + mask file parts and output_format field", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "er-1", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    const result = await client.aiErase(ERASER_REQ);
+    expect(result).toEqual({ renderId: "er-1", remainingCredits: 99 });
+    expect(calls[0]!.url).toBe(`${BASE_URL}/v1/ai-eraser`);
+    expect(calls[0]!.formFiles?.sort()).toEqual(["image", "mask"]);
+    expect(calls[0]!.formFields).toMatchObject({ output_format: "jpg" });
+  });
+
+  it("defaults output_format omitted when not given", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "er-2", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    await client.aiErase({ image: imageBlob(), mask: imageBlob() });
+    expect(calls[0]!.formFields).toEqual({});
+  });
+});
+
+describe("HttpMnmlClient — inpaint (POST /v1/inpaint)", () => {
+  it("POSTs multipart with image + mask + prompt + negative_prompt + seed + mask_type", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "ip-1", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    const result = await client.inpaint(INPAINT_REQ);
+    expect(result).toEqual({ renderId: "ip-1", remainingCredits: 99 });
+    expect(calls[0]!.url).toBe(`${BASE_URL}/v1/inpaint`);
+    expect(calls[0]!.formFiles?.sort()).toEqual(["image", "mask"]);
+    expect(calls[0]!.formFields).toMatchObject({
+      prompt: "replace with a wood door",
+      negative_prompt: "no people",
+      seed: "7",
+      mask_type: "manual",
+    });
+  });
+
+  it("omits optional fields when not given (image + mask only)", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "ip-2", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    await client.inpaint({ image: imageBlob(), mask: imageBlob() });
+    expect(calls[0]!.formFields).toEqual({});
+  });
+});
+
+describe("HttpMnmlClient — styleTransfer (POST /v1/style/transfer)", () => {
+  it("POSTs multipart with image + reference_image file parts and style fields", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "st-1", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    const result = await client.styleTransfer(STYLE_REQ);
+    expect(result).toEqual({ renderId: "st-1", remainingCredits: 99 });
+    expect(calls[0]!.url).toBe(`${BASE_URL}/v1/style/transfer`);
+    expect(calls[0]!.formFiles?.sort()).toEqual(["image", "reference_image"]);
+    expect(calls[0]!.formFields).toMatchObject({
+      prompt: "match this style",
+      strength: "0.7",
+      preserve_structure: "true",
+      color_preservation: "0.3",
+    });
+  });
+
+  it("omits prompt + slider fields when not given (image + reference_image only)", async () => {
+    const { fetcher, calls } = captureFetcher([
+      jsonResponse({ status: "success", id: "st-2", credits: 99 }),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    await client.styleTransfer({
+      image: imageBlob(),
+      referenceImage: imageBlob(),
+    });
+    expect(calls[0]!.formFields).toEqual({});
+  });
+
+  it("propagates a 429 as MnmlError(rate_limited)", async () => {
+    const { fetcher } = captureFetcher([
+      jsonResponse(
+        { code: "rate_limit_exceeded", message: "slow down" },
+        429,
+      ),
+    ]);
+    const client = new HttpMnmlClient({ baseUrl: BASE_URL, apiKey: API_KEY, fetcher });
+    await expect(client.styleTransfer(STYLE_REQ)).rejects.toMatchObject({
+      kind: "rate_limited",
+      code: "rate_limit_exceeded",
     });
   });
 });

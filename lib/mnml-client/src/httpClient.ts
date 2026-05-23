@@ -47,17 +47,22 @@
 import {
   MnmlError,
   noopMnmlLogger,
+  type AiEraserRequest,
   type ArchDiffusionRequest,
   type CreditsResult,
+  type InpaintRequest,
   type MnmlClient,
   type MnmlErrorKind,
   type MnmlLogger,
   type PromptGeneratorRequest,
   type PromptGeneratorResult,
+  type RenderEnhancerRequest,
   type RenderRequest,
   type RenderStatus,
   type RenderStatusResult,
+  type StyleTransferRequest,
   type TriggerRenderResult,
+  type UpscaleRequest,
   type VideoAiRequest,
 } from "./types";
 
@@ -397,12 +402,132 @@ export class HttpMnmlClient implements MnmlClient {
     return { prompt: generated };
   }
 
+  async enhance(input: RenderEnhancerRequest): Promise<TriggerRenderResult> {
+    return this.triggerTool(
+      "/v1/render/enhancer",
+      buildEnhancerForm(input),
+      "enhance",
+    );
+  }
+
+  async upscale(input: UpscaleRequest): Promise<TriggerRenderResult> {
+    return this.triggerTool(
+      "/v1/upscale",
+      buildUpscaleForm(input),
+      "upscale",
+    );
+  }
+
+  async aiErase(input: AiEraserRequest): Promise<TriggerRenderResult> {
+    return this.triggerTool(
+      "/v1/ai-eraser",
+      buildAiEraserForm(input),
+      "aiErase",
+    );
+  }
+
+  async inpaint(input: InpaintRequest): Promise<TriggerRenderResult> {
+    return this.triggerTool(
+      "/v1/inpaint",
+      buildInpaintForm(input),
+      "inpaint",
+    );
+  }
+
+  async styleTransfer(
+    input: StyleTransferRequest,
+  ): Promise<TriggerRenderResult> {
+    return this.triggerTool(
+      "/v1/style/transfer",
+      buildStyleTransferForm(input),
+      "styleTransfer",
+    );
+  }
+
+  /**
+   * Shared dispatch for the five doc 40e power tools. Each tool posts
+   * multipart to its own path and mnml replies with the same shape as
+   * {@link triggerRender} — a job id polled via the shared
+   * {@link getRenderStatus} endpoint. The only per-tool variability is
+   * the path + the form builder, both supplied by the caller.
+   */
+  private async triggerTool(
+    path: string,
+    form: FormData,
+    op: "enhance" | "upscale" | "aiErase" | "inpaint" | "styleTransfer",
+  ): Promise<TriggerRenderResult> {
+    const url = `${this.baseUrl}${path}`;
+    const startedAt = Date.now();
+    const response = await this.doFetch(
+      "POST",
+      url,
+      form,
+      this.triggerTimeoutMs,
+      op,
+    );
+    const durationMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      const err = await mapErrorResponse(response);
+      this.logger.warn(
+        {
+          op,
+          url,
+          status: response.status,
+          durationMs,
+          mnmlKind: err.kind,
+          code: err.code,
+        },
+        `mnml.ai ${op} failed`,
+      );
+      throw err;
+    }
+
+    const body = (await safeJson<MnmlTriggerResponseBody>(response)) ?? {};
+    const renderId = body.id;
+    if (!renderId) {
+      const err = new MnmlError(
+        "validation",
+        "MISSING_ID",
+        `mnml.ai ${op} response had no id`,
+      );
+      this.logger.warn(
+        { op, url, status: response.status, durationMs },
+        `mnml.ai ${op} response malformed`,
+      );
+      throw err;
+    }
+    const remainingCredits =
+      typeof body.credits === "number" ? body.credits : -1;
+    this.logger.info(
+      {
+        op,
+        url,
+        status: response.status,
+        durationMs,
+        renderId,
+        remainingCredits,
+      },
+      `mnml.ai ${op} ok`,
+    );
+    return { renderId, remainingCredits };
+  }
+
   private async doFetch(
     method: "GET" | "POST",
     url: string,
     body: FormData | null,
     timeoutMs: number,
-    op: "triggerRender" | "getRenderStatus" | "getCredits" | "generatePrompt",
+    op:
+      | "triggerRender"
+      | "getRenderStatus"
+      | "getCredits"
+      | "generatePrompt"
+      | "enhance"
+      | "upscale"
+      | "aiErase"
+      | "inpaint"
+      | "styleTransfer",
   ): Promise<Response> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
@@ -523,6 +648,67 @@ function buildPromptGeneratorForm(req: PromptGeneratorRequest): FormData {
   const form = new FormData();
   form.append("image", asFormBlob(req.image), "input.jpg");
   if (req.keywords) form.append("prompt", req.keywords);
+  return form;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Power-tool form builders (doc 40e A.1)
+// ─────────────────────────────────────────────────────────────────────
+
+function buildEnhancerForm(req: RenderEnhancerRequest): FormData {
+  const form = new FormData();
+  form.append("image", asFormBlob(req.image), "input.jpg");
+  form.append("prompt", req.prompt);
+  if (req.geometry !== undefined) form.append("geometry", String(req.geometry));
+  if (req.creativity !== undefined)
+    form.append("creativity", String(req.creativity));
+  if (req.dynamic !== undefined) form.append("dynamic", String(req.dynamic));
+  if (req.seed !== undefined) form.append("seed", String(req.seed));
+  if (req.sharpen !== undefined) form.append("sharpen", String(req.sharpen));
+  return form;
+}
+
+function buildUpscaleForm(req: UpscaleRequest): FormData {
+  const form = new FormData();
+  form.append("image", asFormBlob(req.image), "input.jpg");
+  if (req.scale !== undefined) form.append("scale", String(req.scale));
+  if (req.faceEnhance !== undefined)
+    form.append("face_enhance", String(req.faceEnhance));
+  return form;
+}
+
+function buildAiEraserForm(req: AiEraserRequest): FormData {
+  const form = new FormData();
+  form.append("image", asFormBlob(req.image), "input.jpg");
+  form.append("mask", asFormBlob(req.mask), "mask.png");
+  if (req.outputFormat) form.append("output_format", req.outputFormat);
+  return form;
+}
+
+function buildInpaintForm(req: InpaintRequest): FormData {
+  const form = new FormData();
+  form.append("image", asFormBlob(req.image), "input.jpg");
+  form.append("mask", asFormBlob(req.mask), "mask.png");
+  // mnml's Inpaint docs allow empty-string prompt + negative_prompt; we
+  // only emit the field when the caller passed a non-empty string so
+  // the wire stays compact, mnml's documented defaults apply otherwise.
+  if (req.prompt) form.append("prompt", req.prompt);
+  if (req.negativePrompt) form.append("negative_prompt", req.negativePrompt);
+  if (req.seed !== undefined) form.append("seed", String(req.seed));
+  if (req.maskType) form.append("mask_type", req.maskType);
+  return form;
+}
+
+function buildStyleTransferForm(req: StyleTransferRequest): FormData {
+  const form = new FormData();
+  form.append("image", asFormBlob(req.image), "input.jpg");
+  form.append("reference_image", asFormBlob(req.referenceImage), "reference.jpg");
+  if (req.prompt) form.append("prompt", req.prompt);
+  if (req.strength !== undefined) form.append("strength", String(req.strength));
+  if (req.preserveStructure !== undefined)
+    form.append("preserve_structure", String(req.preserveStructure));
+  if (req.colorPreservation !== undefined)
+    form.append("color_preservation", String(req.colorPreservation));
   return form;
 }
 
