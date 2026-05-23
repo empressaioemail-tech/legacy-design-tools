@@ -28,6 +28,33 @@ export interface FetchWithRetryOptions {
   sleepImpl?: (ms: number) => Promise<void>;
   /** Friendly upstream label used in failure messages. */
   upstreamLabel?: string;
+  /**
+   * QA-22 reopen follow-on. When `true`, a final-attempt fetch throw
+   * (DNS failure / TLS reject / ECONNREFUSED / ECONNRESET / aborted
+   * by network reset / etc.) no longer throws `AdapterRunError(
+   * "network-error", …)` from this helper; instead the helper returns
+   * a synthetic 599-status response with the {@link
+   * FetchWithRetryResult.throwExcerpt} field populated. The caller's
+   * existing `!res.ok` branch then composes its own failure pill that
+   * names the underlying network failure mode (e.g. `Network error:
+   * ENOTFOUND getaddrinfo gis.grandcountyutah.net`) — the operator
+   * can tell apart DNS-vs-TLS-vs-firewall failures from the row pill
+   * alone, without needing Cloud Run log access.
+   *
+   * Off by default so callers that don't opt in keep the existing
+   * "request failed after N attempts: <message>" wording. Transient
+   * throws still retry exactly as before; only the *final-attempt*
+   * throw behaviour changes (return-with-throwExcerpt vs. throw).
+   *
+   * Wired on by arcgis.ts / epa-ejscreen.ts / fcc-broadband.ts —
+   * the three call sites that back the QA-22-affected adapters
+   * (epa:ejscreen, fcc:broadband, grand-county-ut:parcels,
+   * grand-county-ut:zoning). Other adapters (USGS NED, FEMA NFHL,
+   * the state/* lookups, the OSM Overpass roads fallback) keep the
+   * legacy throw posture until a separate dispatch widens the
+   * adoption.
+   */
+  captureThrowsAsResult?: boolean;
 }
 
 /**
@@ -62,6 +89,34 @@ export interface FetchWithRetryResult {
    * needing Cloud Run log access for every triage iteration.
    */
   bodyExcerpt?: string;
+  /**
+   * Compact one-line summary of a fetch *throw* (DNS failure, TLS
+   * reject, ECONNREFUSED, ECONNRESET, etc). Format: `<cause.code>
+   * <cause.syscall> <cause.host|address:port>` when those fields
+   * are present on `err.cause` (node:undici's standard shape), or
+   * `<err.name>: <err.message>` as a fallback when no cause
+   * structure is attached.
+   *
+   * Populated only when {@link FetchWithRetryOptions.captureThrowsAsResult}
+   * is set AND a fetch attempt threw (the final attempt for
+   * transient throws, any attempt for non-transient ones). When
+   * populated, the helper synthesizes a 599-status response so the
+   * caller's `!res.ok` branch fires; the caller is expected to
+   * branch on this field and produce a failure pill that names the
+   * underlying network failure mode (vs. the bare "fetch failed"
+   * the legacy throw posture surfaces).
+   *
+   * Mutually exclusive with `bodyExcerpt` in practice (the 599
+   * synthesis happens before any body would be read), but no
+   * structural invariant — a future contributor could populate
+   * both without violating the type.
+   *
+   * QA-22 reopen follow-on: PR #88's bodyExcerpt path doesn't
+   * trigger for fetch-throw failures (no response object exists);
+   * this field closes that gap so the operator can tell apart DNS-
+   * vs-TLS-vs-firewall failures from the row pill alone.
+   */
+  throwExcerpt?: string;
 }
 
 /**
@@ -116,6 +171,100 @@ function isUnattributedAbort(err: unknown, callerAborted: boolean): boolean {
  * the visible characters so an ArcGIS error envelope's `message`
  * field stays readable.
  */
+/**
+ * Compact one-line summary of a fetch-throw `Error` for use in a
+ * failure pill. Returns `undefined` when the throw carries no useful
+ * structure (so the caller falls back to whatever message it had
+ * before — generally the bare `err.message`).
+ *
+ * node:undici surfaces network failures as a `TypeError` whose
+ * `cause` is a node `Error` with `{ code, errno, syscall, address,
+ * port, host }` populated. We surface the cause-side fields when
+ * present because they are what the operator needs to choose the
+ * mitigation (DNS resolver pinning vs. NAT egress IP allocation vs.
+ * CA bundle injection vs. TLS version pin); the outer `err.message`
+ * is usually a useless "fetch failed" or "terminated".
+ *
+ * Fallback when no cause structure attached: `<err.name>: <err.message>`.
+ * Capped at {@link BODY_EXCERPT_MAX_CHARS} so a pathological case
+ * cannot bloat the failure pill.
+ *
+ * QA-22 reopen follow-on.
+ */
+export function readThrowExcerpt(err: unknown): string | undefined {
+  if (!(err instanceof Error)) return undefined;
+
+  const cause = (err as { cause?: unknown }).cause;
+  const causeObj =
+    cause && typeof cause === "object" ? (cause as Record<string, unknown>) : null;
+
+  const parts: string[] = [];
+
+  // Cause.code is the operator's primary triage signal (ENOTFOUND
+  // vs CERT_HAS_EXPIRED vs ECONNREFUSED → completely different
+  // mitigation paths). Always lead with it when present.
+  const code = causeObj?.code;
+  if (typeof code === "string" && code.length > 0) parts.push(code);
+
+  // syscall (`getaddrinfo`, `connect`, `read`) disambiguates DNS-vs-
+  // TCP-vs-stream failures inside the same code family.
+  const syscall = causeObj?.syscall;
+  if (typeof syscall === "string" && syscall.length > 0) parts.push(syscall);
+
+  // Hostname (TLS SNI / DNS lookup target) and the resolved address /
+  // port. Prefer hostname when both are present; fall back to
+  // address[:port] for ECONNREFUSED-style codes that may carry only
+  // the resolved tuple.
+  const host = causeObj?.host ?? causeObj?.hostname;
+  if (typeof host === "string" && host.length > 0) {
+    parts.push(host);
+  } else {
+    const address = causeObj?.address;
+    if (typeof address === "string" && address.length > 0) {
+      const port = causeObj?.port;
+      parts.push(
+        typeof port === "number" || (typeof port === "string" && port.length > 0)
+          ? `${address}:${port}`
+          : address,
+      );
+    }
+  }
+
+  if (parts.length > 0) {
+    const joined = parts.join(" ");
+    return joined.length > BODY_EXCERPT_MAX_CHARS
+      ? `${joined.slice(0, BODY_EXCERPT_MAX_CHARS)}…`
+      : joined;
+  }
+
+  // Fall back to the outer error shape when nothing useful sits on
+  // `cause` (e.g. a hand-thrown Error from a test fake, or a
+  // non-undici fetch path that doesn't follow the cause convention).
+  const fallback = `${err.name || "Error"}: ${err.message || "(no message)"}`;
+  return fallback.length > BODY_EXCERPT_MAX_CHARS
+    ? `${fallback.slice(0, BODY_EXCERPT_MAX_CHARS)}…`
+    : fallback;
+}
+
+/**
+ * Synthesize a 599-status response carrying no body. Returned by
+ * {@link fetchWithRetry} when a fetch attempt throws and the caller
+ * opted in to `captureThrowsAsResult` — the synthetic response
+ * collapses the throw-path failure into the same `!res.ok` branch
+ * the caller already has for HTTP non-OK responses, letting the
+ * caller compose its failure message off the `throwExcerpt` field.
+ *
+ * 599 is intentionally outside the standard HTTP range so a downstream
+ * `if (res.status === 504)`-style branch can't accidentally treat it
+ * as a real gateway timeout.
+ */
+function synthesizeThrowResponse(): Response {
+  return new Response("", {
+    status: 599,
+    statusText: "Network Error (no upstream response)",
+  });
+}
+
 async function readBodyExcerpt(res: Response): Promise<string | undefined> {
   try {
     const raw = await res.text();
@@ -187,6 +336,10 @@ export async function fetchWithRetry(
       res = await fetchFn(input, reqInit);
     } catch (err) {
       // Caller aborted mid-flight: surface as timeout, no retry.
+      // Wins over `captureThrowsAsResult` because the abort is a
+      // semantic "the budget elapsed" signal, not a network failure
+      // class — the operator wants to see "did not respond in time",
+      // not "Network error: AbortError".
       if (isCallerAbort(opts.signal)) {
         throw new AdapterRunError(
           "timeout",
@@ -195,15 +348,34 @@ export async function fetchWithRetry(
       }
       const transient =
         isTransientNetworkError(err) || isUnattributedAbort(err, false);
-      if (!transient || attempt === maxAttempts) {
-        throw new AdapterRunError(
-          "network-error",
-          `${label} request failed after ${attempt} attempt${attempt === 1 ? "" : "s"}: ${err instanceof Error ? err.message : String(err)}. Use Force refresh to retry.`,
-        );
+      if (transient && attempt < maxAttempts) {
+        // Retry — same backoff posture as today; the throw-capture
+        // path only kicks in on the final attempt (or a non-transient
+        // throw on any attempt) so transient blips still self-heal.
+        lastNetworkError = err;
+        await sleep(jitteredBackoff(attempt, baseMs, maxMs));
+        continue;
       }
-      lastNetworkError = err;
-      await sleep(jitteredBackoff(attempt, baseMs, maxMs));
-      continue;
+      // QA-22 reopen follow-on — final-attempt or non-transient
+      // throw. When the caller opted in via `captureThrowsAsResult`,
+      // collapse the throw into the same `!res.ok` branch the caller
+      // uses for HTTP non-OK responses: synthesize a 599 response and
+      // attach a `throwExcerpt` summary so the caller can compose a
+      // failure pill that names the underlying network failure mode.
+      // Callers that didn't opt in keep the legacy throw posture
+      // unchanged, preserving the existing wording for the OSM
+      // Overpass / USGS NED / FEMA NFHL / state-tier call sites.
+      if (opts.captureThrowsAsResult) {
+        return {
+          response: synthesizeThrowResponse(),
+          attempts: attempt,
+          throwExcerpt: readThrowExcerpt(err),
+        };
+      }
+      throw new AdapterRunError(
+        "network-error",
+        `${label} request failed after ${attempt} attempt${attempt === 1 ? "" : "s"}: ${err instanceof Error ? err.message : String(err)}. Use Force refresh to retry.`,
+      );
     }
     // Retryable HTTP statuses → backoff + try again.
     if (TRANSIENT_STATUS_CODES.has(res.status)) {

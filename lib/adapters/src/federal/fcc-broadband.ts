@@ -183,7 +183,12 @@ export const fccBroadbandAdapter: Adapter = {
     url.searchParams.set("lat", String(ctx.parcel.latitude));
     url.searchParams.set("lng", String(ctx.parcel.longitude));
 
-    const { response: res, attempts, bodyExcerpt } = await fetchWithRetry(
+    const {
+      response: res,
+      attempts,
+      bodyExcerpt,
+      throwExcerpt,
+    } = await fetchWithRetry(
       url.toString(),
       {
         signal: ctx.signal,
@@ -199,9 +204,28 @@ export const fccBroadbandAdapter: Adapter = {
         fetchImpl: ctx.fetchImpl,
         signal: ctx.signal,
         upstreamLabel: FCC_BROADBAND_LABEL,
+        // QA-22 reopen follow-on — collapse fetch-throws (DNS / TLS /
+        // ECONNREFUSED / ECONNRESET / timeout) into the `!res.ok`
+        // branch below so the pill can name the actual network
+        // failure mode. cortex-api-00020-85n showed FCC's BDC v2
+        // endpoint failing with "did not respond in time" (no
+        // retries) — operator can't tell whether that's a real
+        // upstream slowness or an aborted-by-firewall connect.
+        captureThrowsAsResult: true,
       },
     );
     if (!res.ok) {
+      if (throwExcerpt) {
+        // The request never got a response back — DNS resolution, TLS
+        // handshake, connection establishment, or stream read failed
+        // before the BDC endpoint's HTTP layer answered.
+        // `throwExcerpt` names the underlying failure mode so the
+        // operator can pick the mitigation off the pill alone.
+        throw new AdapterRunError(
+          "network-error",
+          `FCC National Broadband Map did not get a response after ${attempts} attempt${attempts === 1 ? "" : "s"}. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
+        );
+      }
       // QA-22 reopen: append the upstream body excerpt so a non-OK
       // from the FCC BDC v2 endpoint surfaces its actual response
       // (envelope error, HTML error page, empty body) in the layer-

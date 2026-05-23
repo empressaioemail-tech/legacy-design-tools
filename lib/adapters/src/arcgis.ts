@@ -98,7 +98,12 @@ export async function arcgisPointQuery(
     input.returnGeometry ? "true" : "false",
   );
 
-  const { response: res, attempts, bodyExcerpt } = await fetchWithRetry(
+  const {
+    response: res,
+    attempts,
+    bodyExcerpt,
+    throwExcerpt,
+  } = await fetchWithRetry(
     url.toString(),
     {
       signal: input.signal,
@@ -116,9 +121,29 @@ export async function arcgisPointQuery(
       fetchImpl: input.fetchImpl,
       signal: input.signal,
       upstreamLabel: label,
+      // QA-22 reopen follow-on — let `fetchWithRetry` collapse a
+      // fetch-throw (DNS / TLS / ECONNREFUSED / ECONNRESET) into the
+      // `!res.ok` branch below so the failure pill can name the
+      // actual network failure mode. cortex-api-00020-85n showed
+      // Grand County requests failing with "fetch failed" + no
+      // body — operator can't tell DNS-from-firewall apart without
+      // this.
+      captureThrowsAsResult: true,
     },
   );
   if (!res.ok) {
+    if (throwExcerpt) {
+      // The request never got a response back — DNS resolution, TLS
+      // handshake, connection establishment, or stream read failed
+      // before the upstream's HTTP layer answered. `throwExcerpt`
+      // names the underlying network failure mode (e.g. `ENOTFOUND
+      // getaddrinfo gis.grandcountyutah.net`) so the operator can
+      // choose the mitigation off the pill alone.
+      throw new AdapterRunError(
+        "network-error",
+        `${label} did not get a response after ${attempts} attempt${attempts === 1 ? "" : "s"}. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
+      );
+    }
     // QA-22 reopen: append the upstream body excerpt so the layer-
     // failure pill carries the ArcGIS error envelope's `message`
     // (or a Cloudflare interstitial / maintenance-window banner /

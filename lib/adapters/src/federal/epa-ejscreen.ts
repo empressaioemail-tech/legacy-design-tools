@@ -94,7 +94,12 @@ export const epaEjscreenAdapter: Adapter = {
     url.searchParams.set("areatype", "blockgroup");
     url.searchParams.set("f", "pjson");
 
-    const { response: res, attempts, bodyExcerpt } = await fetchWithRetry(
+    const {
+      response: res,
+      attempts,
+      bodyExcerpt,
+      throwExcerpt,
+    } = await fetchWithRetry(
       url.toString(),
       {
         signal: ctx.signal,
@@ -110,9 +115,29 @@ export const epaEjscreenAdapter: Adapter = {
         fetchImpl: ctx.fetchImpl,
         signal: ctx.signal,
         upstreamLabel: EPA_EJSCREEN_LABEL,
+        // QA-22 reopen follow-on — collapse fetch-throws (DNS / TLS /
+        // ECONNREFUSED / ECONNRESET) into the `!res.ok` branch below
+        // so the pill can name the actual network failure mode.
+        // cortex-api-00020-85n showed the EJScreen call failing with
+        // "fetch failed" + no body — operator can't pick the
+        // mitigation (DNS resolver / NAT egress IP / CA bundle / TLS
+        // pin) from that alone.
+        captureThrowsAsResult: true,
       },
     );
     if (!res.ok) {
+      if (throwExcerpt) {
+        // The request never got a response back — DNS resolution, TLS
+        // handshake, connection establishment, or stream read failed
+        // before the broker's HTTP layer answered. `throwExcerpt`
+        // names the underlying failure mode (e.g. `ENOTFOUND
+        // getaddrinfo ejscreen.epa.gov`) so the operator can pick
+        // the mitigation off the pill alone.
+        throw new AdapterRunError(
+          "network-error",
+          `EPA EJScreen did not get a response after ${attempts} attempt${attempts === 1 ? "" : "s"}. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
+        );
+      }
       // QA-22 reopen: append the upstream body excerpt so a 503 / 502
       // / 504 from the EJScreen broker surfaces its actual response
       // (maintenance banner, error envelope, empty body) in the
