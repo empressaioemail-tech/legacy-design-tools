@@ -374,6 +374,18 @@ export async function ingestSnapshotIfc(args: {
       // Non-fatal: per-entity rows still get inserted; the viewer will
       // render no geometry but property-level lookups still work.
     }
+  } else {
+    // QA-33 — when the IFC's geometry pass produced no bytes (every
+    // `buildMeshForGeometry` early-returned because web-ifc reported
+    // empty vertex/index arrays, or the IFC was metadata-only), the
+    // bundle row's `glb_object_path` stays null and the viewer renders
+    // an empty viewport even though per-entity rows were inserted.
+    // Log loudly so the operator can recognize this case in Cloud Run
+    // logs without having to inspect bucket contents.
+    reqLog.warn(
+      { snapshotId: snapshot.id, ifcFileId, entityCount: parseResult.entityCount },
+      "ifc ingest: parser produced zero glb bytes — bundle row will have no GLB",
+    );
   }
 
   // 5) Supersede prior active rows for this snapshot, insert the new
@@ -595,6 +607,23 @@ export async function ingestSnapshotIfc(args: {
     gltfObjectPath,
     ifcVersion: parseResult.ifcVersion,
   };
+  // QA-33 — single structured success log line so an operator triaging
+  // an empty viewport can see in one place: how many entities the
+  // parser produced, how many glb bytes came out, and whether the
+  // bundle row got a `glb_object_path` written. Together these three
+  // distinguish the failure modes (zero-glb-bytes vs upload-failed vs
+  // bundle-OK-but-viewer-side issue) without needing bucket access.
+  reqLog.info(
+    {
+      snapshotId: snapshot.id,
+      ifcFileId,
+      entityCount: parseResult.entityCount,
+      glbBytesLen: parseResult.glbBytes.length,
+      gltfObjectPath,
+      ifcVersion: parseResult.ifcVersion,
+    },
+    "ifc ingest: complete",
+  );
   res.status(201).json(success);
 }
 
