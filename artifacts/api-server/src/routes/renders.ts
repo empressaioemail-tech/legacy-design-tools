@@ -83,7 +83,12 @@ import {
   RenderMirrorError,
   resolveRenderBucketName,
 } from "../lib/rendersObjectMirror";
-import { objectStorageClient, signObjectEntityGetUrl } from "../lib/objectStorage";
+import {
+  ObjectNotFoundError,
+  ObjectStorageService,
+  objectStorageClient,
+  signObjectEntityGetUrl,
+} from "../lib/objectStorage";
 import { Readable } from "node:stream";
 import { runRendersSweep } from "../lib/rendersSweep";
 
@@ -113,6 +118,23 @@ const MAX_POLL_DURATION_MS = 10 * 60 * 1000; // 10 minutes
  */
 const MAX_PROMPT_GENERATOR_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_PROMPT_GENERATOR_KEYWORDS_CHARS = 500;
+
+/**
+ * doc 40e A.5 — render source upload ceiling. mnml archDiffusion-v43
+ * accepts up to 15MB; cap the upload route at the same limit.
+ */
+const MAX_RENDER_SOURCE_UPLOAD_BYTES = 15 * 1024 * 1024;
+
+/** Canonical `/objects/uploads/<uuid>` prefix for B.2 upload-as-source. */
+const RENDER_SOURCE_UPLOAD_PATH_RE = /^\/objects\/uploads\/[0-9a-f-]{36}$/i;
+
+let cachedRenderObjectStorage: ObjectStorageService | null = null;
+function renderObjectStorage(): ObjectStorageService {
+  if (!cachedRenderObjectStorage) {
+    cachedRenderObjectStorage = new ObjectStorageService();
+  }
+  return cachedRenderObjectStorage;
+}
 
 /**
  * Elevation-set conventions. mnml's `camera_direction` enum is camera-
@@ -166,9 +188,8 @@ const Vec3Schema = z.object({
   z: z.number(),
 });
 
-/** Common fields across all kinds. */
-const KickoffCommonSchema = z.object({
-  glbUrl: z.string().url(),
+/** Prompt + mnml routing fields shared by every kickoff kind. */
+const KickoffPromptFieldsSchema = z.object({
   prompt: z.string().min(1).max(2000),
   expertName: z
     .enum(["exterior", "interior", "masterplan", "landscape", "plan", "product"])
@@ -188,14 +209,30 @@ const KickoffCommonSchema = z.object({
   expertParams: z.record(z.string(), z.string()).optional(),
 });
 
-const KickoffStillSchema = KickoffCommonSchema.extend({
+/** GLB-capture kickoffs (still from viewport, elevation-set, video). */
+const KickoffCaptureCommonSchema = KickoffPromptFieldsSchema.extend({
+  glbUrl: z.string().url(),
+});
+
+const KickoffStillCaptureSchema = KickoffCaptureCommonSchema.extend({
   kind: z.literal("still"),
   cameraPosition: Vec3Schema,
   cameraTarget: Vec3Schema,
   fov: z.number().min(10).max(120).optional(),
 });
 
-const KickoffElevationSetSchema = KickoffCommonSchema.extend({
+/** doc 40e A.5 / B.2 — still kickoff from a prior source-upload reference. */
+const KickoffStillUploadSchema = KickoffPromptFieldsSchema.extend({
+  kind: z.literal("still"),
+  sourceUploadUrl: z
+    .string()
+    .min(1)
+    .refine((v) => RENDER_SOURCE_UPLOAD_PATH_RE.test(v), {
+      message: "source_upload_url_must_be_objects_uploads_path",
+    }),
+});
+
+const KickoffElevationSetSchema = KickoffCaptureCommonSchema.extend({
   kind: z.literal("elevation-set"),
   buildingCenter: Vec3Schema,
   cameraDistance: z.number().positive(),
@@ -203,7 +240,7 @@ const KickoffElevationSetSchema = KickoffCommonSchema.extend({
   fov: z.number().min(10).max(120).optional(),
 });
 
-const KickoffVideoSchema = KickoffCommonSchema.extend({
+const KickoffVideoSchema = KickoffCaptureCommonSchema.extend({
   kind: z.literal("video"),
   cameraPosition: Vec3Schema,
   cameraTarget: Vec3Schema,
@@ -216,13 +253,20 @@ const KickoffVideoSchema = KickoffCommonSchema.extend({
   direction: z.enum(["left", "right", "up", "down"]).optional(),
 });
 
-const KickoffBodySchema = z.discriminatedUnion("kind", [
-  KickoffStillSchema,
+const KickoffBodySchema = z.union([
+  KickoffStillCaptureSchema,
+  KickoffStillUploadSchema,
   KickoffElevationSetSchema,
   KickoffVideoSchema,
 ]);
 
 type KickoffBody = z.infer<typeof KickoffBodySchema>;
+
+function isStillUploadBody(
+  body: KickoffBody,
+): body is z.infer<typeof KickoffStillUploadSchema> {
+  return body.kind === "still" && "sourceUploadUrl" in body;
+}
 
 const EngagementIdParamsSchema = z.object({ id: z.string().uuid() });
 const RenderIdParamsSchema = z.object({ id: z.string().uuid() });
@@ -357,7 +401,7 @@ async function emitRenderEvent(
  * direction's captured image + camera_direction expert param.
  */
 function buildArchDiffusionForStill(
-  body: z.infer<typeof KickoffStillSchema>,
+  body: z.infer<typeof KickoffPromptFieldsSchema>,
   image: Buffer,
 ): ArchDiffusionRequest {
   return {
@@ -619,30 +663,59 @@ async function resolveCaptureGlbUrl(rawUrl: string): Promise<string> {
   return signObjectEntityGetUrl(normalized, 1800);
 }
 
-// Single-call branch for `still` and `video` kickoffs.
+async function loadRenderSourceUpload(sourceUploadUrl: string): Promise<Buffer> {
+  if (!RENDER_SOURCE_UPLOAD_PATH_RE.test(sourceUploadUrl)) {
+    throw new Error("invalid_source_upload_url");
+  }
+  try {
+    return await renderObjectStorage().getObjectEntityBytes(sourceUploadUrl);
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      throw new Error("source_upload_not_found");
+    }
+    throw err;
+  }
+}
+
+// Single-call branch for `still` (capture or upload) and `video` kickoffs.
 async function runSingleCall(
   viewpointRenderId: string,
   body: Extract<KickoffBody, { kind: "still" } | { kind: "video" }>,
 ): Promise<void> {
-  const cameraPosition = body.cameraPosition;
-  const cameraTarget = body.cameraTarget;
-
-  // 1. Capture viewport
+  // 1. Resolve source image bytes (GLB capture vs uploaded reference).
   let imageBuffer: Buffer;
   try {
-    const glbUrl = await resolveCaptureGlbUrl(body.glbUrl);
-    const cap = await captureBimViewport({
-      glbUrl,
-      cameraPosition,
-      cameraTarget,
-      // Reorder narrows body to the still variant BEFORE accessing
-      // `fov` — TS can't see through the property access otherwise
-      // because the discriminated union's video variant has no `fov`.
-      ...(body.kind === "still" && body.fov !== undefined ? { fov: body.fov } : {}),
-    });
-    imageBuffer = cap.pngBuffer;
+    if (body.kind === "still" && isStillUploadBody(body)) {
+      imageBuffer = await loadRenderSourceUpload(body.sourceUploadUrl);
+      if (imageBuffer.length === 0) {
+        throw new Error("source_upload_empty");
+      }
+    } else {
+      const captureBody = body as
+        | z.infer<typeof KickoffStillCaptureSchema>
+        | z.infer<typeof KickoffVideoSchema>;
+      const glbUrl = await resolveCaptureGlbUrl(captureBody.glbUrl);
+      const cap = await captureBimViewport({
+        glbUrl,
+        cameraPosition: captureBody.cameraPosition,
+        cameraTarget: captureBody.cameraTarget,
+        ...(captureBody.kind === "still" && captureBody.fov !== undefined
+          ? { fov: captureBody.fov }
+          : {}),
+      });
+      imageBuffer = cap.pngBuffer;
+    }
   } catch (err) {
-    const code = err instanceof BimViewportCaptureError ? `capture_${err.code}` : "capture_failed";
+    const code =
+      err instanceof BimViewportCaptureError
+        ? `capture_${err.code}`
+        : (err as Error).message === "source_upload_not_found"
+          ? "source_upload_not_found"
+          : (err as Error).message === "source_upload_empty"
+            ? "source_upload_empty"
+            : (err as Error).message === "invalid_source_upload_url"
+              ? "invalid_source_upload_url"
+              : "capture_failed";
     await persistTerminalState(viewpointRenderId, {
       status: "failed",
       errorCode: code,
@@ -1233,6 +1306,167 @@ function consumePromptGeneratorUpload(
 
 const router: IRouter = Router();
 
+// ─────────────────────────────────────────────────────────────────────
+// Render source upload (doc 40e A.5)
+// ─────────────────────────────────────────────────────────────────────
+
+interface RenderSourceUploadParts {
+  imageBytes: Buffer;
+  contentType: string;
+}
+
+function consumeRenderSourceUpload(
+  req: Request,
+): Promise<
+  | { ok: true; parts: RenderSourceUploadParts }
+  | { ok: false; status: number; error: string }
+> {
+  return new Promise((resolve) => {
+    let busboy: Busboy.Busboy;
+    try {
+      busboy = Busboy({
+        headers: req.headers,
+        limits: {
+          fileSize: MAX_RENDER_SOURCE_UPLOAD_BYTES,
+          files: 1,
+          fields: 2,
+        },
+      });
+    } catch (err) {
+      logger.warn({ err }, "render source-upload: busboy init failed");
+      resolve({ ok: false, status: 400, error: "invalid_multipart" });
+      return;
+    }
+
+    const fileChunks: Buffer[] = [];
+    let fileBytes = 0;
+    let fileTruncated = false;
+    let fileSeen = false;
+    let contentType = "image/png";
+    let aborted = false;
+
+    function abort(status: number, error: string) {
+      if (aborted) return;
+      aborted = true;
+      try {
+        req.unpipe(busboy);
+      } catch {
+        /* ignore */
+      }
+      resolve({ ok: false, status, error });
+    }
+
+    busboy.on("file", (name: string, stream: NodeJS.ReadableStream, info: Busboy.FileInfo) => {
+      if (aborted || name !== "image") {
+        stream.resume();
+        return;
+      }
+      fileSeen = true;
+      if (info.mimeType) contentType = info.mimeType;
+      stream.on("data", (chunk: Buffer) => {
+        fileBytes += chunk.length;
+        if (fileBytes > MAX_RENDER_SOURCE_UPLOAD_BYTES) {
+          fileTruncated = true;
+          return;
+        }
+        fileChunks.push(chunk);
+      });
+      stream.on("limit", () => {
+        fileTruncated = true;
+      });
+    });
+
+    busboy.on("error", (err) => {
+      logger.warn({ err }, "render source-upload: busboy error");
+      abort(400, "multipart_parse_failed");
+    });
+
+    busboy.on("finish", () => {
+      if (aborted) return;
+      if (!fileSeen) {
+        abort(400, "missing_image_part");
+        return;
+      }
+      if (fileTruncated) {
+        abort(413, "image_too_large");
+        return;
+      }
+      if (fileBytes === 0) {
+        abort(400, "empty_image");
+        return;
+      }
+      resolve({
+        ok: true,
+        parts: {
+          imageBytes: Buffer.concat(fileChunks, fileBytes),
+          contentType,
+        },
+      });
+    });
+
+    req.pipe(busboy);
+  });
+}
+
+/**
+ * POST /api/engagements/:id/renders/source-upload — store a source
+ * image for upload-as-render-source (doc 40e A.5 / B.2).
+ *
+ * multipart/form-data: required `image` file (≤15MB). Persists under
+ * the private object dir at `/objects/uploads/<uuid>` and returns the
+ * canonical path for a subsequent `still` kickoff with
+ * `sourceUploadUrl`.
+ */
+router.post(
+  "/engagements/:id/renders/source-upload",
+  async (req: Request, res: Response) => {
+    if (!rendersProdGateOpen()) {
+      res.status(503).json({
+        error: "renders_preview_disabled",
+        message: "Renders are not yet enabled in production. Coming soon.",
+      });
+      return;
+    }
+    const params = EngagementIdParamsSchema.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "invalid_engagement_id" });
+      return;
+    }
+    const contentType = req.headers["content-type"] ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      res.status(415).json({ error: "expected_multipart" });
+      return;
+    }
+
+    const [eng] = await db
+      .select({ id: engagements.id })
+      .from(engagements)
+      .where(eq(engagements.id, params.data.id))
+      .limit(1);
+    if (!eng) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+
+    const upload = await consumeRenderSourceUpload(req);
+    if (!upload.ok) {
+      res.status(upload.status).json({ error: upload.error });
+      return;
+    }
+
+    try {
+      const sourceUploadUrl = await renderObjectStorage().uploadObjectEntityFromBuffer(
+        upload.parts.imageBytes,
+        upload.parts.contentType,
+      );
+      res.status(201).json({ sourceUploadUrl });
+    } catch (err) {
+      logger.error({ err, engagementId: params.data.id }, "render source-upload: persist failed");
+      res.status(500).json({ error: "render_source_upload_failed" });
+    }
+  },
+);
+
 /**
  * POST /api/engagements/:id/renders — kickoff. Synchronous up to row
  * insert + 202 response; the real work happens in the fire-and-forget
@@ -1294,6 +1528,10 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
       ? `${requestor.kind}:${requestor.id}`
       : `${RENDER_SYSTEM_ACTOR.kind}:${RENDER_SYSTEM_ACTOR.id}`;
 
+  const kickoff = body.data;
+  const uploadSource = isStillUploadBody(kickoff);
+  const sourceUploadUrl = uploadSource ? kickoff.sourceUploadUrl : null;
+
   let inserted: ViewpointRender;
   try {
     const rows = await db
@@ -1304,7 +1542,9 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
         bimModelId: bimModel.id,
         briefingAtomEventId: snapshots.briefingAtomEventId,
         bimModelAtomEventId: snapshots.bimModelAtomEventId,
-        kind: body.data.kind,
+        kind: kickoff.kind,
+        sourceType: uploadSource ? "upload" : "model-capture",
+        sourceUploadUrl,
         requestPayload: body.data,
         status: "queued",
         requestedBy,
@@ -1451,6 +1691,9 @@ router.get("/renders/:id", async (req: Request, res: Response) => {
     id: row.id,
     engagementId: row.engagementId,
     kind: row.kind,
+    sourceType: row.sourceType,
+    sourceUploadUrl: row.sourceUploadUrl,
+    parentRenderOutputId: row.parentRenderOutputId,
     status: row.status,
     mnmlJobId: row.mnmlJobId,
     mnmlJobs: row.mnmlJobs,
@@ -1587,6 +1830,8 @@ router.get("/engagements/:id/renders", async (req: Request, res: Response) => {
     items: rows.map((row) => ({
       id: row.id,
       kind: row.kind,
+      sourceType: row.sourceType,
+      parentRenderOutputId: row.parentRenderOutputId,
       status: row.status,
       errorCode: row.errorCode,
       requestedBy: row.requestedBy,

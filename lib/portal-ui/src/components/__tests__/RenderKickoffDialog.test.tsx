@@ -307,7 +307,7 @@ describe("RenderKickoffDialog", () => {
     ) as HTMLButtonElement;
     expect(generateBtn).toBeDisabled();
     const fileInput = screen.getByTestId(
-      "render-kickoff-pg-file",
+      "render-kickoff-pg-file-input",
     ) as HTMLInputElement;
     const file = new File(
       [new Uint8Array([0xff, 0xd8, 0xff])],
@@ -325,7 +325,7 @@ describe("RenderKickoffDialog", () => {
     });
     renderDialog();
     const fileInput = screen.getByTestId(
-      "render-kickoff-pg-file",
+      "render-kickoff-pg-file-input",
     ) as HTMLInputElement;
     const file = new File(
       [new Uint8Array([0xff, 0xd8, 0xff])],
@@ -356,7 +356,7 @@ describe("RenderKickoffDialog", () => {
   it("surfaces an oversize-image error without calling customFetch", async () => {
     renderDialog();
     const fileInput = screen.getByTestId(
-      "render-kickoff-pg-file",
+      "render-kickoff-pg-file-input",
     ) as HTMLInputElement;
     const tooBig = new File(
       [new Uint8Array(9 * 1024 * 1024)],
@@ -364,12 +364,9 @@ describe("RenderKickoffDialog", () => {
       { type: "image/png" },
     );
     fireEvent.change(fileInput, { target: { files: [tooBig] } });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("render-kickoff-pg-generate"));
-    });
     expect(customFetchMock).not.toHaveBeenCalled();
     expect(
-      screen.getByTestId("render-kickoff-pg-error"),
+      screen.getByTestId("render-kickoff-pg-file-error"),
     ).toHaveTextContent(/too large/i);
   });
 

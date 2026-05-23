@@ -4589,6 +4589,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{id}/renders/source-upload:
+    post:
+      operationId: uploadRenderSource
+      tags: [renders]
+      summary: Upload a source image for upload-as-render-source
+      description: |
+        doc 40e A.5 / B.2 — stores a source image under
+        /objects/uploads/{uuid} and returns the canonical
+        `sourceUploadUrl` for a subsequent `still` kickoff. Multipart
+        `image` file part, ≤15MB. Behind `RENDERS_PROD_ENABLED`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        "201":
+          description: Upload persisted; path ready for kickoff.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenderSourceUploadResponse"
+        "400":
+          description: Malformed multipart or missing image.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Image exceeds 15MB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Expected multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Renders preview disabled in production.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /engagements/{id}/renders:
     post:
       operationId: kickoffRender
@@ -4597,20 +4657,15 @@ paths:
       description: |
         Synchronous up to row insert + 202 response; the polling
         worker (capture → trigger → poll → mirror → terminal) runs
-        fire-and-forget. Body is a discriminated union by `kind`:
+        fire-and-forget. Body is a union by `kind`:
 
-          - `still`         — single image. 1 archDiffusion-v43 call.
-          - `elevation-set` — north / east / south / west. 4 archDiff
-                              calls fanned out by the route, persisted
-                              as ONE viewpoint_renders parent row +
-                              4 render_outputs children.
-          - `video`         — single 5- or 10-second Kling clip.
+          - `still` + GLB capture — `glbUrl` + camera params (default).
+          - `still` + upload     — `sourceUploadUrl` from
+            `POST .../renders/source-upload` (doc 40e A.5).
+          - `elevation-set`      — 4 archDiffusion calls.
+          - `video`              — single Kling clip.
 
-        Architect-audience-only. Behind `RENDERS_PROD_ENABLED` in
-        production (returns 503 with `renders_preview_disabled` until
-        the operator flips the flag). The body MUST include `glbUrl`
-        — V1-4 does not resolve the bim-model row's GLB pointer
-        server-side (V1-5 follow-up).
+        Behind `RENDERS_PROD_ENABLED` in production.
       parameters:
         - name: id
           in: path
@@ -4929,6 +4984,278 @@ paths:
           description: |
             Render is already in a terminal state — cancellation has
             no effect.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /render-outputs/{parentId}/enhance:
+    post:
+      operationId: kickoffRenderEnhance
+      tags: [renders]
+      summary: Run Render Enhancer on a parent render output
+      description: |
+        doc 40e A.2 — multipart kickoff for mnml `POST /v1/render/enhancer`.
+        Requires `image` + `prompt` file/field parts; optional geometry,
+        creativity, dynamic, seed, sharpen. Parent render must be `ready`.
+        Returns 202 + `renderId`; poll via `GET /renders/{renderId}`.
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+      responses:
+        "202":
+          description: Tool job queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KickoffPowerToolResponse"
+        "400":
+          description: Invalid parent, body, or parent not ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Parent render output not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Expected multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Renders preview disabled in production.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /render-outputs/{parentId}/upscale:
+    post:
+      operationId: kickoffRenderUpscale
+      tags: [renders]
+      summary: Run 4K Upscaler on a parent render output
+      description: |
+        doc 40e A.2 — multipart kickoff for mnml `POST /v1/upscale`.
+        Requires `image`; optional `scale` (2/4/8), `face_enhance`.
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        "202":
+          description: Tool job queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KickoffPowerToolResponse"
+        "400":
+          description: Invalid parent or body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Parent render output not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Expected multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Renders preview disabled in production.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /render-outputs/{parentId}/erase:
+    post:
+      operationId: kickoffRenderErase
+      tags: [renders]
+      summary: Run AI Eraser on a parent render output
+      description: |
+        doc 40e A.2 — multipart kickoff for mnml `POST /v1/ai-eraser`.
+        Requires `image` + `mask` PNG parts; optional `output_format`.
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        "202":
+          description: Tool job queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KickoffPowerToolResponse"
+        "400":
+          description: Invalid parent or body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Parent render output not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Expected multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Renders preview disabled in production.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /render-outputs/{parentId}/inpaint:
+    post:
+      operationId: kickoffRenderInpaint
+      tags: [renders]
+      summary: Run Inpaint on a parent render output
+      description: |
+        doc 40e A.2 — multipart kickoff for mnml `POST /v1/inpaint`.
+        Requires `image` + `mask`; optional prompt, negative_prompt,
+        seed, mask_type.
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        "202":
+          description: Tool job queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KickoffPowerToolResponse"
+        "400":
+          description: Invalid parent or body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Parent render output not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Expected multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Renders preview disabled in production.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /render-outputs/{parentId}/style-transfer:
+    post:
+      operationId: kickoffRenderStyleTransfer
+      tags: [renders]
+      summary: Run Style Transfer on a parent render output
+      description: |
+        doc 40e A.2 — multipart kickoff for mnml `POST /v1/style/transfer`.
+        Requires `image` + `reference_image`; optional prompt, strength,
+        preserve_structure, color_preservation.
+      parameters:
+        - name: parentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        "202":
+          description: Tool job queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KickoffPowerToolResponse"
+        "400":
+          description: Invalid parent or body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Parent render output not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Expected multipart/form-data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Renders preview disabled in production.
           content:
             application/json:
               schema:
@@ -13073,11 +13400,50 @@ components:
             validates against per-expert allowed values.
       required: [glbUrl, prompt]
 
+    KickoffRenderPromptFields:
+      type: object
+      description: Prompt + mnml routing fields without a GLB capture URL.
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        expertName:
+          type: string
+          enum: [exterior, interior, masterplan, landscape, plan, product]
+        renderStyle:
+          type: string
+          enum:
+            - raw
+            - photoreal
+            - cgi_render
+            - cad
+            - freehand_sketch
+            - clay_model
+            - illustration
+            - watercolor
+        expertParams:
+          type: object
+          additionalProperties:
+            type: string
+      required: [prompt]
+
+    RenderSourceUploadResponse:
+      type: object
+      description: |
+        doc 40e A.5 — canonical object-storage path for an uploaded
+        render source image.
+      properties:
+        sourceUploadUrl:
+          type: string
+          description: /objects/uploads/{uuid} path for kickoff.
+      required: [sourceUploadUrl]
+
     KickoffRenderStillBody:
       allOf:
         - $ref: "#/components/schemas/KickoffRenderCommonFields"
         - type: object
-          description: Single still image kickoff.
+          description: Single still image kickoff from GLB viewport capture.
           properties:
             kind:
               type: string
@@ -13092,6 +13458,24 @@ components:
               maximum: 120
               description: Field of view in degrees. Default 50 if omitted.
           required: [kind, cameraPosition, cameraTarget]
+
+    KickoffRenderStillUploadBody:
+      allOf:
+        - $ref: "#/components/schemas/KickoffRenderPromptFields"
+        - type: object
+          description: |
+            doc 40e A.5 — still kickoff from a prior source-upload
+            reference (concept imagery / manual sketch path).
+          properties:
+            kind:
+              type: string
+              enum: [still]
+            sourceUploadUrl:
+              type: string
+              description: |
+                Path returned by `POST .../renders/source-upload`
+                (/objects/uploads/{uuid}).
+          required: [kind, sourceUploadUrl]
 
     KickoffRenderElevationSetBody:
       allOf:
@@ -13159,14 +13543,13 @@ components:
     KickoffRenderBody:
       oneOf:
         - $ref: "#/components/schemas/KickoffRenderStillBody"
+        - $ref: "#/components/schemas/KickoffRenderStillUploadBody"
         - $ref: "#/components/schemas/KickoffRenderElevationSetBody"
         - $ref: "#/components/schemas/KickoffRenderVideoBody"
-      discriminator:
-        propertyName: kind
-        mapping:
-          still: "#/components/schemas/KickoffRenderStillBody"
-          elevation-set: "#/components/schemas/KickoffRenderElevationSetBody"
-          video: "#/components/schemas/KickoffRenderVideoBody"
+      description: |
+        Union by `kind`. Two `still` shapes share the same discriminator
+        value — GLB capture (`glbUrl` + camera) vs upload (`sourceUploadUrl`);
+        clients disambiguate on presence of those fields (doc 40e A.5).
 
     KickoffRenderResponse:
       type: object
@@ -13184,6 +13567,57 @@ components:
         cost:
           $ref: "#/components/schemas/RenderCostEstimate"
       required: [renderId, state, kind, cost]
+
+    ViewpointRenderSourceType:
+      type: string
+      enum:
+        - model-capture
+        - upload
+        - enhance
+        - upscale
+        - erase
+        - inpaint
+        - style_transfer
+      description: |
+        doc 40e A.4/A.6 — `viewpoint_renders.source_type` discriminant.
+
+    PowerToolSourceType:
+      type: string
+      enum: [enhance, upscale, erase, inpaint, style_transfer]
+      description: |
+        doc 40e A.2/A.4 — power-tool subset of ViewpointRenderSourceType.
+
+    PowerToolCostEstimate:
+      type: object
+      description: |
+        Static per-tool credit cost from `estimatePowerToolCost` (doc 40e A.2).
+      properties:
+        credits:
+          type: integer
+          minimum: 0
+      required: [credits]
+
+    KickoffPowerToolResponse:
+      type: object
+      description: |
+        202 envelope for doc 40e A.2 power-tool kickoffs. Poll via
+        `GET /renders/{renderId}`; output role is `primary` until A.6.
+      properties:
+        renderId:
+          type: string
+        state:
+          $ref: "#/components/schemas/RenderStatus"
+        kind:
+          type: string
+          enum: [still]
+        sourceType:
+          $ref: "#/components/schemas/PowerToolSourceType"
+        parentRenderOutputId:
+          type: string
+          format: uuid
+        cost:
+          $ref: "#/components/schemas/PowerToolCostEstimate"
+      required: [renderId, state, kind, sourceType, parentRenderOutputId, cost]
 
     RenderOutputProjection:
       type: object
@@ -13297,6 +13731,15 @@ components:
           type: string
         kind:
           $ref: "#/components/schemas/DomainRenderKind"
+        sourceType:
+          $ref: "#/components/schemas/ViewpointRenderSourceType"
+        sourceUploadUrl:
+          type: string
+          nullable: true
+        parentRenderOutputId:
+          type: string
+          format: uuid
+          nullable: true
         status:
           $ref: "#/components/schemas/RenderStatus"
         mnmlJobId:
@@ -13337,6 +13780,9 @@ components:
         - id
         - engagementId
         - kind
+        - sourceType
+        - sourceUploadUrl
+        - parentRenderOutputId
         - status
         - mnmlJobId
         - mnmlJobs
@@ -13360,6 +13806,12 @@ components:
           type: string
         kind:
           $ref: "#/components/schemas/DomainRenderKind"
+        sourceType:
+          $ref: "#/components/schemas/ViewpointRenderSourceType"
+        parentRenderOutputId:
+          type: string
+          format: uuid
+          nullable: true
         status:
           $ref: "#/components/schemas/RenderStatus"
         errorCode:

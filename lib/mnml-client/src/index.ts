@@ -54,10 +54,13 @@ export {
 } from "./factory";
 
 export {
+  POWER_TOOL_COST_CREDITS,
   RENDER_COST_CREDITS,
   actualDebitedCredits,
+  estimatePowerToolCost,
   estimateRenderCost,
   type DomainRenderKind,
+  type PowerToolSourceType,
   type RenderCostBreakdownEntry,
   type RenderCostEstimate,
 } from "./cost";

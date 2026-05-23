@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type {
   DomainRenderKind,
   ElevationSetJob,
@@ -6,6 +7,9 @@ import type {
   RenderOutputProjection,
   RenderStatus,
 } from "@workspace/api-client-react";
+import { BeforeAfterSlider } from "./BeforeAfterSlider";
+import { RenderPowerToolDialog } from "./render-tools/RenderPowerToolDialog";
+import type { PowerToolKind } from "./render-tools/powerToolKickoff";
 
 /**
  * Shared render card. Presentational only; the parent owns selection
@@ -71,6 +75,32 @@ function downloadHrefFor(output: RenderOutputProjection): string | null {
 
 function isVideoOutput(output: RenderOutputProjection): boolean {
   return output.format === "mp4" || output.format === "webm";
+}
+
+function formatElapsed(startIso: string): string {
+  const start = new Date(startIso).getTime();
+  if (Number.isNaN(start)) return "";
+  const sec = Math.max(0, Math.floor((Date.now() - start) / 1000));
+  if (sec < 60) return `${sec}s elapsed`;
+  const min = Math.floor(sec / 60);
+  const rem = sec % 60;
+  return `${min}m ${rem}s elapsed`;
+}
+
+function RenderElapsedLabel({ createdAt, status }: { createdAt: string; status: RenderStatus }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!isRenderInFlight(status)) return;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [status]);
+  void tick;
+  if (!isRenderInFlight(status)) return null;
+  return (
+    <span className="sc-meta" style={{ color: "var(--cyan)" }} data-testid="render-elapsed">
+      {formatElapsed(createdAt)}
+    </span>
+  );
 }
 
 function formatRelative(input: string | Date): string {
@@ -146,6 +176,9 @@ export interface RenderCardProps {
    * by leaving this flag off.
    */
   openPreviewInNewTab?: boolean;
+  /** Architect gallery: surface power-tool actions on ready stills. */
+  showPowerTools?: boolean;
+  engagementId?: string;
 }
 
 export function RenderCard({
@@ -155,9 +188,16 @@ export function RenderCard({
   canCancel = true,
   cancelError = null,
   openPreviewInNewTab = false,
+  showPowerTools = false,
+  engagementId,
 }: RenderCardProps) {
+  const [activeTool, setActiveTool] = useState<PowerToolKind | null>(null);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
   const isDetail = "outputs" in render;
   const detail = isDetail ? (render as RenderDetailResponse) : null;
+  const parentOutputId =
+    detail?.parentRenderOutputId ??
+    ("parentRenderOutputId" in render ? render.parentRenderOutputId : null);
 
   const primaryOutput = detail?.outputs?.find(
     (o) => o.role === "primary" || o.role === "video-primary",
@@ -181,10 +221,12 @@ export function RenderCard({
         display: "flex",
         flexDirection: "column",
         gap: 8,
+        marginLeft: parentOutputId ? 12 : 0,
+        borderLeft: parentOutputId ? "2px solid var(--border-default)" : undefined,
       }}
     >
       <div className="flex items-center justify-between" style={{ gap: 8 }}>
-        <div className="flex items-center" style={{ gap: 8 }}>
+        <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
           <span
             className="sc-label"
             style={{ color: "var(--text-primary)", fontWeight: 600 }}
@@ -192,13 +234,23 @@ export function RenderCard({
             {KIND_LABEL[render.kind]}
           </span>
           <StatusPill status={render.status} />
+          {parentOutputId && (
+            <span className="sc-meta" style={{ opacity: 0.7 }} data-testid="render-derived-badge">
+              Tool output
+            </span>
+          )}
         </div>
-        <span
-          className="sc-meta opacity-70"
-          title={new Date(render.createdAt).toLocaleString()}
-        >
-          {formatRelative(render.createdAt)}
-        </span>
+        <div className="flex flex-col items-end" style={{ gap: 2 }}>
+          <RenderElapsedLabel createdAt={render.createdAt} status={render.status} />
+          <span
+            className="sc-meta opacity-70"
+            title={new Date(render.createdAt).toLocaleString()}
+          >
+            {isRenderInFlight(render.status)
+              ? formatRelative(render.createdAt)
+              : formatRelative(render.createdAt)}
+          </span>
+        </div>
       </div>
 
       {detail && detail.kind === "elevation-set" ? (
@@ -211,6 +263,16 @@ export function RenderCard({
           status={render.status}
           output={primaryOutput ?? null}
           openPreviewInNewTab={openPreviewInNewTab}
+          beforeSrc={
+            detail?.sourceUploadUrl && primaryOutput
+              ? detail.sourceUploadUrl
+              : undefined
+          }
+          afterSrc={
+            primaryOutput && previewHrefFor(primaryOutput)
+              ? previewHrefFor(primaryOutput)!
+              : undefined
+          }
         />
       )}
 
@@ -228,6 +290,80 @@ export function RenderCard({
         >
           {(render as RenderDetailResponse).errorMessage}
         </div>
+      )}
+
+      {render.status === "ready" && primaryOutput && previewHrefFor(primaryOutput) && (
+        <div className="flex items-center justify-end" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="sc-btn-ghost"
+            style={{ fontSize: 11, padding: "2px 10px" }}
+            data-testid={`render-share-${render.id}`}
+            onClick={async (e) => {
+              e.stopPropagation();
+              const url =
+                typeof window !== "undefined"
+                  ? `${window.location.origin}${previewHrefFor(primaryOutput)!}`
+                  : previewHrefFor(primaryOutput)!;
+              try {
+                await navigator.clipboard.writeText(url);
+                setShareMsg("Link copied");
+                window.setTimeout(() => setShareMsg(null), 2000);
+              } catch {
+                setShareMsg("Copy failed");
+              }
+            }}
+          >
+            {shareMsg ?? "Share"}
+          </button>
+        </div>
+      )}
+
+      {showPowerTools &&
+        engagementId &&
+        render.status === "ready" &&
+        render.kind === "still" &&
+        primaryOutput &&
+        previewHrefFor(primaryOutput) && (
+          <div
+            data-testid={`render-power-tools-${render.id}`}
+            className="flex flex-wrap"
+            style={{ gap: 6 }}
+          >
+            {(
+              [
+                ["enhance", "Enhance"],
+                ["upscale", "Upscale"],
+                ["erase", "Erase"],
+                ["inpaint", "Inpaint"],
+                ["style_transfer", "Restyle"],
+              ] as const
+            ).map(([tool, label]) => (
+              <button
+                key={tool}
+                type="button"
+                className="sc-btn-ghost"
+                style={{ fontSize: 11, padding: "2px 8px" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveTool(tool);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+      {activeTool && engagementId && primaryOutput && previewHrefFor(primaryOutput) && (
+        <RenderPowerToolDialog
+          engagementId={engagementId}
+          parentOutput={primaryOutput}
+          previewUrl={previewHrefFor(primaryOutput)!}
+          tool={activeTool}
+          isOpen
+          onClose={() => setActiveTool(null)}
+        />
       )}
 
       {cancellable && onCancel && (
@@ -266,10 +402,14 @@ function PrimaryThumb({
   status,
   output,
   openPreviewInNewTab = false,
+  beforeSrc,
+  afterSrc,
 }: {
   status: RenderStatus;
   output: RenderOutputProjection | null;
   openPreviewInNewTab?: boolean;
+  beforeSrc?: string;
+  afterSrc?: string;
 }) {
   const previewHref = output ? previewHrefFor(output) : null;
   const downloadHref = output ? downloadHrefFor(output) : null;
@@ -279,9 +419,18 @@ function PrimaryThumb({
   // skip the wrapping link for video outputs since the inline
   // <video controls> affordance already exposes full playback.
   const wrapPreview = openPreviewInNewTab && ready && output && !isVideoOutput(output);
+  const showSlider =
+    ready && beforeSrc && afterSrc && output && !isVideoOutput(output);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {ready && output ? (
+      {showSlider ? (
+        <BeforeAfterSlider
+          beforeSrc={beforeSrc}
+          afterSrc={afterSrc}
+          testId={`render-before-after-${output.id}`}
+        />
+      ) : ready && output ? (
         <div data-testid={`render-primary-preview-${output.id}`}>
           {isVideoOutput(output) ? (
             <video
