@@ -40,6 +40,7 @@ import deliverableLettersRouter from "./deliverableLetters";
 import detailCalloutSpecsRouter from "./detailCalloutSpecs";
 import productSpecReferencesRouter from "./productSpecReferences";
 import deliverableLetterRendersRouter from "./deliverableLetterRenders";
+import siteTopographyRouter from "./siteTopography";
 
 const router: IRouter = Router();
 
@@ -57,6 +58,11 @@ router.use(parcelBriefingsRouter);
 // kept adjacent to its sibling so the briefing-related routes stay
 // grouped.
 router.use(generateLayersRouter);
+// Phase 2D.x PR3 — site-topography refresh + read endpoints mount
+// under /engagements/:id/site-topography*. Register BEFORE
+// engagementsRouter so the more-specific paths match first (same
+// pattern as parcelBriefingsRouter above).
+router.use(siteTopographyRouter);
 // briefingSourcesRouter exposes top-level `/briefing-sources/:id/glb`
 // for the DA-MV-1 viewer; ordering relative to engagementsRouter is
 // indifferent (no path overlap) but kept adjacent to its sibling so
