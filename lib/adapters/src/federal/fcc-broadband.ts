@@ -17,7 +17,7 @@ import {
   type AdapterResult,
 } from "../types";
 import { fetchWithRetry } from "../retry";
-import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
+import { CACHE_COORDINATE_PRECISION } from "../cache";
 
 /**
  * BDC v2 published JSON endpoint. Documented at
@@ -27,6 +27,93 @@ import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
 const FCC_BDC_AVAILABILITY_ENDPOINT =
   "https://broadbandmap.fcc.gov/nbm/map/api/published/location/availability";
 const FCC_BROADBAND_LABEL = "FCC National Broadband Map";
+
+/**
+ * Per-adapter timeout floor for `fcc:broadband`. QA-22 upstream-probe
+ * dispatch (2026-05-23) raised this from `SLOW_UPSTREAM_TIMEOUT_MS`
+ * (45s) to **90s** for this adapter only — the FCC BDC v2 endpoint
+ * routinely answers slower than the shared 45s floor on the canary
+ * Musgrave / Redd engagements (cortex-api-00020-85n pill:
+ * `did not respond in time during attempt 1`). The hostname is valid
+ * and `broadbandmap.fcc.gov` loads in browser; the upstream is
+ * legitimately slow, not unreachable.
+ *
+ * UGRC / EPA / Grand County intentionally NOT raised — each of those
+ * has a different failure mode (per QA-22 throw-path capture) and a
+ * blanket bump would hide DNS / firewall / TLS classes behind a
+ * `timeout` pill that no longer reflects the actual root cause.
+ */
+const FCC_BROADBAND_TIMEOUT_MS = 90_000;
+
+/**
+ * In-memory result cache for `fcc:broadband` only. Sits in front of
+ * the existing 24h Postgres-backed `adapter_response_cache` (federal
+ * tier, see `artifacts/api-server/src/lib/adapterCache.ts`); the
+ * shorter window catches the operator-reload case where the same
+ * engagement's Generate Layers runs twice within the same minute,
+ * before the Postgres cache row has been committed and read back, or
+ * when the runner is invoked without a backing Postgres cache (tests,
+ * scripts).
+ *
+ * Key shape mirrors {@link CACHE_COORDINATE_PRECISION} — coordinates
+ * rounded to 5 decimal places (~1.1m at the equator) so a parcel that
+ * geocodes to slightly different coordinates on a re-run still hits
+ * the cache. Same precision the Postgres cache uses, so an in-memory
+ * hit and a Postgres hit are interchangeable for the same parcel.
+ *
+ * Module-scoped — one Map per process. Generate Layers is a route
+ * handler, so this lives as long as the api-server instance. Bounded
+ * by the natural cardinality of cached parcels × 15min (small in
+ * practice — single-tenant deployment).
+ */
+const FCC_BROADBAND_INMEM_TTL_MS = 15 * 60 * 1000;
+
+interface FccInMemEntry {
+  result: AdapterResult;
+  expiresAt: number;
+}
+
+const fccInMemCache: Map<string, FccInMemEntry> = new Map();
+
+function fccCacheKey(latitude: number, longitude: number): string {
+  const factor = 10 ** CACHE_COORDINATE_PRECISION;
+  const lat = Math.round(latitude * factor) / factor;
+  const lng = Math.round(longitude * factor) / factor;
+  return `${lat},${lng}`;
+}
+
+/**
+ * Read a non-expired entry. Mutates the cache on expiry so a stale
+ * row does not accumulate memory forever; the next caller for the
+ * same key takes the live path and re-fills.
+ */
+function fccCacheGet(key: string, now: number): AdapterResult | null {
+  const entry = fccInMemCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= now) {
+    fccInMemCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function fccCachePut(key: string, result: AdapterResult, now: number): void {
+  fccInMemCache.set(key, {
+    result,
+    expiresAt: now + FCC_BROADBAND_INMEM_TTL_MS,
+  });
+}
+
+/**
+ * Test-only — clear the module-scoped cache so a fresh test case
+ * does not see a hit from a previous test in the same vitest worker.
+ * Exported instead of being implicit via `vi.resetModules()` because
+ * the adapter is a singleton object, not a factory, so module reset
+ * would also drop the adapter binding the test asserts against.
+ */
+export function __resetFccInMemCacheForTests(): void {
+  fccInMemCache.clear();
+}
 
 /**
  * Identifying User-Agent for the FCC NBM call. Several public broker
@@ -173,12 +260,30 @@ export const fccBroadbandAdapter: Adapter = {
   layerKind: "fcc-broadband-availability",
   provider: "FCC National Broadband Map",
   jurisdictionGate: {},
-  // QA-22 — the FCC National Broadband Map API routinely answers
-  // slower than the 15s runner default; widen this adapter's budget so
-  // a slow-but-healthy NBM response is not cut off as a `timeout`.
-  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
+  // QA-22 upstream-probe (2026-05-23) — see FCC_BROADBAND_TIMEOUT_MS
+  // for the 45s → 90s rationale. The other QA-22-affected adapters
+  // (EPA / Grand County) intentionally stay at the shared
+  // SLOW_UPSTREAM_TIMEOUT_MS because their failure modes (DNS, TCP
+  // connect-timeout from Cloud Run egress) wouldn't be helped by a
+  // longer budget.
+  timeoutMs: FCC_BROADBAND_TIMEOUT_MS,
   appliesTo: federalApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
+    // QA-22 upstream-probe — in-memory cache check before the live
+    // call. See FCC_BROADBAND_INMEM_TTL_MS comment for the why
+    // (catches the operator-reload-within-15min case + tests/scripts
+    // without a Postgres cache).
+    const now = Date.now();
+    const key = fccCacheKey(ctx.parcel.latitude, ctx.parcel.longitude);
+    const cached = fccCacheGet(key, now);
+    if (cached) {
+      // Re-stamp `snapshotDate` to "now" so downstream freshness
+      // calculations don't treat the cached row as older than the
+      // current process actually believes it is. The provider /
+      // payload contract is unchanged.
+      return { ...cached, snapshotDate: nowIso() };
+    }
+
     const url = new URL(FCC_BDC_AVAILABILITY_ENDPOINT);
     url.searchParams.set("lat", String(ctx.parcel.latitude));
     url.searchParams.set("lng", String(ctx.parcel.longitude));
@@ -248,7 +353,7 @@ export const fccBroadbandAdapter: Adapter = {
     }
     const rows = extractProviderAttrs(json);
     if (rows.length === 0) {
-      return {
+      const emptyResult: AdapterResult = {
         adapterKey: this.adapterKey,
         tier: this.tier,
         layerKind: this.layerKind,
@@ -264,6 +369,12 @@ export const fccBroadbandAdapter: Adapter = {
         },
         note: "FCC reports no fixed-broadband deployment at this location.",
       };
+      // Cache the empty result too — a parcel with no fixed-broadband
+      // deployment is a stable answer for the 15-minute window, and
+      // re-hitting FCC cold for the same null answer is exactly what
+      // the cache is for.
+      fccCachePut(key, emptyResult, now);
+      return emptyResult;
     }
     const providers = rows.map(toProviderRow);
     const downs = providers
@@ -272,7 +383,7 @@ export const fccBroadbandAdapter: Adapter = {
     const ups = providers
       .map((p) => p.maxAdvertisedUpstreamMbps)
       .filter((n): n is number => typeof n === "number");
-    return {
+    const populatedResult: AdapterResult = {
       adapterKey: this.adapterKey,
       tier: this.tier,
       layerKind: this.layerKind,
@@ -287,5 +398,7 @@ export const fccBroadbandAdapter: Adapter = {
         providers,
       },
     };
+    fccCachePut(key, populatedResult, now);
+    return populatedResult;
   },
 };
