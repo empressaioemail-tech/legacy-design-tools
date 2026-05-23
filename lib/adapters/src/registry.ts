@@ -69,8 +69,15 @@ import {
  *
  * Session summary: doc_repo/_sessions/2026-05-23_qa22_fcc_recon_cc-agent-C.md
  */
+function defaultProcessEnv(): NodeJS.ProcessEnv {
+  if (typeof process !== "undefined" && process.env) {
+    return process.env;
+  }
+  return {};
+}
+
 export function isFccEnabled(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = defaultProcessEnv(),
 ): boolean {
   return env.FCC_ENABLED === "true";
 }

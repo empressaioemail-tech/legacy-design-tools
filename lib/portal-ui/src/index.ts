@@ -53,8 +53,12 @@ export {
 export type { RenderCardProps } from "./components/RenderCard";
 export { RenderGallery } from "./components/RenderGallery";
 export type { RenderGalleryProps } from "./components/RenderGallery";
-export { RenderKickoffDialog } from "./components/RenderKickoffDialog";
-export type { RenderKickoffDialogProps } from "./components/RenderKickoffDialog";
+export { RenderKickoffDialog, RenderKickoffPanel } from "./components/RenderKickoffDialog";
+export type {
+  RenderKickoffDialogProps,
+  RenderKickoffPanelProps,
+  RenderKickoffVariant,
+} from "./components/RenderKickoffDialog";
 // doc 40c B.6 — credit-balance chip for the Renders tab. Reads
 // `GET /api/renders/credits`; renders nothing when the renders preview
 // is disabled (the gallery owns that message).

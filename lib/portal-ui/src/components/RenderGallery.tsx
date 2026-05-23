@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListEngagementRenders,
@@ -62,12 +62,62 @@ export function RenderGallery({
   });
 
   const items: RenderListItem[] = listQuery.data?.items ?? [];
-  const sortedItems = [...items].sort((a, b) => {
-    const aChild = a.parentRenderOutputId ? 1 : 0;
-    const bChild = b.parentRenderOutputId ? 1 : 0;
-    if (aChild !== bChild) return aChild - bChild;
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  });
+  const rootItems = useMemo(
+    () =>
+      [...items]
+        .filter((i) => !i.parentRenderOutputId)
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+    [items],
+  );
+  const childItems = useMemo(
+    () => items.filter((i) => i.parentRenderOutputId),
+    [items],
+  );
+  const [claimedChildIds, setClaimedChildIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [linkageReady, setLinkageReady] = useState(false);
+
+  const claimChildren = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    setClaimedChildIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of ids) {
+        if (!next.has(id)) {
+          next.add(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const itemIdsKey = useMemo(
+    () => items.map((i) => i.id).sort().join(","),
+    [items],
+  );
+
+  useEffect(() => {
+    setClaimedChildIds(new Set());
+    setLinkageReady(false);
+    const frame = requestAnimationFrame(() => setLinkageReady(true));
+    return () => cancelAnimationFrame(frame);
+  }, [itemIdsKey]);
+
+  const orphanChildren = useMemo(
+    () =>
+      childItems
+        .filter((c) => !claimedChildIds.has(c.id))
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+    [childItems, claimedChildIds],
+  );
 
   if (listQuery.isLoading) {
     return (
@@ -136,7 +186,20 @@ export function RenderGallery({
         alignItems: "start",
       }}
     >
-      {sortedItems.map((item) => (
+      {rootItems.map((root) => (
+        <RenderGalleryGroup
+          key={root.id}
+          engagementId={engagementId}
+          root={root}
+          childCandidates={childItems}
+          canCancel={canCancel}
+          openPreviewInNewTab={openPreviewInNewTab}
+          showPowerTools={showPowerTools}
+          onClaimChildren={claimChildren}
+        />
+      ))}
+      {linkageReady &&
+        orphanChildren.map((item) => (
         <RenderGalleryCard
           key={item.id}
           engagementId={engagementId}
@@ -146,6 +209,105 @@ export function RenderGallery({
           showPowerTools={showPowerTools}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * Parent render plus expandable nested tool-output cards (doc 40e B.5).
+ */
+function RenderGalleryGroup({
+  engagementId,
+  root,
+  childCandidates,
+  canCancel,
+  openPreviewInNewTab,
+  showPowerTools,
+  onClaimChildren,
+}: {
+  engagementId: string;
+  root: RenderListItem;
+  childCandidates: RenderListItem[];
+  canCancel: boolean;
+  openPreviewInNewTab: boolean;
+  showPowerTools: boolean;
+  onClaimChildren: (ids: string[]) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+
+  const detailQuery = useGetRender(root.id, {
+    query: {
+      enabled: true,
+      queryKey: getGetRenderQueryKey(root.id),
+    },
+  });
+
+  const matchedChildren = useMemo(() => {
+    const outputs = detailQuery.data?.outputs ?? [];
+    if (outputs.length === 0) return [];
+    const outputIds = new Set(outputs.map((o) => o.id));
+    return childCandidates.filter(
+      (c) =>
+        c.parentRenderOutputId && outputIds.has(c.parentRenderOutputId),
+    );
+  }, [childCandidates, detailQuery.data?.outputs]);
+
+  useEffect(() => {
+    if (matchedChildren.length > 0) {
+      onClaimChildren(matchedChildren.map((c) => c.id));
+    }
+  }, [matchedChildren, onClaimChildren]);
+
+  return (
+    <div
+      data-testid={`render-gallery-group-${root.id}`}
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
+      <RenderGalleryCard
+        engagementId={engagementId}
+        listItem={root}
+        canCancel={canCancel}
+        openPreviewInNewTab={openPreviewInNewTab}
+        showPowerTools={showPowerTools}
+      />
+      {matchedChildren.length > 0 && (
+        <>
+          <button
+            type="button"
+            className="sc-btn-ghost"
+            data-testid={`render-group-toggle-${root.id}`}
+            onClick={() => setExpanded((v) => !v)}
+            style={{ alignSelf: "flex-start", fontSize: 11, marginLeft: 4 }}
+          >
+            {expanded ? "Hide" : "Show"} {matchedChildren.length} tool output
+            {matchedChildren.length === 1 ? "" : "s"}
+          </button>
+          {expanded && (
+            <div
+              data-testid={`render-group-children-${root.id}`}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                marginLeft: 8,
+                paddingLeft: 8,
+                borderLeft: "2px solid var(--border-default)",
+              }}
+            >
+              {matchedChildren.map((child) => (
+                <RenderGalleryCard
+                  key={child.id}
+                  engagementId={engagementId}
+                  listItem={child}
+                  canCancel={canCancel}
+                  openPreviewInNewTab={openPreviewInNewTab}
+                  showPowerTools={showPowerTools}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
