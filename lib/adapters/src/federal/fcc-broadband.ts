@@ -116,6 +116,64 @@ export function __resetFccInMemCacheForTests(): void {
 }
 
 /**
+ * QA-22 SCOPE B follow-up (2026-05-23, dispatch
+ * `2026-05-23_cc-agent-C_qa22_fcc_recon`) — structured per-request
+ * log lines so the next operator triage round can read the actual
+ * FCC failure mode straight off Cloud Run logs.
+ *
+ * Cloud Run's logs explorer auto-parses JSON-formatted stdout/stderr
+ * lines as structured entries, so a plain `console.info` / `console.warn`
+ * with a stringified field bag lands as a filterable record without
+ * dragging a logger dependency into the adapters package (which has
+ * stayed IO-free apart from the injected `fetch`). Field naming
+ * mirrors the pino-style shape used by `ifcIngest.ts`'s
+ * `ifc ingest: complete` log line (PR #87 / QA-33 diagnostic
+ * logging), so operators don't have to learn two filter idioms.
+ *
+ * Emits three events:
+ *   - `fcc:broadband request start` (info) — outbound request URL,
+ *     coordinates, configured timeout.
+ *   - `fcc:broadband request ok` (info) — wall-clock duration,
+ *     attempt count, response size, provider count.
+ *   - `fcc:broadband request failed` (warn) — error class
+ *     (timeout / network / status / parse), wall-clock duration,
+ *     and either the throw excerpt (no response) or the body
+ *     excerpt (non-OK response) that PR #92 / PR #88 already
+ *     capture.
+ *
+ * Out of scope for this dispatch: making the EPA / Grand County
+ * adapters emit the same shape. The dispatch is FCC-only.
+ */
+type FccLogLevel = "info" | "warn";
+type FccLogFields = Record<string, unknown>;
+
+function fccLogEvent(
+  level: FccLogLevel,
+  msg: string,
+  fields: FccLogFields,
+): void {
+  // Tee through `console.warn` for failures so Cloud Run renders them
+  // at the same severity an operator filters on; everything else lands
+  // on `console.info` (severity INFO in Cloud Run's logs explorer).
+  const out = { level, msg, adapter_key: "fcc:broadband", ...fields };
+  let line: string;
+  try {
+    line = JSON.stringify(out);
+  } catch {
+    // Field bag carries something non-serializable (a circular ref or
+    // a Symbol). Fall back to a string-message-only entry so we still
+    // get a log line for the event; the operator can re-run the trace
+    // with the bad field removed if it ever comes up.
+    line = JSON.stringify({ level, msg, adapter_key: "fcc:broadband" });
+  }
+  if (level === "warn") {
+    console.warn(line);
+  } else {
+    console.info(line);
+  }
+}
+
+/**
  * Identifying User-Agent for the FCC NBM call. Several public broker
  * endpoints (Apache-fronted) 406 requests without a recognized UA;
  * spelling one out keeps the production call from tripping that gate.
@@ -287,6 +345,21 @@ export const fccBroadbandAdapter: Adapter = {
     const url = new URL(FCC_BDC_AVAILABILITY_ENDPOINT);
     url.searchParams.set("lat", String(ctx.parcel.latitude));
     url.searchParams.set("lng", String(ctx.parcel.longitude));
+    const urlString = url.toString();
+
+    // QA-22 SCOPE B follow-up — request-start log so operators can
+    // correlate the request id Cloud Run assigns to the adapter call
+    // with the eventual `request ok` / `request failed` event in the
+    // same span. The full URL is logged (including lat/lng query
+    // params) so a triage filter `jsonPayload.msg="fcc:broadband
+    // request start"` returns the exact URL the adapter built.
+    fccLogEvent("info", "fcc:broadband request start", {
+      url: urlString,
+      lat: ctx.parcel.latitude,
+      lng: ctx.parcel.longitude,
+      timeout_ms: FCC_BROADBAND_TIMEOUT_MS,
+    });
+    const startedAtMs = Date.now();
 
     const {
       response: res,
@@ -294,7 +367,7 @@ export const fccBroadbandAdapter: Adapter = {
       bodyExcerpt,
       throwExcerpt,
     } = await fetchWithRetry(
-      url.toString(),
+      urlString,
       {
         signal: ctx.signal,
         // Apache front doors (and the FCC NBM tile server in particular)
@@ -320,12 +393,25 @@ export const fccBroadbandAdapter: Adapter = {
       },
     );
     if (!res.ok) {
+      const durationMs = Date.now() - startedAtMs;
       if (throwExcerpt) {
         // The request never got a response back — DNS resolution, TLS
         // handshake, connection establishment, or stream read failed
         // before the BDC endpoint's HTTP layer answered.
         // `throwExcerpt` names the underlying failure mode so the
         // operator can pick the mitigation off the pill alone.
+        fccLogEvent("warn", "fcc:broadband request failed", {
+          url: urlString,
+          // `network` covers caller-abort-translated-to-timeout too —
+          // PR #92's `captureThrowsAsResult` rolls aborted-by-runner
+          // into the throw path with a useful throwExcerpt. The
+          // operator can disambiguate by inspecting `throw_excerpt`
+          // (which carries the cause code from undici).
+          error_type: "network",
+          attempts,
+          duration_ms: durationMs,
+          throw_excerpt: throwExcerpt,
+        });
         throw new AdapterRunError(
           "network-error",
           `FCC National Broadband Map did not get a response after ${attempts} attempt${attempts === 1 ? "" : "s"}. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
@@ -336,21 +422,52 @@ export const fccBroadbandAdapter: Adapter = {
       // (envelope error, HTML error page, empty body) in the layer-
       // failure pill — operators don't need Cloud Run access to tell
       // schema drift from transient flakiness.
+      fccLogEvent("warn", "fcc:broadband request failed", {
+        url: urlString,
+        error_type: "status",
+        http_status: res.status,
+        attempts,
+        duration_ms: durationMs,
+        body_excerpt: bodyExcerpt,
+      });
       const suffix = bodyExcerpt ? ` Upstream response: ${bodyExcerpt}` : "";
       throw new AdapterRunError(
         "upstream-error",
         `FCC National Broadband Map responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}.${suffix} Use Force refresh to retry.`,
       );
     }
+    // Capture the response wire size *before* `res.json()` consumes
+    // the stream, via the Content-Length header when the upstream
+    // populates it. Falls back to `undefined` when absent so the
+    // log entry doesn't claim a misleading zero.
+    const contentLengthRaw = res.headers.get("content-length");
+    const responseSizeBytes =
+      contentLengthRaw && /^\d+$/.test(contentLengthRaw)
+        ? Number(contentLengthRaw)
+        : undefined;
     let json: unknown;
     try {
       json = await res.json();
     } catch (err) {
+      const durationMs = Date.now() - startedAtMs;
+      fccLogEvent("warn", "fcc:broadband request failed", {
+        url: urlString,
+        error_type: "parse",
+        http_status: res.status,
+        attempts,
+        duration_ms: durationMs,
+        // The body has already been consumed (or attempted) at this
+        // point, so we surface the parse error's own message rather
+        // than re-reading the stream.
+        parse_error_message:
+          err instanceof Error ? err.message : String(err),
+      });
       throw new AdapterRunError(
         "parse-error",
         `FCC NBM response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    const durationMs = Date.now() - startedAtMs;
     const rows = extractProviderAttrs(json);
     if (rows.length === 0) {
       const emptyResult: AdapterResult = {
@@ -374,6 +491,14 @@ export const fccBroadbandAdapter: Adapter = {
       // re-hitting FCC cold for the same null answer is exactly what
       // the cache is for.
       fccCachePut(key, emptyResult, now);
+      fccLogEvent("info", "fcc:broadband request ok", {
+        url: urlString,
+        http_status: res.status,
+        attempts,
+        duration_ms: durationMs,
+        response_size_bytes: responseSizeBytes,
+        provider_count: 0,
+      });
       return emptyResult;
     }
     const providers = rows.map(toProviderRow);
@@ -399,6 +524,14 @@ export const fccBroadbandAdapter: Adapter = {
       },
     };
     fccCachePut(key, populatedResult, now);
+    fccLogEvent("info", "fcc:broadband request ok", {
+      url: urlString,
+      http_status: res.status,
+      attempts,
+      duration_ms: durationMs,
+      response_size_bytes: responseSizeBytes,
+      provider_count: providers.length,
+    });
     return populatedResult;
   },
 };
