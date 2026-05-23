@@ -112,6 +112,17 @@ export const DECISION_RECORDED_ACTOR_ID = "decision-recorded";
 export const CLASSIFIER_ACTOR_ID = "classifier";
 
 /**
+ * Phase 2D.x PR3 — DEM ingest worker path
+ * (`lib/siteTopographyIngest.ts`). Stamped on
+ * `site-topography.ingested` / `.refreshed` / `.superseded` events
+ * when the worker fetches a parcel-clipped DEM from USGS 3DEP,
+ * derives contour lines, and emits the site-topography atom. The
+ * worker is operator-triggered (or auto-triggered post-Generate-
+ * Layers in a later phase) — there is no user-facing actor variant.
+ */
+export const SITE_TOPOGRAPHY_INGEST_ACTOR_ID = "site-topography-ingest";
+
+/**
  * Every stable server-side actor id, in declaration order. Consumers
  * iterate this array (e.g. the design-tools actorLabel test) to assert
  * each emitted id has a matching operator-facing label, so a new server
@@ -139,6 +150,7 @@ export const SERVER_ACTOR_IDS = [
   FINDING_ENGINE_ACTOR_ID,
   DECISION_RECORDED_ACTOR_ID,
   CLASSIFIER_ACTOR_ID,
+  SITE_TOPOGRAPHY_INGEST_ACTOR_ID,
 ] as const;
 
 /** Literal-id union of {@link SERVER_ACTOR_IDS}. */

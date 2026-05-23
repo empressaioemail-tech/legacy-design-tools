@@ -63,11 +63,19 @@ export type MaterializableElementKind =
  *   - `as-built-ifc-bundle`: a single synthetic per-IFC-ingest row that
  *     carries the consolidated glTF object path. The viewer renders this
  *     row's GLB; per-entity `as-built-ifc` rows stay lean (no GLB).
+ *   - `site-topography` (Phase 2D.x PR3 / migration 0016): the
+ *     materialized read model for an engagement's DEM ingest + derived
+ *     contour-GeoJSON. The `atom_events` log is the source of truth;
+ *     this row is a replayable projection of the latest
+ *     `site-topography.ingested` / `.refreshed` event. Carries
+ *     `engagement_id` only — no `briefing_id`, no IFC fields.
+ *     `property_set` JSON holds `{ demRef, contoursGeoJson, ... }`.
  */
 export const MATERIALIZABLE_ELEMENT_SOURCE_KINDS = [
   "briefing-derived",
   "as-built-ifc",
   "as-built-ifc-bundle",
+  "site-topography",
 ] as const;
 
 export type MaterializableElementSourceKind =
@@ -288,16 +296,18 @@ export const materializableElements = pgTable(
       ),
     /**
      * source_kind closed-tuple guard. Enforced at the DB so a stray
-     * write can't introduce an unknown lens.
+     * write can't introduce an unknown lens. Migration 0016 adds
+     * `'site-topography'` for the Phase 2D.x PR3 DEM-ingest path.
      */
     sourceKindCheck: check(
       "materializable_elements_source_kind_check",
-      sql`${t.sourceKind} IN ('briefing-derived', 'as-built-ifc', 'as-built-ifc-bundle')`,
+      sql`${t.sourceKind} IN ('briefing-derived', 'as-built-ifc', 'as-built-ifc-bundle', 'site-topography')`,
     ),
     /**
      * Provenance invariants. briefing-derived rows must have a
      * briefing_id; as-built IFC rows must have a source_snapshot_id,
-     * an engagement_id, an ifc_global_id, and an ifc_type.
+     * an engagement_id, an ifc_global_id, and an ifc_type;
+     * site-topography rows (migration 0016) must have an engagement_id.
      */
     provenanceInvariantsCheck: check(
       "materializable_elements_provenance_invariants_check",
@@ -308,6 +318,8 @@ export const materializableElements = pgTable(
             AND ${t.engagementId} IS NOT NULL
             AND ${t.ifcGlobalId} IS NOT NULL
             AND ${t.ifcType} IS NOT NULL)
+        OR (${t.sourceKind} = 'site-topography'
+            AND ${t.engagementId} IS NOT NULL)
       )`,
     ),
   }),
