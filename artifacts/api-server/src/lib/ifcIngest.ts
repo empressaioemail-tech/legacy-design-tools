@@ -11,7 +11,7 @@
 
 import type { Request, Response } from "express";
 import Busboy from "busboy";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
   db,
   bimModels,
@@ -388,21 +388,37 @@ export async function ingestSnapshotIfc(args: {
     );
   }
 
-  // 5) Supersede prior active rows for this snapshot, insert the new
-  //    per-entity rows + bundle row, and patch superseded_by_id on
-  //    matching prior rows so the per-entity history is walkable.
+  // 5) Supersede prior active IFC rows for this engagement, insert
+  //    the new per-entity rows + bundle row, and patch superseded_by_id
+  //    on matching prior rows so the per-entity history is walkable.
   //
   //    Transactional so a partial failure cannot leave prior rows
   //    flagged superseded with no replacements (or vice-versa). Mirror
   //    of briefing-sources' supersession contract — see
   //    [[adr-001-atom-architecture]] / [[adr-011]]: atom history is
   //    append + supersede, never delete.
+  //
+  //    QA-35: scope is the *engagement*, not the *snapshot*. Each IFC
+  //    re-upload creates a fresh snapshot (different `snapshot.id`),
+  //    so a snapshot-scoped supersede always finds zero prior rows on
+  //    re-ingest and lets prior generations stay active. Operator
+  //    reproduced this on cortex-api-00020-85n: three uploads of the
+  //    same Musgrave IFC stacked to 303 active rows (3 × 101) when
+  //    only the most recent 101 should have been active. The partial
+  //    unique index `materializable_elements_active_ifc_identity_uniq`
+  //    is keyed `(source_snapshot_id, ifc_global_id)` so it still
+  //    correctly prevented double-insert into the *same* snapshot but
+  //    permitted overlap across snapshots — the index can be
+  //    re-keyed to `(engagement_id, ifc_global_id)` in a follow-up
+  //    migration to defense-in-depth this fix at the DB layer.
   try {
     await db.transaction(async (tx) => {
       // 5a) Read prior active rows (if any) so we can patch
       //     superseded_by_id once new rows have been assigned ids.
-      //     For a first-ingest, this returns []; the rest of the
-      //     transaction degrades to plain inserts.
+      //     Engagement-scoped + IFC-source-kind-scoped so a re-ingest
+      //     across snapshots still finds prior generations to
+      //     supersede. For a first-ingest this returns []; the rest
+      //     of the transaction degrades to plain inserts.
       const priorActiveRows = await tx
         .select({
           id: materializableElements.id,
@@ -412,7 +428,11 @@ export async function ingestSnapshotIfc(args: {
         .from(materializableElements)
         .where(
           and(
-            eq(materializableElements.sourceSnapshotId, snapshot.id),
+            eq(materializableElements.engagementId, snapshot.engagementId),
+            inArray(materializableElements.sourceKind, [
+              "as-built-ifc",
+              "as-built-ifc-bundle",
+            ]),
             isNull(materializableElements.supersededAt),
           ),
         );
@@ -425,19 +445,31 @@ export async function ingestSnapshotIfc(args: {
         );
       }
 
-      // 5b) Stamp supersession on all prior active rows for this
-      //     snapshot up front. The matching new-row id (when one
-      //     exists) gets patched into superseded_by_id in 5e once
-      //     the inserts return; prior rows whose entity no longer
-      //     appears in the re-ingest stay with superseded_by_id =
-      //     null, which is the "tombstoned" lens.
+      // 5b) Stamp supersession on all prior active IFC rows for this
+      //     engagement up front. The matching new-row id (when one
+      //     exists) gets patched into superseded_by_id in 5e once the
+      //     inserts return; prior rows whose entity no longer appears
+      //     in the re-ingest stay with superseded_by_id = null, which
+      //     is the "tombstoned" lens.
+      //
+      //     The bundle rows from prior snapshots fall through to the
+      //     tombstoned-lens branch because their synthetic
+      //     `ifc_global_id = bundle:<snapshot.id>` is snapshot-unique
+      //     by construction — there's no matching new bundle in
+      //     `priorIdByIdentity`, which is intentional (we want the
+      //     viewer's `loadAsBuiltIfcElementsForEngagement` query
+      //     to see only the most-recent snapshot's bundle).
       if (priorActiveRows.length > 0) {
         await tx
           .update(materializableElements)
           .set({ supersededAt: new Date() })
           .where(
             and(
-              eq(materializableElements.sourceSnapshotId, snapshot.id),
+              eq(materializableElements.engagementId, snapshot.engagementId),
+              inArray(materializableElements.sourceKind, [
+                "as-built-ifc",
+                "as-built-ifc-bundle",
+              ]),
               isNull(materializableElements.supersededAt),
             ),
           );
