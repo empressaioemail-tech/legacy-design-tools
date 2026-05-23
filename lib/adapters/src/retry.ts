@@ -38,7 +38,40 @@ export interface FetchWithRetryOptions {
 export interface FetchWithRetryResult {
   response: Response;
   attempts: number;
+  /**
+   * First ~{@link BODY_EXCERPT_MAX_CHARS} characters of the response
+   * body, populated only when the returned `response.ok` is false
+   * (i.e. the caller will throw an `AdapterRunError` with this excerpt
+   * appended so the failure pill carries the upstream's actual error
+   * message — "Service is down for maintenance", an ArcGIS in-band
+   * error envelope, a Cloudflare interstitial, etc).
+   *
+   * Populated for both transient-status retry exhaustion (the
+   * captured body is from the final attempt) and for the hard-4xx
+   * single-attempt path. Absent when the body read itself threw or
+   * the response stream was already consumed (in which case the
+   * caller's existing "HTTP X after N attempts" message stands
+   * unchanged).
+   *
+   * The body read consumes the response stream, so callers MUST NOT
+   * `await response.json()` / `.text()` themselves on a non-OK
+   * response — they should read this field instead.
+   *
+   * QA-22 reopen: added so an operator triaging a layer-generation
+   * failure can see *why* the upstream rejected the call without
+   * needing Cloud Run log access for every triage iteration.
+   */
+  bodyExcerpt?: string;
 }
+
+/**
+ * Cap on the response-body excerpt captured for the failure-message
+ * path. Sized so the excerpt fits comfortably inside one log line and
+ * one FE failure pill — generous enough to include an ArcGIS error
+ * envelope's `message` field and a typical service-unavailable HTML
+ * heading without bloating the layer-failure row payload.
+ */
+export const BODY_EXCERPT_MAX_CHARS = 256;
 
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -69,6 +102,32 @@ function isUnattributedAbort(err: unknown, callerAborted: boolean): boolean {
   if (err instanceof Error && /This operation was aborted/i.test(err.message))
     return true;
   return false;
+}
+
+/**
+ * Read up to {@link BODY_EXCERPT_MAX_CHARS} of a response body for
+ * inclusion in the caller's failure message. Returns `undefined` when
+ * the body read throws (already consumed, network reset mid-read,
+ * unusable transport) — the caller falls back to the bare
+ * "HTTP X after N attempts" wording it had before.
+ *
+ * Collapses runs of whitespace so the excerpt remains compact when
+ * the upstream returned a pretty-printed HTML error page; preserves
+ * the visible characters so an ArcGIS error envelope's `message`
+ * field stays readable.
+ */
+async function readBodyExcerpt(res: Response): Promise<string | undefined> {
+  try {
+    const raw = await res.text();
+    if (!raw) return undefined;
+    const collapsed = raw.replace(/\s+/g, " ").trim();
+    if (!collapsed) return undefined;
+    return collapsed.length > BODY_EXCERPT_MAX_CHARS
+      ? `${collapsed.slice(0, BODY_EXCERPT_MAX_CHARS)}…`
+      : collapsed;
+  } catch {
+    return undefined;
+  }
 }
 
 function jitteredBackoff(
@@ -150,7 +209,16 @@ export async function fetchWithRetry(
     if (TRANSIENT_STATUS_CODES.has(res.status)) {
       lastTransientStatus = res.status;
       if (attempt === maxAttempts) {
-        return { response: res, attempts: attempt };
+        // Final attempt failed with a transient status — capture the
+        // body excerpt before returning so the caller's failure
+        // message can carry the upstream's actual error text. Body
+        // read replaces the previous drain (we no longer need the
+        // socket — the request is over).
+        return {
+          response: res,
+          attempts: attempt,
+          bodyExcerpt: await readBodyExcerpt(res),
+        };
       }
       // Drain the body so the connection can be reused.
       try {
@@ -160,6 +228,18 @@ export async function fetchWithRetry(
       }
       await sleep(jitteredBackoff(attempt, baseMs, maxMs));
       continue;
+    }
+    // Non-transient response (2xx success or hard 4xx). When the hard
+    // status is non-OK (400/401/403/404/422/…), capture the body
+    // excerpt up-front so the adapter's `!res.ok` branch can include
+    // it in the failure message without a second body read (which
+    // would throw — the stream is single-shot).
+    if (!res.ok) {
+      return {
+        response: res,
+        attempts: attempt,
+        bodyExcerpt: await readBodyExcerpt(res),
+      };
     }
     return { response: res, attempts: attempt };
   }

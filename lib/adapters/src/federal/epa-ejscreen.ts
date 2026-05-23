@@ -94,7 +94,7 @@ export const epaEjscreenAdapter: Adapter = {
     url.searchParams.set("areatype", "blockgroup");
     url.searchParams.set("f", "pjson");
 
-    const { response: res, attempts } = await fetchWithRetry(
+    const { response: res, attempts, bodyExcerpt } = await fetchWithRetry(
       url.toString(),
       {
         signal: ctx.signal,
@@ -113,9 +113,15 @@ export const epaEjscreenAdapter: Adapter = {
       },
     );
     if (!res.ok) {
+      // QA-22 reopen: append the upstream body excerpt so a 503 / 502
+      // / 504 from the EJScreen broker surfaces its actual response
+      // (maintenance banner, error envelope, empty body) in the
+      // layer-failure pill — operators don't need Cloud Run access to
+      // tell schema drift from transient flakiness.
+      const suffix = bodyExcerpt ? ` Upstream response: ${bodyExcerpt}` : "";
       throw new AdapterRunError(
         "upstream-error",
-        `EPA EJScreen responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}. Use Force refresh to retry.`,
+        `EPA EJScreen responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}.${suffix} Use Force refresh to retry.`,
       );
     }
     let json: unknown;
