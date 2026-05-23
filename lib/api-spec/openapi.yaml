@@ -13570,12 +13570,24 @@ components:
           $ref: "#/components/schemas/RenderCostEstimate"
       required: [renderId, state, kind, cost]
 
+    ViewpointRenderSourceType:
+      type: string
+      enum:
+        - model-capture
+        - upload
+        - enhance
+        - upscale
+        - erase
+        - inpaint
+        - style_transfer
+      description: |
+        doc 40e A.4/A.6 — `viewpoint_renders.source_type` discriminant.
+
     PowerToolSourceType:
       type: string
       enum: [enhance, upscale, erase, inpaint, style_transfer]
       description: |
-        doc 40e A.2/A.4 — `viewpoint_renders.source_type` for power-tool
-        derivations.
+        doc 40e A.2/A.4 — power-tool subset of ViewpointRenderSourceType.
 
     PowerToolCostEstimate:
       type: object
@@ -13721,6 +13733,15 @@ components:
           type: string
         kind:
           $ref: "#/components/schemas/DomainRenderKind"
+        sourceType:
+          $ref: "#/components/schemas/ViewpointRenderSourceType"
+        sourceUploadUrl:
+          type: string
+          nullable: true
+        parentRenderOutputId:
+          type: string
+          format: uuid
+          nullable: true
         status:
           $ref: "#/components/schemas/RenderStatus"
         mnmlJobId:
@@ -13761,6 +13782,9 @@ components:
         - id
         - engagementId
         - kind
+        - sourceType
+        - sourceUploadUrl
+        - parentRenderOutputId
         - status
         - mnmlJobId
         - mnmlJobs
@@ -13784,6 +13808,12 @@ components:
           type: string
         kind:
           $ref: "#/components/schemas/DomainRenderKind"
+        sourceType:
+          $ref: "#/components/schemas/ViewpointRenderSourceType"
+        parentRenderOutputId:
+          type: string
+          format: uuid
+          nullable: true
         status:
           $ref: "#/components/schemas/RenderStatus"
         errorCode:

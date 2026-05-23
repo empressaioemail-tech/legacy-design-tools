@@ -1689,6 +1689,9 @@ router.get("/renders/:id", async (req: Request, res: Response) => {
     id: row.id,
     engagementId: row.engagementId,
     kind: row.kind,
+    sourceType: row.sourceType,
+    sourceUploadUrl: row.sourceUploadUrl,
+    parentRenderOutputId: row.parentRenderOutputId,
     status: row.status,
     mnmlJobId: row.mnmlJobId,
     mnmlJobs: row.mnmlJobs,
@@ -1825,6 +1828,8 @@ router.get("/engagements/:id/renders", async (req: Request, res: Response) => {
     items: rows.map((row) => ({
       id: row.id,
       kind: row.kind,
+      sourceType: row.sourceType,
+      parentRenderOutputId: row.parentRenderOutputId,
       status: row.status,
       errorCode: row.errorCode,
       requestedBy: row.requestedBy,
