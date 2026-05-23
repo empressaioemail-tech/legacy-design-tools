@@ -31,6 +31,7 @@ import reviewerRequestsRouter from "./reviewerRequests";
 import reviewerQueueRouter from "./submissions";
 import decisionsRouter from "./decisions";
 import rendersRouter from "./renders";
+import renderToolsRouter from "./render-tools";
 import notificationsRouter from "./notifications";
 import cannedFindingsRouter from "./cannedFindings";
 import qaRouter from "./qa";
@@ -151,6 +152,10 @@ router.use(decisionsRouter);
 // ordering-indifferent group (line 55), so we land here matching the
 // briefing-router precedent (line 34 ordering note).
 router.use(rendersRouter);
+// doc 40e A.2 — five mnml power-tool routes under
+// /render-outputs/:parentId/{enhance,upscale,erase,inpaint,style-transfer}.
+// Distinct from rendersRouter's /render-outputs/:id/file leaf.
+router.use(renderToolsRouter);
 // Architect inbox/notification surface. Mounts under
 // `/me/notifications*`; a distinct path subtree from `meRouter`
 // (`/me/architect-pdf-header`, `/me/profile`) so ordering relative

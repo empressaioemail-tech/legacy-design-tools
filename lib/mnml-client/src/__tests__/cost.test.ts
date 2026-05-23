@@ -13,8 +13,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  POWER_TOOL_COST_CREDITS,
   RENDER_COST_CREDITS,
   actualDebitedCredits,
+  estimatePowerToolCost,
   estimateRenderCost,
 } from "../cost";
 
@@ -24,6 +26,32 @@ describe("RENDER_COST_CREDITS", () => {
       archdiffusion: 3,
       video: 10,
     });
+  });
+});
+
+describe("POWER_TOOL_COST_CREDITS", () => {
+  it("exposes 1 credit per tool (doc 40e A.2 placeholder table)", () => {
+    expect(POWER_TOOL_COST_CREDITS).toEqual({
+      enhance: 1,
+      upscale: 1,
+      erase: 1,
+      inpaint: 1,
+      style_transfer: 1,
+    });
+  });
+});
+
+describe("estimatePowerToolCost", () => {
+  it("returns the static credit cost for each tool", () => {
+    for (const tool of [
+      "enhance",
+      "upscale",
+      "erase",
+      "inpaint",
+      "style_transfer",
+    ] as const) {
+      expect(estimatePowerToolCost({ tool })).toEqual({ credits: 1 });
+    }
   });
 });
 
