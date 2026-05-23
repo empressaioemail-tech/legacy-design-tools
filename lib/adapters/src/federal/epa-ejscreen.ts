@@ -1,17 +1,50 @@
 /**
  * EPA EJScreen — federal environmental-justice screening adapter.
  *
- * EPA EJScreen publishes block-group level environmental + demographic
- * indicators. The current public broker endpoint is
- * `https://ejscreen.epa.gov/mapper/ejscreenRESTbroker3.aspx` (the
- * legacy `ejscreenRESTbroker.aspx` was deprecated in 2023). It accepts
- * a point geometry and returns a JSON envelope with the indicators for
- * the enclosing block group (population, demographic index, key
- * pollution percentiles).
+ * STATUS (last swept 2026-05-23): broken upstream. EPA has fully
+ * decommissioned the EJScreen public-facing infrastructure — the
+ * `ejscreen.epa.gov` host is NXDOMAIN, the `www.epa.gov/ejscreen*`
+ * page tree returns HTTP 404, and the broker endpoint this adapter
+ * targets (`/mapper/ejscreenRESTbroker3.aspx`) refuses TCP at the
+ * decommissioned host. The adapter therefore always fails; the EPA
+ * pill renders red in the partnership review UI. No PR is open to
+ * swap the URL because no EPA-published v2 successor exists at this
+ * time. See _research/2026-05-23_qa22_epa_path1a_cc-agent-C.md for
+ * the full dead-end trail.
  *
- * The broker's response shape is awkward (it nests the indicators
- * inside `data.main` as named fields) so we surface the raw envelope
- * verbatim plus a normalized subset the briefing engine reads first.
+ * Sweep summary (so a future agent does not re-dig the same ground):
+ *   geopub.epa.gov/arcgis/rest/services       — no EJ folder/service
+ *   gispub.epa.gov/arcgis/rest/services       — no EJ folder/service
+ *   edg.epa.gov/data/PUBLIC/OEI/              — no EJScreen archive
+ *   NEPAssist/NEPAVELayersPublic_fgdb         — NAAQS non-attainment
+ *                                                polygons only
+ *                                                (categorical, not the
+ *                                                percentile schema)
+ *   ORD/EnvironmentalQualityIndex             — different methodology
+ *                                                + different schema
+ *   OEI/ACS_Demographics_by_Tract_2008_2012   — stale Census, no
+ *                                                pollution layer
+ *   EPA Esri Online org search for "EJScreen" — only third-party
+ *                                                mirrors of the 2023
+ *                                                archive (CalEPA,
+ *                                                Delaware FirstMap,
+ *                                                small state orgs)
+ *
+ * Fallback the operator may opt into (NOT enabled here): the
+ * CalEPA-hosted archive of the EJScreen 2023 block-group dataset at
+ *   services2.arcgis.com/iq8zYa0SRsvIFFKz/.../EJSCREEN_2023_BG_StatePct...
+ * preserves all five indicators this adapter previously surfaced
+ * (with two field renames: RAW_D_POP→ACSTOTPOP and
+ * P_D2_VULEOPCT→P_DEMOGIDX_2). It is a state-agency-hosted mirror,
+ * not an EPA endpoint, and its `P_*` fields are state-distribution
+ * percentiles rather than the original broker's US percentiles — both
+ * are substantive deltas an operator should weigh before adopting.
+ *
+ * The original broker contract (kept here for reference): accept a
+ * point geometry, return a JSON envelope with indicators for the
+ * enclosing block group nested at `data.main`, keyed by EJScreen
+ * field names (population, demographic index percentile, key
+ * pollution percentiles).
  *
  * Calls go through {@link fetchWithRetry} so transient broker
  * hiccups are not surfaced as a hard failure on the first try.
