@@ -72,8 +72,13 @@ const TIER_DESCRIPTIONS: Record<
   "federal" | "state" | "local" | "manual",
   string
 > = {
+  // QA-22 SCOPE B closeout (2026-05-23) — `fcc:broadband` is gated
+  // off by default; see `isFccEnabled` in
+  // `lib/adapters/src/registry.ts`. Copy below names the layers that
+  // actually fire in the default config. If the operator flips
+  // `FCC_ENABLED=true` later, re-add the FCC clause here.
   federal:
-    "FEMA flood zones, USGS NED elevation, EPA EJScreen demographics, and FCC broadband availability.",
+    "FEMA flood zones, USGS NED elevation, and EPA EJScreen demographics.",
   state:
     "State-tier sources (UGRC for Utah, INSIDE Idaho for Idaho, TCEQ for Texas).",
   local:
@@ -1009,9 +1014,9 @@ export function SiteContextTab({
               data-testid="generate-layers-federal-only-message"
               style={{ color: "var(--text-secondary)" }}
             >
-              Federal adapters (FEMA flood, USGS topo, EPA EJSCREEN, FCC
-              broadband) will fetch for this parcel. No state/local adapter for
-              this jurisdiction yet — upload a QGIS overlay or wait for adapter
+              Federal adapters (FEMA flood, USGS topo, EPA EJSCREEN) will
+              fetch for this parcel. No state/local adapter for this
+              jurisdiction yet — upload a QGIS overlay or wait for adapter
               support.
             </div>
             <div
