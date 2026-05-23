@@ -2,6 +2,31 @@
  * FCC Broadband Data Collection (BDC) — federal broadband-availability
  * adapter.
  *
+ * **Gated off by default as of 2026-05-23 (QA-22 SCOPE B closeout).**
+ * PR #96's structured logging + the workstation curl recon in session
+ * `doc_repo/_sessions/2026-05-23_qa22_fcc_recon_cc-agent-C.md`
+ * confirmed the endpoint
+ * `https://broadbandmap.fcc.gov/nbm/map/api/published/location/availability`
+ * is Akamai-WAF-gated: server RSTs at ~19s or holds 60s with zero
+ * bytes for any client UA (adapter UA, browser UA, even the FCC
+ * homepage HEAD). PR #94's 90s timeout + 15-min cache fix can't help
+ * because no successful response ever arrives.
+ *
+ * The binding is kept imported + exported so:
+ *   - the FCC-specific unit tests in `federalAdapters.test.ts` keep
+ *     running (they don't depend on registry membership);
+ *   - an operator can flip the gate back via `FCC_ENABLED=true` on
+ *     the Cloud Run service env if a future use case re-emerges
+ *     (e.g. FCC ships a non-WAF-fronted programmatic endpoint, or
+ *     we move to the BDC bulk-download CSV path) — no code redeploy
+ *     required, just a service-config push.
+ *
+ * Registration is gated in {@link isFccEnabled} +
+ * {@link FEDERAL_ADAPTERS} in `lib/adapters/src/registry.ts`. With
+ * the gate off, `runAdapters(...)` produces zero outcomes for
+ * `fcc:broadband` and the per-source pill in the Site Context tab
+ * renders nothing (not even `no-coverage`).
+ *
  * Uses the documented BDC v2 "availability at coordinate" JSON
  * endpoint, which accepts a lat/lng and returns one row per
  * fixed-broadband provider serving the BDC fabric location. The call

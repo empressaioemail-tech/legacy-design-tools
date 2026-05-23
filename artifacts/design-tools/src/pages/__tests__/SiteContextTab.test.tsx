@@ -1078,9 +1078,14 @@ describe("SiteContextTab Generate Layers pre-flight (PL-04)", () => {
     expect(
       screen.getByText(/Federal layers will load — state\/local pending/i),
     ).toBeInTheDocument();
+    // QA-22 SCOPE B closeout (2026-05-23) — FCC broadband dropped
+    // from the default copy because `fcc:broadband` is gated off by
+    // default; see `isFccEnabled` in `lib/adapters/src/registry.ts`.
+    // If the operator flips `FCC_ENABLED=true`, re-add the FCC clause
+    // to both the SiteContextTab copy AND this assertion.
     expect(
       screen.getByTestId("generate-layers-federal-only-message"),
-    ).toHaveTextContent(/FEMA flood, USGS topo, EPA EJSCREEN, FCC broadband/);
+    ).toHaveTextContent(/FEMA flood, USGS topo, EPA EJSCREEN/);
     // The supported-pilots list is reused from PILOT_JURISDICTIONS
     // so a future adapter addition extends both surfaces from one
     // registry edit.

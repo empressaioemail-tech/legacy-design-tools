@@ -195,18 +195,29 @@ describe("pilot jurisdictions", () => {
       expect([...FEDERAL_PILOT_LAYER_KINDS]).toEqual(expected);
     });
 
-    it("includes the four DA-PI-2 federal adapters today", () => {
+    it("includes the federal trio shipping in the default config (post-QA-22-SCOPE-B FCC drop)", () => {
       expect(FEDERAL_PILOT_LAYER_KINDS.length).toBeGreaterThan(0);
       // Sanity that the well-known federal layer kinds are surfaced
       // — a regression that drops one of these would break this
       // assertion instead of silently shrinking the disclosure.
+      //
+      // `fcc-broadband-availability` was the fourth DA-PI-2 federal
+      // layer but is gated off by default as of QA-22 SCOPE B
+      // closeout (2026-05-23) — see `isFccEnabled` in
+      // `lib/adapters/src/registry.ts` and the gating invariants in
+      // `registry.test.ts`. If the operator flips `FCC_ENABLED=true`,
+      // `FEDERAL_PILOT_LAYER_KINDS` would self-extend to include
+      // `fcc-broadband-availability` (it derives from `ALL_ADAPTERS`).
       expect(FEDERAL_PILOT_LAYER_KINDS).toEqual(
         expect.arrayContaining([
           "fema-nfhl-flood-zone",
           "usgs-ned-elevation",
           "epa-ejscreen-blockgroup",
-          "fcc-broadband-availability",
         ]),
+      );
+      // And the gated-off layer is NOT in the default-config list.
+      expect(FEDERAL_PILOT_LAYER_KINDS).not.toContain(
+        "fcc-broadband-availability",
       );
     });
   });

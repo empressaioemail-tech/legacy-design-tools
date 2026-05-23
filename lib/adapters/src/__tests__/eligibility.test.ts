@@ -20,13 +20,19 @@ function ctxFor(
   };
 }
 
+// QA-22 SCOPE B closeout (2026-05-23) — `fcc:broadband` is gated off
+// by default; see `isFccEnabled` in
+// `lib/adapters/src/registry.ts` and the registry-test invariants
+// in `registry.test.ts`. The applicable-adapter lists below
+// therefore exclude `fcc:broadband` even though FCC's `appliesTo`
+// would still return true for a geocoded engagement — the gate
+// removes it from `ALL_ADAPTERS` upstream of this filter.
 describe("filterApplicableAdapters", () => {
   it("returns Bastrop TX's federal + Texas state + Bastrop local adapters", () => {
     const applicable = filterApplicableAdapters(ctxFor("texas", "bastrop-tx"));
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
@@ -45,7 +51,6 @@ describe("filterApplicableAdapters", () => {
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
@@ -66,7 +71,6 @@ describe("filterApplicableAdapters", () => {
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
@@ -79,15 +83,16 @@ describe("filterApplicableAdapters", () => {
     );
   });
 
-  it("returns the federal four for an out-of-pilot but geocoded context (PL-04)", () => {
+  it("returns the federal trio for an out-of-pilot but geocoded context (PL-04)", () => {
     // Boulder CO style: stateKey null, but the parcel is geocoded
-    // (lat/lng baked into ctxFor's defaults). Federal adapters now
-    // apply to any finite-coords engagement.
+    // (lat/lng baked into ctxFor's defaults). Federal adapters apply
+    // to any finite-coords engagement; the trio that fires is FEMA +
+    // USGS + EPA. `fcc:broadband` is gated off (QA-22 SCOPE B
+    // closeout — see test header).
     const applicable = filterApplicableAdapters(ctxFor(null, null));
     const keys = applicable.map((a) => a.adapterKey).sort();
     expect(keys).toEqual(
       [
-        "fcc:broadband",
         "fema:nfhl-flood-zone",
         "epa:ejscreen",
         "usgs:ned-elevation",
