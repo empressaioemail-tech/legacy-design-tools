@@ -864,7 +864,10 @@ CREATE TABLE @@SCHEMA@@.viewpoint_renders (
     requested_by text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    completed_at timestamp with time zone
+    completed_at timestamp with time zone,
+    source_type text DEFAULT 'model-capture'::text NOT NULL,
+    source_upload_url text,
+    parent_render_output_id uuid
 );
 
 
@@ -1851,6 +1854,12 @@ ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
 
 ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
     ADD CONSTRAINT viewpoint_renders_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: viewpoint_renders viewpoint_renders_parent_render_output_id_render_outputs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
+    ADD CONSTRAINT viewpoint_renders_parent_render_output_id_render_outputs_id_fk FOREIGN KEY (parent_render_output_id) REFERENCES @@SCHEMA@@.render_outputs(id) ON DELETE SET NULL;
 
 
 

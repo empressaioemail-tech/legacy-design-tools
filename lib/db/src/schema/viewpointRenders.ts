@@ -130,6 +130,43 @@ export const viewpointRenders = pgTable(
      */
     kind: text("kind").notNull(),
     /**
+     * doc 40e A.4 — discriminates how the render's source image came
+     * in:
+     *   - `model-capture`  (default; existing rows backfill) — GLB-
+     *                       captured viewport image from the architect's
+     *                       BIM model. The V1 flow.
+     *   - `upload`         — A.5/B.2 upload-as-source. Image uploaded
+     *                       to GCS via the upload endpoint; reference
+     *                       lives in `source_upload_url`.
+     *   - `enhance` | `upscale` | `erase` | `inpaint` | `style_transfer`
+     *                     — A.2/B.3 power tools. Source is an existing
+     *                       render-output; pointer lives in
+     *                       `parent_render_output_id`.
+     * Migration 0016 sets the default to `model-capture` so existing
+     * rows backfill cleanly; the route narrows on every insert.
+     */
+    sourceType: text("source_type").notNull().default("model-capture"),
+    /**
+     * GCS reference (object key or signed-URL pointer) for B.2 uploaded
+     * source images. NULL except when `source_type = 'upload'`. Schema
+     * leaves the column nullable so existing rows + the model-capture /
+     * power-tool sources stay valid without filler.
+     */
+    sourceUploadUrl: text("source_upload_url"),
+    /**
+     * Parent render-output for power-tool-derived renders (A.2/B.3 + B.5
+     * gallery hierarchy). NULL except when the row is a tool derivation
+     * (source_type ∈ enhance/upscale/erase/inpaint/style_transfer). FK
+     * uses `ON DELETE SET NULL` so a parent render-output deletion does
+     * not cascade-destroy historical tool outputs — they survive as
+     * orphaned artifacts visible in the gallery alongside their (now-
+     * detached) lineage.
+     */
+    parentRenderOutputId: uuid("parent_render_output_id").references(
+      (): AnyPgColumn => renderOutputs.id,
+      { onDelete: "set null" },
+    ),
+    /**
      * Validated, normalized request inputs. Image bytes never go in
      * the DB — the captured viewport image is uploaded to object
      * storage by the route's image-capture pipeline and the storage
@@ -241,6 +278,17 @@ export const viewpointRendersRelations = relations(
     bimModel: one(bimModels, {
       fields: [viewpointRenders.bimModelId],
       references: [bimModels.id],
+    }),
+    /**
+     * doc 40e A.4 — power-tool parent linkage. NULL when this render is
+     * not a tool derivation. Drizzle disambiguates from `outputs:
+     * many(renderOutputs)` by FK pair (this uses parentRenderOutputId →
+     * renderOutputs.id; the many-side uses renderOutputs.viewpointRenderId
+     * → viewpointRenders.id).
+     */
+    parentRenderOutput: one(renderOutputs, {
+      fields: [viewpointRenders.parentRenderOutputId],
+      references: [renderOutputs.id],
     }),
     /**
      * Wired in `renderOutputs.ts`'s relations block — child outputs
