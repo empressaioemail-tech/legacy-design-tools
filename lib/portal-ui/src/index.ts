@@ -1,5 +1,9 @@
 export { DashboardLayout } from "./components/DashboardLayout";
 export type { DashboardLayoutProps } from "./components/DashboardLayout";
+export { StatusPill } from "./components/StatusPill";
+export type { StatusPillProps } from "./components/StatusPill";
+export { KpiTile } from "./components/KpiTile";
+export type { KpiTileProps } from "./components/KpiTile";
 export { Sidebar } from "./components/Sidebar";
 export type {
   SidebarProps,

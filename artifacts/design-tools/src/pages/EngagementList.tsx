@@ -11,34 +11,9 @@ import {
   resolveJurisdiction,
   type AdapterContext,
 } from "@workspace/adapters";
+import { StatusPill } from "@workspace/portal-ui";
 import { AppShell } from "../components/AppShell";
 import { relativeTime } from "../lib/relativeTime";
-
-const STATUS_ACCENT: Record<string, { bg: string; color: string }> = {
-  active: { bg: "rgba(0,180,216,0.15)", color: "var(--cyan)" },
-  on_hold: { bg: "rgba(245,158,11,0.18)", color: "#f59e0b" },
-  archived: { bg: "var(--bg-input)", color: "var(--text-muted)" },
-};
-
-function StatusPill({ status }: { status: string }) {
-  const accent = STATUS_ACCENT[status] ?? STATUS_ACCENT.active;
-  return (
-    <span
-      className="sc-pill"
-      style={{
-        background: accent.bg,
-        color: accent.color,
-        textTransform: "uppercase",
-        fontSize: 11,
-        letterSpacing: "0.05em",
-        padding: "3px 8px",
-        borderRadius: 4,
-      }}
-    >
-      {status.replace("_", " ")}
-    </span>
-  );
-}
 
 function NoAdaptersPill({ message }: { message: string }) {
   return (

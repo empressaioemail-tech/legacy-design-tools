@@ -52,6 +52,10 @@ export default defineConfig(({ command }) => {
       host: "0.0.0.0",
       allowedHosts: true,
       // Local Windows dev: Replit's workspace proxy normally routes /api → api-server.
+      // Note: on Replit the workspace proxy at :80 claims `/api` for the
+      // api-server service before this vite proxy gets a chance, so the
+      // default below only matters when you `curl http://127.0.0.1:$PORT/api/…`
+      // directly past the workspace proxy.
       proxy: {
         "/api": {
           target: process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8080",

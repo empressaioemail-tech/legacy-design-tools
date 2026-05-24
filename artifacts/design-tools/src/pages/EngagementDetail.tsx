@@ -38,15 +38,27 @@ import {
 } from "../components/ReviewerRequestsStrip";
 import {
   BimModelViewport,
+  KpiTile,
+  StatusPill,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
   countUnaddressedFindings,
   useSidebarState,
 } from "@workspace/portal-ui";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useEngagementsStore, type SpecDraftEntry } from "../store/engagements";
 import { relativeTime } from "../lib/relativeTime";
 import type { BackfillFilter } from "../lib/submissionBackfill";
-import { StatusPill } from "../components/engagement-detail/StatusPill";
 import { SiteTab } from "../components/engagement-detail/SiteTab";
 import { SettingsTab } from "../components/engagement-detail/SettingsTab";
 import { SiteContextTab } from "../components/engagement-detail/SiteContextTab";
@@ -65,29 +77,48 @@ import {
   type TabId,
 } from "../components/engagement-detail/urlState";
 
-function KpiTile({
-  label,
-  value,
-  footnote,
+/**
+ * Wraps an engagement-detail tab's content with the ARIA tabpanel
+ * semantics that pair with the WAI-ARIA tabs pattern on `TabBar`
+ * above. Each panel gets a stable `id` (referenced by the tab
+ * trigger's `aria-controls`) and an `aria-labelledby` pointing back
+ * at the trigger. Inactive panels are hidden rather than unmounted
+ * via `hidden`, while their children are gated on `isActive` so
+ * sub-components don't keep running queries / state for unseen tabs.
+ */
+function TabPanel({
+  id,
+  active,
+  children,
+  className,
 }: {
-  label: string;
-  value: number | string | null | undefined;
-  footnote?: string;
+  id: TabId;
+  active: TabId;
+  children: React.ReactNode;
+  className?: string;
 }) {
-  // testid is keyed on a normalized lowercase label so e2e tests
-  // (`engagement-snapshot-timeline.spec.ts`) can target individual
-  // tiles without relying on visible text or DOM order.
-  const testId = `engagement-kpi-${label.toLowerCase()}`;
+  const isActive = id === active;
   return (
-    <div className="sc-card p-4" data-testid={testId}>
-      <div className="sc-label">{label}</div>
-      <div className="sc-kpi-md mt-2" data-testid={`${testId}-value`}>
-        {value ?? "—"}
-      </div>
-      {footnote && <div className="sc-meta mt-1 opacity-70">{footnote}</div>}
+    <div
+      role="tabpanel"
+      id={`engagement-tabpanel-${id}`}
+      aria-labelledby={`engagement-tab-trigger-${id}`}
+      hidden={!isActive}
+      tabIndex={0}
+      className={className}
+    >
+      {isActive ? children : null}
     </div>
   );
 }
+
+const TAB_GROUP_LABELS: Record<string, string> = {
+  model: "Model & Source",
+  site: "Site",
+  review: "Review",
+  deliverables: "Deliverables",
+  config: "Config",
+};
 
 function TabBar({
   active,
@@ -106,11 +137,21 @@ function TabBar({
    */
   findingsBadgeCount?: number | undefined;
 }) {
-  // Tabs are grouped into visual sections (model & source, site,
-  // review, deliverables, config). A thin separator is drawn at each
-  // group boundary so the 13-tab row reads as organized sections
-  // rather than one long undifferentiated strip (QA-01 / WSB.1). The
-  // row scrolls horizontally rather than clipping if it cannot fit.
+  // The thirteen tabs the architect uses on an engagement bucket into
+  // the five workflow segments locked in the IA decision (Option A,
+  // workflow-grouped): model intake, site context, the review/findings
+  // loop, deliverable packaging, and configuration. Each cluster is
+  // labelled with a small overline so the 5-workflow IA reads at a
+  // glance instead of dissolving into one long thirteen-tab strip
+  // (QA-01 / WSB.1).
+  //
+  // The tabstrip implements the WAI-ARIA Tabs pattern: role=tablist on
+  // the container, role=tab + aria-selected on each trigger, roving
+  // tabindex (active tab is the only one in the natural tab order),
+  // and arrow-key navigation with Home/End wrap. Activation is
+  // automatic on focus change — matches the rest of the design system
+  // and avoids requiring Enter for what is purely a view-selection
+  // affordance.
   const tabs: Array<{ id: TabId; label: string; group: string }> = [
     { id: "snapshots", label: "Snapshots", group: "model" },
     { id: "sheets", label: "Sheets", group: "model" },
@@ -130,89 +171,171 @@ function TabBar({
     { id: "renders", label: "Renders", group: "deliverables" },
     { id: "settings", label: "Settings", group: "config" },
   ];
+
+  // Bucket consecutive same-group tabs so each cluster can render
+  // beneath its own overline label without losing the flat keyboard
+  // tabindex order.
+  const groups: Array<{
+    key: string;
+    label: string;
+    tabs: Array<{ id: TabId; label: string; group: string }>;
+  }> = [];
+  for (const t of tabs) {
+    const last = groups[groups.length - 1];
+    if (last && last.key === t.group) {
+      last.tabs.push(t);
+    } else {
+      groups.push({
+        key: t.group,
+        label: TAB_GROUP_LABELS[t.group] ?? t.group,
+        tabs: [t],
+      });
+    }
+  }
+
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const activeIdx = Math.max(
+    0,
+    tabs.findIndex((t) => t.id === active),
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    let next = activeIdx;
+    if (e.key === "ArrowRight") next = (activeIdx + 1) % tabs.length;
+    else if (e.key === "ArrowLeft")
+      next = (activeIdx - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    else return;
+    e.preventDefault();
+    onChange(tabs[next].id);
+    // Defer focus to next paint so the re-rendered button is mounted
+    // with the correct tabindex before we ask it to receive focus.
+    requestAnimationFrame(() => tabRefs.current[next]?.focus());
+  };
+
   return (
     <div
+      role="tablist"
+      aria-label="Engagement workflow"
+      onKeyDown={handleKeyDown}
+      className="sc-scroll"
       style={{
         display: "flex",
-        gap: 4,
+        gap: 10,
         borderBottom: "1px solid var(--border-default)",
         overflowX: "auto",
       }}
     >
-      {tabs.map((t, i) => {
-        const isActive = active === t.id;
-        const showBadge =
-          t.id === "findings" &&
-          typeof findingsBadgeCount === "number" &&
-          findingsBadgeCount > 0;
-        const groupBreak = i > 0 && tabs[i - 1].group !== t.group;
-        return (
-          <Fragment key={t.id}>
-            {groupBreak && (
-              <div
-                aria-hidden="true"
-                style={{
-                  alignSelf: "center",
-                  flexShrink: 0,
-                  width: 1,
-                  height: 16,
-                  background: "var(--border-default)",
-                  margin: "0 4px",
-                }}
-              />
-            )}
-            <button
-              onClick={() => onChange(t.id)}
-              className="sc-tab"
-              data-testid={`engagement-tab-${t.id}`}
+      {groups.map((g, gi) => (
+        <Fragment key={g.key}>
+          {gi > 0 && (
+            <div
+              aria-hidden="true"
               style={{
+                alignSelf: "stretch",
                 flexShrink: 0,
-                padding: "8px 12px",
-                background: "transparent",
-                border: "none",
-                borderBottom: isActive
-                  ? "2px solid var(--cyan)"
-                  : "2px solid transparent",
-                color: isActive
-                  ? "var(--text-primary)"
-                  : "var(--text-secondary)",
-                fontFamily: "Inter, sans-serif",
-                fontSize: 12,
-                cursor: "pointer",
-                transition: "color 0.12s, border-color 0.12s",
-                marginBottom: -1,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                whiteSpace: "nowrap",
+                width: 1,
+                background: "var(--border-default)",
+                marginTop: 14,
+              }}
+            />
+          )}
+          <div
+            role="presentation"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              flexShrink: 0,
+            }}
+            data-testid={`engagement-tab-group-${g.key}`}
+          >
+            <div
+              className="sc-label"
+              aria-hidden="true"
+              style={{
+                fontSize: 9,
+                opacity: 0.55,
+                padding: "2px 10px 0",
+                letterSpacing: "0.10em",
               }}
             >
-              {t.label}
-              {showBadge && (
-                <span
-                  data-testid="engagement-tab-findings-badge"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    minWidth: 16,
-                    height: 16,
-                    padding: "0 5px",
-                    borderRadius: 8,
-                    background: "rgba(239, 68, 68, 0.18)",
-                    color: "#ef4444",
-                    fontSize: 10,
-                    fontWeight: 600,
-                    lineHeight: 1,
-                  }}
-                >
-                  {findingsBadgeCount}
-                </span>
-              )}
-            </button>
-          </Fragment>
-        );
-      })}
+              {g.label}
+            </div>
+            <div style={{ display: "flex", gap: 2 }}>
+              {g.tabs.map((t) => {
+                const idx = tabs.indexOf(t);
+                const isActive = active === t.id;
+                const showBadge =
+                  t.id === "findings" &&
+                  typeof findingsBadgeCount === "number" &&
+                  findingsBadgeCount > 0;
+                return (
+                  <button
+                    key={t.id}
+                    ref={(el) => {
+                      tabRefs.current[idx] = el;
+                    }}
+                    type="button"
+                    role="tab"
+                    id={`engagement-tab-trigger-${t.id}`}
+                    aria-selected={isActive}
+                    aria-controls={`engagement-tabpanel-${t.id}`}
+                    tabIndex={isActive ? 0 : -1}
+                    onClick={() => onChange(t.id)}
+                    className="sc-tab sc-tab-trigger"
+                    data-active={isActive ? "true" : "false"}
+                    data-testid={`engagement-tab-${t.id}`}
+                    style={{
+                      flexShrink: 0,
+                      padding: "6px 10px 8px",
+                      background: "transparent",
+                      border: "none",
+                      borderBottom: isActive
+                        ? "2px solid var(--cyan)"
+                        : "2px solid transparent",
+                      color: isActive
+                        ? "var(--text-primary)"
+                        : "var(--text-secondary)",
+                      cursor: "pointer",
+                      transition:
+                        "color 0.12s, border-color 0.12s, box-shadow 0.12s",
+                      marginBottom: -1,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {t.label}
+                    {showBadge && (
+                      <span
+                        data-testid="engagement-tab-findings-badge"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: 16,
+                          height: 16,
+                          padding: "0 5px",
+                          borderRadius: 8,
+                          background: "rgba(239, 68, 68, 0.18)",
+                          color: "#ef4444",
+                          fontSize: 10,
+                          fontWeight: 600,
+                          lineHeight: 1,
+                        }}
+                      >
+                        {findingsBadgeCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </Fragment>
+      ))}
     </div>
   );
 }
@@ -639,29 +762,59 @@ export function EngagementDetail() {
             <button className="sc-btn-ghost" onClick={openEdit}>
               Edit details
             </button>
-            <button
-              type="button"
-              className="sc-btn-ghost"
-              data-testid="engagement-archive-toggle"
-              disabled={archiveMutation.isPending}
-              onClick={() =>
-                archiveMutation.mutate({
-                  id,
-                  data: {
-                    status:
-                      engagement.status === "archived"
-                        ? "active"
-                        : "archived",
-                  },
-                })
-              }
-            >
-              {archiveMutation.isPending
-                ? "Saving…"
-                : engagement.status === "archived"
-                  ? "Unarchive"
-                  : "Archive"}
-            </button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <button
+                  type="button"
+                  className="sc-btn-ghost"
+                  data-testid="engagement-archive-toggle"
+                  disabled={archiveMutation.isPending}
+                >
+                  {archiveMutation.isPending
+                    ? "Saving…"
+                    : engagement.status === "archived"
+                      ? "Unarchive"
+                      : "Archive"}
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    {engagement.status === "archived"
+                      ? "Unarchive this project?"
+                      : "Archive this project?"}
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {engagement.status === "archived"
+                      ? "It will return to the active projects list and reappear in the sidebar shortcuts."
+                      : "It will be hidden from the active projects list. You can find it again by enabling Show archived on the Projects page."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel data-testid="engagement-archive-cancel">
+                    Cancel
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    data-testid="engagement-archive-confirm"
+                    onClick={() =>
+                      archiveMutation.mutate({
+                        id,
+                        data: {
+                          status:
+                            engagement.status === "archived"
+                              ? "active"
+                              : "archived",
+                        },
+                      })
+                    }
+                  >
+                    {engagement.status === "archived"
+                      ? "Unarchive"
+                      : "Archive"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <button
               type="button"
               className="sc-btn-primary"
@@ -695,28 +848,31 @@ export function EngagementDetail() {
           findingsBadgeCount={findingsBadgeCount}
         />
 
-        {tab === "snapshots" && (
-          <>
+        <TabPanel id="snapshots" active={tab}>
             <div className="grid grid-cols-4 gap-3">
               <KpiTile
                 label="SHEETS"
                 value={snapshotDetail?.sheetCount}
                 footnote={captured}
+                testId="engagement-kpi-sheets"
               />
               <KpiTile
                 label="ROOMS"
                 value={snapshotDetail?.roomCount}
                 footnote={captured}
+                testId="engagement-kpi-rooms"
               />
               <KpiTile
                 label="LEVELS"
                 value={snapshotDetail?.levelCount}
                 footnote={captured}
+                testId="engagement-kpi-levels"
               />
               <KpiTile
                 label="WALLS"
                 value={snapshotDetail?.wallCount}
                 footnote={captured}
+                testId="engagement-kpi-walls"
               />
             </div>
 
@@ -790,7 +946,7 @@ export function EngagementDetail() {
               available for debugging without dominating the tab.
             */}
             {hasSnapshots && (
-              <div className="sc-card flex flex-col">
+              <div className="sc-card flex flex-col" data-testid="raw-json-card">
                 <div className="sc-card-header sc-row-sb">
                   <span className="sc-label">RAW JSON</span>
                   <button
@@ -830,14 +986,13 @@ export function EngagementDetail() {
                   ))}
               </div>
             )}
-          </>
-        )}
+        </TabPanel>
 
-        {tab === "model-3d" && (
-          <div className="flex flex-col flex-1 min-h-0">{bimModelPanel}</div>
-        )}
+        <TabPanel id="model-3d" active={tab} className="flex flex-col flex-1 min-h-0">
+          {bimModelPanel}
+        </TabPanel>
 
-        {tab === "sheets" && (
+        <TabPanel id="sheets" active={tab}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div
               style={{
@@ -868,13 +1023,13 @@ export function EngagementDetail() {
               onAskClaude={handleAskClaudeAboutSheet}
             />
           </div>
-        )}
+        </TabPanel>
 
-        {tab === "site" && (
+        <TabPanel id="site" active={tab}>
           <SiteTab engagement={engagement} onAddAddress={openEdit} />
-        )}
+        </TabPanel>
 
-        {tab === "site-context" && (
+        <TabPanel id="site-context" active={tab}>
           <SiteContextTab
             engagement={engagement}
             selectedElementRef={selectedElementRef}
@@ -883,59 +1038,59 @@ export function EngagementDetail() {
             showBuilding={showBuildingOverlay}
             onToggleShowBuilding={setShowBuildingOverlay}
           />
-        )}
+        </TabPanel>
 
-        {tab === "submissions" && (
+        <TabPanel id="submissions" active={tab}>
           <SubmissionsTab
             engagementId={engagement.id}
             backfillFilter={backfillFilter}
             onBackfillFilterChange={setBackfillFilter}
             onOpenSubmission={(sid) => setOpenSubmissionId(sid)}
           />
-        )}
+        </TabPanel>
 
-        {tab === "findings" && (
+        <TabPanel id="findings" active={tab}>
           <FindingsTab
             engagementId={engagement.id}
             initialSubmissionId={latestSubmissionId}
             onElementRefClick={handleElementRefClick}
           />
-        )}
+        </TabPanel>
 
-        {tab === "response-tasks" && (
+        <TabPanel id="response-tasks" active={tab}>
           <ResponseTasksTab engagementId={engagement.id} />
-        )}
+        </TabPanel>
 
-        {tab === "deliverable-letters" && (
+        <TabPanel id="deliverable-letters" active={tab}>
           <DeliverableLettersTab engagementId={engagement.id} />
-        )}
+        </TabPanel>
 
-        {tab === "detail-callouts" && (
+        <TabPanel id="detail-callouts" active={tab}>
           <DetailCalloutSpecsTab
             engagementId={engagement.id}
             aiDraft={detailCalloutDraft}
             onAiDraftConsumed={() => setDetailCalloutDraft(null)}
           />
-        )}
+        </TabPanel>
 
-        {tab === "product-specs" && (
+        <TabPanel id="product-specs" active={tab}>
           <ProductSpecReferencesTab
             engagementId={engagement.id}
             aiDraft={productSpecDraft}
             onAiDraftConsumed={() => setProductSpecDraft(null)}
           />
-        )}
+        </TabPanel>
 
-        {tab === "renders" && (
+        <TabPanel id="renders" active={tab}>
           <RendersTab
             engagementId={engagement.id}
             defaultGlbUrl={defaultBimGlbUrl}
           />
-        )}
+        </TabPanel>
 
-        {tab === "settings" && (
+        <TabPanel id="settings" active={tab}>
           <SettingsTab engagement={engagement} onEdit={openEdit} />
-        )}
+        </TabPanel>
       </div>
 
       <EngagementDetailsModal

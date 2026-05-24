@@ -6,7 +6,7 @@ import {
 import { SiteMap } from "@workspace/site-context/client";
 import { ParcelZoningCard } from "@workspace/portal-ui";
 import { relativeTime } from "../../lib/relativeTime";
-import { StatusPill } from "./StatusPill";
+import { StatusPill } from "@workspace/portal-ui";
 
 const PROJECT_TYPE_LABEL: Record<string, string> = {
   new_build: "New build",

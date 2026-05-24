@@ -250,6 +250,7 @@ export function Sidebar({ brandLabel, brandProductName, groups }: SidebarProps) 
                     <Link
                       href={item.href}
                       title={collapsed ? item.label : undefined}
+                      className="sc-nav-link"
                       style={{
                         display: "flex",
                         alignItems: "center",
