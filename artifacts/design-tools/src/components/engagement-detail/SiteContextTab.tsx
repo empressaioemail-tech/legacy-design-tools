@@ -35,7 +35,7 @@ import { BriefingSourceUploadModal } from "../BriefingSourceUploadModal";
 import { BriefingRecentRunsPanel } from "./BriefingRecentRunsPanel";
 import { BriefingDivergencesPanel, PushToRevitAffordance } from "./PushToRevitAffordance";
 import { GenerateLayersSummaryBanner } from "./GenerateLayersSummaryBanner";
-import { TabHeader, ReservedRail } from "../cockpit/TabChrome";
+import { TabHeader } from "../cockpit/TabChrome";
 import { Mountain, Droplet, CloudRain } from "lucide-react";
 
 /**
@@ -1455,37 +1455,86 @@ export function SiteContextTab({
         existingLayerKinds={existingLayerKinds}
       />
       </div>
-      {/*
-        40d growth zone — reserves layout space for the topo /
-        drainage / rainfall overlays the planning brief calls out
-        for the 2D site-context completeness lane. These ship as
-        proper overlay controls once the adapters land; until then
-        the tiles mark the slot so the IA doesn't shift.
-      */}
-      <ReservedRail
-        title="Coming — 40d completeness lane"
-        testId="site-context-reserved"
-        tiles={[
-          {
-            id: "topo-contours",
-            icon: <Mountain size={14} />,
-            title: "Topo contours",
-            body: "USGS NED-derived elevation contour overlay on the parcel map.",
-          },
-          {
-            id: "drainage-zones",
-            icon: <Droplet size={14} />,
-            title: "Drainage zones",
-            body: "On-parcel drainage polygons + downstream flow lines, sourced from federal and state hydrography layers.",
-          },
-          {
-            id: "rainfall-sim",
-            icon: <CloudRain size={14} />,
-            title: "Rainfall simulation",
-            body: "Storm-event rainfall + runoff simulator panel docked alongside the site map.",
-          },
-        ]}
-      />
+      <FortyDOverlayToggles />
     </div>
+  );
+}
+
+/**
+ * 40d completeness-lane overlay toggles — topo contours, drainage
+ * zones, rainfall simulation. Each shows a "not configured" state
+ * until the source adapter is wired; toggling is intentionally
+ * disabled so the IA reads correctly without misrepresenting
+ * functionality.
+ */
+function FortyDOverlayToggles() {
+  const overlays = [
+    {
+      id: "topo-contours",
+      icon: <Mountain size={14} />,
+      title: "Topo contours",
+      body: "USGS NED-derived elevation contour overlay on the parcel map.",
+      requires: "USGS NED adapter",
+    },
+    {
+      id: "drainage-zones",
+      icon: <Droplet size={14} />,
+      title: "Drainage zones",
+      body: "On-parcel drainage polygons + downstream flow lines.",
+      requires: "Federal / state hydrography adapters",
+    },
+    {
+      id: "rainfall-sim",
+      icon: <CloudRain size={14} />,
+      title: "Rainfall simulation",
+      body: "Storm-event rainfall + runoff simulator panel docked alongside the site map.",
+      requires: "NOAA Atlas 14 + runoff model",
+    },
+  ];
+
+  return (
+    <section
+      className="forty-d-overlays"
+      data-testid="site-context-overlays-40d"
+      aria-label="40d completeness lane"
+    >
+      <div className="forty-d-head">
+        <h2 className="forty-d-title">40d overlays</h2>
+        <span className="forty-d-sub">
+          Map overlay toggles for the 2D site-context completeness lane.
+          Each shows "not configured" until its adapter is wired.
+        </span>
+      </div>
+      <ul className="forty-d-list">
+        {overlays.map((o) => (
+          <li
+            key={o.id}
+            className="forty-d-row"
+            data-testid={`forty-d-overlay-${o.id}`}
+          >
+            <span className="forty-d-icon" aria-hidden="true">
+              {o.icon}
+            </span>
+            <div className="forty-d-text">
+              <div className="forty-d-row-head">
+                <span className="forty-d-row-title">{o.title}</span>
+                <span className="forty-d-not-configured">Not configured</span>
+              </div>
+              <div className="forty-d-row-body">{o.body}</div>
+              <div className="forty-d-row-meta">Requires: {o.requires}</div>
+            </div>
+            <label
+              className="forty-d-toggle"
+              title="Coming soon — adapter not configured"
+            >
+              <input type="checkbox" disabled aria-label={`Enable ${o.title} overlay (coming soon)`} />
+              <span className="forty-d-toggle-track" aria-hidden="true">
+                <span className="forty-d-toggle-thumb" />
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

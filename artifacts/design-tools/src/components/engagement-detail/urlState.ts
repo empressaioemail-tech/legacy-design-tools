@@ -21,6 +21,8 @@ export type TabId =
   | "detail-callouts"
   | "product-specs"
   | "renders"
+  | "presentations"
+  | "publish-prep"
   | "settings";
 
 /**
@@ -51,6 +53,8 @@ export function readTabFromUrl(): TabId {
     raw === "detail-callouts" ||
     raw === "product-specs" ||
     raw === "renders" ||
+    raw === "presentations" ||
+    raw === "publish-prep" ||
     raw === "settings"
   ) {
     return raw;

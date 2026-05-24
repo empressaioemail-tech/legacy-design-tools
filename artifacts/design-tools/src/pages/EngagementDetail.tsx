@@ -63,6 +63,8 @@ import { SettingsTab } from "../components/engagement-detail/SettingsTab";
 import { SiteContextTab } from "../components/engagement-detail/SiteContextTab";
 import { SubmissionsTab } from "../components/engagement-detail/SubmissionsTab";
 import { DesignToolsTab } from "../components/engagement-detail/DesignToolsTab";
+import { PresentationsTab } from "../components/engagement-detail/PresentationsTab";
+import { PublishPrepTab } from "../components/engagement-detail/PublishPrepTab";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
 import { ResponseTasksTab } from "../components/engagement-detail/ResponseTasksTab";
 import { DeliverableLettersTab } from "../components/engagement-detail/DeliverableLettersTab";
@@ -168,6 +170,8 @@ function ViewsRail({
     { id: "detail-callouts", label: "Detail callouts", group: "deliverables" },
     { id: "product-specs", label: "Product specs", group: "deliverables" },
     { id: "renders", label: "Design Tools", group: "deliverables" },
+    { id: "presentations", label: "Presentations", group: "deliverables" },
+    { id: "publish-prep", label: "Publish prep", group: "deliverables" },
     { id: "settings", label: "Settings", group: "config" },
   ];
 
@@ -1024,6 +1028,14 @@ export function EngagementDetail() {
             defaultGlbUrl={defaultBimGlbUrl}
             onOpenBimTab={() => setTab("model-3d")}
           />
+        </TabPanel>
+
+        <TabPanel id="presentations" active={tab}>
+          <PresentationsTab engagementId={engagement.id} />
+        </TabPanel>
+
+        <TabPanel id="publish-prep" active={tab}>
+          <PublishPrepTab engagementId={engagement.id} />
         </TabPanel>
 
         <TabPanel id="settings" active={tab}>

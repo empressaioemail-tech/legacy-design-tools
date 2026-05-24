@@ -4,12 +4,14 @@ import {
   Activity,
   BookOpen,
   Box,
+  Building2,
   Database,
   Inbox,
   LayoutDashboard,
   Palette,
   Search,
   Settings as SettingsIcon,
+  Share2,
 } from "lucide-react";
 import {
   useSidebarState,
@@ -376,7 +378,10 @@ export const DEFAULT_PRIMARY_NAV: CockpitNavSection = {
 };
 
 export const DEFAULT_SECONDARY_NAV: CockpitNavSection = {
+  label: "Workspace",
   items: [
+    { label: "Product settings", href: "/workspace", icon: <Building2 size={18} /> },
+    { label: "Shared with me", href: "/workspace/shared", icon: <Share2 size={18} /> },
     { label: "Atom Inspector", href: "/dev/atoms", icon: <Database size={18} /> },
     { label: "Retrieval Probe", href: "/dev/atoms/probe", icon: <Search size={18} /> },
     { label: "API Health", href: "/health", icon: <Activity size={18} /> },

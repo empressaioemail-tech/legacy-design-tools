@@ -10,6 +10,8 @@ import { DevAtoms } from "./pages/DevAtoms";
 import { DevAtomsProbe } from "./pages/DevAtomsProbe";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
+import { Workspace } from "./pages/Workspace";
+import { SharedWithMe } from "./pages/SharedWithMe";
 import NotFound from "./pages/not-found";
 import { AppShell } from "./components/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -51,6 +53,16 @@ function Router() {
       <Route path="/notifications">
         <AppShell title="Inbox">
           <Notifications />
+        </AppShell>
+      </Route>
+      <Route path="/workspace">
+        <AppShell title="Workspace">
+          <Workspace />
+        </AppShell>
+      </Route>
+      <Route path="/workspace/shared">
+        <AppShell title="Shared with me">
+          <SharedWithMe />
         </AppShell>
       </Route>
       <Route path="/dev/atoms">

@@ -8,6 +8,7 @@ import {
 } from "@workspace/api-client-react";
 import { RevitBinding } from "../RevitBinding";
 import { TabHeader } from "../cockpit/TabChrome";
+import { AccessSection } from "./AccessSection";
 
 export function SettingsTab({
   engagement,
@@ -58,6 +59,8 @@ export function SettingsTab({
         revitCentralGuid={engagement.revitCentralGuid}
         revitDocumentPath={engagement.revitDocumentPath}
       />
+
+      <AccessSection />
 
       <div
         style={{

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "wouter";
 import {
   useListEngagements,
@@ -14,8 +14,9 @@ import {
 import { StatusPill } from "@workspace/portal-ui";
 import { AppShell } from "../components/AppShell";
 import { relativeTime } from "../lib/relativeTime";
-import { ReservedRail } from "../components/cockpit/TabChrome";
 import { Link2 } from "lucide-react";
+import { useState } from "react";
+import { ClientIntakeModal } from "../components/intake/ClientIntakeModal";
 
 function NoAdaptersPill({ message }: { message: string }) {
   return (
@@ -111,6 +112,7 @@ export function EngagementList() {
 
   const [hideOutOfPilot, setHideOutOfPilot] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [intakeOpen, setIntakeOpen] = useState(false);
   const visibleEngagements = useMemo(() => {
     let list = sortedEngagements;
     if (!showArchived) list = list.filter((e) => e.status !== "archived");
@@ -220,22 +222,31 @@ export function EngagementList() {
         </div>
 
         {/*
-          QA-27 growth zone — reserves the drop-link intake entry on the
-          portfolio surface so the chat-driven "give the agent a link to a
-          project / drawing / spec" pattern lands without an IA shift.
+          QA-27 — Client intake entry point. Opens the four-lane modal
+          (link / file / paste / email) that drafts a project. Backend
+          isn't wired yet; the modal lands the user on a synthesized
+          preview with the standard quality-bar chips.
         */}
-        <ReservedRail
-          title="Coming — drop-link intake (QA-27)"
-          testId="engagements-reserved-qa27"
-          tiles={[
-            {
-              id: "drop-link-intake",
-              icon: <Link2 size={14} />,
-              title: "Drop a link to start",
-              body: "Paste a Revit / Drive / Box / Sharepoint link and the agent will spin up a new engagement, pull metadata, and queue the first snapshot.",
-            },
-          ]}
-        />
+        <button
+          type="button"
+          className="cockpit-intake-cta"
+          onClick={() => setIntakeOpen(true)}
+          data-testid="engagements-intake-cta"
+        >
+          <span className="cockpit-intake-cta-icon" aria-hidden="true">
+            <Link2 size={16} />
+          </span>
+          <span className="cockpit-intake-cta-text">
+            <span className="cockpit-intake-cta-title">
+              Drop a link, file, or note to start a project
+            </span>
+            <span className="cockpit-intake-cta-sub">
+              The agent will pull metadata, look up the jurisdiction, and
+              stage a draft engagement.
+            </span>
+          </span>
+          <span className="cockpit-intake-cta-action">Create draft →</span>
+        </button>
 
         {/* ENGAGEMENT GRID ------------------------------------- */}
         {engagements.length === 0 ? (
@@ -307,6 +318,10 @@ export function EngagementList() {
           </div>
         )}
       </div>
+      <ClientIntakeModal
+        isOpen={intakeOpen}
+        onClose={() => setIntakeOpen(false)}
+      />
     </AppShell>
   );
 }
