@@ -157,7 +157,6 @@
 
 /* -- Project list rail ------------------------------------------ */
 .cockpit-project-rail {
-  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -165,12 +164,84 @@
   border-right: 1px solid var(--border-default);
   z-index: 10;
   overflow: hidden;
+  position: relative;
+}
+
+.cockpit-project-rail[data-collapsed="true"] {
+  background: var(--bg-chrome);
+}
+
+.cockpit-project-rail-stub {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.cockpit-project-rail-stub:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.cockpit-project-rail-stub:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.cockpit-project-rail-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  outline: none;
+  z-index: 5;
+  transition: background 0.12s;
+}
+
+.cockpit-project-rail-resize:hover,
+.cockpit-project-rail-resize:focus-visible {
+  background: var(--cyan-dim);
+}
+
+.cockpit-rail-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.cockpit-rail-collapse-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.cockpit-rail-collapse-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
 }
 
 .cockpit-project-rail-header {
   height: 52px;
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-default);
   background: var(--bg-chrome);
@@ -578,6 +649,259 @@
   color: var(--text-muted);
 }
 
+/* -- Sheets grid + lightbox ------------------------------------- */
+.cockpit-sheet-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cockpit-sheet-grid-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cockpit-sheet-grid-search {
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  width: 240px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.cockpit-sheet-grid-search:focus {
+  border-color: var(--border-focus);
+}
+
+.cockpit-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.cockpit-sheet-grid-item {
+  position: relative;
+}
+
+.cockpit-sheet-grid-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 3px 5px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.cockpit-sheet-grid-check[data-selected="true"] {
+  border-color: var(--cyan);
+  background: var(--bg-elevated);
+}
+
+.cockpit-sheet-thumb {
+  width: 100%;
+  padding: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.12s, transform 0.12s;
+}
+
+.cockpit-sheet-thumb:hover {
+  border-color: var(--cyan);
+}
+
+.cockpit-sheet-thumb:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.cockpit-sheet-thumb-image {
+  width: 100%;
+  background: var(--bg-input);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.cockpit-sheet-thumb-unavailable {
+  padding: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.cockpit-sheet-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: white;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+.cockpit-sheet-thumb-img[data-loaded="true"] {
+  opacity: 1;
+}
+
+.cockpit-sheet-thumb-footer {
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-card);
+}
+
+.cockpit-sheet-thumb-number {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--text-primary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.cockpit-sheet-thumb-name {
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Sheet lightbox */
+.cockpit-sheet-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(8, 12, 18, 0.95);
+  display: flex;
+  flex-direction: column;
+}
+
+.cockpit-sheet-lightbox-header {
+  height: 56px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-card);
+  gap: 12px;
+}
+
+.cockpit-sheet-lightbox-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cockpit-sheet-lightbox-name {
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-sheet-lightbox-zoom {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--text-muted);
+  font-size: 11px;
+  min-width: 56px;
+  text-align: center;
+}
+
+.cockpit-sheet-lightbox-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cockpit-sheet-lightbox-close {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.cockpit-sheet-lightbox-close:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.cockpit-sheet-lightbox-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.cockpit-sheet-lightbox-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  pointer-events: none;
+  color: var(--text-secondary);
+}
+
+.cockpit-sheet-lightbox-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  z-index: 1;
+}
+
+.cockpit-sheet-lightbox-img {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 56px - 32px);
+  object-fit: contain;
+  background: white;
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
+  user-select: none;
+}
+
+.cockpit-sheet-lightbox-img[data-loaded="true"] {
+  opacity: 1;
+}
+
 /* -- Engagement detail layout: main + right ViewsRail ---------- */
 .cockpit-engagement-layout {
   display: flex;
@@ -585,6 +909,7 @@
   gap: 20px;
   height: 100%;
   min-height: 0;
+  align-items: stretch;
 }
 
 .cockpit-engagement-main {
@@ -592,11 +917,73 @@
   min-width: 0;
 }
 
+/* -- Engagement detail header (title + action cluster) ---------- */
+.cockpit-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.cockpit-detail-header-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cockpit-detail-header-name-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cockpit-detail-header-name {
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  color: var(--text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cockpit-detail-header-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cockpit-detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Normalize action button heights inside the detail header so
+   ghost + primary lock to the same baseline. */
+.cockpit-detail-header-actions .sc-btn-ghost,
+.cockpit-detail-header-actions .sc-btn-primary,
+.cockpit-detail-header-actions > a {
+  height: 30px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  line-height: 1;
+}
+
 .cockpit-views-rail {
-  width: 220px;
   flex-shrink: 0;
   border-left: 1px solid var(--border-default);
-  padding: 16px 8px 16px 16px;
+  padding: 12px 8px 16px 14px;
   overflow-y: auto;
   /* Negative right margin so the rail bleeds to the right edge of
      the page padding, matching the Cockpit mockup's flush-right
@@ -605,6 +992,73 @@
   margin-top: -20px;
   margin-bottom: -20px;
   background: var(--bg-surface);
+  position: relative;
+}
+
+.cockpit-views-rail-collapsed {
+  width: 32px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-chrome);
+}
+
+.cockpit-views-rail-stub {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.cockpit-views-rail-stub:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.cockpit-views-rail-stub:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.cockpit-views-rail-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  outline: none;
+  z-index: 5;
+  transition: background 0.12s;
+}
+
+.cockpit-views-rail-resize:hover,
+.cockpit-views-rail-resize:focus-visible {
+  background: var(--cyan-dim);
+}
+
+.cockpit-views-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 8px 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.cockpit-views-rail-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .cockpit-views-rail-section {

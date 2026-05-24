@@ -43,7 +43,10 @@ import {
   SubmitToJurisdictionDialog,
   countUnaddressedFindings,
   useSidebarState,
+  VIEWS_RAIL_MAX_WIDTH,
+  VIEWS_RAIL_MIN_WIDTH,
 } from "@workspace/portal-ui";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -120,6 +123,8 @@ const TAB_GROUP_LABELS: Record<string, string> = {
   deliverables: "Deliverables",
   config: "Config",
 };
+
+const VIEWS_KEYBOARD_NUDGE = 16;
 
 function ViewsRail({
   active,
@@ -222,11 +227,116 @@ function ViewsRail({
     requestAnimationFrame(() => tabRefs.current[next]?.focus());
   };
 
+  const collapsed = useSidebarState((s) => s.viewsRailCollapsed);
+  const width = useSidebarState((s) => s.viewsRailWidth);
+  const toggle = useSidebarState((s) => s.toggleViewsRail);
+  const setWidth = useSidebarState((s) => s.setViewsRailWidth);
+  const resetWidth = useSidebarState((s) => s.resetViewsRailWidth);
+
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const onResizeDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (collapsed) return;
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startWidth: width };
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = dragRef.current;
+    if (!start) return;
+    // Rail is on the RIGHT of the page — grows when pointer moves LEFT.
+    setWidth(start.startWidth - (e.clientX - start.startX));
+  };
+  const onResizeUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    setDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch { /* ignore */ }
+  };
+  const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (collapsed) return;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setWidth(width + VIEWS_KEYBOARD_NUDGE);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setWidth(width - VIEWS_KEYBOARD_NUDGE);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setWidth(VIEWS_RAIL_MIN_WIDTH);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setWidth(VIEWS_RAIL_MAX_WIDTH);
+    }
+  };
+
+  if (collapsed) {
+    return (
+      <aside
+        className="cockpit-views-rail cockpit-views-rail-collapsed"
+        aria-label="Engagement views (collapsed)"
+        data-collapsed="true"
+      >
+        <button
+          type="button"
+          onClick={toggle}
+          className="cockpit-views-rail-stub"
+          aria-label="Expand views rail"
+          title="Expand views rail"
+          data-testid="cockpit-views-rail-toggle"
+        >
+          <ChevronLeft size={14} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside
       className="cockpit-views-rail sc-scroll"
       aria-label="Engagement views"
+      data-collapsed="false"
+      style={{
+        width,
+        transition: dragging ? "none" : "width 200ms ease-out",
+      }}
     >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize views rail"
+        aria-valuemin={VIEWS_RAIL_MIN_WIDTH}
+        aria-valuemax={VIEWS_RAIL_MAX_WIDTH}
+        aria-valuenow={width}
+        tabIndex={0}
+        data-testid="cockpit-views-rail-resize-handle"
+        onPointerDown={onResizeDown}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeUp}
+        onPointerCancel={onResizeUp}
+        onDoubleClick={resetWidth}
+        onKeyDown={onResizeKey}
+        title="Drag to resize, double-click to reset"
+        className="cockpit-views-rail-resize"
+        style={{ background: dragging ? "var(--cyan-dim)" : "transparent" }}
+      />
+      <div className="cockpit-views-rail-header">
+        <span className="cockpit-views-rail-title">Views</span>
+        <button
+          type="button"
+          onClick={toggle}
+          className="cockpit-rail-collapse-btn"
+          aria-label="Collapse views rail"
+          title="Collapse views rail"
+          data-testid="cockpit-views-rail-toggle"
+        >
+          <ChevronRight size={14} />
+        </button>
+      </div>
       <div
         role="tablist"
         aria-label="Engagement workflow"
@@ -691,18 +801,18 @@ export function EngagementDetail() {
             onDismiss={() => setLastSubmission(null)}
           />
         )}
-        <div className="flex items-center justify-between flex-shrink-0">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-3">
-              <h2 className="text-[22px] m-0">{engagement.name}</h2>
+        <div className="cockpit-detail-header">
+          <div className="cockpit-detail-header-title">
+            <div className="cockpit-detail-header-name-row">
+              <h2 className="cockpit-detail-header-name">{engagement.name}</h2>
               <StatusPill status={engagement.status} />
             </div>
-            <div className="sc-meta opacity-70">
+            <div className="cockpit-detail-header-meta">
               {engagement.address ?? "No address set"}
               {engagement.jurisdiction ? ` · ${engagement.jurisdiction}` : ""}
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="cockpit-detail-header-actions">
             <Link href="/" className="sc-btn-ghost">
               ← Projects
             </Link>

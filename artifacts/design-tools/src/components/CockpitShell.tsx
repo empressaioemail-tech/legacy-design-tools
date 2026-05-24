@@ -5,6 +5,8 @@ import {
   BookOpen,
   Box,
   Building2,
+  ChevronLeft,
+  ChevronRight,
   Database,
   Inbox,
   LayoutDashboard,
@@ -17,6 +19,8 @@ import {
   useSidebarState,
   RIGHT_SIDEBAR_MAX_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
+  PROJECT_RAIL_MAX_WIDTH,
+  PROJECT_RAIL_MIN_WIDTH,
 } from "@workspace/portal-ui";
 
 /**
@@ -178,8 +182,53 @@ export function CockpitShell({
   const resetRightWidth = useSidebarState((s) => s.resetRightWidth);
   const renderedWidth = rightCollapsed ? RIGHT_COLLAPSED_WIDTH : rightWidth;
 
+  const projectRailCollapsed = useSidebarState((s) => s.projectRailCollapsed);
+  const projectRailWidth = useSidebarState((s) => s.projectRailWidth);
+  const toggleProjectRail = useSidebarState((s) => s.toggleProjectRail);
+  const setProjectRailWidth = useSidebarState((s) => s.setProjectRailWidth);
+  const resetProjectRailWidth = useSidebarState((s) => s.resetProjectRailWidth);
+
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const projDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [projDragging, setProjDragging] = useState(false);
+
+  const onProjPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (projectRailCollapsed) return;
+    e.preventDefault();
+    projDragRef.current = { startX: e.clientX, startWidth: projectRailWidth };
+    setProjDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onProjPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = projDragRef.current;
+    if (!start) return;
+    setProjectRailWidth(start.startWidth + (e.clientX - start.startX));
+  };
+  const onProjPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!projDragRef.current) return;
+    projDragRef.current = null;
+    setProjDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch { /* pointer may already be released */ }
+  };
+  const onProjKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (projectRailCollapsed) return;
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setProjectRailWidth(projectRailWidth + KEYBOARD_NUDGE);
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setProjectRailWidth(projectRailWidth - KEYBOARD_NUDGE);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setProjectRailWidth(PROJECT_RAIL_MIN_WIDTH);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setProjectRailWidth(PROJECT_RAIL_MAX_WIDTH);
+    }
+  };
 
   const onHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (rightCollapsed) return;
@@ -251,24 +300,52 @@ export function CockpitShell({
           className="cockpit-project-rail"
           aria-label="Projects"
           data-testid="cockpit-project-rail"
+          data-collapsed={projectRailCollapsed ? "true" : "false"}
+          style={{
+            width: projectRailCollapsed ? 36 : projectRailWidth,
+            transition: projDragging ? "none" : "width 200ms ease-out",
+          }}
         >
-          <div className="cockpit-project-rail-header">
-            <div className="cockpit-search-affordance">
-              <Search size={13} className="opacity-60" />
-              <span className="cockpit-search-placeholder">Search engagements…</span>
-              <span className="cockpit-kbd">⌘</span>
-              <span className="cockpit-kbd">K</span>
-            </div>
-          </div>
-          <div className="cockpit-project-rail-list sc-scroll">
-            <div className="cockpit-rail-overline">
-              {projectRail.label ?? "Active engagements"}
-            </div>
-            {projectRail.projects.length === 0 ? (
-              <div className="cockpit-rail-empty">
-                {projectRail.emptyMessage ?? "No engagements yet."}
+          {projectRailCollapsed ? (
+            <button
+              type="button"
+              onClick={toggleProjectRail}
+              className="cockpit-project-rail-stub"
+              aria-label="Expand projects rail"
+              title="Expand projects rail"
+              data-testid="cockpit-project-rail-toggle"
+            >
+              <ChevronRight size={14} />
+            </button>
+          ) : (
+            <>
+              <div className="cockpit-project-rail-header">
+                <div className="cockpit-search-affordance">
+                  <Search size={13} className="opacity-60" />
+                  <span className="cockpit-search-placeholder">Search engagements…</span>
+                  <span className="cockpit-kbd">⌘</span>
+                  <span className="cockpit-kbd">K</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleProjectRail}
+                  className="cockpit-rail-collapse-btn"
+                  aria-label="Collapse projects rail"
+                  title="Collapse projects rail"
+                  data-testid="cockpit-project-rail-toggle"
+                >
+                  <ChevronLeft size={14} />
+                </button>
               </div>
-            ) : (
+              <div className="cockpit-project-rail-list sc-scroll">
+                <div className="cockpit-rail-overline">
+                  {projectRail.label ?? "Active engagements"}
+                </div>
+                {projectRail.projects.length === 0 ? (
+                  <div className="cockpit-rail-empty">
+                    {projectRail.emptyMessage ?? "No engagements yet."}
+                  </div>
+                ) : (
               projectRail.projects.map((p) => {
                 const isProjectActive = p.id === projectRail.activeProjectId;
                 return (
@@ -303,6 +380,29 @@ export function CockpitShell({
               </Link>
             )}
           </div>
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize projects rail"
+                aria-valuemin={PROJECT_RAIL_MIN_WIDTH}
+                aria-valuemax={PROJECT_RAIL_MAX_WIDTH}
+                aria-valuenow={projectRailWidth}
+                tabIndex={0}
+                data-testid="cockpit-project-rail-resize-handle"
+                onPointerDown={onProjPointerDown}
+                onPointerMove={onProjPointerMove}
+                onPointerUp={onProjPointerUp}
+                onPointerCancel={onProjPointerUp}
+                onDoubleClick={resetProjectRailWidth}
+                onKeyDown={onProjKeyDown}
+                title="Drag to resize, double-click to reset"
+                className="cockpit-project-rail-resize"
+                style={{
+                  background: projDragging ? "var(--cyan-dim)" : "transparent",
+                }}
+              />
+            </>
+          )}
         </aside>
       )}
 

@@ -87,31 +87,15 @@ export function SheetGrid({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
+    <div className="cockpit-sheet-grid-wrap">
+      <div className="cockpit-sheet-grid-toolbar">
         <span className="sc-label">SHEETS · {sheets.length}</span>
         <input
           type="search"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter by number or name"
-          className="sc-input"
-          style={{
-            background: "var(--bg-input)",
-            border: "1px solid var(--border-default)",
-            color: "var(--text-primary)",
-            padding: "6px 10px",
-            borderRadius: 4,
-            fontSize: 12,
-            width: 220,
-            outline: "none",
-          }}
-          onFocus={(e) =>
-            (e.currentTarget.style.borderColor = "var(--border-focus)")
-          }
-          onBlur={(e) =>
-            (e.currentTarget.style.borderColor = "var(--border-default)")
-          }
+          className="cockpit-sheet-grid-search"
         />
       </div>
 
@@ -120,11 +104,11 @@ export function SheetGrid({
           No sheets match &ldquo;{filter}&rdquo;.
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+        <div className="cockpit-sheet-grid">
           {filtered.map((sheet) => {
             const selected = attachedSheets.some((s) => s.id === sheet.id);
             return (
-              <div key={sheet.id} style={{ position: "relative" }}>
+              <div key={sheet.id} className="cockpit-sheet-grid-item">
                 <label
                   data-testid={`sheet-select-${sheet.id}`}
                   title={
@@ -132,21 +116,8 @@ export function SheetGrid({
                       ? "Sheet is in chat context — untick to remove"
                       : "Tick to send this sheet to chat context"
                   }
-                  style={{
-                    position: "absolute",
-                    top: 6,
-                    left: 6,
-                    zIndex: 2,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    background: "var(--bg-card)",
-                    border: `1px solid ${
-                      selected ? "var(--cyan)" : "var(--border-default)"
-                    }`,
-                    borderRadius: 4,
-                    padding: "3px 5px",
-                    cursor: "pointer",
-                  }}
+                  className="cockpit-sheet-grid-check"
+                  data-selected={selected ? "true" : "false"}
                 >
                   <input
                     type="checkbox"

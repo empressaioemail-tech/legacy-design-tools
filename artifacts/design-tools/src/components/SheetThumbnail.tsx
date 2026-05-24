@@ -19,34 +19,14 @@ export function SheetThumbnail({ sheet, onClick }: SheetThumbnailProps) {
     <button
       type="button"
       onClick={onClick}
-      className="sc-card sc-card-clickable"
-      style={{
-        padding: 0,
-        background: "var(--bg-card)",
-        border: "1px solid var(--border-default)",
-        textAlign: "left",
-        cursor: "pointer",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
+      className="cockpit-sheet-thumb"
     >
       <div
-        style={{
-          width: "100%",
-          aspectRatio: String(aspectRatio || 1),
-          background: "var(--bg-input)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          overflow: "hidden",
-        }}
+        className="cockpit-sheet-thumb-image"
+        style={{ aspectRatio: String(aspectRatio || 1) }}
       >
         {errored ? (
-          <div
-            className="sc-meta opacity-50"
-            style={{ padding: 12, textAlign: "center" }}
-          >
+          <div className="cockpit-sheet-thumb-unavailable">
             preview unavailable
           </div>
         ) : (
@@ -56,48 +36,15 @@ export function SheetThumbnail({ sheet, onClick }: SheetThumbnailProps) {
             loading="lazy"
             onLoad={() => setLoaded(true)}
             onError={() => setErrored(true)}
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
-              opacity: loaded ? 1 : 0,
-              transition: "opacity 0.18s ease-out",
-              background: "white",
-            }}
+            className="cockpit-sheet-thumb-img"
+            data-loaded={loaded ? "true" : "false"}
           />
         )}
       </div>
-      <div
-        className="sc-card-footer"
-        style={{
-          padding: "8px 10px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          borderTop: "1px solid var(--border-default)",
-        }}
-      >
+      <div className="cockpit-sheet-thumb-footer">
+        <span className="cockpit-sheet-thumb-number">{sheet.sheetNumber}</span>
         <span
-          className="sc-medium"
-          style={{
-            color: "var(--text-primary)",
-            fontSize: 12,
-            flexShrink: 0,
-          }}
-        >
-          {sheet.sheetNumber}
-        </span>
-        <span
-          className="sc-meta"
-          style={{
-            color: "var(--text-secondary)",
-            fontSize: 11,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            minWidth: 0,
-          }}
+          className="cockpit-sheet-thumb-name"
           title={sheet.sheetName}
         >
           {sheet.sheetName}
