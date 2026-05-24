@@ -332,7 +332,7 @@ function renderPage(opts?: { search?: string }) {
   // BriefingNarrativePanel (and its Recent runs disclosure) is mounted.
   // Tests that need the disclosure pre-opened or pre-filtered (Task
   // #275) pass an `opts.search` that augments the base query string.
-  const baseSearch = "tab=site-context";
+  const baseSearch = "tab=property-intel";
   const search = opts?.search
     ? `${baseSearch}&${opts.search.replace(/^\?/, "")}`
     : baseSearch;

@@ -109,6 +109,8 @@ describe("lib/db schema integration", () => {
         "deliverable_letters",
         // Cortex L4 (Lane C.4 / C.4.4) — Revit detail-callout specs.
         "detail_callout_specs",
+        // Cockpit IA — engagement deliverable packages (client, publisher, jurisdiction).
+        "engagement_packages",
         "engagements",
         // @workspace/eval harness tables (scaffolded in a8acb35;
         // landed alongside the per-run scoring + per-fixture
@@ -124,6 +126,8 @@ describe("lib/db schema integration", () => {
         "finding_runs",
         "findings",
         "materializable_elements",
+        "package_share_comments",
+        "package_shares",
         "parcel_briefings",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",

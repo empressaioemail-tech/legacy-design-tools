@@ -1,9 +1,8 @@
 /**
  * End-to-end regression test for the engagement detail page's
- * snapshot timeline + KPI strip — the Snapshots tab on
- * `EngagementDetail.tsx` that lists every snapshot ingested for the
- * engagement and surfaces the selected snapshot's counts in the
- * SHEETS / ROOMS / LEVELS / WALLS tile row.
+ * snapshot timeline — the Snapshots tab on `EngagementDetail.tsx` that
+ * lists every snapshot ingested for the engagement and surfaces the
+ * selected snapshot's counts in each timeline row's meta strip.
  *
  * Why this test exists (Task #135): the page composes a few moving
  * parts (the engagement detail query, the snapshots-by-engagement
@@ -14,10 +13,10 @@
  *
  *   - the snapshot row is rendered into `engagement-snapshot-timeline`
  *     and is auto-selected on first load (`data-selected="true"`),
- *   - each KPI tile renders the count from the seeded snapshot
+ *   - each timeline row's meta strip renders counts from the list
  *     payload (not the placeholder `—`),
- *   - clicking a second seeded row flips the selection and re-drives
- *     the KPI strip from the newly-fetched snapshot detail.
+ *   - clicking a second seeded row flips the selection and updates
+ *     the visible meta strip to the older snapshot's counts.
  *
  * Strategy:
  *
@@ -28,8 +27,8 @@
  *      behavior in one spec.
  *   2. Drive the UI through Playwright: navigate to the engagement
  *      with `?tab=snapshots`, assert the auto-selected row's counts
- *      land in the KPI strip, click the older row, and assert the
- *      strip re-renders with the older snapshot's counts.
+ *      land in the timeline meta, click the older row, and assert
+ *      the meta re-renders with the older snapshot's counts.
  *   3. `afterAll` deletes the seeded engagement; the FK cascade on
  *      `snapshots` removes both snapshot rows alongside it (see
  *      `lib/db/src/schema/snapshots.ts`).
@@ -149,41 +148,20 @@ test("renders the snapshot timeline + KPI strip after snapshots are ingested", a
   await expect(newerRow).toHaveAttribute("data-selected", "true");
   await expect(olderRow).toHaveAttribute("data-selected", "false");
 
-  // KPI strip values land from the per-snapshot detail query keyed
-  // by the auto-selected row id. Each tile's `*-value` testid carries
-  // the visible count (not the placeholder dash).
-  await expect(page.getByTestId("engagement-kpi-sheets-value")).toHaveText(
-    String(NEWER_COUNTS.sheetCount),
-  );
-  await expect(page.getByTestId("engagement-kpi-rooms-value")).toHaveText(
-    String(NEWER_COUNTS.roomCount),
-  );
-  await expect(page.getByTestId("engagement-kpi-levels-value")).toHaveText(
-    String(NEWER_COUNTS.levelCount),
-  );
-  await expect(page.getByTestId("engagement-kpi-walls-value")).toHaveText(
-    String(NEWER_COUNTS.wallCount),
-  );
+  const newerMeta = page.getByTestId(`snapshot-row-meta-${newerSnapshotId}`);
+  const olderMeta = page.getByTestId(`snapshot-row-meta-${olderSnapshotId}`);
 
-  // Click the older row to flip the selection. The KPI strip must
-  // re-render against the newly-fetched snapshot detail; if a future
-  // refactor breaks the selection wiring (e.g. forgets to invalidate
-  // / refetch on click) the strip would stay pinned to the previous
-  // counts and this assertion catches it.
+  await expect(newerMeta).toContainText(`${NEWER_COUNTS.sheetCount}sh`);
+  await expect(newerMeta).toContainText(`${NEWER_COUNTS.roomCount}rm`);
+  await expect(newerMeta).toContainText(`${NEWER_COUNTS.levelCount}lv`);
+  await expect(newerMeta).toContainText(`${NEWER_COUNTS.wallCount}w`);
+
   await olderRow.click();
   await expect(olderRow).toHaveAttribute("data-selected", "true");
   await expect(newerRow).toHaveAttribute("data-selected", "false");
 
-  await expect(page.getByTestId("engagement-kpi-sheets-value")).toHaveText(
-    String(OLDER_COUNTS.sheetCount),
-  );
-  await expect(page.getByTestId("engagement-kpi-rooms-value")).toHaveText(
-    String(OLDER_COUNTS.roomCount),
-  );
-  await expect(page.getByTestId("engagement-kpi-levels-value")).toHaveText(
-    String(OLDER_COUNTS.levelCount),
-  );
-  await expect(page.getByTestId("engagement-kpi-walls-value")).toHaveText(
-    String(OLDER_COUNTS.wallCount),
-  );
+  await expect(olderMeta).toContainText(`${OLDER_COUNTS.sheetCount}sh`);
+  await expect(olderMeta).toContainText(`${OLDER_COUNTS.roomCount}rm`);
+  await expect(olderMeta).toContainText(`${OLDER_COUNTS.levelCount}lv`);
+  await expect(olderMeta).toContainText(`${OLDER_COUNTS.wallCount}w`);
 });

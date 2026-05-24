@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { DashboardLayout } from "@workspace/portal-ui";
+import { useMemo, type ReactNode } from "react";
+import { useParams } from "wouter";
 import {
   useListEngagements,
   getListEngagementsQueryKey,
@@ -8,49 +8,60 @@ import {
   useGetSession,
   getGetSessionQueryKey,
 } from "@workspace/api-client-react";
-import {
-  Activity,
-  BookOpen,
-  Database,
-  FolderOpen,
-  Inbox,
-  LayoutDashboard,
-  Palette,
-  Search,
-  Settings as SettingsIcon,
-} from "lucide-react";
 import { AuthChip } from "./AuthChip";
+import {
+  CockpitShell,
+  DEFAULT_PRIMARY_NAV,
+  type CockpitProject,
+} from "./CockpitShell";
+import { GlobalClaudePanel } from "./GlobalClaudePanel";
+import { relativeTime } from "../lib/relativeTime";
 
 interface AppShellProps {
   title?: string;
-  rightPanel?: ReactNode;
+  /** Hide the shell page title row (engagement detail supplies its own header). */
+  hidePageTitle?: boolean;
+  /** Right-aligned slot in the Cockpit header (Ask Claude, New Snapshot, …). */
+  headerActions?: ReactNode;
   children: ReactNode;
 }
 
-export function AppShell({ title, rightPanel, children }: AppShellProps) {
-  const { data } = useListEngagements({
+/**
+ * Thin wrapper around {@link CockpitShell} that wires the live data
+ * sources (engagement list for the project rail, notifications poll
+ * for the Inbox badge, session check to gate the poll) into the
+ * Cockpit IA approved in Wave 2.
+ *
+ * The external contract is unchanged from the previous portal-ui
+ * `DashboardLayout`-backed AppShell — every page still passes
+ * `title`, optional `rightPanel`, and `children` — so no page-level
+ * call sites need to be rewritten.
+ */
+export function AppShell({
+  title,
+  hidePageTitle,
+  headerActions,
+  children,
+}: AppShellProps) {
+  const params = useParams<{ id?: string }>();
+  const activeProjectId = params.id ?? null;
+
+  const { data: engagementsData } = useListEngagements({
     query: {
       queryKey: getListEngagementsQueryKey(),
       refetchInterval: 5000,
     },
   });
-  const engagements = data ?? [];
+  const engagements = engagementsData ?? [];
 
-  // Gate the inbox poll on a real user session — production fail-closes
-  // the session middleware to anonymous (see middlewares/session.ts), so
-  // /me/notifications correctly 401s for any request that lacks a
-  // `requestor.kind === "user"`. Without this gate the side-nav inbox
-  // poll hammers the console with 401s every 5s on prod. Once a verified
-  // auth layer lands (Task #29 follow-up), the session will carry a real
-  // requestor and the gate will let the poll through unchanged.
+  // Same fail-closed gate as the previous shell: don't poll the
+  // notifications endpoint for anonymous sessions or production
+  // floods the console with 401s every 5s.
   const { data: session } = useGetSession({
     query: { queryKey: getGetSessionQueryKey() },
   });
   const isUserSession = session?.requestor?.kind === "user";
 
-  // Poll the architect inbox so the side-nav badge updates without
-  // a hard refresh. The 5s cadence matches the engagement-list
-  // poll above so a single "tab is active" signal covers both.
   const { data: notifications } = useListMyNotifications(undefined, {
     query: {
       queryKey: getListMyNotificationsQueryKey(),
@@ -59,121 +70,49 @@ export function AppShell({ title, rightPanel, children }: AppShellProps) {
     },
   });
   const unreadCount = notifications?.unreadCount ?? 0;
-  const inboxBadge =
-    unreadCount > 0 ? (
-      <span
-        data-testid="inbox-badge"
-        style={{
-          minWidth: 18,
-          height: 16,
-          padding: "0 5px",
-          borderRadius: 8,
-          background: "#C0392B",
-          color: "#FFF",
-          fontSize: 10,
-          fontWeight: 700,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          lineHeight: 1,
-        }}
-      >
-        {unreadCount > 99 ? "99+" : unreadCount}
-      </span>
-    ) : null;
 
-  const projectItems = engagements.slice(0, 8).map((e) => ({
-    label: e.name,
-    href: `/engagements/${e.id}`,
-    icon: <FolderOpen size={14} />,
-  }));
+  const projectRail = useMemo(() => {
+    const projects: CockpitProject[] = engagements
+      .filter((e) => e.status !== "archived")
+      .map((e) => ({
+        id: e.id,
+        name: e.name,
+        jurisdiction: e.jurisdiction ?? null,
+        status: e.status,
+        snapshotCount: e.snapshotCount ?? 0,
+        updatedLabel: relativeTime(e.latestSnapshot?.receivedAt ?? e.updatedAt),
+      }));
+    return {
+      label: "Active engagements",
+      projects,
+      activeProjectId,
+      emptyMessage: "No engagements yet. Send a snapshot from Revit.",
+      viewAllHref: "/",
+    };
+  }, [engagements, activeProjectId]);
 
-  if (engagements.length > 8) {
-    projectItems.push({
-      label: "View all →",
-      href: "/",
-      icon: <FolderOpen size={14} />,
-    });
-  }
-
-  const navGroups = [
-    {
-      label: "WORKSPACE",
-      items: [
-        {
-          label: "Projects",
-          href: "/",
-          icon: <LayoutDashboard size={14} />,
-        },
-        {
-          label: "Inbox",
-          href: "/notifications",
-          icon: <Inbox size={14} />,
-          badge: inboxBadge,
-        },
-        {
-          label: "Code Library",
-          href: "/code-library",
-          icon: <BookOpen size={14} />,
-        },
-        {
-          label: "Style Probe",
-          href: "/style-probe",
-          icon: <Palette size={14} />,
-        },
-        {
-          label: "Settings",
-          href: "/settings",
-          icon: <SettingsIcon size={14} />,
-        },
-      ],
-    },
-    {
-      label: "PROJECTS",
-      items:
-        projectItems.length > 0
-          ? projectItems
-          : [
-              {
-                label: "No engagements yet",
-                href: "/",
-                icon: <FolderOpen size={14} />,
-              },
-            ],
-    },
-    {
-      label: "DEV",
-      items: [
-        {
-          label: "Atom Inspector",
-          href: "/dev/atoms",
-          icon: <Database size={14} />,
-        },
-        {
-          label: "Retrieval Probe",
-          href: "/dev/atoms/probe",
-          icon: <Search size={14} />,
-        },
-        {
-          label: "API Health",
-          href: "/health",
-          icon: <Activity size={14} />,
-        },
-      ],
-    },
-  ];
+  const primaryNav = useMemo(() => {
+    return {
+      items: DEFAULT_PRIMARY_NAV.items.map((it) =>
+        it.href === "/" && unreadCount > 0
+          ? { ...it, badge: unreadCount }
+          : it,
+      ),
+    };
+  }, [unreadCount]);
 
   return (
-    <DashboardLayout
-      title={title}
-      brandLabel="SMARTCITY OS"
-      brandProductName="Design Tools"
-      navGroups={navGroups}
-      rightPanel={rightPanel}
-      headerNotifications={{ href: "/notifications", unreadCount }}
-      headerTrailing={<AuthChip />}
+    <CockpitShell
+      title={hidePageTitle ? undefined : title}
+      hidePageTitle={hidePageTitle}
+      rightPanel={<GlobalClaudePanel />}
+      headerActions={headerActions}
+      primaryNav={primaryNav}
+      secondaryNav={undefined}
+      navTrailing={<AuthChip />}
+      projectRail={projectRail}
     >
       {children}
-    </DashboardLayout>
+    </CockpitShell>
   );
 }

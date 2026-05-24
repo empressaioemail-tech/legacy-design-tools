@@ -13,6 +13,8 @@ import {
  * Spec 52 §2 locked decisions.
  */
 
+export type BuildingOverlayState = "idle" | "loading" | "loaded" | "error";
+
 export interface SiteContextViewerProps {
   sources: EngagementBriefingSource[];
   /**
@@ -46,6 +48,13 @@ export interface SiteContextViewerProps {
    */
   showBuilding?: boolean;
   onToggleShowBuilding?: (next: boolean) => void;
+  /**
+   * When true, the status-panel "Show building" checkbox is hidden.
+   * Pair with an external toolbar toggle as the single visible control.
+   */
+  hideShowBuildingCheckbox?: boolean;
+  /** Fires whenever the building overlay load state changes. */
+  onBuildingStateChange?: (state: BuildingOverlayState) => void;
 }
 
 const TERRAIN_COLOR = 0x8b7355;
@@ -310,6 +319,8 @@ export function SiteContextViewer({
   buildingGlbUrl,
   showBuilding,
   onToggleShowBuilding,
+  hideShowBuildingCheckbox = false,
+  onBuildingStateChange,
 }: SiteContextViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -320,9 +331,11 @@ export function SiteContextViewer({
   const sourceGroupsRef = useRef<Map<string, THREE.Group>>(new Map());
   const activeMatchRef = useRef<MatchedObject | null>(null);
   const buildingGroupRef = useRef<THREE.Group | null>(null);
-  const [buildingState, setBuildingState] = useState<
-    "idle" | "loading" | "loaded" | "error"
-  >("idle");
+  const [buildingState, setBuildingState] = useState<BuildingOverlayState>("idle");
+
+  useEffect(() => {
+    onBuildingStateChange?.(buildingState);
+  }, [buildingState, onBuildingStateChange]);
 
   const [webGlOk] = useState<boolean>(detectWebGl);
   const [sourceState, setSourceState] = useState<
@@ -816,7 +829,7 @@ export function SiteContextViewer({
             fontSize: 11,
           }}
         >
-          {onToggleShowBuilding && (
+          {onToggleShowBuilding && !hideShowBuildingCheckbox && (
             <label
               data-testid="site-context-viewer-show-building-toggle"
               data-state={

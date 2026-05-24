@@ -184,6 +184,28 @@ describe("FindingDetailPanel", () => {
     ).toContain("Override failed");
   });
 
+  it("opens code citations inline when onCodeAtomClick is wired", () => {
+    const finding = makeFinding();
+    const onCodeAtomClick = vi.fn();
+    render(
+      <FindingDetailPanel
+        finding={finding}
+        codeLibraryBase="/design-tools/code-library"
+        onAddressWithRevision={() => {}}
+        isAddressing={false}
+        onCodeAtomClick={onCodeAtomClick}
+      />,
+    );
+    const li = screen.getByTestId(
+      "architect-finding-citation-code-11B-404.2.4",
+    );
+    const btn = li.querySelector("button");
+    expect(btn).not.toBeNull();
+    expect(li.querySelector("a")).toBeNull();
+    fireEvent.click(btn!);
+    expect(onCodeAtomClick).toHaveBeenCalledWith("11B-404.2.4");
+  });
+
   it("renders code-section citations as a CodeAtomPill linking to the Code Library", () => {
     const finding = makeFinding();
     render(

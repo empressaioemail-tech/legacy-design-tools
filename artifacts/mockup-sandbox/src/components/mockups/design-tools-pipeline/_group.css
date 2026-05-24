@@ -1,0 +1,70 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+.dt-pipeline-theme {
+  --bg-app: 240 5% 98%;
+  --bg-card: 0 0% 100%;
+  --border-subtle: 240 5% 90%;
+  --text-primary: 240 10% 10%;
+  --text-secondary: 240 5% 40%;
+  --text-tertiary: 240 5% 60%;
+  --accent-blue: 220 80% 50%;
+  --accent-amber: 35 90% 50%;
+  --accent-green: 150 70% 40%;
+  --accent-red: 0 80% 55%;
+  
+  font-family: 'Inter', sans-serif;
+  background-color: hsl(var(--bg-app));
+  color: hsl(var(--text-primary));
+}
+
+.dt-pipeline-theme .scorecard-gradient {
+  background: linear-gradient(180deg, hsl(var(--bg-card)) 0%, hsl(var(--bg-app)) 100%);
+}
+
+.dt-pipeline-theme .pill-active {
+  background-color: hsla(var(--accent-blue), 0.1);
+  color: hsl(var(--accent-blue));
+}
+.dt-pipeline-theme .pill-archived {
+  background-color: hsla(var(--text-tertiary), 0.1);
+  color: hsl(var(--text-secondary));
+}
+.dt-pipeline-theme .pill-pilot {
+  background-color: hsla(var(--accent-amber), 0.1);
+  color: hsl(var(--accent-amber));
+}
+
+.dt-pipeline-theme .traffic-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.dt-pipeline-theme .traffic-green { background-color: hsl(var(--accent-green)); box-shadow: 0 0 8px hsla(var(--accent-green), 0.4); }
+.dt-pipeline-theme .traffic-amber { background-color: hsl(var(--accent-amber)); box-shadow: 0 0 8px hsla(var(--accent-amber), 0.4); }
+.dt-pipeline-theme .traffic-red { background-color: hsl(var(--accent-red)); box-shadow: 0 0 8px hsla(var(--accent-red), 0.4); }
+
+.dt-pipeline-theme .sparkline {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: drawLine 1.5s ease-out forwards;
+}
+
+@keyframes drawLine {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Custom Scrollbar */
+.dt-pipeline-theme ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.dt-pipeline-theme ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dt-pipeline-theme ::-webkit-scrollbar-thumb {
+  background: hsl(var(--border-subtle));
+  border-radius: 4px;
+}
+.dt-pipeline-theme ::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--text-tertiary));
+}

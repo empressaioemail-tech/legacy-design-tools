@@ -7,6 +7,24 @@
   --dept-landscape: #10b981;
   --dept-zoning: #6366f1;
 }
+[data-theme="charcoal"] {
+  --dept-civil: #0ea5e9;
+  --dept-mep: #8b5cf6;
+  --dept-architectural: #f97316;
+  --dept-fire-life-safety: #ef4444;
+  --dept-structural: #22c55e;
+  --dept-landscape: #10b981;
+  --dept-zoning: #6366f1;
+}
+[data-theme="soft-light"] {
+  --dept-civil: #0369a1;
+  --dept-mep: #7c3aed;
+  --dept-architectural: #ea580c;
+  --dept-fire-life-safety: #dc2626;
+  --dept-structural: #16a34a;
+  --dept-landscape: #059669;
+  --dept-zoning: #4f46e5;
+}
 [data-theme="light"] {
   --dept-civil: #0369a1;
   --dept-mep: #7c3aed;

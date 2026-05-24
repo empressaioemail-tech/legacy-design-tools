@@ -232,7 +232,8 @@ function renderPage() {
   });
   client.setQueryData(["listEngagements"], [{ ...hoisted.engagement }]);
   client.setQueryData(["getSession"], { permissions: [] as string[] });
-  window.history.replaceState(null, "", "/?tab=site-context");
+  // Generate Layers progress / suppression lives in the Map layers panel.
+  window.history.replaceState(null, "", "/?view=site&segment=site");
   const node: ReactNode = (
     <QueryClientProvider client={client}>
       <EngagementDetail />

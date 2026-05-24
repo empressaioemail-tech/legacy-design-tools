@@ -247,3 +247,20 @@
   justify-content: center;
   flex-shrink: 0;
 }
+
+/* Keyboard focus ring for sidebar nav links and tab triggers. Inline
+   styles on Link/button elements can't express :focus-visible without
+   pulling in a CSS-in-JS solution, so we route both through a shared
+   utility class. The ring is inset so it doesn't get clipped by the
+   left-edge active-indicator border or the tabstrip's bottom border. */
+.sc-nav-link:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+  background: var(--bg-highlight);
+  color: var(--chrome-text);
+}
+.sc-tab-trigger:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+  border-radius: 3px;
+}

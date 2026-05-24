@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGenerateEngagementBriefing,
@@ -35,6 +42,10 @@ import { BriefingSourceUploadModal } from "../BriefingSourceUploadModal";
 import { BriefingRecentRunsPanel } from "./BriefingRecentRunsPanel";
 import { BriefingDivergencesPanel, PushToRevitAffordance } from "./PushToRevitAffordance";
 import { GenerateLayersSummaryBanner } from "./GenerateLayersSummaryBanner";
+import { TabHeader } from "../cockpit/TabChrome";
+import { SiteContext3DModelToggle } from "./SiteContext3DModelToggle";
+import { Mountain, Droplet, CloudRain } from "lucide-react";
+import type { BuildingOverlayState } from "@workspace/portal-ui";
 
 /**
  * Tier of a briefing source for the Site Context group headings (DA-PI-4).
@@ -113,6 +124,16 @@ export function SiteContextTab({
   buildingGlbUrl,
   showBuilding,
   onToggleShowBuilding,
+  bimModelLoading = false,
+  embedded = false,
+  hideMapAnd3d = false,
+  uploadOpen: uploadOpenProp,
+  onUploadOpenChange,
+  panelRef,
+  panelFocus = "full",
+  onNavigateToMap,
+  pendingBriefingSourceHighlight,
+  onPendingBriefingSourceHighlightConsumed,
 }: {
   engagement: EngagementDetailType;
   /** CAD element ref deep-linked from the Findings tab. */
@@ -124,9 +145,29 @@ export function SiteContextTab({
   buildingGlbUrl?: string | null;
   showBuilding?: boolean;
   onToggleShowBuilding?: (next: boolean) => void;
+  /** Disable the 3D model toggle until the BIM model query settles. */
+  bimModelLoading?: boolean;
+  /** Render inside the unified Site tab (no duplicate page header). */
+  embedded?: boolean;
+  /** Omit map / 3D viewers when the parent Site tab owns the canvas. */
+  hideMapAnd3d?: boolean;
+  uploadOpen?: boolean;
+  onUploadOpenChange?: (open: boolean) => void;
+  panelRef?: RefObject<HTMLDivElement | null>;
+  /** Split Map (adapter layers) vs Property Intel (briefing narrative). */
+  panelFocus?: "layers" | "briefing" | "full";
+  /** When narrative cites a source, jump to the Map tab layer list. */
+  onNavigateToMap?: (sourceId: string) => void;
+  /** Lifted from EngagementDetail after Property Intel citation navigation. */
+  pendingBriefingSourceHighlight?: string | null;
+  onPendingBriefingSourceHighlightConsumed?: () => void;
 }) {
   const engagementId = engagement.id;
-  const [uploadOpen, setUploadOpen] = useState(false);
+  const showLayersPanel = panelFocus === "layers" || panelFocus === "full";
+  const showBriefingPanel = panelFocus === "briefing" || panelFocus === "full";
+  const [uploadOpenInternal, setUploadOpenInternal] = useState(false);
+  const uploadOpen = uploadOpenProp ?? uploadOpenInternal;
+  const setUploadOpen = onUploadOpenChange ?? setUploadOpenInternal;
   const briefingQuery = useGetEngagementBriefing(engagementId);
   const queryClient = useQueryClient();
 
@@ -574,6 +615,15 @@ export function SiteContextTab({
     }
   }, [hasReadyDxf, subTab]);
 
+  const [buildingOverlayState, setBuildingOverlayState] =
+    useState<BuildingOverlayState>("idle");
+
+  useEffect(() => {
+    if (showBuilding && subTab === "map") {
+      setSubTab("3d");
+    }
+  }, [showBuilding, subTab]);
+
   // Citation-pill jump target highlight state (Task #176). When a
   // user clicks an inline citation pill in the narrative, we scroll
   // the matching `BriefingSourceRow` into view and flash the row's
@@ -589,7 +639,7 @@ export function SiteContextTab({
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
     };
   }, []);
-  const handleJumpToSource = (sourceId: string) => {
+  const flashBriefingSourceHighlight = useCallback((sourceId: string) => {
     setHighlightedSourceId(sourceId);
     // Defer the scroll one frame so React commits the highlight
     // first — the row's style change is what we want the user to
@@ -605,10 +655,65 @@ export function SiteContextTab({
     highlightTimerRef.current = setTimeout(() => {
       setHighlightedSourceId((curr) => (curr === sourceId ? null : curr));
     }, 1600);
+  }, []);
+  useEffect(() => {
+    const sourceId = pendingBriefingSourceHighlight;
+    if (!sourceId || !showLayersPanel) return;
+
+    let cancelled = false;
+    const apply = () => {
+      if (cancelled) return;
+      flashBriefingSourceHighlight(sourceId);
+      onPendingBriefingSourceHighlightConsumed?.();
+    };
+
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(apply);
+      });
+    } else {
+      apply();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pendingBriefingSourceHighlight,
+    showLayersPanel,
+    flashBriefingSourceHighlight,
+    onPendingBriefingSourceHighlightConsumed,
+  ]);
+  const handleJumpToSource = (sourceId: string) => {
+    if (panelFocus === "briefing" && onNavigateToMap) {
+      onNavigateToMap(sourceId);
+      return;
+    }
+    flashBriefingSourceHighlight(sourceId);
   };
 
   return (
-    <div className="sc-card p-6 flex flex-col gap-4 flex-1">
+    <div
+      className={embedded ? "site-context-embedded" : "cockpit-tab"}
+      data-testid="site-context-tab"
+      ref={panelRef}
+    >
+      {!embedded && (
+        <TabHeader
+          overline="Site · group"
+          title="Site context"
+          subtitle="Federal, state, and local layers plus architect-uploaded sources. Generate Layers re-runs every applicable adapter; per-source rows show tier, staleness, and divergences."
+        />
+      )}
+      <div
+        className={
+          embedded
+            ? "site-context-embedded-card flex flex-col gap-4"
+            : "sc-card p-6 flex flex-col gap-4 flex-1"
+        }
+      >
+      {showLayersPanel && (
+      <>
       <div
         style={{
           display: "flex",
@@ -618,7 +723,7 @@ export function SiteContextTab({
         }}
       >
         <div>
-          <div className="sc-medium">Briefing sources</div>
+          <div className="sc-medium">Map layers &amp; adapters</div>
           <div
             style={{
               fontSize: 12,
@@ -626,11 +731,9 @@ export function SiteContextTab({
               marginTop: 2,
             }}
           >
-            Federal, state, and local overlays cited by the engagement's
-            parcel briefing — fetched automatically by the Generate Layers
-            run, plus any architect-uploaded QGIS overlays. Re-running or
-            re-uploading a layer supersedes the prior source while keeping
-            it on the timeline.
+            Fetch federal, state, and local overlays onto the map, upload
+            QGIS sources, and refresh individual adapters. Layer visibility
+            toggles live in the palette above the map.
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1136,7 +1239,11 @@ export function SiteContextTab({
           ))}
         </div>
       )}
+      </>
+      )}
 
+      {!hideMapAnd3d && panelFocus === "full" && (
+      <>
       <div
         style={{
           display: "flex",
@@ -1154,7 +1261,14 @@ export function SiteContextTab({
         >
           Site context view
         </div>
-        <ToggleGroup.Root
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <ToggleGroup.Root
           type="single"
           value={subTab}
           aria-label="Site context view"
@@ -1212,6 +1326,16 @@ export function SiteContextTab({
             3D view
           </ToggleGroup.Item>
         </ToggleGroup.Root>
+          {subTab === "3d" ? (
+            <SiteContext3DModelToggle
+              buildingGlbUrl={buildingGlbUrl}
+              showBuilding={showBuilding}
+              onToggleShowBuilding={onToggleShowBuilding}
+              buildingState={buildingOverlayState}
+              bimModelLoading={bimModelLoading}
+            />
+          ) : null}
+        </div>
       </div>
 
       {subTab === "map" ? (
@@ -1233,7 +1357,7 @@ export function SiteContextTab({
           >
             {engagement.address
               ? "This address hasn't been geocoded yet. Run Generate Layers to resolve the parcel map."
-              : "Add an address on the Site tab to load the parcel map."}
+              : "Add an address on the Map tab to load the parcel map."}
           </div>
         ) : (
           <div
@@ -1265,8 +1389,12 @@ export function SiteContextTab({
             buildingGlbUrl={buildingGlbUrl}
             showBuilding={showBuilding}
             onToggleShowBuilding={onToggleShowBuilding}
+            hideShowBuildingCheckbox
+            onBuildingStateChange={setBuildingOverlayState}
           />
         </div>
+      )}
+      </>
       )}
 
       {briefingQuery.isLoading && (
@@ -1295,7 +1423,8 @@ export function SiteContextTab({
 
       {!briefingQuery.isLoading &&
         !briefingQuery.isError &&
-        sources.length === 0 && (
+        sources.length === 0 &&
+        showLayersPanel && (
           <div
             className="sc-prose"
             style={{
@@ -1312,7 +1441,29 @@ export function SiteContextTab({
           </div>
         )}
 
-      {sources.length > 0 && (
+      {!briefingQuery.isLoading &&
+        !briefingQuery.isError &&
+        sources.length === 0 &&
+        showBriefingPanel &&
+        !showLayersPanel && (
+          <div
+            className="sc-prose site-briefing-empty-hint"
+            data-testid="property-intel-briefing-empty"
+            style={{
+              opacity: 0.85,
+              fontSize: 13,
+              padding: 16,
+              border: "1px dashed var(--border-subtle)",
+              borderRadius: 6,
+            }}
+          >
+            No briefing sources yet. Run{" "}
+            <strong>Generate Layers</strong> on the Map tab (or upload a QGIS
+            overlay) before generating the Spec 51 briefing.
+          </div>
+        )}
+
+      {showLayersPanel && sources.length > 0 && (
         <div
           style={{
             display: "flex",
@@ -1358,54 +1509,128 @@ export function SiteContextTab({
                     {TIER_DESCRIPTIONS[tier]}
                   </div>
                 </div>
-                {sourcesByTier[tier].map((source) => {
-                  const adapterKey = extractAdapterKeyFromProvider(
-                    source.provider,
-                  );
-                  // Task #255 — only pass the rerun error down to the
-                  // row whose adapterKey was actually targeted by the
-                  // most recent failed rerun, so a fault on one
-                  // federal layer can't leak its message into a
-                  // sibling row's footer.
-                  const rerunError =
-                    lastRerunError !== null &&
-                    adapterKey !== null &&
-                    lastRerunError.adapterKey === adapterKey
-                      ? lastRerunError.message
-                      : null;
-                  // Task #271 — same per-adapter scoping for the
-                  // success pill: only the row whose adapterKey was
-                  // actually targeted gets the "Refreshed just now"
-                  // affordance. Bystander rows never see the pill.
-                  const rerunSuccessAt =
-                    lastRerunSuccessAt !== null &&
-                    adapterKey !== null &&
-                    lastRerunSuccessAt.adapterKey === adapterKey
-                      ? lastRerunSuccessAt.at
-                      : null;
-                  return (
-                    <BriefingSourceRow
-                      key={source.id}
-                      engagementId={engagementId}
-                      source={source}
-                      isHighlighted={highlightedSourceId === source.id}
-                      cacheInfo={cacheInfoBySourceId.get(source.id) ?? null}
-                      onRefreshLayer={handleRefreshLayer}
-                      isRefreshing={
-                        refreshingAdapterKey !== null &&
-                        adapterKey === refreshingAdapterKey
-                      }
-                      rerunStaleAdapterError={rerunError}
-                      rerunStaleAdapterSuccessAt={rerunSuccessAt}
-                    />
-                  );
-                })}
+                <div className="briefing-sources-tier-grid">
+                  {sourcesByTier[tier].map((source) => {
+                    const adapterKey = extractAdapterKeyFromProvider(
+                      source.provider,
+                    );
+                    // Task #255 — only pass the rerun error down to the
+                    // row whose adapterKey was actually targeted by the
+                    // most recent failed rerun, so a fault on one
+                    // federal layer can't leak its message into a
+                    // sibling row's footer.
+                    const rerunError =
+                      lastRerunError !== null &&
+                      adapterKey !== null &&
+                      lastRerunError.adapterKey === adapterKey
+                        ? lastRerunError.message
+                        : null;
+                    // Task #271 — same per-adapter scoping for the
+                    // success pill: only the row whose adapterKey was
+                    // actually targeted gets the "Refreshed just now"
+                    // affordance. Bystander rows never see the pill.
+                    const rerunSuccessAt =
+                      lastRerunSuccessAt !== null &&
+                      adapterKey !== null &&
+                      lastRerunSuccessAt.adapterKey === adapterKey
+                        ? lastRerunSuccessAt.at
+                        : null;
+                    return (
+                      <BriefingSourceRow
+                        key={source.id}
+                        engagementId={engagementId}
+                        source={source}
+                        isHighlighted={highlightedSourceId === source.id}
+                        cacheInfo={cacheInfoBySourceId.get(source.id) ?? null}
+                        onRefreshLayer={handleRefreshLayer}
+                        isRefreshing={
+                          refreshingAdapterKey !== null &&
+                          adapterKey === refreshingAdapterKey
+                        }
+                        rerunStaleAdapterError={rerunError}
+                        rerunStaleAdapterSuccessAt={rerunSuccessAt}
+                      />
+                    );
+                  })}
+                </div>
               </div>
             ),
           )}
         </div>
       )}
 
+      {showBriefingPanel && !showLayersPanel && (
+        <div
+          className="site-briefing-panel-head"
+          data-testid="property-intel-briefing-head"
+        >
+          <div className="sc-medium">Parcel briefing</div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-muted)",
+              marginTop: 2,
+              marginBottom: 10,
+            }}
+          >
+            Spec 51 sections A–G with citations to briefing sources. Generate
+            or regenerate after map layers are in place.
+          </div>
+          {(showBriefingProgress || briefingJobError) && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              {showBriefingProgress ? (
+                <span
+                  data-testid="briefing-generation-progress"
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 13,
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    data-testid="briefing-generation-progress-spinner"
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      border: "1.5px solid currentColor",
+                      borderRightColor: "transparent",
+                      display: "inline-block",
+                      animation:
+                        "sc-briefing-generation-spin 0.8s linear infinite",
+                    }}
+                  />
+                  <span>Briefing loading…</span>
+                </span>
+              ) : briefingJobError ? (
+                <span
+                  data-testid="briefing-generation-error"
+                  role="alert"
+                  style={{ fontSize: 12, color: "var(--danger-text, #b91c1c)" }}
+                >
+                  {briefingJobError}
+                </span>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showBriefingPanel && (
+      <>
       {/*
         Task #316 — render the shared BriefingNarrativePanel from
         portal-ui and inject the design-tools-specific
@@ -1439,13 +1664,98 @@ export function SiteContextTab({
       />
 
       <BriefingDivergencesPanel engagementId={engagementId} />
+      </>
+      )}
 
+      {showLayersPanel && (
       <BriefingSourceUploadModal
         engagementId={engagementId}
         isOpen={uploadOpen}
         onClose={() => setUploadOpen(false)}
         existingLayerKinds={existingLayerKinds}
       />
+      )}
+      </div>
+      {!embedded && <FortyDOverlayToggles />}
     </div>
+  );
+}
+
+/**
+ * 40d completeness-lane overlay toggles — topo contours, drainage
+ * zones, rainfall simulation. Each shows a "not configured" state
+ * until the source adapter is wired; toggling is intentionally
+ * disabled so the IA reads correctly without misrepresenting
+ * functionality.
+ */
+function FortyDOverlayToggles() {
+  const overlays = [
+    {
+      id: "topo-contours",
+      icon: <Mountain size={14} />,
+      title: "Topo contours",
+      body: "USGS NED-derived elevation contour overlay on the parcel map.",
+      requires: "USGS NED adapter",
+    },
+    {
+      id: "drainage-zones",
+      icon: <Droplet size={14} />,
+      title: "Drainage zones",
+      body: "On-parcel drainage polygons + downstream flow lines.",
+      requires: "Federal / state hydrography adapters",
+    },
+    {
+      id: "rainfall-sim",
+      icon: <CloudRain size={14} />,
+      title: "Rainfall simulation",
+      body: "Storm-event rainfall + runoff simulator panel docked alongside the site map.",
+      requires: "NOAA Atlas 14 + runoff model",
+    },
+  ];
+
+  return (
+    <section
+      className="forty-d-overlays"
+      data-testid="site-context-overlays-40d"
+      aria-label="40d completeness lane"
+    >
+      <div className="forty-d-head">
+        <h2 className="forty-d-title">40d overlays</h2>
+        <span className="forty-d-sub">
+          Map overlay toggles for the 2D site-context completeness lane.
+          Each shows "not configured" until its adapter is wired.
+        </span>
+      </div>
+      <ul className="forty-d-list">
+        {overlays.map((o) => (
+          <li
+            key={o.id}
+            className="forty-d-row"
+            data-testid={`forty-d-overlay-${o.id}`}
+          >
+            <span className="forty-d-icon" aria-hidden="true">
+              {o.icon}
+            </span>
+            <div className="forty-d-text">
+              <div className="forty-d-row-head">
+                <span className="forty-d-row-title">{o.title}</span>
+                <span className="forty-d-not-configured">Not configured</span>
+              </div>
+              <div className="forty-d-row-body">{o.body}</div>
+              <div className="forty-d-row-meta">Requires: {o.requires}</div>
+            </div>
+            <label
+              className="forty-d-toggle"
+              title="Coming soon — adapter not configured"
+            >
+              <input type="checkbox" disabled aria-label={`Enable ${o.title} overlay (coming soon)`} />
+              <span className="forty-d-toggle-track" aria-hidden="true">
+                <span className="forty-d-toggle-thumb" />
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

@@ -347,10 +347,10 @@ function renderPage() {
   });
   client.setQueryData(["listEngagements"], [{ ...hoisted.engagement }]);
   client.setQueryData(["getSession"], { permissions: [] as string[] });
-  // The page reads the active tab from `?tab=…` once on mount, so
-  // landing directly on the Site Context tab keeps these tests focused
-  // on the SiteContextTab subtree.
-  window.history.replaceState(null, "", "/?tab=site-context");
+  // The page reads the active tab from the URL once on mount. Layers /
+  // Generate Layers UI lives on the Map segment (`site`), not Property
+  // Intel (`property-intel`), which only mounts the briefing panel.
+  window.history.replaceState(null, "", "/?view=site&segment=site");
   const node: ReactNode = (
     <QueryClientProvider client={client}>
       <EngagementDetail />
@@ -404,9 +404,9 @@ describe("SiteContextTab Generate Layers fallback (Task #177)", () => {
   it("renders the empty-pilot-jurisdiction banner when the server returns 422 no_applicable_adapters", async () => {
     renderPage();
 
-    // The Generate Layers button is only mounted on the Site Context
-    // tab; if it isn't visible the page didn't honor the `?tab=` deep
-    // link and the rest of the assertions would be confusingly false.
+    // The Generate Layers button is only mounted on the Map segment;
+    // if it isn't visible the page didn't honor the URL deep link and
+    // the rest of the assertions would be confusingly false.
     expect(screen.getByTestId("generate-layers-button")).toBeVisible();
 
     // Sanity: nothing has fired yet, both banners are absent.

@@ -1,12 +1,20 @@
+import { StyleProbeThemePicker } from "@workspace/portal-ui";
+
 export default function StyleProbe() {
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-2xl">Design Tools — Style Probe</h1>
-        <p className="sc-body mt-1">If this page looks right, the design system is wired up.</p>
+        <h1 className="text-2xl font-['Oxygen'] font-bold text-[var(--text-primary)]">
+          Style Probe
+        </h1>
+        <p className="sc-body mt-1">
+          Compare chrome variants below. Colored pills stay semantic across themes.
+        </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <StyleProbeThemePicker />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="sc-card p-4">
           <div className="sc-label">Active Engagements</div>
           <div className="sc-kpi-md mt-2">7</div>
@@ -33,10 +41,16 @@ export default function StyleProbe() {
         <span className="sc-pill sc-pill-muted">Draft</span>
       </div>
 
-      <div className="flex gap-2">
-        <button className="sc-btn-primary">Submit design</button>
-        <button className="sc-btn-ghost">View comments</button>
-        <button className="sc-btn-alert">Reject</button>
+      <div className="flex gap-2 flex-wrap">
+        <button type="button" className="sc-btn-primary">
+          Submit design
+        </button>
+        <button type="button" className="sc-btn-ghost">
+          View comments
+        </button>
+        <button type="button" className="sc-btn-alert">
+          Reject
+        </button>
       </div>
 
       <div className="sc-card">
@@ -53,7 +67,9 @@ export default function StyleProbe() {
         </div>
         <div className="sc-card-footer sc-row-sb">
           <span className="sc-meta">Identified by Claude · 2 min ago</span>
-          <button className="sc-btn-sm">View on plan</button>
+          <button type="button" className="sc-btn-sm">
+            View on plan
+          </button>
         </div>
       </div>
     </div>

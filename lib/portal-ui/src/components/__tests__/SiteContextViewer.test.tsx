@@ -30,6 +30,7 @@ vi.mock("three", () => {
     parent: FakeObject | null = null;
     userData: Record<string, unknown> = {};
     position = { set: () => {} };
+    rotation = { x: 0, y: 0, z: 0 };
     quaternion = { set: () => {} };
     scale = { set: () => {} };
     matrixWorld = {
@@ -454,5 +455,88 @@ describe("SiteContextViewer", () => {
     expect(
       screen.getByTestId("site-context-viewer-empty"),
     ).toBeInTheDocument();
+  });
+
+  it("loads the building GLB when showBuilding is toggled on", async () => {
+    hoisted.fetchMock.mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+    });
+
+    const { rerender } = render(
+      <SiteContextViewer
+        sources={[]}
+        buildingGlbUrl="https://example.com/building.glb"
+        showBuilding={false}
+        onToggleShowBuilding={vi.fn()}
+      />,
+    );
+
+    expect(hoisted.fetchMock).not.toHaveBeenCalled();
+
+    rerender(
+      <SiteContextViewer
+        sources={[]}
+        buildingGlbUrl="https://example.com/building.glb"
+        showBuilding
+        onToggleShowBuilding={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(hoisted.fetchMock).toHaveBeenCalledWith(
+        "https://example.com/building.glb",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("site-context-viewer-show-building-toggle"),
+      ).toHaveAttribute("data-state", "shown");
+    });
+  });
+
+  it("hides the status-panel checkbox when hideShowBuildingCheckbox is true", () => {
+    render(
+      <SiteContextViewer
+        sources={[]}
+        buildingGlbUrl="https://example.com/building.glb"
+        showBuilding={false}
+        onToggleShowBuilding={vi.fn()}
+        hideShowBuildingCheckbox
+      />,
+    );
+
+    expect(
+      screen.queryByTestId("site-context-viewer-show-building-toggle"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces building load failure in the status panel", async () => {
+    hoisted.fetchMock.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+    });
+
+    render(
+      <SiteContextViewer
+        sources={[]}
+        buildingGlbUrl="https://example.com/missing.glb"
+        showBuilding
+        onToggleShowBuilding={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("site-context-viewer-show-building-toggle"),
+      ).toHaveAttribute("data-state", "error");
+      expect(
+        screen.getByTestId("site-context-viewer-show-building-toggle"),
+      ).toHaveTextContent(/load failed/i);
+    });
   });
 });

@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -14,8 +15,11 @@ import {
   type EngagementSubmissionSummary,
   type Finding,
 } from "@workspace/api-client-react";
+import { TabHeader } from "../cockpit/TabChrome";
+import { SubmissionSelector } from "./SubmissionSelector";
 import {
   ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
+  CodeAtomDetailModal,
   FindingDetailPanel,
   FindingsList,
   countUnaddressedFindings,
@@ -50,15 +54,10 @@ const FINDINGS_CATEGORY_CHIP_LABELS: Record<FindingCategory, string> = {
 };
 
 /**
- * Filter chip strip rendered above the FindingsList (Task #436).
- *
- * Three independent groups: severity bucket (single-select with "All"),
- * finding category (single-select with "All"), and a Show addressed
- * toggle. Each chip carries a `data-active` attribute so the test
- * file can assert which one is currently selected without depending
- * on visual styling. The category list is derived from the generated
- * `FindingCategory` enum so adding a category in the API spec
- * automatically widens the chip row.
+ * Filter chip strip for the Triage Inbox. Kept as three labelled rows
+ * (severity / category / addressed) so the existing
+ * `findings-tab-filter-*` testids continue to resolve. Renders inside
+ * the left pane below the Open / All / Overridden tab strip.
  */
 function FindingsFilterChips({
   severityFilter,
@@ -86,28 +85,36 @@ function FindingsFilterChips({
     ...(Object.keys(FindingCategory) as FindingCategory[]),
   ];
   const chipStyle = (active: boolean): React.CSSProperties => ({
-    padding: "3px 10px",
+    padding: "2px 8px",
     borderRadius: 999,
     border: active
       ? "1px solid var(--cyan)"
       : "1px solid var(--border-default)",
     background: active ? "var(--cyan-accent-bg)" : "transparent",
     color: active ? "var(--cyan)" : "var(--text-secondary)",
-    fontSize: 11,
+    fontSize: 10,
     cursor: "pointer",
     fontFamily: "inherit",
   });
   return (
     <div
       data-testid="findings-tab-filters"
-      className="sc-card p-3"
-      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--border-subtle)",
+      }}
     >
       <div
         data-testid="findings-tab-filters-severity"
-        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}
       >
-        <span className="sc-label" style={{ minWidth: 72 }}>
+        <span
+          className="sc-label"
+          style={{ minWidth: 56, fontSize: 9, opacity: 0.6 }}
+        >
           SEVERITY
         </span>
         {severityOptions.map((opt) => {
@@ -128,9 +135,12 @@ function FindingsFilterChips({
       </div>
       <div
         data-testid="findings-tab-filters-category"
-        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}
       >
-        <span className="sc-label" style={{ minWidth: 72 }}>
+        <span
+          className="sc-label"
+          style={{ minWidth: 56, fontSize: 9, opacity: 0.6 }}
+        >
           CATEGORY
         </span>
         {categoryOptions.map((opt) => {
@@ -151,9 +161,12 @@ function FindingsFilterChips({
       </div>
       <div
         data-testid="findings-tab-filters-addressed"
-        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}
       >
-        <span className="sc-label" style={{ minWidth: 72 }}>
+        <span
+          className="sc-label"
+          style={{ minWidth: 56, fontSize: 9, opacity: 0.6 }}
+        >
           ADDRESSED
         </span>
         <button
@@ -194,6 +207,81 @@ function describeRerunError(err: unknown): string {
   return "Failed to start plan review run.";
 }
 
+type TriageScope = "open" | "all" | "overridden";
+
+/**
+ * Horizontal progress bar used in the right-pane Findings Summary
+ * block. Reads palette tokens (`--danger-text`, `--warning-text`,
+ * `--info-text`) from the active theme so the bar tints stay in
+ * sync with the rest of the cockpit.
+ */
+function SummaryBar({
+  label,
+  count,
+  total,
+  color,
+}: {
+  label: string;
+  count: number;
+  total: number;
+  color: string;
+}) {
+  const pct = total <= 0 ? 0 : Math.min(100, Math.round((count / total) * 100));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 11,
+          color: "var(--text-secondary)",
+        }}
+      >
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            aria-hidden
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 999,
+              background: color,
+              display: "inline-block",
+            }}
+          />
+          {label}
+        </span>
+        <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>
+          {count} open
+        </span>
+      </div>
+      <div
+        style={{
+          width: "100%",
+          height: 4,
+          borderRadius: 999,
+          background: "var(--border-subtle)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: color,
+            borderRadius: 999,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+const TRIAGE_TAB_OPTIONS: { id: TriageScope; label: string }[] = [
+  { id: "open", label: "Open" },
+  { id: "all", label: "All" },
+  { id: "overridden", label: "Overridden" },
+];
+
 /**
  * Architect-side "Findings" tab (Task #421 / V1-1 / V1-7).
  *
@@ -203,6 +291,25 @@ function describeRerunError(err: unknown): string {
  * audit surface can render the same chrome — this component is the
  * thin data-layer adapter that wires those views to the engagement
  * page.
+ *
+ * Layout — Triage Inbox (graduated from the
+ * `review-workspace/SplitInbox.tsx` canvas mockup):
+ *
+ *   - LEFT pane: submission picker + Open/All/Overridden tab strip +
+ *     severity/category/addressed filter chips + scrolling
+ *     `FindingsList`. The Open/All tabs are syntactic sugar over the
+ *     existing `showAddressed` URL state (Open = hide overridden,
+ *     All = show overridden too). The Overridden tab is a local-only
+ *     view that forces show-addressed on and filters down to rows
+ *     whose status is `overridden`.
+ *   - CENTER pane: `FindingDetailPanel` (kept intact so the address /
+ *     override / element-ref / citations behaviors and all
+ *     `architect-finding-detail-*` testids continue to resolve).
+ *   - RIGHT pane: submission context — status pill, submitted /
+ *     responded timestamps, reviewer comment placeholder, findings
+ *     summary bars (blockers / concerns / advisory), the rerun CTA,
+ *     and the failure / error banners that used to live in the top
+ *     strip.
  *
  * Selection rules:
  *   - Submission picker defaults to the engagement's most-recent
@@ -243,6 +350,7 @@ export function FindingsTab({
 }) {
   const queryClient = useQueryClient();
   const codeLibraryBase = `${import.meta.env.BASE_URL}code-library`;
+  const [codeAtomModalId, setCodeAtomModalId] = useState<string | null>(null);
 
   const {
     data: submissions,
@@ -301,9 +409,49 @@ export function FindingsTab({
   const [showAddressed, setShowAddressedState] = useState<boolean>(() =>
     readFindingsShowAddressedFromUrl(),
   );
+
+  // Triage-inbox tab strip. Open = hide overridden (the existing
+  // `showAddressed=false` URL state). All = show overridden too
+  // (showAddressed=true). Overridden is a local-only view that
+  // filters down to status==='overridden' rows and is intentionally
+  // NOT written to the URL — existing deep links and tests only
+  // know about the show-addressed toggle, so the URL contract is
+  // limited to Open/All.
+  const [triageScope, setTriageScope] = useState<TriageScope>(() =>
+    readFindingsShowAddressedFromUrl() ? "all" : "open",
+  );
+  const [filtersExpanded, setFiltersExpanded] = useState(true);
+  const [contextOpen, setContextOpen] = useState(true);
+  // Single setter for the addressed URL state so both the
+  // Open/All tab clicks and the Hide-addressed chip flow through
+  // the same place; keeps the tab strip and the chip in lockstep
+  // without either one being "the source of truth" the other has
+  // to read from.
   const setShowAddressed = (next: boolean): void => {
     setShowAddressedState(next);
     writeFindingsShowAddressedToUrl(next);
+    // If the user toggles the addressed chip directly we keep the
+    // tab strip coherent: false -> Open, true -> All. We do not
+    // touch the scope when the user is parked on Overridden — that
+    // tab manages its own filter and should not flip when the chip
+    // moves under it.
+    setTriageScope((scope) =>
+      scope === "overridden" ? scope : next ? "all" : "open",
+    );
+  };
+  const handleTriageScopeChange = (next: TriageScope) => {
+    setTriageScope(next);
+    // Open / All write to the URL via the existing show-addressed
+    // contract. Overridden is purely local; we do NOT mutate the
+    // URL when entering or leaving it so the deep-link behavior
+    // matches what the existing tests and bookmarks expect.
+    if (next === "open") {
+      setShowAddressedState(false);
+      writeFindingsShowAddressedToUrl(false);
+    } else if (next === "all") {
+      setShowAddressedState(true);
+      writeFindingsShowAddressedToUrl(true);
+    }
   };
 
   const findingsQueryKey = selectedSubmissionId
@@ -391,10 +539,43 @@ export function FindingsTab({
       if (categoryFilter !== "all" && f.category !== categoryFilter) {
         return false;
       }
-      if (!showAddressed && f.status === "overridden") return false;
+      if (triageScope === "overridden" && f.status !== "overridden") {
+        return false;
+      }
+      if (
+        triageScope !== "overridden" &&
+        !showAddressed &&
+        f.status === "overridden"
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [findings, severityFilter, categoryFilter, showAddressed]);
+  }, [findings, severityFilter, categoryFilter, showAddressed, triageScope]);
+
+  // Counts for the right-pane Findings Summary bars and tab badges.
+  // Driven off the unfiltered list so summary numbers always reflect
+  // the submission, not the active drill-down.
+  const severityCounts = useMemo(() => {
+    let blocker = 0;
+    let concern = 0;
+    let advisory = 0;
+    let overridden = 0;
+    for (const f of findings) {
+      if (f.status === "overridden") overridden += 1;
+      if (f.severity === "blocker") blocker += 1;
+      else if (f.severity === "concern") concern += 1;
+      else if (f.severity === "advisory") advisory += 1;
+    }
+    return {
+      blocker,
+      concern,
+      advisory,
+      overridden,
+      open: findings.length - overridden,
+      total: findings.length,
+    };
+  }, [findings]);
 
   // Auto-select the highest-severity row in the filtered list when it
   // resolves so the right pane is never blank if there is anything to
@@ -422,6 +603,8 @@ export function FindingsTab({
 
   const selectedFinding =
     filteredFindings.find((f) => f.id === selectedFindingId) ?? null;
+  const activeSubmission =
+    sortedSubmissions.find((s) => s.id === selectedSubmissionId) ?? null;
 
   const overrideMutation = useOverrideFinding();
   const [overrideError, setOverrideError] = useState<string | null>(null);
@@ -498,195 +681,392 @@ export function FindingsTab({
       ? "Re-run plan review"
       : "Run plan review";
 
+  const submissionLabelShort = activeSubmission
+    ? `#${activeSubmission.id.slice(-4).toUpperCase()}`
+    : "—";
+  const submissionStatusLabel = activeSubmission?.status
+    ? activeSubmission.status.replace(/_/g, " ").toUpperCase()
+    : null;
+
   return (
-    <div className="flex flex-col gap-3" data-testid="findings-tab">
-      <div className="sc-row-sb" style={{ gap: 12 }}>
-        <label
-          className="sc-label"
-          style={{ display: "flex", alignItems: "center", gap: 8 }}
-        >
-          SUBMISSION
-          <select
-            data-testid="findings-tab-submission-picker"
-            className="sc-select"
-            value={selectedSubmissionId ?? ""}
-            onChange={(e) => setSelectedSubmissionId(e.target.value || null)}
-            style={{ minWidth: 240 }}
+    <div className="cockpit-tab findings-triage-tab" data-testid="findings-tab">
+      <TabHeader
+        overline="Review"
+        title="Triage Inbox"
+        subtitle="Work open findings for the selected submission — filter, pick a row, read citations, and mark addressed for the next revision."
+      />
+      <div data-testid="findings-tab-body" className="findings-triage-shell">
+        <div className="findings-triage-toolbar">
+          <div className="findings-triage-toolbar-submission">
+            <SubmissionSelector
+              submissions={sortedSubmissions}
+              value={selectedSubmissionId}
+              testId="findings-tab-submission-picker"
+              onChange={setSelectedSubmissionId}
+            />
+          </div>
+          <div
+            role="tablist"
+            aria-label="Triage scope"
+            data-testid="findings-tab-triage-scope"
+            className="findings-triage-toolbar-tabs"
           >
-            {sortedSubmissions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.submittedAt}
-                {s.status ? ` · ${s.status}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            marginLeft: "auto",
-          }}
-        >
-          <span
-            className="sc-meta"
-            data-testid="findings-tab-unaddressed-count"
-            style={{ opacity: 0.7, fontSize: 11 }}
-          >
-            {findings.length === 0
-              ? "0 findings"
-              : `${countUnaddressedFindings(findings)} unaddressed of ${findings.length}`}
-          </span>
-          {isRunning && (
-            <span
-              data-testid="findings-tab-rerun-running-pill"
-              style={{
-                background: "var(--info-dim)",
-                color: "var(--info-text)",
-                fontSize: 10,
-                fontWeight: 600,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                padding: "2px 8px",
-                borderRadius: 999,
-              }}
+            {TRIAGE_TAB_OPTIONS.map((opt) => {
+              const active = triageScope === opt.id;
+              const badge =
+                opt.id === "open"
+                  ? severityCounts.open
+                  : opt.id === "all"
+                    ? severityCounts.total
+                    : severityCounts.overridden;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`findings-tab-triage-scope-${opt.id}`}
+                  data-active={active ? "true" : "false"}
+                  onClick={() => handleTriageScopeChange(opt.id)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: active
+                      ? "2px solid var(--cyan)"
+                      : "2px solid transparent",
+                    color: active ? "var(--cyan)" : "var(--text-secondary)",
+                    padding: "2px 0 6px",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 11,
+                    fontWeight: active ? 600 : 500,
+                  }}
+                >
+                  {opt.label}
+                  {findings.length > 0 ? ` (${badge})` : ""}
+                </button>
+              );
+            })}
+          </div>
+          <div className="findings-triage-toolbar-actions">
+            <button
+              type="button"
+              className="findings-triage-toolbar-toggle"
+              data-active={filtersExpanded ? "true" : "false"}
+              data-testid="findings-tab-filters-toggle"
+              onClick={() => setFiltersExpanded((v) => !v)}
+              aria-expanded={filtersExpanded}
             >
-              Running
-            </span>
-          )}
-          <button
-            type="button"
-            className="sc-btn-primary"
-            onClick={handleRerun}
-            disabled={isRunning || !selectedSubmissionId}
-            data-testid="findings-tab-rerun"
-          >
-            {rerunCtaLabel}
-          </button>
-        </div>
-      </div>
-
-      {rerunError && (
-        <div
-          role="alert"
-          data-testid="findings-tab-rerun-error"
-          className="sc-alert sc-alert-error"
-        >
-          {rerunError}
-        </div>
-      )}
-
-      {runState === "failed" && !isRunning && (
-        <div
-          role="alert"
-          data-testid="findings-tab-auto-failure-badge"
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 12,
-            padding: "10px 12px",
-            border: "1px solid var(--danger-border, var(--danger-text))",
-            background: "var(--danger-dim)",
-            borderRadius: 6,
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: "var(--danger-text)",
-              }}
+              <SlidersHorizontal size={12} aria-hidden />
+              Filters
+              {filtersExpanded ? (
+                <ChevronDown size={12} aria-hidden />
+              ) : (
+                <ChevronRight size={12} aria-hidden />
+              )}
+            </button>
+            <button
+              type="button"
+              className="findings-triage-toolbar-toggle"
+              data-active={contextOpen ? "true" : "false"}
+              data-testid="findings-tab-context-toggle"
+              onClick={() => setContextOpen((v) => !v)}
+              aria-expanded={contextOpen}
+              title={contextOpen ? "Hide submission context" : "Show submission context"}
             >
-              AI plan review failed
-            </div>
-            <div
-              data-testid="findings-tab-auto-failure-detail"
-              style={{
-                fontSize: 12,
-                color: "var(--danger-text)",
-                marginTop: 2,
-                wordBreak: "break-word",
-              }}
-            >
-              {statusQuery.data?.error
-                ? `The most recent attempt failed: ${statusQuery.data.error}`
-                : "The most recent automatic attempt failed. Re-run to try again."}
-            </div>
+              {contextOpen ? (
+                <PanelRightClose size={12} aria-hidden />
+              ) : (
+                <PanelRightOpen size={12} aria-hidden />
+              )}
+              Context
+            </button>
           </div>
         </div>
-      )}
 
-      <FindingsFilterChips
-        severityFilter={severityFilter}
-        onSeverityChange={setSeverityFilter}
-        categoryFilter={categoryFilter}
-        onCategoryChange={setCategoryFilter}
-        showAddressed={showAddressed}
-        onShowAddressedChange={setShowAddressed}
-      />
+        {findings.length > 0 && (
+          <div className="findings-triage-summary-strip" data-testid="findings-tab-summary-strip">
+            <span className="findings-triage-summary-pill">
+              <span
+                className="findings-triage-summary-pill-dot"
+                style={{ background: "var(--danger-text)" }}
+                aria-hidden
+              />
+              {severityCounts.blocker} blocker
+            </span>
+            <span className="findings-triage-summary-pill">
+              <span
+                className="findings-triage-summary-pill-dot"
+                style={{ background: "var(--warning-text)" }}
+                aria-hidden
+              />
+              {severityCounts.concern} concern
+            </span>
+            <span className="findings-triage-summary-pill">
+              <span
+                className="findings-triage-summary-pill-dot"
+                style={{ background: "var(--info-text, var(--cyan))" }}
+                aria-hidden
+              />
+              {severityCounts.advisory} advisory
+            </span>
+            <span
+              className="findings-triage-summary-pill"
+              data-testid="findings-tab-unaddressed-count"
+            >
+              {countUnaddressedFindings(findings)} unaddressed of {findings.length}
+            </span>
+          </div>
+        )}
 
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "minmax(280px, 360px) 1fr",
-          gap: 12,
-          minHeight: 420,
-        }}
-      >
         <div
-          className="sc-card"
-          style={{ overflow: "auto", maxHeight: 600 }}
+          className="findings-triage-filters"
+          data-collapsed={filtersExpanded ? "false" : "true"}
         >
-          {findingsLoading ? (
-            <div
-              className="sc-prose opacity-60 p-4"
-              data-testid="findings-tab-list-loading"
-            >
-              Loading findings…
-            </div>
-          ) : findingsError ? (
-            <div
-              className="alert-block warning m-3"
-              data-testid="findings-tab-list-error"
-            >
-              Could not load findings for this submission.
-            </div>
-          ) : findings.length === 0 ? (
-            <div
-              className="sc-prose opacity-60 p-4"
-              data-testid="findings-tab-list-empty"
-            >
-              No findings on this submission.
-            </div>
-          ) : filteredFindings.length === 0 ? (
-            <div
-              className="sc-prose opacity-60 p-4"
-              data-testid="findings-tab-list-filtered-empty"
-            >
-              No findings match the active filters.
-            </div>
-          ) : (
-            <FindingsList
-              findings={filteredFindings}
-              selectedFindingId={selectedFindingId}
-              onSelect={setSelectedFindingId}
-            />
-          )}
+          <FindingsFilterChips
+            severityFilter={severityFilter}
+            onSeverityChange={setSeverityFilter}
+            categoryFilter={categoryFilter}
+            onCategoryChange={setCategoryFilter}
+            showAddressed={showAddressed}
+            onShowAddressedChange={setShowAddressed}
+          />
         </div>
 
-        <FindingDetailPanel
-          finding={selectedFinding}
-          codeLibraryBase={codeLibraryBase}
-          onAddressWithRevision={handleAddressWithRevision}
-          isAddressing={overrideMutation.isPending}
-          addressError={overrideError}
-          onRetry={handleAddressWithRevision}
-          onClose={() => setSelectedFindingId(null)}
-          onElementRefClick={onElementRefClick}
-        />
+        <div className="findings-triage-split">
+          <div data-testid="findings-tab-inbox" className="findings-triage-inbox">
+            <div className="findings-triage-inbox-scroll">
+            {findingsLoading ? (
+              <div
+                className="sc-prose opacity-60 p-4"
+                data-testid="findings-tab-list-loading"
+              >
+                Loading findings…
+              </div>
+            ) : findingsError ? (
+              <div
+                className="alert-block warning m-3"
+                data-testid="findings-tab-list-error"
+              >
+                Could not load findings for this submission.
+              </div>
+            ) : findings.length === 0 ? (
+              <div
+                className="sc-prose opacity-60 p-4"
+                data-testid="findings-tab-list-empty"
+              >
+                No findings on this submission.
+              </div>
+            ) : filteredFindings.length === 0 ? (
+              <div
+                className="sc-prose opacity-60 p-4"
+                data-testid="findings-tab-list-filtered-empty"
+              >
+                No findings match the active filters.
+              </div>
+            ) : (
+              <FindingsList
+                findings={filteredFindings}
+                selectedFindingId={selectedFindingId}
+                onSelect={setSelectedFindingId}
+              />
+            )}
+            </div>
+          </div>
+
+          <div className="findings-triage-detail">
+            <FindingDetailPanel
+              finding={selectedFinding}
+              codeLibraryBase={codeLibraryBase}
+              onAddressWithRevision={handleAddressWithRevision}
+              isAddressing={overrideMutation.isPending}
+              addressError={overrideError}
+              onRetry={handleAddressWithRevision}
+              onClose={() => setSelectedFindingId(null)}
+              onElementRefClick={onElementRefClick}
+              onCodeAtomClick={setCodeAtomModalId}
+            />
+          </div>
+
+          <aside
+            data-testid="findings-tab-submission-context"
+            className="findings-triage-context"
+            data-collapsed={contextOpen ? "false" : "true"}
+          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span
+              className="sc-label"
+              style={{ fontSize: 9, opacity: 0.6 }}
+            >
+              ACTIVE SUBMISSION
+            </span>
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                color: "var(--text-primary)",
+              }}
+            >
+              {submissionLabelShort}
+            </div>
+            {submissionStatusLabel && (
+              <div
+                data-testid="findings-tab-submission-status"
+                style={{
+                  marginTop: 4,
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                  width: "fit-content",
+                  background: "var(--warning-dim, var(--cyan-dim))",
+                  color: "var(--warning-text, var(--cyan-text))",
+                  border:
+                    "1px solid var(--warning-border, var(--cyan-accent-border))",
+                }}
+              >
+                {submissionStatusLabel}
+              </div>
+            )}
+            {activeSubmission?.submittedAt && (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span style={{ opacity: 0.7 }}>Submitted</span>
+                <span>{activeSubmission.submittedAt}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Findings Summary bars */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <span
+              className="sc-label"
+              style={{ fontSize: 9, opacity: 0.6 }}
+            >
+              FINDINGS SUMMARY
+            </span>
+            <SummaryBar
+              label="Blockers"
+              count={severityCounts.blocker}
+              total={Math.max(severityCounts.total, 1)}
+              color="var(--danger-text)"
+            />
+            <SummaryBar
+              label="Concerns"
+              count={severityCounts.concern}
+              total={Math.max(severityCounts.total, 1)}
+              color="var(--warning-text)"
+            />
+            <SummaryBar
+              label="Advisory"
+              count={severityCounts.advisory}
+              total={Math.max(severityCounts.total, 1)}
+              color="var(--info-text, var(--cyan))"
+            />
+          </div>
+
+          {/* Plan review controls */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <span
+              className="sc-label"
+              style={{ fontSize: 9, opacity: 0.6 }}
+            >
+              PLAN REVIEW
+            </span>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              onClick={handleRerun}
+              disabled={isRunning || !selectedSubmissionId}
+              data-testid="findings-tab-rerun"
+              style={{ width: "100%" }}
+            >
+              {rerunCtaLabel}
+            </button>
+            {isRunning && (
+              <span
+                data-testid="findings-tab-rerun-running-pill"
+                style={{
+                  background: "var(--info-dim)",
+                  color: "var(--info-text)",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  alignSelf: "flex-start",
+                }}
+              >
+                Running
+              </span>
+            )}
+            {rerunError && (
+              <div
+                role="alert"
+                data-testid="findings-tab-rerun-error"
+                className="sc-alert sc-alert-error"
+              >
+                {rerunError}
+              </div>
+            )}
+            {runState === "failed" && !isRunning && (
+              <div
+                role="alert"
+                data-testid="findings-tab-auto-failure-badge"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  padding: "8px 10px",
+                  border:
+                    "1px solid var(--danger-border, var(--danger-text))",
+                  background: "var(--danger-dim)",
+                  borderRadius: 6,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--danger-text)",
+                  }}
+                >
+                  AI plan review failed
+                </div>
+                <div
+                  data-testid="findings-tab-auto-failure-detail"
+                  style={{
+                    fontSize: 11,
+                    color: "var(--danger-text)",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {statusQuery.data?.error
+                    ? `The most recent attempt failed: ${statusQuery.data.error}`
+                    : "The most recent automatic attempt failed. Re-run to try again."}
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+        </div>
       </div>
+      {codeAtomModalId ? (
+        <CodeAtomDetailModal
+          atomId={codeAtomModalId}
+          onClose={() => setCodeAtomModalId(null)}
+          codeLibraryHref={`${codeLibraryBase}?atom=${encodeURIComponent(codeAtomModalId)}`}
+        />
+      ) : null}
     </div>
   );
 }

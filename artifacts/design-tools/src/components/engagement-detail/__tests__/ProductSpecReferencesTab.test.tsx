@@ -146,6 +146,7 @@ describe("ProductSpecReferencesTab", () => {
   it("triggers the ICC-ES refresh mutation", () => {
     hoisted.listData = { productSpecReferences: [makeRef()] };
     renderTab();
+    fireEvent.click(screen.getByTestId("product-spec-reference-row-psr-1"));
     fireEvent.click(screen.getByTestId("product-spec-psr-1-refresh"));
     expect(hoisted.refreshMutate).toHaveBeenCalledWith({
       referenceId: "psr-1",

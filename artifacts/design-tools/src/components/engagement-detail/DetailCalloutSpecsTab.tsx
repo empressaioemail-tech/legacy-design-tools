@@ -14,6 +14,7 @@ import {
   type WallAssemblyLayer,
   type DoorScheduleRow,
 } from "@workspace/api-client-react";
+import { TabHeader } from "../cockpit/TabChrome";
 import { relativeTime } from "../../lib/relativeTime";
 import type { SpecDraftEntry } from "../../store/engagements";
 
@@ -335,7 +336,7 @@ function CreateDetailCalloutSpecDialog({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.5)",
+        background: "var(--overlay-scrim)",
         zIndex: 50,
         display: "flex",
         alignItems: "center",
@@ -778,7 +779,12 @@ export function DetailCalloutSpecsTab({
   const specs = useMemo(() => data?.detailCalloutSpecs ?? [], [data]);
 
   return (
-    <>
+    <div className="cockpit-tab" data-testid="detail-callout-specs-tab-shell">
+      <TabHeader
+        overline="Deliverables · group"
+        title="Detail callouts"
+        subtitle="Structured details (door schedules, wall sections, wall types, room finishes) the Revit connector can push back to the model. Agent drafts pre-fill the form."
+      />
       <div
         className="sc-card flex flex-col"
         data-testid="detail-callout-specs-list"
@@ -841,6 +847,6 @@ export function DetailCalloutSpecsTab({
           setDraftReasoning(null);
         }}
       />
-    </>
+    </div>
   );
 }

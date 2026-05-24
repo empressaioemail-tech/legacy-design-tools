@@ -178,7 +178,7 @@ export function BriefingSourceRow({
     BRIEFING_SOURCE_HISTORY_TIER_LABEL[persistedHistoryTier];
   return (
     <div
-      className="sc-card"
+      className="sc-card briefing-source-row"
       style={{
         padding: 12,
         display: "flex",
@@ -379,6 +379,7 @@ export function BriefingSourceRow({
         </div>
       )}
       <div
+        className="briefing-source-row__footer"
         style={{
           fontSize: 10,
           color: "var(--text-muted)",
@@ -386,13 +387,17 @@ export function BriefingSourceRow({
           alignItems: "center",
           justifyContent: "space-between",
           gap: 8,
+          marginTop: "auto",
         }}
       >
         <span>
           Snapshot {new Date(source.snapshotDate).toLocaleDateString()} ·
           added {relativeTime(source.createdAt)}
         </span>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <div
+          className="briefing-source-row__actions"
+          style={{ display: "flex", gap: 12, alignItems: "center" }}
+        >
           {showRefreshLayer && (
             <button
               type="button"

@@ -493,37 +493,27 @@ function TierGroup({
       >
         {TIER_LABELS[tier]} ({sources.length})
       </div>
-      <ul
-        style={{
-          listStyle: "none",
-          margin: 0,
-          padding: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 6,
-        }}
-      >
+      <div className="briefing-sources-tier-grid">
         {sources.map((source) => (
-          <li key={source.id} style={{ listStyle: "none" }}>
-            {/*
-              Task #316 — render the same {@link BriefingSourceRow}
-              the architect sees on design-tools, with `readOnly`
-              suppressing the "Retry conversion" / "Refresh this
-              layer" / "Restore this version" mutate affordances.
-              Reviewers get the same per-source generation history,
-              divergence pills, and prior-run comparison disclosure
-              the architect uses without being able to mutate the
-              briefing.
-            */}
-            <BriefingSourceRow
-              engagementId={engagementId}
-              source={source}
-              audience={audience}
-              readOnly
-            />
-          </li>
+          /*
+            Task #316 — render the same {@link BriefingSourceRow}
+            the architect sees on design-tools, with `readOnly`
+            suppressing the "Retry conversion" / "Refresh this
+            layer" / "Restore this version" mutate affordances.
+            Reviewers get the same per-source generation history,
+            divergence pills, and prior-run comparison disclosure
+            the architect uses without being able to mutate the
+            briefing.
+          */
+          <BriefingSourceRow
+            key={source.id}
+            engagementId={engagementId}
+            source={source}
+            audience={audience}
+            readOnly
+          />
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

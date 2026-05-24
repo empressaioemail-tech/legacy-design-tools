@@ -10,7 +10,71 @@ import {
   type ResponseTaskAtom,
   type ResponseTaskState,
 } from "@workspace/api-client-react";
+import {
+  AlertCircle,
+  AtSign,
+  CheckCircle2,
+  Clock,
+  Hash,
+  MessageSquare,
+  MoreHorizontal,
+  Search,
+  Sparkles,
+  User,
+  XCircle,
+} from "lucide-react";
+import { TabHeader } from "../cockpit/TabChrome";
 import { relativeTime } from "../../lib/relativeTime";
+import {
+  demoResponseTasksForEngagement,
+  isDemoSeedEnabled,
+} from "../../demo/seed";
+
+/**
+ * State → left-rail accent and avatar palette. Mirrors the
+ * Activity Stream mockup's vocabulary: red for "needs you" /
+ * cancelled, cyan for in-progress and AI-drafted, green for
+ * completed, slate for closed/cancelled.
+ */
+const ACCENT_BY_STATE: Record<
+  ResponseTaskState,
+  {
+    accent: string;
+    iconBg: string;
+    iconFg: string;
+    Icon: typeof Clock;
+    label: string;
+  }
+> = {
+  open: {
+    accent: "var(--danger)",
+    iconBg: "var(--danger-dim)",
+    iconFg: "var(--danger-text)",
+    Icon: AlertCircle,
+    label: "Needs you",
+  },
+  "in-progress": {
+    accent: "var(--cyan)",
+    iconBg: "var(--cyan-accent-bg)",
+    iconFg: "var(--cyan-text)",
+    Icon: Clock,
+    label: "In progress",
+  },
+  done: {
+    accent: "var(--success)",
+    iconBg: "var(--success-dim)",
+    iconFg: "var(--success-text)",
+    Icon: CheckCircle2,
+    label: "Complete",
+  },
+  cancelled: {
+    accent: "var(--border-default)",
+    iconBg: "var(--bg-input)",
+    iconFg: "var(--text-muted)",
+    Icon: XCircle,
+    label: "Cancelled",
+  },
+};
 
 /**
  * Cortex L1 (Lane C.4 / C.4.1) — architect-side response-task surface.
@@ -221,7 +285,7 @@ function CreateResponseTaskDialog({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.5)",
+        background: "var(--overlay-scrim)",
         zIndex: 50,
         display: "flex",
         alignItems: "center",
@@ -429,173 +493,402 @@ function ResponseTaskRow({
 
   const busy = stateMutation.isPending || linkMutation.isPending;
   const state = task.state as ResponseTaskState;
+  const isAi = task.actorId === AI_AGENT_ACTOR_ID;
+  const palette = ACCENT_BY_STATE[state] ?? ACCENT_BY_STATE.open;
+  // AI-drafted tasks ride the cyan accent rather than the state default,
+  // mirroring the violet AI card in the Activity Stream mockup.
+  const accent = isAi ? "var(--cyan)" : palette.accent;
+  const iconBg = isAi ? "var(--cyan-accent-bg)" : palette.iconBg;
+  const iconFg = isAi ? "var(--cyan-text)" : palette.iconFg;
+  const Icon = isAi ? Sparkles : palette.Icon;
 
   return (
-    <div
+    <article
       data-testid={`response-task-row-${task.entityId}`}
       style={{
-        padding: "12px 16px",
-        borderBottom: "1px solid var(--border-default)",
+        position: "relative",
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-default)",
+        borderRadius: 8,
+        padding: 14,
+        paddingLeft: 18,
+        overflow: "hidden",
         display: "flex",
-        flexDirection: "column",
-        gap: 8,
+        gap: 14,
+        boxShadow: "var(--depth-inset), var(--depth-shadow-md)",
       }}
     >
-      <div
-        style={{ display: "flex", alignItems: "center", gap: 8 }}
-      >
-        <span
-          className="sc-medium"
-          style={{ color: "var(--text-primary)", fontSize: 13, flex: 1 }}
-        >
-          {task.title}
-        </span>
-        {task.actorId === AI_AGENT_ACTOR_ID && (
-          <span
-            data-testid={`response-task-ai-badge-${task.entityId}`}
-            title="Drafted by the Cortex in-app agent — review before relying on it"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "2px 7px",
-              borderRadius: 999,
-              background: "var(--cyan-accent-bg)",
-              color: "var(--cyan)",
-              border: "1px solid var(--cyan)",
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: 0.3,
-              textTransform: "uppercase",
-              lineHeight: 1.4,
-            }}
-          >
-            AI-drafted
-          </span>
-        )}
-        <ResponseTaskStateBadge state={state} />
-      </div>
-
-      {task.description && (
-        <div
-          className="sc-body"
-          style={{
-            color: "var(--text-secondary)",
-            fontSize: 12,
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {task.description}
-        </div>
-      )}
-
-      <div
-        className="sc-meta"
+      {/* Left accent bar */}
+      <span
+        aria-hidden="true"
         style={{
-          display: "flex",
-          gap: 12,
-          flexWrap: "wrap",
-          color: "var(--text-secondary)",
-          fontSize: 11,
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 3,
+          background: accent,
+        }}
+      />
+
+      {/* Avatar / icon circle */}
+      <div
+        style={{
+          width: 40,
+          height: 40,
+          flexShrink: 0,
+          borderRadius: 999,
+          background: iconBg,
+          color: iconFg,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          position: "relative",
         }}
       >
-        <span title={new Date(task.createdAt).toLocaleString()}>
-          Opened {relativeTime(task.createdAt)}
-        </span>
-        {task.dueAt && (
-          <span
-            data-testid={`response-task-due-${task.entityId}`}
-            title={new Date(task.dueAt).toLocaleString()}
-          >
-            Due {relativeTime(task.dueAt)}
-          </span>
-        )}
-        {task.completedAt && (
-          <span title={new Date(task.completedAt).toLocaleString()}>
-            Completed {relativeTime(task.completedAt)}
-          </span>
-        )}
-        <span data-testid={`response-task-finding-${task.entityId}`}>
-          {task.findingId ? `Finding: ${task.findingId}` : "No finding linked"}
-        </span>
+        <Icon size={18} />
       </div>
 
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {NEXT_ACTIONS[state].map((action) => (
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Header line: title + AI badge + state badge + timestamp */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 8,
+            marginBottom: 6,
+          }}
+        >
+          <span
+            className="sc-medium"
+            style={{
+              color: "var(--text-primary)",
+              fontSize: 13,
+              fontWeight: 600,
+              flex: 1,
+              minWidth: 0,
+              wordBreak: "break-word",
+            }}
+          >
+            {task.title}
+          </span>
+          {isAi && (
+            <span
+              data-testid={`response-task-ai-badge-${task.entityId}`}
+              title="Drafted by the Cortex in-app agent — review before relying on it"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "2px 7px",
+                borderRadius: 999,
+                background: "var(--cyan-accent-bg)",
+                color: "var(--cyan)",
+                border: "1px solid var(--cyan)",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+                lineHeight: 1.4,
+                flexShrink: 0,
+              }}
+            >
+              AI-drafted
+            </span>
+          )}
+          <ResponseTaskStateBadge state={state} />
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--text-muted)",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+            }}
+            title={new Date(task.createdAt).toLocaleString()}
+          >
+            {relativeTime(task.createdAt)}
+          </span>
+        </div>
+
+        {/* Description quote-block */}
+        {task.description && (
+          <div
+            style={{
+              background: "var(--bg-base)",
+              border: "1px solid var(--border-soft)",
+              borderRadius: 6,
+              padding: "8px 10px",
+              marginBottom: 8,
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              whiteSpace: "pre-wrap",
+              lineHeight: 1.45,
+            }}
+          >
+            “{task.description}”
+          </div>
+        )}
+
+        {/* Meta chip row */}
+        <div
+          className="sc-meta"
+          style={{
+            display: "flex",
+            gap: 6,
+            flexWrap: "wrap",
+            marginBottom: 10,
+          }}
+        >
+          {task.dueAt && (
+            <span
+              data-testid={`response-task-due-${task.entityId}`}
+              title={new Date(task.dueAt).toLocaleString()}
+              style={chipStyle}
+            >
+              <Clock size={10} aria-hidden="true" />
+              Due {relativeTime(task.dueAt)}
+            </span>
+          )}
+          {task.completedAt && (
+            <span
+              title={new Date(task.completedAt).toLocaleString()}
+              style={chipStyle}
+            >
+              <CheckCircle2 size={10} aria-hidden="true" />
+              Completed {relativeTime(task.completedAt)}
+            </span>
+          )}
+          <span
+            data-testid={`response-task-finding-${task.entityId}`}
+            style={chipStyle}
+          >
+            <AtSign size={10} aria-hidden="true" />
+            {task.findingId ? `Finding: ${task.findingId}` : "No finding linked"}
+          </span>
+        </div>
+
+        {/* Action bar */}
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          {NEXT_ACTIONS[state].map((action, idx) => (
+            <button
+              key={action.to}
+              type="button"
+              className={idx === 0 ? "sc-btn-primary sc-btn-sm" : "sc-btn-ghost sc-btn-sm"}
+              disabled={busy}
+              data-testid={`response-task-${task.entityId}-to-${action.to}`}
+              onClick={() =>
+                stateMutation.mutate({
+                  responseTaskId: task.entityId,
+                  data: { state: action.to },
+                })
+              }
+            >
+              {action.label}
+            </button>
+          ))}
           <button
-            key={action.to}
             type="button"
             className="sc-btn-ghost sc-btn-sm"
             disabled={busy}
-            data-testid={`response-task-${task.entityId}-to-${action.to}`}
-            onClick={() =>
-              stateMutation.mutate({
-                responseTaskId: task.entityId,
-                data: { state: action.to },
-              })
-            }
+            data-testid={`response-task-${task.entityId}-link-toggle`}
+            onClick={() => {
+              setLinkValue(task.findingId ?? "");
+              setLinkOpen((v) => !v);
+            }}
           >
-            {action.label}
+            {task.findingId ? "Change finding" : "Link finding"}
           </button>
-        ))}
-        <button
-          type="button"
-          className="sc-btn-ghost sc-btn-sm"
-          disabled={busy}
-          data-testid={`response-task-${task.entityId}-link-toggle`}
-          onClick={() => {
-            setLinkValue(task.findingId ?? "");
-            setLinkOpen((v) => !v);
-          }}
-        >
-          {task.findingId ? "Change finding" : "Link finding"}
-        </button>
+        </div>
+
+        {linkOpen && (
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              marginTop: 8,
+            }}
+          >
+            <input
+              type="text"
+              value={linkValue}
+              onChange={(e) => setLinkValue(e.target.value)}
+              disabled={busy}
+              placeholder="finding entityId"
+              data-testid={`response-task-${task.entityId}-link-input`}
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button
+              type="button"
+              className="sc-btn-primary sc-btn-sm"
+              disabled={busy || linkValue.trim().length === 0}
+              data-testid={`response-task-${task.entityId}-link-save`}
+              onClick={() =>
+                linkMutation.mutate({
+                  responseTaskId: task.entityId,
+                  data: { findingId: linkValue.trim() },
+                })
+              }
+            >
+              Save
+            </button>
+          </div>
+        )}
+
+        {/* Reply composer affordance for tasks that still need work */}
+        {!busy && (state === "open" || state === "in-progress") && (
+          <div
+            style={{
+              marginTop: 10,
+              paddingTop: 10,
+              borderTop: "1px solid var(--border-soft)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <div
+              aria-hidden="true"
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 999,
+                background: "var(--bg-input)",
+                color: "var(--text-secondary)",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <User size={11} />
+            </div>
+            <div
+              style={{
+                flex: 1,
+                background: "var(--bg-base)",
+                border: "1px solid var(--border-soft)",
+                borderRadius: 6,
+                padding: "6px 10px",
+                fontSize: 11.5,
+                color: "var(--text-muted)",
+              }}
+            >
+              Reply to this thread…
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div
+            data-testid={`response-task-${task.entityId}-error`}
+            role="alert"
+            className="sc-meta"
+            style={{
+              color: "var(--danger-text)",
+              marginTop: 8,
+            }}
+          >
+            {error}
+          </div>
+        )}
       </div>
-
-      {linkOpen && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input
-            type="text"
-            value={linkValue}
-            onChange={(e) => setLinkValue(e.target.value)}
-            disabled={busy}
-            placeholder="finding entityId"
-            data-testid={`response-task-${task.entityId}-link-input`}
-            style={{ ...inputStyle, flex: 1 }}
-          />
-          <button
-            type="button"
-            className="sc-btn-primary sc-btn-sm"
-            disabled={busy || linkValue.trim().length === 0}
-            data-testid={`response-task-${task.entityId}-link-save`}
-            onClick={() =>
-              linkMutation.mutate({
-                responseTaskId: task.entityId,
-                data: { findingId: linkValue.trim() },
-              })
-            }
-          >
-            Save
-          </button>
-        </div>
-      )}
-
-      {error && (
-        <div
-          data-testid={`response-task-${task.entityId}-error`}
-          role="alert"
-          className="sc-meta"
-          style={{ color: "var(--danger-text)" }}
-        >
-          {error}
-        </div>
-      )}
-    </div>
+    </article>
   );
 }
+
+const chipStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  padding: "2px 8px",
+  borderRadius: 4,
+  background: "var(--bg-base)",
+  border: "1px solid var(--border-default)",
+  color: "var(--text-secondary)",
+  fontSize: 11,
+};
 
 /* -------------------------------------------------------------------------- */
 /*                                 Tab                                        */
 /* -------------------------------------------------------------------------- */
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function groupTasksByDay(tasks: ResponseTaskAtom[]) {
+  const now = Date.now();
+  const today: ResponseTaskAtom[] = [];
+  const yesterday: ResponseTaskAtom[] = [];
+  const older: ResponseTaskAtom[] = [];
+  for (const t of tasks) {
+    const ts = new Date(t.createdAt).getTime();
+    const ageDays = (now - ts) / DAY_MS;
+    if (ageDays < 1) today.push(t);
+    else if (ageDays < 2) yesterday.push(t);
+    else older.push(t);
+  }
+  return { today, yesterday, older };
+}
+
+function FeedSection({
+  label,
+  count,
+  children,
+  dim,
+}: {
+  label: string;
+  count: number;
+  children: React.ReactNode;
+  dim?: boolean;
+}) {
+  if (count === 0) return null;
+  return (
+    <section style={{ marginBottom: 20, opacity: dim ? 0.85 : 1 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
+        <h3
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: dim ? "var(--text-secondary)" : "var(--text-primary)",
+            margin: 0,
+            textTransform: "none",
+            letterSpacing: 0,
+          }}
+        >
+          {label}
+        </h3>
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--text-muted)",
+          }}
+        >
+          {count}
+        </span>
+        <div
+          style={{ flex: 1, height: 1, background: "var(--border-soft)" }}
+          aria-hidden="true"
+        />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {children}
+      </div>
+    </section>
+  );
+}
 
 export function ResponseTasksTab({ engagementId }: { engagementId: string }) {
   const [createOpen, setCreateOpen] = useState(false);
@@ -606,26 +899,183 @@ export function ResponseTasksTab({ engagementId }: { engagementId: string }) {
     },
   });
 
-  const tasks = useMemo(() => data?.responseTasks ?? [], [data]);
+  const tasks = useMemo(() => {
+    const live = data?.responseTasks ?? [];
+    if (isDemoSeedEnabled() && live.length === 0 && engagementId) {
+      return demoResponseTasksForEngagement(engagementId);
+    }
+    return live;
+  }, [data, engagementId]);
+  const grouped = useMemo(() => groupTasksByDay(tasks), [tasks]);
+  const unreadCount = useMemo(
+    () =>
+      tasks.filter((t) => t.state === "open" || t.state === "in-progress")
+        .length,
+    [tasks],
+  );
 
   return (
-    <>
-      <div className="sc-card flex flex-col" data-testid="response-tasks-list">
-        <div className="sc-card-header sc-row-sb">
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span className="sc-label">RESPONSE TASKS</span>
-            <span className="sc-meta" style={{ opacity: 0.7 }}>
-              {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
+    <div className="cockpit-tab" data-testid="response-tasks-tab-shell">
+      <TabHeader
+        overline="Review · group"
+        title="Response tasks"
+        subtitle="Track the architect-side response to each finding. The in-app agent can create tasks; you can reverse any agent action from the chat log."
+      />
+      <div
+        className="flex flex-col"
+        data-testid="response-tasks-list"
+        style={{
+          background: "var(--bg-base)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 8,
+          overflow: "hidden",
+        }}
+      >
+        {/* Channel header strip */}
+        <div
+          style={{
+            padding: "14px 16px 0",
+            background: "var(--bg-chrome)",
+            borderBottom: "1px solid var(--border-default)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              marginBottom: 12,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                minWidth: 0,
+              }}
+            >
+              <Hash
+                size={18}
+                color="var(--text-muted)"
+                aria-hidden="true"
+              />
+              <span
+                style={{
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: "var(--text-primary)",
+                }}
+              >
+                Activity
+              </span>
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    background: "var(--cyan-accent-bg)",
+                    color: "var(--cyan-text)",
+                    padding: "1px 8px",
+                    borderRadius: 999,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {unreadCount} need{unreadCount === 1 ? "s" : ""} you
+                </span>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <button
+                type="button"
+                disabled
+                title="Search the response-task feed (coming soon)"
+                aria-label="Search response tasks"
+                style={iconBtnStyle}
+              >
+                <Search size={14} />
+              </button>
+              <button
+                type="button"
+                disabled
+                title="Feed options (coming soon)"
+                aria-label="More options"
+                style={iconBtnStyle}
+              >
+                <MoreHorizontal size={14} />
+              </button>
+              <button
+                type="button"
+                className="sc-btn-primary"
+                data-testid="response-tasks-new"
+                onClick={() => setCreateOpen(true)}
+              >
+                New response task
+              </button>
+            </div>
+          </div>
+
+          {/* Sub-tab pills (visual only, "Activity" is active) */}
+          <div
+            style={{ display: "flex", gap: 18, fontSize: 12, fontWeight: 600 }}
+          >
+            <span
+              style={{
+                paddingBottom: 8,
+                color: "var(--text-primary)",
+                borderBottom: "2px solid var(--cyan)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              Activity
+              <span
+                style={{
+                  background: "var(--cyan-accent-bg)",
+                  color: "var(--cyan-text)",
+                  padding: "1px 6px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
+                {tasks.length}
+              </span>
+            </span>
+            <span
+              style={{
+                paddingBottom: 8,
+                color: "var(--text-muted)",
+                opacity: 0.7,
+              }}
+              title="Inline submissions view coming soon"
+            >
+              Submissions
+            </span>
+            <span
+              style={{
+                paddingBottom: 8,
+                color: "var(--text-muted)",
+                opacity: 0.7,
+              }}
+              title="Inline findings view coming soon"
+            >
+              Findings
+            </span>
+            <span
+              style={{
+                paddingBottom: 8,
+                color: "var(--text-muted)",
+                opacity: 0.7,
+              }}
+              title="Inline letters view coming soon"
+            >
+              Letters
             </span>
           </div>
-          <button
-            type="button"
-            className="sc-btn-primary"
-            data-testid="response-tasks-new"
-            onClick={() => setCreateOpen(true)}
-          >
-            New response task
-          </button>
         </div>
 
         {isLoading ? (
@@ -633,22 +1083,71 @@ export function ResponseTasksTab({ engagementId }: { engagementId: string }) {
             <div className="sc-body opacity-60">Loading response tasks…</div>
           </div>
         ) : tasks.length === 0 ? (
-          <div className="p-6 text-center" data-testid="response-tasks-empty">
+          <div
+            className="p-6 text-center"
+            data-testid="response-tasks-empty"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 10,
+              padding: 40,
+            }}
+          >
+            <div
+              aria-hidden="true"
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 999,
+                background: "var(--bg-input)",
+                color: "var(--text-muted)",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <MessageSquare size={20} />
+            </div>
             <div className="sc-prose opacity-70" style={{ maxWidth: 460 }}>
-              No response tasks yet. Open one with{" "}
-              <strong>New response task</strong> to track a piece of the
-              client-comment response.
+              No activity yet. Open a thread with{" "}
+              <strong>New response task</strong> to start the client-comment
+              response trail.
             </div>
           </div>
         ) : (
-          <div className="flex flex-col">
-            {tasks.map((task) => (
-              <ResponseTaskRow
-                key={task.entityId}
-                task={task}
-                engagementId={engagementId}
-              />
-            ))}
+          <div style={{ padding: 16 }}>
+            <FeedSection label="Today" count={grouped.today.length}>
+              {grouped.today.map((task) => (
+                <ResponseTaskRow
+                  key={task.entityId}
+                  task={task}
+                  engagementId={engagementId}
+                />
+              ))}
+            </FeedSection>
+            <FeedSection
+              label="Yesterday"
+              count={grouped.yesterday.length}
+              dim
+            >
+              {grouped.yesterday.map((task) => (
+                <ResponseTaskRow
+                  key={task.entityId}
+                  task={task}
+                  engagementId={engagementId}
+                />
+              ))}
+            </FeedSection>
+            <FeedSection label="Older" count={grouped.older.length} dim>
+              {grouped.older.map((task) => (
+                <ResponseTaskRow
+                  key={task.entityId}
+                  task={task}
+                  engagementId={engagementId}
+                />
+              ))}
+            </FeedSection>
           </div>
         )}
       </div>
@@ -658,6 +1157,20 @@ export function ResponseTasksTab({ engagementId }: { engagementId: string }) {
         isOpen={createOpen}
         onClose={() => setCreateOpen(false)}
       />
-    </>
+    </div>
   );
 }
+
+const iconBtnStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  borderRadius: 4,
+  background: "transparent",
+  border: "1px solid transparent",
+  color: "var(--text-secondary)",
+  cursor: "not-allowed",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  opacity: 0.7,
+};

@@ -50,7 +50,10 @@ function HexGlyph({ size = 18 }: { size?: number }) {
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
     >
-      <path d="M12 2 L21.5 7 L21.5 17 L12 22 L2.5 17 L2.5 7 Z" fill="#6398AA" />
+      <path
+        d="M12 2 L21.5 7 L21.5 17 L12 22 L2.5 17 L2.5 7 Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -306,7 +309,9 @@ export function ClaudeChat({
           gap: 12,
         }}
       >
+        <span style={{ color: "var(--cyan)" }}>
         <HexGlyph size={20} />
+      </span>
         <button
           onClick={toggleRight}
           title="Expand Claude (⇤)"
@@ -339,7 +344,9 @@ export function ClaudeChat({
       <div className="sc-card-header flex flex-col gap-1 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <HexGlyph />
+            <span style={{ color: "var(--cyan)" }}>
+              <HexGlyph />
+            </span>
             <span className="sc-label">CLAUDE</span>
           </div>
           <div className="flex items-center gap-2">

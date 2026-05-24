@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -28,7 +27,7 @@ import {
   type SubmissionReceipt,
 } from "@workspace/api-client-react";
 import { AppShell } from "../components/AppShell";
-import { ClaudeChat } from "../components/ClaudeChat";
+import { EngagementViewHeader } from "../components/engagement-detail/EngagementViewHeader";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
@@ -38,20 +37,38 @@ import {
 } from "../components/ReviewerRequestsStrip";
 import {
   BimModelViewport,
+  StatusPill,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
   countUnaddressedFindings,
   useSidebarState,
 } from "@workspace/portal-ui";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useEngagementsStore, type SpecDraftEntry } from "../store/engagements";
-import { relativeTime } from "../lib/relativeTime";
 import type { BackfillFilter } from "../lib/submissionBackfill";
-import { StatusPill } from "../components/engagement-detail/StatusPill";
 import { SiteTab } from "../components/engagement-detail/SiteTab";
+import { PropertyIntelTab } from "../components/engagement-detail/PropertyIntelTab";
+import { SnapshotsTab } from "../components/engagement-detail/SnapshotsTab";
 import { SettingsTab } from "../components/engagement-detail/SettingsTab";
-import { SiteContextTab } from "../components/engagement-detail/SiteContextTab";
 import { SubmissionsTab } from "../components/engagement-detail/SubmissionsTab";
-import { RendersTab } from "../components/engagement-detail/RendersTab";
+import { DesignToolsTab } from "../components/engagement-detail/DesignToolsTab";
+import {
+  floorPlanSourceIdForSheet,
+  writeFloorPlanVizDeepLink,
+} from "../components/engagement-detail/renderModeUrl";
+import { TabHeader } from "../components/cockpit/TabChrome";
+import { PackagesTab } from "../components/engagement-detail/packages/PackagesTab";
+import { packageTemplateForTab } from "../components/engagement-detail/engagementViews";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
 import { ResponseTasksTab } from "../components/engagement-detail/ResponseTasksTab";
 import { DeliverableLettersTab } from "../components/engagement-detail/DeliverableLettersTab";
@@ -65,154 +82,37 @@ import {
   type TabId,
 } from "../components/engagement-detail/urlState";
 
-function KpiTile({
-  label,
-  value,
-  footnote,
-}: {
-  label: string;
-  value: number | string | null | undefined;
-  footnote?: string;
-}) {
-  // testid is keyed on a normalized lowercase label so e2e tests
-  // (`engagement-snapshot-timeline.spec.ts`) can target individual
-  // tiles without relying on visible text or DOM order.
-  const testId = `engagement-kpi-${label.toLowerCase()}`;
-  return (
-    <div className="sc-card p-4" data-testid={testId}>
-      <div className="sc-label">{label}</div>
-      <div className="sc-kpi-md mt-2" data-testid={`${testId}-value`}>
-        {value ?? "—"}
-      </div>
-      {footnote && <div className="sc-meta mt-1 opacity-70">{footnote}</div>}
-    </div>
-  );
-}
-
-function TabBar({
+/**
+ * Wraps an engagement-detail tab's content with the ARIA tabpanel
+ * semantics that pair with the WAI-ARIA tabs pattern on `TabBar`
+ * above. Each panel gets a stable `id` (referenced by the tab
+ * trigger's `aria-controls`) and an `aria-labelledby` pointing back
+ * at the trigger. Inactive panels are hidden rather than unmounted
+ * via `hidden`, while their children are gated on `isActive` so
+ * sub-components don't keep running queries / state for unseen tabs.
+ */
+function TabPanel({
+  id,
   active,
-  onChange,
-  findingsBadgeCount,
+  children,
+  className,
 }: {
+  id: TabId;
   active: TabId;
-  onChange: (id: TabId) => void;
-  /**
-   * Number of unaddressed findings on the most-recent submission
-   * (Task #421 / V1-1 / V1-7). Rendered as a small badge on the
-   * "Findings" tab so an architect can spot blocker / concern work
-   * without having to open the tab. `undefined` while the badge
-   * fetch is loading or the engagement has no submissions yet —
-   * we render the tab with no badge in that case.
-   */
-  findingsBadgeCount?: number | undefined;
+  children: React.ReactNode;
+  className?: string;
 }) {
-  // Tabs are grouped into visual sections (model & source, site,
-  // review, deliverables, config). A thin separator is drawn at each
-  // group boundary so the 13-tab row reads as organized sections
-  // rather than one long undifferentiated strip (QA-01 / WSB.1). The
-  // row scrolls horizontally rather than clipping if it cannot fit.
-  const tabs: Array<{ id: TabId; label: string; group: string }> = [
-    { id: "snapshots", label: "Snapshots", group: "model" },
-    { id: "sheets", label: "Sheets", group: "model" },
-    { id: "model-3d", label: "3D model", group: "model" },
-    { id: "site", label: "Site", group: "site" },
-    { id: "site-context", label: "Site context", group: "site" },
-    { id: "submissions", label: "Submissions", group: "review" },
-    { id: "findings", label: "Findings", group: "review" },
-    { id: "response-tasks", label: "Response tasks", group: "review" },
-    {
-      id: "deliverable-letters",
-      label: "Deliverable letters",
-      group: "deliverables",
-    },
-    { id: "detail-callouts", label: "Detail callouts", group: "deliverables" },
-    { id: "product-specs", label: "Product specs", group: "deliverables" },
-    { id: "renders", label: "Renders", group: "deliverables" },
-    { id: "settings", label: "Settings", group: "config" },
-  ];
+  const isActive = id === active;
   return (
     <div
-      style={{
-        display: "flex",
-        gap: 4,
-        borderBottom: "1px solid var(--border-default)",
-        overflowX: "auto",
-      }}
+      role="tabpanel"
+      id={`engagement-tabpanel-${id}`}
+      aria-labelledby={`engagement-tab-trigger-${id}`}
+      hidden={!isActive}
+      tabIndex={0}
+      className={className}
     >
-      {tabs.map((t, i) => {
-        const isActive = active === t.id;
-        const showBadge =
-          t.id === "findings" &&
-          typeof findingsBadgeCount === "number" &&
-          findingsBadgeCount > 0;
-        const groupBreak = i > 0 && tabs[i - 1].group !== t.group;
-        return (
-          <Fragment key={t.id}>
-            {groupBreak && (
-              <div
-                aria-hidden="true"
-                style={{
-                  alignSelf: "center",
-                  flexShrink: 0,
-                  width: 1,
-                  height: 16,
-                  background: "var(--border-default)",
-                  margin: "0 4px",
-                }}
-              />
-            )}
-            <button
-              onClick={() => onChange(t.id)}
-              className="sc-tab"
-              data-testid={`engagement-tab-${t.id}`}
-              style={{
-                flexShrink: 0,
-                padding: "8px 12px",
-                background: "transparent",
-                border: "none",
-                borderBottom: isActive
-                  ? "2px solid var(--cyan)"
-                  : "2px solid transparent",
-                color: isActive
-                  ? "var(--text-primary)"
-                  : "var(--text-secondary)",
-                fontFamily: "Inter, sans-serif",
-                fontSize: 12,
-                cursor: "pointer",
-                transition: "color 0.12s, border-color 0.12s",
-                marginBottom: -1,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {t.label}
-              {showBadge && (
-                <span
-                  data-testid="engagement-tab-findings-badge"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    minWidth: 16,
-                    height: 16,
-                    padding: "0 5px",
-                    borderRadius: 8,
-                    background: "rgba(239, 68, 68, 0.18)",
-                    color: "#ef4444",
-                    fontSize: 10,
-                    fontWeight: 600,
-                    lineHeight: 1,
-                  }}
-                >
-                  {findingsBadgeCount}
-                </span>
-              )}
-            </button>
-          </Fragment>
-        );
-      })}
+      {isActive ? children : null}
     </div>
   );
 }
@@ -230,6 +130,7 @@ export function EngagementDetail() {
   // sprint needs back-button-aware tabs, it can wrap this state in a
   // `useSyncExternalStore` against `popstate`.
   const [tab, setTabState] = useState<TabId>(() => readTabFromUrl());
+  const [renderDeepLinkToken, setRenderDeepLinkToken] = useState(0);
   const setTab = useCallback((next: TabId): void => {
     setTabState(next);
     writeTabToUrl(next);
@@ -278,6 +179,10 @@ export function EngagementDetail() {
   const [selectedElementRef, setSelectedElementRef] = useState<string | null>(
     null,
   );
+  // Property Intel citation pills land on the Map tab's layer list;
+  // lift the pending source id so SiteTab can flash the matching row.
+  const [pendingBriefingSourceHighlight, setPendingBriefingSourceHighlight] =
+    useState<string | null>(null);
   // WS-C (WSC.4) — AI-prepared spec drafts routed from the chat agent
   // to the L4 / L5 manual forms. EngagementDetail consumes the store
   // draft, switches to the matching tab, and hands it to the tab, which
@@ -330,14 +235,35 @@ export function EngagementDetail() {
     }
     return null;
   }, [bimElements]);
-  const [showBuildingOverlay, setShowBuildingOverlay] = useState(false);
-  // Finding-citation drill-in lands on Snapshots so the new BIM
-  // viewer can highlight the matched element. The Site Context tab
-  // still subscribes to `selectedElementRef` if the user navigates
-  // there manually.
+  const [showBuildingOverlay, setShowBuildingOverlay] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return sessionStorage.getItem(`site-context:show-building:${id}`) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem(
+        `site-context:show-building:${id}`,
+        showBuildingOverlay ? "1" : "0",
+      );
+    } catch {
+      // sessionStorage may be unavailable in private mode — ignore.
+    }
+  }, [id, showBuildingOverlay]);
+  // Finding-citation drill-in lands on Snapshots so the BIM viewer can
+  // highlight the matched element (full-screen affordance on that tab).
   const handleElementRefClick = (elementRef: string): void => {
     setSelectedElementRef(elementRef);
     setTab("snapshots");
+  };
+  const handleNavigateToMapFromBriefing = (sourceId: string): void => {
+    setPendingBriefingSourceHighlight(sourceId);
+    setTab("site");
   };
   // Auto-dismiss the banner after 8s so it stays out of the way once
   // the user has seen it. The dialog itself already closed on success,
@@ -426,6 +352,12 @@ export function EngagementDetail() {
       `What is shown on sheet ${sheet.sheetNumber} (${sheet.sheetName})?`,
     );
     if (rightCollapsed) toggleRight();
+  };
+
+  const handleVisualizeFloorPlanFromSheet = (sheet: SheetSummary) => {
+    writeFloorPlanVizDeepLink(floorPlanSourceIdForSheet(id, sheet.id));
+    setRenderDeepLinkToken((t) => t + 1);
+    setTab("renders");
   };
 
   const explicitlySelected = selectedSnapshotIdByEngagement[id] ?? null;
@@ -517,7 +449,7 @@ export function EngagementDetail() {
 
   if (!engagement) {
     return (
-      <AppShell title="Loading…">
+      <AppShell hidePageTitle title="Loading…">
         <div className="sc-prose opacity-60">Loading engagement…</div>
       </AppShell>
     );
@@ -525,9 +457,6 @@ export function EngagementDetail() {
 
   const snapshots = engagement.snapshots ?? [];
   const hasSnapshots = snapshots.length > 0;
-  const captured = snapshotDetail
-    ? `from snapshot ${relativeTime(snapshotDetail.receivedAt)}`
-    : undefined;
 
   const openEdit = () => {
     setModalMode("edit");
@@ -557,63 +486,38 @@ export function EngagementDetail() {
     setModalOpen(false);
   };
 
-  // BIM model viewer panel — shared by the Snapshots tab (where WSB.3
-  // moves it up beside the snapshot timeline) and the dedicated
-  // "3D model" tab (WSB.1). Tabs render conditionally so only one
-  // instance ever mounts. Keeps `data-testid="snapshots-bim-viewer"`
-  // so the finding-citation deep-link regression test still resolves.
-  const bimModelPanel = (
+  // BIM model viewer panel — Snapshots tab hero only (3D model segment removed).
+  const bimViewportCentered = bimModelQuery.isLoading || bimElements.length === 0;
+
+  const bimViewportBody =
+    bimModelQuery.isLoading ? (
+      <div className="sc-prose opacity-60">Loading BIM model…</div>
+    ) : bimElements.length === 0 ? (
+      <div className="sc-prose opacity-70 text-center px-6">
+        No BIM elements yet. Push this engagement&apos;s briefing to Revit to
+        populate the 3D viewer.
+      </div>
+    ) : (
+      <BimModelViewport
+        elements={bimElements}
+        selectedElementRef={selectedElementRef ?? null}
+        presentation="immersive"
+      />
+    );
+
+  const bimHeroPanel = (
     <div
-      className="sc-card flex flex-col h-full"
+      className="snapshots-bim-hero-viewport"
       data-testid="snapshots-bim-viewer"
-      style={{ minHeight: 420 }}
+      data-centered={bimViewportCentered ? "true" : "false"}
     >
-      <div className="sc-card-header sc-row-sb">
-        <span className="sc-label">BIM MODEL</span>
-        <span className="sc-meta">
-          {bimElements.length}{" "}
-          {bimElements.length === 1 ? "element" : "elements"}
-        </span>
-      </div>
-      <div
-        className="flex-1"
-        style={{
-          borderTop: "1px solid var(--border-default)",
-          padding: 8,
-          display: "flex",
-          minHeight: 0,
-        }}
-      >
-        {bimModelQuery.isLoading ? (
-          <div className="sc-prose opacity-60 m-auto">Loading BIM model…</div>
-        ) : bimElements.length === 0 ? (
-          <div className="sc-prose opacity-70 m-auto text-center">
-            No BIM elements yet. Push this engagement&apos;s briefing to Revit
-            to populate the 3D viewer.
-          </div>
-        ) : (
-          <BimModelViewport
-            elements={bimElements}
-            selectedElementRef={selectedElementRef ?? null}
-          />
-        )}
-      </div>
+      {bimViewportBody}
     </div>
   );
 
   return (
-    <AppShell
-      title={engagement.name}
-      rightPanel={
-        <ClaudeChat
-          engagementId={id}
-          hasSnapshots={hasSnapshots}
-          snapshots={snapshots}
-          activeTab={tab}
-        />
-      }
-    >
-      <div className="flex flex-col gap-5 h-full">
+    <AppShell hidePageTitle>
+      <div className="cockpit-engagement-column flex flex-col flex-1 min-h-0 gap-4">
         {lastSubmission && (
           <SubmissionRecordedBanner
             submittedAt={lastSubmission.receipt.submittedAt}
@@ -621,47 +525,77 @@ export function EngagementDetail() {
             onDismiss={() => setLastSubmission(null)}
           />
         )}
-        <div className="flex items-center justify-between flex-shrink-0">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-3">
-              <h2 className="text-[22px] m-0">{engagement.name}</h2>
+        <div className="cockpit-detail-header">
+          <div className="cockpit-detail-header-title">
+            <div className="cockpit-detail-header-name-row">
+              <h2 className="cockpit-detail-header-name">{engagement.name}</h2>
               <StatusPill status={engagement.status} />
             </div>
-            <div className="sc-meta opacity-70">
+            <div className="cockpit-detail-header-meta">
               {engagement.address ?? "No address set"}
               {engagement.jurisdiction ? ` · ${engagement.jurisdiction}` : ""}
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="cockpit-detail-header-actions">
             <Link href="/" className="sc-btn-ghost">
               ← Projects
             </Link>
             <button className="sc-btn-ghost" onClick={openEdit}>
               Edit details
             </button>
-            <button
-              type="button"
-              className="sc-btn-ghost"
-              data-testid="engagement-archive-toggle"
-              disabled={archiveMutation.isPending}
-              onClick={() =>
-                archiveMutation.mutate({
-                  id,
-                  data: {
-                    status:
-                      engagement.status === "archived"
-                        ? "active"
-                        : "archived",
-                  },
-                })
-              }
-            >
-              {archiveMutation.isPending
-                ? "Saving…"
-                : engagement.status === "archived"
-                  ? "Unarchive"
-                  : "Archive"}
-            </button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <button
+                  type="button"
+                  className="sc-btn-ghost"
+                  data-testid="engagement-archive-toggle"
+                  disabled={archiveMutation.isPending}
+                >
+                  {archiveMutation.isPending
+                    ? "Saving…"
+                    : engagement.status === "archived"
+                      ? "Unarchive"
+                      : "Archive"}
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    {engagement.status === "archived"
+                      ? "Unarchive this project?"
+                      : "Archive this project?"}
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {engagement.status === "archived"
+                      ? "It will return to the active projects list and reappear in the sidebar shortcuts."
+                      : "It will be hidden from the active projects list. You can find it again by enabling Show archived on the Projects page."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel data-testid="engagement-archive-cancel">
+                    Cancel
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    data-testid="engagement-archive-confirm"
+                    onClick={() =>
+                      archiveMutation.mutate({
+                        id,
+                        data: {
+                          status:
+                            engagement.status === "archived"
+                              ? "active"
+                              : "archived",
+                        },
+                      })
+                    }
+                  >
+                    {engagement.status === "archived"
+                      ? "Unarchive"
+                      : "Archive"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <button
               type="button"
               className="sc-btn-primary"
@@ -689,253 +623,173 @@ export function EngagementDetail() {
         */}
         <ReviewerRequestsHistory engagementId={id} />
 
-        <TabBar
-          active={tab}
-          onChange={setTab}
+        <EngagementViewHeader
+          activeTab={tab}
+          onSelectTab={setTab}
           findingsBadgeCount={findingsBadgeCount}
         />
 
-        {tab === "snapshots" && (
-          <>
-            <div className="grid grid-cols-4 gap-3">
-              <KpiTile
-                label="SHEETS"
-                value={snapshotDetail?.sheetCount}
-                footnote={captured}
-              />
-              <KpiTile
-                label="ROOMS"
-                value={snapshotDetail?.roomCount}
-                footnote={captured}
-              />
-              <KpiTile
-                label="LEVELS"
-                value={snapshotDetail?.levelCount}
-                footnote={captured}
-              />
-              <KpiTile
-                label="WALLS"
-                value={snapshotDetail?.wallCount}
-                footnote={captured}
-              />
-            </div>
+        <div className="cockpit-engagement-body flex flex-col flex-1 min-h-0">
+        <TabPanel id="snapshots" active={tab} className="flex flex-col flex-1 min-h-0">
+          <SnapshotsTab
+            engagementId={id}
+            snapshots={snapshots}
+            hasSnapshots={hasSnapshots}
+            snapshotDetail={snapshotDetail}
+            selectedSnapshotId={selectedSnapshotId}
+            onSelectSnapshot={(snapshotId) => selectSnapshot(id, snapshotId)}
+            bimModelPanel={bimHeroPanel}
+            bimElementCount={bimElements.length}
+            jsonExpanded={jsonExpanded}
+            setJsonExpanded={setJsonExpanded}
+            onOpenSheets={() => setTab("sheets")}
+          />
+        </TabPanel>
 
-            <div className="grid lg:grid-cols-3 gap-4 flex-1 min-h-0">
-              <div className="sc-card flex flex-col col-span-1 min-h-0">
-                <div className="sc-card-header sc-row-sb">
-                  <span className="sc-label">SNAPSHOTS</span>
-                  <span className="sc-meta">{snapshots.length}</span>
-                </div>
-                <div
-                  className="flex-1 overflow-y-auto sc-scroll"
-                  data-testid="engagement-snapshot-timeline"
-                >
-                  {!hasSnapshots ? (
-                    <div className="p-4 sc-body text-center opacity-70">
-                      No snapshots yet. Send one from Revit.
-                    </div>
-                  ) : (
-                    snapshots.map((s) => {
-                      const isSelected = s.id === selectedSnapshotId;
-                      return (
-                        <div
-                          key={s.id}
-                          data-testid={`snapshot-row-${s.id}`}
-                          data-selected={isSelected ? "true" : "false"}
-                          className={`sc-card-row sc-card-clickable flex flex-col ${
-                            isSelected ? "sc-accent-cyan" : ""
-                          }`}
-                          style={{
-                            background: isSelected
-                              ? "var(--bg-highlight)"
-                              : undefined,
-                          }}
-                          onClick={() => selectSnapshot(id, s.id)}
-                        >
-                          <div className="sc-medium">
-                            {relativeTime(s.receivedAt)}
-                          </div>
-                          <div className="sc-meta mt-1">
-                            {s.sheetCount ?? "—"}sh · {s.roomCount ?? "—"}rm ·{" "}
-                            {s.levelCount ?? "—"}lv · {s.wallCount ?? "—"}w
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/*
-                QA-12 / WSB.3 — the BIM model is promoted into the
-                primary column beside the snapshot timeline instead of
-                sitting at the bottom of the tab under the raw JSON.
-              */}
-              <div className="col-span-2 min-h-0">
-                {!hasSnapshots && bimElements.length === 0 ? (
-                  <div className="sc-card p-8 h-full flex items-center justify-center">
-                    <div className="sc-prose text-center opacity-70">
-                      No snapshots yet. Send one from Revit.
-                    </div>
-                  </div>
-                ) : (
-                  bimModelPanel
-                )}
-              </div>
-            </div>
-
-            {/*
-              QA-12 / WSB.3 — raw snapshot JSON demoted to a secondary,
-              collapsed-by-default card below the model. It stays
-              available for debugging without dominating the tab.
-            */}
-            {hasSnapshots && (
-              <div className="sc-card flex flex-col">
-                <div className="sc-card-header sc-row-sb">
-                  <span className="sc-label">RAW JSON</span>
-                  <button
-                    className="sc-btn-sm"
-                    onClick={() => setJsonExpanded(!jsonExpanded)}
-                  >
-                    {jsonExpanded ? "Collapse" : "Expand"}
-                  </button>
-                </div>
-                {jsonExpanded &&
-                  (!snapshotDetail ? (
-                    <div
-                      className="p-4 sc-prose opacity-60"
-                      style={{ borderTop: "1px solid var(--border-default)" }}
-                    >
-                      Loading snapshot…
-                    </div>
-                  ) : (
-                    <div
-                      className="flex-1 overflow-hidden"
-                      style={{ borderTop: "1px solid var(--border-default)" }}
-                    >
-                      <pre
-                        className="sc-mono-sm sc-scroll m-0"
-                        style={{
-                          background: "var(--bg-input)",
-                          padding: 12,
-                          maxHeight: 600,
-                          overflow: "auto",
-                          whiteSpace: "pre-wrap",
-                          wordWrap: "break-word",
-                        }}
-                      >
-                        {JSON.stringify(snapshotDetail.payload, null, 2)}
-                      </pre>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {tab === "model-3d" && (
-          <div className="flex flex-col flex-1 min-h-0">{bimModelPanel}</div>
-        )}
-
-        {tab === "sheets" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
+        <TabPanel id="sheets" active={tab} className="flex flex-col gap-3">
+          <TabHeader
+            overline="Deliver"
+            title="Sheets"
+            subtitle="Sheet thumbnails from the active snapshot — attach to chat, visualize floor plans, or open full size."
+            testId="sheets-tab-header"
+            actions={
               <button
                 type="button"
                 className="sc-btn-ghost"
                 data-testid="sheets-tab-view-in-3d"
                 disabled={bimElements.length === 0}
-                onClick={() => setTab("model-3d")}
+                onClick={() => setTab("snapshots")}
                 title={
                   bimElements.length === 0
                     ? "Push this engagement's briefing to Revit to enable the 3D viewer."
-                    : "Open the dedicated 3D model tab."
+                    : "Open the BIM model on Snapshots (use Full screen 3D for immersive view)."
                 }
               >
-                View in 3D
+                View BIM model
               </button>
-            </div>
-            <SheetGrid
-              snapshotId={selectedSnapshotId}
-              engagementId={id}
-              onAskClaude={handleAskClaudeAboutSheet}
-            />
-          </div>
-        )}
+            }
+          />
+          <SheetGrid
+            snapshotId={selectedSnapshotId}
+            engagementId={id}
+            onAskClaude={handleAskClaudeAboutSheet}
+            onVisualizeFloorPlan={handleVisualizeFloorPlanFromSheet}
+          />
+        </TabPanel>
 
-        {tab === "site" && (
-          <SiteTab engagement={engagement} onAddAddress={openEdit} />
-        )}
-
-        {tab === "site-context" && (
-          <SiteContextTab
+        <TabPanel id="site" active={tab} className="flex flex-col flex-1 min-h-0">
+          <SiteTab
             engagement={engagement}
+            onAddAddress={openEdit}
+            onOpenPropertyIntel={setTab}
+            selectedElementRef={selectedElementRef}
+            onClearSelectedElement={() => setSelectedElementRef(null)}
+            buildingGlbUrl={defaultBimGlbUrl}
+            showBuilding={showBuildingOverlay}
+            onToggleShowBuilding={setShowBuildingOverlay}
+            bimModelLoading={bimModelQuery.isLoading}
+            initialCanvasMode={
+              tab === "site" && selectedElementRef ? "3d" : "map"
+            }
+            pendingBriefingSourceHighlight={pendingBriefingSourceHighlight}
+            onPendingBriefingSourceHighlightConsumed={() =>
+              setPendingBriefingSourceHighlight(null)
+            }
+          />
+        </TabPanel>
+
+        <TabPanel
+          id="property-intel"
+          active={tab}
+          className="flex flex-col flex-1 min-h-0"
+        >
+          <PropertyIntelTab
+            engagement={engagement}
+            onNavigate={setTab}
+            onNavigateToMapWithSource={handleNavigateToMapFromBriefing}
             selectedElementRef={selectedElementRef}
             onClearSelectedElement={() => setSelectedElementRef(null)}
             buildingGlbUrl={defaultBimGlbUrl}
             showBuilding={showBuildingOverlay}
             onToggleShowBuilding={setShowBuildingOverlay}
           />
-        )}
+        </TabPanel>
 
-        {tab === "submissions" && (
+        <TabPanel id="submissions" active={tab}>
           <SubmissionsTab
             engagementId={engagement.id}
             backfillFilter={backfillFilter}
             onBackfillFilterChange={setBackfillFilter}
             onOpenSubmission={(sid) => setOpenSubmissionId(sid)}
           />
-        )}
+        </TabPanel>
 
-        {tab === "findings" && (
+        <TabPanel id="findings" active={tab} className="flex flex-col flex-1 min-h-0">
           <FindingsTab
             engagementId={engagement.id}
             initialSubmissionId={latestSubmissionId}
             onElementRefClick={handleElementRefClick}
           />
-        )}
+        </TabPanel>
 
-        {tab === "response-tasks" && (
+        <TabPanel id="response-tasks" active={tab}>
           <ResponseTasksTab engagementId={engagement.id} />
-        )}
+        </TabPanel>
 
-        {tab === "deliverable-letters" && (
+        <TabPanel id="deliverable-letters" active={tab}>
           <DeliverableLettersTab engagementId={engagement.id} />
-        )}
+        </TabPanel>
 
-        {tab === "detail-callouts" && (
+        <TabPanel id="detail-callouts" active={tab}>
           <DetailCalloutSpecsTab
             engagementId={engagement.id}
             aiDraft={detailCalloutDraft}
             onAiDraftConsumed={() => setDetailCalloutDraft(null)}
           />
-        )}
+        </TabPanel>
 
-        {tab === "product-specs" && (
+        <TabPanel id="product-specs" active={tab}>
           <ProductSpecReferencesTab
             engagementId={engagement.id}
             aiDraft={productSpecDraft}
             onAiDraftConsumed={() => setProductSpecDraft(null)}
           />
-        )}
+        </TabPanel>
 
-        {tab === "renders" && (
-          <RendersTab
+        <TabPanel
+          id="packages"
+          active={
+            tab === "packages" ||
+            tab === "client-materials" ||
+            tab === "publish-prep" ||
+            tab === "publish-launch"
+              ? "packages"
+              : tab
+          }
+          className="flex flex-col flex-1 min-h-0"
+        >
+          <PackagesTab
+            engagement={engagement}
+            snapshotId={selectedSnapshotId}
+            onNavigate={setTab}
+            initialTemplate={packageTemplateForTab(tab)}
+          />
+        </TabPanel>
+
+        <TabPanel id="renders" active={tab} className="flex flex-col flex-1 min-h-0">
+          <DesignToolsTab
             engagementId={engagement.id}
             defaultGlbUrl={defaultBimGlbUrl}
+            onOpenBimTab={() => setTab("snapshots")}
+            onOpenClientMaterials={() => setTab("packages")}
+            renderDeepLinkToken={renderDeepLinkToken}
           />
-        )}
+        </TabPanel>
 
-        {tab === "settings" && (
+        <TabPanel id="settings" active={tab}>
           <SettingsTab engagement={engagement} onEdit={openEdit} />
-        )}
+        </TabPanel>
+        </div>
       </div>
 
       <EngagementDetailsModal

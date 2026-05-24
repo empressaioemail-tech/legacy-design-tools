@@ -7,21 +7,13 @@ import {
   parseBackfillFilter,
   type BackfillFilter,
 } from "../../lib/submissionBackfill";
+import {
+  resolveTabFromSearchParams,
+  writeViewStateToUrl,
+  type TabId,
+} from "./engagementViews";
 
-export type TabId =
-  | "snapshots"
-  | "sheets"
-  | "model-3d"
-  | "site"
-  | "site-context"
-  | "submissions"
-  | "findings"
-  | "response-tasks"
-  | "deliverable-letters"
-  | "detail-callouts"
-  | "product-specs"
-  | "renders"
-  | "settings";
+export type { TabId };
 
 /**
  * Read the active tab from `?tab=…` on the current URL. Mirrors the
@@ -37,25 +29,7 @@ export type TabId =
  */
 export function readTabFromUrl(): TabId {
   if (typeof window === "undefined") return "snapshots";
-  const raw = new URLSearchParams(window.location.search).get("tab");
-  if (
-    raw === "snapshots" ||
-    raw === "sheets" ||
-    raw === "model-3d" ||
-    raw === "site" ||
-    raw === "site-context" ||
-    raw === "submissions" ||
-    raw === "findings" ||
-    raw === "response-tasks" ||
-    raw === "deliverable-letters" ||
-    raw === "detail-callouts" ||
-    raw === "product-specs" ||
-    raw === "renders" ||
-    raw === "settings"
-  ) {
-    return raw;
-  }
-  return "snapshots";
+  return resolveTabFromSearchParams(new URLSearchParams(window.location.search));
 }
 
 /**
@@ -71,14 +45,7 @@ export function readTabFromUrl(): TabId {
  * the bare engagement URL when the user is on the default view.
  */
 export function writeTabToUrl(next: TabId): void {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  if (next === "snapshots") {
-    url.searchParams.delete("tab");
-  } else {
-    url.searchParams.set("tab", next);
-  }
-  window.history.replaceState(null, "", url.toString());
+  writeViewStateToUrl(next);
 }
 
 /**

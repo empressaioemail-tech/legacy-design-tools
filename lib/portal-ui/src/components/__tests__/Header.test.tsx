@@ -1,21 +1,10 @@
 /**
- * Header — theme toggle (Task #420).
- *
- * The header is the only architect-surface affordance for switching
- * between the dark and light token sets, so a regression that
- * silently dropped the toggle would strand the user on whichever
- * theme `initTheme()` picked at boot. Tests assert:
- *
- *   1. Clicking the toggle flips `data-theme` on <html>.
- *   2. The icon (Sun ↔ Moon) and aria-label update with the new
- *      theme so screen readers always describe the *next* action.
- *   3. The choice is persisted to localStorage under the same
- *      "theme" key `initTheme()` reads on next boot.
+ * Header — theme toggle (Task #420, extended for chrome themes).
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Header } from "../Header";
-import { setTheme } from "../../lib/theme";
+import { setChromeTheme } from "../../lib/theme";
 
 describe("Header theme toggle", () => {
   beforeEach(() => {
@@ -24,35 +13,36 @@ describe("Header theme toggle", () => {
     } catch {
       // ignore
     }
-    setTheme("dark");
+    setChromeTheme("charcoal");
   });
 
-  it("flips data-theme between dark and light when clicked", () => {
+  it("flips between dark chrome and soft-light when clicked", () => {
     render(<Header title="Dashboard" />);
-    const button = screen.getByTestId("theme-toggle");
+    const button = screen.getByTestId("chrome-theme-toggle");
 
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(button).toHaveAttribute("aria-label", "Switch to light theme");
+    expect(document.documentElement.dataset.theme).toBe("charcoal");
+    expect(button).toHaveAttribute("aria-label", "Switch to soft light theme");
     expect(button).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(button);
 
-    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("soft-light");
     expect(button).toHaveAttribute("aria-label", "Switch to dark theme");
     expect(button).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(button);
 
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(button).toHaveAttribute("aria-label", "Switch to light theme");
+    expect(document.documentElement.dataset.theme).toBe("charcoal");
+    expect(button).toHaveAttribute("aria-label", "Switch to soft light theme");
   });
 
   it("persists the chosen theme to localStorage", () => {
     render(<Header title="Dashboard" />);
-    const button = screen.getByTestId("theme-toggle");
+    const button = screen.getByTestId("chrome-theme-toggle");
     fireEvent.click(button);
-    expect(localStorage.getItem("theme")).toBe("light");
+    expect(localStorage.getItem("theme")).toBe("soft-light");
     fireEvent.click(button);
-    expect(localStorage.getItem("theme")).toBe("dark");
+    expect(localStorage.getItem("theme")).toBe("charcoal");
+    expect(localStorage.getItem("theme-last-dark")).toBe("charcoal");
   });
 });

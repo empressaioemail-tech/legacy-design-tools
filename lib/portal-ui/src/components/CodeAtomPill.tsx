@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type CSSProperties, type ReactNode } from "react";
 import { BookOpen } from "lucide-react";
 
 /**
@@ -19,30 +19,56 @@ export interface CodeAtomPillProps {
   codeLibraryBase: string;
   /** Optional data-testid override. */
   testId?: string;
+  /** When set, opens inline (e.g. modal) instead of navigating away. */
+  onClick?: (atomId: string) => void;
 }
 
-export function CodeAtomPill({ atomId, codeLibraryBase, testId }: CodeAtomPillProps) {
+const pillStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 3,
+  background: "rgba(99, 152, 170, 0.18)",
+  color: "var(--cyan)",
+  fontSize: 10,
+  letterSpacing: "0.04em",
+  padding: "1px 6px",
+  borderRadius: 3,
+  textTransform: "uppercase",
+  textDecoration: "none",
+  verticalAlign: "baseline",
+  marginInline: 2,
+  border: "none",
+  cursor: "pointer",
+  font: "inherit",
+};
+
+export function CodeAtomPill({
+  atomId,
+  codeLibraryBase,
+  testId,
+  onClick,
+}: CodeAtomPillProps) {
   const short = atomId.slice(0, 8);
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        data-testid={testId}
+        title={`View code section ${atomId}`}
+        style={pillStyle}
+        onClick={() => onClick(atomId)}
+      >
+        <BookOpen size={9} aria-hidden />
+        CODE·{short}
+      </button>
+    );
+  }
   return (
     <a
       href={`${codeLibraryBase}?atom=${atomId}`}
       data-testid={testId}
       title={`Open atom ${atomId} in Code Library`}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 3,
-        background: "rgba(99, 152, 170, 0.18)",
-        color: "var(--cyan)",
-        fontSize: 10,
-        letterSpacing: "0.04em",
-        padding: "1px 6px",
-        borderRadius: 3,
-        textTransform: "uppercase",
-        textDecoration: "none",
-        verticalAlign: "baseline",
-        marginInline: 2,
-      }}
+      style={pillStyle}
     >
       <BookOpen size={9} aria-hidden />
       CODE·{short}
@@ -57,6 +83,8 @@ export interface RenderCodeAtomTokensOptions {
   codeLibraryBase: string;
   /** Optional per-atom testid generator. */
   testIdForAtom?: (atomId: string) => string;
+  /** When set, code pills invoke this instead of linking away. */
+  onAtomClick?: (atomId: string) => void;
 }
 
 /**
@@ -85,6 +113,7 @@ export function splitOnCodeAtomTokens(
           atomId={atomId}
           codeLibraryBase={opts.codeLibraryBase}
           testId={opts.testIdForAtom?.(atomId)}
+          onClick={opts.onAtomClick}
         />
       ),
     });

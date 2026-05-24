@@ -7,6 +7,15 @@ import {
   getGetMaterializableElementGlbUrl,
   type MaterializableElement,
 } from "@workspace/api-client-react";
+import { ViewCubeWidget, type ViewCubeRegionId } from "./ViewCubeWidget";
+import { VIEW_CUBE_DIRECTIONS } from "./viewCubeModel";
+import {
+  applyCompassHeadingDrag,
+  applyOrbitDrag,
+  snapCameraToDirectionVector,
+  snapCompassCardinal,
+  tweenCameraToView,
+} from "./viewCubeCamera";
 
 /**
  * Read-only Three.js viewer for the engagement's bim-model
@@ -86,16 +95,13 @@ import {
  *     Task #401 to give the BIM-viewer pan/zoom + Reset view
  *     e2e spec a stable, deterministic read-side proof.
  *
- * Reviewer interaction model (Task #380):
- *   - Wheel scroll zooms around the cursor (`zoomToCursor`).
- *   - Click-and-drag (left mouse button) pans the camera in
- *     screen space.
- *   - Right mouse button still rotates the orbit, in case a
- *     reviewer wants to look at a wall from a different angle —
- *     not requested by the task but cheap to keep enabled.
- *   - The "Reset view" button restores the auto-framed bounds
- *     for the current selection (or the full scene when there's
- *     no selection in flight).
+ * Interaction model:
+ *   - `presentation="immersive"` (Snapshots / 3D model): left-drag
+ *     orbits, right-drag pans, wheel zooms — standard CAD viewer.
+ *   - `presentation="default"` (plan-review modal): left-drag pans,
+ *     right-drag orbits (Task #380 reviewer workflow).
+ *   - Wheel zoom anchors on the cursor in both modes.
+ *   - "Reset view" restores auto-framed bounds for the selection.
  *
  * The viewport intentionally does *not* own the aria-live
  * announcement — that lives in {@link MaterializableElementsList}
@@ -133,6 +139,12 @@ export interface BimModelViewportProps {
    * graduation behaviour.
    */
   currentUserId?: string;
+  /**
+   * `default` — framed card with title row (Plan Review modal, dedicated
+   * 3D tab). `immersive` — edge-to-edge canvas for hero layouts such as
+   * the engagement Snapshots tab (no outer border, canvas fills parent).
+   */
+  presentation?: "default" | "immersive";
 }
 
 interface Bounds2D {
@@ -442,6 +454,136 @@ export function computeCameraFit(bounds: Bounds3D): {
   return { target: [cx, cy, cz], distance };
 }
 
+/**
+ * Viewer preference persistence — small, defensive, and shared
+ * across engagements. The reviewer-visible "make it brighter"
+ * toolbar (Task: BIM 3D viewport polish) writes here so a
+ * jurisdiction reviewer who prefers a lit-up model doesn't have
+ * to re-tune every time they open a new engagement.
+ */
+const VIEWER_PREF_KEY = "bim-viewer-prefs:v1";
+type BgPresetKey = "dark" | "studio" | "light";
+interface BgPreset {
+  label: string;
+  /** Scene clear colour. */
+  color: number;
+  /** Tile swatch (CSS) shown in the toolbar. */
+  swatch: string;
+}
+const BG_PRESETS: Record<BgPresetKey, BgPreset> = {
+  dark: { label: "Dark", color: 0x141821, swatch: "#141821" },
+  studio: { label: "Studio", color: 0x2b3340, swatch: "#2b3340" },
+  light: { label: "Light", color: 0xeef2f7, swatch: "#eef2f7" },
+};
+type ViewPresetKey = "iso" | "top" | "front" | "side";
+const VIEW_PRESETS: Record<ViewPresetKey, { label: string; vec: [number, number, number] }> = {
+  iso: { label: "Iso", vec: [-1, -1, 1] },
+  top: { label: "Top", vec: [0, 0, 1] },
+  front: { label: "Front", vec: [0, -1, 0.05] },
+  side: { label: "Side", vec: [1, 0, 0.05] },
+};
+
+const VIEW_CUBE_VEC = VIEW_CUBE_DIRECTIONS;
+
+const EXPOSURE_MIN = 0.4;
+const EXPOSURE_MAX = 2.4;
+
+function validateViewerPref(field: string, value: unknown): unknown {
+  // Range/shape validation per field — guards against stale or
+  // corrupted localStorage from previous schema versions or a
+  // hand-edited value. Anything that fails validation returns
+  // `undefined` so the caller falls back to its default.
+  if (field === "exposure") {
+    if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+    return Math.min(EXPOSURE_MAX, Math.max(EXPOSURE_MIN, value));
+  }
+  if (field === "bg") {
+    return value === "dark" || value === "studio" || value === "light"
+      ? value
+      : undefined;
+  }
+  return value;
+}
+
+function readViewerPref<T>(field: string, fallback: T): T {
+  try {
+    if (typeof window === "undefined") return fallback;
+    const raw = window.localStorage.getItem(VIEWER_PREF_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const validated = validateViewerPref(field, parsed[field]);
+    return validated === undefined ? fallback : (validated as T);
+  } catch {
+    return fallback;
+  }
+}
+function writeViewerPref(field: string, value: unknown): void {
+  try {
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem(VIEWER_PREF_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    parsed[field] = value;
+    window.localStorage.setItem(VIEWER_PREF_KEY, JSON.stringify(parsed));
+  } catch {
+    /* ignore quota / private-browsing */
+  }
+}
+
+function applyBackgroundToRenderer(
+  renderer: THREE.WebGLRenderer,
+  preset: BgPresetKey,
+): void {
+  const cfg = BG_PRESETS[preset] ?? BG_PRESETS.studio;
+  // alpha=1 so the chosen background fully covers the page's
+  // own `var(--bg-input)` fallback. The light preset is still
+  // legible behind the existing overlays (warning / loading)
+  // because they use opaque backgrounds.
+  renderer.setClearColor(cfg.color, 1);
+}
+
+/**
+ * Walk a loaded GLB hierarchy and gently brighten any materials
+ * that would render as near-black under our light rig — IFC
+ * exports frequently ship matte dark-grey concrete / asphalt
+ * materials that look fine in Revit's own viewer (which floods
+ * the scene with environment light) but disappear here. We
+ * keep the original hue, just lift the lightness, drop metalness
+ * (a fully-metal MeshStandardMaterial with no envMap is always
+ * pitch-black), and clamp roughness so highlights still form.
+ */
+function brightenGlbMaterials(root: THREE.Object3D): void {
+  root.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) {
+      if (!m) continue;
+      const mat = m as THREE.MeshStandardMaterial & {
+        metalness?: number;
+        roughness?: number;
+        emissive?: THREE.Color;
+        emissiveIntensity?: number;
+      };
+      if (mat.color && typeof mat.color.getHSL === "function") {
+        const hsl = { h: 0, s: 0, l: 0 };
+        mat.color.getHSL(hsl);
+        // Lift very-dark materials to at least L=0.55 so they
+        // catch our light rig; lightly nudge already-mid
+        // materials so the whole model reads as a touch
+        // brighter overall.
+        const targetL = Math.max(hsl.l, 0.55);
+        mat.color.setHSL(hsl.h, Math.min(hsl.s, 0.4), targetL);
+      }
+      if (typeof mat.metalness === "number") mat.metalness = Math.min(mat.metalness, 0.1);
+      if (typeof mat.roughness === "number") mat.roughness = Math.max(mat.roughness, 0.55);
+      if (mat.emissive && typeof mat.emissive.copy === "function" && mat.color) {
+        mat.emissive.copy(mat.color).multiplyScalar(0.08);
+        if (typeof mat.emissiveIntensity === "number") mat.emissiveIntensity = 1;
+      }
+    }
+  });
+}
+
 const KIND_COLOR: Record<string, number> = {
   terrain: 0x8b7355,
   "property-line": 0xff3344,
@@ -681,7 +823,9 @@ export function BimModelViewport({
   elements,
   selectedElementRef = null,
   currentUserId = ANON_USER_ID,
+  presentation = "default",
 }: BimModelViewportProps) {
+  const immersive = presentation === "immersive";
   const renderable = useMemo(() => classifyElements(elements), [elements]);
 
   // Three.js scene refs — the React state below mirrors what the
@@ -698,11 +842,25 @@ export function BimModelViewport({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const cameraTweenRef = useRef<{ cancel: () => void } | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   // Map of elementId → its scene Object3D, so selection /
   // camera-fit / disposal can find a mesh by the id the React
   // tree knows about.
   const elementMeshesRef = useRef<Map<string, THREE.Object3D>>(new Map());
+
+  // Reviewer-tunable viewer prefs (persisted in localStorage so a
+  // reviewer's "make the model brighter" gesture sticks across
+  // engagements). Read lazily so the very first scene init uses
+  // the persisted values via the refs below.
+  const [exposure, setExposure] = useState<number>(() => readViewerPref("exposure", 1.2));
+  const [bgPreset, setBgPreset] = useState<BgPresetKey>(() =>
+    readViewerPref<BgPresetKey>("bg", "studio"),
+  );
+  const exposureRef = useRef(exposure);
+  const bgPresetRef = useRef<BgPresetKey>(bgPreset);
+  useEffect(() => { exposureRef.current = exposure; }, [exposure]);
+  useEffect(() => { bgPresetRef.current = bgPreset; }, [bgPreset]);
 
   const [webGlOk] = useState<boolean>(detectWebGl);
   // Per-source GLB load state, plus the bounds the load
@@ -940,21 +1098,59 @@ export function BimModelViewport({
       container.clientHeight || 1,
       false,
     );
-    renderer.setClearColor(0x000000, 0);
-    container.appendChild(renderer.domElement);
+    // Tone mapping + exposure give the reviewer a single
+    // "brightness" knob (`renderer.toneMappingExposure`) for
+    // lifting dark IFC interiors without re-authoring every
+    // material. ACES is the standard cinematic curve and rolls
+    // off highlights cleanly so the slider can go above 1.0
+    // without blowing out white walls. sRGB output keeps colour
+    // swatches faithful.
+    if ((THREE as unknown as { ACESFilmicToneMapping?: number })
+      .ACESFilmicToneMapping !== undefined) {
+      renderer.toneMapping = (THREE as unknown as { ACESFilmicToneMapping: number })
+        .ACESFilmicToneMapping;
+    }
+    renderer.toneMappingExposure = exposureRef.current;
+    if ((THREE as unknown as { SRGBColorSpace?: string }).SRGBColorSpace) {
+      (renderer as unknown as { outputColorSpace?: string }).outputColorSpace =
+        (THREE as unknown as { SRGBColorSpace: string }).SRGBColorSpace;
+    }
+    applyBackgroundToRenderer(renderer, bgPresetRef.current);
+    const canvas = renderer.domElement;
+    canvas.style.position = "absolute";
+    canvas.style.inset = "0";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.zIndex = "0";
+    canvas.style.display = "block";
+    // Keep orbit surface behind HUD overlays (sheets rail is z-index 15).
+    canvas.style.pointerEvents = "auto";
+    canvas.style.touchAction = "none";
+    container.appendChild(canvas);
     rendererRef.current = renderer;
 
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.45);
+    // Three-light rig + hemisphere fill — dark IFC walls were
+    // rendering as near-black under the old single-ambient
+    // setup. Hemisphere gives a soft sky/ground gradient so
+    // unlit surfaces still read as having form; key/fill/rim
+    // directional lights add directional shading so corners and
+    // edges remain legible.
+    const hemi = new THREE.HemisphereLight(0xdfeaff, 0x404448, 0.85);
+    scene.add(hemi);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xffffff, 0.85);
-    // Z-up world: light sits above scene (positive Z) and slightly
-    // off-axis so extruded slabs cast a visible top-vs-side shading
-    // rather than rendering as flat colour blocks.
-    sun.position.set(0, -100, 200);
-    scene.add(sun);
+    const key = new THREE.DirectionalLight(0xffffff, 1.1);
+    key.position.set(120, -160, 220);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0xc8d8ff, 0.55);
+    fill.position.set(-160, 120, 100);
+    scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xffe6c0, 0.4);
+    rim.position.set(0, 200, -120);
+    scene.add(rim);
 
     const camera = new THREE.PerspectiveCamera(
       45,
@@ -978,38 +1174,38 @@ export function BimModelViewport({
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.target.set(0, 0, 0);
-    // Task #380 — reviewer pan/zoom interaction model:
-    //   - Left mouse drags pan the camera (the most common gesture
-    //     reviewers reach for when verifying a finding's neighbour
-    //     context). Screen-space panning so the gesture moves the
-    //     scene 1:1 with the cursor regardless of camera tilt.
-    //   - Wheel zooms toward the cursor (handled by the custom
-    //     `wheel` capture-phase listener below — three@0.128
-    //     predates OrbitControls' built-in `zoomToCursor`, and
-    //     bumping the dependency for one UX nicety would regress
-    //     too many other consumers).
-    //   - Right mouse still rotates the orbit so reviewers can
-    //     pivot to read a setback-plane from a different angle.
-    //     The task didn't ask for this but the alternative is to
-    //     disable rotation entirely, which would regress today's
-    //     OrbitControls default for no good reason.
     controls.enablePan = true;
     controls.enableZoom = true;
     controls.enableRotate = true;
     controls.screenSpacePanning = true;
-    if (THREE.MOUSE) {
-      controls.mouseButtons = {
-        LEFT: THREE.MOUSE.PAN,
-        MIDDLE: THREE.MOUSE.DOLLY,
-        RIGHT: THREE.MOUSE.ROTATE,
-      };
-    }
-    if (THREE.TOUCH) {
-      controls.touches = {
-        ONE: THREE.TOUCH.PAN,
-        TWO: THREE.TOUCH.DOLLY_ROTATE,
-      };
-    }
+    const immersiveOrbit = presentation === "immersive";
+    const mouseRotate = THREE.MOUSE?.ROTATE ?? 0;
+    const mouseDolly = THREE.MOUSE?.DOLLY ?? 1;
+    const mousePan = THREE.MOUSE?.PAN ?? 2;
+    const touchRotate = THREE.TOUCH?.ROTATE ?? 0;
+    const touchPan = THREE.TOUCH?.PAN ?? 1;
+    const touchDollyPan = THREE.TOUCH?.DOLLY_PAN ?? 2;
+    const touchDollyRotate = THREE.TOUCH?.DOLLY_ROTATE ?? 3;
+    controls.mouseButtons = immersiveOrbit
+      ? {
+          LEFT: mouseRotate,
+          MIDDLE: mouseDolly,
+          RIGHT: mousePan,
+        }
+      : {
+          LEFT: mousePan,
+          MIDDLE: mouseDolly,
+          RIGHT: mouseRotate,
+        };
+    controls.touches = immersiveOrbit
+      ? {
+          ONE: touchRotate,
+          TWO: touchDollyPan,
+        }
+      : {
+          ONE: touchPan,
+          TWO: touchDollyRotate,
+        };
     controlsRef.current = controls;
 
     // Custom wheel-zoom that anchors on the cursor instead of the
@@ -1171,7 +1367,7 @@ export function BimModelViewport({
       sceneRef.current = null;
       cameraRef.current = null;
     };
-  }, [webGlOk]);
+  }, [webGlOk, presentation]);
 
   // ---------- Inline-ring meshes: build / sync / dispose ----------
   useEffect(() => {
@@ -1304,6 +1500,13 @@ export function BimModelViewport({
                 gltf.scene.children
                   .slice()
                   .forEach((child) => root.add(child));
+                // Lift dark IFC/DXF materials before mounting so
+                // every clone derived from `root` inherits the
+                // brightened materials (clones share material
+                // refs by default, but doing this here keeps the
+                // mount loop below symmetric and avoids
+                // re-traversing the cloned tree).
+                brightenGlbMaterials(root);
                 const box = new THREE.Box3().setFromObject(root);
                 const bounds3: Bounds3D = {
                   minX: Number.isFinite(box.min.x) ? box.min.x : 0,
@@ -1447,6 +1650,114 @@ export function BimModelViewport({
     }
   }, [cameraFit, fitSignature, applyCameraFit, webGlOk]);
 
+  // Live-update the renderer when the reviewer drags the
+  // brightness slider or picks a background swatch. We don't
+  // re-init the whole scene — just patch the live renderer in
+  // place — so a reviewer can fine-tune without losing their
+  // pan/zoom state.
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.toneMappingExposure = exposure;
+    writeViewerPref("exposure", exposure);
+  }, [exposure]);
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    applyBackgroundToRenderer(renderer, bgPreset);
+    writeViewerPref("bg", bgPreset);
+  }, [bgPreset]);
+
+  // View preset — snap the camera to one of four standard
+  // engineering viewpoints around the current orbit target,
+  // preserving the framed distance so the reviewer's mental
+  // scale stays put. Increments the same `cameraFitAppliedCount`
+  // counter the auto-fit path uses so e2e specs can observe
+  // the camera move without reaching into three.js internals.
+  const snapCameraToDirection = useCallback(
+    (vec: [number, number, number]) => {
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      if (!camera || !controls) return;
+      cameraTweenRef.current?.cancel();
+      const distance =
+        camera.position.distanceTo(controls.target) ||
+        (cameraFit ? cameraFit.distance : 100);
+      const { position, target } = snapCameraToDirectionVector(
+        camera,
+        controls,
+        vec,
+        distance,
+      );
+      cameraTweenRef.current = tweenCameraToView(
+        camera,
+        controls,
+        position,
+        target,
+        300,
+        () => {
+          cameraTweenRef.current = null;
+          setCameraFitAppliedCount((n) => n + 1);
+        },
+      );
+    },
+    [cameraFit],
+  );
+
+  const handleViewPreset = useCallback(
+    (preset: ViewPresetKey) => {
+      snapCameraToDirection(VIEW_PRESETS[preset].vec);
+    },
+    [snapCameraToDirection],
+  );
+
+  const handleViewCubeFace = useCallback(
+    (region: ViewCubeRegionId) => {
+      const vec = VIEW_CUBE_VEC[region];
+      if (!vec) return;
+      snapCameraToDirection(vec);
+    },
+    [snapCameraToDirection],
+  );
+
+  const handleViewCubeOrbitDrag = useCallback((deltaX: number, deltaY: number) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    applyOrbitDrag(camera, controls, deltaX, deltaY);
+  }, []);
+
+  const handleViewCubeDragStart = useCallback(() => {
+    const controls = controlsRef.current;
+    if (controls) controls.enableDamping = false;
+  }, []);
+
+  const handleViewCubeDragEnd = useCallback(() => {
+    const controls = controlsRef.current;
+    if (controls) {
+      controls.enableDamping = true;
+      controls.update();
+    }
+  }, []);
+
+  const handleCompassHeadingDrag = useCallback((deltaRadians: number) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    applyCompassHeadingDrag(camera, controls, deltaRadians);
+  }, []);
+
+  const handleCompassSnap = useCallback(
+    (cardinal: "n" | "e" | "s" | "w") => {
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      if (!camera || !controls) return;
+      snapCompassCardinal(camera, controls, cardinal);
+      setCameraFitAppliedCount((n) => n + 1);
+    },
+    [],
+  );
+
   const handleResetView = useCallback(() => {
     if (applyCameraFit()) {
       // Re-syncs the signature so the next selection-change /
@@ -1478,6 +1789,7 @@ export function BimModelViewport({
     <div
       ref={viewportRef}
       data-testid="bim-model-viewport"
+      data-presentation={presentation}
       data-renderable-element-count={renderable.length}
       data-selected-element-id={selectedElementId}
       data-selected-element-source={selectedSourceAttr}
@@ -1486,62 +1798,100 @@ export function BimModelViewport({
       data-camera-fit-applied-count={cameraFitAppliedCount}
       data-webgl-available={webGlOk ? "true" : "false"}
       {...sourceLoadAttrs}
-      style={{
-        padding: 12,
-        border: "1px solid var(--border-default)",
-        borderRadius: 6,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
+      style={
+        immersive
+          ? {
+              position: "relative",
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              minHeight: 0,
+              height: "100%",
+              width: "100%",
+            }
+          : {
+              padding: 12,
+              border: "1px solid var(--border-default)",
+              borderRadius: 6,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }
+      }
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 8,
-        }}
-      >
-        <div style={{ fontSize: 14, fontWeight: 500 }}>BIM model viewer</div>
+      {!immersive && (
         <div
-          data-testid="bim-model-viewport-element-count"
           style={{
-            fontSize: 11,
-            color: "var(--text-muted)",
-            fontVariantNumeric: "tabular-nums",
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: 8,
           }}
         >
-          {renderable.length}{" "}
-          {renderable.length === 1 ? "element" : "elements"} renderable
+          <div style={{ fontSize: 14, fontWeight: 500 }}>BIM model viewer</div>
+          <div
+            data-testid="bim-model-viewport-element-count"
+            style={{
+              fontSize: 11,
+              color: "var(--text-muted)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {renderable.length}{" "}
+            {renderable.length === 1 ? "element" : "elements"} renderable
+          </div>
         </div>
-      </div>
+      )}
 
       <div
-        ref={containerRef}
         data-testid="bim-model-viewport-canvas"
-        style={{
-          position: "relative",
-          background: "var(--bg-input)",
-          borderRadius: 4,
-          overflow: "hidden",
-          minHeight: 280,
-          // QA-33 — the `aspectRatio: 16/9` styling derives the canvas
-          // wrapper height from its width. On a wide modal (the plan-
-          // review `DialogContent` with `max-w-3xl` plus larger viewports)
-          // that produces a 400–600px height, and a real as-built IFC
-          // (Musgrave: 5MB GLB) renders a building centered in that box.
-          // Nothing in the ancestor chain — `DialogContent` →
-          // `TabsContent` → `BimModelTab` → this component's outer
-          // `viewportRef` — capped the canvas wrapper, so the modal
-          // scrolled the building below the fold and the operator saw
-          // an empty viewport on cortex-api-00020-85n. Cap at 60vh so
-          // the canvas is always visible inside `DialogContent`'s own
-          // 90vh budget regardless of how wide the modal grows.
-          maxHeight: "60vh",
-          aspectRatio: "16 / 9",
-        }}
+        className="bim-model-viewport-canvas-wrap"
+        style={
+          immersive
+            ? {
+                position: "relative",
+                flex: 1,
+                minHeight: 0,
+                width: "100%",
+                height: "100%",
+                overflow: "hidden",
+                background: "var(--bg-base)",
+              }
+            : {
+                position: "relative",
+                background: "var(--bg-input)",
+                borderRadius: 4,
+                overflow: "hidden",
+                minHeight: 280,
+                // QA-33 — the `aspectRatio: 16/9` styling derives the canvas
+                // wrapper height from its width. On a wide modal (the plan-
+                // review `DialogContent` with `max-w-3xl` plus larger viewports)
+                // that produces a 400–600px height, and a real as-built IFC
+                // (Musgrave: 5MB GLB) renders a building centered in that box.
+                // Nothing in the ancestor chain — `DialogContent` →
+                // `TabsContent` → `BimModelTab` → this component's outer
+                // `viewportRef` — capped the canvas wrapper, so the modal
+                // scrolled the building below the fold and the operator saw
+                // an empty viewport on cortex-api-00020-85n. Cap at 60vh so
+                // the canvas is always visible inside `DialogContent`'s own
+                // 90vh budget regardless of how wide the modal grows.
+                maxHeight: "60vh",
+                aspectRatio: "16 / 9",
+              }
+        }
       >
+        {/*
+          WebGL canvas lives in a React-empty host so reconciliation never
+          removes the DOM node OrbitControls is bound to. HUD chrome sits in
+          a sibling overlay layer with pointer-events: none so drags on the
+          model pass through to the canvas.
+        */}
+        <div
+          ref={containerRef}
+          className="bim-model-viewport-canvas-host"
+          data-testid="bim-model-viewport-canvas-host"
+        />
+        <div className="bim-model-viewport-overlays">
         {/*
           Task #402 — gesture legend. Reviewers used to land on the
           interactive 3D viewport (Task #380) with no on-canvas
@@ -1562,7 +1912,11 @@ export function BimModelViewport({
           <div
             data-testid="bim-model-viewport-gesture-hint"
             data-hint-source={hintDismissed ? "revealed" : "initial"}
-            aria-label="3D viewer controls: drag to pan, scroll to zoom, right-drag to rotate, Reset view to recenter"
+            aria-label={
+              immersive
+                ? "3D viewer controls: drag to rotate, scroll to zoom, right-drag to pan, Reset view to recenter"
+                : "3D viewer controls: drag to pan, scroll to zoom, right-drag to rotate, Reset view to recenter"
+            }
             style={{
               position: "absolute",
               top: 8,
@@ -1580,8 +1934,9 @@ export function BimModelViewport({
               zIndex: 2,
             }}
           >
-            Drag to pan · Scroll to zoom · Right-drag to rotate ·
-            Reset view to recenter
+            {immersive
+              ? "Drag to rotate · Scroll to zoom · Right-drag to pan · Reset view to recenter"
+              : "Drag to pan · Scroll to zoom · Right-drag to rotate · Reset view to recenter"}
           </div>
         )}
         {webGlOk && cameraFit && hintDismissed && (
@@ -1661,32 +2016,278 @@ export function BimModelViewport({
           </button>
         )}
         {webGlOk && cameraFit && (
-          <button
-            type="button"
-            data-testid="bim-model-viewport-reset-view"
-            onClick={handleResetView}
-            title={
-              selectedRenderable
-                ? "Reset view to the selected element"
-                : "Reset view to the full scene"
+          <div className="bim-viewport-viewcube-slot">
+            <ViewCubeWidget
+              mainCamera={cameraRef}
+              onSelectRegion={handleViewCubeFace}
+              onOrbitDrag={handleViewCubeOrbitDrag}
+              onOrbitDragStart={handleViewCubeDragStart}
+              onOrbitDragEnd={handleViewCubeDragEnd}
+              onCompassHeadingDrag={handleCompassHeadingDrag}
+              onCompassSnap={handleCompassSnap}
+              onHome={handleResetView}
+            />
+          </div>
+        )}
+        {webGlOk && cameraFit && (
+          <div
+            className={
+              immersive ? "bim-viewport-overlay-stack" : undefined
             }
-            style={{
-              position: "absolute",
-              top: 8,
-              right: 8,
-              background: "var(--bg-elevated)",
-              color: "var(--text-default)",
-              border: "1px solid var(--border-default)",
-              borderRadius: 4,
-              padding: "4px 8px",
-              fontSize: 11,
-              cursor: "pointer",
-              lineHeight: 1.2,
-              zIndex: 1,
-            }}
+            data-testid="bim-model-viewport-toolbar"
+            style={
+              immersive
+                ? undefined
+                : {
+                    position: "absolute",
+                    top: 96,
+                    right: 8,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    alignItems: "flex-end",
+                    zIndex: 1,
+                  }
+            }
           >
-            Reset view
-          </button>
+            {immersive ? (
+                <div className="bim-viewport-hud-panel bim-viewport-hud-panel--unified">
+                  <div className="bim-viewport-hud-panel-row">
+                    <div
+                      className="bim-viewport-hud-chip bim-viewport-hud-chip--meta"
+                      data-testid="bim-model-viewport-element-count"
+                    >
+                      <span>BIM</span>
+                      <strong>{renderable.length}</strong>
+                      <span>
+                        {renderable.length === 1 ? "element" : "elements"}
+                      </span>
+                    </div>
+                    <div
+                      role="group"
+                      aria-label="Camera view presets"
+                      className="bim-viewport-hud-view-group"
+                    >
+                      {(Object.keys(VIEW_PRESETS) as ViewPresetKey[]).map(
+                        (k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            data-testid={`bim-model-viewport-view-${k}`}
+                            onClick={() => handleViewPreset(k)}
+                            title={`Snap camera to ${VIEW_PRESETS[k].label.toLowerCase()} view`}
+                          >
+                            {VIEW_PRESETS[k].label}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                  <div className="bim-viewport-hud-panel-row bim-viewport-hud-panel-row--secondary">
+                    <div
+                      role="group"
+                      aria-label="Scene background"
+                      className="bim-viewport-hud-appearance"
+                    >
+                      {(Object.keys(BG_PRESETS) as BgPresetKey[]).map((k) => {
+                        const active = bgPreset === k;
+                        return (
+                          <button
+                            key={k}
+                            type="button"
+                            data-testid={`bim-model-viewport-bg-${k}`}
+                            data-active={active ? "true" : "false"}
+                            aria-pressed={active}
+                            aria-label={`Set ${BG_PRESETS[k].label.toLowerCase()} background`}
+                            onClick={() => setBgPreset(k)}
+                            title={`${BG_PRESETS[k].label} background`}
+                            style={{
+                              width: 18,
+                              height: 18,
+                              padding: 0,
+                              background: BG_PRESETS[k].swatch,
+                              border: active
+                                ? "2px solid var(--accent-default, #4a8cff)"
+                                : "1px solid rgba(255, 255, 255, 0.2)",
+                              borderRadius: 3,
+                              cursor: "pointer",
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                    <label
+                      data-testid="bim-model-viewport-brightness-wrap"
+                      className="bim-viewport-hud-chip bim-viewport-hud-brightness"
+                    >
+                      <span aria-hidden="true">☀</span>
+                      <input
+                        type="range"
+                        data-testid="bim-model-viewport-brightness"
+                        aria-label="Model brightness"
+                        min={0.4}
+                        max={2.4}
+                        step={0.05}
+                        value={exposure}
+                        onChange={(e) =>
+                          setExposure(Number(e.currentTarget.value))
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      data-testid="bim-model-viewport-reset-view"
+                      className="bim-viewport-hud-chip bim-viewport-hud-chip--button"
+                      onClick={handleResetView}
+                      title={
+                        selectedRenderable
+                          ? "Reset view to the selected element"
+                          : "Reset view to the full scene"
+                      }
+                    >
+                      Reset view
+                    </button>
+                  </div>
+                </div>
+            ) : (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                alignItems: "flex-end",
+              }}
+            >
+              <div
+                role="group"
+                aria-label="Camera view presets"
+                style={{
+                  display: "flex",
+                  gap: 0,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  overflow: "hidden",
+                }}
+              >
+                {(Object.keys(VIEW_PRESETS) as ViewPresetKey[]).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    data-testid={`bim-model-viewport-view-${k}`}
+                    onClick={() => handleViewPreset(k)}
+                    title={`Snap camera to ${VIEW_PRESETS[k].label.toLowerCase()} view`}
+                    style={{
+                      background: "transparent",
+                      color: "var(--text-default)",
+                      border: "none",
+                      borderLeft:
+                        k === "iso" ? "none" : "1px solid var(--border-default)",
+                      padding: "4px 8px",
+                      fontSize: 11,
+                      lineHeight: 1.2,
+                      cursor: "pointer",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {VIEW_PRESETS[k].label}
+                  </button>
+                ))}
+              </div>
+              <div
+                role="group"
+                aria-label="Scene background"
+                style={{
+                  display: "flex",
+                  gap: 0,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  overflow: "hidden",
+                  padding: 2,
+                }}
+              >
+                {(Object.keys(BG_PRESETS) as BgPresetKey[]).map((k) => {
+                  const active = bgPreset === k;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      data-testid={`bim-model-viewport-bg-${k}`}
+                      data-active={active ? "true" : "false"}
+                      aria-pressed={active}
+                      aria-label={`Set ${BG_PRESETS[k].label.toLowerCase()} background`}
+                      onClick={() => setBgPreset(k)}
+                      title={`${BG_PRESETS[k].label} background`}
+                      style={{
+                        width: 18,
+                        height: 18,
+                        margin: 1,
+                        padding: 0,
+                        background: BG_PRESETS[k].swatch,
+                        border: active
+                          ? "2px solid var(--accent-default, #4a8cff)"
+                          : "1px solid var(--border-default)",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              <label
+                data-testid="bim-model-viewport-brightness-wrap"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "var(--bg-elevated)",
+                  color: "var(--text-muted)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: "3px 8px",
+                  fontSize: 10,
+                  lineHeight: 1.2,
+                }}
+              >
+                <span aria-hidden="true">☀</span>
+                <input
+                  type="range"
+                  data-testid="bim-model-viewport-brightness"
+                  aria-label="Model brightness"
+                  min={0.4}
+                  max={2.4}
+                  step={0.05}
+                  value={exposure}
+                  onChange={(e) => setExposure(Number(e.currentTarget.value))}
+                  style={{ width: 80, cursor: "pointer" }}
+                />
+              </label>
+              <button
+                type="button"
+                data-testid="bim-model-viewport-reset-view"
+                onClick={handleResetView}
+                title={
+                  selectedRenderable
+                    ? "Reset view to the selected element"
+                    : "Reset view to the full scene"
+                }
+                style={{
+                  background: "var(--bg-elevated)",
+                  color: "var(--text-default)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: "4px 8px",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  lineHeight: 1.2,
+                }}
+              >
+                Reset view
+              </button>
+            </div>
+            )}
+          </div>
         )}
         {!webGlOk && (
           <div
@@ -1795,6 +2396,7 @@ export function BimModelViewport({
               . The element list still highlights its row below.
             </div>
           )}
+        </div>
       </div>
     </div>
   );

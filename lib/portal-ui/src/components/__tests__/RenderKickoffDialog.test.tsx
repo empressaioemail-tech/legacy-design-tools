@@ -409,6 +409,7 @@ describe("RenderKickoffPanel", () => {
     expect(
       screen.queryByTestId("render-kickoff-dialog"),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("New render")).toBeInTheDocument();
+    expect(screen.getByTestId("render-kickoff-intent")).toBeInTheDocument();
+    expect(screen.getByTestId("render-kickoff-confirm")).toBeInTheDocument();
   });
 });
