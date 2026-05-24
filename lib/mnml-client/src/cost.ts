@@ -33,6 +33,23 @@ export const RENDER_COST_CREDITS = {
   video: 10,
 } as const;
 
+/**
+ * doc 40e A.2 — static per-power-tool credit costs. mnml documents 1
+ * credit each for upscale + ai-eraser (2026-05-23 docs); enhance,
+ * inpaint, and style_transfer are unspecified in docs — 1 credit
+ * placeholder matches MockMnmlClient until live discovery.
+ */
+export const POWER_TOOL_COST_CREDITS = {
+  enhance: 1,
+  upscale: 1,
+  erase: 1,
+  inpaint: 1,
+  style_transfer: 1,
+} as const;
+
+/** `viewpoint_renders.source_type` values for the five power tools. */
+export type PowerToolSourceType = keyof typeof POWER_TOOL_COST_CREDITS;
+
 /** API-server domain render kinds. */
 export type DomainRenderKind = "still" | "elevation-set" | "video";
 
@@ -117,4 +134,14 @@ function buildEstimate(
     credits: subtotal,
     breakdown: [{ kind, count, creditsPerCall, subtotal }],
   };
+}
+
+/**
+ * Pre-kickoff cost for a single power-tool invocation (doc 40e A.2).
+ * Pure function — one mnml call per route, no fan-out.
+ */
+export function estimatePowerToolCost(input: {
+  tool: PowerToolSourceType;
+}): { credits: number } {
+  return { credits: POWER_TOOL_COST_CREDITS[input.tool] };
 }

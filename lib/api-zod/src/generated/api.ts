@@ -6793,22 +6793,31 @@ export const WithdrawReviewerRequestResponse = zod
   );
 
 /**
+ * doc 40e A.5 / B.2 — stores a source image under
+/objects/uploads/{uuid} and returns the canonical
+`sourceUploadUrl` for a subsequent `still` kickoff. Multipart
+`image` file part, ≤15MB. Behind `RENDERS_PROD_ENABLED`.
+
+ * @summary Upload a source image for upload-as-render-source
+ */
+export const UploadRenderSourceParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UploadRenderSourceBody = zod.object({}).passthrough();
+
+/**
  * Synchronous up to row insert + 202 response; the polling
 worker (capture → trigger → poll → mirror → terminal) runs
-fire-and-forget. Body is a discriminated union by `kind`:
+fire-and-forget. Body is a union by `kind`:
 
-  - `still`         — single image. 1 archDiffusion-v43 call.
-  - `elevation-set` — north / east / south / west. 4 archDiff
-                      calls fanned out by the route, persisted
-                      as ONE viewpoint_renders parent row +
-                      4 render_outputs children.
-  - `video`         — single 5- or 10-second Kling clip.
+  - `still` + GLB capture — `glbUrl` + camera params (default).
+  - `still` + upload     — `sourceUploadUrl` from
+    `POST .../renders/source-upload` (doc 40e A.5).
+  - `elevation-set`      — 4 archDiffusion calls.
+  - `video`              — single Kling clip.
 
-Architect-audience-only. Behind `RENDERS_PROD_ENABLED` in
-production (returns 503 with `renders_preview_disabled` until
-the operator flips the flag). The body MUST include `glbUrl`
-— V1-4 does not resolve the bim-model row's GLB pointer
-server-side (V1-5 follow-up).
+Behind `RENDERS_PROD_ENABLED` in production.
 
  * @summary Kick off a mnml.ai render for an engagement
  */
@@ -6823,270 +6832,305 @@ export const kickoffRenderBodyOneTwoFovMax = 120;
 
 export const kickoffRenderBodyTwoOnePromptMax = 2000;
 
-export const kickoffRenderBodyTwoTwoCameraDistanceExclusiveMin = 0;
-
-export const kickoffRenderBodyTwoTwoFovMin = 10;
-export const kickoffRenderBodyTwoTwoFovMax = 120;
-
 export const kickoffRenderBodyThreeOnePromptMax = 2000;
 
-export const kickoffRenderBodyThreeTwoCfgScaleMin = 0;
-export const kickoffRenderBodyThreeTwoCfgScaleMax = 1;
+export const kickoffRenderBodyThreeTwoCameraDistanceExclusiveMin = 0;
 
-export const KickoffRenderBody = zod.union([
-  zod
-    .object({
-      glbUrl: zod
-        .string()
-        .url()
-        .describe(
-          "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
-        ),
-      prompt: zod
-        .string()
-        .min(1)
-        .max(kickoffRenderBodyOneOnePromptMax)
-        .describe(
-          "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
-        ),
-      expertName: zod
-        .enum([
-          "exterior",
-          "interior",
-          "masterplan",
-          "landscape",
-          "plan",
-          "product",
-        ])
-        .optional()
-        .describe("mnml expert routing per Spec 54 v2 §2.1."),
-      renderStyle: zod
-        .enum([
-          "raw",
-          "photoreal",
-          "cgi_render",
-          "cad",
-          "freehand_sketch",
-          "clay_model",
-          "illustration",
-          "watercolor",
-        ])
-        .optional(),
-      expertParams: zod
-        .record(zod.string(), zod.string())
-        .optional()
-        .describe(
-          "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
-        ),
-    })
-    .describe("Common kickoff fields shared across every render kind.")
-    .and(
-      zod
-        .object({
-          kind: zod.enum(["still"]),
-          cameraPosition: zod
-            .object({
-              x: zod.number(),
-              y: zod.number(),
-              z: zod.number(),
-            })
-            .describe(
-              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
-            ),
-          cameraTarget: zod
-            .object({
-              x: zod.number(),
-              y: zod.number(),
-              z: zod.number(),
-            })
-            .describe(
-              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
-            ),
-          fov: zod
-            .number()
-            .min(kickoffRenderBodyOneTwoFovMin)
-            .max(kickoffRenderBodyOneTwoFovMax)
-            .optional()
-            .describe("Field of view in degrees. Default 50 if omitted."),
-        })
-        .describe("Single still image kickoff."),
-    )
-    .and(
-      zod.object({
-        kind: zod.enum(["still"]),
-      }),
-    ),
-  zod
-    .object({
-      glbUrl: zod
-        .string()
-        .url()
-        .describe(
-          "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
-        ),
-      prompt: zod
-        .string()
-        .min(1)
-        .max(kickoffRenderBodyTwoOnePromptMax)
-        .describe(
-          "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
-        ),
-      expertName: zod
-        .enum([
-          "exterior",
-          "interior",
-          "masterplan",
-          "landscape",
-          "plan",
-          "product",
-        ])
-        .optional()
-        .describe("mnml expert routing per Spec 54 v2 §2.1."),
-      renderStyle: zod
-        .enum([
-          "raw",
-          "photoreal",
-          "cgi_render",
-          "cad",
-          "freehand_sketch",
-          "clay_model",
-          "illustration",
-          "watercolor",
-        ])
-        .optional(),
-      expertParams: zod
-        .record(zod.string(), zod.string())
-        .optional()
-        .describe(
-          "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
-        ),
-    })
-    .describe("Common kickoff fields shared across every render kind.")
-    .and(
-      zod
-        .object({
-          kind: zod.enum(["elevation-set"]),
-          buildingCenter: zod
-            .object({
-              x: zod.number(),
-              y: zod.number(),
-              z: zod.number(),
-            })
-            .describe(
-              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
-            ),
-          cameraDistance: zod
-            .number()
-            .gt(kickoffRenderBodyTwoTwoCameraDistanceExclusiveMin)
-            .describe("Meters from buildingCenter along each cardinal axis.\n"),
-          cameraHeight: zod
-            .number()
-            .describe("Meters above ground for the camera origin."),
-          fov: zod
-            .number()
-            .min(kickoffRenderBodyTwoTwoFovMin)
-            .max(kickoffRenderBodyTwoTwoFovMax)
-            .optional(),
-        })
-        .describe(
-          "Cardinal-elevation set. The route fans out 4 separate\narchDiffusion-v43 calls (camera_direction front \/ right \/\nback \/ left) and persists ONE viewpoint_renders parent\nrow + 4 render_outputs children (one per cardinal role).\n",
-        ),
-    )
-    .and(
-      zod.object({
-        kind: zod.enum(["elevation-set"]),
-      }),
-    ),
-  zod
-    .object({
-      glbUrl: zod
-        .string()
-        .url()
-        .describe(
-          "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
-        ),
-      prompt: zod
-        .string()
-        .min(1)
-        .max(kickoffRenderBodyThreeOnePromptMax)
-        .describe(
-          "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
-        ),
-      expertName: zod
-        .enum([
-          "exterior",
-          "interior",
-          "masterplan",
-          "landscape",
-          "plan",
-          "product",
-        ])
-        .optional()
-        .describe("mnml expert routing per Spec 54 v2 §2.1."),
-      renderStyle: zod
-        .enum([
-          "raw",
-          "photoreal",
-          "cgi_render",
-          "cad",
-          "freehand_sketch",
-          "clay_model",
-          "illustration",
-          "watercolor",
-        ])
-        .optional(),
-      expertParams: zod
-        .record(zod.string(), zod.string())
-        .optional()
-        .describe(
-          "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
-        ),
-    })
-    .describe("Common kickoff fields shared across every render kind.")
-    .and(
-      zod
-        .object({
-          kind: zod.enum(["video"]),
-          cameraPosition: zod
-            .object({
-              x: zod.number(),
-              y: zod.number(),
-              z: zod.number(),
-            })
-            .describe(
-              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
-            ),
-          cameraTarget: zod
-            .object({
-              x: zod.number(),
-              y: zod.number(),
-              z: zod.number(),
-            })
-            .describe(
-              "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
-            ),
-          duration: zod.union([zod.literal(5), zod.literal(10)]),
-          cfgScale: zod
-            .number()
-            .min(kickoffRenderBodyThreeTwoCfgScaleMin)
-            .max(kickoffRenderBodyThreeTwoCfgScaleMax)
-            .optional(),
-          aspectRatio: zod.enum(["16:9", "4:3", "1:1"]).optional(),
-          movementType: zod
-            .enum(["horizontal", "vertical", "zoom_in", "zoom_out", "pan"])
-            .optional(),
-          direction: zod.enum(["left", "right", "up", "down"]).optional(),
-        })
-        .describe(
-          "Single 5- or 10-second Kling clip. mnml's documented hard\ncap (Spec 54 v2 §2.2) — duration outside `{5, 10}` is\nrejected by validation.\n",
-        ),
-    )
-    .and(
-      zod.object({
-        kind: zod.enum(["video"]),
-      }),
-    ),
-]);
+export const kickoffRenderBodyThreeTwoFovMin = 10;
+export const kickoffRenderBodyThreeTwoFovMax = 120;
+
+export const kickoffRenderBodyFourOnePromptMax = 2000;
+
+export const kickoffRenderBodyFourTwoCfgScaleMin = 0;
+export const kickoffRenderBodyFourTwoCfgScaleMax = 1;
+
+export const KickoffRenderBody = zod
+  .union([
+    zod
+      .object({
+        glbUrl: zod
+          .string()
+          .url()
+          .describe(
+            "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+          ),
+        prompt: zod
+          .string()
+          .min(1)
+          .max(kickoffRenderBodyOneOnePromptMax)
+          .describe(
+            "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
+          ),
+        expertName: zod
+          .enum([
+            "exterior",
+            "interior",
+            "masterplan",
+            "landscape",
+            "plan",
+            "product",
+          ])
+          .optional()
+          .describe("mnml expert routing per Spec 54 v2 §2.1."),
+        renderStyle: zod
+          .enum([
+            "raw",
+            "photoreal",
+            "cgi_render",
+            "cad",
+            "freehand_sketch",
+            "clay_model",
+            "illustration",
+            "watercolor",
+          ])
+          .optional(),
+        expertParams: zod
+          .record(zod.string(), zod.string())
+          .optional()
+          .describe(
+            "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
+          ),
+      })
+      .describe("Common kickoff fields shared across every render kind.")
+      .and(
+        zod
+          .object({
+            kind: zod.enum(["still"]),
+            cameraPosition: zod
+              .object({
+                x: zod.number(),
+                y: zod.number(),
+                z: zod.number(),
+              })
+              .describe(
+                "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+              ),
+            cameraTarget: zod
+              .object({
+                x: zod.number(),
+                y: zod.number(),
+                z: zod.number(),
+              })
+              .describe(
+                "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+              ),
+            fov: zod
+              .number()
+              .min(kickoffRenderBodyOneTwoFovMin)
+              .max(kickoffRenderBodyOneTwoFovMax)
+              .optional()
+              .describe("Field of view in degrees. Default 50 if omitted."),
+          })
+          .describe("Single still image kickoff from GLB viewport capture."),
+      ),
+    zod
+      .object({
+        prompt: zod.string().min(1).max(kickoffRenderBodyTwoOnePromptMax),
+        expertName: zod
+          .enum([
+            "exterior",
+            "interior",
+            "masterplan",
+            "landscape",
+            "plan",
+            "product",
+          ])
+          .optional(),
+        renderStyle: zod
+          .enum([
+            "raw",
+            "photoreal",
+            "cgi_render",
+            "cad",
+            "freehand_sketch",
+            "clay_model",
+            "illustration",
+            "watercolor",
+          ])
+          .optional(),
+        expertParams: zod.record(zod.string(), zod.string()).optional(),
+      })
+      .describe("Prompt + mnml routing fields without a GLB capture URL.")
+      .and(
+        zod
+          .object({
+            kind: zod.enum(["still"]),
+            sourceUploadUrl: zod
+              .string()
+              .describe(
+                "Path returned by `POST ...\/renders\/source-upload`\n(\/objects\/uploads\/{uuid}).\n",
+              ),
+          })
+          .describe(
+            "doc 40e A.5 — still kickoff from a prior source-upload\nreference (concept imagery \/ manual sketch path).\n",
+          ),
+      ),
+    zod
+      .object({
+        glbUrl: zod
+          .string()
+          .url()
+          .describe(
+            "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+          ),
+        prompt: zod
+          .string()
+          .min(1)
+          .max(kickoffRenderBodyThreeOnePromptMax)
+          .describe(
+            "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
+          ),
+        expertName: zod
+          .enum([
+            "exterior",
+            "interior",
+            "masterplan",
+            "landscape",
+            "plan",
+            "product",
+          ])
+          .optional()
+          .describe("mnml expert routing per Spec 54 v2 §2.1."),
+        renderStyle: zod
+          .enum([
+            "raw",
+            "photoreal",
+            "cgi_render",
+            "cad",
+            "freehand_sketch",
+            "clay_model",
+            "illustration",
+            "watercolor",
+          ])
+          .optional(),
+        expertParams: zod
+          .record(zod.string(), zod.string())
+          .optional()
+          .describe(
+            "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
+          ),
+      })
+      .describe("Common kickoff fields shared across every render kind.")
+      .and(
+        zod
+          .object({
+            kind: zod.enum(["elevation-set"]),
+            buildingCenter: zod
+              .object({
+                x: zod.number(),
+                y: zod.number(),
+                z: zod.number(),
+              })
+              .describe(
+                "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+              ),
+            cameraDistance: zod
+              .number()
+              .gt(kickoffRenderBodyThreeTwoCameraDistanceExclusiveMin)
+              .describe(
+                "Meters from buildingCenter along each cardinal axis.\n",
+              ),
+            cameraHeight: zod
+              .number()
+              .describe("Meters above ground for the camera origin."),
+            fov: zod
+              .number()
+              .min(kickoffRenderBodyThreeTwoFovMin)
+              .max(kickoffRenderBodyThreeTwoFovMax)
+              .optional(),
+          })
+          .describe(
+            "Cardinal-elevation set. The route fans out 4 separate\narchDiffusion-v43 calls (camera_direction front \/ right \/\nback \/ left) and persists ONE viewpoint_renders parent\nrow + 4 render_outputs children (one per cardinal role).\n",
+          ),
+      ),
+    zod
+      .object({
+        glbUrl: zod
+          .string()
+          .url()
+          .describe(
+            "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+          ),
+        prompt: zod
+          .string()
+          .min(1)
+          .max(kickoffRenderBodyFourOnePromptMax)
+          .describe(
+            "Free-form prompt forwarded to mnml as the\n`archDiffusion-v43.prompt` (or `video-ai.prompt`) form\nfield. Spec 54 v2 §2.1 caps at 2000 chars.\n",
+          ),
+        expertName: zod
+          .enum([
+            "exterior",
+            "interior",
+            "masterplan",
+            "landscape",
+            "plan",
+            "product",
+          ])
+          .optional()
+          .describe("mnml expert routing per Spec 54 v2 §2.1."),
+        renderStyle: zod
+          .enum([
+            "raw",
+            "photoreal",
+            "cgi_render",
+            "cad",
+            "freehand_sketch",
+            "clay_model",
+            "illustration",
+            "watercolor",
+          ])
+          .optional(),
+        expertParams: zod
+          .record(zod.string(), zod.string())
+          .optional()
+          .describe(
+            "Per-expert flat string-map. The api-server passes each\nentry through verbatim as a multipart field; mnml\nvalidates against per-expert allowed values.\n",
+          ),
+      })
+      .describe("Common kickoff fields shared across every render kind.")
+      .and(
+        zod
+          .object({
+            kind: zod.enum(["video"]),
+            cameraPosition: zod
+              .object({
+                x: zod.number(),
+                y: zod.number(),
+                z: zod.number(),
+              })
+              .describe(
+                "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+              ),
+            cameraTarget: zod
+              .object({
+                x: zod.number(),
+                y: zod.number(),
+                z: zod.number(),
+              })
+              .describe(
+                "XYZ vector in world coordinates. Y-up, Z+ = north convention\nmatches the FE BimViewer's three.js setup.\n",
+              ),
+            duration: zod.union([zod.literal(5), zod.literal(10)]),
+            cfgScale: zod
+              .number()
+              .min(kickoffRenderBodyFourTwoCfgScaleMin)
+              .max(kickoffRenderBodyFourTwoCfgScaleMax)
+              .optional(),
+            aspectRatio: zod.enum(["16:9", "4:3", "1:1"]).optional(),
+            movementType: zod
+              .enum(["horizontal", "vertical", "zoom_in", "zoom_out", "pan"])
+              .optional(),
+            direction: zod.enum(["left", "right", "up", "down"]).optional(),
+          })
+          .describe(
+            "Single 5- or 10-second Kling clip. mnml's documented hard\ncap (Spec 54 v2 §2.2) — duration outside `{5, 10}` is\nrejected by validation.\n",
+          ),
+      ),
+  ])
+  .describe(
+    "Union by `kind`. Two `still` shapes share the same discriminator\nvalue — GLB capture (`glbUrl` + camera) vs upload (`sourceUploadUrl`);\nclients disambiguate on presence of those fields (doc 40e A.5).\n",
+  );
 
 /**
  * Returns up to 100 most-recent renders ordered by `createdAt`
@@ -7112,6 +7156,21 @@ export const ListEngagementRendersResponse = zod
             .describe(
               "API-server domain render taxonomy. Distinct from mnml-client's\nwire kind (`archdiffusion | video`) because `elevation-set` is\na fan-out concept that lives in the route, not on the wire\n(Spec 54 v2 §6.2).\n",
             ),
+          sourceType: zod
+            .enum([
+              "model-capture",
+              "upload",
+              "enhance",
+              "upscale",
+              "erase",
+              "inpaint",
+              "style_transfer",
+            ])
+            .optional()
+            .describe(
+              "doc 40e A.4\/A.6 — `viewpoint_renders.source_type` discriminant.\n",
+            ),
+          parentRenderOutputId: zod.string().uuid().nullish(),
           status: zod
             .enum(["queued", "rendering", "ready", "failed", "cancelled"])
             .describe(
@@ -7214,6 +7273,21 @@ export const GetRenderResponse = zod
       .describe(
         "API-server domain render taxonomy. Distinct from mnml-client's\nwire kind (`archdiffusion | video`) because `elevation-set` is\na fan-out concept that lives in the route, not on the wire\n(Spec 54 v2 §6.2).\n",
       ),
+    sourceType: zod
+      .enum([
+        "model-capture",
+        "upload",
+        "enhance",
+        "upscale",
+        "erase",
+        "inpaint",
+        "style_transfer",
+      ])
+      .describe(
+        "doc 40e A.4\/A.6 — `viewpoint_renders.source_type` discriminant.\n",
+      ),
+    sourceUploadUrl: zod.string().nullable(),
+    parentRenderOutputId: zod.string().uuid().nullable(),
     status: zod
       .enum(["queued", "rendering", "ready", "failed", "cancelled"])
       .describe(
@@ -7338,6 +7412,72 @@ export const CancelRenderResponse = zod
   .describe(
     "Wire envelope for `POST \/renders\/{id}\/cancel`. The polling\nworker observes `status='cancelled'` on its next iteration\nand bails — there is no synchronous mnml call.\n",
   );
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/render/enhancer`.
+Requires `image` + `prompt` file/field parts; optional geometry,
+creativity, dynamic, seed, sharpen. Parent render must be `ready`.
+Returns 202 + `renderId`; poll via `GET /renders/{renderId}`.
+
+ * @summary Run Render Enhancer on a parent render output
+ */
+export const KickoffRenderEnhanceParams = zod.object({
+  parentId: zod.coerce.string().uuid(),
+});
+
+export const KickoffRenderEnhanceBody = zod.object({
+  prompt: zod.string().optional(),
+});
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/upscale`.
+Requires `image`; optional `scale` (2/4/8), `face_enhance`.
+
+ * @summary Run 4K Upscaler on a parent render output
+ */
+export const KickoffRenderUpscaleParams = zod.object({
+  parentId: zod.coerce.string().uuid(),
+});
+
+export const KickoffRenderUpscaleBody = zod.object({}).passthrough();
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/ai-eraser`.
+Requires `image` + `mask` PNG parts; optional `output_format`.
+
+ * @summary Run AI Eraser on a parent render output
+ */
+export const KickoffRenderEraseParams = zod.object({
+  parentId: zod.coerce.string().uuid(),
+});
+
+export const KickoffRenderEraseBody = zod.object({}).passthrough();
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/inpaint`.
+Requires `image` + `mask`; optional prompt, negative_prompt,
+seed, mask_type.
+
+ * @summary Run Inpaint on a parent render output
+ */
+export const KickoffRenderInpaintParams = zod.object({
+  parentId: zod.coerce.string().uuid(),
+});
+
+export const KickoffRenderInpaintBody = zod.object({}).passthrough();
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/style/transfer`.
+Requires `image` + `reference_image`; optional prompt, strength,
+preserve_structure, color_preservation.
+
+ * @summary Run Style Transfer on a parent render output
+ */
+export const KickoffRenderStyleTransferParams = zod.object({
+  parentId: zod.coerce.string().uuid(),
+});
+
+export const KickoffRenderStyleTransferBody = zod.object({}).passthrough();
 
 /**
  * Streams the durable mirrored bytes for a single

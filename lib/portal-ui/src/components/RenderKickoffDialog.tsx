@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useKickoffRender,
+  getUploadRenderSourceUrl,
   getListEngagementRendersQueryKey,
   getGetRenderCreditsQueryKey,
   getGenerateRenderPromptUrl,
@@ -14,7 +15,11 @@ import {
   type KickoffRenderResponse,
   type PromptGeneratorResponse,
   type RenderListItem,
+  type RenderSourceUploadResponse,
 } from "@workspace/api-client-react";
+import { DragDropUpload } from "./DragDropUpload";
+import { MnmlExpertParamGrid } from "./MnmlExpertParamGrid";
+import type { MnmlExpertName } from "../schemas/mnml-experts";
 
 interface ListEngagementRendersCache {
   items: RenderListItem[];
@@ -37,6 +42,8 @@ interface ListEngagementRendersCache {
  * viewer surfaces.
  */
 
+export type RenderKickoffVariant = "dialog" | "embedded";
+
 export interface RenderKickoffDialogProps {
   engagementId: string;
   /**
@@ -45,14 +52,30 @@ export interface RenderKickoffDialogProps {
    * override it inline before submitting.
    */
   defaultGlbUrl?: string | null;
-  isOpen: boolean;
-  onClose: () => void;
   /**
-   * Fires after a successful kickoff, just before `onClose` runs.
-   * Parent uses this to advance selection in the gallery to the
-   * just-created render id.
+   * `dialog` — modal overlay (legacy). `embedded` — inline panel
+   * for the Renders tab dashboard (doc 40e / 40c intent).
+   */
+  variant?: RenderKickoffVariant;
+  /** Required for `variant="dialog"`; ignored when embedded. */
+  isOpen?: boolean;
+  /** Required for `variant="dialog"`; ignored when embedded. */
+  onClose?: () => void;
+  /**
+   * Fires after a successful kickoff. Dialog variant also calls
+   * `onClose`; embedded resets the form in place.
    */
   onKickedOff?: (response: KickoffRenderResponse) => void;
+}
+
+/** Inline kickoff panel for the Renders tab dashboard (not a modal). */
+export type RenderKickoffPanelProps = Pick<
+  RenderKickoffDialogProps,
+  "engagementId" | "defaultGlbUrl" | "onKickedOff"
+>;
+
+export function RenderKickoffPanel(props: RenderKickoffPanelProps) {
+  return <RenderKickoffDialog {...props} variant="embedded" isOpen />;
 }
 
 const KIND_LABEL: Record<DomainRenderKind, string> = {
@@ -128,14 +151,20 @@ const RENDER_STYLE_LABEL: Record<
 /** mnml's Prompt Generator accepts JPEG/PNG/GIF/WebP up to 8MB. */
 const PROMPT_GENERATOR_MAX_BYTES = 8 * 1024 * 1024;
 const PROMPT_GENERATOR_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
+const SOURCE_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
+const SOURCE_UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp";
+
+type StillSourceMode = "model-capture" | "upload";
 
 export function RenderKickoffDialog({
   engagementId,
   defaultGlbUrl,
-  isOpen,
+  variant = "dialog",
+  isOpen = false,
   onClose,
   onKickedOff,
 }: RenderKickoffDialogProps) {
+  const embedded = variant === "embedded";
   const qc = useQueryClient();
   const [kind, setKind] = useState<DomainRenderKind>("still");
   const [glbUrl, setGlbUrl] = useState<string>(defaultGlbUrl ?? "");
@@ -162,28 +191,68 @@ export function RenderKickoffDialog({
   const [pgFile, setPgFile] = useState<File | null>(null);
   const [pgBusy, setPgBusy] = useState(false);
   const [pgError, setPgError] = useState<string | null>(null);
+  const [stillSourceMode, setStillSourceMode] = useState<StillSourceMode>("model-capture");
+  const [sourceUploadUrl, setSourceUploadUrl] = useState<string | null>(null);
+  const [sourceUploadFile, setSourceUploadFile] = useState<File | null>(null);
+  const [expertParams, setExpertParams] = useState<Record<string, string>>({});
+  const [negativePrompt, setNegativePrompt] = useState("");
+  const [seed, setSeed] = useState("");
+
+  function resetForm() {
+    setKind("still");
+    setGlbUrl(defaultGlbUrl ?? "");
+    setPrompt("");
+    setCameraPos("0,0,10");
+    setCameraTarget("0,0,0");
+    setBuildingCenter("0,0,0");
+    setCameraDistance("20");
+    setCameraHeight("2");
+    setDuration(5);
+    setError(null);
+    setIntent("deliverable");
+    setExpertName(INTENT_DEFAULTS.deliverable.expert);
+    setRenderStyle(INTENT_DEFAULTS.deliverable.style);
+    setPgFile(null);
+    setPgBusy(false);
+    setPgError(null);
+    setStillSourceMode("model-capture");
+    setSourceUploadUrl(null);
+    setSourceUploadFile(null);
+    setExpertParams({});
+    setNegativePrompt("");
+    setSeed("");
+  }
 
   useEffect(() => {
-    if (isOpen) {
-      setKind("still");
-      setGlbUrl(defaultGlbUrl ?? "");
-      setPrompt("");
-      setCameraPos("0,0,10");
-      setCameraTarget("0,0,0");
-      setBuildingCenter("0,0,0");
-      setCameraDistance("20");
-      setCameraHeight("2");
-      setDuration(5);
-      setError(null);
-      // doc 40c gap-fill resets.
-      setIntent("deliverable");
-      setExpertName(INTENT_DEFAULTS.deliverable.expert);
-      setRenderStyle(INTENT_DEFAULTS.deliverable.style);
-      setPgFile(null);
-      setPgBusy(false);
-      setPgError(null);
+    if (embedded) {
+      resetForm();
+      return;
     }
-  }, [isOpen, defaultGlbUrl]);
+    if (isOpen) resetForm();
+  }, [isOpen, defaultGlbUrl, embedded]);
+
+  const [sourceUploadBusy, setSourceUploadBusy] = useState(false);
+
+  async function handleSourceUpload(file: File | null) {
+    setSourceUploadFile(file);
+    setSourceUploadUrl(null);
+    if (!file) return;
+    setSourceUploadBusy(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("image", file);
+      const res = await customFetch<RenderSourceUploadResponse>(
+        getUploadRenderSourceUrl(engagementId),
+        { method: "POST", body: form, responseType: "json" },
+      );
+      setSourceUploadUrl(res.sourceUploadUrl);
+    } catch (err) {
+      setError(formatKickoffError(err));
+    } finally {
+      setSourceUploadBusy(false);
+    }
+  }
 
   /**
    * Intent switch: pin the expert + style to the intent's defaults so
@@ -263,7 +332,11 @@ export function RenderKickoffDialog({
         // RenderCreditsBadge.
         qc.invalidateQueries({ queryKey: getGetRenderCreditsQueryKey() });
         onKickedOff?.(response);
-        onClose();
+        if (embedded) {
+          resetForm();
+        } else {
+          onClose?.();
+        }
       },
       onError: (err) => {
         setError(formatKickoffError(err));
@@ -271,19 +344,40 @@ export function RenderKickoffDialog({
     },
   });
 
-  if (!isOpen) return null;
+  if (!embedded && !isOpen) return null;
 
   const trimmedGlb = glbUrl.trim();
   const trimmedPrompt = prompt.trim();
   const promptOverLimit = prompt.length > PROMPT_MAX;
   const submitting = mutation.isPending;
 
+  const buildExpertParams = (): Record<string, string> | undefined => {
+    const merged = { ...expertParams };
+    if (negativePrompt.trim()) merged.negative_prompt = negativePrompt.trim();
+    if (seed.trim()) merged.seed = seed.trim();
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  };
+
   const buildBody = (): KickoffRenderBody | null => {
-    if (!trimmedGlb || !trimmedPrompt || promptOverLimit) return null;
-    // doc 40c B.1 — surface the expert + style on every kickoff so the
-    // engine routes the request correctly. Both flow through
-    // KickoffRenderCommonFields and are read by routes/renders.ts.
-    const expertFields = { expertName, renderStyle };
+    if (!trimmedPrompt || promptOverLimit) return null;
+    const params = buildExpertParams();
+    if (kind === "still" && stillSourceMode === "upload") {
+      if (!sourceUploadUrl) return null;
+      return {
+        kind: "still",
+        sourceUploadUrl,
+        prompt: trimmedPrompt,
+        expertName,
+        renderStyle,
+        ...(params ? { expertParams: params } : {}),
+      };
+    }
+    if (!trimmedGlb) return null;
+    const expertFields = {
+      expertName,
+      renderStyle,
+      ...(params ? { expertParams: params } : {}),
+    };
     if (kind === "still") {
       const cp = parseVec3(cameraPos);
       const ct = parseVec3(cameraTarget);
@@ -337,30 +431,14 @@ export function RenderKickoffDialog({
     mutation.mutate({ id: engagementId, data: body });
   };
 
-  return (
-    <div
-      onClick={() => {
-        if (!submitting) onClose();
-      }}
-      data-testid="render-kickoff-dialog"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        zIndex: 50,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-      }}
-    >
+  const shell = (
       <div
         className="sc-card"
-        onClick={(e) => e.stopPropagation()}
+        onClick={embedded ? undefined : (e) => e.stopPropagation()}
         style={{
           width: "100%",
-          maxWidth: 560,
-          maxHeight: "90vh",
+          maxWidth: embedded ? undefined : 560,
+          maxHeight: embedded ? "min(85vh, 960px)" : "90vh",
           overflow: "auto",
           display: "flex",
           flexDirection: "column",
@@ -375,11 +453,12 @@ export function RenderKickoffDialog({
                 color: "var(--text-primary)",
               }}
             >
-              Kick off a render
+              {embedded ? "New render" : "Kick off a render"}
             </span>
             <span className="sc-meta opacity-70">
-              The polling worker advances the render's status; you'll
-              see it appear in the gallery as soon as it's queued.
+              {embedded
+                ? "Configure and submit a render; results appear in the gallery."
+                : "The polling worker advances the render's status; you'll see it appear in the gallery as soon as it's queued."}
             </span>
           </div>
         </div>
@@ -562,31 +641,78 @@ export function RenderKickoffDialog({
             </label>
           </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span
-              className="sc-label"
-              style={{ color: "var(--text-secondary)" }}
+          {kind === "still" && (
+            <fieldset
+              data-testid="render-kickoff-source-mode"
+              style={{ border: "none", padding: 0, margin: 0 }}
             >
-              GLB URL (required)
-            </span>
-            <input
-              type="url"
-              value={glbUrl}
-              onChange={(e) => setGlbUrl(e.target.value)}
-              disabled={submitting}
-              placeholder="https://…/model.glb"
-              data-testid="render-kickoff-glb-url"
-              className="sc-ui"
-              style={{
-                background: "var(--bg-input)",
-                color: "var(--text-primary)",
-                border: "1px solid var(--border-default)",
-                padding: "6px 8px",
-                borderRadius: 4,
-                fontSize: 12.5,
-              }}
+              <legend className="sc-meta" style={{ marginBottom: 6 }}>
+                Still source
+              </legend>
+              <div className="flex" style={{ gap: 12 }}>
+                <label className="sc-meta flex items-center" style={{ gap: 4 }}>
+                  <input
+                    type="radio"
+                    name="still-source"
+                    checked={stillSourceMode === "model-capture"}
+                    disabled={submitting}
+                    onChange={() => setStillSourceMode("model-capture")}
+                  />
+                  BIM viewport capture
+                </label>
+                <label className="sc-meta flex items-center" style={{ gap: 4 }}>
+                  <input
+                    type="radio"
+                    name="still-source"
+                    checked={stillSourceMode === "upload"}
+                    disabled={submitting}
+                    onChange={() => setStillSourceMode("upload")}
+                  />
+                  Upload image
+                </label>
+              </div>
+            </fieldset>
+          )}
+
+          {kind === "still" && stillSourceMode === "upload" ? (
+            <DragDropUpload
+              label="Drop source image for concept render"
+              hint="PNG or JPEG, max 15MB"
+              accept={SOURCE_UPLOAD_ACCEPT}
+              maxBytes={SOURCE_UPLOAD_MAX_BYTES}
+              file={sourceUploadFile}
+              disabled={submitting || sourceUploadBusy}
+              busy={sourceUploadBusy}
+              testId="render-kickoff-source-upload"
+              onFileChange={handleSourceUpload}
             />
-          </label>
+          ) : (
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span
+                className="sc-label"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                GLB URL (required)
+              </span>
+              <input
+                type="url"
+                value={glbUrl}
+                onChange={(e) => setGlbUrl(e.target.value)}
+                disabled={submitting}
+                placeholder="https://…/model.glb"
+                data-testid="render-kickoff-glb-url"
+                className="sc-ui"
+                style={{
+                  background: "var(--bg-input)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border-default)",
+                  padding: "6px 8px",
+                  borderRadius: 4,
+                  fontSize: 12.5,
+                }}
+              />
+            </label>
+          )}
 
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span
@@ -657,18 +783,20 @@ export function RenderKickoffDialog({
             <div
               style={{ display: "flex", gap: 8, alignItems: "center" }}
             >
-              <input
-                type="file"
-                accept={PROMPT_GENERATOR_ACCEPT}
-                disabled={submitting || pgBusy}
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  setPgFile(f);
-                  setPgError(null);
-                }}
-                data-testid="render-kickoff-pg-file"
-                style={{ flex: 1, fontSize: 12 }}
-              />
+              <div style={{ flex: 1 }}>
+                <DragDropUpload
+                  label="Drop reference image"
+                  accept={PROMPT_GENERATOR_ACCEPT}
+                  maxBytes={PROMPT_GENERATOR_MAX_BYTES}
+                  file={pgFile}
+                  disabled={submitting || pgBusy}
+                  testId="render-kickoff-pg-file"
+                  onFileChange={(f) => {
+                    setPgFile(f);
+                    setPgError(null);
+                  }}
+                />
+              </div>
               <button
                 type="button"
                 className="sc-btn-ghost"
@@ -691,7 +819,66 @@ export function RenderKickoffDialog({
             )}
           </div>
 
-          {(kind === "still" || kind === "video") && (
+          <MnmlExpertParamGrid
+            expert={expertName as MnmlExpertName}
+            values={expertParams}
+            onChange={setExpertParams}
+            disabled={submitting}
+          />
+
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span className="sc-meta">Negative prompt (optional)</span>
+            <textarea
+              value={negativePrompt}
+              onChange={(e) => setNegativePrompt(e.target.value)}
+              disabled={submitting}
+              rows={2}
+              data-testid="render-kickoff-negative-prompt"
+              className="sc-ui"
+              style={{
+                background: "var(--bg-input)",
+                color: "var(--text-primary)",
+                border: "1px solid var(--border-default)",
+                borderRadius: 4,
+                padding: 6,
+                fontSize: 12.5,
+              }}
+            />
+          </label>
+
+          <div className="flex items-end" style={{ gap: 8 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+              <span className="sc-meta">Seed (optional)</span>
+              <input
+                type="number"
+                value={seed}
+                onChange={(e) => setSeed(e.target.value)}
+                disabled={submitting}
+                placeholder="Random"
+                data-testid="render-kickoff-seed"
+                className="sc-ui"
+                style={{
+                  background: "var(--bg-input)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border-default)",
+                  padding: "6px 8px",
+                  borderRadius: 4,
+                  fontSize: 12.5,
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="sc-btn-ghost"
+              disabled={submitting}
+              onClick={() => setSeed("")}
+              data-testid="render-kickoff-seed-random"
+            >
+              Random
+            </button>
+          </div>
+
+          {(kind === "still" && stillSourceMode === "model-capture") || kind === "video" ? (
             <div
               data-testid="render-kickoff-camera-fields"
               style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
@@ -711,7 +898,7 @@ export function RenderKickoffDialog({
                 testId="render-kickoff-camera-target"
               />
             </div>
-          )}
+          ) : null}
 
           {kind === "elevation-set" && (
             <div
@@ -789,14 +976,26 @@ export function RenderKickoffDialog({
           className="p-4 flex justify-end gap-2"
           style={{ borderTop: "1px solid var(--border-default)" }}
         >
-          <button
-            type="button"
-            className="sc-btn-ghost"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </button>
+          {embedded ? (
+            <button
+              type="button"
+              className="sc-btn-ghost"
+              onClick={resetForm}
+              disabled={submitting}
+              data-testid="render-kickoff-reset"
+            >
+              Reset form
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="sc-btn-ghost"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+          )}
           <button
             type="button"
             className="sc-btn-primary"
@@ -808,6 +1007,34 @@ export function RenderKickoffDialog({
           </button>
         </div>
       </div>
+  );
+
+  if (embedded) {
+    return (
+      <div data-testid="render-kickoff-panel" style={{ minWidth: 0 }}>
+        {shell}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => {
+        if (!submitting) onClose?.();
+      }}
+      data-testid="render-kickoff-dialog"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      {shell}
     </div>
   );
 }

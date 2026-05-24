@@ -62,6 +62,12 @@ export const fixtureReadyStillOutput: RenderOutputProjection = {
   seed: 12345,
 };
 
+const fixtureRenderLinkage = {
+  sourceType: "model-capture" as const,
+  sourceUploadUrl: null,
+  parentRenderOutputId: null,
+};
+
 export const fixtureReadyStillDetail: RenderDetailResponse = {
   id: fixtureReadyStill.id,
   engagementId: "eng-1",
@@ -77,6 +83,7 @@ export const fixtureReadyStillDetail: RenderDetailResponse = {
   updatedAt: fixtureReadyStill.updatedAt,
   completedAt: fixtureReadyStill.completedAt,
   outputs: [fixtureReadyStillOutput],
+  ...fixtureRenderLinkage,
 };
 
 export const fixtureRenderingStillDetail: RenderDetailResponse = {
@@ -94,6 +101,7 @@ export const fixtureRenderingStillDetail: RenderDetailResponse = {
   updatedAt: fixtureRenderingStill.updatedAt,
   completedAt: null,
   outputs: [],
+  ...fixtureRenderLinkage,
 };
 
 export const fixtureFailedStillDetail: RenderDetailResponse = {
@@ -111,6 +119,7 @@ export const fixtureFailedStillDetail: RenderDetailResponse = {
   updatedAt: fixtureFailedStill.updatedAt,
   completedAt: fixtureFailedStill.completedAt,
   outputs: [],
+  ...fixtureRenderLinkage,
 };
 
 export const fixtureElevationSetInFlight: RenderListItem = {
@@ -167,6 +176,7 @@ export const fixtureElevationSetDetail: RenderDetailResponse = {
   createdAt: fixtureElevationSetInFlight.createdAt,
   updatedAt: fixtureElevationSetInFlight.updatedAt,
   completedAt: null,
+  ...fixtureRenderLinkage,
   outputs: [
     {
       id: "output-elev-n",

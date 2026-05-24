@@ -10,6 +10,7 @@ import type { ElevationSetJob } from "./elevationSetJob";
 import type { RenderDetailResponseErrorDetails } from "./renderDetailResponseErrorDetails";
 import type { RenderOutputProjection } from "./renderOutputProjection";
 import type { RenderStatus } from "./renderStatus";
+import type { ViewpointRenderSourceType } from "./viewpointRenderSourceType";
 
 /**
  * Full row + child outputs projection for `GET /renders/{id}`.
@@ -22,6 +23,9 @@ export interface RenderDetailResponse {
   id: string;
   engagementId: string;
   kind: DomainRenderKind;
+  sourceType: ViewpointRenderSourceType;
+  sourceUploadUrl: string | null;
+  parentRenderOutputId: string | null;
   status: RenderStatus;
   mnmlJobId: string | null;
   mnmlJobs: ElevationSetJob[] | null;

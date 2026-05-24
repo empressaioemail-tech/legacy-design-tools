@@ -12,6 +12,7 @@ import {
   fireEvent,
   cleanup,
   act,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -24,6 +25,7 @@ import {
 import {
   fixtureReadyStill,
   fixtureReadyStillDetail,
+  fixtureReadyStillOutput,
   fixtureRenderingStill,
   fixtureRenderingStillDetail,
 } from "../../test-utils/renderFixtures";
@@ -156,6 +158,43 @@ describe("RenderGallery", () => {
     expect(
       screen.getByTestId(`render-card-${fixtureReadyStill.id}`),
     ).toBeInTheDocument();
+  });
+
+  it("nests tool-output children under the parent group and toggles visibility", () => {
+    const childStill: RenderListItem = {
+      ...fixtureReadyStill,
+      id: "render-child-enhance",
+      parentRenderOutputId: fixtureReadyStillOutput.id,
+    };
+    const childDetail: RenderDetailResponse = {
+      ...fixtureReadyStillDetail,
+      id: childStill.id,
+      parentRenderOutputId: fixtureReadyStillOutput.id,
+    };
+    hoisted.items = [fixtureReadyStill, childStill];
+    hoisted.detailById.set(fixtureReadyStillDetail.id, fixtureReadyStillDetail);
+    hoisted.detailById.set(childStill.id, childDetail);
+    renderGallery();
+
+    expect(
+      screen.getByTestId(`render-gallery-group-${fixtureReadyStill.id}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId(`render-group-children-${fixtureReadyStill.id}`),
+    ).toBeInTheDocument();
+    const childrenRegion = screen.getByTestId(
+      `render-group-children-${fixtureReadyStill.id}`,
+    );
+    expect(
+      within(childrenRegion).getByTestId(`render-card-${childStill.id}`),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByTestId(`render-group-toggle-${fixtureReadyStill.id}`),
+    );
+    expect(
+      screen.queryByTestId(`render-group-children-${fixtureReadyStill.id}`),
+    ).not.toBeInTheDocument();
   });
 
   it("fires the cancel mutation after window.confirm() returns true", () => {

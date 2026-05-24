@@ -679,12 +679,15 @@ describe("GET /api/atoms/catalog", () => {
     // Composition order from viewpoint-render.atom: engagement,
     // parcel-briefing (briefingAtRender snapshot key),
     // bim-model (bimModelAtRender snapshot key),
-    // neighboring-context (optional, neighboringContextAtRender).
+    // neighboring-context (optional, neighboringContextAtRender),
+    // render-output (outputs gallery),
+    // render-output (parentRenderOutput — tool derivations, doc 40e A.6).
     expect(viewpointRender?.composes).toEqual([
       "engagement",
       "parcel-briefing",
       "bim-model",
       "neighboring-context",
+      "render-output",
       "render-output",
     ]);
 

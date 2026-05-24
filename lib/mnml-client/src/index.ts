@@ -17,19 +17,24 @@
 export {
   MnmlError,
   noopMnmlLogger,
+  type AiEraserRequest,
   type ArchDiffusionRequest,
   type CreditsResult,
+  type InpaintRequest,
   type MnmlClient,
   type MnmlErrorKind,
   type MnmlLogger,
   type PromptGeneratorRequest,
   type PromptGeneratorResult,
+  type RenderEnhancerRequest,
   type RenderOutputRole,
   type RenderRequest,
   type RenderStatus,
   type RenderStatusResult,
+  type StyleTransferRequest,
   type TimeOfDay,
   type TriggerRenderResult,
+  type UpscaleRequest,
   type VideoAiRequest,
   type Weather,
 } from "./types";
@@ -49,10 +54,13 @@ export {
 } from "./factory";
 
 export {
+  POWER_TOOL_COST_CREDITS,
   RENDER_COST_CREDITS,
   actualDebitedCredits,
+  estimatePowerToolCost,
   estimateRenderCost,
   type DomainRenderKind,
+  type PowerToolSourceType,
   type RenderCostBreakdownEntry,
   type RenderCostEstimate,
 } from "./cost";

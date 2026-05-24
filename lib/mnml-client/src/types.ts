@@ -269,6 +269,102 @@ export interface PromptGeneratorResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Power tools (doc 40e — five mnml endpoints added this sprint)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * `POST /v1/render/enhancer`. Mnml's Render Enhancer — refines a
+ * source render with optional creativity/dynamic/sharpen controls.
+ * Async (returns a job id polled via {@link MnmlClient.getRenderStatus});
+ * limits 10 MB image. Cost unspecified in mnml docs as of 2026-05-23
+ * and will surface on first live call.
+ */
+export interface RenderEnhancerRequest {
+  /** Source image — JPEG/PNG/WebP, max 10 MB per mnml docs. */
+  image: Buffer | Blob;
+  prompt: string;
+  /** 0..1, default 1 — how strictly the output preserves source geometry. */
+  geometry?: number;
+  /** 0..1, default 0.3 — generative freedom. */
+  creativity?: number;
+  /** 0..10, default 5 — output stylistic dynamism. */
+  dynamic?: number;
+  /** Random if omitted. */
+  seed?: number;
+  /** 0..1, default 0.5 — output sharpening intensity. */
+  sharpen?: number;
+}
+
+/**
+ * `POST /v1/upscale`. Mnml's 4K Upscaler — bicubic-derived AI
+ * upscaler. Async; documented cost 1 credit; limits 8 MB image,
+ * JPG/PNG/GIF only, min 1 KB, auto-resized to 1400px width.
+ */
+export interface UpscaleRequest {
+  /** Source image — JPG/PNG/GIF, 1 KB–8 MB. */
+  image: Buffer | Blob;
+  /** Output scale factor. Default 2. */
+  scale?: 2 | 4 | 8;
+  /** Optional face-aware refinement pass. Default false. */
+  faceEnhance?: boolean;
+}
+
+/**
+ * `POST /v1/ai-eraser`. Mnml's AI Eraser — removes content
+ * indicated by a mask. Async; documented cost 1 credit; limits
+ * 8 MB image; mask must match image dimensions, white = erase,
+ * black = keep; auto-resized to 1024px width (min 256px).
+ */
+export interface AiEraserRequest {
+  /** Source image — max 8 MB. */
+  image: Buffer | Blob;
+  /** Mask PNG — white pixels = erase region, black = keep. Same dimensions as image. */
+  mask: Buffer | Blob;
+  /** Output container. Default `png`. */
+  outputFormat?: "png" | "jpg" | "jpeg";
+}
+
+/**
+ * `POST /v1/inpaint`. Mnml's Inpaint — replaces masked region
+ * with generated content. Async; cost unspecified in docs; limits
+ * 10 MB image; mask PNG black background, white selected area.
+ */
+export interface InpaintRequest {
+  /** Source image — max 10 MB. */
+  image: Buffer | Blob;
+  /** Mask PNG — white pixels = replace region, black = keep. */
+  mask: Buffer | Blob;
+  /** Prompt guiding the inpaint. Empty string allowed per docs (default ""). */
+  prompt?: string;
+  /** Optional negative prompt (default ""). */
+  negativePrompt?: string;
+  /** Random if omitted. */
+  seed?: number;
+  /** `manual` honors the provided mask; `automatic` lets mnml infer one. Default `manual`. */
+  maskType?: "manual" | "automatic";
+}
+
+/**
+ * `POST /v1/style/transfer`. Mnml's Style Transfer — restyles a
+ * source image to match a reference image's style. Async; cost
+ * unspecified in docs; limits 10 MB.
+ */
+export interface StyleTransferRequest {
+  /** Source image — max 10 MB. */
+  image: Buffer | Blob;
+  /** Style-reference image. */
+  referenceImage: Buffer | Blob;
+  /** Optional prompt guidance. */
+  prompt?: string;
+  /** 0..1, default 0.7 — how strongly the style is applied. */
+  strength?: number;
+  /** Preserve source structure during restyle. Default true. */
+  preserveStructure?: boolean;
+  /** 0..1, default 0.3 — how much of the source's color is retained. */
+  colorPreservation?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Client interface
 // ─────────────────────────────────────────────────────────────────────
 
@@ -280,6 +376,12 @@ export interface PromptGeneratorResult {
  * cancel endpoint (Spec 54 v2 §6.1). Cancellation, when needed, is a
  * server-side concept tracked via a `viewpoint_renders.status =
  * 'cancelled'` transition; the api-server simply stops polling.
+ *
+ * The five power-tool methods (doc 40e A.1 — `enhance`, `upscale`,
+ * `aiErase`, `inpaint`, `styleTransfer`) follow the same async shape
+ * as {@link triggerRender}: each returns a job id immediately and the
+ * caller polls via {@link getRenderStatus} (mnml uses a shared
+ * `GET /v1/status/{id}` worker across all job kinds).
  */
 export interface MnmlClient {
   triggerRender(input: RenderRequest): Promise<TriggerRenderResult>;
@@ -300,6 +402,16 @@ export interface MnmlClient {
   generatePrompt(
     input: PromptGeneratorRequest,
   ): Promise<PromptGeneratorResult>;
+  /** Render Enhancer — `POST /v1/render/enhancer`. Async; poll via {@link getRenderStatus}. */
+  enhance(input: RenderEnhancerRequest): Promise<TriggerRenderResult>;
+  /** 4K Upscaler — `POST /v1/upscale`. Async; documented 1 credit. */
+  upscale(input: UpscaleRequest): Promise<TriggerRenderResult>;
+  /** AI Eraser — `POST /v1/ai-eraser`. Async; documented 1 credit. */
+  aiErase(input: AiEraserRequest): Promise<TriggerRenderResult>;
+  /** Inpaint — `POST /v1/inpaint`. Async. */
+  inpaint(input: InpaintRequest): Promise<TriggerRenderResult>;
+  /** Style Transfer — `POST /v1/style/transfer`. Async. */
+  styleTransfer(input: StyleTransferRequest): Promise<TriggerRenderResult>;
 }
 
 // ─────────────────────────────────────────────────────────────────────

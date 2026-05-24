@@ -1,32 +1,30 @@
-import { useState } from "react";
 import {
+  ConstellationCanvas,
   RenderCreditsBadge,
   RenderGallery,
-  RenderKickoffDialog,
+  RenderKickoffPanel,
 } from "@workspace/portal-ui";
 
 /**
- * Architect-only "Renders" tab. Wraps the shared `RenderGallery`
- * from portal-ui and mounts `RenderKickoffDialog` behind a "New
- * render" button. The gallery owns polling, cancel confirmation,
- * and downloads; this tab just owns the dialog's open state.
+ * Architect-only "Renders" tab — a two-column render dashboard:
+ * kickoff panel (always visible) + gallery (polling, power tools).
  */
 export function RendersTab({
   engagementId,
   defaultGlbUrl,
 }: {
   engagementId: string;
-  /** Auto-resolved BIM-model GLB URL the kickoff dialog defaults
+  /** Auto-resolved BIM-model GLB URL the kickoff panel defaults
    * to. Null when the engagement has no renderable BIM elements
    * yet — the architect can still paste a URL manually. */
   defaultGlbUrl?: string | null;
 }) {
-  const [kickoffOpen, setKickoffOpen] = useState(false);
   return (
     <div
       data-testid="renders-tab"
-      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+      style={{ display: "flex", flexDirection: "column", gap: 12, position: "relative" }}
     >
+      <ConstellationCanvas />
       <div className="flex items-center justify-between">
         <div className="flex flex-col gap-1">
           <span
@@ -36,34 +34,33 @@ export function RendersTab({
             Renders
           </span>
           <span className="sc-meta opacity-70">
-            mnml.ai-powered architectural renders for this
-            engagement. Stills, 4-direction elevation sets, and
-            short videos all run on the same polling worker.
+            mnml.ai-powered architectural renders for this engagement.
+            Configure a new render on the left; results stream into the
+            gallery on the right.
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <RenderCreditsBadge />
-          <button
-            type="button"
-            className="sc-btn-primary"
-            onClick={() => setKickoffOpen(true)}
-            data-testid="renders-tab-new-render"
-          >
-            New render
-          </button>
-        </div>
+        <RenderCreditsBadge />
       </div>
-      <RenderGallery
-        engagementId={engagementId}
-        canCancel
-        emptyStateHint="No renders yet. Click 'New render' to kick off your first one."
-      />
-      <RenderKickoffDialog
-        engagementId={engagementId}
-        defaultGlbUrl={defaultGlbUrl ?? null}
-        isOpen={kickoffOpen}
-        onClose={() => setKickoffOpen(false)}
-      />
+      <div
+        data-testid="renders-tab-dashboard"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(320px, 400px) minmax(0, 1fr)",
+          gap: 16,
+          alignItems: "start",
+        }}
+      >
+        <RenderKickoffPanel
+          engagementId={engagementId}
+          defaultGlbUrl={defaultGlbUrl ?? null}
+        />
+        <RenderGallery
+          engagementId={engagementId}
+          canCancel
+          showPowerTools
+          emptyStateHint="No renders yet. Use the panel on the left to kick off your first one."
+        />
+      </div>
     </div>
   );
 }

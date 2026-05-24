@@ -31,6 +31,7 @@ import reviewerRequestsRouter from "./reviewerRequests";
 import reviewerQueueRouter from "./submissions";
 import decisionsRouter from "./decisions";
 import rendersRouter from "./renders";
+import renderToolsRouter from "./render-tools";
 import notificationsRouter from "./notifications";
 import cannedFindingsRouter from "./cannedFindings";
 import qaRouter from "./qa";
@@ -40,6 +41,7 @@ import deliverableLettersRouter from "./deliverableLetters";
 import detailCalloutSpecsRouter from "./detailCalloutSpecs";
 import productSpecReferencesRouter from "./productSpecReferences";
 import deliverableLetterRendersRouter from "./deliverableLetterRenders";
+import siteTopographyRouter from "./siteTopography";
 
 const router: IRouter = Router();
 
@@ -57,6 +59,11 @@ router.use(parcelBriefingsRouter);
 // kept adjacent to its sibling so the briefing-related routes stay
 // grouped.
 router.use(generateLayersRouter);
+// Phase 2D.x PR3 — site-topography refresh + read endpoints mount
+// under /engagements/:id/site-topography*. Register BEFORE
+// engagementsRouter so the more-specific paths match first (same
+// pattern as parcelBriefingsRouter above).
+router.use(siteTopographyRouter);
 // briefingSourcesRouter exposes top-level `/briefing-sources/:id/glb`
 // for the DA-MV-1 viewer; ordering relative to engagementsRouter is
 // indifferent (no path overlap) but kept adjacent to its sibling so
@@ -145,6 +152,10 @@ router.use(decisionsRouter);
 // ordering-indifferent group (line 55), so we land here matching the
 // briefing-router precedent (line 34 ordering note).
 router.use(rendersRouter);
+// doc 40e A.2 — five mnml power-tool routes under
+// /render-outputs/:parentId/{enhance,upscale,erase,inpaint,style-transfer}.
+// Distinct from rendersRouter's /render-outputs/:id/file leaf.
+router.use(renderToolsRouter);
 // Architect inbox/notification surface. Mounts under
 // `/me/notifications*`; a distinct path subtree from `meRouter`
 // (`/me/architect-pdf-header`, `/me/profile`) so ordering relative

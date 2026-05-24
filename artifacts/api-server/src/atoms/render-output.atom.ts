@@ -44,6 +44,7 @@ import { eq } from "drizzle-orm";
 import {
   db,
   renderOutputs,
+  viewpointRenders,
   type RenderOutput as RenderOutputRow,
 } from "@workspace/db";
 import {
@@ -106,10 +107,22 @@ export type RenderOutputRole =
   | "video-primary"
   | "video-thumbnail";
 
+/**
+ * doc 40e A.6 — lineage copied from the parent `viewpoint_renders` row
+ * when this output belongs to a tool derivation or upload-source render.
+ */
+export interface RenderOutputDerivation {
+  sourceType: string;
+  parentRenderOutputId?: string | null;
+  sourceUploadUrl?: string | null;
+}
+
 export interface RenderOutputTypedPayload {
   id: string;
   found: boolean;
   viewpointRenderId?: string;
+  /** Present when the parent viewpoint-render is a tool or upload derivation. */
+  derivation?: RenderOutputDerivation;
   role?: RenderOutputRole;
   format?: string;
   resolution?: string | null;
@@ -187,6 +200,13 @@ export function makeRenderOutputAtom(
       }
 
       let row: RenderOutputRow | undefined;
+      let parentRender:
+        | {
+            sourceType: string;
+            sourceUploadUrl: string | null;
+            parentRenderOutputId: string | null;
+          }
+        | undefined;
       try {
         const found = await resolveDb()
           .select()
@@ -194,6 +214,18 @@ export function makeRenderOutputAtom(
           .where(eq(renderOutputs.id, entityId))
           .limit(1);
         row = found[0];
+        if (row) {
+          const parentRows = await resolveDb()
+            .select({
+              sourceType: viewpointRenders.sourceType,
+              sourceUploadUrl: viewpointRenders.sourceUploadUrl,
+              parentRenderOutputId: viewpointRenders.parentRenderOutputId,
+            })
+            .from(viewpointRenders)
+            .where(eq(viewpointRenders.id, row.viewpointRenderId))
+            .limit(1);
+          parentRender = parentRows[0];
+        }
       } catch {
         // Fall through to not-found envelope.
       }
@@ -244,10 +276,21 @@ export function makeRenderOutputAtom(
         }
       }
 
+      const derivation: RenderOutputDerivation | undefined = parentRender
+        ? {
+            sourceType: parentRender.sourceType,
+            parentRenderOutputId: parentRender.parentRenderOutputId,
+            sourceUploadUrl: parentRender.sourceUploadUrl,
+          }
+        : undefined;
+
       const keyMetrics: KeyMetric[] = [
         { label: "role", value: row.role },
         { label: "format", value: row.format },
       ];
+      if (derivation && derivation.sourceType !== "model-capture") {
+        keyMetrics.push({ label: "source_type", value: derivation.sourceType });
+      }
       if (row.resolution) {
         keyMetrics.push({ label: "resolution", value: row.resolution });
       }
@@ -270,10 +313,17 @@ export function makeRenderOutputAtom(
         value: row.mirroredObjectKey ? "true" : "false",
       });
 
+      const lineageFragment =
+        derivation?.parentRenderOutputId
+          ? ` Tool derivation (${derivation.sourceType}) of output ${derivation.parentRenderOutputId}.`
+          : derivation && derivation.sourceType === "upload"
+            ? " From an uploaded source image."
+            : "";
       const proseRaw =
         `Render output ${row.id} (role=${row.role}, format=${row.format}` +
         (row.resolution ? `, resolution=${row.resolution}` : "") +
         `).` +
+        lineageFragment +
         (row.mirroredObjectKey
           ? ` Mirrored to object storage at ${row.mirroredObjectKey}.`
           : ` Not yet mirrored — mnml URL is ephemeral.`);
@@ -286,6 +336,7 @@ export function makeRenderOutputAtom(
         id: row.id,
         found: true,
         viewpointRenderId: row.viewpointRenderId,
+        ...(derivation ? { derivation } : {}),
         role: row.role as RenderOutputRole,
         format: row.format,
         resolution: row.resolution,

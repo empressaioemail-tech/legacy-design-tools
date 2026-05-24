@@ -111,6 +111,19 @@ export const VIEWPOINT_RENDER_EVENT_TYPES = [
 export type ViewpointRenderEventType =
   (typeof VIEWPOINT_RENDER_EVENT_TYPES)[number];
 
+/**
+ * doc 40e A.4/A.6 — how the render's source image was obtained.
+ * Mirrors `viewpoint_renders.source_type`.
+ */
+export type ViewpointRenderSourceType =
+  | "model-capture"
+  | "upload"
+  | "enhance"
+  | "upscale"
+  | "erase"
+  | "inpaint"
+  | "style_transfer";
+
 /** Per-edge freshness verdict on the typed payload. */
 export type FreshnessVerdict = "current" | "stale" | "unknown";
 
@@ -142,6 +155,12 @@ export interface ViewpointRenderTypedPayload {
   bimModelAtomEventId?: string | null;
   /** `still` | `elevation-set` | `video` (api-server domain). */
   kind?: string;
+  /** doc 40e — source provenance discriminant. */
+  sourceType?: ViewpointRenderSourceType;
+  /** GCS path when `sourceType === 'upload'`. */
+  sourceUploadUrl?: string | null;
+  /** Parent output when this row is a power-tool derivation. */
+  parentRenderOutputId?: string | null;
   /** `queued` | `rendering` | `ready` | `failed` | `cancelled`. */
   status?: string;
   /** mnml's render id for single-call kinds; null for `elevation-set`. */
@@ -214,6 +233,13 @@ export function makeViewpointRenderAtom(
       childEntityType: "render-output",
       childMode: "compact",
       dataKey: "outputs",
+    },
+    // doc 40e A.6 — tool derivations link back to the parent output
+    // that was enhanced / upscaled / erased / inpainted / restyled.
+    {
+      childEntityType: "render-output",
+      childMode: "compact",
+      dataKey: "parentRenderOutput",
     },
   ];
 
@@ -342,6 +368,9 @@ export function makeViewpointRenderAtom(
         if (row.bimModelId) {
           parentData["bimModelAtRender"] = { id: row.bimModelId };
         }
+        if (row.parentRenderOutputId) {
+          parentData["parentRenderOutput"] = { id: row.parentRenderOutputId };
+        }
         const resolved = resolveComposition(
           registration as unknown as AnyAtomRegistration,
           parentRef,
@@ -357,11 +386,18 @@ export function makeViewpointRenderAtom(
 
       const keyMetrics: KeyMetric[] = [
         { label: "kind", value: row.kind },
+        { label: "source_type", value: row.sourceType },
         { label: "status", value: row.status },
         { label: "outputs", value: outputRows.length },
         { label: "freshness_briefing", value: freshness.briefing },
         { label: "freshness_bim_model", value: freshness.bimModel },
       ];
+      if (row.parentRenderOutputId) {
+        keyMetrics.push({
+          label: "parent_render_output_id",
+          value: row.parentRenderOutputId,
+        });
+      }
       if (row.completedAt) {
         keyMetrics.push({
           label: "completed_at",
@@ -375,9 +411,15 @@ export function makeViewpointRenderAtom(
       const errorFragment = row.errorCode
         ? ` Error: ${row.errorCode}${row.errorMessage ? ` — ${row.errorMessage}` : ""}.`
         : "";
+      const lineageFragment = row.parentRenderOutputId
+        ? ` Derived from render-output ${row.parentRenderOutputId} via ${row.sourceType}.`
+        : row.sourceType !== "model-capture"
+          ? ` Source=${row.sourceType}.`
+          : "";
       const proseRaw =
-        `Viewpoint render of kind=${row.kind}, status=${row.status}. ` +
-        `${outputRows.length} output${outputRows.length === 1 ? "" : "s"} mirrored.` +
+        `Viewpoint render of kind=${row.kind}, status=${row.status}.` +
+        lineageFragment +
+        ` ${outputRows.length} output${outputRows.length === 1 ? "" : "s"} mirrored.` +
         ` Freshness: briefing=${freshness.briefing}, bim-model=${freshness.bimModel}.` +
         errorFragment;
       const prose =
@@ -405,6 +447,9 @@ export function makeViewpointRenderAtom(
         briefingAtomEventId: row.briefingAtomEventId,
         bimModelAtomEventId: row.bimModelAtomEventId,
         kind: row.kind,
+        sourceType: row.sourceType as ViewpointRenderSourceType,
+        sourceUploadUrl: row.sourceUploadUrl,
+        parentRenderOutputId: row.parentRenderOutputId,
         status: row.status,
         mnmlJobId: row.mnmlJobId,
         outputs,

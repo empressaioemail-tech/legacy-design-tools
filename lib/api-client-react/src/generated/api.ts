@@ -91,8 +91,14 @@ import type {
   HealthStatus,
   IllegalPushTransitionError,
   JurisdictionSummary,
+  KickoffPowerToolResponse,
   KickoffRenderBody,
+  KickoffRenderEnhanceBody,
+  KickoffRenderEraseBody,
+  KickoffRenderInpaintBody,
   KickoffRenderResponse,
+  KickoffRenderStyleTransferBody,
+  KickoffRenderUpscaleBody,
   LinkResponseTaskFindingBody,
   ListAttachedDocumentsParams,
   ListBimModelDivergencesResponse,
@@ -156,6 +162,7 @@ import type {
   RenderDeliverableLetterBody,
   RenderDetailResponse,
   RenderListResponse,
+  RenderSourceUploadResponse,
   RendersSweepResponse,
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
@@ -196,6 +203,7 @@ import type {
   UpdateQaTriageItemBody,
   UpdateReviewerAnnotationBody,
   UpdateUserBody,
+  UploadRenderSourceBody,
   UploadSnapshotSheetsBody,
   User,
   WarmupResult,
@@ -9750,22 +9758,110 @@ export const useWithdrawReviewerRequest = <
 };
 
 /**
+ * doc 40e A.5 / B.2 — stores a source image under
+/objects/uploads/{uuid} and returns the canonical
+`sourceUploadUrl` for a subsequent `still` kickoff. Multipart
+`image` file part, ≤15MB. Behind `RENDERS_PROD_ENABLED`.
+
+ * @summary Upload a source image for upload-as-render-source
+ */
+export const getUploadRenderSourceUrl = (id: string) => {
+  return `/api/engagements/${id}/renders/source-upload`;
+};
+
+export const uploadRenderSource = async (
+  id: string,
+  uploadRenderSourceBody: UploadRenderSourceBody,
+  options?: RequestInit,
+): Promise<RenderSourceUploadResponse> => {
+  const formData = new FormData();
+
+  return customFetch<RenderSourceUploadResponse>(getUploadRenderSourceUrl(id), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getUploadRenderSourceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadRenderSource>>,
+    TError,
+    { id: string; data: BodyType<UploadRenderSourceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof uploadRenderSource>>,
+  TError,
+  { id: string; data: BodyType<UploadRenderSourceBody> },
+  TContext
+> => {
+  const mutationKey = ["uploadRenderSource"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof uploadRenderSource>>,
+    { id: string; data: BodyType<UploadRenderSourceBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return uploadRenderSource(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UploadRenderSourceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof uploadRenderSource>>
+>;
+export type UploadRenderSourceMutationBody = BodyType<UploadRenderSourceBody>;
+export type UploadRenderSourceMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Upload a source image for upload-as-render-source
+ */
+export const useUploadRenderSource = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadRenderSource>>,
+    TError,
+    { id: string; data: BodyType<UploadRenderSourceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof uploadRenderSource>>,
+  TError,
+  { id: string; data: BodyType<UploadRenderSourceBody> },
+  TContext
+> => {
+  return useMutation(getUploadRenderSourceMutationOptions(options));
+};
+
+/**
  * Synchronous up to row insert + 202 response; the polling
 worker (capture → trigger → poll → mirror → terminal) runs
-fire-and-forget. Body is a discriminated union by `kind`:
+fire-and-forget. Body is a union by `kind`:
 
-  - `still`         — single image. 1 archDiffusion-v43 call.
-  - `elevation-set` — north / east / south / west. 4 archDiff
-                      calls fanned out by the route, persisted
-                      as ONE viewpoint_renders parent row +
-                      4 render_outputs children.
-  - `video`         — single 5- or 10-second Kling clip.
+  - `still` + GLB capture — `glbUrl` + camera params (default).
+  - `still` + upload     — `sourceUploadUrl` from
+    `POST .../renders/source-upload` (doc 40e A.5).
+  - `elevation-set`      — 4 archDiffusion calls.
+  - `video`              — single Kling clip.
 
-Architect-audience-only. Behind `RENDERS_PROD_ENABLED` in
-production (returns 503 with `renders_preview_disabled` until
-the operator flips the flag). The body MUST include `glbUrl`
-— V1-4 does not resolve the bim-model row's GLB pointer
-server-side (V1-5 follow-up).
+Behind `RENDERS_PROD_ENABLED` in production.
 
  * @summary Kick off a mnml.ai render for an engagement
  */
@@ -10317,6 +10413,487 @@ export const useCancelRender = <
   TContext
 > => {
   return useMutation(getCancelRenderMutationOptions(options));
+};
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/render/enhancer`.
+Requires `image` + `prompt` file/field parts; optional geometry,
+creativity, dynamic, seed, sharpen. Parent render must be `ready`.
+Returns 202 + `renderId`; poll via `GET /renders/{renderId}`.
+
+ * @summary Run Render Enhancer on a parent render output
+ */
+export const getKickoffRenderEnhanceUrl = (parentId: string) => {
+  return `/api/render-outputs/${parentId}/enhance`;
+};
+
+export const kickoffRenderEnhance = async (
+  parentId: string,
+  kickoffRenderEnhanceBody: KickoffRenderEnhanceBody,
+  options?: RequestInit,
+): Promise<KickoffPowerToolResponse> => {
+  const formData = new FormData();
+  if (kickoffRenderEnhanceBody.prompt !== undefined) {
+    formData.append(`prompt`, kickoffRenderEnhanceBody.prompt);
+  }
+
+  return customFetch<KickoffPowerToolResponse>(
+    getKickoffRenderEnhanceUrl(parentId),
+    {
+      ...options,
+      method: "POST",
+      body: formData,
+    },
+  );
+};
+
+export const getKickoffRenderEnhanceMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderEnhance>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderEnhanceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof kickoffRenderEnhance>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderEnhanceBody> },
+  TContext
+> => {
+  const mutationKey = ["kickoffRenderEnhance"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof kickoffRenderEnhance>>,
+    { parentId: string; data: BodyType<KickoffRenderEnhanceBody> }
+  > = (props) => {
+    const { parentId, data } = props ?? {};
+
+    return kickoffRenderEnhance(parentId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type KickoffRenderEnhanceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof kickoffRenderEnhance>>
+>;
+export type KickoffRenderEnhanceMutationBody =
+  BodyType<KickoffRenderEnhanceBody>;
+export type KickoffRenderEnhanceMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Run Render Enhancer on a parent render output
+ */
+export const useKickoffRenderEnhance = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderEnhance>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderEnhanceBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof kickoffRenderEnhance>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderEnhanceBody> },
+  TContext
+> => {
+  return useMutation(getKickoffRenderEnhanceMutationOptions(options));
+};
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/upscale`.
+Requires `image`; optional `scale` (2/4/8), `face_enhance`.
+
+ * @summary Run 4K Upscaler on a parent render output
+ */
+export const getKickoffRenderUpscaleUrl = (parentId: string) => {
+  return `/api/render-outputs/${parentId}/upscale`;
+};
+
+export const kickoffRenderUpscale = async (
+  parentId: string,
+  kickoffRenderUpscaleBody: KickoffRenderUpscaleBody,
+  options?: RequestInit,
+): Promise<KickoffPowerToolResponse> => {
+  const formData = new FormData();
+
+  return customFetch<KickoffPowerToolResponse>(
+    getKickoffRenderUpscaleUrl(parentId),
+    {
+      ...options,
+      method: "POST",
+      body: formData,
+    },
+  );
+};
+
+export const getKickoffRenderUpscaleMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderUpscale>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderUpscaleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof kickoffRenderUpscale>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderUpscaleBody> },
+  TContext
+> => {
+  const mutationKey = ["kickoffRenderUpscale"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof kickoffRenderUpscale>>,
+    { parentId: string; data: BodyType<KickoffRenderUpscaleBody> }
+  > = (props) => {
+    const { parentId, data } = props ?? {};
+
+    return kickoffRenderUpscale(parentId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type KickoffRenderUpscaleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof kickoffRenderUpscale>>
+>;
+export type KickoffRenderUpscaleMutationBody =
+  BodyType<KickoffRenderUpscaleBody>;
+export type KickoffRenderUpscaleMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Run 4K Upscaler on a parent render output
+ */
+export const useKickoffRenderUpscale = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderUpscale>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderUpscaleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof kickoffRenderUpscale>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderUpscaleBody> },
+  TContext
+> => {
+  return useMutation(getKickoffRenderUpscaleMutationOptions(options));
+};
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/ai-eraser`.
+Requires `image` + `mask` PNG parts; optional `output_format`.
+
+ * @summary Run AI Eraser on a parent render output
+ */
+export const getKickoffRenderEraseUrl = (parentId: string) => {
+  return `/api/render-outputs/${parentId}/erase`;
+};
+
+export const kickoffRenderErase = async (
+  parentId: string,
+  kickoffRenderEraseBody: KickoffRenderEraseBody,
+  options?: RequestInit,
+): Promise<KickoffPowerToolResponse> => {
+  const formData = new FormData();
+
+  return customFetch<KickoffPowerToolResponse>(
+    getKickoffRenderEraseUrl(parentId),
+    {
+      ...options,
+      method: "POST",
+      body: formData,
+    },
+  );
+};
+
+export const getKickoffRenderEraseMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderErase>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderEraseBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof kickoffRenderErase>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderEraseBody> },
+  TContext
+> => {
+  const mutationKey = ["kickoffRenderErase"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof kickoffRenderErase>>,
+    { parentId: string; data: BodyType<KickoffRenderEraseBody> }
+  > = (props) => {
+    const { parentId, data } = props ?? {};
+
+    return kickoffRenderErase(parentId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type KickoffRenderEraseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof kickoffRenderErase>>
+>;
+export type KickoffRenderEraseMutationBody = BodyType<KickoffRenderEraseBody>;
+export type KickoffRenderEraseMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Run AI Eraser on a parent render output
+ */
+export const useKickoffRenderErase = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderErase>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderEraseBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof kickoffRenderErase>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderEraseBody> },
+  TContext
+> => {
+  return useMutation(getKickoffRenderEraseMutationOptions(options));
+};
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/inpaint`.
+Requires `image` + `mask`; optional prompt, negative_prompt,
+seed, mask_type.
+
+ * @summary Run Inpaint on a parent render output
+ */
+export const getKickoffRenderInpaintUrl = (parentId: string) => {
+  return `/api/render-outputs/${parentId}/inpaint`;
+};
+
+export const kickoffRenderInpaint = async (
+  parentId: string,
+  kickoffRenderInpaintBody: KickoffRenderInpaintBody,
+  options?: RequestInit,
+): Promise<KickoffPowerToolResponse> => {
+  const formData = new FormData();
+
+  return customFetch<KickoffPowerToolResponse>(
+    getKickoffRenderInpaintUrl(parentId),
+    {
+      ...options,
+      method: "POST",
+      body: formData,
+    },
+  );
+};
+
+export const getKickoffRenderInpaintMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderInpaint>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderInpaintBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof kickoffRenderInpaint>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderInpaintBody> },
+  TContext
+> => {
+  const mutationKey = ["kickoffRenderInpaint"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof kickoffRenderInpaint>>,
+    { parentId: string; data: BodyType<KickoffRenderInpaintBody> }
+  > = (props) => {
+    const { parentId, data } = props ?? {};
+
+    return kickoffRenderInpaint(parentId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type KickoffRenderInpaintMutationResult = NonNullable<
+  Awaited<ReturnType<typeof kickoffRenderInpaint>>
+>;
+export type KickoffRenderInpaintMutationBody =
+  BodyType<KickoffRenderInpaintBody>;
+export type KickoffRenderInpaintMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Run Inpaint on a parent render output
+ */
+export const useKickoffRenderInpaint = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderInpaint>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderInpaintBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof kickoffRenderInpaint>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderInpaintBody> },
+  TContext
+> => {
+  return useMutation(getKickoffRenderInpaintMutationOptions(options));
+};
+
+/**
+ * doc 40e A.2 — multipart kickoff for mnml `POST /v1/style/transfer`.
+Requires `image` + `reference_image`; optional prompt, strength,
+preserve_structure, color_preservation.
+
+ * @summary Run Style Transfer on a parent render output
+ */
+export const getKickoffRenderStyleTransferUrl = (parentId: string) => {
+  return `/api/render-outputs/${parentId}/style-transfer`;
+};
+
+export const kickoffRenderStyleTransfer = async (
+  parentId: string,
+  kickoffRenderStyleTransferBody: KickoffRenderStyleTransferBody,
+  options?: RequestInit,
+): Promise<KickoffPowerToolResponse> => {
+  const formData = new FormData();
+
+  return customFetch<KickoffPowerToolResponse>(
+    getKickoffRenderStyleTransferUrl(parentId),
+    {
+      ...options,
+      method: "POST",
+      body: formData,
+    },
+  );
+};
+
+export const getKickoffRenderStyleTransferMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderStyleTransfer>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderStyleTransferBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof kickoffRenderStyleTransfer>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderStyleTransferBody> },
+  TContext
+> => {
+  const mutationKey = ["kickoffRenderStyleTransfer"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof kickoffRenderStyleTransfer>>,
+    { parentId: string; data: BodyType<KickoffRenderStyleTransferBody> }
+  > = (props) => {
+    const { parentId, data } = props ?? {};
+
+    return kickoffRenderStyleTransfer(parentId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type KickoffRenderStyleTransferMutationResult = NonNullable<
+  Awaited<ReturnType<typeof kickoffRenderStyleTransfer>>
+>;
+export type KickoffRenderStyleTransferMutationBody =
+  BodyType<KickoffRenderStyleTransferBody>;
+export type KickoffRenderStyleTransferMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Run Style Transfer on a parent render output
+ */
+export const useKickoffRenderStyleTransfer = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof kickoffRenderStyleTransfer>>,
+    TError,
+    { parentId: string; data: BodyType<KickoffRenderStyleTransferBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof kickoffRenderStyleTransfer>>,
+  TError,
+  { parentId: string; data: BodyType<KickoffRenderStyleTransferBody> },
+  TContext
+> => {
+  return useMutation(getKickoffRenderStyleTransferMutationOptions(options));
 };
 
 /**

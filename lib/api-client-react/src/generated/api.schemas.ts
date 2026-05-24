@@ -4595,12 +4595,57 @@ validates against per-expert allowed values.
   expertParams?: KickoffRenderCommonFieldsExpertParams;
 }
 
-export type KickoffRenderStillBodyKind =
-  (typeof KickoffRenderStillBodyKind)[keyof typeof KickoffRenderStillBodyKind];
+export type KickoffRenderPromptFieldsExpertName =
+  (typeof KickoffRenderPromptFieldsExpertName)[keyof typeof KickoffRenderPromptFieldsExpertName];
 
-export const KickoffRenderStillBodyKind = {
-  still: "still",
+export const KickoffRenderPromptFieldsExpertName = {
+  exterior: "exterior",
+  interior: "interior",
+  masterplan: "masterplan",
+  landscape: "landscape",
+  plan: "plan",
+  product: "product",
 } as const;
+
+export type KickoffRenderPromptFieldsRenderStyle =
+  (typeof KickoffRenderPromptFieldsRenderStyle)[keyof typeof KickoffRenderPromptFieldsRenderStyle];
+
+export const KickoffRenderPromptFieldsRenderStyle = {
+  raw: "raw",
+  photoreal: "photoreal",
+  cgi_render: "cgi_render",
+  cad: "cad",
+  freehand_sketch: "freehand_sketch",
+  clay_model: "clay_model",
+  illustration: "illustration",
+  watercolor: "watercolor",
+} as const;
+
+export type KickoffRenderPromptFieldsExpertParams = { [key: string]: string };
+
+/**
+ * Prompt + mnml routing fields without a GLB capture URL.
+ */
+export interface KickoffRenderPromptFields {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  prompt: string;
+  expertName?: KickoffRenderPromptFieldsExpertName;
+  renderStyle?: KickoffRenderPromptFieldsRenderStyle;
+  expertParams?: KickoffRenderPromptFieldsExpertParams;
+}
+
+/**
+ * doc 40e A.5 — canonical object-storage path for an uploaded
+render source image.
+
+ */
+export interface RenderSourceUploadResponse {
+  /** /objects/uploads/{uuid} path for kickoff. */
+  sourceUploadUrl: string;
+}
 
 export type KickoffRenderStillBody = KickoffRenderCommonFields & {
   kind: "still";
@@ -4612,16 +4657,15 @@ export type KickoffRenderStillBody = KickoffRenderCommonFields & {
    * @maximum 120
    */
   fov?: number;
-} & {
-  kind: KickoffRenderStillBodyKind;
 };
 
-export type KickoffRenderElevationSetBodyKind =
-  (typeof KickoffRenderElevationSetBodyKind)[keyof typeof KickoffRenderElevationSetBodyKind];
-
-export const KickoffRenderElevationSetBodyKind = {
-  "elevation-set": "elevation-set",
-} as const;
+export type KickoffRenderStillUploadBody = KickoffRenderPromptFields & {
+  kind: "still";
+  /** Path returned by `POST .../renders/source-upload`
+(/objects/uploads/{uuid}).
+ */
+  sourceUploadUrl: string;
+};
 
 export type KickoffRenderElevationSetBody = KickoffRenderCommonFields & {
   kind: "elevation-set";
@@ -4639,16 +4683,7 @@ export type KickoffRenderElevationSetBody = KickoffRenderCommonFields & {
    * @maximum 120
    */
   fov?: number;
-} & {
-  kind: KickoffRenderElevationSetBodyKind;
 };
-
-export type KickoffRenderVideoBodyKind =
-  (typeof KickoffRenderVideoBodyKind)[keyof typeof KickoffRenderVideoBodyKind];
-
-export const KickoffRenderVideoBodyKind = {
-  video: "video",
-} as const;
 
 export type KickoffRenderVideoBody = KickoffRenderCommonFields & {
   kind: "video";
@@ -4663,12 +4698,17 @@ export type KickoffRenderVideoBody = KickoffRenderCommonFields & {
   aspectRatio?: "16:9" | "4:3" | "1:1";
   movementType?: "horizontal" | "vertical" | "zoom_in" | "zoom_out" | "pan";
   direction?: "left" | "right" | "up" | "down";
-} & {
-  kind: KickoffRenderVideoBodyKind;
 };
 
+/**
+ * Union by `kind`. Two `still` shapes share the same discriminator
+value — GLB capture (`glbUrl` + camera) vs upload (`sourceUploadUrl`);
+clients disambiguate on presence of those fields (doc 40e A.5).
+
+ */
 export type KickoffRenderBody =
   | KickoffRenderStillBody
+  | KickoffRenderStillUploadBody
   | KickoffRenderElevationSetBody
   | KickoffRenderVideoBody;
 
@@ -4683,6 +4723,68 @@ export interface KickoffRenderResponse {
   state: RenderStatus;
   kind: DomainRenderKind;
   cost: RenderCostEstimate;
+}
+
+/**
+ * doc 40e A.4/A.6 — `viewpoint_renders.source_type` discriminant.
+
+ */
+export type ViewpointRenderSourceType =
+  (typeof ViewpointRenderSourceType)[keyof typeof ViewpointRenderSourceType];
+
+export const ViewpointRenderSourceType = {
+  "model-capture": "model-capture",
+  upload: "upload",
+  enhance: "enhance",
+  upscale: "upscale",
+  erase: "erase",
+  inpaint: "inpaint",
+  style_transfer: "style_transfer",
+} as const;
+
+/**
+ * doc 40e A.2/A.4 — power-tool subset of ViewpointRenderSourceType.
+
+ */
+export type PowerToolSourceType =
+  (typeof PowerToolSourceType)[keyof typeof PowerToolSourceType];
+
+export const PowerToolSourceType = {
+  enhance: "enhance",
+  upscale: "upscale",
+  erase: "erase",
+  inpaint: "inpaint",
+  style_transfer: "style_transfer",
+} as const;
+
+/**
+ * Static per-tool credit cost from `estimatePowerToolCost` (doc 40e A.2).
+
+ */
+export interface PowerToolCostEstimate {
+  /** @minimum 0 */
+  credits: number;
+}
+
+export type KickoffPowerToolResponseKind =
+  (typeof KickoffPowerToolResponseKind)[keyof typeof KickoffPowerToolResponseKind];
+
+export const KickoffPowerToolResponseKind = {
+  still: "still",
+} as const;
+
+/**
+ * 202 envelope for doc 40e A.2 power-tool kickoffs. Poll via
+`GET /renders/{renderId}`; output role is `primary` until A.6.
+
+ */
+export interface KickoffPowerToolResponse {
+  renderId: string;
+  state: RenderStatus;
+  kind: KickoffPowerToolResponseKind;
+  sourceType: PowerToolSourceType;
+  parentRenderOutputId: string;
+  cost: PowerToolCostEstimate;
 }
 
 export type RenderOutputProjectionFormat =
@@ -4804,6 +4906,9 @@ export interface RenderDetailResponse {
   id: string;
   engagementId: string;
   kind: DomainRenderKind;
+  sourceType: ViewpointRenderSourceType;
+  sourceUploadUrl: string | null;
+  parentRenderOutputId: string | null;
   status: RenderStatus;
   mnmlJobId: string | null;
   mnmlJobs: ElevationSetJob[] | null;
@@ -4826,6 +4931,8 @@ the detail shape — outputs are NOT included; clients fetch
 export interface RenderListItem {
   id: string;
   kind: DomainRenderKind;
+  sourceType?: ViewpointRenderSourceType;
+  parentRenderOutputId?: string | null;
   status: RenderStatus;
   errorCode: string | null;
   requestedBy: string;
@@ -5929,12 +6036,26 @@ export const ListMyReviewerRequestsStatus = {
   all: "all",
 } as const;
 
+export type UploadRenderSourceBody = { [key: string]: unknown };
+
 export type GenerateRenderPromptBody = {
   /** Optional keyword hints for the generator to
 emphasize.
  */
   keywords?: string;
 };
+
+export type KickoffRenderEnhanceBody = {
+  prompt?: string;
+};
+
+export type KickoffRenderUpscaleBody = { [key: string]: unknown };
+
+export type KickoffRenderEraseBody = { [key: string]: unknown };
+
+export type KickoffRenderInpaintBody = { [key: string]: unknown };
+
+export type KickoffRenderStyleTransferBody = { [key: string]: unknown };
 
 export type GetRenderOutputFileParams = {
   download?: GetRenderOutputFileDownload;

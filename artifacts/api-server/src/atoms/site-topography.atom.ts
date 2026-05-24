@@ -102,14 +102,20 @@ export type SiteTopographyEventType =
 
 /**
  * Typed payload returned by `site-topography`'s `contextSummary.typed`.
- * Only `id` + `found` are populated in Phase 2D.1.3 (registration-only);
- * the producer in 2D.1.2 will widen this to surface DEM source +
- * resolution + acquisition date + contour count once the event payload
- * is being read at lookup time.
+ * Phase 2D.x PR3 widens the shape now that the ingest worker emits
+ * real event payloads — `found: true` returns DEM provenance + contour
+ * metadata pulled off the latest `site-topography.ingested` /
+ * `.refreshed` event.
  */
 export interface SiteTopographyTypedPayload {
   id: string;
   found: boolean;
+  demSource?: string;
+  demResolutionMeters?: number;
+  demFetchedAt?: string;
+  contourCount?: number;
+  contourIntervalMeters?: number;
+  parcelOrigin?: string;
 }
 
 export interface SiteTopographyAtomDeps {
@@ -153,6 +159,8 @@ export function makeSiteTopographyAtom(
     ): Promise<ContextSummary<"site-topography">> {
       let latestEventId = "";
       let latestEventAt = new Date(0).toISOString();
+      let latestPayload: Record<string, unknown> | null = null;
+      let latestEventType: string | null = null;
       if (deps.history) {
         try {
           const latest = await deps.history.latestEvent({
@@ -163,6 +171,14 @@ export function makeSiteTopographyAtom(
           if (latest) {
             latestEventId = latest.id;
             latestEventAt = latest.occurredAt.toISOString();
+            latestEventType = latest.eventType;
+            if (
+              latest.payload &&
+              typeof latest.payload === "object" &&
+              !Array.isArray(latest.payload)
+            ) {
+              latestPayload = latest.payload as Record<string, unknown>;
+            }
           }
         } catch {
           // Best-effort — a transient history outage cannot fail the
@@ -170,24 +186,91 @@ export function makeSiteTopographyAtom(
         }
       }
 
-      const proseRaw =
-        `Site topography ${entityId} is registered as a catalog atom but the DEM ingest + contour ` +
-        `derivation layer is not implemented yet (ships with the Phase 2D.1.2 ingest worker built on ` +
-        `the USGS 3DEP client landed in PR #98). The atom shape (engagement composition edge, ` +
-        `event vocabulary) is declared so producers and the inline-reference resolver can recognize ` +
-        `this type.`;
-      const prose =
-        proseRaw.length > SITE_TOPOGRAPHY_PROSE_MAX_CHARS
-          ? proseRaw.slice(0, SITE_TOPOGRAPHY_PROSE_MAX_CHARS - 1) + "…"
-          : proseRaw;
+      // Phase 2D.x PR3 — when the ingest worker has appended at least
+      // one event, surface DEM + contour provenance off the latest
+      // payload so the card renders something useful.
+      const found = latestPayload !== null && latestEventType !== "site-topography.superseded";
+      let typedPayload: SiteTopographyTypedPayload;
+      let prose: string;
+      const keyMetrics: ContextSummary<"site-topography">["keyMetrics"] = [];
+      if (found && latestPayload) {
+        const demRaw = latestPayload.dem as Record<string, unknown> | undefined;
+        const contoursRaw = latestPayload.contours as
+          | Record<string, unknown>
+          | undefined;
+        const parcelRaw = latestPayload.parcel as
+          | Record<string, unknown>
+          | undefined;
+        const demSource =
+          typeof demRaw?.source === "string" ? demRaw.source : undefined;
+        const demResolutionMeters =
+          typeof demRaw?.resolutionMeters === "number"
+            ? (demRaw.resolutionMeters as number)
+            : undefined;
+        const demFetchedAt =
+          typeof demRaw?.fetchedAt === "string" ? demRaw.fetchedAt : undefined;
+        const contourCount =
+          typeof contoursRaw?.featureCount === "number"
+            ? (contoursRaw.featureCount as number)
+            : undefined;
+        const contourIntervalMeters =
+          typeof contoursRaw?.intervalMeters === "number"
+            ? (contoursRaw.intervalMeters as number)
+            : undefined;
+        const parcelOrigin =
+          typeof parcelRaw?.origin === "string" ? parcelRaw.origin : undefined;
+        typedPayload = {
+          id: entityId,
+          found: true,
+          demSource,
+          demResolutionMeters,
+          demFetchedAt,
+          contourCount,
+          contourIntervalMeters,
+          parcelOrigin,
+        };
+        if (typeof contourCount === "number") {
+          keyMetrics.push({
+            label: "Contour features",
+            value: String(contourCount),
+          });
+        }
+        if (typeof contourIntervalMeters === "number") {
+          keyMetrics.push({
+            label: "Interval (m)",
+            value: String(contourIntervalMeters),
+          });
+        }
+        if (typeof demResolutionMeters === "number") {
+          keyMetrics.push({
+            label: "DEM resolution (m)",
+            value: String(demResolutionMeters),
+          });
+        }
+        const proseRaw =
+          `Site topography for engagement ${entityId}: ${contourCount ?? "?"} contour features at ` +
+          `${contourIntervalMeters ?? "?"}m interval derived from ${demSource ?? "USGS 3DEP"} ` +
+          `(${demResolutionMeters ?? "?"}m resolution). Parcel boundary from ${parcelOrigin ?? "?"}.`;
+        prose =
+          proseRaw.length > SITE_TOPOGRAPHY_PROSE_MAX_CHARS
+            ? proseRaw.slice(0, SITE_TOPOGRAPHY_PROSE_MAX_CHARS - 1) + "…"
+            : proseRaw;
+      } else {
+        typedPayload = { id: entityId, found: false };
+        const proseRaw =
+          `Site topography ${entityId}: no DEM ingest has been triggered yet. ` +
+          `Hit POST /api/engagements/${entityId}/site-topography/refresh to derive contours ` +
+          `from USGS 3DEP for the engagement's parcel boundary.`;
+        prose =
+          proseRaw.length > SITE_TOPOGRAPHY_PROSE_MAX_CHARS
+            ? proseRaw.slice(0, SITE_TOPOGRAPHY_PROSE_MAX_CHARS - 1) + "…"
+            : proseRaw;
+      }
 
       return {
         prose,
-        typed: { id: entityId, found: false } as unknown as Record<
-          string,
-          unknown
-        >,
-        keyMetrics: [],
+        typed: typedPayload as unknown as Record<string, unknown>,
+        keyMetrics,
         relatedAtoms: [],
         historyProvenance: { latestEventId, latestEventAt },
         scopeFiltered: false,

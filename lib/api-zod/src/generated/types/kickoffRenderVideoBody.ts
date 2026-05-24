@@ -6,7 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { KickoffRenderCommonFields } from "./kickoffRenderCommonFields";
-import type { KickoffRenderVideoBodyKind } from "./kickoffRenderVideoBodyKind";
 import type { Vec3 } from "./vec3";
 
 export type KickoffRenderVideoBody = KickoffRenderCommonFields & {
@@ -22,6 +21,4 @@ export type KickoffRenderVideoBody = KickoffRenderCommonFields & {
   aspectRatio?: "16:9" | "4:3" | "1:1";
   movementType?: "horizontal" | "vertical" | "zoom_in" | "zoom_out" | "pan";
   direction?: "left" | "right" | "up" | "down";
-} & {
-  kind: KickoffRenderVideoBodyKind;
 };

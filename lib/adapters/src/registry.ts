@@ -16,6 +16,10 @@ import { usgsNedAdapter } from "./federal/usgs-ned";
 import { epaEjscreenAdapter } from "./federal/epa-ejscreen";
 import { fccBroadbandAdapter } from "./federal/fcc-broadband";
 import {
+  regridParcelsAdapter,
+  regridZoningAdapter,
+} from "./national/regrid";
+import {
   utahDemAdapter,
   utahParcelsAdapter,
   utahAddressPointsAdapter,
@@ -65,8 +69,15 @@ import {
  *
  * Session summary: doc_repo/_sessions/2026-05-23_qa22_fcc_recon_cc-agent-C.md
  */
+function defaultProcessEnv(): NodeJS.ProcessEnv {
+  if (typeof process !== "undefined" && process.env) {
+    return process.env;
+  }
+  return {};
+}
+
 export function isFccEnabled(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = defaultProcessEnv(),
 ): boolean {
   return env.FCC_ENABLED === "true";
 }
@@ -75,8 +86,18 @@ export const FEDERAL_ADAPTERS: ReadonlyArray<Adapter> = [
   femaNfhlAdapter,
   usgsNedAdapter,
   epaEjscreenAdapter,
-  // QA-22 SCOPE B closeout — see `isFccEnabled` docstring above.
+  // QA-22 SCOPE B closeout (PR #102) — see `isFccEnabled` docstring
+  // above. FCC is gated off by default; the binding is only spread
+  // in when the operator flips `FCC_ENABLED=true` on the Cloud Run
+  // service env.
   ...(isFccEnabled() ? [fccBroadbandAdapter] : []),
+  // Cortex prop-intel SCOPE B (2026-05-23) — Regrid national
+  // parcel + zoning baseline. Tier-housed under FEDERAL_ADAPTERS
+  // for cache-predicate reuse (the runner's default cache predicate
+  // caches federal-tier outcomes). The operator-visible attribution
+  // is source_kind = "national-aggregator", which the UI reads.
+  regridParcelsAdapter,
+  regridZoningAdapter,
 ];
 
 // TODO: state-tier gates on localKey not stateKey — see PL-04

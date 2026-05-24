@@ -6,7 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { KickoffRenderCommonFields } from "./kickoffRenderCommonFields";
-import type { KickoffRenderElevationSetBodyKind } from "./kickoffRenderElevationSetBodyKind";
 import type { Vec3 } from "./vec3";
 
 export type KickoffRenderElevationSetBody = KickoffRenderCommonFields & {
@@ -25,6 +24,4 @@ export type KickoffRenderElevationSetBody = KickoffRenderCommonFields & {
    * @maximum 120
    */
   fov?: number;
-} & {
-  kind: KickoffRenderElevationSetBodyKind;
 };
