@@ -1,54 +1,173 @@
 /**
  * EPA EJScreen — federal environmental-justice screening adapter.
  *
- * EPA EJScreen publishes block-group level environmental + demographic
- * indicators. The current public broker endpoint is
- * `https://ejscreen.epa.gov/mapper/ejscreenRESTbroker3.aspx` (the
- * legacy `ejscreenRESTbroker.aspx` was deprecated in 2023). It accepts
- * a point geometry and returns a JSON envelope with the indicators for
- * the enclosing block group (population, demographic index, key
- * pollution percentiles).
+ * HISTORY:
  *
- * The broker's response shape is awkward (it nests the indicators
- * inside `data.main` as named fields) so we surface the raw envelope
- * verbatim plus a normalized subset the briefing engine reads first.
+ * - Original (pre-2024): EPA published EJScreen at `ejscreen.epa.gov`
+ *   with a public REST broker (`/mapper/ejscreenRESTbroker3.aspx`)
+ *   that returned block-group indicators keyed by EJScreen field names
+ *   (`P_PM25`, `P_OZONE`, etc.) under `data.main`. Calls went through
+ *   {@link fetchWithRetry} with a SLOW_UPSTREAM_TIMEOUT_MS budget.
  *
- * Calls go through {@link fetchWithRetry} so transient broker
- * hiccups are not surfaced as a hard failure on the first try.
+ * - 2024-late: EPA decommissioned the entire `ejscreen.epa.gov` host
+ *   (DNS NXDOMAIN) and the `www.epa.gov/ejscreen*` page tree (HTTP 404).
+ *   No successor announced.
+ *
+ * - 2026-05-23 dead-end sweep (cc-agent-C QA-22 SCOPE A Path 1a, see
+ *   `_research/2026-05-23_qa22_epa_path1a_cc-agent-C.md`): confirmed
+ *   full decommission. Swept geopub.epa.gov + gispub.epa.gov +
+ *   edg.epa.gov + EPA Esri Online org. No EPA-published successor. The
+ *   only national-coverage source still emitting the EJScreen 2023
+ *   schema is a CalEPA-hosted Feature Server mirror.
+ *
+ * - 2026-05-23 opt-in landing (this change, decision record
+ *   `doc_repo/_decisions/2026-05-23_epa_calepa_mirror_opt_in.md`):
+ *   three policy deltas explicitly accepted; adapter swapped to the
+ *   CalEPA mirror.
+ *
+ * CURRENT IMPLEMENTATION (CalEPA mirror, opt-in):
+ *
+ *   Endpoint: services2.arcgis.com/iq8zYa0SRsvIFFKz/.../EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI_gdb/FeatureServer/0
+ *   Schema:   EJScreen 2023, block-group polygons, state percentiles
+ *   Vintage:  CalEPA mirror published 2024-01-29 (frozen until further notice)
+ *
+ * THREE OPERATOR-ACCEPTED DELTAS:
+ *
+ *   1. Not EPA-owned. State-agency hosted mirror at
+ *      `services2.arcgis.com` (owner `1045138_CAL`). Could be taken
+ *      down or stop refreshing. Provider attribution explicitly names
+ *      "CalEPA mirror — EPA EJScreen API retired" so the federal-tier
+ *      promise on Redd softens visibly, it does not silently erase.
+ *
+ *   2. State-distribution percentiles, not US-distribution. Layer is
+ *      `EJSCREEN_StatePctiles_with_AS_CNMI_GU_VI`. A `P_PM25=78` from
+ *      this mirror means "78th percentile of PM2.5 within this state",
+ *      not "78th percentile nationwide". The payload carries
+ *      `percentileBasis: "state"` so the UI / chip / markdown digest
+ *      can surface "state-pctile" wherever they render a percentile.
+ *
+ *   3. Demographic-index methodology shift between 2022 → 2023.
+ *      `P_D2_VULEOPCT` (old broker, 2022 EJScreen) → `P_DEMOGIDX_2`
+ *      (2023 mirror). EJScreen 2023 dropped "vulnerable" from the
+ *      demographic-index components. Forward-only (Cortex did not
+ *      carry historical EJScreen state) but worth knowing.
+ *
+ * REVERSAL CRITERIA (per the decision record):
+ *
+ *   - CalEPA tenant takes the mirror down → roll back to "leave EPA
+ *     pill red", file a fresh SCOPE A recon for the next successor pass.
+ *   - EPA publishes EJScreen v2 → swap back to EPA endpoint via fresh
+ *     dispatch; the CalEPA mirror becomes a documented historical
+ *     fallback in this docstring.
+ *   - Operator changes mind on state-percentile silent-drift risk →
+ *     disable the adapter, re-evaluate.
+ *   - A Cortex briefing surfaces an embarrassing reading traceable to
+ *     state-vs-US percentile confusion → pause adapter, audit briefing
+ *     UI copy, re-enable with stronger disclosure.
+ *
+ * FRESHNESS THRESHOLD CHOICE:
+ *
+ *   24 months (up from the 18 the original EPA broker used). EJScreen
+ *   was historically rebuilt roughly annually; the CalEPA mirror is
+ *   intentionally a frozen 2023 snapshot republished on 2024-01-29 with
+ *   no published refresh cadence. The 24-month window gives some
+ *   headroom past the mirror's current ~16-month staleness while still
+ *   firing the cache-age badge for engagements opened years apart.
+ *   NOTE that `snapshotDate` is stamped at fetch time, not at upstream
+ *   data publication time — the badge therefore measures cache age,
+ *   not the underlying EJScreen 2023 vintage. The
+ *   `payload.upstreamDatasetVersion` field carries the data vintage so
+ *   the UI can disclose that independently of cache age.
+ *
+ * DEAD-END LEDGER (so a future agent does not re-dig the 2026-05-23 sweep):
+ *
+ *   geopub.epa.gov/arcgis/rest/services       — no EJ folder/service
+ *   gispub.epa.gov/arcgis/rest/services       — no EJ folder/service
+ *   edg.epa.gov/data/PUBLIC/OEI/              — no EJScreen archive
+ *   NEPAssist/NEPAVELayersPublic_fgdb         — NAAQS non-attainment
+ *                                                polygons only
+ *                                                (categorical, not the
+ *                                                percentile schema)
+ *   ORD/EnvironmentalQualityIndex             — different methodology
+ *                                                + different schema
+ *   OEI/ACS_Demographics_by_Tract_2008_2012   — stale Census, no
+ *                                                pollution layer
+ *   EPA Esri Online org search for "EJScreen" — only third-party
+ *                                                mirrors of the 2023
+ *                                                archive (CalEPA,
+ *                                                Delaware FirstMap,
+ *                                                small state orgs)
+ *
+ * Calls go through {@link arcgisPointQuery} so transient hiccups are
+ * not surfaced as a hard failure on the first try, and so DNS / TLS /
+ * ECONNRESET throws collapse into a typed `network-error` adapter
+ * failure rather than rendering as "fetch failed" with no body.
  */
 
 import {
-  AdapterRunError,
   type Adapter,
   type AdapterContext,
   type AdapterResult,
+  AdapterRunError,
 } from "../types";
-import { fetchWithRetry } from "../retry";
-import { SLOW_UPSTREAM_TIMEOUT_MS } from "../timeouts";
-
-const EPA_EJSCREEN_BROKER =
-  "https://ejscreen.epa.gov/mapper/ejscreenRESTbroker3.aspx";
-const EPA_EJSCREEN_LABEL = "EPA EJScreen";
+import { arcgisPointQuery } from "../arcgis";
 
 /**
- * Identifying User-Agent for the EJScreen broker call. The broker
- * sits behind an IIS/Apache front door that rejects requests without
- * a recognized `User-Agent` (production saw this as `fetch failed`).
+ * CalEPA-hosted mirror of the EJScreen 2023 block-group dataset. See
+ * the top-of-file docstring for the dead-end ledger that led here and
+ * the three operator-accepted policy deltas.
  */
-const EPA_EJSCREEN_USER_AGENT =
-  "smartcity-plan-review/1.0 (+https://cortex.empressa.io)";
+const EPA_EJSCREEN_FEATURESERVER =
+  "https://services2.arcgis.com/iq8zYa0SRsvIFFKz/arcgis/rest/services/" +
+  "EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI_gdb/FeatureServer/0";
+
+/**
+ * Short label shown on the failure pill / log lines if the upstream
+ * misbehaves. Kept compact so the pill fits without wrapping.
+ */
+const EPA_EJSCREEN_LABEL = "EJScreen (CalEPA mirror)";
+
+/**
+ * Provider attribution string set on the persisted briefing-source
+ * row. Surfaces in the row footer as "source: <provider>". Per the
+ * decision record (2026-05-23) this MUST NOT read just "EJScreen" —
+ * the federal-tier promise softens via attribution, it does not
+ * silently erase.
+ */
+export const EPA_EJSCREEN_PROVIDER_LABEL =
+  "EJScreen 2023 — CalEPA mirror — EPA EJScreen API retired, awaiting v2";
+
+/**
+ * Data vintage label exposed on the payload so the UI can disclose
+ * "what year of EJScreen this is" independently of when the adapter
+ * ran. The CalEPA mirror is a frozen snapshot, not a live feed.
+ */
+export const EPA_EJSCREEN_DATASET_VERSION =
+  "EJScreen 2023 (CalEPA mirror, published 2024-01-29)";
+
+/**
+ * Block-group attribute fields the adapter pulls from the ArcGIS
+ * Feature Server. Kept as a constant so the same list drives both the
+ * `outFields` query parameter and the payload mapping below.
+ */
+const EJSCREEN_OUT_FIELDS = [
+  "ID", // block-group GEOID
+  "STATE_NAME",
+  "ACSTOTPOP", // population (was RAW_D_POP in the old broker)
+  "P_DEMOGIDX_2", // 2-component demographic index (was P_D2_VULEOPCT)
+  "P_DEMOGIDX_5", // supplemental 5-component demographic index
+  "P_PM25",
+  "P_OZONE",
+  "P_LDPNT",
+].join(",");
 
 /**
  * Freshness window for the EPA EJScreen snapshot.
  *
- * EJScreen is rebuilt roughly annually, after the Census/ACS five-year
- * sample it draws demographics from is republished and the EPA's
- * pollution model layers (PM2.5, ozone, NATA) are refreshed. 18 months
- * gives the architect a buffer past the typical annual cycle so a row
- * isn't tagged stale during the brief overlap when EJScreen has
- * announced an update but the adapter cache hasn't rerun yet.
+ * 24 months — see the FRESHNESS THRESHOLD CHOICE section of the
+ * top-of-file docstring for the rationale.
  */
-export const EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS = 18;
+export const EPA_EJSCREEN_FRESHNESS_THRESHOLD_MONTHS = 24;
 
 function federalApplies(ctx: AdapterContext): boolean {
   // PL-04: federal adapters apply nationwide whenever the engagement is
@@ -63,132 +182,59 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function pickNumber(
+  attrs: Record<string, unknown>,
+  key: string,
+): number | null {
+  const v = attrs[key];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function pickString(
+  attrs: Record<string, unknown>,
+  key: string,
+): string | null {
+  const v = attrs[key];
+  if (typeof v === "string" && v.length > 0) return v;
+  return null;
+}
+
 export const epaEjscreenAdapter: Adapter = {
   adapterKey: "epa:ejscreen",
   tier: "federal",
   sourceKind: "federal-adapter",
   layerKind: "epa-ejscreen-blockgroup",
-  provider: "EPA EJScreen",
+  provider: EPA_EJSCREEN_PROVIDER_LABEL,
   jurisdictionGate: {},
-  // QA-22 — the EJScreen broker routinely answers slower than the 15s
-  // runner default; widen this adapter's budget so a slow-but-healthy
-  // broker response is not cut off as a `timeout` failure.
-  timeoutMs: SLOW_UPSTREAM_TIMEOUT_MS,
   appliesTo: federalApplies,
   async run(ctx: AdapterContext): Promise<AdapterResult> {
-    const url = new URL(EPA_EJSCREEN_BROKER);
-    url.searchParams.set("namespace", "EJScreen");
-    url.searchParams.set(
-      "geometry",
-      JSON.stringify({
-        spatialReference: { wkid: 4326 },
-        x: ctx.parcel.longitude,
-        y: ctx.parcel.latitude,
-      }),
-    );
-    // Broker3 contract: distance in `unit` (9035 = meters). 1m keeps
-    // the lookup pinned to the enclosing block group without pulling
-    // adjacent geographies.
-    url.searchParams.set("distance", "1");
-    url.searchParams.set("unit", "9035");
-    url.searchParams.set("areatype", "blockgroup");
-    url.searchParams.set("f", "pjson");
-
-    const {
-      response: res,
-      attempts,
-      bodyExcerpt,
-      throwExcerpt,
-    } = await fetchWithRetry(
-      url.toString(),
-      {
-        signal: ctx.signal,
-        // EJScreen's broker 406s requests with the default Node fetch
-        // headers (production saw this as `fetch failed`). Spell UA +
-        // Accept out so the broker accepts the call.
-        headers: {
-          "User-Agent": EPA_EJSCREEN_USER_AGENT,
-          Accept: "application/json, */*;q=0.1",
-        },
-      },
-      {
-        fetchImpl: ctx.fetchImpl,
-        signal: ctx.signal,
-        upstreamLabel: EPA_EJSCREEN_LABEL,
-        // QA-22 reopen follow-on — collapse fetch-throws (DNS / TLS /
-        // ECONNREFUSED / ECONNRESET) into the `!res.ok` branch below
-        // so the pill can name the actual network failure mode.
-        // cortex-api-00020-85n showed the EJScreen call failing with
-        // "fetch failed" + no body — operator can't pick the
-        // mitigation (DNS resolver / NAT egress IP / CA bundle / TLS
-        // pin) from that alone.
-        captureThrowsAsResult: true,
-      },
-    );
-    if (!res.ok) {
-      if (throwExcerpt) {
-        // The request never got a response back — DNS resolution, TLS
-        // handshake, connection establishment, or stream read failed
-        // before the broker's HTTP layer answered. `throwExcerpt`
-        // names the underlying failure mode (e.g. `ENOTFOUND
-        // getaddrinfo ejscreen.epa.gov`) so the operator can pick
-        // the mitigation off the pill alone.
-        throw new AdapterRunError(
-          "network-error",
-          `EPA EJScreen did not get a response after ${attempts} attempt${attempts === 1 ? "" : "s"}. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
-        );
-      }
-      // QA-22 reopen: append the upstream body excerpt so a 503 / 502
-      // / 504 from the EJScreen broker surfaces its actual response
-      // (maintenance banner, error envelope, empty body) in the
-      // layer-failure pill — operators don't need Cloud Run access to
-      // tell schema drift from transient flakiness.
-      const suffix = bodyExcerpt ? ` Upstream response: ${bodyExcerpt}` : "";
-      throw new AdapterRunError(
-        "upstream-error",
-        `EPA EJScreen responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}.${suffix} Use Force refresh to retry.`,
-      );
-    }
-    let json: unknown;
-    try {
-      json = await res.json();
-    } catch (err) {
-      throw new AdapterRunError(
-        "parse-error",
-        `EPA EJScreen response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (!json || typeof json !== "object") {
-      throw new AdapterRunError(
-        "parse-error",
-        "EPA EJScreen response was not a JSON object",
-      );
-    }
-    // Broker surfaces failures inline as `{ error: "..." }`.
-    const errMsg = (json as { error?: unknown }).error;
-    if (typeof errMsg === "string" && errMsg.length > 0) {
-      throw new AdapterRunError(
-        "upstream-error",
-        `EPA EJScreen error: ${errMsg}`,
-      );
-    }
-    const data =
-      ((json as { data?: unknown }).data as { main?: unknown } | undefined) ??
-      undefined;
-    const main =
-      data && typeof data === "object"
-        ? ((data as { main?: unknown }).main as Record<string, unknown> | undefined)
-        : undefined;
-    // The block-group lookup can come back empty when the point falls
-    // in unincorporated land that wasn't included in the EJScreen
-    // base layer (rare — the dataset covers all 50 states + DC + PR
-    // block groups, but rural edges occasionally miss).
-    if (!main || Object.keys(main).length === 0) {
+    const result = await arcgisPointQuery({
+      serviceUrl: EPA_EJSCREEN_FEATURESERVER,
+      latitude: ctx.parcel.latitude,
+      longitude: ctx.parcel.longitude,
+      outFields: EJSCREEN_OUT_FIELDS,
+      returnGeometry: false,
+      fetchImpl: ctx.fetchImpl,
+      signal: ctx.signal,
+      upstreamLabel: EPA_EJSCREEN_LABEL,
+    });
+    const feature = result.features[0];
+    if (!feature) {
+      // CalEPA's EJSCREEN_2023_BG layer covers all 50 states + DC + PR
+      // + AS/CNMI/GU/VI; a query that returns zero features at a valid
+      // lat/lng almost always means the point fell in unincorporated
+      // water / federal land that's not in the block-group base layer.
       throw new AdapterRunError(
         "no-coverage",
         "EJScreen returned no block-group indicators at this lat/lng.",
       );
     }
+    const attrs = feature.attributes;
     return {
       adapterKey: this.adapterKey,
       tier: this.tier,
@@ -198,28 +244,30 @@ export const epaEjscreenAdapter: Adapter = {
       snapshotDate: nowIso(),
       payload: {
         kind: "ejscreen-blockgroup",
-        // Surface the most-cited subset the briefing engine reads first.
-        // Anything else is still available on `raw` for downstream readers.
-        population: pickNumber(main, "RAW_D_POP"),
-        demographicIndexPercentile: pickNumber(main, "P_D2_VULEOPCT"),
-        pm25Percentile: pickNumber(main, "P_PM25"),
-        ozonePercentile: pickNumber(main, "P_OZONE"),
-        leadPaintPercentile: pickNumber(main, "P_LDPNT"),
-        raw: main,
+        // `state` flags the percentile basis so the UI / chip / markdown
+        // digest can surface "state-pctile" wherever they render a
+        // percentile — see THREE OPERATOR-ACCEPTED DELTAS #2 above.
+        percentileBasis: "state",
+        // Data vintage independent of fetch time — the mirror is a
+        // frozen 2023 snapshot, not a live feed. UI surfaces this in
+        // the BriefingSourceDetails dataset-vintage footer.
+        upstreamDatasetVersion: EPA_EJSCREEN_DATASET_VERSION,
+        blockGroupId: pickString(attrs, "ID"),
+        stateName: pickString(attrs, "STATE_NAME"),
+        population: pickNumber(attrs, "ACSTOTPOP"),
+        demographicIndexPercentile: pickNumber(attrs, "P_DEMOGIDX_2"),
+        supplementalDemographicIndexPercentile: pickNumber(
+          attrs,
+          "P_DEMOGIDX_5",
+        ),
+        pm25Percentile: pickNumber(attrs, "P_PM25"),
+        ozonePercentile: pickNumber(attrs, "P_OZONE"),
+        leadPaintPercentile: pickNumber(attrs, "P_LDPNT"),
+        // Raw attributes verbatim — downstream readers (briefing
+        // engine, CSV export, audit replay) get the full block-group
+        // row without re-querying the upstream.
+        raw: attrs,
       },
     };
   },
 };
-
-function pickNumber(
-  obj: Record<string, unknown>,
-  key: string,
-): number | null {
-  const v = obj[key];
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}

@@ -127,14 +127,19 @@ const FEDERAL_SEED_ROWS = [
   },
   {
     layerKind: "epa-ejscreen-blockgroup",
-    provider: "EPA EJScreen",
+    // QA-22 SCOPE A CalEPA-mirror opt-in (2026-05-23) — the persisted
+    // provider attribution names the mirror + the EPA-retirement
+    // context per the decision-record requirement #1.
+    provider:
+      "EJScreen 2023 — CalEPA mirror — EPA EJScreen API retired, awaiting v2",
     payload: {
       kind: "ejscreen-blockgroup",
+      percentileBasis: "state",
       demographicIndexPercentile: 65,
       pm25Percentile: 72,
     },
     note: "Seeded by federal-summary-chips.spec.ts",
-    expectedChip: "EJ Index 65th pctile · PM2.5 72nd pctile",
+    expectedChip: "EJ Index 65th state-pctile · PM2.5 72nd state-pctile",
   },
   {
     layerKind: "fcc-broadband-availability",

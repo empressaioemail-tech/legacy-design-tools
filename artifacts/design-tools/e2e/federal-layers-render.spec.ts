@@ -109,18 +109,27 @@ const FEDERAL_SEED_ROWS = [
   },
   {
     layerKind: "epa-ejscreen-blockgroup",
-    provider: "EPA EJScreen",
+    // QA-22 SCOPE A CalEPA-mirror opt-in (2026-05-23) — the persisted
+    // provider attribution names the mirror + the EPA-retirement
+    // context per the decision-record requirement #1.
+    provider:
+      "EJScreen 2023 — CalEPA mirror — EPA EJScreen API retired, awaiting v2",
     payload: {
       kind: "ejscreen-blockgroup",
+      percentileBasis: "state",
+      upstreamDatasetVersion:
+        "EJScreen 2023 (CalEPA mirror, published 2024-01-29)",
       population: 1234,
       demographicIndexPercentile: 62,
       pm25Percentile: 87,
       ozonePercentile: 41,
       leadPaintPercentile: 28,
-      raw: { RAW_D_POP: 1234, P_PM25: 87 },
+      raw: { ACSTOTPOP: 1234, P_PM25: 87 },
     },
     note: "Seeded by federal-layers-render.spec.ts",
-    summaryAssertions: ["PM2.5 percentile", "87"],
+    // The KvRow label is "<indicator> state percentile" because the
+    // payload carries `percentileBasis: "state"` (CalEPA mirror).
+    summaryAssertions: ["PM2.5 state percentile", "87"],
   },
   {
     layerKind: "fcc-broadband-availability",

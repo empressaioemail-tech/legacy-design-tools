@@ -119,46 +119,75 @@ describe("summarizeUsgsNedPayload", () => {
 });
 
 describe("summarizeEpaEjscreenPayload", () => {
-  it("leads with the demographic index and adds the PM2.5 percentile", () => {
-    // Mirror the adapter's normalized subset of the broker `data.main`
-    // envelope — only the percentiles the chip surfaces are needed.
-    const main = ejscreenBlockGroup.data.main;
+  it("leads with the demographic index and adds the PM2.5 percentile (state-basis chip)", () => {
+    // CalEPA mirror schema: ACSTOTPOP / P_DEMOGIDX_2 / P_PM25.
+    // Mirror the adapter's promoted subset of the EJScreen 2023 BG
+    // attribute row — only the percentiles the chip surfaces are
+    // needed. The `percentileBasis: "state"` flag drives the
+    // "state-pctile" wording on the chip.
+    const attrs = ejscreenBlockGroup.features[0].attributes;
     const summary = summarizeEpaEjscreenPayload({
       kind: "ejscreen-blockgroup",
-      demographicIndexPercentile: main.P_D2_VULEOPCT,
-      pm25Percentile: main.P_PM25,
+      percentileBasis: "state",
+      demographicIndexPercentile: attrs.P_DEMOGIDX_2,
+      pm25Percentile: attrs.P_PM25,
     });
-    expect(summary).toBe("EJ Index 65th pctile · PM2.5 72nd pctile");
+    expect(summary).toBe("EJ Index 83rd state-pctile · PM2.5 3rd state-pctile");
   });
 
   it("emits the demographic index alone when PM2.5 is missing", () => {
     expect(
       summarizeEpaEjscreenPayload({
         kind: "ejscreen-blockgroup",
+        percentileBasis: "state",
         demographicIndexPercentile: 87,
         pm25Percentile: null,
       }),
-    ).toBe("EJ Index 87th pctile");
+    ).toBe("EJ Index 87th state-pctile");
   });
 
   it("falls back to PM2.5 alone when the demographic index is missing", () => {
     expect(
       summarizeEpaEjscreenPayload({
         kind: "ejscreen-blockgroup",
+        percentileBasis: "state",
         demographicIndexPercentile: null,
         pm25Percentile: 22,
       }),
-    ).toBe("PM2.5 22nd pctile");
+    ).toBe("PM2.5 22nd state-pctile");
   });
 
   it("uses an 'unavailable' chip when neither percentile is present", () => {
     expect(
       summarizeEpaEjscreenPayload({
         kind: "ejscreen-blockgroup",
+        percentileBasis: "state",
         demographicIndexPercentile: null,
         pm25Percentile: null,
       }),
     ).toBe("EJScreen indicators unavailable");
+  });
+
+  it("drops the state-pctile wording when `percentileBasis` is absent or US-relative", () => {
+    // The chip degrades to bare "pctile" if/when the adapter swaps
+    // back to a US-percentile source (e.g. EPA publishes EJScreen v2);
+    // we don't want a stale label silently riding the old wording.
+    expect(
+      summarizeEpaEjscreenPayload({
+        kind: "ejscreen-blockgroup",
+        demographicIndexPercentile: 65,
+        pm25Percentile: 72,
+        // No percentileBasis — pre-CalEPA payload shape.
+      }),
+    ).toBe("EJ Index 65th pctile · PM2.5 72nd pctile");
+    expect(
+      summarizeEpaEjscreenPayload({
+        kind: "ejscreen-blockgroup",
+        percentileBasis: "us",
+        demographicIndexPercentile: 65,
+        pm25Percentile: 72,
+      }),
+    ).toBe("EJ Index 65th pctile · PM2.5 72nd pctile");
   });
 
   it("returns null when the payload kind doesn't match", () => {
@@ -362,16 +391,21 @@ describe("diffFederalPayload", () => {
     ]);
   });
 
-  it("emits ordinal-suffix percentile deltas for EJScreen reruns", () => {
+  it("emits ordinal-suffix percentile deltas for EJScreen reruns (state-basis label)", () => {
+    // Labels include "(state %ile)" so the rerun-delta table discloses
+    // the percentile basis the same way the inline chip does — reader
+    // cannot misread a state-relative value as a US-relative one.
     const changes = diffFederalPayload(
       "epa-ejscreen-blockgroup",
       {
         kind: "ejscreen-blockgroup",
+        percentileBasis: "state",
         demographicIndexPercentile: 65,
         pm25Percentile: 72,
       },
       {
         kind: "ejscreen-blockgroup",
+        percentileBasis: "state",
         demographicIndexPercentile: 71,
         pm25Percentile: 72,
       },
@@ -379,7 +413,7 @@ describe("diffFederalPayload", () => {
     expect(changes).toEqual([
       {
         key: "demographicIndexPercentile",
-        label: "EJ Index",
+        label: "EJ Index (state %ile)",
         before: "65th pctile",
         after: "71st pctile",
       },

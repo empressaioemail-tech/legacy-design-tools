@@ -1244,15 +1244,23 @@ describe("BriefingSourceHistoryPanel — 'Changed: …' hint + reveal (Tasks #18
     // from the 65th to the 71st pctile while PM2.5 stayed put. The
     // reveal must surface only the moved key and format both sides
     // with the chip's ordinal suffix.
+    //
+    // QA-22 SCOPE A CalEPA-mirror opt-in (2026-05-23): provider strings
+    // + percentileBasis carry the mirror attribution; the diff label
+    // includes the "(state %ile)" suffix per the decision-record
+    // requirement #2 so the rerun reveal cannot misread state-relative
+    // values as US-relative.
     const current = mkSource({
       id: "src-current",
       layerKind: "epa-ejscreen-blockgroup",
       sourceKind: "federal-adapter",
-      provider: "epa:ejscreen (EPA EJScreen)",
+      provider:
+        "epa:ejscreen (EJScreen 2023 — CalEPA mirror — EPA EJScreen API retired, awaiting v2)",
       note: "Auto-fetched by Generate Layers.",
       snapshotDate: "2026-04-15T00:00:00.000Z",
       payload: {
         kind: "ejscreen-blockgroup",
+        percentileBasis: "state",
         demographicIndexPercentile: 71,
         pm25Percentile: 72,
       },
@@ -1261,11 +1269,13 @@ describe("BriefingSourceHistoryPanel — 'Changed: …' hint + reveal (Tasks #18
       id: "src-prior-ejscreen",
       layerKind: "epa-ejscreen-blockgroup",
       sourceKind: "federal-adapter",
-      provider: "epa:ejscreen (EPA EJScreen)",
+      provider:
+        "epa:ejscreen (EJScreen 2023 — CalEPA mirror — EPA EJScreen API retired, awaiting v2)",
       note: "Auto-fetched by Generate Layers.",
       snapshotDate: "2026-04-15T00:00:00.000Z",
       payload: {
         kind: "ejscreen-blockgroup",
+        percentileBasis: "state",
         demographicIndexPercentile: 65,
         pm25Percentile: 72,
       },
@@ -1283,7 +1293,11 @@ describe("BriefingSourceHistoryPanel — 'Changed: …' hint + reveal (Tasks #18
       `briefing-source-history-row-changed-${prior.id}`,
     );
     // Only EJ Index moved — PM2.5 must not leak into the hint copy.
-    expect(hint.textContent).toMatch(/Changed:\s*EJ Index\s*$/);
+    // The "(state %ile)" suffix is part of the label so the reveal
+    // discloses the basis in the hint chip itself.
+    expect(hint.textContent).toMatch(
+      /Changed:\s*EJ Index \(state %ile\)\s*$/,
+    );
     expect(hint.textContent).not.toContain("PM2.5");
     expect(hint.textContent).not.toContain("snapshotDate");
 

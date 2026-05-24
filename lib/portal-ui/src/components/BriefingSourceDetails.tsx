@@ -882,6 +882,22 @@ const EJSCREEN_PERCENTILE_FIELDS: ReadonlyArray<{
  * see the most-elevated indicators at a glance. Falls back to a hint
  * when none of the promoted percentile fields were populated (the
  * `raw` envelope is still available in the parent adapter row).
+ *
+ * Two disclosures the row body MUST surface to the reader (QA-22 SCOPE A
+ * CalEPA-mirror opt-in, 2026-05-23 decision record):
+ *
+ *   - Percentile basis. When `payload.percentileBasis === "state"`, every
+ *     percentile KvRow renders as "<label> (state percentile)" so the
+ *     reader cannot misread a state-distribution percentile as a
+ *     US-distribution one. If the adapter ever swaps back to a
+ *     US-percentile source, the basis flips to "us" and the label drops
+ *     back to the bare "percentile" wording.
+ *
+ *   - Data vintage. When `payload.upstreamDatasetVersion` is set, a small
+ *     italic footer renders beneath the rows ("EJScreen 2023 (CalEPA
+ *     mirror, published 2024-01-29)") so the architect sees the actual
+ *     data vintage independently of the `snapshotDate` provenance footer
+ *     (which measures cache age, not data publication time).
  */
 function EpaEjscreenSummary({
   payload,
@@ -889,6 +905,12 @@ function EpaEjscreenSummary({
   payload: Record<string, unknown>;
 }) {
   const population = payload["population"];
+  const basis =
+    payload["percentileBasis"] === "state" ? "state percentile" : "percentile";
+  const datasetVersion =
+    typeof payload["upstreamDatasetVersion"] === "string"
+      ? (payload["upstreamDatasetVersion"] as string)
+      : null;
   const ranked = EJSCREEN_PERCENTILE_FIELDS.map((f) => ({
     label: f.label,
     value: payload[f.key],
@@ -913,10 +935,23 @@ function EpaEjscreenSummary({
       {ranked.map((r) => (
         <KvRow
           key={r.label}
-          label={`${r.label} percentile`}
+          label={`${r.label} ${basis}`}
           value={String(r.value)}
         />
       ))}
+      {datasetVersion && (
+        <div
+          data-testid="briefing-source-ejscreen-dataset-version"
+          style={{
+            marginTop: 4,
+            fontSize: 11,
+            color: "var(--text-muted)",
+            fontStyle: "italic",
+          }}
+        >
+          Dataset: {datasetVersion}
+        </div>
+      )}
     </div>
   );
 }
