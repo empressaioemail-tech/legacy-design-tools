@@ -675,3 +675,203 @@
   line-height: 1;
   font-family: 'IBM Plex Mono', monospace;
 }
+
+/* =============================================================
+ * Design Tools tab (formerly Renders) — rendering workbench
+ * IA: header / kickoff / gallery / reserved rail. All values
+ * resolve through the shared token set.
+ * ============================================================= */
+
+.cockpit-design-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cockpit-design-tools-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.cockpit-design-tools-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cockpit-design-tools-h1 {
+  font-family: 'Inter', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 2px 0 0;
+  line-height: 1.2;
+}
+
+.cockpit-design-tools-sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 64ch;
+}
+
+.cockpit-design-tools-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* -- BIM context hint ------------------------------------------ */
+.cockpit-design-tools-bim-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--alert);
+  border-radius: 6px;
+}
+
+.cockpit-design-tools-bim-hint-ok {
+  border-left-color: var(--cyan);
+}
+
+.cockpit-design-tools-bim-hint-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.cockpit-design-tools-bim-hint-body strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.cockpit-design-tools-bim-hint svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* -- Kickoff + gallery dashboard ------------------------------- */
+.cockpit-design-tools-dashboard {
+  display: grid;
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .cockpit-design-tools-dashboard {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cockpit-design-tools-kickoff,
+.cockpit-design-tools-gallery {
+  min-width: 0;
+}
+
+/* -- Reserved rail (growth zone) ------------------------------- */
+.cockpit-design-tools-reserved {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border-soft);
+}
+
+.cockpit-design-tools-reserved-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cockpit-design-tools-reserved-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--text-muted);
+  margin: 0;
+  font-weight: 500;
+}
+
+.cockpit-design-tools-reserved-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.cockpit-design-tools-reserved-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-soft);
+  border-radius: 6px;
+  opacity: 0.85;
+  position: relative;
+}
+
+.cockpit-design-tools-reserved-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.cockpit-design-tools-reserved-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cockpit-design-tools-reserved-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cockpit-design-tools-reserved-card-body {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.cockpit-design-tools-reserved-pill {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
