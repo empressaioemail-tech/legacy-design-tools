@@ -37,7 +37,6 @@ import {
 } from "../components/ReviewerRequestsStrip";
 import {
   BimModelViewport,
-  KpiTile,
   StatusPill,
   SubmissionRecordedBanner,
   SubmitToJurisdictionDialog,
@@ -62,6 +61,7 @@ import { useEngagementsStore, type SpecDraftEntry } from "../store/engagements";
 import { relativeTime } from "../lib/relativeTime";
 import type { BackfillFilter } from "../lib/submissionBackfill";
 import { SiteTab } from "../components/engagement-detail/SiteTab";
+import { SnapshotsTab } from "../components/engagement-detail/SnapshotsTab";
 import { SettingsTab } from "../components/engagement-detail/SettingsTab";
 import { SiteContextTab } from "../components/engagement-detail/SiteContextTab";
 import { SubmissionsTab } from "../components/engagement-detail/SubmissionsTab";
@@ -899,144 +899,20 @@ export function EngagementDetail() {
         */}
         <ReviewerRequestsHistory engagementId={id} />
 
-        <TabPanel id="snapshots" active={tab}>
-            <div className="grid grid-cols-4 gap-3">
-              <KpiTile
-                label="SHEETS"
-                value={snapshotDetail?.sheetCount}
-                footnote={captured}
-                testId="engagement-kpi-sheets"
-              />
-              <KpiTile
-                label="ROOMS"
-                value={snapshotDetail?.roomCount}
-                footnote={captured}
-                testId="engagement-kpi-rooms"
-              />
-              <KpiTile
-                label="LEVELS"
-                value={snapshotDetail?.levelCount}
-                footnote={captured}
-                testId="engagement-kpi-levels"
-              />
-              <KpiTile
-                label="WALLS"
-                value={snapshotDetail?.wallCount}
-                footnote={captured}
-                testId="engagement-kpi-walls"
-              />
-            </div>
-
-            <div className="grid lg:grid-cols-3 gap-4 flex-1 min-h-0">
-              <div className="sc-card flex flex-col col-span-1 min-h-0">
-                <div className="sc-card-header sc-row-sb">
-                  <span className="sc-label">SNAPSHOTS</span>
-                  <span className="sc-meta">{snapshots.length}</span>
-                </div>
-                <div
-                  className="flex-1 overflow-y-auto sc-scroll"
-                  data-testid="engagement-snapshot-timeline"
-                >
-                  {!hasSnapshots ? (
-                    <div className="p-4 sc-body text-center opacity-70">
-                      No snapshots yet. Send one from Revit.
-                    </div>
-                  ) : (
-                    snapshots.map((s) => {
-                      const isSelected = s.id === selectedSnapshotId;
-                      return (
-                        <div
-                          key={s.id}
-                          data-testid={`snapshot-row-${s.id}`}
-                          data-selected={isSelected ? "true" : "false"}
-                          className={`sc-card-row sc-card-clickable flex flex-col ${
-                            isSelected ? "sc-accent-cyan" : ""
-                          }`}
-                          style={{
-                            background: isSelected
-                              ? "var(--bg-highlight)"
-                              : undefined,
-                          }}
-                          onClick={() => selectSnapshot(id, s.id)}
-                        >
-                          <div className="sc-medium">
-                            {relativeTime(s.receivedAt)}
-                          </div>
-                          <div className="sc-meta mt-1">
-                            {s.sheetCount ?? "—"}sh · {s.roomCount ?? "—"}rm ·{" "}
-                            {s.levelCount ?? "—"}lv · {s.wallCount ?? "—"}w
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/*
-                QA-12 / WSB.3 — the BIM model is promoted into the
-                primary column beside the snapshot timeline instead of
-                sitting at the bottom of the tab under the raw JSON.
-              */}
-              <div className="col-span-2 min-h-0">
-                {!hasSnapshots && bimElements.length === 0 ? (
-                  <div className="sc-card p-8 h-full flex items-center justify-center">
-                    <div className="sc-prose text-center opacity-70">
-                      No snapshots yet. Send one from Revit.
-                    </div>
-                  </div>
-                ) : (
-                  bimModelPanel
-                )}
-              </div>
-            </div>
-
-            {/*
-              QA-12 / WSB.3 — raw snapshot JSON demoted to a secondary,
-              collapsed-by-default card below the model. It stays
-              available for debugging without dominating the tab.
-            */}
-            {hasSnapshots && (
-              <div className="sc-card flex flex-col" data-testid="raw-json-card">
-                <div className="sc-card-header sc-row-sb">
-                  <span className="sc-label">RAW JSON</span>
-                  <button
-                    className="sc-btn-sm"
-                    onClick={() => setJsonExpanded(!jsonExpanded)}
-                  >
-                    {jsonExpanded ? "Collapse" : "Expand"}
-                  </button>
-                </div>
-                {jsonExpanded &&
-                  (!snapshotDetail ? (
-                    <div
-                      className="p-4 sc-prose opacity-60"
-                      style={{ borderTop: "1px solid var(--border-default)" }}
-                    >
-                      Loading snapshot…
-                    </div>
-                  ) : (
-                    <div
-                      className="flex-1 overflow-hidden"
-                      style={{ borderTop: "1px solid var(--border-default)" }}
-                    >
-                      <pre
-                        className="sc-mono-sm sc-scroll m-0"
-                        style={{
-                          background: "var(--bg-input)",
-                          padding: 12,
-                          maxHeight: 600,
-                          overflow: "auto",
-                          whiteSpace: "pre-wrap",
-                          wordWrap: "break-word",
-                        }}
-                      >
-                        {JSON.stringify(snapshotDetail.payload, null, 2)}
-                      </pre>
-                    </div>
-                  ))}
-              </div>
-            )}
+        <TabPanel id="snapshots" active={tab} className="flex flex-col flex-1 min-h-0">
+          <SnapshotsTab
+            engagementId={id}
+            snapshots={snapshots}
+            hasSnapshots={hasSnapshots}
+            snapshotDetail={snapshotDetail}
+            selectedSnapshotId={selectedSnapshotId}
+            onSelectSnapshot={(snapshotId) => selectSnapshot(id, snapshotId)}
+            bimModelPanel={bimModelPanel}
+            bimElementCount={bimElements.length}
+            jsonExpanded={jsonExpanded}
+            setJsonExpanded={setJsonExpanded}
+            captured={captured}
+          />
         </TabPanel>
 
         <TabPanel id="model-3d" active={tab} className="flex flex-col flex-1 min-h-0">
