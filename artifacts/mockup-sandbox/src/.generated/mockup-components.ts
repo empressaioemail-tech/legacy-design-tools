@@ -3,11 +3,14 @@ type ModuleMap = Record<string, () => Promise<Record<string, unknown>>>;
 export const modules: ModuleMap = {
   "./components/mockups/design-tools-cockpit/Cockpit.tsx": () => import("../components/mockups/design-tools-cockpit/Cockpit.tsx"),
   "./components/mockups/design-tools-pipeline/Pipeline.tsx": () => import("../components/mockups/design-tools-pipeline/Pipeline.tsx"),
-  "./components/mockups/snapshot-page/StackedFeed.tsx": () => import("../components/mockups/snapshot-page/StackedFeed.tsx"),
-  "./components/mockups/snapshot-page/SummarySplit.tsx": () => import("../components/mockups/snapshot-page/SummarySplit.tsx"),
-  "./components/mockups/snapshot-page/ViewerHero.tsx": () => import("../components/mockups/snapshot-page/ViewerHero.tsx"),
+  "./components/mockups/review-workspace/FindingTimeline.tsx": () => import("../components/mockups/review-workspace/FindingTimeline.tsx"),
+  "./components/mockups/review-workspace/KanbanBoard.tsx": () => import("../components/mockups/review-workspace/KanbanBoard.tsx"),
+  "./components/mockups/review-workspace/SplitInbox.tsx": () => import("../components/mockups/review-workspace/SplitInbox.tsx"),
   "./components/mockups/design-tools-workbench/Workbench.tsx": () => import("../components/mockups/design-tools-workbench/Workbench.tsx"),
   "./components/mockups/site-workspace/LayeredCockpit.tsx": () => import("../components/mockups/site-workspace/LayeredCockpit.tsx"),
   "./components/mockups/site-workspace/NarrativeBrief.tsx": () => import("../components/mockups/site-workspace/NarrativeBrief.tsx"),
-  "./components/mockups/site-workspace/StagedFlow.tsx": () => import("../components/mockups/site-workspace/StagedFlow.tsx")
+  "./components/mockups/site-workspace/StagedFlow.tsx": () => import("../components/mockups/site-workspace/StagedFlow.tsx"),
+  "./components/mockups/snapshot-page/StackedFeed.tsx": () => import("../components/mockups/snapshot-page/StackedFeed.tsx"),
+  "./components/mockups/snapshot-page/SummarySplit.tsx": () => import("../components/mockups/snapshot-page/SummarySplit.tsx"),
+  "./components/mockups/snapshot-page/ViewerHero.tsx": () => import("../components/mockups/snapshot-page/ViewerHero.tsx")
 };
