@@ -1,5 +1,22 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "_wmkDoXKBLtBbx0fL1ukr"
+uri = "file://artifacts/mockup-sandbox/public/client-portal-dusk-render.png"
+type = "image"
+title = "Dusk rendering of mixed-use building"
+
+[[generated]]
+id = "xq-1kNMfHA41jb6OOW_Tq"
+uri = "file://artifacts/mockup-sandbox/public/client-portal-3d-plaza.png"
+type = "image"
+title = "3D view entry plaza"
+
+[[generated]]
+id = "l3UtOlk2K4-DSjsZyn92v"
+uri = "file://artifacts/mockup-sandbox/public/client-portal-avatar-maria.png"
+type = "image"
+title = "Architect avatar"
 
 [[outputs]]
 id = "-_vt6bIEfxbgxVh3mLJnE"
