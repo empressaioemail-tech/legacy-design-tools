@@ -1,4 +1,12 @@
 -- Phase 2D.x PR3 — site-topography materializable_elements integration.
+-- Renumbered 0016 → 0017 (2026-05-24) so `0016_renders_power_tools_source_type.sql`
+-- (40e) owns the 0016 slot. migrate-prod.mjs orders by filename; both files
+-- were tracked separately but the duplicate prefix blocked a clear head.
+--
+-- If `_schema_migrations` already records the old filename, operator runs once:
+--   UPDATE _schema_migrations
+--   SET name = '0017_add_site_topography_source_kind.sql'
+--   WHERE name = '0016_add_site_topography_source_kind.sql';
 --
 -- Relax `materializable_elements`'s two CHECK constraints to admit a
 -- `source_kind = 'site-topography'` row carrying engagement-scoped DEM

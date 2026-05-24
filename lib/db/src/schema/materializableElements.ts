@@ -296,7 +296,7 @@ export const materializableElements = pgTable(
       ),
     /**
      * source_kind closed-tuple guard. Enforced at the DB so a stray
-     * write can't introduce an unknown lens. Migration 0016 adds
+     * write can't introduce an unknown lens. Migration 0017 adds
      * `'site-topography'` for the Phase 2D.x PR3 DEM-ingest path.
      */
     sourceKindCheck: check(
@@ -307,7 +307,7 @@ export const materializableElements = pgTable(
      * Provenance invariants. briefing-derived rows must have a
      * briefing_id; as-built IFC rows must have a source_snapshot_id,
      * an engagement_id, an ifc_global_id, and an ifc_type;
-     * site-topography rows (migration 0016) must have an engagement_id.
+     * site-topography rows (migration 0017) must have an engagement_id.
      */
     provenanceInvariantsCheck: check(
       "materializable_elements_provenance_invariants_check",
