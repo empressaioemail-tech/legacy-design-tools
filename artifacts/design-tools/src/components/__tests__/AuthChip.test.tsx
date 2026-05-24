@@ -2,8 +2,10 @@
  * AuthChip — gateway-assumed top-right auth affordance for the
  * design-tools SPA. Verifies:
  *   1. The user-indicator chip and the sign-out button render.
- *   2. Clicking sign-out redirects to /logout — the chip's stub
- *      contract until a real /api/me + signOut endpoint lands.
+ *   2. Clicking sign-out redirects to "/" by default — the chip's
+ *      stub contract until a real /api/me + signOut endpoint lands.
+ *      Environments with a real gateway can override the target via
+ *      the `VITE_LOGOUT_URL` env var.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -31,9 +33,9 @@ describe("AuthChip", () => {
     );
   });
 
-  it("redirects to /logout on sign-out click", () => {
+  it("redirects to the home route on sign-out click by default", () => {
     render(<AuthChip />);
     fireEvent.click(screen.getByTestId("auth-chip-signout"));
-    expect(window.location.href).toBe("/logout");
+    expect(window.location.href).toBe("/");
   });
 });
