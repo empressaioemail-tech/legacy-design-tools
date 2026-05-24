@@ -41,3 +41,9 @@ id = "II-cxeFrGupK8jST0G2Ds"
 uri = "file://attached_assets/ui-audit/UI-AUDIT.md"
 type = "text"
 title = "SmartCity OS — UI Audit"
+
+[[outputs]]
+id = "2bzCrVvdD-fo4Fq-HCJyD"
+uri = "file://docs/canvas-graduation-map.md"
+type = "text"
+title = "Canvas → SmartCity OS — Graduation Map"
