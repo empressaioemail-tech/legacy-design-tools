@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import {
   useListEngagements,
@@ -25,7 +25,7 @@ function NoAdaptersPill({ message }: { message: string }) {
         background: "var(--info-dim)",
         color: "var(--info-text)",
         textTransform: "uppercase",
-        fontSize: 11,
+        fontSize: 10,
         letterSpacing: "0.05em",
         padding: "3px 8px",
         borderRadius: 4,
@@ -36,17 +36,12 @@ function NoAdaptersPill({ message }: { message: string }) {
   );
 }
 
-function CountCell({
-  label,
-  value,
-}: {
-  label: string;
-  value: number | null | undefined;
-}) {
+function Kpi({ label, value, sub }: { label: string; value: string | number; sub?: ReactNode }) {
   return (
-    <div>
-      <div className="sc-data-label">{label}</div>
-      <div className="sc-mono mt-1">{value ?? "—"}</div>
+    <div className="cockpit-portfolio-kpi">
+      <div className="cockpit-overline">{label}</div>
+      <div className="cockpit-kpi-value">{value}</div>
+      {sub && <div className="cockpit-kpi-sub">{sub}</div>}
     </div>
   );
 }
@@ -62,15 +57,6 @@ function CountCell({
  * source of truth the server's `generateLayers` 422 envelope reads
  * from — so the list pill, the detail-tab banner, and the server
  * verdict cannot disagree.
- *
- * The card-level message is derived once via the shared
- * `noApplicableAdaptersMessage` helper and passed into the pill's
- * `title` tooltip so the list and detail copy stay in lockstep.
- *
- * Computed off the same `EngagementSummary` shape returned by
- * `GET /engagements` — the row already carries `site.geocode`
- * (jurisdictionCity / jurisdictionState) and the freeform
- * `jurisdiction` / `address` columns the resolver consumes.
  */
 function computeEligibility(e: EngagementSummary): {
   isInPilot: boolean;
@@ -106,27 +92,13 @@ export function EngagementList() {
   });
   const engagements = data ?? [];
 
-  // Per-row eligibility, memoized so a refetch with the same row
-  // shapes doesn't re-run the resolver unnecessarily. The map is
-  // keyed by id so the filter checkbox below can read each row's
-  // verdict in O(1) without re-invoking the resolver.
   const eligibilityById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof computeEligibility>>();
     for (const e of engagements) m.set(e.id, computeEligibility(e));
     return m;
   }, [engagements]);
 
-  // Sort in-pilot rows ahead of out-of-pilot ones (Task #277). When
-  // the list grows long, even with the "No adapters" pill visible
-  // the actionable rows are interleaved with the unactionable ones,
-  // so triaging "what can I run Generate Layers on right now" still
-  // takes a scan. Sorting on the same `eligibilityById` map the
-  // pill and the "Show only in-pilot" filter both read from keeps
-  // the pill, the filter, and the order from drifting. `Array#sort`
-  // is stable in modern JS, so the API's `updatedAt desc` ordering
-  // is preserved *within* each group — most-recently-touched
-  // in-pilot row first, then most-recently-touched out-of-pilot row
-  // first below that.
+  // Stable sort: in-pilot first, preserves API's updatedAt desc within group.
   const sortedEngagements = useMemo(() => {
     return [...engagements].sort((a, b) => {
       const aRank = eligibilityById.get(a.id)?.isInPilot ? 0 : 1;
@@ -135,86 +107,105 @@ export function EngagementList() {
     });
   }, [engagements, eligibilityById]);
 
-  // Optional list-level filter (Task #235 stretch goal). Defaults
-  // off so the existing "show everything" behaviour is preserved on
-  // first load; flipping it on hides every row whose jurisdiction
-  // resolves to no applicable adapters so an architect can focus
-  // triage on the actionable subset.
   const [hideOutOfPilot, setHideOutOfPilot] = useState(false);
-  // Archived projects are hidden by default so the list does not grow
-  // unbounded (QA-02 / WSB.2); the "Show archived" toggle reveals them.
   const [showArchived, setShowArchived] = useState(false);
   const visibleEngagements = useMemo(() => {
     let list = sortedEngagements;
-    if (!showArchived) {
-      list = list.filter((e) => e.status !== "archived");
-    }
-    if (hideOutOfPilot) {
+    if (!showArchived) list = list.filter((e) => e.status !== "archived");
+    if (hideOutOfPilot)
       list = list.filter((e) => eligibilityById.get(e.id)?.isInPilot);
-    }
     return list;
   }, [sortedEngagements, eligibilityById, hideOutOfPilot, showArchived]);
+
   const archivedCount = useMemo(
     () => engagements.filter((e) => e.status === "archived").length,
     [engagements],
   );
-  const outOfPilotCount = engagements.length - visibleEngagementsInPilotCount(
-    engagements,
-    eligibilityById,
-  );
+  const outOfPilotCount =
+    engagements.length -
+    visibleEngagementsInPilotCount(engagements, eligibilityById);
 
   const totalSnapshots = engagements.reduce(
     (acc, e) => acc + (e.snapshotCount ?? 0),
     0,
   );
+  const totalSheets = engagements.reduce(
+    (acc, e) => acc + (e.latestSnapshot?.sheetCount ?? 0),
+    0,
+  );
   const activeCount = engagements.filter((e) => e.status === "active").length;
+  const inPilotCount = engagements.filter(
+    (e) => eligibilityById.get(e.id)?.isInPilot,
+  ).length;
+
+  const headerActions = (
+    <button
+      className="cockpit-btn-ghost"
+      onClick={() => refetch()}
+      disabled={isFetching}
+    >
+      {isFetching ? "Refreshing…" : "Refresh"}
+    </button>
+  );
 
   return (
-    <AppShell title="Projects">
-      <div className="flex flex-col gap-6 h-full">
-        <div className="flex items-end justify-between">
-          <div>
-            <h2 className="text-[22px] m-0">Active engagements</h2>
-            <div className="sc-body opacity-70 mt-1">
-              {activeCount} active · {totalSnapshots} total snapshot
-              {totalSnapshots === 1 ? "" : "s"}
-              {outOfPilotCount > 0 ? (
-                <>
-                  {" "}
-                  ·{" "}
-                  <span data-testid="engagements-out-of-pilot-tally">
-                    {outOfPilotCount} out of pilot
-                  </span>
-                </>
-              ) : null}
-              {archivedCount > 0 && !showArchived ? (
-                <>
-                  {" "}
-                  ·{" "}
-                  <span data-testid="engagements-archived-tally">
-                    {archivedCount} archived hidden
-                  </span>
-                </>
-              ) : null}
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <label
-              className="sc-body opacity-80 flex items-center gap-2"
-              style={{ cursor: "pointer", userSelect: "none" }}
-            >
+    <AppShell title="Projects" headerActions={headerActions}>
+      <div className="cockpit-page flex flex-col gap-6">
+        {/* PORTFOLIO KPI STRIP ---------------------------------- */}
+        <section
+          className="grid grid-cols-2 md:grid-cols-4 gap-3"
+          data-testid="engagements-portfolio-kpis"
+        >
+          <Kpi
+            label="Engagements"
+            value={engagements.length}
+            sub={`${activeCount} active`}
+          />
+          <Kpi
+            label="In pilot"
+            value={inPilotCount}
+            sub={
+              outOfPilotCount > 0 ? (
+                <span data-testid="engagements-out-of-pilot-tally">
+                  {outOfPilotCount} out of pilot
+                </span>
+              ) : (
+                "All actionable"
+              )
+            }
+          />
+          <Kpi
+            label="Snapshots"
+            value={totalSnapshots}
+            sub={`${totalSheets} sheets`}
+          />
+          <Kpi
+            label="Archived"
+            value={archivedCount}
+            sub={
+              archivedCount > 0 && !showArchived ? (
+                <span data-testid="engagements-archived-tally">hidden</span>
+              ) : (
+                "—"
+              )
+            }
+          />
+        </section>
+
+        {/* TOOLBAR --------------------------------------------- */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="cockpit-overline">Portfolio · {visibleEngagements.length} visible</div>
+          <div className="flex items-center gap-4">
+            <label className="cockpit-toggle" style={{ cursor: "pointer", userSelect: "none" }}>
               <input
                 type="checkbox"
                 data-testid="engagements-filter-in-pilot"
                 checked={hideOutOfPilot}
                 onChange={(e) => setHideOutOfPilot(e.target.checked)}
               />
-              Show only in-pilot
+              In-pilot only
             </label>
-            <label
-              className="sc-body opacity-80 flex items-center gap-2"
-              style={{ cursor: "pointer", userSelect: "none" }}
-            >
+            <label className="cockpit-toggle" style={{ cursor: "pointer", userSelect: "none" }}>
               <input
                 type="checkbox"
                 data-testid="engagements-filter-show-archived"
@@ -223,36 +214,31 @@ export function EngagementList() {
               />
               Show archived
             </label>
-            <button
-              className="sc-btn-ghost"
-              onClick={() => refetch()}
-              disabled={isFetching}
-            >
-              {isFetching ? "Refreshing…" : "Refresh"}
-            </button>
           </div>
         </div>
 
+        {/* ENGAGEMENT GRID ------------------------------------- */}
         {engagements.length === 0 ? (
-          <div className="sc-card p-8">
-            <div className="sc-prose text-center opacity-70">
-              No engagements yet. Send a snapshot from Revit to create one.
+          <div className="cockpit-card cockpit-empty">
+            <div className="cockpit-empty-title">No engagements yet</div>
+            <div className="cockpit-empty-body">
+              Send a snapshot from Revit to create one.
             </div>
           </div>
         ) : visibleEngagements.length === 0 ? (
-          <div className="sc-card p-8">
+          <div className="cockpit-card cockpit-empty">
             <div
-              className="sc-prose text-center opacity-70"
+              className="cockpit-empty-body"
               data-testid="engagements-empty-filtered"
             >
-              No in-pilot engagements right now. Uncheck "Show only in-pilot"
-              to see the {engagements.length} project
-              {engagements.length === 1 ? "" : "s"} outside the current
-              adapter set.
+              No in-pilot engagements right now. Uncheck "In-pilot only" to see
+              the {engagements.length} project
+              {engagements.length === 1 ? "" : "s"} outside the current adapter
+              set.
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {visibleEngagements.map((e) => {
               const latest = e.latestSnapshot;
               const eligibility = eligibilityById.get(e.id);
@@ -262,40 +248,37 @@ export function EngagementList() {
                   href={`/engagements/${e.id}`}
                   data-testid={`engagement-card-${e.id}`}
                   data-in-pilot={eligibility?.isInPilot ? "true" : "false"}
-                  className="sc-card sc-card-clickable flex flex-col"
-                  style={{ textDecoration: "none", color: "inherit" }}
+                  className="cockpit-engagement-card"
                 >
-                  <div className="sc-card-header sc-row-sb">
-                    <span className="sc-medium">{e.name}</span>
-                    <div className="flex items-center gap-2">
+                  <div className="cockpit-engagement-card-header">
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <span className="cockpit-engagement-name truncate">{e.name}</span>
+                      <span className="cockpit-engagement-meta truncate">
+                        {e.address ?? "No address set"}
+                        {e.jurisdiction ? ` · ${e.jurisdiction}` : ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       {eligibility && !eligibility.isInPilot ? (
                         <NoAdaptersPill message={eligibility.message} />
                       ) : null}
                       <StatusPill status={e.status} />
                     </div>
                   </div>
-                  <div className="flex flex-col gap-3" style={{ padding: 14 }}>
-                    {e.address ? (
-                      <div className="sc-body">{e.address}</div>
-                    ) : (
-                      <div className="sc-micro opacity-60">No address set</div>
-                    )}
-                    {e.jurisdiction && (
-                      <div className="sc-meta">{e.jurisdiction}</div>
-                    )}
-                    <div className="grid grid-cols-4 gap-3 mt-2">
-                      <CountCell label="SHEETS" value={latest?.sheetCount} />
-                      <CountCell label="ROOMS" value={latest?.roomCount} />
-                      <CountCell label="LEVELS" value={latest?.levelCount} />
-                      <CountCell label="WALLS" value={latest?.wallCount} />
-                    </div>
+                  <div className="cockpit-engagement-kpis">
+                    <CountCell label="Sheets" value={latest?.sheetCount} />
+                    <CountCell label="Rooms" value={latest?.roomCount} />
+                    <CountCell label="Levels" value={latest?.levelCount} />
+                    <CountCell label="Walls" value={latest?.wallCount} />
                   </div>
-                  <div className="sc-card-footer sc-row-sb">
-                    <span className="sc-meta">
-                      {e.snapshotCount} snapshot{e.snapshotCount === 1 ? "" : "s"}
+                  <div className="cockpit-engagement-footer">
+                    <span>
+                      {e.snapshotCount} snapshot
+                      {e.snapshotCount === 1 ? "" : "s"}
                     </span>
-                    <span className="sc-meta">
-                      Updated {relativeTime(latest?.receivedAt ?? e.updatedAt)}
+                    <span>
+                      Updated{" "}
+                      {relativeTime(latest?.receivedAt ?? e.updatedAt)}
                     </span>
                   </div>
                 </Link>
@@ -305,6 +288,21 @@ export function EngagementList() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+function CountCell({
+  label,
+  value,
+}: {
+  label: string;
+  value: number | null | undefined;
+}) {
+  return (
+    <div>
+      <div className="cockpit-cell-label">{label}</div>
+      <div className="cockpit-cell-value">{value ?? "—"}</div>
+    </div>
   );
 }
 

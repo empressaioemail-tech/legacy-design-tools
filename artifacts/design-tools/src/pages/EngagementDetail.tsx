@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -120,7 +119,7 @@ const TAB_GROUP_LABELS: Record<string, string> = {
   config: "Config",
 };
 
-function TabBar({
+function ViewsRail({
   active,
   onChange,
   findingsBadgeCount,
@@ -130,10 +129,10 @@ function TabBar({
   /**
    * Number of unaddressed findings on the most-recent submission
    * (Task #421 / V1-1 / V1-7). Rendered as a small badge on the
-   * "Findings" tab so an architect can spot blocker / concern work
-   * without having to open the tab. `undefined` while the badge
+   * "Findings" view so an architect can spot blocker / concern work
+   * without having to open the view. `undefined` while the badge
    * fetch is loading or the engagement has no submissions yet —
-   * we render the tab with no badge in that case.
+   * we render the rail item with no badge in that case.
    */
   findingsBadgeCount?: number | undefined;
 }) {
@@ -199,10 +198,15 @@ function TabBar({
     tabs.findIndex((t) => t.id === active),
   );
 
+  // Vertical orientation — ArrowDown / ArrowUp move between items in
+  // the same WAI-ARIA Tabs pattern Wave 1 introduced. ArrowRight /
+  // ArrowLeft are intentionally inert: the rail lives on the right
+  // edge of the page and horizontal arrows are reserved for the main
+  // content's own widgets (sheets grid, BIM viewer, …).
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     let next = activeIdx;
-    if (e.key === "ArrowRight") next = (activeIdx + 1) % tabs.length;
-    else if (e.key === "ArrowLeft")
+    if (e.key === "ArrowDown") next = (activeIdx + 1) % tabs.length;
+    else if (e.key === "ArrowUp")
       next = (activeIdx - 1 + tabs.length) % tabs.length;
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = tabs.length - 1;
@@ -215,128 +219,66 @@ function TabBar({
   };
 
   return (
-    <div
-      role="tablist"
-      aria-label="Engagement workflow"
-      onKeyDown={handleKeyDown}
-      className="sc-scroll"
-      style={{
-        display: "flex",
-        gap: 10,
-        borderBottom: "1px solid var(--border-default)",
-        overflowX: "auto",
-      }}
+    <aside
+      className="cockpit-views-rail sc-scroll"
+      aria-label="Engagement views"
     >
-      {groups.map((g, gi) => (
-        <Fragment key={g.key}>
-          {gi > 0 && (
-            <div
-              aria-hidden="true"
-              style={{
-                alignSelf: "stretch",
-                flexShrink: 0,
-                width: 1,
-                background: "var(--border-default)",
-                marginTop: 14,
-              }}
-            />
-          )}
+      <div
+        role="tablist"
+        aria-label="Engagement workflow"
+        aria-orientation="vertical"
+        onKeyDown={handleKeyDown}
+      >
+        {groups.map((g) => (
           <div
+            key={g.key}
             role="presentation"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              flexShrink: 0,
-            }}
+            className="cockpit-views-rail-section"
             data-testid={`engagement-tab-group-${g.key}`}
           >
-            <div
-              className="sc-label"
-              aria-hidden="true"
-              style={{
-                fontSize: 9,
-                opacity: 0.55,
-                padding: "2px 10px 0",
-                letterSpacing: "0.10em",
-              }}
-            >
+            <div className="cockpit-views-rail-overline" aria-hidden="true">
               {g.label}
             </div>
-            <div style={{ display: "flex", gap: 2 }}>
-              {g.tabs.map((t) => {
-                const idx = tabs.indexOf(t);
-                const isActive = active === t.id;
-                const showBadge =
-                  t.id === "findings" &&
-                  typeof findingsBadgeCount === "number" &&
-                  findingsBadgeCount > 0;
-                return (
-                  <button
-                    key={t.id}
-                    ref={(el) => {
-                      tabRefs.current[idx] = el;
-                    }}
-                    type="button"
-                    role="tab"
-                    id={`engagement-tab-trigger-${t.id}`}
-                    aria-selected={isActive}
-                    aria-controls={`engagement-tabpanel-${t.id}`}
-                    tabIndex={isActive ? 0 : -1}
-                    onClick={() => onChange(t.id)}
-                    className="sc-tab sc-tab-trigger"
-                    data-active={isActive ? "true" : "false"}
-                    data-testid={`engagement-tab-${t.id}`}
-                    style={{
-                      flexShrink: 0,
-                      padding: "6px 10px 8px",
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: isActive
-                        ? "2px solid var(--cyan)"
-                        : "2px solid transparent",
-                      color: isActive
-                        ? "var(--text-primary)"
-                        : "var(--text-secondary)",
-                      cursor: "pointer",
-                      transition:
-                        "color 0.12s, border-color 0.12s, box-shadow 0.12s",
-                      marginBottom: -1,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {t.label}
-                    {showBadge && (
-                      <span
-                        data-testid="engagement-tab-findings-badge"
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          minWidth: 16,
-                          height: 16,
-                          padding: "0 5px",
-                          borderRadius: 8,
-                          background: "rgba(239, 68, 68, 0.18)",
-                          color: "#ef4444",
-                          fontSize: 10,
-                          fontWeight: 600,
-                          lineHeight: 1,
-                        }}
-                      >
-                        {findingsBadgeCount}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            {g.tabs.map((t) => {
+              const idx = tabs.indexOf(t);
+              const isActive = active === t.id;
+              const showBadge =
+                t.id === "findings" &&
+                typeof findingsBadgeCount === "number" &&
+                findingsBadgeCount > 0;
+              return (
+                <button
+                  key={t.id}
+                  ref={(el) => {
+                    tabRefs.current[idx] = el;
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`engagement-tab-trigger-${t.id}`}
+                  aria-selected={isActive}
+                  aria-controls={`engagement-tabpanel-${t.id}`}
+                  tabIndex={isActive ? 0 : -1}
+                  onClick={() => onChange(t.id)}
+                  className="cockpit-views-rail-item"
+                  data-active={isActive ? "true" : "false"}
+                  data-testid={`engagement-tab-${t.id}`}
+                >
+                  <span className="cockpit-views-rail-item-label">{t.label}</span>
+                  {showBadge && (
+                    <span
+                      data-testid="engagement-tab-findings-badge"
+                      className="cockpit-views-rail-badge"
+                    >
+                      {findingsBadgeCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
-        </Fragment>
-      ))}
-    </div>
+        ))}
+      </div>
+    </aside>
   );
 }
 
@@ -736,7 +678,8 @@ export function EngagementDetail() {
         />
       }
     >
-      <div className="flex flex-col gap-5 h-full">
+      <div className="cockpit-engagement-layout">
+        <div className="cockpit-engagement-main flex flex-col gap-5">
         {lastSubmission && (
           <SubmissionRecordedBanner
             submittedAt={lastSubmission.receipt.submittedAt}
@@ -841,12 +784,6 @@ export function EngagementDetail() {
           closed. Self-hides when there is no history to show.
         */}
         <ReviewerRequestsHistory engagementId={id} />
-
-        <TabBar
-          active={tab}
-          onChange={setTab}
-          findingsBadgeCount={findingsBadgeCount}
-        />
 
         <TabPanel id="snapshots" active={tab}>
             <div className="grid grid-cols-4 gap-3">
@@ -1091,6 +1028,12 @@ export function EngagementDetail() {
         <TabPanel id="settings" active={tab}>
           <SettingsTab engagement={engagement} onEdit={openEdit} />
         </TabPanel>
+        </div>
+        <ViewsRail
+          active={tab}
+          onChange={setTab}
+          findingsBadgeCount={findingsBadgeCount}
+        />
       </div>
 
       <EngagementDetailsModal
