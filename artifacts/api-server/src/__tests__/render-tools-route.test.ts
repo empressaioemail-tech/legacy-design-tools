@@ -115,7 +115,7 @@ describe("POST /api/render-outputs/:parentId/enhance", () => {
 
   it("404s when parent render output does not exist", async () => {
     const res = await request(getApp()).post(
-      `/api/render-outputs/00000000-0000-0000-0000-000000000099/enhance`,
+      `/api/render-outputs/11111111-1111-4111-8111-111111111111/enhance`,
     );
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("parent_render_output_not_found");

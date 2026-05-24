@@ -42,6 +42,8 @@ interface ListEngagementRendersCache {
  * viewer surfaces.
  */
 
+export type RenderKickoffVariant = "dialog" | "embedded";
+
 export interface RenderKickoffDialogProps {
   engagementId: string;
   /**
@@ -50,14 +52,30 @@ export interface RenderKickoffDialogProps {
    * override it inline before submitting.
    */
   defaultGlbUrl?: string | null;
-  isOpen: boolean;
-  onClose: () => void;
   /**
-   * Fires after a successful kickoff, just before `onClose` runs.
-   * Parent uses this to advance selection in the gallery to the
-   * just-created render id.
+   * `dialog` — modal overlay (legacy). `embedded` — inline panel
+   * for the Renders tab dashboard (doc 40e / 40c intent).
+   */
+  variant?: RenderKickoffVariant;
+  /** Required for `variant="dialog"`; ignored when embedded. */
+  isOpen?: boolean;
+  /** Required for `variant="dialog"`; ignored when embedded. */
+  onClose?: () => void;
+  /**
+   * Fires after a successful kickoff. Dialog variant also calls
+   * `onClose`; embedded resets the form in place.
    */
   onKickedOff?: (response: KickoffRenderResponse) => void;
+}
+
+/** Inline kickoff panel for the Renders tab dashboard (not a modal). */
+export type RenderKickoffPanelProps = Pick<
+  RenderKickoffDialogProps,
+  "engagementId" | "defaultGlbUrl" | "onKickedOff"
+>;
+
+export function RenderKickoffPanel(props: RenderKickoffPanelProps) {
+  return <RenderKickoffDialog {...props} variant="embedded" isOpen />;
 }
 
 const KIND_LABEL: Record<DomainRenderKind, string> = {
@@ -141,10 +159,12 @@ type StillSourceMode = "model-capture" | "upload";
 export function RenderKickoffDialog({
   engagementId,
   defaultGlbUrl,
-  isOpen,
+  variant = "dialog",
+  isOpen = false,
   onClose,
   onKickedOff,
 }: RenderKickoffDialogProps) {
+  const embedded = variant === "embedded";
   const qc = useQueryClient();
   const [kind, setKind] = useState<DomainRenderKind>("still");
   const [glbUrl, setGlbUrl] = useState<string>(defaultGlbUrl ?? "");
@@ -178,33 +198,38 @@ export function RenderKickoffDialog({
   const [negativePrompt, setNegativePrompt] = useState("");
   const [seed, setSeed] = useState("");
 
+  function resetForm() {
+    setKind("still");
+    setGlbUrl(defaultGlbUrl ?? "");
+    setPrompt("");
+    setCameraPos("0,0,10");
+    setCameraTarget("0,0,0");
+    setBuildingCenter("0,0,0");
+    setCameraDistance("20");
+    setCameraHeight("2");
+    setDuration(5);
+    setError(null);
+    setIntent("deliverable");
+    setExpertName(INTENT_DEFAULTS.deliverable.expert);
+    setRenderStyle(INTENT_DEFAULTS.deliverable.style);
+    setPgFile(null);
+    setPgBusy(false);
+    setPgError(null);
+    setStillSourceMode("model-capture");
+    setSourceUploadUrl(null);
+    setSourceUploadFile(null);
+    setExpertParams({});
+    setNegativePrompt("");
+    setSeed("");
+  }
+
   useEffect(() => {
-    if (isOpen) {
-      setKind("still");
-      setGlbUrl(defaultGlbUrl ?? "");
-      setPrompt("");
-      setCameraPos("0,0,10");
-      setCameraTarget("0,0,0");
-      setBuildingCenter("0,0,0");
-      setCameraDistance("20");
-      setCameraHeight("2");
-      setDuration(5);
-      setError(null);
-      // doc 40c gap-fill resets.
-      setIntent("deliverable");
-      setExpertName(INTENT_DEFAULTS.deliverable.expert);
-      setRenderStyle(INTENT_DEFAULTS.deliverable.style);
-      setPgFile(null);
-      setPgBusy(false);
-      setPgError(null);
-      setStillSourceMode("model-capture");
-      setSourceUploadUrl(null);
-      setSourceUploadFile(null);
-      setExpertParams({});
-      setNegativePrompt("");
-      setSeed("");
+    if (embedded) {
+      resetForm();
+      return;
     }
-  }, [isOpen, defaultGlbUrl]);
+    if (isOpen) resetForm();
+  }, [isOpen, defaultGlbUrl, embedded]);
 
   const [sourceUploadBusy, setSourceUploadBusy] = useState(false);
 
@@ -307,7 +332,11 @@ export function RenderKickoffDialog({
         // RenderCreditsBadge.
         qc.invalidateQueries({ queryKey: getGetRenderCreditsQueryKey() });
         onKickedOff?.(response);
-        onClose();
+        if (embedded) {
+          resetForm();
+        } else {
+          onClose?.();
+        }
       },
       onError: (err) => {
         setError(formatKickoffError(err));
@@ -315,7 +344,7 @@ export function RenderKickoffDialog({
     },
   });
 
-  if (!isOpen) return null;
+  if (!embedded && !isOpen) return null;
 
   const trimmedGlb = glbUrl.trim();
   const trimmedPrompt = prompt.trim();
@@ -402,30 +431,14 @@ export function RenderKickoffDialog({
     mutation.mutate({ id: engagementId, data: body });
   };
 
-  return (
-    <div
-      onClick={() => {
-        if (!submitting) onClose();
-      }}
-      data-testid="render-kickoff-dialog"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        zIndex: 50,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-      }}
-    >
+  const shell = (
       <div
         className="sc-card"
-        onClick={(e) => e.stopPropagation()}
+        onClick={embedded ? undefined : (e) => e.stopPropagation()}
         style={{
           width: "100%",
-          maxWidth: 560,
-          maxHeight: "90vh",
+          maxWidth: embedded ? undefined : 560,
+          maxHeight: embedded ? "min(85vh, 960px)" : "90vh",
           overflow: "auto",
           display: "flex",
           flexDirection: "column",
@@ -440,11 +453,12 @@ export function RenderKickoffDialog({
                 color: "var(--text-primary)",
               }}
             >
-              Kick off a render
+              {embedded ? "New render" : "Kick off a render"}
             </span>
             <span className="sc-meta opacity-70">
-              The polling worker advances the render's status; you'll
-              see it appear in the gallery as soon as it's queued.
+              {embedded
+                ? "Configure and submit a render; results appear in the gallery."
+                : "The polling worker advances the render's status; you'll see it appear in the gallery as soon as it's queued."}
             </span>
           </div>
         </div>
@@ -962,14 +976,26 @@ export function RenderKickoffDialog({
           className="p-4 flex justify-end gap-2"
           style={{ borderTop: "1px solid var(--border-default)" }}
         >
-          <button
-            type="button"
-            className="sc-btn-ghost"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </button>
+          {embedded ? (
+            <button
+              type="button"
+              className="sc-btn-ghost"
+              onClick={resetForm}
+              disabled={submitting}
+              data-testid="render-kickoff-reset"
+            >
+              Reset form
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="sc-btn-ghost"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+          )}
           <button
             type="button"
             className="sc-btn-primary"
@@ -981,6 +1007,34 @@ export function RenderKickoffDialog({
           </button>
         </div>
       </div>
+  );
+
+  if (embedded) {
+    return (
+      <div data-testid="render-kickoff-panel" style={{ minWidth: 0 }}>
+        {shell}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => {
+        if (!submitting) onClose?.();
+      }}
+      data-testid="render-kickoff-dialog"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      {shell}
     </div>
   );
 }

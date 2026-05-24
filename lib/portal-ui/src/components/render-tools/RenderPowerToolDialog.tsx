@@ -31,6 +31,45 @@ const TOOL_LABEL: Record<PowerToolKind, string> = {
   style_transfer: "Style Transfer",
 };
 
+function ParamSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  disabled,
+  testId,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  disabled?: boolean;
+  testId: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span className="sc-meta">
+        {label} ({value})
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        data-testid={testId}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: "100%" }}
+      />
+    </label>
+  );
+}
+
 export function RenderPowerToolDialog({
   engagementId,
   parentOutput,
@@ -46,6 +85,17 @@ export function RenderPowerToolDialog({
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [scale, setScale] = useState<"2" | "4" | "8">("2");
+  const [faceEnhance, setFaceEnhance] = useState(false);
+  const [outputFormat, setOutputFormat] = useState<"png" | "jpg" | "jpeg">("png");
+  const [maskType, setMaskType] = useState<"manual" | "automatic">("manual");
+  const [seed, setSeed] = useState("");
+  const [geometry, setGeometry] = useState(1);
+  const [creativity, setCreativity] = useState(0.3);
+  const [dynamic, setDynamic] = useState(5);
+  const [sharpen, setSharpen] = useState(0.5);
+  const [strength, setStrength] = useState(0.65);
+  const [colorPreservation, setColorPreservation] = useState(0.5);
+  const [preserveStructure, setPreserveStructure] = useState(true);
   const [maskBlob, setMaskBlob] = useState<Blob | null>(null);
   const [referenceFile, setReferenceFile] = useState<File | null>(null);
 
@@ -65,6 +115,7 @@ export function RenderPowerToolDialog({
     try {
       const form = new FormData();
       form.append("image", await loadParentImageFile());
+
       if (tool === "enhance" || tool === "inpaint" || tool === "style_transfer") {
         if (!prompt.trim()) {
           setError("Prompt is required.");
@@ -73,18 +124,59 @@ export function RenderPowerToolDialog({
         }
         form.append("prompt", prompt.trim());
       }
-      if (tool === "inpaint" && negativePrompt.trim()) {
-        form.append("negative_prompt", negativePrompt.trim());
+
+      if (tool === "enhance") {
+        form.append("geometry", String(geometry));
+        form.append("creativity", String(creativity));
+        form.append("dynamic", String(dynamic));
+        form.append("sharpen", String(sharpen));
+        if (seed.trim()) form.append("seed", seed.trim());
       }
+
+      if (tool === "inpaint") {
+        if (negativePrompt.trim()) {
+          form.append("negative_prompt", negativePrompt.trim());
+        }
+        form.append("mask_type", maskType);
+        if (seed.trim()) form.append("seed", seed.trim());
+      }
+
       if (tool === "upscale") {
         form.append("scale", scale);
+        form.append("face_enhance", faceEnhance ? "true" : "false");
       }
+
+      if (tool === "erase") {
+        if (!maskBlob) {
+          setError("Draw a mask on the region to erase.");
+          setBusy(false);
+          return;
+        }
+        form.append("output_format", outputFormat);
+      }
+
       if ((tool === "erase" || tool === "inpaint") && maskBlob) {
         form.append("mask", maskBlob, "mask.png");
       }
-      if (tool === "style_transfer" && referenceFile) {
-        form.append("reference_image", referenceFile);
+
+      if (tool === "inpaint" && maskType === "manual" && !maskBlob) {
+        setError("Draw a mask for manual inpaint.");
+        setBusy(false);
+        return;
       }
+
+      if (tool === "style_transfer") {
+        if (!referenceFile) {
+          setError("Reference style image is required.");
+          setBusy(false);
+          return;
+        }
+        form.append("reference_image", referenceFile);
+        form.append("strength", String(strength));
+        form.append("color_preservation", String(colorPreservation));
+        form.append("preserve_structure", preserveStructure ? "true" : "false");
+      }
+
       const res = await kickoffPowerTool(parentOutput.id, tool, form);
       const optimistic: RenderListItem = {
         id: res.renderId,
@@ -154,7 +246,7 @@ export function RenderPowerToolDialog({
           </button>
         </div>
 
-        {(tool === "erase" || tool === "inpaint") && (
+        {(tool === "erase" || tool === "inpaint") && maskType === "manual" && (
           <MaskCanvas
             imageUrl={previewUrl}
             disabled={busy}
@@ -185,55 +277,220 @@ export function RenderPowerToolDialog({
           </label>
         )}
 
-        {tool === "inpaint" && (
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span className="sc-meta">Negative prompt (optional)</span>
-            <textarea
-              className="sc-ui"
-              rows={2}
-              value={negativePrompt}
+        {tool === "enhance" && (
+          <>
+            <ParamSlider
+              label="Geometry"
+              value={geometry}
+              min={0}
+              max={1}
+              step={0.05}
               disabled={busy}
-              onChange={(e) => setNegativePrompt(e.target.value)}
-              data-testid="power-tool-negative-prompt"
-              style={{
-                background: "var(--bg-input)",
-                color: "var(--text-primary)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                padding: 8,
-                fontSize: 12.5,
-              }}
+              testId="power-tool-geometry"
+              onChange={setGeometry}
             />
-          </label>
+            <ParamSlider
+              label="Creativity"
+              value={creativity}
+              min={0}
+              max={1}
+              step={0.05}
+              disabled={busy}
+              testId="power-tool-creativity"
+              onChange={setCreativity}
+            />
+            <ParamSlider
+              label="Dynamic"
+              value={dynamic}
+              min={0}
+              max={10}
+              step={0.5}
+              disabled={busy}
+              testId="power-tool-dynamic"
+              onChange={setDynamic}
+            />
+            <ParamSlider
+              label="Sharpen"
+              value={sharpen}
+              min={0}
+              max={1}
+              step={0.05}
+              disabled={busy}
+              testId="power-tool-sharpen"
+              onChange={setSharpen}
+            />
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="sc-meta">Seed (optional)</span>
+              <input
+                type="number"
+                className="sc-ui"
+                value={seed}
+                disabled={busy}
+                placeholder="Random"
+                data-testid="power-tool-seed"
+                onChange={(e) => setSeed(e.target.value)}
+                style={{
+                  background: "var(--bg-input)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: "6px 8px",
+                  fontSize: 12.5,
+                }}
+              />
+            </label>
+          </>
+        )}
+
+        {tool === "inpaint" && (
+          <>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="sc-meta">Negative prompt (optional)</span>
+              <textarea
+                className="sc-ui"
+                rows={2}
+                value={negativePrompt}
+                disabled={busy}
+                onChange={(e) => setNegativePrompt(e.target.value)}
+                data-testid="power-tool-negative-prompt"
+                style={{
+                  background: "var(--bg-input)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: 8,
+                  fontSize: 12.5,
+                }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="sc-meta">Mask type</span>
+              <select
+                className="sc-ui"
+                value={maskType}
+                disabled={busy}
+                data-testid="power-tool-mask-type"
+                onChange={(e) =>
+                  setMaskType(e.target.value as "manual" | "automatic")
+                }
+              >
+                <option value="manual">Manual (draw mask)</option>
+                <option value="automatic">Automatic</option>
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="sc-meta">Seed (optional)</span>
+              <input
+                type="number"
+                className="sc-ui"
+                value={seed}
+                disabled={busy}
+                placeholder="Random"
+                data-testid="power-tool-inpaint-seed"
+                onChange={(e) => setSeed(e.target.value)}
+                style={{
+                  background: "var(--bg-input)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 4,
+                  padding: "6px 8px",
+                  fontSize: 12.5,
+                }}
+              />
+            </label>
+          </>
         )}
 
         {tool === "upscale" && (
+          <>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span className="sc-meta">Scale</span>
+              <select
+                className="sc-ui"
+                value={scale}
+                disabled={busy}
+                onChange={(e) => setScale(e.target.value as "2" | "4" | "8")}
+                data-testid="power-tool-scale"
+              >
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+                <option value="8">8×</option>
+              </select>
+            </label>
+            <label className="sc-meta flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={faceEnhance}
+                disabled={busy}
+                data-testid="power-tool-face-enhance"
+                onChange={(e) => setFaceEnhance(e.target.checked)}
+              />
+              Face enhance
+            </label>
+          </>
+        )}
+
+        {tool === "erase" && (
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span className="sc-meta">Scale</span>
+            <span className="sc-meta">Output format</span>
             <select
               className="sc-ui"
-              value={scale}
+              value={outputFormat}
               disabled={busy}
-              onChange={(e) => setScale(e.target.value as "2" | "4" | "8")}
-              data-testid="power-tool-scale"
+              data-testid="power-tool-output-format"
+              onChange={(e) =>
+                setOutputFormat(e.target.value as "png" | "jpg" | "jpeg")
+              }
             >
-              <option value="2">2×</option>
-              <option value="4">4×</option>
-              <option value="8">8×</option>
+              <option value="png">PNG</option>
+              <option value="jpg">JPG</option>
+              <option value="jpeg">JPEG</option>
             </select>
           </label>
         )}
 
         {tool === "style_transfer" && (
-          <DragDropUpload
-            label="Drop reference style image"
-            accept="image/png,image/jpeg,image/webp"
-            maxBytes={10 * 1024 * 1024}
-            file={referenceFile}
-            onFileChange={setReferenceFile}
-            disabled={busy}
-            testId="power-tool-reference-upload"
-          />
+          <>
+            <DragDropUpload
+              label="Drop reference style image"
+              accept="image/png,image/jpeg,image/webp"
+              maxBytes={10 * 1024 * 1024}
+              file={referenceFile}
+              onFileChange={setReferenceFile}
+              disabled={busy}
+              testId="power-tool-reference-upload"
+            />
+            <ParamSlider
+              label="Strength"
+              value={strength}
+              min={0}
+              max={1}
+              step={0.05}
+              disabled={busy}
+              testId="power-tool-strength"
+              onChange={setStrength}
+            />
+            <ParamSlider
+              label="Color preservation"
+              value={colorPreservation}
+              min={0}
+              max={1}
+              step={0.05}
+              disabled={busy}
+              testId="power-tool-color-preservation"
+              onChange={setColorPreservation}
+            />
+            <label className="sc-meta flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={preserveStructure}
+                disabled={busy}
+                data-testid="power-tool-preserve-structure"
+                onChange={(e) => setPreserveStructure(e.target.checked)}
+              />
+              Preserve structure
+            </label>
+          </>
         )}
 
         {error && (

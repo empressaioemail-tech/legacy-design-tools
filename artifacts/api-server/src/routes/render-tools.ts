@@ -646,12 +646,6 @@ async function kickoffToolRoute(
     return;
   }
 
-  const contentType = req.headers["content-type"] ?? "";
-  if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
-    res.status(415).json({ error: "expected_multipart" });
-    return;
-  }
-
   const parent = await loadParentRenderOutput(params.data.parentId);
   if (!parent) {
     res.status(404).json({ error: "parent_render_output_not_found" });
@@ -659,6 +653,12 @@ async function kickoffToolRoute(
   }
   if (parent.render.status !== "ready") {
     res.status(400).json({ error: "parent_render_not_ready" });
+    return;
+  }
+
+  const contentType = req.headers["content-type"] ?? "";
+  if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+    res.status(415).json({ error: "expected_multipart" });
     return;
   }
 
