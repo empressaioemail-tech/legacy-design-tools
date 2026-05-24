@@ -167,7 +167,7 @@ export function ReviewStream() {
                       type="text" 
                       placeholder="Reply to Maria..." 
                       className="w-full pl-4 pr-24 py-2.5 bg-white border rounded-lg text-sm focus:outline-none focus:ring-2 shadow-sm"
-                      style={{ borderColor: "#d9d2c5", focusRingColor: "#0a6a78" }}
+                      style={{ borderColor: "#d9d2c5" }}
                     />
                     <div className="absolute right-2 top-2 flex items-center gap-1">
                       <button className="p-1 text-slate-400 hover:text-slate-600 rounded"><Paperclip className="w-4 h-4" /></button>

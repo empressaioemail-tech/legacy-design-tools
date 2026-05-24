@@ -401,7 +401,8 @@ function EngagementDetail({ engagement, activeTab, onTabChange }: { engagement: 
   const stages = ['snapshots', 'review', 'submitted', 'approved'];
   const currentStageIdx = stages.indexOf(engagement.stage);
   
-  const tabs = [
+  type Tab = { id: string; label: string; icon: typeof LayoutGrid; badge?: number };
+  const tabs: Tab[] = [
     { id: 'overview', label: 'Overview', icon: LayoutGrid },
     { id: 'snapshots', label: 'Snapshots', icon: Layers },
     { id: 'bim', label: '3D Model', icon: Box },
