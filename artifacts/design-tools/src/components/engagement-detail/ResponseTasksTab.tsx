@@ -503,7 +503,7 @@ function ResponseTaskRow({
       data-testid={`response-task-row-${task.entityId}`}
       style={{
         position: "relative",
-        background: "var(--bg-surface)",
+        background: "var(--bg-elevated)",
         border: "1px solid var(--border-default)",
         borderRadius: 8,
         padding: 14,
@@ -511,6 +511,7 @@ function ResponseTaskRow({
         overflow: "hidden",
         display: "flex",
         gap: 14,
+        boxShadow: "var(--depth-inset), var(--depth-shadow-md)",
       }}
     >
       {/* Left accent bar */}
@@ -911,15 +912,21 @@ export function ResponseTasksTab({ engagementId }: { engagementId: string }) {
         subtitle="Track the architect-side response to each finding. The in-app agent can create tasks; you can reverse any agent action from the chat log."
       />
       <div
-        className="sc-card flex flex-col"
+        className="flex flex-col"
         data-testid="response-tasks-list"
-        style={{ padding: 0 }}
+        style={{
+          background: "var(--bg-base)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 8,
+          overflow: "hidden",
+        }}
       >
         {/* Channel header strip */}
         <div
           style={{
             padding: "14px 16px 0",
-            borderBottom: "1px solid var(--border-soft)",
+            background: "var(--bg-chrome)",
+            borderBottom: "1px solid var(--border-default)",
           }}
         >
           <div
