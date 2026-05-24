@@ -129,6 +129,8 @@ export function SiteContextTab({
   panelRef,
   panelFocus = "full",
   onNavigateToMap,
+  pendingBriefingSourceHighlight,
+  onPendingBriefingSourceHighlightConsumed,
 }: {
   engagement: EngagementDetailType;
   /** CAD element ref deep-linked from the Findings tab. */
@@ -150,7 +152,10 @@ export function SiteContextTab({
   /** Split Map (adapter layers) vs Property Intel (briefing narrative). */
   panelFocus?: "layers" | "briefing" | "full";
   /** When narrative cites a source, jump to the Map tab layer list. */
-  onNavigateToMap?: () => void;
+  onNavigateToMap?: (sourceId: string) => void;
+  /** Lifted from EngagementDetail after Property Intel citation navigation. */
+  pendingBriefingSourceHighlight?: string | null;
+  onPendingBriefingSourceHighlightConsumed?: () => void;
 }) {
   const engagementId = engagement.id;
   const showLayersPanel = panelFocus === "layers" || panelFocus === "full";
@@ -620,18 +625,7 @@ export function SiteContextTab({
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
     };
   }, []);
-  const handleJumpToSource = (sourceId: string) => {
-    if (panelFocus === "briefing" && onNavigateToMap) {
-      onNavigateToMap();
-      if (typeof window !== "undefined") {
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => {
-            scrollToBriefingSource(sourceId);
-          });
-        });
-      }
-      return;
-    }
+  const flashBriefingSourceHighlight = useCallback((sourceId: string) => {
     setHighlightedSourceId(sourceId);
     // Defer the scroll one frame so React commits the highlight
     // first — the row's style change is what we want the user to
@@ -647,6 +641,41 @@ export function SiteContextTab({
     highlightTimerRef.current = setTimeout(() => {
       setHighlightedSourceId((curr) => (curr === sourceId ? null : curr));
     }, 1600);
+  }, []);
+  useEffect(() => {
+    const sourceId = pendingBriefingSourceHighlight;
+    if (!sourceId || !showLayersPanel) return;
+
+    let cancelled = false;
+    const apply = () => {
+      if (cancelled) return;
+      flashBriefingSourceHighlight(sourceId);
+      onPendingBriefingSourceHighlightConsumed?.();
+    };
+
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(apply);
+      });
+    } else {
+      apply();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pendingBriefingSourceHighlight,
+    showLayersPanel,
+    flashBriefingSourceHighlight,
+    onPendingBriefingSourceHighlightConsumed,
+  ]);
+  const handleJumpToSource = (sourceId: string) => {
+    if (panelFocus === "briefing" && onNavigateToMap) {
+      onNavigateToMap(sourceId);
+      return;
+    }
+    flashBriefingSourceHighlight(sourceId);
   };
 
   return (

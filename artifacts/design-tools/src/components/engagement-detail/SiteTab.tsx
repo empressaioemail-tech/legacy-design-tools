@@ -501,6 +501,8 @@ export function SiteTab({
   showBuilding,
   onToggleShowBuilding,
   initialCanvasMode,
+  pendingBriefingSourceHighlight,
+  onPendingBriefingSourceHighlightConsumed,
 }: {
   engagement: EngagementDetailType;
   onAddAddress: () => void;
@@ -512,6 +514,8 @@ export function SiteTab({
   onToggleShowBuilding?: (next: boolean) => void;
   /** Deep-link: open the map canvas in 3D (e.g. finding element ref). */
   initialCanvasMode?: "map" | "3d";
+  pendingBriefingSourceHighlight?: string | null;
+  onPendingBriefingSourceHighlightConsumed?: () => void;
 }) {
   const [, setLocation] = useLocation();
   const site = engagement.site;
@@ -941,6 +945,10 @@ export function SiteTab({
               panelFocus="layers"
               uploadOpen={uploadOpen}
               onUploadOpenChange={setUploadOpen}
+              pendingBriefingSourceHighlight={pendingBriefingSourceHighlight}
+              onPendingBriefingSourceHighlightConsumed={
+                onPendingBriefingSourceHighlightConsumed
+              }
             />
           </section>
         </div>

@@ -818,7 +818,7 @@ describe("EngagementDetail submission banner (Task #126)", () => {
     );
     expect(reviewOrder[0]).toHaveAttribute("data-active", "true");
 
-    fireEvent.click(screen.getByTestId("engagement-view-deliver"));
+    gotoDeliverView();
     for (const id of [
       "engagement-tab-sheets",
       "engagement-tab-product-specs",

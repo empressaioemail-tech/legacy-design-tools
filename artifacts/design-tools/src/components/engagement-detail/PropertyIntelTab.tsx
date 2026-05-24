@@ -15,6 +15,7 @@ import {
 export function PropertyIntelTab({
   engagement,
   onNavigate,
+  onNavigateToMapWithSource,
   selectedElementRef,
   onClearSelectedElement,
   buildingGlbUrl,
@@ -23,6 +24,8 @@ export function PropertyIntelTab({
 }: {
   engagement: EngagementDetailType;
   onNavigate: (tab: TabId) => void;
+  /** Citation pill → Map tab with source row highlight. */
+  onNavigateToMapWithSource: (sourceId: string) => void;
   selectedElementRef?: string | null;
   onClearSelectedElement?: () => void;
   buildingGlbUrl?: string | null;
@@ -165,7 +168,7 @@ export function PropertyIntelTab({
             embedded
             hideMapAnd3d
             panelFocus="briefing"
-            onNavigateToMap={() => onNavigate("site")}
+            onNavigateToMap={onNavigateToMapWithSource}
             selectedElementRef={selectedElementRef}
             onClearSelectedElement={onClearSelectedElement}
             buildingGlbUrl={buildingGlbUrl}

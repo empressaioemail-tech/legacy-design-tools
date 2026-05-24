@@ -174,6 +174,10 @@ export function EngagementDetail() {
   const [selectedElementRef, setSelectedElementRef] = useState<string | null>(
     null,
   );
+  // Property Intel citation pills land on the Map tab's layer list;
+  // lift the pending source id so SiteTab can flash the matching row.
+  const [pendingBriefingSourceHighlight, setPendingBriefingSourceHighlight] =
+    useState<string | null>(null);
   // WS-C (WSC.4) — AI-prepared spec drafts routed from the chat agent
   // to the L4 / L5 manual forms. EngagementDetail consumes the store
   // draft, switches to the matching tab, and hands it to the tab, which
@@ -234,6 +238,10 @@ export function EngagementDetail() {
   const handleElementRefClick = (elementRef: string): void => {
     setSelectedElementRef(elementRef);
     setTab("snapshots");
+  };
+  const handleNavigateToMapFromBriefing = (sourceId: string): void => {
+    setPendingBriefingSourceHighlight(sourceId);
+    setTab("site");
   };
   // Auto-dismiss the banner after 8s so it stays out of the way once
   // the user has seen it. The dialog itself already closed on success,
@@ -688,6 +696,10 @@ export function EngagementDetail() {
             initialCanvasMode={
               tab === "site" && selectedElementRef ? "3d" : "map"
             }
+            pendingBriefingSourceHighlight={pendingBriefingSourceHighlight}
+            onPendingBriefingSourceHighlightConsumed={() =>
+              setPendingBriefingSourceHighlight(null)
+            }
           />
         </TabPanel>
 
@@ -699,6 +711,7 @@ export function EngagementDetail() {
           <PropertyIntelTab
             engagement={engagement}
             onNavigate={setTab}
+            onNavigateToMapWithSource={handleNavigateToMapFromBriefing}
             selectedElementRef={selectedElementRef}
             onClearSelectedElement={() => setSelectedElementRef(null)}
             buildingGlbUrl={defaultBimGlbUrl}
