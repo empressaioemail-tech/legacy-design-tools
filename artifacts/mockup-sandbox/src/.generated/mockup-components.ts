@@ -2,15 +2,21 @@
 type ModuleMap = Record<string, () => Promise<Record<string, unknown>>>;
 export const modules: ModuleMap = {
   "./components/mockups/design-tools-cockpit/Cockpit.tsx": () => import("../components/mockups/design-tools-cockpit/Cockpit.tsx"),
-  "./components/mockups/design-tools-pipeline/Pipeline.tsx": () => import("../components/mockups/design-tools-pipeline/Pipeline.tsx"),
-  "./components/mockups/review-workspace/FindingTimeline.tsx": () => import("../components/mockups/review-workspace/FindingTimeline.tsx"),
-  "./components/mockups/review-workspace/KanbanBoard.tsx": () => import("../components/mockups/review-workspace/KanbanBoard.tsx"),
-  "./components/mockups/review-workspace/SplitInbox.tsx": () => import("../components/mockups/review-workspace/SplitInbox.tsx"),
+  "./components/mockups/deliverables-workspace/LetterThread.tsx": () => import("../components/mockups/deliverables-workspace/LetterThread.tsx"),
+  "./components/mockups/deliverables-workspace/PackageBuilder.tsx": () => import("../components/mockups/deliverables-workspace/PackageBuilder.tsx"),
+  "./components/mockups/deliverables-workspace/SpecCatalog.tsx": () => import("../components/mockups/deliverables-workspace/SpecCatalog.tsx"),
   "./components/mockups/design-tools-workbench/Workbench.tsx": () => import("../components/mockups/design-tools-workbench/Workbench.tsx"),
+  "./components/mockups/production-workspace/CanvasStudio.tsx": () => import("../components/mockups/production-workspace/CanvasStudio.tsx"),
+  "./components/mockups/production-workspace/Launchpad.tsx": () => import("../components/mockups/production-workspace/Launchpad.tsx"),
+  "./components/mockups/production-workspace/StagePipeline.tsx": () => import("../components/mockups/production-workspace/StagePipeline.tsx"),
   "./components/mockups/site-workspace/LayeredCockpit.tsx": () => import("../components/mockups/site-workspace/LayeredCockpit.tsx"),
   "./components/mockups/site-workspace/NarrativeBrief.tsx": () => import("../components/mockups/site-workspace/NarrativeBrief.tsx"),
   "./components/mockups/site-workspace/StagedFlow.tsx": () => import("../components/mockups/site-workspace/StagedFlow.tsx"),
   "./components/mockups/snapshot-page/StackedFeed.tsx": () => import("../components/mockups/snapshot-page/StackedFeed.tsx"),
   "./components/mockups/snapshot-page/SummarySplit.tsx": () => import("../components/mockups/snapshot-page/SummarySplit.tsx"),
-  "./components/mockups/snapshot-page/ViewerHero.tsx": () => import("../components/mockups/snapshot-page/ViewerHero.tsx")
+  "./components/mockups/snapshot-page/ViewerHero.tsx": () => import("../components/mockups/snapshot-page/ViewerHero.tsx"),
+  "./components/mockups/design-tools-pipeline/Pipeline.tsx": () => import("../components/mockups/design-tools-pipeline/Pipeline.tsx"),
+  "./components/mockups/review-workspace/FindingTimeline.tsx": () => import("../components/mockups/review-workspace/FindingTimeline.tsx"),
+  "./components/mockups/review-workspace/KanbanBoard.tsx": () => import("../components/mockups/review-workspace/KanbanBoard.tsx"),
+  "./components/mockups/review-workspace/SplitInbox.tsx": () => import("../components/mockups/review-workspace/SplitInbox.tsx")
 };
