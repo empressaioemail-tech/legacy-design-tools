@@ -1,4 +1,11 @@
-import { useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useLocation } from "wouter";
 import {
   useGetEngagementBriefing,
@@ -7,21 +14,25 @@ import {
   type EngagementBriefing,
   type EngagementBriefingSource,
 } from "@workspace/api-client-react";
-import { SiteMap } from "@workspace/site-context/client";
-import { ParcelZoningCard, StatusPill } from "@workspace/portal-ui";
+import {
+  SiteMap,
+  extractBriefingSourceOverlays,
+} from "@workspace/site-context/client";
+import {
+  ParcelZoningCard,
+  SiteContextViewer,
+  StatusPill,
+} from "@workspace/portal-ui";
+import type { TabId } from "./urlState";
+import { SiteContextTab } from "./SiteContextTab";
 import {
   Eye,
   EyeOff,
-  GripVertical,
   Plus,
   Upload,
   RefreshCw,
-  Share2,
   Layers as LayersIcon,
   MapPin,
-  Compass,
-  ZoomIn,
-  ZoomOut,
   Info,
   Building2,
   ChevronRight,
@@ -29,6 +40,11 @@ import {
   Mountain,
   AlertTriangle,
   Wifi,
+  Expand,
+  Minimize2,
+  GripHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 import { relativeTime } from "../../lib/relativeTime";
 import { TabHeader } from "../cockpit/TabChrome";
@@ -249,7 +265,7 @@ function buildActiveContext(
   ];
 }
 
-function LayerRow({
+function LayerChip({
   row,
   visible,
   onToggle,
@@ -259,76 +275,38 @@ function LayerRow({
   onToggle: () => void;
 }) {
   return (
-    <div
-      className="group flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer"
-      style={{
-        background: "transparent",
-      }}
-      onMouseEnter={(e) =>
-        (e.currentTarget.style.background = "var(--bg-highlight)")
-      }
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    <button
+      type="button"
+      className="site-layer-chip"
+      data-active={visible ? "true" : "false"}
+      onClick={onToggle}
+      aria-pressed={visible}
+      title={`${row.name} (${row.source})`}
     >
-      <span
-        className="flex-shrink-0 opacity-30 group-hover:opacity-100"
-        style={{ color: "var(--text-secondary)" }}
-      >
-        <GripVertical size={14} />
-      </span>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex-shrink-0"
-        style={{
-          color: visible ? "var(--text-primary)" : "var(--text-muted)",
-          background: "transparent",
-          border: "none",
-          padding: 0,
-          cursor: "pointer",
-        }}
-        aria-label={visible ? `Hide ${row.name}` : `Show ${row.name}`}
-      >
-        {visible ? <Eye size={14} /> : <EyeOff size={14} />}
-      </button>
-      <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
-        <span
-          className="text-xs truncate"
-          style={{
-            color: visible ? "var(--text-primary)" : "var(--text-muted)",
-          }}
-        >
-          {row.name}
-        </span>
-        <span
-          className="text-[9px] uppercase tracking-wider flex-shrink-0 px-1 rounded"
-          style={{
-            color: "var(--text-muted)",
-            background: "var(--bg-base)",
-            border: "1px solid var(--border-default)",
-          }}
-        >
-          {row.source}
-        </span>
-      </div>
-      {visible && row.opacity !== undefined && (
-        <div
-          className="w-12 h-1 rounded-full overflow-hidden flex-shrink-0 hidden group-hover:block"
-          style={{
-            background: "var(--bg-base)",
-            border: "1px solid var(--border-default)",
-          }}
-        >
-          <div
-            className="h-full"
-            style={{
-              width: `${row.opacity}%`,
-              background: "var(--text-secondary)",
-            }}
-          />
-        </div>
-      )}
-    </div>
+      {visible ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}
+      <span className="site-layer-chip-name">{row.name}</span>
+      <span className="site-layer-chip-src">{row.source}</span>
+    </button>
   );
+}
+
+function useMapCanvasHeight(min = 320) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(min);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      setHeight(Math.max(min, Math.floor(el.getBoundingClientRect().height)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [min]);
+
+  return { ref, height };
 }
 
 function InspectorStat({
@@ -391,12 +369,149 @@ function ContextRow({ item }: { item: ContextItemSpec }) {
   );
 }
 
+const MAP_PANE_MIN_PX = 200;
+const MAP_DETAILS_MIN_PX = 120;
+const MAP_PANE_DEFAULT_RATIO = 0.45;
+
+function SiteParcelInspector({
+  engagement,
+  site,
+  geocode,
+  briefing,
+  contextItems,
+  latest,
+  onOpenPropertyIntel,
+  onOpenSnapshots,
+}: {
+  engagement: EngagementDetailType;
+  site: EngagementDetailType["site"];
+  geocode: NonNullable<EngagementDetailType["site"]>["geocode"] | null;
+  briefing: EngagementBriefing | null;
+  contextItems: ContextItemSpec[];
+  latest: EngagementDetailType["latestSnapshot"];
+  onOpenPropertyIntel: () => void;
+  onOpenSnapshots: () => void;
+}) {
+  return (
+    <div className="site-workbench-inspector-body">
+      <div>
+        <h4 className="site-details-address-heading">
+          {site?.address ?? engagement.name}
+        </h4>
+        <p className="site-details-applicant sc-mono-sm sc-accent-cyan">
+          {engagement.applicantFirm ?? "Applicant not recorded"}
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <InspectorStat
+          label="Lot Area"
+          value={
+            site?.lotAreaSqft != null
+              ? `${(site.lotAreaSqft / 43560).toFixed(2)} acres`
+              : "—"
+          }
+          sub={
+            site?.lotAreaSqft != null
+              ? `${site.lotAreaSqft.toLocaleString()} sq ft`
+              : undefined
+          }
+        />
+        <InspectorStat
+          label="Type"
+          value={
+            site?.projectType
+              ? (PROJECT_TYPE_LABEL[site.projectType] ?? site.projectType)
+              : "—"
+          }
+        />
+      </div>
+      <ParcelZoningCard
+        hasGeocode={!!geocode}
+        zoningCodeFromSite={site?.zoningCode ?? null}
+        lotAreaSqftFromSite={site?.lotAreaSqft ?? null}
+        briefing={briefing}
+        siteContextHref={`/engagements/${engagement.id}?view=site&segment=property-intel`}
+        onOpenSiteContext={onOpenPropertyIntel}
+      />
+      <div>
+        <h4 className="site-details-subheading">Active context</h4>
+        <div className="space-y-1">
+          {contextItems.map((item) => (
+            <ContextRow key={item.key} item={item} />
+          ))}
+        </div>
+      </div>
+      <div className="site-details-revit-block">
+        <h4 className="site-details-subheading">Building on this site</h4>
+        <button
+          type="button"
+          className="group w-full rounded-md p-3 text-left relative overflow-hidden site-details-revit-card"
+          disabled={!latest}
+          onClick={onOpenSnapshots}
+        >
+          <div className="absolute top-0 right-0 p-2 opacity-10">
+            <Building2 size={56} aria-hidden />
+          </div>
+          <div className="relative z-10">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="site-details-revit-icon">
+                <Building2 size={14} aria-hidden />
+              </div>
+              <div>
+                <div className="text-sm font-medium">Revit Model</div>
+                <div className="text-[10px] sc-meta">
+                  {latest
+                    ? `Synced ${relativeTime(latest.receivedAt)}`
+                    : "No snapshot yet"}
+                </div>
+              </div>
+            </div>
+            {latest && (
+              <div className="flex gap-3 text-xs sc-meta">
+                {latest.wallCount != null && (
+                  <span>{latest.wallCount} Walls</span>
+                )}
+                {latest.sheetCount != null && (
+                  <span>{latest.sheetCount} Sheets</span>
+                )}
+                {latest.levelCount != null && (
+                  <span>{latest.levelCount} Levels</span>
+                )}
+              </div>
+            )}
+            {latest && (
+              <div className="mt-3 text-xs font-medium flex items-center gap-1 sc-accent-cyan opacity-0 group-hover:opacity-100 transition-opacity">
+                Open snapshots <ChevronRight size={14} aria-hidden />
+              </div>
+            )}
+          </div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SiteTab({
   engagement,
   onAddAddress,
+  onOpenPropertyIntel,
+  selectedElementRef,
+  onClearSelectedElement,
+  buildingGlbUrl,
+  showBuilding,
+  onToggleShowBuilding,
+  initialCanvasMode,
 }: {
   engagement: EngagementDetailType;
   onAddAddress: () => void;
+  onOpenPropertyIntel: (tab?: TabId) => void;
+  selectedElementRef?: string | null;
+  onClearSelectedElement?: () => void;
+  buildingGlbUrl?: string | null;
+  showBuilding?: boolean;
+  onToggleShowBuilding?: (next: boolean) => void;
+  /** Deep-link: open the map canvas in 3D (e.g. finding element ref). */
+  initialCanvasMode?: "map" | "3d";
 }) {
   const [, setLocation] = useLocation();
   const site = engagement.site;
@@ -435,8 +550,109 @@ export function SiteTab({
   const isVisible = (id: string) =>
     visibility[id] ?? initialVisibility[id] ?? false;
 
-  const goSiteContext = () =>
-    setLocation(`/engagements/${engagement.id}?tab=site-context`);
+  const [canvasMode, setCanvasMode] = useState<"map" | "3d">(
+    initialCanvasMode ?? "map",
+  );
+  useEffect(() => {
+    if (selectedElementRef) setCanvasMode("3d");
+  }, [selectedElementRef]);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [mapPaneHeight, setMapPaneHeight] = useState<number | null>(null);
+  const layersPanelRef = useRef<HTMLDivElement>(null);
+  const workbenchRef = useRef<HTMLDivElement>(null);
+  const savedMapHeightRef = useRef<number | null>(null);
+  const mapResizeDragRef = useRef<{ startY: number; startH: number } | null>(
+    null,
+  );
+
+  const openSnapshots = useCallback(() => {
+    setLocation(`/engagements/${engagement.id}?tab=snapshots`);
+  }, [engagement.id, setLocation]);
+
+  const scrollToLayersPanel = useCallback(() => {
+    layersPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  useLayoutEffect(() => {
+    const wb = workbenchRef.current;
+    if (!wb || mapPaneHeight != null) return;
+    const next = Math.round(
+      Math.min(520, Math.max(280, wb.clientHeight * MAP_PANE_DEFAULT_RATIO)),
+    );
+    setMapPaneHeight(next);
+  }, [mapPaneHeight]);
+
+  const clampMapPaneHeight = useCallback((height: number) => {
+    const wb = workbenchRef.current;
+    const max = wb
+      ? Math.max(MAP_PANE_MIN_PX, wb.clientHeight - MAP_DETAILS_MIN_PX)
+      : 520;
+    return Math.min(max, Math.max(MAP_PANE_MIN_PX, height));
+  }, []);
+
+  const onMapResizePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (mapExpanded) return;
+      e.preventDefault();
+      const base = mapPaneHeight ?? MAP_PANE_MIN_PX;
+      mapResizeDragRef.current = { startY: e.clientY, startH: base };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [mapExpanded, mapPaneHeight],
+  );
+
+  const onMapResizePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const drag = mapResizeDragRef.current;
+      if (!drag) return;
+      const next = drag.startH + (e.clientY - drag.startY);
+      setMapPaneHeight(clampMapPaneHeight(next));
+    },
+    [clampMapPaneHeight],
+  );
+
+  const onMapResizePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!mapResizeDragRef.current) return;
+      mapResizeDragRef.current = null;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    },
+    [],
+  );
+
+  const { ref: mapHeroRef, height: mapHeight } = useMapCanvasHeight(280);
+  const effectiveMapPaneHeight = mapPaneHeight ?? 280;
+
+  const toggleMapExpanded = useCallback(() => {
+    setMapExpanded((expanded) => {
+      if (!expanded) {
+        savedMapHeightRef.current = mapPaneHeight;
+        return true;
+      }
+      if (savedMapHeightRef.current != null) {
+        setMapPaneHeight(savedMapHeightRef.current);
+      }
+      return false;
+    });
+  }, [mapPaneHeight]);
+
+  const toggleMapFullscreen = useCallback(() => {
+    const el = mapHeroRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void el.requestFullscreen();
+    }
+  }, [mapHeroRef]);
+
+  const briefingSources = briefing?.sources ?? [];
+  const mapOverlays = useMemo(
+    () => extractBriefingSourceOverlays(briefingSources),
+    [briefingSources],
+  );
 
   const jurisdictionLabel = geocode
     ? [geocode.jurisdictionCity, geocode.jurisdictionState]
@@ -447,11 +663,14 @@ export function SiteTab({
   const latest = engagement.latestSnapshot;
 
   return (
-    <div className="cockpit-tab" data-testid="site-tab">
+    <div
+      className="cockpit-tab site-tab-shell flex flex-col flex-1 min-h-0"
+      data-testid="site-tab"
+    >
       <TabHeader
         overline="Site · workspace"
         title="Site"
-        subtitle="Layered map cockpit. Toggle base, jurisdictional, federal, and proposed overlays; inspect parcel, zoning, and federal context on the right; jump to Site Context to run adapters."
+        subtitle="Drag the map edge to resize; parcel details float on the map."
         actions={
           <button className="sc-btn-ghost sc-btn-sm" onClick={onAddAddress}>
             Edit address
@@ -460,118 +679,133 @@ export function SiteTab({
       />
 
       <div
-        className="flex overflow-hidden rounded-md"
-        style={{
-          height: 720,
-          background: "var(--bg-chrome)",
-          border: "1px solid var(--border-default)",
-        }}
+        ref={workbenchRef}
+        className="site-workbench flex flex-col flex-1 min-h-0"
+        data-map-expanded={mapExpanded ? "true" : "false"}
       >
-        {/* LEFT — LAYER PALETTE */}
         <div
-          className="flex flex-col"
-          style={{
-            width: 280,
-            borderRight: "1px solid var(--border-default)",
-            background: "var(--bg-surface)",
-          }}
-          data-testid="site-tab-layer-palette"
+          ref={mapHeroRef}
+          className="site-hero-map"
+          data-testid="site-tab-hero-map"
+          style={
+            mapExpanded
+              ? undefined
+              : { flex: `0 0 ${effectiveMapPaneHeight}px` }
+          }
         >
-          <div
-            className="p-4"
-            style={{ borderBottom: "1px solid var(--border-default)" }}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <h1
-                className="text-sm font-medium truncate"
-                style={{ color: "var(--text-primary)" }}
-              >
-                {engagement.name}
-              </h1>
-              <StatusPill status={engagement.status} />
-            </div>
-            <p
-              className="text-xs truncate"
-              style={{ color: "var(--text-secondary)" }}
+          <div className="site-hero-map-float" aria-label="Map view controls">
+            <button
+              type="button"
+              className="site-hero-float-btn"
+              data-active={inspectorOpen ? "true" : "false"}
+              onClick={() => setInspectorOpen((v) => !v)}
+              data-testid="site-tab-toggle-inspector"
+              title={inspectorOpen ? "Hide parcel details" : "Show parcel details"}
             >
-              {site?.address ?? "Address not set"}
-            </p>
+              {inspectorOpen ? (
+                <PanelRightClose size={14} aria-hidden />
+              ) : (
+                <PanelRightOpen size={14} aria-hidden />
+              )}
+              <span>Parcel</span>
+            </button>
+            <button
+              type="button"
+              className="site-hero-float-btn"
+              data-active={canvasMode === "3d" ? "true" : "false"}
+              onClick={() => setCanvasMode((m) => (m === "map" ? "3d" : "map"))}
+              data-testid="site-tab-canvas-3d"
+            >
+              <Building2 size={14} aria-hidden />
+              {canvasMode === "3d" ? "Map" : "3D"}
+            </button>
+            <button
+              type="button"
+              className="site-hero-float-btn"
+              onClick={() => briefingQuery.refetch()}
+              data-testid="site-tab-refresh"
+              title="Refresh briefing"
+            >
+              <RefreshCw size={14} aria-hidden />
+            </button>
+            <button
+              type="button"
+              className="site-hero-float-btn"
+              onClick={toggleMapExpanded}
+              data-testid="site-tab-expand-map"
+              title={mapExpanded ? "Restore split view" : "Expand map"}
+            >
+              {mapExpanded ? (
+                <Minimize2 size={14} aria-hidden />
+              ) : (
+                <Expand size={14} aria-hidden />
+              )}
+              <span>{mapExpanded ? "Restore" : "Expand"}</span>
+            </button>
+            <button
+              type="button"
+              className="site-hero-float-btn"
+              onClick={toggleMapFullscreen}
+              data-testid="site-tab-fullscreen"
+              title="Full screen"
+            >
+              <Expand size={14} aria-hidden />
+            </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-4 text-sm">
-            {layerGroups.map((group) => (
-              <div key={group.key}>
-                <h2
-                  className="text-[10px] uppercase tracking-widest mb-2 font-semibold"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {group.title}
-                </h2>
-                {group.rows.length === 0 ? (
-                  <div
-                    className="text-xs italic px-2 py-1"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    None yet
-                  </div>
-                ) : (
-                  <div className="space-y-0.5">
-                    {group.rows.map((row) => (
-                      <LayerRow
-                        key={row.id}
-                        row={row}
-                        visible={isVisible(row.id)}
-                        onToggle={() => toggleLayer(row.id)}
-                      />
-                    ))}
-                  </div>
-                )}
+          {geocode && (
+            <aside
+              className="site-workbench-inspector sc-scroll"
+              data-open={inspectorOpen ? "true" : "false"}
+              data-testid="site-tab-inspector"
+              aria-label="Parcel and site context"
+            >
+              <div className="site-workbench-inspector-head">
+                <Info size={14} className="sc-accent-cyan" aria-hidden />
+                <span>Parcel &amp; context</span>
               </div>
-            ))}
-          </div>
-
-          <div
-            className="p-3 flex flex-col gap-2"
-            style={{ borderTop: "1px solid var(--border-default)" }}
-          >
-            <button
-              type="button"
-              className="sc-btn-secondary sc-btn-sm flex items-center justify-center gap-2"
-              onClick={goSiteContext}
-              data-testid="site-tab-add-layer"
-            >
-              <Plus size={14} /> Add Layer
-            </button>
-            <button
-              type="button"
-              className="sc-btn-ghost sc-btn-sm flex items-center justify-center gap-2"
-              onClick={goSiteContext}
-              data-testid="site-tab-upload-qgis"
-            >
-              <Upload size={14} /> Upload QGIS
-            </button>
-          </div>
-        </div>
-
-        {/* CENTER — MAP CANVAS */}
-        <div
-          className="flex-1 relative overflow-hidden"
-          style={{ background: "var(--bg-base)" }}
-        >
-          {geocode ? (
-            <div className="absolute inset-0">
-              <SiteMap
-                latitude={geocode.latitude}
-                longitude={geocode.longitude}
-                addressLabel={site?.address ?? undefined}
-                height={720}
+              <SiteParcelInspector
+                engagement={engagement}
+                site={site}
+                geocode={geocode}
+                briefing={briefing ?? null}
+                contextItems={contextItems}
+                latest={latest}
+                onOpenPropertyIntel={() => onOpenPropertyIntel("property-intel")}
+                onOpenSnapshots={openSnapshots}
               />
+            </aside>
+          )}
+
+          {geocode ? (
+            <div className="site-hero-map-canvas">
+              {canvasMode === "map" ? (
+                <SiteMap
+                  latitude={geocode.latitude}
+                  longitude={geocode.longitude}
+                  addressLabel={site?.address ?? undefined}
+                  overlays={mapOverlays}
+                  height={mapHeight}
+                />
+              ) : (
+                <div
+                  className="site-workbench-3d-canvas"
+                  data-testid="site-tab-3d-canvas"
+                  style={{ height: mapHeight, minHeight: 280 }}
+                >
+                  <SiteContextViewer
+                    sources={briefingSources}
+                    selectedElementRef={selectedElementRef}
+                    onClearSelectedElement={onClearSelectedElement}
+                    buildingGlbUrl={buildingGlbUrl}
+                    showBuilding={showBuilding}
+                    onToggleShowBuilding={onToggleShowBuilding}
+                  />
+                </div>
+              )}
             </div>
           ) : (
-            <div
-              className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center"
-              style={{ color: "var(--text-secondary)" }}
-            >
+            <div className="site-workbench-map-empty">
               <MapPin
                 size={28}
                 style={{ color: "var(--text-muted)" }}
@@ -585,267 +819,130 @@ export function SiteTab({
               </button>
             </div>
           )}
-
-          {/* Floating top bar */}
-          <div className="absolute top-3 left-3 right-3 flex justify-between items-start gap-2 z-10 pointer-events-none">
-            <div
-              className="px-3 py-1.5 rounded-full flex items-center gap-2 pointer-events-auto"
-              style={{
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
-              }}
-            >
-              <MapPin size={14} style={{ color: "var(--text-secondary)" }} />
-              <span className="text-xs">{jurisdictionLabel}</span>
-            </div>
-
-            <div className="flex gap-2 pointer-events-auto">
-              <button
-                type="button"
-                className="sc-btn-ghost sc-btn-sm flex items-center gap-1.5"
-                onClick={goSiteContext}
-                data-testid="site-tab-generate-layers"
-              >
-                <LayersIcon size={14} /> Generate layers
-              </button>
-              <button
-                type="button"
-                className="sc-btn-ghost sc-btn-sm flex items-center gap-1.5"
-                onClick={() => briefingQuery.refetch()}
-                data-testid="site-tab-refresh"
-              >
-                <RefreshCw size={14} /> Refresh
-              </button>
-              <button
-                type="button"
-                className="sc-btn-secondary sc-btn-sm flex items-center gap-1.5 sc-accent-cyan"
-                onClick={goSiteContext}
-                data-testid="site-tab-push-revit"
-              >
-                <Share2 size={14} /> Push to Revit
-              </button>
-            </div>
-          </div>
-
-          {/* Bottom-right: zoom controls (decorative — real map controls live inside SiteMap) */}
-          <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-[5] pointer-events-none">
-            <div
-              className="rounded flex flex-col"
-              style={{
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-default)",
-                opacity: 0.8,
-              }}
-            >
-              <span
-                className="p-2"
-                style={{
-                  color: "var(--text-secondary)",
-                  borderBottom: "1px solid var(--border-default)",
-                }}
-              >
-                <ZoomIn size={14} />
-              </span>
-              <span className="p-2" style={{ color: "var(--text-secondary)" }}>
-                <ZoomOut size={14} />
-              </span>
-            </div>
-          </div>
-
-          {/* Bottom-left: compass + scale */}
-          <div className="absolute bottom-4 left-4 flex items-center gap-3 z-[5] pointer-events-none">
-            <div
-              className="rounded-full p-1.5"
-              style={{
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-default)",
-                opacity: 0.85,
-              }}
-            >
-              <Compass
-                size={14}
-                style={{ color: "var(--text-secondary)" }}
-              />
-            </div>
-          </div>
         </div>
 
-        {/* RIGHT — INSPECTOR */}
-        <div
-          className="flex flex-col"
-          style={{
-            width: 340,
-            borderLeft: "1px solid var(--border-default)",
-            background: "var(--bg-surface)",
-          }}
-          data-testid="site-tab-inspector"
-        >
+        {!mapExpanded && (
           <div
-            className="p-4 flex items-center justify-between"
-            style={{
-              borderBottom: "1px solid var(--border-default)",
-              background: "var(--bg-base)",
-            }}
+            className="site-map-resize-handle"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize map"
+            data-testid="site-tab-map-resize"
+            onPointerDown={onMapResizePointerDown}
+            onPointerMove={onMapResizePointerMove}
+            onPointerUp={onMapResizePointerUp}
+            onPointerCancel={onMapResizePointerUp}
           >
-            <h2
-              className="text-sm font-medium flex items-center gap-2"
-              style={{ color: "var(--text-primary)" }}
-            >
-              <Info size={14} className="sc-accent-cyan" /> Inspecting: Parcel
-            </h2>
+            <GripHorizontal size={14} aria-hidden />
           </div>
+        )}
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            {/* Identity */}
-            <div>
-              <h3
-                className="text-lg font-light mb-1"
-                style={{ color: "var(--text-primary)" }}
-              >
-                {site?.address ?? engagement.name}
-              </h3>
-              <p
-                className="text-xs sc-mono-sm sc-accent-cyan"
-                style={{ wordBreak: "break-all" }}
-              >
-                {engagement.applicantFirm ?? "Applicant not recorded"}
+        <div
+          className="site-details-panel sc-scroll"
+          data-testid="site-details-panel"
+          hidden={mapExpanded}
+        >
+          <section className="site-details-block site-details-block--header">
+            <div className="site-workbench-toolbar-meta">
+              <div className="site-workbench-project">
+                <h2 className="site-workbench-project-name">{engagement.name}</h2>
+                <StatusPill status={engagement.status} />
+              </div>
+              <p className="site-workbench-address">
+                {site?.address ?? "Address not set"}
               </p>
-            </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-2 gap-3">
-              <InspectorStat
-                label="Lot Area"
-                value={
-                  site?.lotAreaSqft != null
-                    ? `${(site.lotAreaSqft / 43560).toFixed(2)} acres`
-                    : "—"
-                }
-                sub={
-                  site?.lotAreaSqft != null
-                    ? `${site.lotAreaSqft.toLocaleString()} sq ft`
-                    : undefined
-                }
-              />
-              <InspectorStat
-                label="Type"
-                value={
-                  site?.projectType
-                    ? (PROJECT_TYPE_LABEL[site.projectType] ?? site.projectType)
-                    : "—"
-                }
-              />
-            </div>
-
-            {/* Zoning Constraints — real ParcelZoningCard (preserves tests) */}
-            <ParcelZoningCard
-              hasGeocode={!!geocode}
-              zoningCodeFromSite={site?.zoningCode ?? null}
-              lotAreaSqftFromSite={site?.lotAreaSqft ?? null}
-              briefing={briefing}
-              siteContextHref={`/engagements/${engagement.id}?tab=site-context`}
-            />
-
-            {/* Active Context */}
-            <div>
-              <div
-                className="text-[10px] uppercase mb-2 tracking-widest font-semibold"
-                style={{ color: "var(--text-muted)" }}
-              >
-                Active Context
-              </div>
-              <div className="space-y-1">
-                {contextItems.map((item) => (
-                  <ContextRow key={item.key} item={item} />
-                ))}
+              <div className="site-workbench-jurisdiction">
+                <MapPin size={12} aria-hidden />
+                <span>{jurisdictionLabel}</span>
               </div>
             </div>
-
-            {/* Building on this site — Revit Model */}
-            <div
-              className="mt-6 pt-5"
-              style={{ borderTop: "1px solid var(--border-default)" }}
-            >
-              <div
-                className="text-[10px] uppercase mb-3 tracking-widest font-semibold"
-                style={{ color: "var(--text-muted)" }}
-              >
-                Building on this site →
-              </div>
+            <div className="site-workbench-toolbar-actions">
               <button
                 type="button"
-                className="group w-full rounded-md p-3 text-left relative overflow-hidden transition-colors"
-                style={{
-                  background: "var(--bg-base)",
-                  border: "1px solid var(--border-default)",
-                  cursor: latest ? "pointer" : "default",
+                className="sc-btn-ghost sc-btn-sm"
+                onClick={() => {
+                  scrollToLayersPanel();
+                  setUploadOpen(true);
                 }}
-                disabled={!latest}
-                onClick={() =>
-                  setLocation(
-                    `/engagements/${engagement.id}?tab=snapshots`,
-                  )
-                }
+                data-testid="site-tab-add-layer"
               >
-                <div className="absolute top-0 right-0 p-2 opacity-10">
-                  <Building2 size={56} />
-                </div>
-                <div className="relative z-10">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div
-                      className="p-1.5 rounded"
-                      style={{
-                        background: "var(--bg-elevated)",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      <Building2 size={14} />
-                    </div>
-                    <div>
-                      <div
-                        className="text-sm font-medium"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        Revit Model
-                      </div>
-                      <div
-                        className="text-[10px]"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        {latest
-                          ? `Synced ${relativeTime(latest.receivedAt)}`
-                          : "No snapshot yet"}
-                      </div>
-                    </div>
-                  </div>
-                  {latest && (
-                    <div
-                      className="flex gap-3 text-xs mt-3"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {latest.wallCount != null && (
-                        <span>{latest.wallCount} Walls</span>
-                      )}
-                      {latest.sheetCount != null && (
-                        <span>{latest.sheetCount} Sheets</span>
-                      )}
-                      {latest.levelCount != null && (
-                        <span>{latest.levelCount} Levels</span>
-                      )}
-                    </div>
-                  )}
-                  {latest && (
-                    <div
-                      className="mt-3 text-xs font-medium flex items-center gap-1 sc-accent-cyan opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      Open snapshots <ChevronRight size={14} />
-                    </div>
-                  )}
-                </div>
+                <Plus size={14} aria-hidden /> Add layer
+              </button>
+              <button
+                type="button"
+                className="sc-btn-ghost sc-btn-sm"
+                onClick={() => {
+                  scrollToLayersPanel();
+                  setUploadOpen(true);
+                }}
+                data-testid="site-tab-upload-qgis"
+              >
+                <Upload size={14} aria-hidden /> Upload QGIS
+              </button>
+              <button
+                type="button"
+                className="sc-btn-ghost sc-btn-sm"
+                onClick={scrollToLayersPanel}
+                data-testid="site-tab-generate-layers"
+              >
+                <LayersIcon size={14} aria-hidden /> Generate layers
+              </button>
+              <button
+                type="button"
+                className="sc-btn-secondary sc-btn-sm sc-accent-cyan"
+                onClick={() => onOpenPropertyIntel("property-intel")}
+                data-testid="site-tab-open-property-intel"
+              >
+                Property Intel
               </button>
             </div>
-          </div>
+          </section>
+
+          <section className="site-details-block" aria-label="Map layer visibility">
+            <h3 className="site-details-block-title">Map layers</h3>
+            <div
+              className="site-workbench-layers sc-scroll"
+              data-testid="site-tab-layer-palette"
+            >
+              {layerGroups.map((group) => (
+                <div key={group.key} className="site-workbench-layer-group">
+                  <span className="site-workbench-layer-group-label">
+                    {group.title}
+                  </span>
+                  {group.rows.length === 0 ? (
+                    <span className="site-workbench-layer-empty">None</span>
+                  ) : (
+                    group.rows.map((row) => (
+                      <LayerChip
+                        key={row.id}
+                        row={row}
+                        visible={isVisible(row.id)}
+                        onToggle={() => toggleLayer(row.id)}
+                      />
+                    ))
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section
+            className="site-details-block site-details-block--layers-admin"
+            aria-label="Adapter layers and refresh"
+            data-testid="site-tab-layers-panel"
+            id="site-layers-panel"
+            ref={layersPanelRef}
+          >
+            <h3 className="site-details-block-title">Layers &amp; adapters</h3>
+            <SiteContextTab
+              engagement={engagement}
+              embedded
+              hideMapAnd3d
+              panelFocus="layers"
+              uploadOpen={uploadOpen}
+              onUploadOpenChange={setUploadOpen}
+            />
+          </section>
         </div>
       </div>
     </div>

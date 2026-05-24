@@ -152,7 +152,7 @@ function CreateLetterDialog({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.5)",
+        background: "var(--overlay-scrim)",
         zIndex: 50,
         display: "flex",
         alignItems: "center",
@@ -800,9 +800,9 @@ export function DeliverableLettersTab({
       data-testid="deliverable-letters-tab"
     >
       <TabHeader
-        overline="Deliverables · group"
-        title="Deliverable letters"
-        subtitle="Comment-response letters as classified atoms — cover · intro · per-comment-response · signature, with per-section provenance back to findings and tasks."
+        overline="Review"
+        title="Comment-response letters"
+        subtitle="Deliverable letters tied to submissions and findings — cover, intro, per-comment responses, and signature, with provenance back to review artifacts."
       />
       <div className="sc-card flex flex-col">
       <div className="sc-card-header sc-row-sb">

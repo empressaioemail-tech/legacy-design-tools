@@ -14,6 +14,7 @@ import {
   DEFAULT_BRIEFING_PDF_HEADER,
   DEFAULT_FOOTER_WATERMARK,
 } from "@workspace/briefing-pdf-tokens";
+import { SettingsAreaLayout } from "../components/settings/SettingsAreaLayout";
 
 /**
  * Architect-facing Settings.
@@ -89,45 +90,56 @@ export function Settings() {
 
   if (sessionLoading) {
     return (
-      <div className="p-6 max-w-2xl mx-auto">
-        <h1 className="text-2xl mb-6">Settings</h1>
-        <div className="sc-card p-6 sc-body">Loading…</div>
-      </div>
+      <SettingsAreaLayout>
+        <div className="cockpit-settings-page">
+          <h1 className="cockpit-settings-page-title">Account</h1>
+          <div className="sc-card p-6 sc-body">Loading…</div>
+        </div>
+      </SettingsAreaLayout>
     );
   }
 
   if (!isUserSession) {
     return (
-      <div className="p-6 max-w-2xl mx-auto">
-        <h1 className="text-2xl mb-6">Settings</h1>
-        <div className="sc-card p-6">
-          <div className="sc-medium">Sign in required</div>
-          <div className="sc-body mt-1">
-            Settings are tied to your user profile. Sign in as a user (not
-            an automation agent) to edit your stakeholder-briefing PDF
-            header.
+      <SettingsAreaLayout>
+        <div className="cockpit-settings-page">
+          <h1 className="cockpit-settings-page-title">Account</h1>
+          <div className="sc-card p-6">
+            <div className="sc-medium">Sign in required</div>
+            <div className="sc-body mt-1">
+              Settings are tied to your user profile. Sign in as a user (not
+              an automation agent) to edit your stakeholder-briefing PDF
+              header.
+            </div>
           </div>
         </div>
-      </div>
+      </SettingsAreaLayout>
     );
   }
 
   return (
-    <div className="p-6 max-w-2xl mx-auto flex flex-col gap-6">
-      <h1 className="text-2xl">Settings</h1>
+    <SettingsAreaLayout>
+      <div className="cockpit-settings-page flex flex-col gap-6">
+        <header>
+          <h1 className="cockpit-settings-page-title">Account</h1>
+          <p className="cockpit-settings-page-sub sc-body opacity-80">
+            Profile and briefing export branding for your architect account.
+          </p>
+        </header>
 
-      <ProfileForm
-        user={user ?? null}
-        userLoading={userLoading}
-        userError={userError}
-      />
-      <ArchitectPdfHeaderForm
-        user={user ?? null}
-        userLoading={userLoading}
-        userError={userError}
-      />
-      <FooterWatermarkPreview />
-    </div>
+        <ProfileForm
+          user={user ?? null}
+          userLoading={userLoading}
+          userError={userError}
+        />
+        <ArchitectPdfHeaderForm
+          user={user ?? null}
+          userLoading={userLoading}
+          userError={userError}
+        />
+        <FooterWatermarkPreview />
+      </div>
+    </SettingsAreaLayout>
   );
 }
 

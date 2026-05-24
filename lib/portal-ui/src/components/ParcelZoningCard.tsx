@@ -29,6 +29,8 @@ export interface ParcelZoningCardProps {
   lotAreaSqftFromSite: number | null;
   briefing: EngagementBriefing | null;
   siteContextHref: string;
+  /** When set, replaces the Site Context anchor with an in-tab action. */
+  onOpenSiteContext?: () => void;
 }
 
 const SQFT_PER_ACRE = 43_560;
@@ -310,6 +312,7 @@ export function ParcelZoningCard({
   lotAreaSqftFromSite,
   briefing,
   siteContextHref,
+  onOpenSiteContext,
 }: ParcelZoningCardProps) {
   // ── No-geocode branch ────────────────────────────────────────────
   if (!hasGeocode) {
@@ -384,15 +387,34 @@ export function ParcelZoningCard({
             </div>
             <div style={{ opacity: 0.8 }}>
               Federal layers (FEMA flood zone, USGS elevation) and any
-              manually-uploaded sources still appear on the{" "}
-              <a
-                href={siteContextHref}
-                data-testid="parcel-zoning-card-site-context-link"
-                style={{ color: "var(--cyan)", textDecoration: "underline" }}
-              >
-                Site Context
-              </a>{" "}
-              tab.
+              manually-uploaded sources still appear in the{" "}
+              {onOpenSiteContext ? (
+                <button
+                  type="button"
+                  data-testid="parcel-zoning-card-site-context-link"
+                  onClick={onOpenSiteContext}
+                  style={{
+                    color: "var(--cyan)",
+                    textDecoration: "underline",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    font: "inherit",
+                    cursor: "pointer",
+                  }}
+                >
+                  layers panel
+                </button>
+              ) : (
+                <a
+                  href={siteContextHref}
+                  data-testid="parcel-zoning-card-site-context-link"
+                  style={{ color: "var(--cyan)", textDecoration: "underline" }}
+                >
+                  Site Context
+                </a>
+              )}{" "}
+              below.
             </div>
           </div>
         </div>

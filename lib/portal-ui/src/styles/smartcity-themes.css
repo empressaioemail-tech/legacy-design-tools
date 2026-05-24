@@ -59,6 +59,9 @@
   --depth-hover-bg: rgba(255, 255, 255, 0.03);
   --ai-panel-bg: #141a20;
   --thread-glass: rgba(10, 15, 22, 0.30);
+  --overlay-scrim: rgba(0, 0, 0, 0.55);
+  --overlay-glass: color-mix(in srgb, var(--bg-chrome) 88%, transparent);
+  --overlay-glass-border: var(--border-default);
 }
 
 [data-theme="light"] {
@@ -122,4 +125,7 @@
   --depth-hover-bg: rgba(0, 0, 0, 0.03);
   --ai-panel-bg: #eef2f6;
   --thread-glass: rgba(220, 230, 240, 0.45);
+  --overlay-scrim: rgba(15, 25, 35, 0.45);
+  --overlay-glass: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  --overlay-glass-border: var(--border-default);
 }

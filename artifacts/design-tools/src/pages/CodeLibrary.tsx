@@ -47,7 +47,7 @@ const ERROR_AUTOCLEAR_MS = 5000;
 // flapping on a single dropped request.
 const POLL_FAILURE_THRESHOLD = 3;
 
-export function CodeLibrary() {
+export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
   const qc = useQueryClient();
   const { data: jurisdictions, isLoading } = useListCodeJurisdictions({
     query: {
@@ -246,17 +246,28 @@ export function CodeLibrary() {
   );
 
   return (
-    <div className="p-6 max-w-7xl mx-auto flex flex-col gap-6">
-      <div className="flex items-center gap-2">
-        <BookOpen size={20} />
-        <h1 className="text-2xl">Code Library</h1>
-      </div>
-      <p className="sc-body opacity-70">
-        Atom-anchored code knowledge. Atoms are fetched on demand the first time
-        an engagement geocodes to a configured jurisdiction. Click a card to
-        browse its atoms, click a book pill to filter, or open one to see the
-        full text and source link.
-      </p>
+    <div
+      className={
+        embedded
+          ? "cockpit-dashboard-code-embedded flex flex-col gap-6"
+          : "p-6 max-w-7xl mx-auto flex flex-col gap-6"
+      }
+      data-testid={embedded ? "dashboard-code-library" : "code-library-page"}
+    >
+      {!embedded && (
+        <>
+          <div className="flex items-center gap-2">
+            <BookOpen size={20} />
+            <h1 className="text-2xl">Code Library</h1>
+          </div>
+          <p className="sc-body opacity-70">
+            Atom-anchored code knowledge. Atoms are fetched on demand the first
+            time an engagement geocodes to a configured jurisdiction. Click a
+            card to browse its atoms, click a book pill to filter, or open one
+            to see the full text and source link.
+          </p>
+        </>
+      )}
 
       {/* QA-17 — every jurisdiction in the Hauska substrate, read live via
           the MCP catalog surface. Sits above the cortex-prod-local corpus

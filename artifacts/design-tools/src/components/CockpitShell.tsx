@@ -1,20 +1,14 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  Activity,
-  BookOpen,
   Box,
-  Building2,
   ChevronLeft,
   ChevronRight,
-  Database,
-  Inbox,
   LayoutDashboard,
-  Palette,
   Search,
   Settings as SettingsIcon,
-  Share2,
 } from "lucide-react";
+import { isSettingsAreaPath } from "./settings/settingsNav";
 import {
   useSidebarState,
   RIGHT_SIDEBAR_MAX_WIDTH,
@@ -158,6 +152,21 @@ export function CockpitShell({
   const toggleProjectRail = useSidebarState((s) => s.toggleProjectRail);
   const setProjectRailWidth = useSidebarState((s) => s.setProjectRailWidth);
   const resetProjectRailWidth = useSidebarState((s) => s.resetProjectRailWidth);
+  const setRight = useSidebarState((s) => s.setRight);
+
+  // One-time migration: expanded Claude + project list after IA consolidation.
+  useEffect(() => {
+    if (!rightPanel) return;
+    try {
+      const key = "cockpit-ia-v2-shell-defaults";
+      if (localStorage.getItem(key)) return;
+      if (rightCollapsed) setRight(false);
+      if (projectRail && projectRailCollapsed) toggleProjectRail();
+      localStorage.setItem(key, "1");
+    } catch {
+      /* private mode / blocked storage */
+    }
+  }, [rightPanel, rightCollapsed, projectRail, projectRailCollapsed, setRight, toggleProjectRail]);
 
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -241,6 +250,7 @@ export function CockpitShell({
   };
 
   const isActive = (href: string) => {
+    if (href === "/settings") return isSettingsAreaPath(location);
     if (href === "/") return location === "/";
     return location === href || location.startsWith(href + "/");
   };
@@ -431,7 +441,15 @@ export function CockpitShell({
             )}
           </header>
         )}
-        <main className="cockpit-main-body sc-scroll">{children}</main>
+        <main
+          className={
+            hidePageTitle
+              ? "cockpit-main-body cockpit-main-body-engagement sc-scroll"
+              : "cockpit-main-body sc-scroll"
+          }
+        >
+          {children}
+        </main>
       </div>
 
       {/* RIGHT PANEL (Claude / context) ---------------------------- */}
@@ -480,23 +498,14 @@ export function CockpitShell({
  */
 export const DEFAULT_PRIMARY_NAV: CockpitNavSection = {
   items: [
-    { label: "Projects", href: "/", icon: <LayoutDashboard size={18} /> },
-    { label: "Inbox", href: "/inbox", icon: <Inbox size={18} /> },
-    { label: "Code Library", href: "/code-library", icon: <BookOpen size={18} /> },
-    { label: "Style Probe", href: "/style-probe", icon: <Palette size={18} /> },
+    { label: "Dashboard", href: "/", icon: <LayoutDashboard size={18} /> },
     { label: "Settings", href: "/settings", icon: <SettingsIcon size={18} /> },
   ],
 };
 
+/** Dev/workspace tools live under Settings subnav — no secondary rail items. */
 export const DEFAULT_SECONDARY_NAV: CockpitNavSection = {
-  label: "Workspace",
-  items: [
-    { label: "Product settings", href: "/workspace", icon: <Building2 size={18} /> },
-    { label: "Shared with me", href: "/workspace/shared", icon: <Share2 size={18} /> },
-    { label: "Atom Inspector", href: "/dev/atoms", icon: <Database size={18} /> },
-    { label: "Retrieval Probe", href: "/dev/atoms/probe", icon: <Search size={18} /> },
-    { label: "API Health", href: "/health", icon: <Activity size={18} /> },
-  ],
+  items: [],
 };
 
 export { Box as CockpitBrandIcon };

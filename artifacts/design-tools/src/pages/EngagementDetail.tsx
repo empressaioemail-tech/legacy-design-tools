@@ -55,15 +55,15 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useEngagementsStore, type SpecDraftEntry } from "../store/engagements";
-import { relativeTime } from "../lib/relativeTime";
 import type { BackfillFilter } from "../lib/submissionBackfill";
 import { SiteTab } from "../components/engagement-detail/SiteTab";
+import { PropertyIntelTab } from "../components/engagement-detail/PropertyIntelTab";
 import { SnapshotsTab } from "../components/engagement-detail/SnapshotsTab";
 import { SettingsTab } from "../components/engagement-detail/SettingsTab";
-import { SiteContextTab } from "../components/engagement-detail/SiteContextTab";
 import { SubmissionsTab } from "../components/engagement-detail/SubmissionsTab";
 import { DesignToolsTab } from "../components/engagement-detail/DesignToolsTab";
 import { PresentationsTab } from "../components/engagement-detail/PresentationsTab";
+import { TabHeader } from "../components/cockpit/TabChrome";
 import { PublishPrepTab } from "../components/engagement-detail/PublishPrepTab";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
 import { ResponseTasksTab } from "../components/engagement-detail/ResponseTasksTab";
@@ -421,9 +421,6 @@ export function EngagementDetail() {
 
   const snapshots = engagement.snapshots ?? [];
   const hasSnapshots = snapshots.length > 0;
-  const captured = snapshotDetail
-    ? `from snapshot ${relativeTime(snapshotDetail.receivedAt)}`
-    : undefined;
 
   const openEdit = () => {
     setModalMode("edit");
@@ -458,11 +455,13 @@ export function EngagementDetail() {
   // "3D model" tab (WSB.1). Tabs render conditionally so only one
   // instance ever mounts. Keeps `data-testid="snapshots-bim-viewer"`
   // so the finding-citation deep-link regression test still resolves.
+  const bimViewportCentered = bimModelQuery.isLoading || bimElements.length === 0;
+
   const bimViewportBody =
     bimModelQuery.isLoading ? (
-      <div className="sc-prose opacity-60 m-auto">Loading BIM model…</div>
+      <div className="sc-prose opacity-60">Loading BIM model…</div>
     ) : bimElements.length === 0 ? (
-      <div className="sc-prose opacity-70 m-auto text-center">
+      <div className="sc-prose opacity-70 text-center px-6">
         No BIM elements yet. Push this engagement&apos;s briefing to Revit to
         populate the 3D viewer.
       </div>
@@ -470,22 +469,17 @@ export function EngagementDetail() {
       <BimModelViewport
         elements={bimElements}
         selectedElementRef={selectedElementRef ?? null}
+        presentation="immersive"
       />
     );
 
   const bimHeroPanel = (
     <div
-      className="snapshots-bim-hero-viewport flex flex-col h-full min-h-0"
+      className="snapshots-bim-hero-viewport"
       data-testid="snapshots-bim-viewer"
+      data-centered={bimViewportCentered ? "true" : "false"}
     >
-      <div className="snapshots-bim-hero-viewport-meta sc-row-sb shrink-0">
-        <span className="sc-label">BIM model</span>
-        <span className="sc-meta">
-          {bimElements.length}{" "}
-          {bimElements.length === 1 ? "element" : "elements"}
-        </span>
-      </div>
-      <div className="flex-1 min-h-0 flex">{bimViewportBody}</div>
+      {bimViewportBody}
     </div>
   );
 
@@ -643,7 +637,7 @@ export function EngagementDetail() {
             bimElementCount={bimElements.length}
             jsonExpanded={jsonExpanded}
             setJsonExpanded={setJsonExpanded}
-            captured={captured}
+            onAskClaudeAboutSheet={handleAskClaudeAboutSheet}
           />
         </TabPanel>
 
@@ -651,16 +645,13 @@ export function EngagementDetail() {
           {bimModelPanel}
         </TabPanel>
 
-        <TabPanel id="sheets" active={tab}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
+        <TabPanel id="sheets" active={tab} className="flex flex-col gap-3">
+          <TabHeader
+            overline="Deliver"
+            title="Sheets"
+            subtitle="Sheet thumbnails from the latest snapshot. Open a row or jump to the dedicated 3D viewer."
+            testId="sheets-tab-header"
+            actions={
               <button
                 type="button"
                 className="sc-btn-ghost"
@@ -675,22 +666,39 @@ export function EngagementDetail() {
               >
                 View in 3D
               </button>
-            </div>
-            <SheetGrid
-              snapshotId={selectedSnapshotId}
-              engagementId={id}
-              onAskClaude={handleAskClaudeAboutSheet}
-            />
-          </div>
+            }
+          />
+          <SheetGrid
+            snapshotId={selectedSnapshotId}
+            engagementId={id}
+            onAskClaude={handleAskClaudeAboutSheet}
+          />
         </TabPanel>
 
-        <TabPanel id="site" active={tab}>
-          <SiteTab engagement={engagement} onAddAddress={openEdit} />
-        </TabPanel>
-
-        <TabPanel id="site-context" active={tab}>
-          <SiteContextTab
+        <TabPanel id="site" active={tab} className="flex flex-col flex-1 min-h-0">
+          <SiteTab
             engagement={engagement}
+            onAddAddress={openEdit}
+            onOpenPropertyIntel={setTab}
+            selectedElementRef={selectedElementRef}
+            onClearSelectedElement={() => setSelectedElementRef(null)}
+            buildingGlbUrl={defaultBimGlbUrl}
+            showBuilding={showBuildingOverlay}
+            onToggleShowBuilding={setShowBuildingOverlay}
+            initialCanvasMode={
+              tab === "site" && selectedElementRef ? "3d" : "map"
+            }
+          />
+        </TabPanel>
+
+        <TabPanel
+          id="property-intel"
+          active={tab}
+          className="flex flex-col flex-1 min-h-0"
+        >
+          <PropertyIntelTab
+            engagement={engagement}
+            onNavigate={setTab}
             selectedElementRef={selectedElementRef}
             onClearSelectedElement={() => setSelectedElementRef(null)}
             buildingGlbUrl={defaultBimGlbUrl}
@@ -740,7 +748,7 @@ export function EngagementDetail() {
           />
         </TabPanel>
 
-        <TabPanel id="renders" active={tab}>
+        <TabPanel id="renders" active={tab} className="flex flex-col flex-1 min-h-0">
           <DesignToolsTab
             engagementId={engagement.id}
             defaultGlbUrl={defaultBimGlbUrl}
@@ -748,12 +756,12 @@ export function EngagementDetail() {
           />
         </TabPanel>
 
-        <TabPanel id="presentations" active={tab}>
-          <PresentationsTab engagementId={engagement.id} />
+        <TabPanel id="presentations" active={tab} className="flex flex-col gap-4">
+          <PresentationsTab engagementId={engagement.id} onNavigate={setTab} />
         </TabPanel>
 
-        <TabPanel id="publish-prep" active={tab}>
-          <PublishPrepTab engagementId={engagement.id} />
+        <TabPanel id="publish-prep" active={tab} className="flex flex-col flex-1 min-h-0">
+          <PublishPrepTab engagementId={engagement.id} onNavigate={setTab} />
         </TabPanel>
 
         <TabPanel id="settings" active={tab}>

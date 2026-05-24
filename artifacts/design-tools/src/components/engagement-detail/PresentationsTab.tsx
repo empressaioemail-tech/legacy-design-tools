@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Camera,
   CheckSquare,
   ChevronRight,
   Download,
+  ExternalLink,
   FileText,
   Heart,
   History,
@@ -16,84 +17,38 @@ import {
 } from "lucide-react";
 import { TabHeader } from "../cockpit/TabChrome";
 import { DraftBadge, SourceChip } from "../cockpit/QualityChips";
+import {
+  canEnterPresentationStep,
+  isPresentationStepComplete,
+  PRESENTATION_FLOW_STEPS,
+  SECTION_SOURCE_TAB,
+  type PresentationFlowStepId,
+} from "./presentationFlow";
+import {
+  countTemplatePages,
+  DEFAULT_PRESENTATION_PAGE_IDS,
+  PRESENTATION_PAGE_CATEGORIES,
+  PRESENTATION_PAGE_TYPES,
+  PRESENTATION_TEMPLATE_META,
+} from "./presentationTemplate";
+import type { TabId } from "./urlState";
 
 /**
- * Presentations (QA-29) — UI shell only.
+ * Presentations (QA-29) — client deck UI shell.
  *
- * Graduates the client-portal Showroom canvas mockup into the
- * production Presentations tab. Layout: top view-mode tab strip
- * (Tour / Sheets / Renderings) → hero preview pane with floating
- * controls (faux project illustration + view pills + "Generate
- * draft PDF" CTA) → horizontal "Sections" rail of selectable
- * section cards → vertical slide preview list → right-side
- * collapsible Versions / Conversation drawer with toggle pill.
+ * Packages a design concept for client review in a Canva-style slide
+ * deck: moodboards, room overviews, floor plans, materials / FF&E, and
+ * next-steps pages on a neutral branded template (~30 pages when fully
+ * populated). Exports a PDF today; Canva handoff is planned.
  *
- * No backend wiring: section toggle still updates local state,
- * "Generate draft PDF" still runs a 700ms mock job that appends a
- * draft to the version list. Tokens-only — every color flows
- * through smartcity-themes.css tokens.
+ * No backend wiring — page toggles and export run local mock state only.
  */
-
-interface SectionDef {
-  id: string;
-  label: string;
-  description: string;
-  /** Source chips the agent will pull from when assembling this section. */
-  sources: ReadonlyArray<{ kind: string; label: string }>;
-}
-
-const SECTIONS: ReadonlyArray<SectionDef> = [
-  {
-    id: "cover",
-    label: "Cover page",
-    description:
-      "Project name, jurisdiction, presenter, and the engagement-level KPI strip.",
-    sources: [{ kind: "META", label: "engagement details" }],
-  },
-  {
-    id: "site-context",
-    label: "Site context summary",
-    description:
-      "Top-level briefing narrative + the federal / state / local source rows.",
-    sources: [
-      { kind: "BRIEF", label: "Site Context briefing" },
-      { kind: "GIS", label: "parcel overlay" },
-    ],
-  },
-  {
-    id: "findings",
-    label: "Findings recap",
-    description:
-      "Most-recent submission findings, grouped by severity, with element refs.",
-    sources: [{ kind: "RUN", label: "latest plan-review run" }],
-  },
-  {
-    id: "letters",
-    label: "Comment-response letters",
-    description:
-      "Rendered deliverable letters that have been sent or are ready to send.",
-    sources: [{ kind: "DOC", label: "deliverable letters" }],
-  },
-  {
-    id: "renders",
-    label: "Renders & 3D snapshots",
-    description:
-      "Picked sheet thumbnails and BIM viewer captures (renders tab selection).",
-    sources: [{ kind: "BIM", label: "model snapshots" }],
-  },
-  {
-    id: "appendix",
-    label: "Product spec appendix",
-    description: "ICC-ES-evaluated product references and supporting docs.",
-    sources: [{ kind: "ICC", label: "product specs" }],
-  },
-];
 
 interface VersionEntry {
   id: string;
   label: string;
   generatedAt: string;
-  sectionCount: number;
+  pageCount: number;
   isDraft: boolean;
 }
 
@@ -102,33 +57,35 @@ const SEED_VERSIONS: ReadonlyArray<VersionEntry> = [
     id: "v-002",
     label: "Pre-call walkthrough",
     generatedAt: "yesterday · 4:12 PM",
-    sectionCount: 4,
+    pageCount: 24,
     isDraft: true,
   },
   {
     id: "v-001",
     label: "First share with client",
     generatedAt: "3 days ago",
-    sectionCount: 3,
+    pageCount: 18,
     isDraft: false,
   },
 ];
 
-type ViewMode = "tour" | "sheets" | "renderings";
+type ViewMode = "deck" | "moodboards" | "plans";
 
 const VIEW_MODES: ReadonlyArray<{ id: ViewMode; label: string }> = [
-  { id: "tour", label: "Tour" },
-  { id: "sheets", label: "Sheets" },
-  { id: "renderings", label: "Renderings" },
+  { id: "deck", label: "Full deck" },
+  { id: "moodboards", label: "Moodboards" },
+  { id: "plans", label: "Plans" },
 ];
 
 export function PresentationsTab({
   engagementId,
+  onNavigate,
 }: {
   engagementId: string;
+  onNavigate?: (tab: TabId) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(["cover", "site-context", "findings"]),
+    () => new Set(DEFAULT_PRESENTATION_PAGE_IDS),
   );
   const [generating, setGenerating] = useState(false);
   const [versions, setVersions] = useState<VersionEntry[]>(() => [
@@ -137,39 +94,83 @@ export function PresentationsTab({
   const [activeVersionId, setActiveVersionId] = useState<string | null>(
     SEED_VERSIONS[0]?.id ?? null,
   );
-  const [viewMode, setViewMode] = useState<ViewMode>("tour");
+  const [viewMode, setViewMode] = useState<ViewMode>("deck");
   const [drawerOpen, setDrawerOpen] = useState(true);
+  const [flowStep, setFlowStep] = useState<PresentationFlowStepId>("assemble");
 
-  const selectedSections = useMemo(
-    () => SECTIONS.filter((s) => selected.has(s.id)),
+  const sectionsRef = useRef<HTMLElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const slidesRef = useRef<HTMLElement>(null);
+
+  const selectedPages = useMemo(
+    () => PRESENTATION_PAGE_TYPES.filter((p) => selected.has(p.id)),
+    [selected],
+  );
+
+  const estimatedPageCount = useMemo(
+    () => countTemplatePages(selected),
     [selected],
   );
 
   const draftCount = versions.filter((v) => v.isDraft).length;
+  const flowCtx = useMemo(
+    () => ({
+      selectedCount: selectedPages.length,
+      versionCount: versions.length,
+      generating,
+      hasDraft: draftCount > 0,
+    }),
+    [selectedPages.length, versions.length, generating, draftCount],
+  );
+
+  const goToFlowStep = useCallback((step: PresentationFlowStepId) => {
+    if (!canEnterPresentationStep(step, flowCtx)) return;
+    setFlowStep(step);
+    if (step === "assemble") {
+      sectionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (step === "preview" || step === "generate") {
+      heroRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (step === "review") {
+      setDrawerOpen(true);
+      slidesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [flowCtx]);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      if (next.size > 0 && flowStep === "assemble") {
+        setFlowStep("preview");
+      }
       return next;
     });
 
   const handleGenerate = () => {
-    if (generating || selectedSections.length === 0) return;
+    if (generating || selectedPages.length === 0) return;
+    setFlowStep("generate");
     setGenerating(true);
     window.setTimeout(() => {
-      const nextNum = versions.length + 1;
-      const entry: VersionEntry = {
-        id: `v-${String(nextNum).padStart(3, "0")}`,
-        label: `Draft v${nextNum}`,
-        generatedAt: "just now",
-        sectionCount: selectedSections.length,
-        isDraft: true,
-      };
-      setVersions([entry, ...versions]);
-      setActiveVersionId(entry.id);
+      setVersions((prev) => {
+        const nextNum = prev.length + 1;
+        const entry: VersionEntry = {
+          id: `v-${String(nextNum).padStart(3, "0")}`,
+          label: `Draft v${nextNum}`,
+          generatedAt: "just now",
+          pageCount: estimatedPageCount,
+          isDraft: true,
+        };
+        setActiveVersionId(entry.id);
+        return [entry, ...prev];
+      });
       setGenerating(false);
+      setFlowStep("review");
+      setDrawerOpen(true);
     }, 700);
   };
 
@@ -180,13 +181,80 @@ export function PresentationsTab({
       data-engagement-id={engagementId}
     >
       <TabHeader
-        overline="Deliverables · group"
-        title="Presentations"
-        subtitle="Assemble a client- or jurisdiction-ready slide deck from the atoms in this engagement. Drafts are agent-generated — review before sending."
+        overline="Studio · client deliverable"
+        title="Client presentation"
+        subtitle={PRESENTATION_TEMPLATE_META.subtitle}
       />
 
+      <aside
+        className="presentation-template-scope sc-card"
+        data-testid="presentation-template-scope"
+        aria-labelledby="presentation-template-scope-title"
+      >
+        <h2 id="presentation-template-scope-title" className="presentation-template-scope-title">
+          {PRESENTATION_TEMPLATE_META.title}
+        </h2>
+        <p className="presentation-template-scope-lead">
+          Downloadable slide deck for client review — like an interior-design
+          Canva template, not plan-check documentation. Neutral layout, lifestyle
+          imagery slots, moodboard grids, plan panels, and materials boards you
+          brand per studio.
+        </p>
+        <ul className="presentation-template-scope-meta">
+          <li>
+            <strong>Template size:</strong> {PRESENTATION_TEMPLATE_META.pageTarget}{" "}
+            when all page types are included (duplicate and reorder per project).
+          </li>
+          <li>
+            <strong>Outputs:</strong>{" "}
+            {PRESENTATION_TEMPLATE_META.outputs.join(" · ")}
+          </li>
+          <li>
+            <strong>Visual system:</strong> {PRESENTATION_TEMPLATE_META.aesthetic}
+          </li>
+        </ul>
+      </aside>
+
+      <nav
+        className="presentation-flow"
+        aria-label="Presentation workflow"
+        data-testid="presentation-flow"
+      >
+        {PRESENTATION_FLOW_STEPS.map((step, index) => {
+          const active = flowStep === step.id;
+          const complete = isPresentationStepComplete(step.id, flowCtx);
+          const enabled = canEnterPresentationStep(step.id, flowCtx);
+          return (
+            <button
+              key={step.id}
+              type="button"
+              className="presentation-flow-step"
+              data-testid={step.testId}
+              data-active={active ? "true" : "false"}
+              data-complete={complete ? "true" : "false"}
+              disabled={!enabled}
+              title={step.summary}
+              onClick={() => goToFlowStep(step.id)}
+            >
+              <span className="presentation-flow-step-index">{index + 1}</span>
+              <span className="presentation-flow-step-text">
+                <span className="presentation-flow-step-label">{step.label}</span>
+                <span className="presentation-flow-step-summary">{step.summary}</span>
+              </span>
+              {index < PRESENTATION_FLOW_STEPS.length - 1 && (
+                <ChevronRight
+                  className="presentation-flow-step-chevron"
+                  size={16}
+                  aria-hidden
+                />
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
       <div
-        className="sc-card"
+        className="sc-card presentation-workspace"
         style={{
           padding: 0,
           display: "flex",
@@ -251,7 +319,7 @@ export function PresentationsTab({
                     }}
                   >
                     {m.label}
-                    {m.id === "tour" && draftCount > 0 && (
+                    {m.id === "deck" && draftCount > 0 && (
                       <span
                         style={{
                           padding: "1px 6px",
@@ -281,15 +349,17 @@ export function PresentationsTab({
               }}
             >
               <span>
-                {selectedSections.length}{" "}
-                {selectedSections.length === 1 ? "section" : "sections"} ·{" "}
-                {versions.length} version{versions.length === 1 ? "" : "s"}
+                {selectedPages.length} page{" "}
+                {selectedPages.length === 1 ? "type" : "types"} · ~
+                {estimatedPageCount} slides · {versions.length} version
+                {versions.length === 1 ? "" : "s"}
               </span>
             </div>
           </div>
 
           {/* HERO preview pane */}
           <div
+            ref={heroRef}
             style={{
               position: "relative",
               flex: "0 0 auto",
@@ -299,6 +369,7 @@ export function PresentationsTab({
               background: "var(--bg-base)",
             }}
             data-testid="presentation-hero"
+            data-flow-step={flowStep === "preview" || flowStep === "generate" ? flowStep : undefined}
           >
             {/* faux project preview */}
             <svg
@@ -403,19 +474,19 @@ export function PresentationsTab({
                 gap: 6,
               }}
             >
-              {viewMode === "tour" ? (
+              {viewMode === "deck" ? (
                 <Camera size={12} color="var(--cyan-text)" />
-              ) : viewMode === "sheets" ? (
+              ) : viewMode === "plans" ? (
                 <FileText size={12} color="var(--cyan-text)" />
               ) : (
                 <ImageIcon size={12} color="var(--cyan-text)" />
               )}
               <span style={{ color: "var(--text-secondary)" }}>
-                {viewMode === "tour"
-                  ? "Tour · Exterior approach"
-                  : viewMode === "sheets"
-                    ? "Sheets · A1.1 Site plan"
-                    : "Renderings · Hero exterior"}
+                {viewMode === "deck"
+                  ? "Deck · Cover → concept → rooms"
+                  : viewMode === "plans"
+                    ? "Plans · Annotated floor plan spread"
+                    : "Moodboards · 2×2 inspiration grid"}
               </span>
             </div>
 
@@ -522,7 +593,7 @@ export function PresentationsTab({
             <button
               type="button"
               onClick={handleGenerate}
-              disabled={generating || selectedSections.length === 0}
+              disabled={generating || selectedPages.length === 0}
               data-testid="presentation-generate"
               style={{
                 position: "absolute",
@@ -531,31 +602,31 @@ export function PresentationsTab({
                 padding: "8px 16px",
                 borderRadius: 999,
                 background:
-                  generating || selectedSections.length === 0
+                  generating || selectedPages.length === 0
                     ? "var(--bg-elevated)"
                     : "var(--cyan)",
                 border: "1px solid var(--cyan-accent-border)",
                 color:
-                  generating || selectedSections.length === 0
+                  generating || selectedPages.length === 0
                     ? "var(--text-muted)"
                     : "var(--text-inverse)",
                 fontSize: 12,
                 fontWeight: 700,
                 cursor:
-                  generating || selectedSections.length === 0
+                  generating || selectedPages.length === 0
                     ? "not-allowed"
                     : "pointer",
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
                 boxShadow:
-                  generating || selectedSections.length === 0
+                  generating || selectedPages.length === 0
                     ? "none"
                     : "0 4px 14px var(--cyan-glow)",
               }}
             >
-              <Camera size={13} />
-              {generating ? "Generating…" : "Generate draft PDF"}
+              <Download size={13} />
+              {generating ? "Exporting…" : "Export client deck (PDF)"}
             </button>
           </div>
 
@@ -571,8 +642,8 @@ export function PresentationsTab({
               gap: 18,
             }}
           >
-            {/* Sections rail (horizontal scroll) */}
-            <section>
+            {/* Page-type rail (horizontal scroll) */}
+            <section ref={sectionsRef} data-flow-step="assemble">
               <div
                 style={{
                   display: "flex",
@@ -585,7 +656,7 @@ export function PresentationsTab({
                 }}
               >
                 <FileText size={13} color="var(--cyan-text)" />
-                Sections
+                Page types
                 <span
                   style={{
                     fontWeight: 400,
@@ -594,7 +665,8 @@ export function PresentationsTab({
                     marginLeft: 4,
                   }}
                 >
-                  {selectedSections.length} of {SECTIONS.length} selected
+                  {selectedPages.length} of {PRESENTATION_PAGE_TYPES.length}{" "}
+                  selected · ~{estimatedPageCount} slides
                 </span>
               </div>
               <div
@@ -606,8 +678,11 @@ export function PresentationsTab({
                   paddingBottom: 6,
                 }}
               >
-                {SECTIONS.map((s) => {
+                {PRESENTATION_PAGE_TYPES.map((s) => {
                   const checked = selected.has(s.id);
+                  const categoryLabel = PRESENTATION_PAGE_CATEGORIES.find(
+                    (c) => c.id === s.category,
+                  )?.label;
                   return (
                     <button
                       key={s.id}
@@ -731,6 +806,15 @@ export function PresentationsTab({
                           {s.label}
                         </span>
                       </div>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {categoryLabel} · {s.templatePages} pg
+                        {s.templatePages === 1 ? "" : "s"}
+                      </span>
                       {checked && (
                         <span
                           aria-hidden="true"
@@ -757,7 +841,7 @@ export function PresentationsTab({
             </section>
 
             {/* Slide preview list */}
-            <section>
+            <section ref={slidesRef} data-flow-step="review">
               <div
                 style={{
                   display: "flex",
@@ -779,11 +863,11 @@ export function PresentationsTab({
                     marginLeft: 4,
                   }}
                 >
-                  Order matches deck output
+                  Order matches PDF export · duplicate pages in Canva later
                 </span>
               </div>
 
-              {selectedSections.length === 0 ? (
+              {selectedPages.length === 0 ? (
                 <div
                   style={{
                     padding: "32px 16px",
@@ -807,10 +891,10 @@ export function PresentationsTab({
                       fontWeight: 600,
                     }}
                   >
-                    Pick at least one section
+                    Pick at least one page type
                   </div>
                   <div style={{ marginTop: 4, fontSize: 11.5 }}>
-                    Tap a card in the rail above to add it to the deck.
+                    Tap a card in the rail above to add spreads to the client deck.
                   </div>
                 </div>
               ) : (
@@ -825,7 +909,7 @@ export function PresentationsTab({
                     gap: 8,
                   }}
                 >
-                  {selectedSections.map((s, idx) => (
+                  {selectedPages.map((s, idx) => (
                     <li
                       key={s.id}
                       style={{
@@ -877,8 +961,28 @@ export function PresentationsTab({
                           >
                             {s.label}
                           </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: "var(--text-muted)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {s.templatePages} template pg
+                            {s.templatePages === 1 ? "" : "s"}
+                          </span>
                           <DraftBadge />
                         </div>
+                        <p
+                          style={{
+                            margin: 0,
+                            color: "var(--text-muted)",
+                            fontSize: 10.5,
+                            fontStyle: "italic",
+                          }}
+                        >
+                          {s.layoutHint}
+                        </p>
                         <p
                           style={{
                             margin: 0,
@@ -894,6 +998,7 @@ export function PresentationsTab({
                             display: "flex",
                             gap: 6,
                             flexWrap: "wrap",
+                            alignItems: "center",
                           }}
                         >
                           {s.sources.map((src, i) => (
@@ -903,6 +1008,20 @@ export function PresentationsTab({
                               label={src.label}
                             />
                           ))}
+                          {onNavigate && SECTION_SOURCE_TAB[s.id] && (
+                            <button
+                              type="button"
+                              className="presentation-section-source-link"
+                              data-testid={`presentation-section-source-${s.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onNavigate(SECTION_SOURCE_TAB[s.id]!);
+                              }}
+                            >
+                              <ExternalLink size={11} aria-hidden />
+                              Edit source
+                            </button>
+                          )}
                         </div>
                       </div>
                     </li>
@@ -924,6 +1043,20 @@ export function PresentationsTab({
                 type="button"
                 className="sc-btn-ghost"
                 disabled
+                title="Canva handoff — opens an editable duplicate of the deck template"
+                data-testid="presentation-export-canva"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <ExternalLink size={13} /> Open in Canva (coming soon)
+              </button>
+              <button
+                type="button"
+                className="sc-btn-ghost"
+                disabled
                 title="Coming soon — needs the share-link backend"
                 style={{
                   display: "inline-flex",
@@ -931,7 +1064,7 @@ export function PresentationsTab({
                   gap: 6,
                 }}
               >
-                <Download size={13} /> Share with client (coming soon)
+                <Download size={13} /> Share link with client (coming soon)
               </button>
             </div>
           </div>
@@ -1123,8 +1256,8 @@ export function PresentationsTab({
                             color: "var(--text-secondary)",
                           }}
                         >
-                          {v.generatedAt} · {v.sectionCount} section
-                          {v.sectionCount === 1 ? "" : "s"}
+                          {v.generatedAt} · {v.pageCount} slide
+                          {v.pageCount === 1 ? "" : "s"}
                           {active ? (
                             <>
                               {" "}

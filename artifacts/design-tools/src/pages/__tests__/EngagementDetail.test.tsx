@@ -44,6 +44,7 @@ import {
   cleanup,
   act,
   within,
+  waitFor,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -536,12 +537,36 @@ async function submitOnce(opts?: {
  * not mounted on first paint — clicking the tab button is the same
  * thing a user would do to verify their submission landed.
  */
+function gotoReviewView() {
+  fireEvent.click(screen.getByTestId("engagement-view-review"));
+}
+
 function gotoSubmissionsTab() {
-  fireEvent.click(screen.getByRole("button", { name: "Submissions" }));
+  gotoReviewView();
+  fireEvent.click(screen.getByTestId("engagement-tab-submissions"));
 }
 
 function gotoFindingsTab() {
+  gotoReviewView();
   fireEvent.click(screen.getByTestId("engagement-tab-findings"));
+}
+
+function gotoDeliverView() {
+  fireEvent.click(screen.getByTestId("engagement-view-deliver"));
+}
+
+function gotoStudioView() {
+  fireEvent.click(screen.getByTestId("engagement-view-studio"));
+}
+
+function gotoRendersTab() {
+  gotoStudioView();
+  fireEvent.click(screen.getByTestId("engagement-tab-renders"));
+}
+
+function gotoPresentationsTab() {
+  gotoStudioView();
+  fireEvent.click(screen.getByTestId("engagement-tab-presentations"));
 }
 
 /** Convenience builder for `Finding` fixtures used by the findings-tab tests. */
@@ -640,12 +665,57 @@ function seedSubmissionsWithFindings(
     );
   };
 }
-describe("EngagementDetail renders tab (Task #422)", () => {
-  it("renders the 'Renders' tab with inline kickoff panel and gallery when activated", () => {
+describe("EngagementDetail Studio view", () => {
+  it("navigates to mission control when the Studio view is selected", () => {
     renderPage();
-    const tabBtn = screen.getByRole("button", { name: "Renders" });
-    expect(tabBtn).toBeInTheDocument();
-    fireEvent.click(tabBtn);
+    fireEvent.click(screen.getByTestId("engagement-view-studio"));
+    expect(screen.getByTestId("publish-prep-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("publish-prep-checklist")).toBeInTheDocument();
+  });
+
+  it("shows the launch pipeline on Mission control", () => {
+    renderPage();
+    fireEvent.click(screen.getByTestId("engagement-view-studio"));
+    expect(screen.getByTestId("publish-launch-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("publish-stage-visualize")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("engagement-tab-publish-launch"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("EngagementDetail Presentations flow", () => {
+  it("shows the four-step flow and advances on generate", async () => {
+    renderPage();
+    gotoPresentationsTab();
+    expect(screen.getByTestId("presentation-flow")).toBeInTheDocument();
+    expect(screen.getByTestId("presentation-flow-assemble")).toBeInTheDocument();
+    expect(screen.getByTestId("presentation-flow-preview")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("presentation-generate"));
+    await waitFor(() => {
+      expect(screen.getByTestId("presentation-flow-review")).toHaveAttribute(
+        "data-active",
+        "true",
+      );
+    });
+  });
+
+  it("links section sources to other engagement tabs", () => {
+    renderPage();
+    gotoPresentationsTab();
+    fireEvent.click(screen.getByTestId("presentation-section-source-moodboard"));
+    expect(screen.getByTestId("engagement-tab-renders")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+  });
+});
+
+describe("EngagementDetail Rendering tab (Task #422)", () => {
+  it("renders the Rendering segment with inline kickoff panel and gallery when activated", () => {
+    renderPage();
+    gotoRendersTab();
     expect(screen.getByTestId("renders-tab")).toBeInTheDocument();
     expect(screen.getByTestId("renders-tab-dashboard")).toBeInTheDocument();
     expect(screen.getByTestId("render-kickoff-panel")).toBeInTheDocument();
@@ -657,9 +727,9 @@ describe("EngagementDetail renders tab (Task #422)", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the inline kickoff panel without a modal dialog on the Renders tab", () => {
+  it("shows the inline kickoff panel without a modal dialog on the Rendering segment", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Renders" }));
+    gotoRendersTab();
     expect(screen.getByTestId("render-kickoff-panel")).toBeInTheDocument();
     expect(
       screen.queryByTestId("render-kickoff-dialog"),
@@ -728,27 +798,58 @@ describe("EngagementDetail submission banner (Task #126)", () => {
     }
   });
 
-  it("renders the Findings tab between Submissions and Renders", () => {
+  it("renders consolidated view + segment navigation (top header IA)", () => {
     renderPage();
-    const tabs = screen
-      .getAllByRole("button")
-      .map((b) => b.getAttribute("data-testid"))
-      .filter(
-        (v): v is string => typeof v === "string" && v.startsWith("engagement-tab-"),
-      );
-    const sub = tabs.indexOf("engagement-tab-submissions");
-    const find = tabs.indexOf("engagement-tab-findings");
-    const renders = tabs.indexOf("engagement-tab-renders");
-    const settings = tabs.indexOf("engagement-tab-settings");
-    expect(sub).toBeGreaterThanOrEqual(0);
-    expect(find).toBe(sub + 1);
-    // The Cortex L-surface tabs (Lane C.4 — response-tasks,
-    // deliverable-letters, detail-callouts, product-specs) sit between
-    // Findings and Renders, so Renders is no longer findings+1; assert
-    // ordering (Findings before Renders before Settings) rather than
-    // strict adjacency.
-    expect(renders).toBeGreaterThan(find);
-    expect(settings).toBeGreaterThan(renders);
+    expect(screen.getByTestId("engagement-view-header")).toBeInTheDocument();
+    expect(screen.getByTestId("engagement-view-model")).toBeInTheDocument();
+    expect(screen.getByTestId("engagement-view-review")).toBeInTheDocument();
+    expect(screen.getByTestId("engagement-view-deliver")).toBeInTheDocument();
+    expect(screen.getByTestId("engagement-view-studio")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("engagement-view-review"));
+    const reviewSegs = [
+      "engagement-tab-findings",
+      "engagement-tab-submissions",
+      "engagement-tab-response-tasks",
+      "engagement-tab-deliverable-letters",
+    ];
+    const reviewOrder = reviewSegs.map((id) =>
+      screen.getByTestId(id),
+    );
+    expect(reviewOrder[0]).toHaveAttribute("data-active", "true");
+
+    fireEvent.click(screen.getByTestId("engagement-view-deliver"));
+    for (const id of [
+      "engagement-tab-sheets",
+      "engagement-tab-product-specs",
+      "engagement-tab-detail-callouts",
+    ]) {
+      expect(screen.getByTestId(id)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByTestId("engagement-view-model"));
+    expect(screen.getByTestId("engagement-tab-snapshots")).toBeInTheDocument();
+    expect(screen.getByTestId("engagement-tab-model-3d")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("engagement-tab-sheets"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("engagement-view-studio"));
+    for (const id of [
+      "engagement-tab-publish-prep",
+      "engagement-tab-renders",
+      "engagement-tab-presentations",
+    ]) {
+      expect(screen.getByTestId(id)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByTestId("engagement-view-site"));
+    expect(screen.getByTestId("engagement-tab-site")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("engagement-tab-property-intel"),
+    ).toBeInTheDocument();
+
+    expect(screen.getByTestId("engagement-view-settings")).toBeInTheDocument();
   });
 
   it("auto-clears the banner after the 8s timeout and leaves the submission row intact", async () => {
@@ -798,7 +899,8 @@ describe("EngagementDetail submission banner (Task #126)", () => {
 
 // Site-tab `ParcelZoningCard` — Bastrop populated + Boston fallback.
 function gotoSiteTab() {
-  fireEvent.click(screen.getByRole("button", { name: "Site" }));
+  fireEvent.click(screen.getByTestId("engagement-view-site"));
+  fireEvent.click(screen.getByTestId("engagement-tab-site"));
 }
 
 describe("EngagementDetail Site tab parcel & zoning card", () => {
@@ -1033,7 +1135,7 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     expect(rows).toEqual([
       "architect-findings-row-finding:sub-latest:concern",
     ]);
-    expect(window.location.search).toBe("?tab=findings&severity=concern");
+    expect(window.location.search).toBe("?view=review&severity=concern");
     // Active chip carries the data-active marker.
     expect(
       screen
@@ -1071,7 +1173,7 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
       .getAllByRole("listitem")
       .map((r) => r.getAttribute("data-testid"));
     expect(rows).toEqual(["architect-findings-row-finding:sub-latest:02"]);
-    expect(window.location.search).toBe("?tab=findings&category=setback");
+    expect(window.location.search).toBe("?view=review&category=setback");
   });
 
   it("hides addressed findings when the Addressed toggle is flipped off and updates the URL", () => {
@@ -1105,7 +1207,7 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
         .map((r) => r.getAttribute("data-testid")),
     ).toEqual(["architect-findings-row-finding:sub-latest:open"]);
     expect(window.location.search).toBe(
-      "?tab=findings&showAddressed=false",
+      "?view=review&showAddressed=false",
     );
   });
 
@@ -1178,6 +1280,13 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
   });
 
   it("clicking the CAD elementRef link swings the page to Snapshots and pre-selects the element in the BIM viewer (Task #437)", () => {
+    hoisted.engagement = {
+      ...hoisted.engagement,
+      site: {
+        address: hoisted.engagement.address,
+        geocode: { latitude: 40.015, longitude: -105.27 },
+      },
+    };
     renderPage({
       seed: (client) => {
         seedSubmissionsWithFindings([
@@ -1246,10 +1355,11 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     expect(viewport.getAttribute("data-selected-element-id")).toBe(
       "door:l2-corridor-9",
     );
-    // Selection is page-level — clear it from Site context (same state
-    // the Snapshots viewport reads).
-    fireEvent.click(screen.getByTestId("engagement-tab-site-context"));
-    fireEvent.click(screen.getByTestId("site-context-subtab-3d"));
+    // Selection is page-level — clear it from the Site tab 3D canvas
+    // (same state the Snapshots viewport reads).
+    fireEvent.click(screen.getByTestId("engagement-view-site"));
+    expect(screen.getByTestId("site-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("site-tab-3d-canvas")).toBeInTheDocument();
     fireEvent.click(
       screen.getByTestId("site-context-viewer-selected-element-clear"),
     );

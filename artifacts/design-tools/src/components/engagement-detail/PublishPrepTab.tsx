@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import { TabHeader } from "../cockpit/TabChrome";
 import { DraftBadge, SourceChip } from "../cockpit/QualityChips";
+import { demoPublishChecklistState, isDemoSeedEnabled } from "../../demo/seed";
+import { PublishLaunchPipelineSection } from "./PublishLaunchPipelineSection";
+import type { TabId } from "./urlState";
 
 /**
  * Publish prep (QA-06) — Launchpad-style mission dashboard with
@@ -123,11 +126,19 @@ const SLIDE_TILES = [
   { id: "s4", tone: "var(--success)" },
 ];
 
-export function PublishPrepTab({ engagementId }: { engagementId: string }) {
+export function PublishPrepTab({
+  engagementId,
+  onNavigate,
+}: {
+  engagementId: string;
+  onNavigate?: (tab: TabId) => void;
+}) {
   const [legacyFile, setLegacyFile] = useState<string | null>(null);
-  const [state, setState] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(ITEMS.map((i) => [i.id, i.initial])),
-  );
+  const [state, setState] = useState<Record<string, boolean>>(() => {
+    const demo = isDemoSeedEnabled() ? demoPublishChecklistState() : null;
+    if (demo) return demo;
+    return Object.fromEntries(ITEMS.map((i) => [i.id, i.initial]));
+  });
 
   const total = ITEMS.length;
   const done = ITEMS.filter((i) => state[i.id]).length;
@@ -140,19 +151,19 @@ export function PublishPrepTab({ engagementId }: { engagementId: string }) {
 
   return (
     <div
-      className="cockpit-tab"
+      className="cockpit-tab cockpit-publish-tab"
       data-testid="publish-prep-tab"
       data-engagement-id={engagementId}
     >
       <TabHeader
-        overline="Deliverables · group"
-        title="Publish prep"
-        subtitle="Mission control for shipping the engagement: track deliverable readiness, walk the publisher checklist, and export when blockers clear."
+        overline="Publish"
+        title="Mission control"
+        subtitle="Readiness checklist, launch pipeline stages, and export when blockers clear."
+        testId="publish-prep-tab-header"
       />
 
-      {/* READY TO SHIP banner */}
       <section
-        className="sc-card"
+        className="sc-card cockpit-publish-ship-banner"
         style={{
           padding: 20,
           display: "grid",
@@ -276,22 +287,8 @@ export function PublishPrepTab({ engagementId }: { engagementId: string }) {
         </div>
       </section>
 
-      {/* MAIN GRID: 2x2 mission deck + right rail */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) 280px",
-          gap: 16,
-          alignItems: "stretch",
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-            gap: 16,
-          }}
-        >
+      <div className="cockpit-publish-mission-layout">
+        <div className="cockpit-publish-mission-deck">
           {/* CARD 1 — Render Set preview (Canvas Studio palette) */}
           <DeckCard
             icon={<ImageIcon size={18} />}
@@ -369,6 +366,7 @@ export function PublishPrepTab({ engagementId }: { engagementId: string }) {
               hint="Launch when 4 / 4 hero renders complete"
               actionTone="cyan"
               actionLabel="Open render studio"
+              onAction={onNavigate ? () => onNavigate("renders") : undefined}
             />
           </DeckCard>
 
@@ -496,6 +494,7 @@ export function PublishPrepTab({ engagementId }: { engagementId: string }) {
 
           {/* CARD 3 — Publisher Checklist (REAL data, preserves testids) */}
           <section
+            id="publish-prep-checklist"
             className="sc-card"
             data-testid="publish-prep-checklist"
             style={{
@@ -761,16 +760,9 @@ export function PublishPrepTab({ engagementId }: { engagementId: string }) {
           </section>
         </div>
 
-        {/* RIGHT RAIL — Mission Control */}
         <aside
-          className="sc-card"
+          className="sc-card cockpit-publish-mission-rail"
           data-testid="publish-prep-mission-control"
-          style={{
-            padding: 0,
-            display: "flex",
-            flexDirection: "column",
-            background: "var(--bg-surface)",
-          }}
         >
           <div
             style={{
@@ -1024,6 +1016,10 @@ export function PublishPrepTab({ engagementId }: { engagementId: string }) {
           </div>
         </aside>
       </div>
+
+      {onNavigate && (
+        <PublishLaunchPipelineSection onNavigate={onNavigate} />
+      )}
     </div>
   );
 }
@@ -1149,10 +1145,12 @@ function CardFooter({
   hint,
   actionLabel,
   actionTone,
+  onAction,
 }: {
   hint: string;
   actionLabel: string;
   actionTone: "cyan" | "neutral";
+  onAction?: () => void;
 }) {
   return (
     <div
@@ -1170,8 +1168,9 @@ function CardFooter({
       <button
         type="button"
         className="sc-btn-ghost"
-        disabled
-        title="Coming soon"
+        disabled={!onAction}
+        onClick={onAction}
+        title={onAction ? actionLabel : "Coming soon"}
         style={{
           color: actionTone === "cyan" ? "var(--cyan-text)" : "var(--text-secondary)",
           background: "none",

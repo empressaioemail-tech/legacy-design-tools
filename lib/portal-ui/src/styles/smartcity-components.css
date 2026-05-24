@@ -127,3 +127,503 @@
   border-radius: 2px;
   transition: width 1.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/* BIM viewport — view cube + immersive HUD overlays */
+.bim-viewport-overlay-stack {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  /* Above snapshots sheets rail (z-index 15) and hero overlays (20). */
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  pointer-events: none;
+  max-width: min(300px, calc(100% - 24px));
+}
+
+.bim-viewport-overlay-stack > * {
+  pointer-events: auto;
+}
+
+.bim-viewport-hud-panel,
+.bim-viewport-hud-orientation,
+.bim-view-cube,
+.bim-viewport-hud-panel button,
+.bim-viewport-hud-panel input,
+.bim-viewport-hud-panel label,
+.bim-view-cube button {
+  pointer-events: auto;
+}
+
+.bim-model-viewport-canvas-wrap {
+  isolation: isolate;
+}
+
+.bim-model-viewport-canvas-host {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.bim-model-viewport-canvas-host canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.bim-model-viewport-overlays {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.bim-model-viewport-overlays [data-testid="bim-model-viewport-gesture-hint-toggle"],
+.bim-model-viewport-overlays .bim-viewport-overlay-stack,
+.bim-model-viewport-overlays .bim-viewport-overlay-stack > *,
+.bim-model-viewport-overlays [data-testid="bim-model-viewport-webgl-fallback"],
+.bim-model-viewport-overlays [data-testid="bim-model-viewport-no-geometry"],
+.bim-model-viewport-overlays [data-testid="bim-model-viewport-glb-loading"],
+.bim-model-viewport-overlays [data-testid="bim-model-viewport-glb-error"] {
+  pointer-events: auto;
+}
+
+.bim-viewport-hud-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--overlay-glass-border, rgba(255, 255, 255, 0.12));
+  background: rgba(12, 16, 28, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.bim-viewport-hud-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bim-viewport-hud-panel-row--secondary {
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bim-viewport-hud-panel--unified {
+  min-width: 228px;
+}
+
+.bim-viewport-hud-orientation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bim-viewport-hud-orientation-label {
+  align-self: flex-start;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.bim-viewport-hud-appearance {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.bim-viewport-hud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.bim-viewport-hud-chip--button {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.88);
+  font: inherit;
+}
+
+.bim-viewport-hud-chip--button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.bim-viewport-hud-chip--meta {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.bim-viewport-hud-chip--meta strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.bim-viewport-hud-view-group {
+  display: inline-flex;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.bim-viewport-hud-view-group button {
+  background: transparent;
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+
+.bim-viewport-hud-view-group button:first-child {
+  border-left: none;
+}
+
+.bim-viewport-hud-view-group button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.bim-viewport-hud-brightness {
+  flex: 1;
+  min-width: 88px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bim-viewport-hud-brightness input[type="range"] {
+  flex: 1;
+  min-width: 72px;
+  cursor: pointer;
+}
+
+.bim-view-cube {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  width: 100%;
+}
+
+.bim-view-cube-body {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 8px 8px;
+  border-radius: 10px;
+  background: linear-gradient(
+    165deg,
+    rgba(28, 34, 48, 0.95) 0%,
+    rgba(14, 18, 28, 0.98) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.bim-view-cube-svg {
+  display: block;
+  touch-action: manipulation;
+  shape-rendering: geometricPrecision;
+}
+
+.bim-view-cube-region {
+  transition:
+    fill 0.12s ease,
+    stroke 0.12s ease,
+    stroke-width 0.12s ease;
+}
+
+.bim-view-cube-region:focus {
+  outline: none;
+}
+
+.bim-view-cube-label {
+  fill: rgba(255, 255, 255, 0.95);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  user-select: none;
+  paint-order: stroke fill;
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 2px;
+}
+
+.bim-view-cube-iso {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 4px 8px;
+  font-size: 8px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(12, 16, 28, 0.95);
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  z-index: 3;
+  touch-action: manipulation;
+}
+
+.bim-view-cube-iso:hover {
+  color: var(--cyan-text, #7dd3fc);
+  border-color: var(--cyan, #00b4d8);
+}
+
+.bim-view-cube-compass {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.bim-view-cube-compass span {
+  position: absolute;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.bim-view-cube-compass-n {
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.bim-view-cube-compass-s {
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.bim-view-cube-compass-e {
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.bim-view-cube-compass-w {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Render kickoff — embedded Studio panel + intent tiles */
+.render-kickoff-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  width: 100%;
+}
+
+.render-kickoff-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.render-kickoff-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-base);
+}
+
+.render-kickoff-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.render-kickoff-section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.render-kickoff-section-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.render-kickoff-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.render-kickoff-subtitle {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.render-kickoff-intent-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  padding: 10px 12px;
+  text-align: left;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.render-kickoff-intent-btn:hover:not(:disabled) {
+  border-color: rgba(0, 180, 216, 0.45);
+  background: var(--bg-highlight);
+}
+
+.render-kickoff-intent-btn--active {
+  border-color: var(--cyan);
+  background: var(--cyan-accent-bg, rgba(0, 180, 216, 0.12));
+  box-shadow: 0 0 0 1px rgba(0, 180, 216, 0.25);
+}
+
+.render-kickoff-intent-btn-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.render-kickoff-intent-btn-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.render-kickoff-field-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.render-kickoff-shell .render-kickoff-field-label,
+.render-kickoff-body .render-kickoff-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.render-kickoff-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-default);
+}
+
+.render-kickoff-footer .sc-btn-primary {
+  flex: 1 1 100%;
+  height: 36px;
+  font-size: 12px;
+}
+
+.render-kickoff-shell label,
+.render-kickoff-body label {
+  min-width: 0;
+}
+
+.render-kickoff-shell select,
+.render-kickoff-shell textarea,
+.render-kickoff-shell input[type="text"],
+.render-kickoff-shell input[type="number"],
+.render-kickoff-body select,
+.render-kickoff-body textarea,
+.render-kickoff-body input[type="text"],
+.render-kickoff-body input[type="number"] {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Briefing source layer cards — responsive grid per tier */
+.briefing-sources-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.briefing-sources-tier-grid .briefing-source-row {
+  min-width: 0;
+  height: 100%;
+}
+
+.briefing-sources-tier-grid .briefing-source-row__footer {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.briefing-sources-tier-grid .briefing-source-row__actions {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}

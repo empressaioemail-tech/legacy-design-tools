@@ -79,6 +79,7 @@ export { ConstellationCanvas } from "./components/ConstellationCanvas";
 export type { ConstellationCanvasProps } from "./components/ConstellationCanvas";
 export { RenderPowerToolDialog } from "./components/render-tools/RenderPowerToolDialog";
 export type { RenderPowerToolDialogProps } from "./components/render-tools/RenderPowerToolDialog";
+export type { PowerToolKind } from "./components/render-tools/powerToolKickoff";
 
 // Promoted from artifacts/plan-review so design-tools can mount the
 // same read-only Three.js BIM viewer on its Snapshots tab without

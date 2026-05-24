@@ -14,6 +14,8 @@ export interface MnmlExpertParamGridProps {
   onChange: (next: Record<string, string>) => void;
   disabled?: boolean;
   testId?: string;
+  /** Omit params already surfaced as dedicated kickoff controls. */
+  excludeParamNames?: readonly string[];
 }
 
 function defaultFor(def: MnmlParamDef): string {
@@ -114,7 +116,16 @@ export function MnmlExpertParamGrid({
   onChange,
   disabled,
   testId = "mnml-expert-param-grid",
+  excludeParamNames = [],
 }: MnmlExpertParamGridProps) {
+  const exclude = useMemo(
+    () => new Set(excludeParamNames),
+    [excludeParamNames],
+  );
+  const commonParams = useMemo(
+    () => MNML_COMMON_PARAMS.filter((d) => !exclude.has(d.name)),
+    [exclude],
+  );
   const [openCommon, setOpenCommon] = useState(true);
   const [openExpert, setOpenExpert] = useState(true);
 
@@ -195,7 +206,8 @@ export function MnmlExpertParamGrid({
       <div className="sc-meta" style={{ opacity: 0.8 }}>
         Advanced mnml parameters ({total} fields)
       </div>
-      {renderSection("Common", MNML_COMMON_PARAMS, openCommon, setOpenCommon, "common")}
+      {commonParams.length > 0 &&
+        renderSection("Common", commonParams, openCommon, setOpenCommon, "common")}
       {renderSection(
         `Expert · ${expert}`,
         expertParams,

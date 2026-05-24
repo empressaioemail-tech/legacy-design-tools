@@ -12,7 +12,6 @@ import { AuthChip } from "./AuthChip";
 import {
   CockpitShell,
   DEFAULT_PRIMARY_NAV,
-  DEFAULT_SECONDARY_NAV,
   type CockpitProject,
 } from "./CockpitShell";
 import { GlobalClaudePanel } from "./GlobalClaudePanel";
@@ -96,7 +95,9 @@ export function AppShell({
   const primaryNav = useMemo(() => {
     return {
       items: DEFAULT_PRIMARY_NAV.items.map((it) =>
-        it.href === "/inbox" ? { ...it, badge: unreadCount } : it,
+        it.href === "/" && unreadCount > 0
+          ? { ...it, badge: unreadCount }
+          : it,
       ),
     };
   }, [unreadCount]);
@@ -108,7 +109,7 @@ export function AppShell({
       rightPanel={<GlobalClaudePanel />}
       headerActions={headerActions}
       primaryNav={primaryNav}
-      secondaryNav={DEFAULT_SECONDARY_NAV}
+      secondaryNav={undefined}
       navTrailing={<AuthChip />}
       projectRail={projectRail}
     >

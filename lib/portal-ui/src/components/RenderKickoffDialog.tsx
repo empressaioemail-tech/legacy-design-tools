@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useKickoffRender,
@@ -124,6 +124,37 @@ const INTENT_DEFAULTS: Record<
   deliverable: { expert: "exterior", style: "photoreal" },
   concept: { expert: "plan", style: "freehand_sketch" },
 };
+
+const KICKOFF_CREDIT_BY_KIND: Record<DomainRenderKind, number> = {
+  still: 3,
+  "elevation-set": 12,
+  video: 10,
+};
+
+function KickoffSection({
+  embedded,
+  title,
+  hint,
+  testId,
+  children,
+}: {
+  embedded: boolean;
+  title: string;
+  hint?: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  if (!embedded) return <>{children}</>;
+  return (
+    <section className="render-kickoff-section" data-testid={testId}>
+      <header className="render-kickoff-section-head">
+        <h3 className="render-kickoff-section-title">{title}</h3>
+        {hint ? <p className="render-kickoff-section-hint">{hint}</p> : null}
+      </header>
+      <div className="render-kickoff-section-body">{children}</div>
+    </section>
+  );
+}
 
 const EXPERT_LABEL: Record<KickoffRenderCommonFieldsExpertName, string> = {
   exterior: "Exterior",
@@ -433,37 +464,49 @@ export function RenderKickoffDialog({
 
   const shell = (
       <div
-        className="sc-card"
+        className={embedded ? "render-kickoff-shell" : "sc-card"}
         onClick={embedded ? undefined : (e) => e.stopPropagation()}
         style={{
           width: "100%",
           maxWidth: embedded ? undefined : 560,
-          maxHeight: embedded ? "min(85vh, 960px)" : "90vh",
-          overflow: "auto",
+          maxHeight: embedded ? undefined : "90vh",
+          overflow: embedded ? "visible" : "auto",
           display: "flex",
           flexDirection: "column",
         }}
       >
-        <div className="sc-card-header">
-          <div className="flex flex-col gap-1">
-            <span
-              style={{
-                fontSize: 16,
-                fontWeight: 600,
-                color: "var(--text-primary)",
-              }}
-            >
-              {embedded ? "New render" : "Kick off a render"}
-            </span>
-            <span className="sc-meta opacity-70">
-              {embedded
-                ? "Configure and submit a render; results appear in the gallery."
-                : "The polling worker advances the render's status; you'll see it appear in the gallery as soon as it's queued."}
-            </span>
+        {!embedded && (
+          <div className="sc-card-header">
+            <div className="flex flex-col gap-1">
+              <span
+                style={{
+                  fontSize: 16,
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                }}
+              >
+                Kick off a render
+              </span>
+              <span className="render-kickoff-subtitle">
+                The polling worker advances the render&apos;s status; you&apos;ll
+                see it appear in the gallery as soon as it&apos;s queued.
+              </span>
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="p-4 flex flex-col" style={{ gap: 12 }}>
+        <div
+          className={
+            embedded ? "render-kickoff-body" : "p-4 flex flex-col"
+          }
+          style={embedded ? undefined : { gap: 12 }}
+        >
+          <KickoffSection
+            embedded={embedded}
+            title="Output & intent"
+            hint="Choose deliverable vs concept, then the mnml job type."
+            testId="render-kickoff-section-output"
+          >
           <div
             data-testid="render-kickoff-intent"
             style={{ display: "flex", flexDirection: "column", gap: 6 }}
@@ -494,27 +537,16 @@ export function RenderKickoffDialog({
                     disabled={submitting}
                     onClick={() => applyIntent(value)}
                     data-testid={`render-kickoff-intent-${value}`}
-                    className={active ? "sc-btn-primary" : "sc-btn-ghost"}
-                    style={{
-                      padding: "10px 12px",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "flex-start",
-                      gap: 2,
-                      textAlign: "left",
-                    }}
+                    className={
+                      active
+                        ? "render-kickoff-intent-btn render-kickoff-intent-btn--active"
+                        : "render-kickoff-intent-btn"
+                    }
                   >
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>
+                    <span className="render-kickoff-intent-btn-title">
                       {INTENT_LABEL[value]}
                     </span>
-                    <span
-                      className="sc-meta"
-                      style={{
-                        opacity: 0.85,
-                        fontSize: 11.5,
-                        fontWeight: 400,
-                      }}
-                    >
+                    <span className="render-kickoff-intent-btn-hint">
                       {INTENT_HINT[value]}
                     </span>
                   </button>
@@ -552,14 +584,17 @@ export function RenderKickoffDialog({
               ))}
             </select>
           </label>
+          </KickoffSection>
 
+          <KickoffSection
+            embedded={embedded}
+            title="Expert & style"
+            hint="Routed to mnml ArchDiffusion; advanced sliders live below."
+            testId="render-kickoff-section-look"
+          >
           <div
             data-testid="render-kickoff-expert-style"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 8,
-            }}
+            className="render-kickoff-field-grid"
           >
             <label
               style={{ display: "flex", flexDirection: "column", gap: 4 }}
@@ -640,7 +675,18 @@ export function RenderKickoffDialog({
               </select>
             </label>
           </div>
+          </KickoffSection>
 
+          <KickoffSection
+            embedded={embedded}
+            title="Source"
+            hint={
+              kind === "still"
+                ? "BIM GLB capture or uploaded reference image."
+                : "GLB URL for headless viewport capture."
+            }
+            testId="render-kickoff-section-source"
+          >
           {kind === "still" && (
             <fieldset
               data-testid="render-kickoff-source-mode"
@@ -713,7 +759,14 @@ export function RenderKickoffDialog({
               />
             </label>
           )}
+          </KickoffSection>
 
+          <KickoffSection
+            embedded={embedded}
+            title="Prompt"
+            hint="Required for every job. Generator costs 1 credit."
+            testId="render-kickoff-section-prompt"
+          >
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span
               className="sc-label"
@@ -818,12 +871,20 @@ export function RenderKickoffDialog({
               </div>
             )}
           </div>
+          </KickoffSection>
 
+          <KickoffSection
+            embedded={embedded}
+            title="Advanced mnml"
+            hint="Optional expert multipart fields, negative prompt, and seed."
+            testId="render-kickoff-section-advanced"
+          >
           <MnmlExpertParamGrid
             expert={expertName as MnmlExpertName}
             values={expertParams}
             onChange={setExpertParams}
             disabled={submitting}
+            excludeParamNames={["expert_name", "render_style"]}
           />
 
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -877,7 +938,14 @@ export function RenderKickoffDialog({
               Random
             </button>
           </div>
+          </KickoffSection>
 
+          <KickoffSection
+            embedded={embedded}
+            title="Camera & framing"
+            hint="Required for still capture, elevation set, and video paths."
+            testId="render-kickoff-section-camera"
+          >
           {(kind === "still" && stillSourceMode === "model-capture") || kind === "video" ? (
             <div
               data-testid="render-kickoff-camera-fields"
@@ -959,6 +1027,7 @@ export function RenderKickoffDialog({
               </select>
             </label>
           )}
+          </KickoffSection>
 
           {error && (
             <div
@@ -973,8 +1042,16 @@ export function RenderKickoffDialog({
         </div>
 
         <div
-          className="p-4 flex justify-end gap-2"
-          style={{ borderTop: "1px solid var(--border-default)" }}
+          className={
+            embedded
+              ? "render-kickoff-footer"
+              : "p-4 flex justify-end gap-2"
+          }
+          style={
+            embedded
+              ? undefined
+              : { borderTop: "1px solid var(--border-default)" }
+          }
         >
           {embedded ? (
             <button
@@ -1003,7 +1080,11 @@ export function RenderKickoffDialog({
             disabled={!canSubmit}
             data-testid="render-kickoff-confirm"
           >
-            {submitting ? "Kicking off…" : "Kick off render"}
+            {submitting
+              ? "Kicking off…"
+              : embedded
+                ? `Kick off render · ${KICKOFF_CREDIT_BY_KIND[kind]} credits`
+                : "Kick off render"}
           </button>
         </div>
       </div>

@@ -3,6 +3,7 @@ import {
   ENGAGEMENT_VIEW_LABELS,
   ENGAGEMENT_VIEW_IDS,
   VIEW_SEGMENTS,
+  VIEW_DEFAULT_TAB,
   tabToView,
   type EngagementViewId,
 } from "./engagementViews";
@@ -25,8 +26,8 @@ export function EngagementViewHeader({
       onSelectTab("settings");
       return;
     }
-    const first = VIEW_SEGMENTS[view][0]?.tab;
-    if (first) onSelectTab(first);
+    const first = VIEW_SEGMENTS[view][0]?.tab ?? VIEW_DEFAULT_TAB[view];
+    onSelectTab(first);
   };
 
   return (

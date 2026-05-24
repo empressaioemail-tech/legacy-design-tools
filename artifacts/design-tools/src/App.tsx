@@ -1,6 +1,6 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { EngagementList } from "./pages/EngagementList";
+import { DashboardPage } from "./pages/DashboardPage";
 import { EngagementDetail } from "./pages/EngagementDetail";
 import { EngagementCompare } from "./pages/EngagementCompare";
 import StyleProbe from "./pages/StyleProbe";
@@ -14,6 +14,7 @@ import { Workspace } from "./pages/Workspace";
 import { SharedWithMe } from "./pages/SharedWithMe";
 import NotFound from "./pages/not-found";
 import { AppShell } from "./components/AppShell";
+import { SettingsAreaLayout } from "./components/settings/SettingsAreaLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const queryClient = new QueryClient();
@@ -22,7 +23,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/">
-        <EngagementList />
+        <DashboardPage />
       </Route>
       <Route path="/engagements/:id/compare">
         <EngagementCompare />
@@ -37,12 +38,16 @@ function Router() {
       </Route>
       <Route path="/style-probe">
         <AppShell title="Style Probe">
-          <StyleProbe />
+          <SettingsAreaLayout>
+            <StyleProbe />
+          </SettingsAreaLayout>
         </AppShell>
       </Route>
       <Route path="/health">
         <AppShell title="API Health">
-          <Health />
+          <SettingsAreaLayout>
+            <Health />
+          </SettingsAreaLayout>
         </AppShell>
       </Route>
       <Route path="/settings">
@@ -58,22 +63,30 @@ function Router() {
       </Route>
       <Route path="/workspace">
         <AppShell title="Workspace">
-          <Workspace />
+          <SettingsAreaLayout>
+            <Workspace />
+          </SettingsAreaLayout>
         </AppShell>
       </Route>
       <Route path="/workspace/shared">
         <AppShell title="Shared with me">
-          <SharedWithMe />
+          <SettingsAreaLayout>
+            <SharedWithMe />
+          </SettingsAreaLayout>
         </AppShell>
       </Route>
       <Route path="/dev/atoms">
         <AppShell title="Atom Inspector">
-          <DevAtoms />
+          <SettingsAreaLayout>
+            <DevAtoms />
+          </SettingsAreaLayout>
         </AppShell>
       </Route>
       <Route path="/dev/atoms/probe">
         <AppShell title="Retrieval Probe">
-          <DevAtomsProbe />
+          <SettingsAreaLayout>
+            <DevAtomsProbe />
+          </SettingsAreaLayout>
         </AppShell>
       </Route>
       <Route>

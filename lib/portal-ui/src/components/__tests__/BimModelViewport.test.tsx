@@ -73,7 +73,10 @@ vi.mock("three", () => {
     children: FakeObject[] = [];
     parent: FakeObject | null = null;
     userData: Record<string, unknown> = {};
-    position = { set: () => {} };
+    position = {
+      set: () => {},
+      distanceTo: () => 100,
+    };
     quaternion = { set: () => {} };
     scale = { set: () => {} };
     matrixWorld = { decompose: () => {} };
@@ -156,6 +159,16 @@ vi.mock("three", () => {
       return this;
     }
   }
+  class Vector3 {
+    x: number;
+    y: number;
+    z: number;
+    constructor(x = 0, y = 0, z = 0) {
+      this.x = x;
+      this.y = y;
+      this.z = z;
+    }
+  }
   return {
     Object3D: FakeObject,
     Group,
@@ -170,6 +183,7 @@ vi.mock("three", () => {
     Shape,
     ExtrudeGeometry,
     Box3,
+    Vector3,
     DoubleSide: 2,
     // OrbitControls reads the requested mouse-button / touch
     // bindings off these enums (Task #380 — pan-on-left,
@@ -600,6 +614,40 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     ).toBeInTheDocument();
   });
 
+  it("immersive presentation drops the framed title row and overlays HUD + view cube", () => {
+    render(<BimModelViewport elements={elements} presentation="immersive" />);
+    const viewport = screen.getByTestId("bim-model-viewport");
+    expect(viewport.getAttribute("data-presentation")).toBe("immersive");
+    expect(screen.queryByText("BIM model viewer")).toBeNull();
+    expect(screen.getByTestId("bim-model-viewport-element-count")).toHaveTextContent(
+      "3",
+    );
+    expect(screen.getByTestId("bim-view-cube")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("bim-model-viewport-toolbar").className,
+    ).toContain("bim-viewport-overlay-stack");
+  });
+
+  it("view cube face clicks re-apply the camera frame", () => {
+    render(<BimModelViewport elements={elements} presentation="immersive" />);
+    const viewport = screen.getByTestId("bim-model-viewport");
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
+    fireEvent.click(screen.getByTestId("bim-view-cube-front"));
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("2");
+    fireEvent.click(screen.getByTestId("bim-view-cube-top"));
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("3");
+  });
+
+  it("view cube edge and corner regions snap the camera", () => {
+    render(<BimModelViewport elements={elements} presentation="immersive" />);
+    const viewport = screen.getByTestId("bim-model-viewport");
+    fireEvent.click(screen.getByTestId("bim-view-cube-top-front"));
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("2");
+    fireEvent.click(screen.getByTestId("bim-view-cube-top-front-right"));
+    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("3");
+    expect(screen.getByTestId("bim-view-cube-top-back")).toBeInTheDocument();
+  });
+
   it("renders the WebGL fallback when the canvas has no GL context", () => {
     hoisted.webGlAvailable = false;
     render(<BimModelViewport elements={elements} />);
@@ -892,7 +940,7 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
 
   // --- Task #380 — reviewer pan / zoom / reset-view -----------------
 
-  it("configures OrbitControls for left-mouse pan, screen-space panning, and right-mouse rotate", () => {
+  it("configures OrbitControls for left-mouse pan, screen-space panning, and right-mouse rotate (default)", () => {
     render(<BimModelViewport elements={elements} />);
     const controls = hoisted.lastOrbitControls as
       | (Record<string, unknown> & {
@@ -904,15 +952,26 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     expect(controls?.enablePan).toBe(true);
     expect(controls?.enableZoom).toBe(true);
     expect(controls?.screenSpacePanning).toBe(true);
-    // PAN = 2 in the MOUSE enum we expose from the three mock.
+    // PAN = 2, ROTATE = 0, DOLLY = 1 in the MOUSE enum we expose from the three mock.
     expect(controls?.mouseButtons?.LEFT).toBe(2);
     expect(controls?.mouseButtons?.MIDDLE).toBe(1);
     expect(controls?.mouseButtons?.RIGHT).toBe(0);
-    // Touch: single-finger pan, two-finger dolly+rotate (so a
-    // pinch zooms in / out the way reviewers expect on a laptop
-    // trackpad).
     expect(controls?.touches?.ONE).toBe(1);
     expect(controls?.touches?.TWO).toBe(3);
+  });
+
+  it("configures OrbitControls for left-mouse rotate in immersive presentation", () => {
+    render(<BimModelViewport elements={elements} presentation="immersive" />);
+    const controls = hoisted.lastOrbitControls as
+      | (Record<string, unknown> & {
+          mouseButtons?: { LEFT?: number; MIDDLE?: number; RIGHT?: number };
+          touches?: { ONE?: number; TWO?: number };
+        })
+      | null;
+    expect(controls?.mouseButtons?.LEFT).toBe(0);
+    expect(controls?.mouseButtons?.RIGHT).toBe(2);
+    expect(controls?.touches?.ONE).toBe(0);
+    expect(controls?.touches?.TWO).toBe(2);
   });
 
   it("renders the Reset view button when WebGL is available and there's a frame to restore", () => {
