@@ -72,7 +72,7 @@ vi.mock("@workspace/api-client-react", () => {
   };
 });
 
-const { RenderKickoffDialog } = await import("../RenderKickoffDialog");
+const { RenderKickoffDialog, RenderKickoffPanel } = await import("../RenderKickoffDialog");
 
 function makeQueryClient() {
   return new QueryClient({
@@ -391,5 +391,24 @@ describe("RenderKickoffDialog", () => {
     });
     expect(onKickedOff).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("RenderKickoffPanel", () => {
+  it("renders inline without a modal overlay", () => {
+    const client = makeQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <RenderKickoffPanel
+          engagementId="eng-1"
+          defaultGlbUrl="https://example.com/model.glb"
+        />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId("render-kickoff-panel")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("render-kickoff-dialog"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("New render")).toBeInTheDocument();
   });
 });

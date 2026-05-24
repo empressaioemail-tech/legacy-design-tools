@@ -51,6 +51,13 @@ export default defineConfig(({ command }) => {
       strictPort: true,
       host: "0.0.0.0",
       allowedHosts: true,
+      // Local Windows dev: Replit's workspace proxy normally routes /api → api-server.
+      proxy: {
+        "/api": {
+          target: process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8080",
+          changeOrigin: true,
+        },
+      },
       fs: {
         strict: true,
       },

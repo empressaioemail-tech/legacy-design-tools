@@ -90,7 +90,7 @@ vi.mock("../lib/rendersObjectMirror", () => ({
 
 const { setupRouteTests } = await import("./setup");
 const { setMnmlClient, MockMnmlClient } = await import("@workspace/mnml-client");
-const { runRenderPolling } = await import("../routes/renders");
+const { resetRenderObjectStorageCacheForTests } = await import("../routes/renders");
 const {
   engagements,
   parcelBriefings,
@@ -112,6 +112,7 @@ const PNG_BYTES = Buffer.from(
 
 beforeEach(() => {
   uploadStore.clear();
+  resetRenderObjectStorageCacheForTests();
   setMnmlClient(null);
   captureMock.mockClear();
   mirrorMock.mockClear();
@@ -204,14 +205,17 @@ describe("POST /api/engagements/:id/renders — still upload source", () => {
         prompt: "courtyard",
       });
 
-    await runRenderPolling({
-      viewpointRenderId: kickoffRes.body.renderId,
-      body: {
-        kind: "still",
-        sourceUploadUrl: uploadRes.body.sourceUploadUrl,
-        prompt: "courtyard",
+    await vi.waitFor(
+      async () => {
+        const [row] = await ctx.schema!.db
+          .select()
+          .from(viewpointRenders)
+          .where(eq(viewpointRenders.id, kickoffRes.body.renderId))
+          .limit(1);
+        expect(row?.status).toBe("ready");
       },
-    });
+      { timeout: 20_000 },
+    );
 
     const [row] = await ctx.schema!.db
       .select()

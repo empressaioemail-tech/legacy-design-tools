@@ -136,6 +136,11 @@ function renderObjectStorage(): ObjectStorageService {
   return cachedRenderObjectStorage;
 }
 
+/** Test-only: drop cached storage so vi.mock'd ObjectStorageService is picked up. */
+export function resetRenderObjectStorageCacheForTests(): void {
+  cachedRenderObjectStorage = null;
+}
+
 /**
  * Elevation-set conventions. mnml's `camera_direction` enum is camera-
  * relative (which side of the building the camera is on). Our role
