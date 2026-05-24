@@ -641,25 +641,29 @@ function seedSubmissionsWithFindings(
   };
 }
 describe("EngagementDetail renders tab (Task #422)", () => {
-  it("renders the 'Renders' tab in the tab bar and mounts the gallery + new-render button when activated", () => {
+  it("renders the 'Renders' tab with inline kickoff panel and gallery when activated", () => {
     renderPage();
     const tabBtn = screen.getByRole("button", { name: "Renders" });
     expect(tabBtn).toBeInTheDocument();
     fireEvent.click(tabBtn);
     expect(screen.getByTestId("renders-tab")).toBeInTheDocument();
-    expect(screen.getByTestId("renders-tab-new-render")).toBeInTheDocument();
+    expect(screen.getByTestId("renders-tab-dashboard")).toBeInTheDocument();
+    expect(screen.getByTestId("render-kickoff-panel")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("renders-tab-new-render"),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("renders-gallery-empty"),
     ).toBeInTheDocument();
   });
 
-  it("opens the kickoff dialog when 'New render' is clicked", () => {
+  it("shows the inline kickoff panel without a modal dialog on the Renders tab", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Renders" }));
-    fireEvent.click(screen.getByTestId("renders-tab-new-render"));
+    expect(screen.getByTestId("render-kickoff-panel")).toBeInTheDocument();
     expect(
-      screen.getByTestId("render-kickoff-dialog"),
-    ).toBeInTheDocument();
+      screen.queryByTestId("render-kickoff-dialog"),
+    ).not.toBeInTheDocument();
   });
 });
 
