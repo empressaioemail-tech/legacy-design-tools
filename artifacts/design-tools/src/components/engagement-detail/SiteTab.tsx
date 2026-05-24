@@ -7,6 +7,7 @@ import { SiteMap } from "@workspace/site-context/client";
 import { ParcelZoningCard } from "@workspace/portal-ui";
 import { relativeTime } from "../../lib/relativeTime";
 import { StatusPill } from "@workspace/portal-ui";
+import { TabHeader } from "../cockpit/TabChrome";
 
 const PROJECT_TYPE_LABEL: Record<string, string> = {
   new_build: "New build",
@@ -112,7 +113,18 @@ export function SiteTab({
   ];
 
   return (
-    <div className="grid lg:grid-cols-2 gap-4">
+    <div className="cockpit-tab" data-testid="site-tab">
+      <TabHeader
+        overline="Site · group"
+        title="Site"
+        subtitle="Address, geocode, jurisdiction, project type, and parcel context for this engagement. Edits open the engagement details modal."
+        actions={
+          <button className="sc-btn-ghost sc-btn-sm" onClick={onAddAddress}>
+            Edit address
+          </button>
+        }
+      />
+      <div className="grid lg:grid-cols-2 gap-4">
       <div className="flex flex-col gap-4">
         <div className="sc-card flex flex-col">
           <div className="sc-card-header">
@@ -171,6 +183,7 @@ export function SiteTab({
           briefing={briefing}
           siteContextHref={`/engagements/${engagement.id}?tab=site-context`}
         />
+      </div>
       </div>
     </div>
   );

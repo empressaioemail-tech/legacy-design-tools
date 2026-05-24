@@ -14,6 +14,7 @@ import {
   type EngagementSubmissionSummary,
   type Finding,
 } from "@workspace/api-client-react";
+import { TabHeader } from "../cockpit/TabChrome";
 import {
   ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
   FindingDetailPanel,
@@ -499,7 +500,13 @@ export function FindingsTab({
       : "Run plan review";
 
   return (
-    <div className="flex flex-col gap-3" data-testid="findings-tab">
+    <div className="cockpit-tab" data-testid="findings-tab">
+      <TabHeader
+        overline="Review · group"
+        title="Findings"
+        subtitle="Plan-review findings for the selected submission. Use the chips to focus by severity / category, or hide addressed items. Element refs jump to Site context or 3D."
+      />
+      <div className="flex flex-col gap-3" data-testid="findings-tab-body">
       <div className="sc-row-sb" style={{ gap: 12 }}>
         <label
           className="sc-label"
@@ -686,6 +693,7 @@ export function FindingsTab({
           onClose={() => setSelectedFindingId(null)}
           onElementRefClick={onElementRefClick}
         />
+      </div>
       </div>
     </div>
   );

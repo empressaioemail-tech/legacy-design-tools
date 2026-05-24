@@ -7,6 +7,7 @@ import {
   type EngagementDetail as EngagementDetailType,
 } from "@workspace/api-client-react";
 import { RevitBinding } from "../RevitBinding";
+import { TabHeader } from "../cockpit/TabChrome";
 
 export function SettingsTab({
   engagement,
@@ -33,7 +34,12 @@ export function SettingsTab({
   const isArchived = engagement.status === "archived";
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="cockpit-tab" data-testid="settings-tab">
+      <TabHeader
+        overline="Config · group"
+        title="Settings"
+        subtitle="Per-engagement configuration: details, Revit binding, and the danger zone (archive). Global preferences live under the /settings route."
+      />
       <div className="sc-card p-4 flex items-center justify-between">
         <div>
           <div className="sc-label" style={{ marginBottom: 4 }}>
@@ -69,10 +75,10 @@ export function SettingsTab({
             disabled={isArchived || archive.isPending}
             onClick={() => setConfirming(true)}
             style={{
-              color: isArchived ? "var(--text-muted)" : "#ef4444",
+              color: isArchived ? "var(--text-muted)" : "var(--danger)",
               borderColor: isArchived
                 ? "var(--border-default)"
-                : "rgba(239,68,68,0.4)",
+                : "var(--danger-border, var(--danger))",
             }}
           >
             {isArchived ? "Already archived" : "Archive engagement"}

@@ -18,6 +18,8 @@ import {
   type LetterSectionKind,
 } from "@workspace/api-client-react";
 import { relativeTime } from "../../lib/relativeTime";
+import { TabHeader, ReservedRail } from "../cockpit/TabChrome";
+import { Sparkles, Presentation } from "lucide-react";
 
 /**
  * Cortex L3 (Lane C.4 / C.4.3) — architect-side deliverable-letter
@@ -794,9 +796,15 @@ export function DeliverableLettersTab({
 
   return (
     <div
-      className="sc-card flex flex-col"
+      className="cockpit-tab"
       data-testid="deliverable-letters-tab"
     >
+      <TabHeader
+        overline="Deliverables · group"
+        title="Deliverable letters"
+        subtitle="Comment-response letters as classified atoms — cover · intro · per-comment-response · signature, with per-section provenance back to findings and tasks."
+      />
+      <div className="sc-card flex flex-col">
       <div className="sc-card-header sc-row-sb">
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="sc-label">DELIVERABLE LETTERS</span>
@@ -890,6 +898,32 @@ export function DeliverableLettersTab({
         isOpen={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={(id) => setSelectedId(id)}
+      />
+      </div>
+      {/*
+        QA-28 / QA-29 growth zones — reserves layout for the
+        chat-initiated client-letter generator and the branded
+        presentation packet, both called out in the planning brief.
+        Wired here so the next wave drops into Deliverables without
+        another IA pass.
+      */}
+      <ReservedRail
+        title="Coming — agent-assisted deliverables"
+        testId="deliverable-letters-reserved"
+        tiles={[
+          {
+            id: "qa-28-chat-generate",
+            icon: <Sparkles size={14} />,
+            title: "Generate from chat (QA-28)",
+            body: "Ask the agent for a client letter — it drafts the L3 sections and stages them here for review.",
+          },
+          {
+            id: "qa-29-presentation-packet",
+            icon: <Presentation size={14} />,
+            title: "Branded presentation packet (QA-29)",
+            body: "Wizard that assembles letters, renders, and site context into a single branded deliverable PDF.",
+          },
+        ]}
       />
     </div>
   );

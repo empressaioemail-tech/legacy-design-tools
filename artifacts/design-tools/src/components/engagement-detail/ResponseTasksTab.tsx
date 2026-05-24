@@ -10,6 +10,7 @@ import {
   type ResponseTaskAtom,
   type ResponseTaskState,
 } from "@workspace/api-client-react";
+import { TabHeader } from "../cockpit/TabChrome";
 import { relativeTime } from "../../lib/relativeTime";
 
 /**
@@ -609,7 +610,12 @@ export function ResponseTasksTab({ engagementId }: { engagementId: string }) {
   const tasks = useMemo(() => data?.responseTasks ?? [], [data]);
 
   return (
-    <>
+    <div className="cockpit-tab" data-testid="response-tasks-tab-shell">
+      <TabHeader
+        overline="Review · group"
+        title="Response tasks"
+        subtitle="Track the architect-side response to each finding. The in-app agent can create tasks; you can reverse any agent action from the chat log."
+      />
       <div className="sc-card flex flex-col" data-testid="response-tasks-list">
         <div className="sc-card-header sc-row-sb">
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -658,6 +664,6 @@ export function ResponseTasksTab({ engagementId }: { engagementId: string }) {
         isOpen={createOpen}
         onClose={() => setCreateOpen(false)}
       />
-    </>
+    </div>
   );
 }

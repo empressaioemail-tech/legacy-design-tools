@@ -123,7 +123,7 @@ export function Notifications() {
                         width: 8,
                         height: 8,
                         borderRadius: "50%",
-                        background: "#6398AA",
+                        background: "var(--cyan)",
                         display: "inline-block",
                         flexShrink: 0,
                       }}

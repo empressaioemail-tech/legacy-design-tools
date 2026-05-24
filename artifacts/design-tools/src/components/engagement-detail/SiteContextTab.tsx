@@ -35,6 +35,8 @@ import { BriefingSourceUploadModal } from "../BriefingSourceUploadModal";
 import { BriefingRecentRunsPanel } from "./BriefingRecentRunsPanel";
 import { BriefingDivergencesPanel, PushToRevitAffordance } from "./PushToRevitAffordance";
 import { GenerateLayersSummaryBanner } from "./GenerateLayersSummaryBanner";
+import { TabHeader, ReservedRail } from "../cockpit/TabChrome";
+import { Mountain, Droplet, CloudRain } from "lucide-react";
 
 /**
  * Tier of a briefing source for the Site Context group headings (DA-PI-4).
@@ -608,7 +610,13 @@ export function SiteContextTab({
   };
 
   return (
-    <div className="sc-card p-6 flex flex-col gap-4 flex-1">
+    <div className="cockpit-tab" data-testid="site-context-tab">
+      <TabHeader
+        overline="Site · group"
+        title="Site context"
+        subtitle="Federal, state, and local layers plus architect-uploaded sources. Generate Layers re-runs every applicable adapter; per-source rows show tier, staleness, and divergences."
+      />
+      <div className="sc-card p-6 flex flex-col gap-4 flex-1">
       <div
         style={{
           display: "flex",
@@ -1445,6 +1453,38 @@ export function SiteContextTab({
         isOpen={uploadOpen}
         onClose={() => setUploadOpen(false)}
         existingLayerKinds={existingLayerKinds}
+      />
+      </div>
+      {/*
+        40d growth zone — reserves layout space for the topo /
+        drainage / rainfall overlays the planning brief calls out
+        for the 2D site-context completeness lane. These ship as
+        proper overlay controls once the adapters land; until then
+        the tiles mark the slot so the IA doesn't shift.
+      */}
+      <ReservedRail
+        title="Coming — 40d completeness lane"
+        testId="site-context-reserved"
+        tiles={[
+          {
+            id: "topo-contours",
+            icon: <Mountain size={14} />,
+            title: "Topo contours",
+            body: "USGS NED-derived elevation contour overlay on the parcel map.",
+          },
+          {
+            id: "drainage-zones",
+            icon: <Droplet size={14} />,
+            title: "Drainage zones",
+            body: "On-parcel drainage polygons + downstream flow lines, sourced from federal and state hydrography layers.",
+          },
+          {
+            id: "rainfall-sim",
+            icon: <CloudRain size={14} />,
+            title: "Rainfall simulation",
+            body: "Storm-event rainfall + runoff simulator panel docked alongside the site map.",
+          },
+        ]}
       />
     </div>
   );

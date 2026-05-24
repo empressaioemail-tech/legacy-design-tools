@@ -9,6 +9,7 @@ import {
   type ProductSpecReferenceAtom,
   type ProductSpecStatus,
 } from "@workspace/api-client-react";
+import { TabHeader } from "../cockpit/TabChrome";
 import { relativeTime } from "../../lib/relativeTime";
 import type { SpecDraftEntry } from "../../store/engagements";
 
@@ -503,7 +504,12 @@ export function ProductSpecReferencesTab({
   );
 
   return (
-    <>
+    <div className="cockpit-tab" data-testid="product-spec-references-tab-shell">
+      <TabHeader
+        overline="Deliverables · group"
+        title="Product specs"
+        subtitle="ICC-ES-evaluated product references with live ESR status. Withdrawn or expired evaluations are flagged for review; refresh re-polls ICC-ES on demand."
+      />
       <div
         className="sc-card flex flex-col"
         data-testid="product-spec-references-list"
@@ -567,6 +573,6 @@ export function ProductSpecReferencesTab({
           setDraftReasoning(null);
         }}
       />
-    </>
+    </div>
   );
 }

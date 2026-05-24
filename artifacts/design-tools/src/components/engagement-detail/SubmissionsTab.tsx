@@ -5,6 +5,7 @@ import {
   type EngagementSubmissionSummary,
   type SubmissionStatus,
 } from "@workspace/api-client-react";
+import { TabHeader } from "../cockpit/TabChrome";
 import { ReviewerComment } from "@workspace/portal-ui";
 import { relativeTime } from "../../lib/relativeTime";
 import {
@@ -251,7 +252,12 @@ export function SubmissionsTab({
   }
 
   return (
-    <>
+    <div className="cockpit-tab" data-testid="submissions-tab-shell">
+      <TabHeader
+        overline="Review · group"
+        title="Submissions"
+        subtitle="Every package this engagement has sent to the jurisdiction, newest first. Use the chip row to filter live replies from backfilled ones."
+      />
       <div className="sc-card flex flex-col" data-testid="submissions-list">
         <div className="sc-card-header sc-row-sb">
           <div
@@ -464,6 +470,6 @@ export function SubmissionsTab({
           })}
         </div>
       </div>
-    </>
+    </div>
   );
 }

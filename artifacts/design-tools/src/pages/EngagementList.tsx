@@ -14,6 +14,8 @@ import {
 import { StatusPill } from "@workspace/portal-ui";
 import { AppShell } from "../components/AppShell";
 import { relativeTime } from "../lib/relativeTime";
+import { ReservedRail } from "../components/cockpit/TabChrome";
+import { Link2 } from "lucide-react";
 
 function NoAdaptersPill({ message }: { message: string }) {
   return (
@@ -216,6 +218,24 @@ export function EngagementList() {
             </label>
           </div>
         </div>
+
+        {/*
+          QA-27 growth zone — reserves the drop-link intake entry on the
+          portfolio surface so the chat-driven "give the agent a link to a
+          project / drawing / spec" pattern lands without an IA shift.
+        */}
+        <ReservedRail
+          title="Coming — drop-link intake (QA-27)"
+          testId="engagements-reserved-qa27"
+          tiles={[
+            {
+              id: "drop-link-intake",
+              icon: <Link2 size={14} />,
+              title: "Drop a link to start",
+              body: "Paste a Revit / Drive / Box / Sharepoint link and the agent will spin up a new engagement, pull metadata, and queue the first snapshot.",
+            },
+          ]}
+        />
 
         {/* ENGAGEMENT GRID ------------------------------------- */}
         {engagements.length === 0 ? (
