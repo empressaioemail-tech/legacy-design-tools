@@ -87,6 +87,9 @@ export type { PowerToolKind } from "./components/render-tools/powerToolKickoff";
 // finding-citation drill-in.
 export { BimModelViewport } from "./components/BimModelViewport";
 export type { BimModelViewportProps } from "./components/BimModelViewport";
+export { ViewCubeWidget } from "./components/ViewCubeWidget";
+export type { ViewCubeWidgetProps, ViewCubeRegionId } from "./components/ViewCubeWidget";
+export { BimViewCube } from "./components/BimViewCube";
 
 // Briefing divergences — shared by design-tools (architect surface)
 // and plan-review (read-only reviewer surface). Promoted to portal-ui
@@ -137,6 +140,10 @@ export type {
   CodeAtomPillProps,
   RenderCodeAtomTokensOptions,
 } from "./components/CodeAtomPill";
+export {
+  CodeAtomDetailModal,
+} from "./components/CodeAtomDetailModal";
+export type { CodeAtomDetailModalProps } from "./components/CodeAtomDetailModal";
 
 // Briefing context surface — Task #305 (Wave 2 Sprint A).
 //
@@ -147,7 +154,7 @@ export type {
 // read-only "Engagement Context" view that the architect sees in
 // design-tools without either artifact importing the other.
 export { SiteContextViewer } from "./components/SiteContextViewer";
-export type { SiteContextViewerProps } from "./components/SiteContextViewer";
+export type { SiteContextViewerProps, BuildingOverlayState } from "./components/SiteContextViewer";
 export {
   BriefingSourceCitationPill,
   BriefingCodeAtomPill,
@@ -239,8 +246,12 @@ export {
   setTheme,
   getTheme,
   toggleTheme,
+  useStyleProbeThemePreview,
+  STYLE_PROBE_THEMES,
   type ThemeName,
+  type StyleProbeThemeId,
 } from "./lib/theme";
+export { StyleProbeThemePicker } from "./components/StyleProbeThemePicker";
 
 export {
   useSidebarState,
@@ -304,3 +315,45 @@ export type { HovercardProps, HovercardPlacement } from "./components/Hovercard"
 // (aggregate variant for the document-level provenance line).
 export { AIBadge } from "./components/AIBadge";
 export type { AIBadgeProps, AIBadgeVariant } from "./components/AIBadge";
+
+// Canva Connect — client materials deliverables (stub phase).
+export { CanvaConnectionBanner } from "./components/CanvaConnectionBanner";
+export { CanvaAssetPicker } from "./components/CanvaAssetPicker";
+export { CanvaTemplateGrid } from "./components/CanvaTemplateGrid";
+export { CanvaPushProgress } from "./components/CanvaPushProgress";
+export {
+  createMockCanvaIntegrationService,
+  mockCanvaIntegrationService,
+} from "./canva/mockCanvaIntegrationService";
+export type {
+  CanvaIntegrationService,
+  CanvaConnectionStatus,
+  CanvaSelectableAsset,
+  CanvaBrandTemplate,
+  CanvaTemplateSlot,
+  CanvaPushJob,
+  CanvaDesignPush,
+  CanvaPushRequest,
+} from "./canva/types";
+
+// Floor plan → 3D visualization (stub phase).
+export { FloorPlanSourcePicker } from "./components/FloorPlanSourcePicker";
+export { FloorPlanFormatBadges } from "./components/FloorPlanFormatBadges";
+export { FloorPlanVizControls } from "./components/FloorPlanVizControls";
+export { FloorPlanVizProgress } from "./components/FloorPlanVizProgress";
+export { FloorPlanBeforeAfterHero } from "./components/FloorPlanBeforeAfterHero";
+export { FloorPlanVizHistory } from "./components/FloorPlanVizHistory";
+export { FloorPlanVizWorkspace } from "./components/FloorPlanVizWorkspace";
+export {
+  createMockFloorPlanVizService,
+  mockFloorPlanVizService,
+  registerMockFloorPlanSource,
+} from "./floor-plan-viz/mockFloorPlanVizService";
+export {
+  FLOOR_PLAN_PRESET_META,
+  type FloorPlanVizService,
+  type FloorPlanVizSource,
+  type FloorPlanVizJob,
+  type FloorPlanVizPreset,
+  type FloorPlanVizJobStatus,
+} from "./floor-plan-viz/types";

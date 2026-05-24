@@ -1,4 +1,34 @@
+import { useLayoutEffect, useState } from "react";
+
 export type ThemeName = "dark" | "light";
+
+/** Style Probe chrome variants — not persisted to localStorage. */
+export type StyleProbeThemeId = "dark" | "charcoal" | "soft-light";
+
+export const STYLE_PROBE_THEMES: ReadonlyArray<{
+  id: StyleProbeThemeId;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "dark",
+    label: "Navy",
+    description:
+      "Current production dark — cool blue undertone on surfaces and borders.",
+  },
+  {
+    id: "charcoal",
+    label: "Charcoal",
+    description:
+      "Near-monochrome deep greys — softened charcoal, not pure black.",
+  },
+  {
+    id: "soft-light",
+    label: "Soft light",
+    description:
+      "Muted light surfaces — warm grey base, not paper-white.",
+  },
+] as const;
 
 const STORAGE_KEY = "theme";
 
@@ -74,4 +104,48 @@ export function toggleTheme(): ThemeName {
   const next: ThemeName = getTheme() === "dark" ? "light" : "dark";
   setTheme(next);
   return next;
+}
+
+function applyStyleProbeTheme(html: HTMLElement, themeId: StyleProbeThemeId): void {
+  html.setAttribute("data-theme", themeId);
+  html.classList.toggle("dark", themeId !== "soft-light");
+}
+
+function restoreDocumentTheme(
+  html: HTMLElement,
+  previous: string,
+  hadDarkClass: boolean,
+): void {
+  html.setAttribute("data-theme", previous);
+  const wasDark =
+    previous === "dark" ||
+    previous === "charcoal" ||
+    (previous !== "light" && previous !== "soft-light" && hadDarkClass);
+  html.classList.toggle("dark", wasDark);
+}
+
+/**
+ * Style Probe theme switcher — previews navy / charcoal / soft-light on
+ * `<html>` without writing to localStorage. Restores prior theme on unmount.
+ */
+export function useStyleProbeThemePreview(
+  initial: StyleProbeThemeId = "dark",
+): {
+  themeId: StyleProbeThemeId;
+  setThemeId: (id: StyleProbeThemeId) => void;
+} {
+  const [themeId, setThemeId] = useState<StyleProbeThemeId>(initial);
+
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return;
+    const html = document.documentElement;
+    const previous = html.getAttribute("data-theme") ?? "dark";
+    const hadDarkClass = html.classList.contains("dark");
+    applyStyleProbeTheme(html, themeId);
+    return () => {
+      restoreDocumentTheme(html, previous, hadDarkClass);
+    };
+  }, [themeId]);
+
+  return { themeId, setThemeId };
 }
