@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Box,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import { isSettingsAreaPath } from "./settings/settingsNav";
 import {
+  ChromeThemeToggle,
   useSidebarState,
   RIGHT_SIDEBAR_MAX_WIDTH,
   RIGHT_SIDEBAR_MIN_WIDTH,
@@ -46,6 +48,18 @@ import {
 
 const RIGHT_COLLAPSED_WIDTH = 48;
 const KEYBOARD_NUDGE = 16;
+
+function filterProjects(projects: CockpitProject[], query: string): CockpitProject[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return projects;
+  return projects.filter((p) => {
+    const haystack = [p.name, p.jurisdiction, p.status, p.updatedLabel]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(q);
+  });
+}
 
 export interface CockpitNavItem {
   label: string;
@@ -153,6 +167,43 @@ export function CockpitShell({
   const setProjectRailWidth = useSidebarState((s) => s.setProjectRailWidth);
   const resetProjectRailWidth = useSidebarState((s) => s.resetProjectRailWidth);
   const setRight = useSidebarState((s) => s.setRight);
+  const collapsedGroups = useSidebarState((s) => s.collapsedGroups);
+  const toggleGroup = useSidebarState((s) => s.toggleGroup);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const engagementsGroupKey = projectRail?.label ?? "Active engagements";
+  const engagementsCollapsed = collapsedGroups[engagementsGroupKey] === true;
+
+  const filteredProjects = useMemo(
+    () => (projectRail ? filterProjects(projectRail.projects, searchQuery) : []),
+    [projectRail, searchQuery],
+  );
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
+          return;
+        }
+        e.preventDefault();
+        if (projectRailCollapsed) toggleProjectRail();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [projectRailCollapsed, toggleProjectRail]);
+
+  useEffect(() => {
+    if (searchQuery.trim() && engagementsCollapsed) {
+      toggleGroup(engagementsGroupKey);
+    }
+  }, [searchQuery, engagementsCollapsed, engagementsGroupKey, toggleGroup]);
 
   // One-time migration: expanded Claude + project list after IA consolidation.
   useEffect(() => {
@@ -283,16 +334,19 @@ export function CockpitShell({
           ) : (
             <>
               <div className="cockpit-unified-rail-top">
-                <Link
-                  href="/"
-                  className="cockpit-nav-brand cockpit-nav-brand-labeled"
-                  aria-label="SmartCity OS Home"
-                >
-                  <span className="cockpit-nav-brand-mark" aria-hidden="true">
-                    S
-                  </span>
-                  <span className="cockpit-nav-brand-text">SmartCity OS</span>
-                </Link>
+                <div className="cockpit-unified-rail-top-row">
+                  <Link
+                    href="/"
+                    className="cockpit-nav-brand cockpit-nav-brand-labeled"
+                    aria-label="SmartCity OS Home"
+                  >
+                    <span className="cockpit-nav-brand-mark" aria-hidden="true">
+                      S
+                    </span>
+                    <span className="cockpit-nav-brand-text">SmartCity OS</span>
+                  </Link>
+                  <ChromeThemeToggle />
+                </div>
                 <nav
                   className="cockpit-workspace-nav"
                   aria-label="Workspace navigation"
@@ -336,12 +390,27 @@ export function CockpitShell({
                 )}
               </div>
               <div className="cockpit-project-rail-header">
-                <div className="cockpit-search-affordance">
-                  <Search size={13} className="opacity-60" />
-                  <span className="cockpit-search-placeholder">Search engagements…</span>
-                  <span className="cockpit-kbd">⌘</span>
-                  <span className="cockpit-kbd">K</span>
-                </div>
+                <label className="cockpit-search-affordance" htmlFor="cockpit-engagement-search">
+                  <Search size={13} className="opacity-60" aria-hidden />
+                  <input
+                    ref={searchInputRef}
+                    id="cockpit-engagement-search"
+                    type="search"
+                    className="cockpit-search-input"
+                    placeholder="Search engagements…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    data-testid="cockpit-engagement-search"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <span className="cockpit-kbd" aria-hidden>
+                    ⌘
+                  </span>
+                  <span className="cockpit-kbd" aria-hidden>
+                    K
+                  </span>
+                </label>
                 <button
                   type="button"
                   onClick={toggleProjectRail}
@@ -354,15 +423,35 @@ export function CockpitShell({
                 </button>
               </div>
               <div className="cockpit-project-rail-list sc-scroll">
-                <div className="cockpit-rail-overline">
-                  {projectRail.label ?? "Active engagements"}
-                </div>
+                <button
+                  type="button"
+                  className="cockpit-rail-section-toggle"
+                  onClick={() => toggleGroup(engagementsGroupKey)}
+                  aria-expanded={!engagementsCollapsed}
+                  data-testid="cockpit-engagements-group-toggle"
+                >
+                  {engagementsCollapsed ? (
+                    <ChevronRight size={11} aria-hidden />
+                  ) : (
+                    <ChevronDown size={11} aria-hidden />
+                  )}
+                  <span>{engagementsGroupKey}</span>
+                  {!engagementsCollapsed && filteredProjects.length > 0 && (
+                    <span className="cockpit-rail-section-count">{filteredProjects.length}</span>
+                  )}
+                </button>
+                {!engagementsCollapsed && (
+                  <>
                 {projectRail.projects.length === 0 ? (
                   <div className="cockpit-rail-empty">
                     {projectRail.emptyMessage ?? "No engagements yet."}
                   </div>
+                ) : filteredProjects.length === 0 ? (
+                  <div className="cockpit-rail-empty" data-testid="cockpit-engagement-search-empty">
+                    No engagements match &ldquo;{searchQuery.trim()}&rdquo;.
+                  </div>
                 ) : (
-              projectRail.projects.map((p) => {
+              filteredProjects.map((p) => {
                 const isProjectActive = p.id === projectRail.activeProjectId;
                 return (
                   <Link
@@ -387,7 +476,9 @@ export function CockpitShell({
                 );
               })
             )}
-            {projectRail.viewAllHref && projectRail.projects.length > 0 && (
+            {projectRail.viewAllHref &&
+              !searchQuery.trim() &&
+              projectRail.projects.length > 0 && (
               <Link
                 href={projectRail.viewAllHref}
                 className="cockpit-rail-view-all"
@@ -395,6 +486,8 @@ export function CockpitShell({
                 View all projects →
               </Link>
             )}
+                  </>
+                )}
           </div>
               <div className="cockpit-unified-rail-footer">
                 {navTrailing}

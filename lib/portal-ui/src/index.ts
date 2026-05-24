@@ -246,12 +246,18 @@ export {
   setTheme,
   getTheme,
   toggleTheme,
+  setChromeTheme,
+  getChromeTheme,
+  isDarkChromeTheme,
+  useChromeTheme,
   useStyleProbeThemePreview,
   STYLE_PROBE_THEMES,
   type ThemeName,
+  type ChromeThemeId,
   type StyleProbeThemeId,
 } from "./lib/theme";
 export { StyleProbeThemePicker } from "./components/StyleProbeThemePicker";
+export { ChromeThemeToggle } from "./components/ChromeThemeToggle";
 
 export {
   useSidebarState,

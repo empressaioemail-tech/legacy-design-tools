@@ -1,9 +1,13 @@
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
-export type ThemeName = "dark" | "light";
+/** App chrome themes — drives `data-theme` on `<html>`. */
+export type ChromeThemeId = "dark" | "charcoal" | "soft-light" | "light";
 
-/** Style Probe chrome variants — not persisted to localStorage. */
+/** Themes exposed in Style Probe (production light stays on header toggle). */
 export type StyleProbeThemeId = "dark" | "charcoal" | "soft-light";
+
+/** @deprecated Prefer {@link ChromeThemeId}. */
+export type ThemeName = "dark" | "light";
 
 export const STYLE_PROBE_THEMES: ReadonlyArray<{
   id: StyleProbeThemeId;
@@ -14,7 +18,7 @@ export const STYLE_PROBE_THEMES: ReadonlyArray<{
     id: "dark",
     label: "Navy",
     description:
-      "Current production dark — cool blue undertone on surfaces and borders.",
+      "Production dark — cool blue undertone on surfaces and borders.",
   },
   {
     id: "charcoal",
@@ -31,26 +35,66 @@ export const STYLE_PROBE_THEMES: ReadonlyArray<{
 ] as const;
 
 const STORAGE_KEY = "theme";
+const LAST_DARK_STORAGE_KEY = "theme-last-dark";
 
-function readStoredTheme(): ThemeName | null {
+const CHROME_THEMES: ChromeThemeId[] = [
+  "dark",
+  "charcoal",
+  "soft-light",
+  "light",
+];
+
+function isChromeThemeId(value: string | null | undefined): value is ChromeThemeId {
+  return (
+    value === "dark" ||
+    value === "charcoal" ||
+    value === "soft-light" ||
+    value === "light"
+  );
+}
+
+export function isDarkChromeTheme(themeId: ChromeThemeId): boolean {
+  return themeId === "dark" || themeId === "charcoal";
+}
+
+export function applyChromeTheme(
+  html: HTMLElement,
+  themeId: ChromeThemeId,
+): void {
+  html.setAttribute("data-theme", themeId);
+  html.classList.toggle("dark", isDarkChromeTheme(themeId));
+}
+
+function readStoredChromeTheme(): ChromeThemeId | null {
   if (typeof localStorage === "undefined") return null;
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark") return stored;
+    if (isChromeThemeId(stored)) return stored;
   } catch {
     // ignore storage errors (private mode, etc)
   }
   return null;
 }
 
-function readSystemTheme(): ThemeName {
+function readLastDarkChromeTheme(): ChromeThemeId {
+  if (typeof localStorage === "undefined") return "charcoal";
+  try {
+    const stored = localStorage.getItem(LAST_DARK_STORAGE_KEY);
+    if (stored === "dark" || stored === "charcoal") return stored;
+  } catch {
+    // ignore
+  }
+  return "charcoal";
+}
+
+function readSystemChromeTheme(): ChromeThemeId {
   if (
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function"
   ) {
     try {
       if (window.matchMedia("(prefers-color-scheme: light)").matches) {
-        return "light";
+        return "soft-light";
       }
     } catch {
       // ignore matchMedia errors
@@ -59,93 +103,111 @@ function readSystemTheme(): ThemeName {
   return "dark";
 }
 
-export function setTheme(name: ThemeName): void {
+/** Persist and apply a chrome theme app-wide. */
+export function setChromeTheme(themeId: ChromeThemeId): void {
   if (typeof document === "undefined") return;
-  const html = document.documentElement;
-  html.dataset.theme = name;
-  html.classList.toggle("dark", name === "dark");
+  applyChromeTheme(document.documentElement, themeId);
   try {
-    localStorage.setItem(STORAGE_KEY, name);
+    localStorage.setItem(STORAGE_KEY, themeId);
+    if (isDarkChromeTheme(themeId)) {
+      localStorage.setItem(LAST_DARK_STORAGE_KEY, themeId);
+    }
   } catch {
     // ignore storage errors (private mode, etc)
   }
 }
 
+export function getChromeTheme(): ChromeThemeId {
+  if (typeof document === "undefined") return "dark";
+  const current = document.documentElement.getAttribute("data-theme");
+  if (isChromeThemeId(current)) return current;
+  return "dark";
+}
+
+/** Back-compat wrapper — maps legacy light/dark to chrome themes. */
+export function setTheme(name: ThemeName): void {
+  setChromeTheme(name === "light" ? "light" : "dark");
+}
+
 /**
- * Apply the user's persisted theme on app boot. When no preference is
- * stored we honour the OS `prefers-color-scheme` setting so a light-mode
- * user lands on a light dashboard the first time they open it.
- *
- * The OS-derived choice is applied to `data-theme` but intentionally
- * NOT written to localStorage — that way a later OS theme switch still
- * cascades to the dashboard until the user makes an explicit pick via
- * the header toggle.
+ * Apply persisted chrome theme on boot. When nothing is stored, honour
+ * OS `prefers-color-scheme` without writing to localStorage.
  */
 export function initTheme(): void {
   if (typeof document === "undefined") return;
-  const stored = readStoredTheme();
+  const stored = readStoredChromeTheme();
   if (stored) {
-    setTheme(stored);
+    applyChromeTheme(document.documentElement, stored);
     return;
   }
-  const fromOs = readSystemTheme();
-  const html = document.documentElement;
-  html.dataset.theme = fromOs;
-  html.classList.toggle("dark", fromOs === "dark");
+  const fromOs = readSystemChromeTheme();
+  applyChromeTheme(document.documentElement, fromOs);
 }
 
+/** Back-compat — returns dark unless the active chrome theme is light. */
 export function getTheme(): ThemeName {
-  if (typeof document === "undefined") return "dark";
-  const t = document.documentElement.dataset.theme;
-  return t === "light" ? "light" : "dark";
-}
-
-export function toggleTheme(): ThemeName {
-  const next: ThemeName = getTheme() === "dark" ? "light" : "dark";
-  setTheme(next);
-  return next;
-}
-
-function applyStyleProbeTheme(html: HTMLElement, themeId: StyleProbeThemeId): void {
-  html.setAttribute("data-theme", themeId);
-  html.classList.toggle("dark", themeId !== "soft-light");
-}
-
-function restoreDocumentTheme(
-  html: HTMLElement,
-  previous: string,
-  hadDarkClass: boolean,
-): void {
-  html.setAttribute("data-theme", previous);
-  const wasDark =
-    previous === "dark" ||
-    previous === "charcoal" ||
-    (previous !== "light" && previous !== "soft-light" && hadDarkClass);
-  html.classList.toggle("dark", wasDark);
+  const chrome = getChromeTheme();
+  return chrome === "light" || chrome === "soft-light" ? "light" : "dark";
 }
 
 /**
- * Style Probe theme switcher — previews navy / charcoal / soft-light on
- * `<html>` without writing to localStorage. Restores prior theme on unmount.
+ * Header toggle: dark family (navy / charcoal) ↔ soft light.
+ * Remembers which dark variant was last selected.
  */
+export function toggleTheme(): ChromeThemeId {
+  const current = getChromeTheme();
+  if (isDarkChromeTheme(current)) {
+    setChromeTheme("soft-light");
+    return "soft-light";
+  }
+  const next = readLastDarkChromeTheme();
+  setChromeTheme(next);
+  return next;
+}
+
+/** React hook — mirrors `<html data-theme>` for chrome pickers and header. */
+export function useChromeTheme(): {
+  themeId: ChromeThemeId;
+  setThemeId: (id: ChromeThemeId) => void;
+} {
+  const [themeId, setThemeIdState] = useState<ChromeThemeId>(() =>
+    typeof document === "undefined" ? "dark" : getChromeTheme(),
+  );
+
+  useEffect(() => {
+    setThemeIdState(getChromeTheme());
+    if (typeof MutationObserver === "undefined") return;
+    const obs = new MutationObserver(() => {
+      setThemeIdState(getChromeTheme());
+    });
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => obs.disconnect();
+  }, []);
+
+  return {
+    themeId,
+    setThemeId: (id: ChromeThemeId) => {
+      setChromeTheme(id);
+      setThemeIdState(id);
+    },
+  };
+}
+
+/** @deprecated Use {@link useChromeTheme}. */
 export function useStyleProbeThemePreview(
   initial: StyleProbeThemeId = "dark",
 ): {
   themeId: StyleProbeThemeId;
   setThemeId: (id: StyleProbeThemeId) => void;
 } {
-  const [themeId, setThemeId] = useState<StyleProbeThemeId>(initial);
-
-  useLayoutEffect(() => {
-    if (typeof document === "undefined") return;
-    const html = document.documentElement;
-    const previous = html.getAttribute("data-theme") ?? "dark";
-    const hadDarkClass = html.classList.contains("dark");
-    applyStyleProbeTheme(html, themeId);
-    return () => {
-      restoreDocumentTheme(html, previous, hadDarkClass);
-    };
-  }, [themeId]);
-
-  return { themeId, setThemeId };
+  const chrome = useChromeTheme();
+  return {
+    themeId: (chrome.themeId === "light"
+      ? initial
+      : chrome.themeId) as StyleProbeThemeId,
+    setThemeId: (id: StyleProbeThemeId) => chrome.setThemeId(id),
+  };
 }
