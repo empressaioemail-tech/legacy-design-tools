@@ -23,6 +23,7 @@ const server = http.createServer((req, res) => {
       method: req.method,
       path: upstreamPath,
       headers,
+      ...(isHttps ? { rejectUnauthorized: false } : {}),
     },
     (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);

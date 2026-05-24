@@ -36,7 +36,13 @@ function bucketFor(kind: DemoInboxKind): string {
   }
 }
 
-function ActionCard({ item }: { item: DemoInboxItem }) {
+function ActionCard({
+  item,
+  compact = false,
+}: {
+  item: DemoInboxItem;
+  compact?: boolean;
+}) {
   return (
     <div
       className={`cockpit-inbox-action-card${item.muted ? " cockpit-inbox-action-card--muted" : ""}`}
@@ -68,12 +74,16 @@ function ActionCard({ item }: { item: DemoInboxItem }) {
         <div className="cockpit-inbox-action-card-footer">
           <span className="cockpit-inbox-engagement-chip">{item.engagementName}</span>
           <div className="cockpit-inbox-action-card-actions">
-            <button type="button" className="cockpit-inbox-ghost-btn">
-              Dismiss
-            </button>
-            <button type="button" className="cockpit-inbox-ghost-btn">
-              Snooze
-            </button>
+            {!compact ? (
+              <>
+                <button type="button" className="cockpit-inbox-ghost-btn">
+                  Dismiss
+                </button>
+                <button type="button" className="cockpit-inbox-ghost-btn">
+                  Snooze
+                </button>
+              </>
+            ) : null}
             <Link href={inboxHref(item)} className="cockpit-inbox-cta-btn">
               {item.ctaLabel ?? "Open"}
               <ChevronRight size={14} aria-hidden="true" />
@@ -257,31 +267,63 @@ export function InboxActionQueue({ compact = false }: { compact?: boolean }) {
           </p>
         )}
 
-        <section className="cockpit-inbox-bucket" data-testid="inbox-needs-you">
-          <h2 className="cockpit-inbox-bucket-title">
-            <span className="cockpit-inbox-bucket-dot" data-bucket="action" />
-            Needs your action
-            <span className="cockpit-inbox-bucket-count">({needsYou.length})</span>
-          </h2>
-          <div className="cockpit-inbox-action-list">
-            {needsVisible.map((item) => (
-              <ActionCard key={item.id} item={item} />
-            ))}
-          </div>
-        </section>
+        {compact ? (
+          <div className="cockpit-dashboard-inbox-buckets">
+            <section className="cockpit-inbox-bucket" data-testid="inbox-needs-you">
+              <h2 className="cockpit-inbox-bucket-title">
+                <span className="cockpit-inbox-bucket-dot" data-bucket="action" />
+                Needs your action
+                <span className="cockpit-inbox-bucket-count">({needsYou.length})</span>
+              </h2>
+              <div className="cockpit-inbox-action-list">
+                {needsVisible.map((item) => (
+                  <ActionCard key={item.id} item={item} compact />
+                ))}
+              </div>
+            </section>
 
-        <section className="cockpit-inbox-bucket" data-testid="inbox-ai">
-          <h2 className="cockpit-inbox-bucket-title">
-            <span className="cockpit-inbox-bucket-dot" data-bucket="ai" />
-            AI is flagging
-            <span className="cockpit-inbox-bucket-count">({aiItems.length})</span>
-          </h2>
-          <div className="cockpit-inbox-ai-grid">
-            {aiVisible.map((item) => (
-              <AiCard key={item.id} item={item} />
-            ))}
+            <section className="cockpit-inbox-bucket" data-testid="inbox-ai">
+              <h2 className="cockpit-inbox-bucket-title">
+                <span className="cockpit-inbox-bucket-dot" data-bucket="ai" />
+                AI is flagging
+                <span className="cockpit-inbox-bucket-count">({aiItems.length})</span>
+              </h2>
+              <div className="cockpit-inbox-ai-grid">
+                {aiVisible.map((item) => (
+                  <AiCard key={item.id} item={item} />
+                ))}
+              </div>
+            </section>
           </div>
-        </section>
+        ) : (
+          <>
+            <section className="cockpit-inbox-bucket" data-testid="inbox-needs-you">
+              <h2 className="cockpit-inbox-bucket-title">
+                <span className="cockpit-inbox-bucket-dot" data-bucket="action" />
+                Needs your action
+                <span className="cockpit-inbox-bucket-count">({needsYou.length})</span>
+              </h2>
+              <div className="cockpit-inbox-action-list">
+                {needsVisible.map((item) => (
+                  <ActionCard key={item.id} item={item} />
+                ))}
+              </div>
+            </section>
+
+            <section className="cockpit-inbox-bucket" data-testid="inbox-ai">
+              <h2 className="cockpit-inbox-bucket-title">
+                <span className="cockpit-inbox-bucket-dot" data-bucket="ai" />
+                AI is flagging
+                <span className="cockpit-inbox-bucket-count">({aiItems.length})</span>
+              </h2>
+              <div className="cockpit-inbox-ai-grid">
+                {aiVisible.map((item) => (
+                  <AiCard key={item.id} item={item} />
+                ))}
+              </div>
+            </section>
+          </>
+        )}
 
         {!compact && (
         <>

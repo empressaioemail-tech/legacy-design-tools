@@ -1,8 +1,17 @@
-import { useState, type ReactNode } from "react";
-import type { EngagementDetail, SnapshotDetail, SheetSummary } from "@workspace/api-client-react";
-import { Clock, ChevronDown, ChevronUp, Code, Info, User } from "lucide-react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
+import type { EngagementDetail, SnapshotDetail } from "@workspace/api-client-react";
+import {
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  Code,
+  Expand,
+  ExternalLink,
+  Info,
+  User,
+} from "lucide-react";
 import { relativeTime } from "../../lib/relativeTime";
-import { SnapshotsSheetRail } from "./SnapshotsSheetRail";
+import { TabHeader } from "../cockpit/TabChrome";
 
 type Snapshot = NonNullable<EngagementDetail["snapshots"]>[number];
 
@@ -17,7 +26,7 @@ interface SnapshotsTabProps {
   bimElementCount: number;
   jsonExpanded: boolean;
   setJsonExpanded: (next: boolean) => void;
-  onAskClaudeAboutSheet: (sheet: SheetSummary) => void;
+  onOpenSheets?: () => void;
 }
 
 export function SnapshotsTab({
@@ -31,17 +40,61 @@ export function SnapshotsTab({
   bimElementCount,
   jsonExpanded,
   setJsonExpanded,
-  onAskClaudeAboutSheet,
+  onOpenSheets,
 }: SnapshotsTabProps) {
   const [drawerOpen, setDrawerOpen] = useState(true);
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   const selected =
     snapshots.find((s) => s.id === selectedSnapshotId) ?? snapshots[0];
 
+  const toggleFullscreen = useCallback(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void el.requestFullscreen();
+    }
+  }, []);
+
+  const headerActions =
+    bimElementCount > 0 ? (
+      <>
+        <button
+          type="button"
+          className="sc-btn-ghost sc-btn-sm"
+          data-testid="snapshots-bim-fullscreen"
+          onClick={toggleFullscreen}
+          title="Full screen 3D"
+        >
+          <Expand size={14} aria-hidden /> Full screen 3D
+        </button>
+        {onOpenSheets && (selected?.sheetCount ?? 0) > 0 ? (
+          <button
+            type="button"
+            className="sc-btn-ghost sc-btn-sm"
+            data-testid="snapshots-open-sheets"
+            onClick={onOpenSheets}
+          >
+            <ExternalLink size={14} aria-hidden />
+            Sheets ({selected?.sheetCount ?? 0})
+          </button>
+        ) : null}
+      </>
+    ) : null;
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="snapshots-hero-split flex-1 min-h-0">
-        <div className="snapshots-hero-viewport">
+      <TabHeader
+        overline="Model"
+        title="Snapshots"
+        subtitle="BIM sync history and 3D viewer — rotate, zoom, and inspect elements from Revit."
+        testId="snapshots-tab-header"
+        actions={headerActions}
+      />
+      <div className="snapshots-hero-viewport-wrap flex-1 min-h-0">
+        <div ref={viewportRef} className="snapshots-hero-viewport">
           <div className="snapshots-hero-bim-layer">{bimModelPanel}</div>
 
           <div className="snapshots-hero-overlay-stack">
@@ -150,9 +203,9 @@ export function SnapshotsTab({
                 <Clock className="w-5 h-5" />
               </div>
               {!hasSnapshots && (
-                <div className="snapshots-hero-timeline-empty sc-body">
+                <p className="snapshots-hero-timeline-empty sc-body">
                   No snapshots yet. Send one from Revit.
-                </div>
+                </p>
               )}
               {snapshots.map((snap) => {
                 const isSelected = snap.id === selectedSnapshotId;
@@ -220,11 +273,6 @@ export function SnapshotsTab({
             </div>
           )}
         </div>
-
-        <SnapshotsSheetRail
-          snapshotId={selectedSnapshotId}
-          onAskClaude={onAskClaudeAboutSheet}
-        />
       </div>
     </div>
   );

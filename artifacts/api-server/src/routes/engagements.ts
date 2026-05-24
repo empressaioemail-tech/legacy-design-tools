@@ -17,6 +17,12 @@ import { getHistoryService } from "../atoms/registry";
 import { autoTriggerFindingsOnSubmissionCreated } from "../lib/autoTriggerFindingsOnSubmissionCreated";
 import { autoTriggerClassificationOnSubmissionCreated } from "../lib/autoTriggerClassificationOnSubmissionCreated";
 import {
+  buildIntakeSiteContextRaw,
+  mergeSiteContextRaw,
+  parseCreateEngagementBody,
+  toClientBrief,
+} from "./packages.logic";
+import {
   ENGAGEMENT_EDIT_ACTOR,
   SUBMISSION_INGEST_ACTOR,
   emitEngagementAddressUpdatedEvent,
@@ -162,6 +168,7 @@ function toEngagementSummary(
     revitDocumentPath: e.revitDocumentPath,
     applicantFirm: e.applicantFirm,
     architectOfRecord: buildArchitectOfRecord(e),
+    clientBrief: toClientBrief(e),
   };
 }
 
@@ -198,6 +205,49 @@ router.get("/engagements", async (_req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err }, "list engagements failed");
     res.status(500).json({ error: "Failed to list engagements" });
+  }
+});
+
+router.post("/engagements", async (req: Request, res: Response) => {
+  const parsed = parseCreateEngagementBody(req.body);
+  if ("error" in parsed) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  try {
+    const nameLower = parsed.name.toLowerCase();
+    const hasIntakeMeta =
+      parsed.clientNotes ||
+      parsed.clientEmail ||
+      parsed.intakeSource ||
+      parsed.sourceExcerpt;
+    const siteContextRaw = hasIntakeMeta
+      ? buildIntakeSiteContextRaw({
+          clientNotes: parsed.clientNotes ?? null,
+          clientEmail: parsed.clientEmail ?? null,
+          intakeSource: parsed.intakeSource ?? null,
+          sourceExcerpt: parsed.sourceExcerpt ?? null,
+          capturedAt: new Date().toISOString(),
+        })
+      : null;
+
+    const [row] = await db
+      .insert(engagements)
+      .values({
+        name: parsed.name,
+        nameLower,
+        status: "active",
+        address: parsed.address ?? null,
+        jurisdiction: parsed.jurisdiction ?? null,
+        projectType: parsed.projectType ?? null,
+        applicantFirm: parsed.applicantFirm ?? null,
+        siteContextRaw,
+      })
+      .returning();
+    res.status(201).json(toEngagementSummary(row!, 0, null));
+  } catch (err) {
+    logger.error({ err }, "create engagement failed");
+    res.status(500).json({ error: "Failed to create engagement" });
   }
 });
 
@@ -362,7 +412,10 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
             update["jurisdictionCity"] = geo.jurisdictionCity;
             update["jurisdictionState"] = geo.jurisdictionState;
             update["jurisdictionFips"] = geo.jurisdictionFips;
-            update["siteContextRaw"] = geo.raw ?? null;
+            update["siteContextRaw"] = mergeSiteContextRaw(
+              existing.siteContextRaw,
+              geo.raw ?? null,
+            );
             if (geo.jurisdictionCity && geo.jurisdictionState) {
               geocodeProducedJurisdiction = true;
               resolvedJurisdictionCity = geo.jurisdictionCity;
@@ -486,7 +539,10 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
             jurisdictionCity: resolvedGeo.jurisdictionCity,
             jurisdictionState: resolvedGeo.jurisdictionState,
             jurisdictionFips: resolvedGeo.jurisdictionFips,
-            siteContextRaw: resolvedGeo.raw ?? null,
+            siteContextRaw: mergeSiteContextRaw(
+              existing.siteContextRaw,
+              resolvedGeo.raw ?? null,
+            ),
             updatedAt: new Date(),
           })
           .where(eq(engagements.id, existing.id));

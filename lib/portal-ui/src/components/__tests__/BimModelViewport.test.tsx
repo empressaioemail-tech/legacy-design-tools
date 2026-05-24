@@ -63,6 +63,40 @@ const hoisted = vi.hoisted(() => ({
   // (Task #380) and to count how many times the camera-fit
   // logic actually wrote a new target into the live controls.
   lastOrbitControls: null as Record<string, unknown> | null,
+  viewCubeRaycastFace: vi.fn(() => null as string | null),
+  viewCubeRaycastCompass: vi.fn(() => null as string | null),
+  viewCubeRaycastCubeBody: vi.fn(() => true),
+}));
+
+vi.mock("../ViewCubeRenderer", () => ({
+  ViewCubeRenderer: class MockViewCubeRenderer {
+    domElement: HTMLCanvasElement;
+
+    constructor(container: HTMLElement) {
+      this.domElement = document.createElement("canvas");
+      this.domElement.className = "bim-viewport-viewcube-canvas";
+      container.appendChild(this.domElement);
+    }
+
+    setOrientationFromMainCamera() {}
+
+    raycastFace(...args: unknown[]) {
+      return hoisted.viewCubeRaycastFace(...args);
+    }
+
+    raycastCompass(...args: unknown[]) {
+      return hoisted.viewCubeRaycastCompass(...args);
+    }
+
+    raycastCubeBody(...args: unknown[]) {
+      return hoisted.viewCubeRaycastCubeBody(...args);
+    }
+
+    updateHover() {}
+    setHoverFace() {}
+    render() {}
+    dispose() {}
+  },
 }));
 
 // Three.js module stub — only the surface BimModelViewport touches.
@@ -74,8 +108,25 @@ vi.mock("three", () => {
     parent: FakeObject | null = null;
     userData: Record<string, unknown> = {};
     position = {
-      set: () => {},
-      distanceTo: () => 100,
+      x: 0,
+      y: 0,
+      z: 0,
+      set(x?: number, y?: number, z?: number) {
+        if (typeof x === "number" && typeof y === "number" && typeof z === "number") {
+          this.x = x;
+          this.y = y;
+          this.z = z;
+        }
+      },
+      copy(v: { x: number; y: number; z: number }) {
+        this.x = v.x;
+        this.y = v.y;
+        this.z = v.z;
+        return this;
+      },
+      distanceTo(v: { x: number; y: number; z: number }) {
+        return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z);
+      },
     };
     quaternion = { set: () => {} };
     scale = { set: () => {} };
@@ -116,6 +167,7 @@ vi.mock("three", () => {
     aspect = 1;
     up = { set: () => {} };
     updateProjectionMatrix() {}
+    lookAt() {}
   }
   class WebGLRenderer {
     domElement: HTMLCanvasElement;
@@ -168,6 +220,72 @@ vi.mock("three", () => {
       this.y = y;
       this.z = z;
     }
+    set(x: number, y: number, z: number) {
+      this.x = x;
+      this.y = y;
+      this.z = z;
+      return this;
+    }
+    copy(v: Vector3) {
+      this.x = v.x;
+      this.y = v.y;
+      this.z = v.z;
+      return this;
+    }
+    subVectors(a: Vector3, b: Vector3) {
+      this.x = a.x - b.x;
+      this.y = a.y - b.y;
+      this.z = a.z - b.z;
+      return this;
+    }
+    add(v: Vector3) {
+      this.x += v.x;
+      this.y += v.y;
+      this.z += v.z;
+      return this;
+    }
+    addScaledVector(v: Vector3, s: number) {
+      this.x += v.x * s;
+      this.y += v.y * s;
+      this.z += v.z * s;
+      return this;
+    }
+    applyAxisAngle(_axis: Vector3, angle: number) {
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const nx = this.x * c - this.y * s;
+      const ny = this.x * s + this.y * c;
+      this.x = nx;
+      this.y = ny;
+      return this;
+    }
+    distanceTo(v: Vector3) {
+      return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z);
+    }
+    setFromSpherical(s: Spherical) {
+      const sinPhi = Math.sin(s.phi);
+      this.x = s.radius * sinPhi * Math.cos(s.theta);
+      this.y = s.radius * sinPhi * Math.sin(s.theta);
+      this.z = s.radius * Math.cos(s.phi);
+      return this;
+    }
+  }
+  class Spherical {
+    radius = 1;
+    phi = 0;
+    theta = 0;
+    setFromVector3(v: Vector3) {
+      this.radius = Math.hypot(v.x, v.y, v.z) || 1;
+      this.phi = Math.acos(Math.max(-1, Math.min(1, v.z / this.radius)));
+      this.theta = Math.atan2(v.y, v.x);
+      return this;
+    }
+    setFromSpherical(s: Spherical) {
+      this.radius = s.radius;
+      this.phi = s.phi;
+      this.theta = s.theta;
+      return this;
+    }
   }
   return {
     Object3D: FakeObject,
@@ -184,6 +302,7 @@ vi.mock("three", () => {
     ExtrudeGeometry,
     Box3,
     Vector3,
+    Spherical,
     DoubleSide: 2,
     // OrbitControls reads the requested mouse-button / touch
     // bindings off these enums (Task #380 — pan-on-left,
@@ -201,21 +320,8 @@ vi.mock("three", () => {
 
 vi.mock("three/examples/jsm/controls/OrbitControls.js", () => ({
   OrbitControls: class {
-    // Captures every (x, y, z) the camera-fit logic writes to the
-    // controls target — tests assert the length of this array to
-    // tell "the camera was reframed once / twice / not at all"
-    // apart from "the React-derived data-camera-target attribute
-    // changed reactively but the camera was left alone".
     targetCalls: Array<[number, number, number]> = [];
-    target = {
-      set: (x: number, y: number, z: number) => {
-        // eslint-disable-next-line @typescript-eslint/no-this-alias
-        const self = this as unknown as {
-          targetCalls: Array<[number, number, number]>;
-        };
-        self.targetCalls.push([x, y, z]);
-      },
-    };
+    target!: { x: number; y: number; z: number; set: (x: number, y: number, z: number) => void };
     enableDamping = false;
     dampingFactor = 0;
     enablePan?: boolean;
@@ -228,6 +334,18 @@ vi.mock("three/examples/jsm/controls/OrbitControls.js", () => ({
     update() {}
     dispose() {}
     constructor() {
+      const self = this;
+      this.target = {
+        x: 0,
+        y: 0,
+        z: 0,
+        set(x: number, y: number, z: number) {
+          this.x = x;
+          this.y = y;
+          this.z = z;
+          self.targetCalls.push([x, y, z]);
+        },
+      };
       hoisted.lastOrbitControls = this as unknown as Record<string, unknown>;
     }
   },
@@ -302,6 +420,12 @@ beforeEach(() => {
     max: { x: 0, y: 0, z: 0 },
   };
   hoisted.lastOrbitControls = null;
+  hoisted.viewCubeRaycastFace.mockReset();
+  hoisted.viewCubeRaycastCompass.mockReset();
+  hoisted.viewCubeRaycastCubeBody.mockReset();
+  hoisted.viewCubeRaycastFace.mockReturnValue(null);
+  hoisted.viewCubeRaycastCompass.mockReturnValue(null);
+  hoisted.viewCubeRaycastCubeBody.mockReturnValue(true);
   // Task #409 — the gesture legend's "graduated power user" state
   // is persisted via localStorage. Clearing between tests so one
   // spec's dismissals don't leak into the next spec's "fresh
@@ -322,10 +446,24 @@ beforeEach(() => {
       disconnect() {}
     };
   globalThis.fetch = hoisted.fetchMock as unknown as typeof fetch;
-  vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation(
-    () => 0 as unknown as number,
-  );
-  vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation(() => {});
+  const rafTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  let rafId = 0;
+  vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+    const id = ++rafId;
+    const timer = setTimeout(() => {
+      rafTimers.delete(id);
+      cb(performance.now() + 300);
+    }, 0);
+    rafTimers.set(id, timer);
+    return id;
+  });
+  vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation((id) => {
+    const timer = rafTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      rafTimers.delete(id);
+    }
+  });
 });
 
 afterEach(() => {
@@ -622,30 +760,34 @@ describe("BimModelViewport — Plan Review (Task #370)", () => {
     expect(screen.getByTestId("bim-model-viewport-element-count")).toHaveTextContent(
       "3",
     );
-    expect(screen.getByTestId("bim-view-cube")).toBeInTheDocument();
+    expect(screen.getByTestId("bim-viewport-viewcube")).toBeInTheDocument();
     expect(
       screen.getByTestId("bim-model-viewport-toolbar").className,
     ).toContain("bim-viewport-overlay-stack");
   });
 
-  it("view cube face clicks re-apply the camera frame", () => {
+  it("view cube face clicks re-apply the camera frame", async () => {
     render(<BimModelViewport elements={elements} presentation="immersive" />);
     const viewport = screen.getByTestId("bim-model-viewport");
     expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("1");
-    fireEvent.click(screen.getByTestId("bim-view-cube-front"));
-    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("2");
-    fireEvent.click(screen.getByTestId("bim-view-cube-top"));
-    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("3");
+    hoisted.viewCubeRaycastFace.mockReturnValue("front");
+    fireEvent.click(screen.getByTestId("bim-viewport-viewcube-canvas-wrap"));
+    await waitFor(() => {
+      expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("2");
+    });
+    hoisted.viewCubeRaycastFace.mockReturnValue("top");
+    fireEvent.click(screen.getByTestId("bim-viewport-viewcube-canvas-wrap"));
+    await waitFor(() => {
+      expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("3");
+    });
   });
 
-  it("view cube edge and corner regions snap the camera", () => {
+  it("view cube hosts a WebGL mini canvas (edge/corner raycast = Phase 2)", () => {
     render(<BimModelViewport elements={elements} presentation="immersive" />);
-    const viewport = screen.getByTestId("bim-model-viewport");
-    fireEvent.click(screen.getByTestId("bim-view-cube-top-front"));
-    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("2");
-    fireEvent.click(screen.getByTestId("bim-view-cube-top-front-right"));
-    expect(viewport.getAttribute("data-camera-fit-applied-count")).toBe("3");
-    expect(screen.getByTestId("bim-view-cube-top-back")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("bim-viewport-viewcube-canvas-wrap"),
+    ).toBeInTheDocument();
+    expect(document.querySelector(".bim-viewport-viewcube-canvas")).toBeInTheDocument();
   });
 
   it("renders the WebGL fallback when the canvas has no GL context", () => {

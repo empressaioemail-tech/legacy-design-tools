@@ -41,6 +41,8 @@ export interface FindingDetailPanelProps {
    * `lib/portal-ui` and must stay viewer-agnostic.
    */
   onElementRefClick?: (elementRef: string) => void;
+  /** When set, code citation pills open inline instead of linking away. */
+  onCodeAtomClick?: (atomId: string) => void;
   testIdPrefix?: string;
 }
 
@@ -50,6 +52,7 @@ function renderCitation(
   citation: FindingCitation,
   key: number,
   codeLibraryBase: string,
+  onCodeAtomClick?: (atomId: string) => void,
 ): ReactNode {
   if (citation.kind === "code-section") {
     return (
@@ -61,6 +64,7 @@ function renderCitation(
         <CodeAtomPill
           atomId={citation.atomId}
           codeLibraryBase={codeLibraryBase}
+          onClick={onCodeAtomClick}
         />
       </li>
     );
@@ -88,6 +92,7 @@ export function FindingDetailPanel({
   onRetry,
   onClose,
   onElementRefClick,
+  onCodeAtomClick,
   testIdPrefix = DEFAULT_TESTID_PREFIX,
 }: FindingDetailPanelProps) {
   // Escape key clears the selection when an `onClose` is wired.
@@ -148,6 +153,7 @@ export function FindingDetailPanel({
   const promoted = isFindingReviewerPromoted(finding);
   const bodyNodes = splitOnCodeAtomTokens(finding.text, {
     codeLibraryBase,
+    onAtomClick: onCodeAtomClick,
   });
 
   return (
@@ -209,7 +215,7 @@ export function FindingDetailPanel({
             </div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {finding.citations.map((c, i) =>
-                renderCitation(c, i, codeLibraryBase),
+                renderCitation(c, i, codeLibraryBase, onCodeAtomClick),
               )}
             </ul>
           </div>

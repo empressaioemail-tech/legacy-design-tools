@@ -43,7 +43,9 @@ import { BriefingRecentRunsPanel } from "./BriefingRecentRunsPanel";
 import { BriefingDivergencesPanel, PushToRevitAffordance } from "./PushToRevitAffordance";
 import { GenerateLayersSummaryBanner } from "./GenerateLayersSummaryBanner";
 import { TabHeader } from "../cockpit/TabChrome";
+import { SiteContext3DModelToggle } from "./SiteContext3DModelToggle";
 import { Mountain, Droplet, CloudRain } from "lucide-react";
+import type { BuildingOverlayState } from "@workspace/portal-ui";
 
 /**
  * Tier of a briefing source for the Site Context group headings (DA-PI-4).
@@ -122,6 +124,7 @@ export function SiteContextTab({
   buildingGlbUrl,
   showBuilding,
   onToggleShowBuilding,
+  bimModelLoading = false,
   embedded = false,
   hideMapAnd3d = false,
   uploadOpen: uploadOpenProp,
@@ -142,6 +145,8 @@ export function SiteContextTab({
   buildingGlbUrl?: string | null;
   showBuilding?: boolean;
   onToggleShowBuilding?: (next: boolean) => void;
+  /** Disable the 3D model toggle until the BIM model query settles. */
+  bimModelLoading?: boolean;
   /** Render inside the unified Site tab (no duplicate page header). */
   embedded?: boolean;
   /** Omit map / 3D viewers when the parent Site tab owns the canvas. */
@@ -609,6 +614,15 @@ export function SiteContextTab({
       setSubTab("3d");
     }
   }, [hasReadyDxf, subTab]);
+
+  const [buildingOverlayState, setBuildingOverlayState] =
+    useState<BuildingOverlayState>("idle");
+
+  useEffect(() => {
+    if (showBuilding && subTab === "map") {
+      setSubTab("3d");
+    }
+  }, [showBuilding, subTab]);
 
   // Citation-pill jump target highlight state (Task #176). When a
   // user clicks an inline citation pill in the narrative, we scroll
@@ -1247,7 +1261,14 @@ export function SiteContextTab({
         >
           Site context view
         </div>
-        <ToggleGroup.Root
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <ToggleGroup.Root
           type="single"
           value={subTab}
           aria-label="Site context view"
@@ -1305,6 +1326,16 @@ export function SiteContextTab({
             3D view
           </ToggleGroup.Item>
         </ToggleGroup.Root>
+          {subTab === "3d" ? (
+            <SiteContext3DModelToggle
+              buildingGlbUrl={buildingGlbUrl}
+              showBuilding={showBuilding}
+              onToggleShowBuilding={onToggleShowBuilding}
+              buildingState={buildingOverlayState}
+              bimModelLoading={bimModelLoading}
+            />
+          ) : null}
+        </div>
       </div>
 
       {subTab === "map" ? (
@@ -1358,6 +1389,8 @@ export function SiteContextTab({
             buildingGlbUrl={buildingGlbUrl}
             showBuilding={showBuilding}
             onToggleShowBuilding={onToggleShowBuilding}
+            hideShowBuildingCheckbox
+            onBuildingStateChange={setBuildingOverlayState}
           />
         </div>
       )}

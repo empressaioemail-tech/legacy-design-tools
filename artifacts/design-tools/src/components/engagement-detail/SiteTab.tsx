@@ -25,6 +25,8 @@ import {
 } from "@workspace/portal-ui";
 import type { TabId } from "./urlState";
 import { SiteContextTab } from "./SiteContextTab";
+import { SiteContext3DModelToggle } from "./SiteContext3DModelToggle";
+import type { BuildingOverlayState } from "@workspace/portal-ui";
 import {
   Eye,
   EyeOff,
@@ -500,6 +502,7 @@ export function SiteTab({
   buildingGlbUrl,
   showBuilding,
   onToggleShowBuilding,
+  bimModelLoading = false,
   initialCanvasMode,
   pendingBriefingSourceHighlight,
   onPendingBriefingSourceHighlightConsumed,
@@ -512,6 +515,7 @@ export function SiteTab({
   buildingGlbUrl?: string | null;
   showBuilding?: boolean;
   onToggleShowBuilding?: (next: boolean) => void;
+  bimModelLoading?: boolean;
   /** Deep-link: open the map canvas in 3D (e.g. finding element ref). */
   initialCanvasMode?: "map" | "3d";
   pendingBriefingSourceHighlight?: string | null;
@@ -557,6 +561,14 @@ export function SiteTab({
   const [canvasMode, setCanvasMode] = useState<"map" | "3d">(
     initialCanvasMode ?? "map",
   );
+  const [buildingOverlayState, setBuildingOverlayState] =
+    useState<BuildingOverlayState>("idle");
+
+  useEffect(() => {
+    if (showBuilding && canvasMode === "map") {
+      setCanvasMode("3d");
+    }
+  }, [showBuilding, canvasMode]);
   useEffect(() => {
     if (selectedElementRef) setCanvasMode("3d");
   }, [selectedElementRef]);
@@ -723,6 +735,15 @@ export function SiteTab({
               <Building2 size={14} aria-hidden />
               {canvasMode === "3d" ? "Map" : "3D"}
             </button>
+            {canvasMode === "3d" ? (
+              <SiteContext3DModelToggle
+                buildingGlbUrl={buildingGlbUrl}
+                showBuilding={showBuilding}
+                onToggleShowBuilding={onToggleShowBuilding}
+                buildingState={buildingOverlayState}
+                bimModelLoading={bimModelLoading}
+              />
+            ) : null}
             <button
               type="button"
               className="site-hero-float-btn"
@@ -804,6 +825,8 @@ export function SiteTab({
                     buildingGlbUrl={buildingGlbUrl}
                     showBuilding={showBuilding}
                     onToggleShowBuilding={onToggleShowBuilding}
+                    hideShowBuildingCheckbox
+                    onBuildingStateChange={setBuildingOverlayState}
                   />
                 </div>
               )}
@@ -902,8 +925,14 @@ export function SiteTab({
             </div>
           </section>
 
-          <section className="site-details-block" aria-label="Map layer visibility">
-            <h3 className="site-details-block-title">Map layers</h3>
+          <section
+            className="site-details-block site-details-block--layers-unified"
+            aria-label="Site layers and adapters"
+            data-testid="site-tab-layers-panel"
+            id="site-layers-panel"
+            ref={layersPanelRef}
+          >
+            <h3 className="site-details-block-title">Site layers</h3>
             <div
               className="site-workbench-layers sc-scroll"
               data-testid="site-tab-layer-palette"
@@ -928,16 +957,6 @@ export function SiteTab({
                 </div>
               ))}
             </div>
-          </section>
-
-          <section
-            className="site-details-block site-details-block--layers-admin"
-            aria-label="Adapter layers and refresh"
-            data-testid="site-tab-layers-panel"
-            id="site-layers-panel"
-            ref={layersPanelRef}
-          >
-            <h3 className="site-details-block-title">Layers &amp; adapters</h3>
             <SiteContextTab
               engagement={engagement}
               embedded

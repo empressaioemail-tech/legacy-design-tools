@@ -8,24 +8,29 @@ import {
   StickyNote,
   X,
 } from "lucide-react";
+import { useLocation } from "wouter";
 import { DraftBadge, SourceChip } from "../cockpit/QualityChips";
-
-/**
- * Client intake — QA-27 surface, UI shell only.
- *
- * Four entry lanes (link / file / paste text / forwarded email) collapse
- * into a single "Create draft project" call. The submit handler runs a
- * mock 600ms job and lands the user on a success state that shows the
- * synthesized project preview with the standard quality-bar chips
- * (Draft badge + source chip + Unverified tag where the agent
- * couldn't pull a value) so the screen reads like the real intake will.
- *
- * Backend is intentionally not wired — no API call is made and no
- * engagement is created. The modal is the empty-state shell the chat /
- * agent integration will hang off in the next wave.
- */
+import { createEngagement } from "../engagement-detail/packages/packagesApi";
 
 type IntakeMode = "link" | "file" | "paste" | "email";
+
+type ProjectTypeValue =
+  | "new_build"
+  | "renovation"
+  | "addition"
+  | "tenant_improvement"
+  | "other"
+  | "";
+
+const PROJECT_TYPE_OPTIONS: Array<{ value: ProjectTypeValue; label: string }> =
+  [
+    { value: "", label: "Not set" },
+    { value: "new_build", label: "New build" },
+    { value: "renovation", label: "Renovation" },
+    { value: "addition", label: "Addition" },
+    { value: "tenant_improvement", label: "Tenant improvement" },
+    { value: "other", label: "Other" },
+  ];
 
 const MODE_TABS: Array<{ id: IntakeMode; label: string; icon: typeof Link2 }> =
   [
@@ -36,27 +41,56 @@ const MODE_TABS: Array<{ id: IntakeMode; label: string; icon: typeof Link2 }> =
   ];
 
 const MODE_HINT: Record<IntakeMode, string> = {
-  link: "Paste a Revit / Drive / Box / Sharepoint / Figma URL. The agent will follow the link, pull metadata, and stage a draft project.",
-  file: "Drop a PDF, DWG, or zipped Revit central file. Files stay client-side until you click Create.",
-  paste: "Paste the project brief, a client email body, or a meeting transcript. The agent will extract the project name, address, and scope.",
-  email: "Forward the kickoff email to the workspace inbox (shown after create), or paste it below — agent parses sender, subject, and attachments.",
+  link: "Paste a Revit / Drive / Box / Sharepoint / Figma URL. The agent will follow the link and merge what it finds with your project details.",
+  file: "Drop a PDF, DWG, or zipped Revit central file. Files stay client-side until you confirm.",
+  paste: "Paste the project brief, client email, or meeting transcript. The agent extracts name, address, and scope.",
+  email: "Forward the kickoff email to the workspace inbox, or paste it below — agent parses sender, subject, and attachments.",
 };
 
-interface DraftPreview {
+interface ProjectDetailsForm {
   projectName: string;
   address: string;
   jurisdiction: string;
-  projectType: string;
-  unverifiedFields: ReadonlyArray<"address" | "jurisdiction" | "projectType">;
+  projectType: ProjectTypeValue;
+  clientName: string;
+  clientEmail: string;
+  clientNotes: string;
+}
+
+const EMPTY_DETAILS: ProjectDetailsForm = {
+  projectName: "",
+  address: "",
+  jurisdiction: "",
+  projectType: "",
+  clientName: "",
+  clientEmail: "",
+  clientNotes: "",
+};
+
+interface DraftPreview extends ProjectDetailsForm {
+  unverifiedFields: ReadonlyArray<
+    "address" | "jurisdiction" | "projectType" | "projectName"
+  >;
   sources: ReadonlyArray<{ kind: string; label: string }>;
 }
 
-const MOCK_PREVIEW: Record<IntakeMode, DraftPreview> = {
+const MOCK_EXTRACT: Record<
+  IntakeMode,
+  Pick<
+    DraftPreview,
+  | "projectName"
+  | "address"
+  | "jurisdiction"
+  | "projectType"
+  | "unverifiedFields"
+  | "sources"
+  >
+> = {
   link: {
     projectName: "Untitled link-imported project",
     address: "1144 N Kayenta Dr, Moab UT 84532",
     jurisdiction: "Grand County, UT",
-    projectType: "New build",
+    projectType: "new_build",
     unverifiedFields: ["projectType"],
     sources: [
       { kind: "URL", label: "linked Drive folder" },
@@ -65,9 +99,9 @@ const MOCK_PREVIEW: Record<IntakeMode, DraftPreview> = {
   },
   file: {
     projectName: "Untitled upload project",
-    address: "Address not detected",
-    jurisdiction: "Jurisdiction not detected",
-    projectType: "Renovation",
+    address: "",
+    jurisdiction: "",
+    projectType: "renovation",
     unverifiedFields: ["address", "jurisdiction"],
     sources: [{ kind: "PDF", label: "uploaded scope p. 1–3" }],
   },
@@ -75,27 +109,91 @@ const MOCK_PREVIEW: Record<IntakeMode, DraftPreview> = {
     projectName: "Untitled paste-imported project",
     address: "143 E 100 N, Moab UT 84532",
     jurisdiction: "Grand County, UT",
-    projectType: "Addition",
+    projectType: "addition",
     unverifiedFields: [],
     sources: [{ kind: "PASTE", label: "client brief excerpt" }],
   },
   email: {
     projectName: "Untitled email-imported project",
-    address: "Address not detected",
-    jurisdiction: "Jurisdiction not detected",
-    projectType: "New build",
+    address: "",
+    jurisdiction: "",
+    projectType: "new_build",
     unverifiedFields: ["address", "jurisdiction", "projectType"],
     sources: [{ kind: "EMAIL", label: "forwarded kickoff" }],
   },
 };
 
+function mergeDraft(
+  mode: IntakeMode,
+  manual: ProjectDetailsForm,
+): DraftPreview {
+  const extracted = MOCK_EXTRACT[mode];
+  const pick = (key: keyof ProjectDetailsForm) => {
+    const manualVal = manual[key];
+    if (typeof manualVal === "string" && manualVal.trim()) {
+      return manualVal.trim();
+    }
+    const extractedVal = extracted[key as keyof typeof extracted];
+    return typeof extractedVal === "string" ? extractedVal : "";
+  };
+
+  const projectName = pick("projectName");
+  const address = pick("address");
+  const jurisdiction = pick("jurisdiction");
+  const projectType = (manual.projectType ||
+    extracted.projectType ||
+    "") as ProjectTypeValue;
+
+  const unverified: Array<
+    "address" | "jurisdiction" | "projectType" | "projectName"
+  > = [];
+  if (!manual.projectName.trim()) {
+    if (extracted.unverifiedFields.includes("projectName" as never)) {
+      unverified.push("projectName");
+    }
+  }
+  for (const field of extracted.unverifiedFields) {
+    if (field === "projectName") continue;
+    const manualFilled =
+      field === "address"
+        ? manual.address.trim()
+        : field === "jurisdiction"
+          ? manual.jurisdiction.trim()
+          : manual.projectType;
+    if (!manualFilled) unverified.push(field);
+  }
+
+  return {
+    projectName,
+    address,
+    jurisdiction,
+    projectType,
+    clientName: manual.clientName.trim(),
+    clientEmail: manual.clientEmail.trim(),
+    clientNotes: manual.clientNotes.trim(),
+    unverifiedFields: unverified,
+    sources: extracted.sources,
+  };
+}
+
+function projectTypeLabel(value: ProjectTypeValue): string {
+  return PROJECT_TYPE_OPTIONS.find((o) => o.value === value)?.label ?? value;
+}
+
 export interface ClientIntakeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onCreated?: (engagementId: string) => void;
 }
 
-export function ClientIntakeModal({ isOpen, onClose }: ClientIntakeModalProps) {
+export function ClientIntakeModal({
+  isOpen,
+  onClose,
+  onCreated,
+}: ClientIntakeModalProps) {
+  const [, navigate] = useLocation();
   const [mode, setMode] = useState<IntakeMode>("link");
+  const [details, setDetails] = useState<ProjectDetailsForm>(EMPTY_DETAILS);
   const [value, setValue] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -103,8 +201,8 @@ export function ClientIntakeModal({ isOpen, onClose }: ClientIntakeModalProps) {
 
   useEffect(() => {
     if (!isOpen) {
-      // Reset the form on close so re-opening starts fresh.
       setMode("link");
+      setDetails(EMPTY_DETAILS);
       setValue("");
       setFileName(null);
       setSubmitting(false);
@@ -123,18 +221,24 @@ export function ClientIntakeModal({ isOpen, onClose }: ClientIntakeModalProps) {
 
   if (!isOpen) return null;
 
-  const canSubmit =
-    !submitting &&
-    (mode === "file" ? !!fileName : value.trim().length > 0);
+  const hasSource =
+    mode === "file" ? !!fileName : value.trim().length > 0;
+  const hasBasics =
+    details.projectName.trim().length > 0 ||
+    details.address.trim().length > 0;
+  const canSubmit = !submitting && (hasSource || hasBasics);
 
   const handleSubmit = () => {
     if (!canSubmit) return;
     setSubmitting(true);
-    // Mock latency so the loading state is visible. No API call.
     window.setTimeout(() => {
       setSubmitting(false);
-      setDraft(MOCK_PREVIEW[mode]);
+      setDraft(mergeDraft(mode, details));
     }, 600);
+  };
+
+  const updateDetails = (patch: Partial<ProjectDetailsForm>) => {
+    setDetails((prev) => ({ ...prev, ...patch }));
   };
 
   const body = (
@@ -148,18 +252,16 @@ export function ClientIntakeModal({ isOpen, onClose }: ClientIntakeModalProps) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="intake-card">
+      <div className="intake-card intake-card--wide">
         <header className="intake-header">
           <div className="intake-header-text">
-            <span className="cockpit-tab-header-overline">
-              Intake · QA-27
-            </span>
+            <span className="cockpit-tab-header-overline">Intake · QA-27</span>
             <h2 id="intake-title" className="intake-title">
               Create a draft project
             </h2>
             <p className="intake-sub">
-              The agent will pull metadata, look up jurisdiction, and stage
-              an engagement you can review before it's saved.
+              Enter what you know about the client and site, add source material,
+              then review the merged draft before saving.
             </p>
           </div>
           <button
@@ -173,95 +275,133 @@ export function ClientIntakeModal({ isOpen, onClose }: ClientIntakeModalProps) {
         </header>
 
         {draft ? (
-          <DraftPreviewView draft={draft} onStartOver={() => setDraft(null)} />
+          <DraftPreviewView
+            draft={draft}
+            mode={mode}
+            sourceExcerpt={mode === "file" ? fileName : value.trim()}
+            onDraftChange={setDraft}
+            onStartOver={() => setDraft(null)}
+            onConfirm={async (finalDraft) => {
+              const created = await createEngagement({
+                name: finalDraft.projectName,
+                address: finalDraft.address || null,
+                jurisdiction: finalDraft.jurisdiction || null,
+                projectType: finalDraft.projectType || null,
+                intakeSource: mode,
+                applicantFirm: finalDraft.clientName || null,
+                clientEmail: finalDraft.clientEmail || null,
+                clientNotes: finalDraft.clientNotes || null,
+                sourceExcerpt:
+                  mode === "file"
+                    ? fileName
+                    : value.trim().slice(0, 8000) || null,
+              });
+              onCreated?.(created.id);
+              onClose();
+              navigate(
+                `/engagements/${created.id}?view=site&segment=property-intel`,
+              );
+            }}
+          />
         ) : (
           <>
-            <div
-              role="tablist"
-              aria-label="Intake source"
-              className="intake-tabs"
-            >
-              {MODE_TABS.map((t) => {
-                const Icon = t.icon;
-                const active = mode === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    className={`intake-tab${active ? " intake-tab-active" : ""}`}
-                    data-testid={`intake-tab-${t.id}`}
-                    onClick={() => {
-                      setMode(t.id);
-                      setValue("");
-                      setFileName(null);
-                    }}
-                  >
-                    <Icon size={14} />
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
+            <ProjectDetailsSection
+              details={details}
+              onChange={updateDetails}
+            />
 
-            <p className="intake-mode-hint">{MODE_HINT[mode]}</p>
+            <div className="intake-source-section">
+              <span className="cockpit-tab-header-overline">
+                Source material
+              </span>
+              <div
+                role="tablist"
+                aria-label="Intake source"
+                className="intake-tabs"
+              >
+                {MODE_TABS.map((t) => {
+                  const Icon = t.icon;
+                  const active = mode === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className={`intake-tab${active ? " intake-tab-active" : ""}`}
+                      data-testid={`intake-tab-${t.id}`}
+                      onClick={() => {
+                        setMode(t.id);
+                        setValue("");
+                        setFileName(null);
+                      }}
+                    >
+                      <Icon size={14} />
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
 
-            <div className="intake-input-area">
-              {mode === "link" ? (
-                <input
-                  type="url"
-                  className="intake-input"
-                  placeholder="https://drive.google.com/…"
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  data-testid="intake-input-link"
-                />
-              ) : mode === "email" ? (
-                <textarea
-                  className="intake-input intake-textarea"
-                  placeholder="Paste the forwarded email here, or note the inbox address you forwarded it to."
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  rows={6}
-                  data-testid="intake-input-email"
-                />
-              ) : mode === "paste" ? (
-                <textarea
-                  className="intake-input intake-textarea"
-                  placeholder="Paste the brief, transcript, or scope text…"
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  rows={8}
-                  data-testid="intake-input-paste"
-                />
-              ) : (
-                <label
-                  className="intake-file-drop"
-                  data-testid="intake-input-file"
-                >
+              <p className="intake-mode-hint">{MODE_HINT[mode]}</p>
+
+              <div className="intake-input-area">
+                {mode === "link" ? (
                   <input
-                    type="file"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      setFileName(f ? f.name : null);
-                    }}
-                    style={{ display: "none" }}
+                    type="url"
+                    className="intake-input"
+                    placeholder="https://drive.google.com/…"
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    data-testid="intake-input-link"
                   />
-                  <FileUp size={18} />
-                  <span>
-                    {fileName ? fileName : "Click to choose a PDF / DWG / ZIP"}
-                  </span>
-                  <span className="intake-file-hint">
-                    Files stay client-side in this UI shell.
-                  </span>
-                </label>
-              )}
+                ) : mode === "email" ? (
+                  <textarea
+                    className="intake-input intake-textarea"
+                    placeholder="Paste the forwarded email here, or note the inbox address you forwarded it to."
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    rows={5}
+                    data-testid="intake-input-email"
+                  />
+                ) : mode === "paste" ? (
+                  <textarea
+                    className="intake-input intake-textarea"
+                    placeholder="Paste the brief, transcript, or scope text…"
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    rows={5}
+                    data-testid="intake-input-paste"
+                  />
+                ) : (
+                  <label
+                    className="intake-file-drop"
+                    data-testid="intake-input-file"
+                  >
+                    <input
+                      type="file"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        setFileName(f ? f.name : null);
+                      }}
+                      style={{ display: "none" }}
+                    />
+                    <FileUp size={18} />
+                    <span>
+                      {fileName ? fileName : "Click to choose a PDF / DWG / ZIP"}
+                    </span>
+                    <span className="intake-file-hint">
+                      Optional if you already filled project details above.
+                    </span>
+                  </label>
+                )}
+              </div>
             </div>
 
             <footer className="intake-footer">
               <span className="intake-foot-meta">
-                No engagement is saved until you confirm on the next step.
+                Add project details, source material, or both — nothing is saved
+                until you confirm on the next step.
               </span>
               <div className="intake-foot-actions">
                 <button
@@ -292,13 +432,127 @@ export function ClientIntakeModal({ isOpen, onClose }: ClientIntakeModalProps) {
   return createPortal(body, document.body);
 }
 
+function ProjectDetailsSection({
+  details,
+  onChange,
+}: {
+  details: ProjectDetailsForm;
+  onChange: (patch: Partial<ProjectDetailsForm>) => void;
+}) {
+  return (
+    <section className="intake-details-section" aria-label="Project details">
+      <span className="cockpit-tab-header-overline">Project details</span>
+      <div className="intake-details-grid">
+        <label className="intake-field intake-field--full">
+          <span className="intake-field-label">Project name</span>
+          <input
+            type="text"
+            className="intake-input"
+            placeholder="e.g. Moab guest house addition"
+            value={details.projectName}
+            onChange={(e) => onChange({ projectName: e.target.value })}
+            data-testid="intake-field-project-name"
+          />
+        </label>
+        <label className="intake-field">
+          <span className="intake-field-label">Address</span>
+          <input
+            type="text"
+            className="intake-input"
+            placeholder="Street, city, state"
+            value={details.address}
+            onChange={(e) => onChange({ address: e.target.value })}
+            data-testid="intake-field-address"
+          />
+        </label>
+        <label className="intake-field">
+          <span className="intake-field-label">Jurisdiction</span>
+          <input
+            type="text"
+            className="intake-input"
+            placeholder="County or city"
+            value={details.jurisdiction}
+            onChange={(e) => onChange({ jurisdiction: e.target.value })}
+            data-testid="intake-field-jurisdiction"
+          />
+        </label>
+        <label className="intake-field">
+          <span className="intake-field-label">Project type</span>
+          <select
+            className="intake-input intake-select"
+            value={details.projectType}
+            onChange={(e) =>
+              onChange({
+                projectType: e.target.value as ProjectTypeValue,
+              })
+            }
+            data-testid="intake-field-project-type"
+          >
+            {PROJECT_TYPE_OPTIONS.map((o) => (
+              <option key={o.value || "unset"} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="intake-field">
+          <span className="intake-field-label">Client / firm</span>
+          <input
+            type="text"
+            className="intake-input"
+            placeholder="Client or company name"
+            value={details.clientName}
+            onChange={(e) => onChange({ clientName: e.target.value })}
+            data-testid="intake-field-client-name"
+          />
+        </label>
+        <label className="intake-field">
+          <span className="intake-field-label">Client email</span>
+          <input
+            type="email"
+            className="intake-input"
+            placeholder="contact@example.com"
+            value={details.clientEmail}
+            onChange={(e) => onChange({ clientEmail: e.target.value })}
+            data-testid="intake-field-client-email"
+          />
+        </label>
+        <label className="intake-field intake-field--full">
+          <span className="intake-field-label">Client notes</span>
+          <textarea
+            className="intake-input intake-textarea"
+            placeholder="Scope, budget hints, timeline, preferences — anything the client told you."
+            value={details.clientNotes}
+            onChange={(e) => onChange({ clientNotes: e.target.value })}
+            rows={3}
+            data-testid="intake-field-client-notes"
+          />
+        </label>
+      </div>
+    </section>
+  );
+}
+
 function DraftPreviewView({
   draft,
+  mode,
+  sourceExcerpt,
+  onDraftChange,
   onStartOver,
+  onConfirm,
 }: {
   draft: DraftPreview;
+  mode: IntakeMode;
+  sourceExcerpt: string | null;
+  onDraftChange: (next: DraftPreview) => void;
   onStartOver: () => void;
+  onConfirm: (finalDraft: DraftPreview) => Promise<void>;
 }) {
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+
+  const patch = (p: Partial<DraftPreview>) => onDraftChange({ ...draft, ...p });
+
   return (
     <div className="intake-success" data-testid="intake-success">
       <div className="intake-success-head">
@@ -306,35 +560,77 @@ function DraftPreviewView({
         <div>
           <div className="intake-success-title">Draft project ready</div>
           <div className="intake-success-sub">
-            Review the synthesized fields below. Saving / confirming the
-            engagement isn't wired in this preview.
+            Edit any field, then create the engagement.
           </div>
-        </div>
+          </div>
         <DraftBadge testId="intake-draft-badge" />
       </div>
 
-      <dl className="intake-preview-grid">
-        <PreviewField
+      <div className="intake-details-grid intake-details-grid--review">
+        <EditableField
           label="Project name"
           value={draft.projectName}
-          unverified={false}
+          onChange={(v) => patch({ projectName: v })}
+          unverified={draft.unverifiedFields.includes("projectName")}
+          testId="intake-review-project-name"
         />
-        <PreviewField
+        <EditableField
           label="Address"
           value={draft.address}
+          onChange={(v) => patch({ address: v })}
           unverified={draft.unverifiedFields.includes("address")}
+          testId="intake-review-address"
         />
-        <PreviewField
+        <EditableField
           label="Jurisdiction"
           value={draft.jurisdiction}
+          onChange={(v) => patch({ jurisdiction: v })}
           unverified={draft.unverifiedFields.includes("jurisdiction")}
+          testId="intake-review-jurisdiction"
         />
-        <PreviewField
-          label="Project type"
-          value={draft.projectType}
-          unverified={draft.unverifiedFields.includes("projectType")}
+        <label className="intake-field">
+          <span className="intake-field-label">Project type</span>
+          <select
+            className="intake-input intake-select"
+            value={draft.projectType}
+            onChange={(e) =>
+              patch({ projectType: e.target.value as ProjectTypeValue })
+            }
+            data-testid="intake-review-project-type"
+          >
+            {PROJECT_TYPE_OPTIONS.filter((o) => o.value).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          {draft.unverifiedFields.includes("projectType") ? (
+            <UnverifiedInline />
+          ) : null}
+        </label>
+        <EditableField
+          label="Client / firm"
+          value={draft.clientName}
+          onChange={(v) => patch({ clientName: v })}
+          testId="intake-review-client-name"
         />
-      </dl>
+        <EditableField
+          label="Client email"
+          value={draft.clientEmail}
+          onChange={(v) => patch({ clientEmail: v })}
+          testId="intake-review-client-email"
+        />
+        <label className="intake-field intake-field--full">
+          <span className="intake-field-label">Client notes</span>
+          <textarea
+            className="intake-input intake-textarea"
+            value={draft.clientNotes}
+            onChange={(e) => patch({ clientNotes: e.target.value })}
+            rows={4}
+            data-testid="intake-review-client-notes"
+          />
+        </label>
+      </div>
 
       <div className="intake-source-row">
         <span className="cockpit-tab-header-overline">Sources</span>
@@ -345,26 +641,42 @@ function DraftPreviewView({
         </div>
       </div>
 
+      {sourceExcerpt ? (
+        <div className="intake-source-excerpt sc-card">
+          <span className="sc-label">Source excerpt</span>
+          <p className="intake-source-excerpt-body">{sourceExcerpt}</p>
+        </div>
+      ) : null}
+
       <footer className="intake-footer">
-        <span className="intake-foot-meta">
-          Confirm step lands when the intake backend is wired.
-        </span>
+        {confirmError ? (
+          <span className="intake-foot-meta intake-foot-error">{confirmError}</span>
+        ) : (
+          <span className="intake-foot-meta">
+            {projectTypeLabel(draft.projectType)} · Source: {mode}
+          </span>
+        )}
         <div className="intake-foot-actions">
-          <button
-            type="button"
-            className="sc-btn-ghost"
-            onClick={onStartOver}
-          >
+          <button type="button" className="sc-btn-ghost" onClick={onStartOver}>
             Start over
           </button>
           <button
             type="button"
             className="sc-btn-primary"
-            disabled
-            title="Coming soon — confirm is wired with the intake backend"
-            data-testid="intake-confirm-stub"
+            disabled={confirming || !draft.projectName.trim()}
+            data-testid="intake-confirm"
+            onClick={() => {
+              setConfirming(true);
+              setConfirmError(null);
+              void onConfirm(draft).catch((err) => {
+                setConfirmError(
+                  err instanceof Error ? err.message : "Create failed.",
+                );
+                setConfirming(false);
+              });
+            }}
           >
-            Confirm & create engagement
+            {confirming ? "Creating…" : "Confirm & create engagement"}
           </button>
         </div>
       </footer>
@@ -372,29 +684,37 @@ function DraftPreviewView({
   );
 }
 
-function PreviewField({
+function EditableField({
   label,
   value,
-  unverified,
+  onChange,
+  unverified = false,
+  testId,
 }: {
   label: string;
   value: string;
-  unverified: boolean;
+  onChange: (v: string) => void;
+  unverified?: boolean;
+  testId?: string;
 }) {
   return (
-    <div className="intake-preview-field">
-      <dt className="intake-preview-label">{label}</dt>
-      <dd className="intake-preview-value">
-        <span>{value}</span>
+    <label className="intake-field">
+      <span className="intake-field-label">{label}</span>
+      <div className="intake-field-input-row">
+        <input
+          type="text"
+          className="intake-input"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          data-testid={testId}
+        />
         {unverified ? <UnverifiedInline /> : null}
-      </dd>
-    </div>
+      </div>
+    </label>
   );
 }
 
 function UnverifiedInline() {
-  // Local mini-tag so we don't drag the AlertTriangle import all the way
-  // up. Re-uses the shared CSS class.
   return (
     <span
       className="quality-unverified-tag"

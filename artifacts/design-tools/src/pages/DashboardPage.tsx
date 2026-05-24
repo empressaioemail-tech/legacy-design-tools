@@ -52,7 +52,7 @@ export function DashboardPage({
           <div>
             <h1 className="cockpit-dashboard-page-title">Dashboard</h1>
             <p className="cockpit-dashboard-page-sub">
-              Triage inbox and projects above; browse the full code library
+              Triage inbox and projects in the grid above; browse the code library
               below.
             </p>
           </div>

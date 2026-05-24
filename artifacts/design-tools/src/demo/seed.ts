@@ -146,7 +146,7 @@ export const DEMO_INBOX_ITEMS: DemoInboxItem[] = [
     createdAt: hours(6),
     ctaLabel: "Re-export model",
     view: "model",
-    segment: "model-3d",
+    segment: "snapshots",
     muted: true,
   },
   {
@@ -324,7 +324,7 @@ export const DEMO_PUBLISH_STAGES: DemoPublishStage[] = [
   {
     id: "assemble",
     label: "Assemble",
-    summary: "Pitch deck v3 draft · 14 slides · 2 sources stale",
+    summary: "Client materials draft · Canva template selected",
     status: "pending",
   },
   {
@@ -343,11 +343,11 @@ export const DEMO_PUBLISH_STAGES: DemoPublishStage[] = [
 
 export const DEMO_DELIVER_WORKBENCH_BLOCKS = [
   {
-    id: "presentations",
-    title: "Client presentation",
+    id: "client-materials",
+    title: "Client materials",
     description:
-      "Moodboard + plan + FF&E deck (~24 slides) for client concept review.",
-    segment: "presentations" as const,
+      "Canva proposal deck — renders, plans, and metadata mapped to brand template.",
+    segment: "client-materials" as const,
     status: "in-progress",
   },
   {

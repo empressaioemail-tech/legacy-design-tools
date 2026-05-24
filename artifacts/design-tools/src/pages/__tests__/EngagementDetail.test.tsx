@@ -559,14 +559,24 @@ function gotoStudioView() {
   fireEvent.click(screen.getByTestId("engagement-view-studio"));
 }
 
+function gotoPackagesTab() {
+  gotoDeliverView();
+  fireEvent.click(screen.getByTestId("engagement-tab-packages"));
+}
+
+function gotoPublishPrepTab() {
+  gotoPackagesTab();
+  fireEvent.click(screen.getByTestId("packages-template-publisher-handoff"));
+}
+
 function gotoRendersTab() {
   gotoStudioView();
   fireEvent.click(screen.getByTestId("engagement-tab-renders"));
 }
 
-function gotoPresentationsTab() {
-  gotoStudioView();
-  fireEvent.click(screen.getByTestId("engagement-tab-presentations"));
+function gotoClientPresentationPackage() {
+  gotoPackagesTab();
+  fireEvent.click(screen.getByTestId("packages-template-client-presentation"));
 }
 
 /** Convenience builder for `Finding` fixtures used by the findings-tab tests. */
@@ -666,49 +676,30 @@ function seedSubmissionsWithFindings(
   };
 }
 describe("EngagementDetail Studio view", () => {
-  it("navigates to mission control when the Studio view is selected", () => {
+  it("renders the publisher intake form when the Publisher intake segment is selected", () => {
     renderPage();
-    fireEvent.click(screen.getByTestId("engagement-view-studio"));
+    gotoPublishPrepTab();
     expect(screen.getByTestId("publish-prep-tab")).toBeInTheDocument();
-    expect(screen.getByTestId("publish-prep-checklist")).toBeInTheDocument();
-  });
-
-  it("shows the launch pipeline on Mission control", () => {
-    renderPage();
-    fireEvent.click(screen.getByTestId("engagement-view-studio"));
-    expect(screen.getByTestId("publish-launch-tab")).toBeInTheDocument();
-    expect(screen.getByTestId("publish-stage-visualize")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("engagement-tab-publish-launch"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("publisher-deliverable-package")).toBeInTheDocument();
+    expect(screen.getByTestId("publisher-intake-form")).toBeInTheDocument();
+    expect(screen.getByLabelText("Designer Plan Name")).toHaveValue("Modern Cabin");
+    expect(screen.getByTestId("publisher-intake-room-table")).toBeInTheDocument();
+    expect(screen.getByTestId("publisher-package-export")).toBeInTheDocument();
+    expect(screen.getByTestId("publisher-intake-export-csv")).toBeInTheDocument();
   });
 });
 
-describe("EngagementDetail Presentations flow", () => {
-  it("shows the four-step flow and advances on generate", async () => {
+describe("EngagementDetail Packages (client presentation)", () => {
+  it("shows the packages builder on the client presentation template", async () => {
     renderPage();
-    gotoPresentationsTab();
-    expect(screen.getByTestId("presentation-flow")).toBeInTheDocument();
-    expect(screen.getByTestId("presentation-flow-assemble")).toBeInTheDocument();
-    expect(screen.getByTestId("presentation-flow-preview")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("presentation-generate"));
+    gotoClientPresentationPackage();
+    expect(screen.getByTestId("packages-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("packages-tab-header")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByTestId("presentation-flow-review")).toHaveAttribute(
-        "data-active",
-        "true",
-      );
+      expect(
+        screen.getByTestId("packages-template-client-presentation"),
+      ).toHaveAttribute("aria-selected", "true");
     });
-  });
-
-  it("links section sources to other engagement tabs", () => {
-    renderPage();
-    gotoPresentationsTab();
-    fireEvent.click(screen.getByTestId("presentation-section-source-moodboard"));
-    expect(screen.getByTestId("engagement-tab-renders")).toHaveAttribute(
-      "data-active",
-      "true",
-    );
   });
 });
 
@@ -734,6 +725,20 @@ describe("EngagementDetail Rendering tab (Task #422)", () => {
     expect(
       screen.queryByTestId("render-kickoff-dialog"),
     ).not.toBeInTheDocument();
+  });
+
+  it("switches to floor plan visualization mode with stub workspace", async () => {
+    renderPage();
+    gotoRendersTab();
+    fireEvent.click(screen.getByTestId("render-mode-floorplan"));
+    expect(screen.getByTestId("fpviz-workspace")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("fpviz-source-picker")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("fpviz-visualize-cta")).toBeInTheDocument();
+    expect(screen.getByTestId("fpviz-history-list")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("render-mode-model"));
+    expect(screen.getByTestId("renders-tab-dashboard")).toBeInTheDocument();
   });
 });
 
@@ -820,6 +825,7 @@ describe("EngagementDetail submission banner (Task #126)", () => {
 
     gotoDeliverView();
     for (const id of [
+      "engagement-tab-packages",
       "engagement-tab-sheets",
       "engagement-tab-product-specs",
       "engagement-tab-detail-callouts",
@@ -829,19 +835,15 @@ describe("EngagementDetail submission banner (Task #126)", () => {
 
     fireEvent.click(screen.getByTestId("engagement-view-model"));
     expect(screen.getByTestId("engagement-tab-snapshots")).toBeInTheDocument();
-    expect(screen.getByTestId("engagement-tab-model-3d")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("engagement-tab-model-3d"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByTestId("engagement-tab-sheets"),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("engagement-view-studio"));
-    for (const id of [
-      "engagement-tab-publish-prep",
-      "engagement-tab-renders",
-      "engagement-tab-presentations",
-    ]) {
-      expect(screen.getByTestId(id)).toBeInTheDocument();
-    }
+    expect(screen.getByTestId("engagement-tab-renders")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("engagement-view-site"));
     expect(screen.getByTestId("engagement-tab-site")).toBeInTheDocument();

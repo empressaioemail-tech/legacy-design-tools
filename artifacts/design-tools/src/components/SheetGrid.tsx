@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Sparkles } from "lucide-react";
 import {
   useGetSnapshotSheets,
   getGetSnapshotSheetsQueryKey,
@@ -13,12 +14,15 @@ interface SheetGridProps {
   /** Engagement the sheets belong to — keys the chat-context selection. */
   engagementId: string;
   onAskClaude: (sheet: SheetSummary) => void;
+  /** Navigate to floor plan viz with this sheet pre-selected (stub). */
+  onVisualizeFloorPlan?: (sheet: SheetSummary) => void;
 }
 
 export function SheetGrid({
   snapshotId,
   engagementId,
   onAskClaude,
+  onVisualizeFloorPlan,
 }: SheetGridProps) {
   const [filter, setFilter] = useState("");
   const [viewerSheetId, setViewerSheetId] = useState<string | null>(null);
@@ -134,6 +138,18 @@ export function SheetGrid({
                   sheet={sheet}
                   onClick={() => setViewerSheetId(sheet.id)}
                 />
+                {onVisualizeFloorPlan ? (
+                  <button
+                    type="button"
+                    className="cockpit-sheet-grid-viz sc-btn-ghost sc-btn-sm"
+                    data-testid={`sheet-visualize-floorplan-${sheet.id}`}
+                    title="Visualize floor plan"
+                    onClick={() => onVisualizeFloorPlan(sheet)}
+                  >
+                    <Sparkles size={14} aria-hidden />
+                    Visualize floor plan
+                  </button>
+                ) : null}
               </div>
             );
           })}

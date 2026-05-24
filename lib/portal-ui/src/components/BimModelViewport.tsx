@@ -7,8 +7,15 @@ import {
   getGetMaterializableElementGlbUrl,
   type MaterializableElement,
 } from "@workspace/api-client-react";
-import { BimViewCube, type ViewCubeRegionId } from "./BimViewCube";
+import { ViewCubeWidget, type ViewCubeRegionId } from "./ViewCubeWidget";
 import { VIEW_CUBE_DIRECTIONS } from "./viewCubeModel";
+import {
+  applyCompassHeadingDrag,
+  applyOrbitDrag,
+  snapCameraToDirectionVector,
+  snapCompassCardinal,
+  tweenCameraToView,
+} from "./viewCubeCamera";
 
 /**
  * Read-only Three.js viewer for the engagement's bim-model
@@ -835,6 +842,7 @@ export function BimModelViewport({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const cameraTweenRef = useRef<{ cancel: () => void } | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   // Map of elementId → its scene Object3D, so selection /
   // camera-fit / disposal can find a mesh by the id the React
@@ -1671,23 +1679,27 @@ export function BimModelViewport({
       const camera = cameraRef.current;
       const controls = controlsRef.current;
       if (!camera || !controls) return;
-      const target = controls.target;
-      const tx = typeof target.x === "number" ? target.x : 0;
-      const ty = typeof target.y === "number" ? target.y : 0;
-      const tz = typeof target.z === "number" ? target.z : 0;
+      cameraTweenRef.current?.cancel();
       const distance =
-        camera.position.distanceTo(new THREE.Vector3(tx, ty, tz)) ||
+        camera.position.distanceTo(controls.target) ||
         (cameraFit ? cameraFit.distance : 100);
-      const [vx, vy, vz] = vec;
-      const len = Math.hypot(vx, vy, vz) || 1;
-      camera.position.set(
-        tx + (vx / len) * distance,
-        ty + (vy / len) * distance,
-        tz + (vz / len) * distance,
+      const { position, target } = snapCameraToDirectionVector(
+        camera,
+        controls,
+        vec,
+        distance,
       );
-      camera.lookAt(tx, ty, tz);
-      if (typeof controls.update === "function") controls.update();
-      setCameraFitAppliedCount((n) => n + 1);
+      cameraTweenRef.current = tweenCameraToView(
+        camera,
+        controls,
+        position,
+        target,
+        300,
+        () => {
+          cameraTweenRef.current = null;
+          setCameraFitAppliedCount((n) => n + 1);
+        },
+      );
     },
     [cameraFit],
   );
@@ -1706,6 +1718,44 @@ export function BimModelViewport({
       snapCameraToDirection(vec);
     },
     [snapCameraToDirection],
+  );
+
+  const handleViewCubeOrbitDrag = useCallback((deltaX: number, deltaY: number) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    applyOrbitDrag(camera, controls, deltaX, deltaY);
+  }, []);
+
+  const handleViewCubeDragStart = useCallback(() => {
+    const controls = controlsRef.current;
+    if (controls) controls.enableDamping = false;
+  }, []);
+
+  const handleViewCubeDragEnd = useCallback(() => {
+    const controls = controlsRef.current;
+    if (controls) {
+      controls.enableDamping = true;
+      controls.update();
+    }
+  }, []);
+
+  const handleCompassHeadingDrag = useCallback((deltaRadians: number) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    applyCompassHeadingDrag(camera, controls, deltaRadians);
+  }, []);
+
+  const handleCompassSnap = useCallback(
+    (cardinal: "n" | "e" | "s" | "w") => {
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      if (!camera || !controls) return;
+      snapCompassCardinal(camera, controls, cardinal);
+      setCameraFitAppliedCount((n) => n + 1);
+    },
+    [],
   );
 
   const handleResetView = useCallback(() => {
@@ -1966,6 +2016,20 @@ export function BimModelViewport({
           </button>
         )}
         {webGlOk && cameraFit && (
+          <div className="bim-viewport-viewcube-slot">
+            <ViewCubeWidget
+              mainCamera={cameraRef}
+              onSelectRegion={handleViewCubeFace}
+              onOrbitDrag={handleViewCubeOrbitDrag}
+              onOrbitDragStart={handleViewCubeDragStart}
+              onOrbitDragEnd={handleViewCubeDragEnd}
+              onCompassHeadingDrag={handleCompassHeadingDrag}
+              onCompassSnap={handleCompassSnap}
+              onHome={handleResetView}
+            />
+          </div>
+        )}
+        {webGlOk && cameraFit && (
           <div
             className={
               immersive ? "bim-viewport-overlay-stack" : undefined
@@ -1976,7 +2040,7 @@ export function BimModelViewport({
                 ? undefined
                 : {
                     position: "absolute",
-                    top: 8,
+                    top: 96,
                     right: 8,
                     display: "flex",
                     flexDirection: "column",
@@ -2083,12 +2147,6 @@ export function BimModelViewport({
                     >
                       Reset view
                     </button>
-                  </div>
-                  <div className="bim-viewport-hud-orientation">
-                    <span className="bim-viewport-hud-orientation-label">
-                      Orientation
-                    </span>
-                    <BimViewCube onSelectFace={handleViewCubeFace} />
                   </div>
                 </div>
             ) : (

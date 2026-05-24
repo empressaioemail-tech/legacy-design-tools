@@ -74,7 +74,6 @@ export function AppShell({
   const projectRail = useMemo(() => {
     const projects: CockpitProject[] = engagements
       .filter((e) => e.status !== "archived")
-      .slice(0, 12)
       .map((e) => ({
         id: e.id,
         name: e.name,

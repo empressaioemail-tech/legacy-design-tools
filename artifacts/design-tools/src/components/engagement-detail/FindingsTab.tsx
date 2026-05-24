@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,8 +16,10 @@ import {
   type Finding,
 } from "@workspace/api-client-react";
 import { TabHeader } from "../cockpit/TabChrome";
+import { SubmissionSelector } from "./SubmissionSelector";
 import {
   ADDRESS_WITH_NEXT_REVISION_REVIEWER_COMMENT,
+  CodeAtomDetailModal,
   FindingDetailPanel,
   FindingsList,
   countUnaddressedFindings,
@@ -347,6 +350,7 @@ export function FindingsTab({
 }) {
   const queryClient = useQueryClient();
   const codeLibraryBase = `${import.meta.env.BASE_URL}code-library`;
+  const [codeAtomModalId, setCodeAtomModalId] = useState<string | null>(null);
 
   const {
     data: submissions,
@@ -416,6 +420,8 @@ export function FindingsTab({
   const [triageScope, setTriageScope] = useState<TriageScope>(() =>
     readFindingsShowAddressedFromUrl() ? "all" : "open",
   );
+  const [filtersExpanded, setFiltersExpanded] = useState(true);
+  const [contextOpen, setContextOpen] = useState(true);
   // Single setter for the addressed URL state so both the
   // Open/All tab clicks and the Hide-addressed chip flow through
   // the same place; keeps the tab strip and the chip in lockstep
@@ -683,125 +689,140 @@ export function FindingsTab({
     : null;
 
   return (
-    <div className="cockpit-tab" data-testid="findings-tab">
+    <div className="cockpit-tab findings-triage-tab" data-testid="findings-tab">
       <TabHeader
-        overline="Review · group"
+        overline="Review"
         title="Triage Inbox"
-        subtitle="Findings for the active submission. Tab Open / All / Overridden to scope, drill into a row for the detail and address actions, see submission context on the right."
+        subtitle="Work open findings for the selected submission — filter, pick a row, read citations, and mark addressed for the next revision."
       />
-      <div
-        data-testid="findings-tab-body"
-        className="sc-card"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(280px, 320px) minmax(0, 1fr) 280px",
-          gap: 0,
-          minHeight: 560,
-          maxHeight: 720,
-          overflow: "hidden",
-          padding: 0,
-        }}
-      >
-        {/* LEFT — Triage Inbox: picker + tabs + filters + list */}
-        <div
-          data-testid="findings-tab-inbox"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-            borderRight: "1px solid var(--border-subtle)",
-            background: "var(--bg-subtle, transparent)",
-          }}
-        >
-          <div
-            style={{
-              padding: "10px 12px",
-              borderBottom: "1px solid var(--border-subtle)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            <label
-              className="sc-label"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 9,
-                opacity: 0.6,
-              }}
-            >
-              SUBMISSION
-              <select
-                data-testid="findings-tab-submission-picker"
-                className="sc-select"
-                value={selectedSubmissionId ?? ""}
-                onChange={(e) =>
-                  setSelectedSubmissionId(e.target.value || null)
-                }
-                style={{ flex: 1, fontSize: 12 }}
-              >
-                {sortedSubmissions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.submittedAt}
-                    {s.status ? ` · ${s.status}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div
-              role="tablist"
-              aria-label="Triage scope"
-              data-testid="findings-tab-triage-scope"
-              style={{
-                display: "flex",
-                gap: 14,
-                fontSize: 11,
-                fontWeight: 500,
-                borderBottom: "1px solid var(--border-subtle)",
-                marginBottom: -8,
-              }}
-            >
-              {TRIAGE_TAB_OPTIONS.map((opt) => {
-                const active = triageScope === opt.id;
-                const badge =
-                  opt.id === "open"
-                    ? severityCounts.open
-                    : opt.id === "all"
-                      ? severityCounts.total
-                      : severityCounts.overridden;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    data-testid={`findings-tab-triage-scope-${opt.id}`}
-                    data-active={active ? "true" : "false"}
-                    onClick={() => handleTriageScopeChange(opt.id)}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: active
-                        ? "2px solid var(--cyan)"
-                        : "2px solid transparent",
-                      color: active ? "var(--cyan)" : "var(--text-secondary)",
-                      padding: "4px 0 8px",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontSize: 11,
-                      fontWeight: active ? 600 : 500,
-                    }}
-                  >
-                    {opt.label}
-                    {findings.length > 0 ? ` (${badge})` : ""}
-                  </button>
-                );
-              })}
-            </div>
+      <div data-testid="findings-tab-body" className="findings-triage-shell">
+        <div className="findings-triage-toolbar">
+          <div className="findings-triage-toolbar-submission">
+            <SubmissionSelector
+              submissions={sortedSubmissions}
+              value={selectedSubmissionId}
+              testId="findings-tab-submission-picker"
+              onChange={setSelectedSubmissionId}
+            />
           </div>
+          <div
+            role="tablist"
+            aria-label="Triage scope"
+            data-testid="findings-tab-triage-scope"
+            className="findings-triage-toolbar-tabs"
+          >
+            {TRIAGE_TAB_OPTIONS.map((opt) => {
+              const active = triageScope === opt.id;
+              const badge =
+                opt.id === "open"
+                  ? severityCounts.open
+                  : opt.id === "all"
+                    ? severityCounts.total
+                    : severityCounts.overridden;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`findings-tab-triage-scope-${opt.id}`}
+                  data-active={active ? "true" : "false"}
+                  onClick={() => handleTriageScopeChange(opt.id)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: active
+                      ? "2px solid var(--cyan)"
+                      : "2px solid transparent",
+                    color: active ? "var(--cyan)" : "var(--text-secondary)",
+                    padding: "2px 0 6px",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 11,
+                    fontWeight: active ? 600 : 500,
+                  }}
+                >
+                  {opt.label}
+                  {findings.length > 0 ? ` (${badge})` : ""}
+                </button>
+              );
+            })}
+          </div>
+          <div className="findings-triage-toolbar-actions">
+            <button
+              type="button"
+              className="findings-triage-toolbar-toggle"
+              data-active={filtersExpanded ? "true" : "false"}
+              data-testid="findings-tab-filters-toggle"
+              onClick={() => setFiltersExpanded((v) => !v)}
+              aria-expanded={filtersExpanded}
+            >
+              <SlidersHorizontal size={12} aria-hidden />
+              Filters
+              {filtersExpanded ? (
+                <ChevronDown size={12} aria-hidden />
+              ) : (
+                <ChevronRight size={12} aria-hidden />
+              )}
+            </button>
+            <button
+              type="button"
+              className="findings-triage-toolbar-toggle"
+              data-active={contextOpen ? "true" : "false"}
+              data-testid="findings-tab-context-toggle"
+              onClick={() => setContextOpen((v) => !v)}
+              aria-expanded={contextOpen}
+              title={contextOpen ? "Hide submission context" : "Show submission context"}
+            >
+              {contextOpen ? (
+                <PanelRightClose size={12} aria-hidden />
+              ) : (
+                <PanelRightOpen size={12} aria-hidden />
+              )}
+              Context
+            </button>
+          </div>
+        </div>
 
+        {findings.length > 0 && (
+          <div className="findings-triage-summary-strip" data-testid="findings-tab-summary-strip">
+            <span className="findings-triage-summary-pill">
+              <span
+                className="findings-triage-summary-pill-dot"
+                style={{ background: "var(--danger-text)" }}
+                aria-hidden
+              />
+              {severityCounts.blocker} blocker
+            </span>
+            <span className="findings-triage-summary-pill">
+              <span
+                className="findings-triage-summary-pill-dot"
+                style={{ background: "var(--warning-text)" }}
+                aria-hidden
+              />
+              {severityCounts.concern} concern
+            </span>
+            <span className="findings-triage-summary-pill">
+              <span
+                className="findings-triage-summary-pill-dot"
+                style={{ background: "var(--info-text, var(--cyan))" }}
+                aria-hidden
+              />
+              {severityCounts.advisory} advisory
+            </span>
+            <span
+              className="findings-triage-summary-pill"
+              data-testid="findings-tab-unaddressed-count"
+            >
+              {countUnaddressedFindings(findings)} unaddressed of {findings.length}
+            </span>
+          </div>
+        )}
+
+        <div
+          className="findings-triage-filters"
+          data-collapsed={filtersExpanded ? "false" : "true"}
+        >
           <FindingsFilterChips
             severityFilter={severityFilter}
             onSeverityChange={setSeverityFilter}
@@ -810,14 +831,11 @@ export function FindingsTab({
             showAddressed={showAddressed}
             onShowAddressedChange={setShowAddressed}
           />
+        </div>
 
-          <div
-            style={{
-              flex: 1,
-              overflow: "auto",
-              minHeight: 0,
-            }}
-          >
+        <div className="findings-triage-split">
+          <div data-testid="findings-tab-inbox" className="findings-triage-inbox">
+            <div className="findings-triage-inbox-scroll">
             {findingsLoading ? (
               <div
                 className="sc-prose opacity-60 p-4"
@@ -853,44 +871,28 @@ export function FindingsTab({
                 onSelect={setSelectedFindingId}
               />
             )}
+            </div>
           </div>
-        </div>
 
-        {/* CENTER — Finding detail */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-            minHeight: 0,
-          }}
-        >
-          <FindingDetailPanel
-            finding={selectedFinding}
-            codeLibraryBase={codeLibraryBase}
-            onAddressWithRevision={handleAddressWithRevision}
-            isAddressing={overrideMutation.isPending}
-            addressError={overrideError}
-            onRetry={handleAddressWithRevision}
-            onClose={() => setSelectedFindingId(null)}
-            onElementRefClick={onElementRefClick}
-          />
-        </div>
+          <div className="findings-triage-detail">
+            <FindingDetailPanel
+              finding={selectedFinding}
+              codeLibraryBase={codeLibraryBase}
+              onAddressWithRevision={handleAddressWithRevision}
+              isAddressing={overrideMutation.isPending}
+              addressError={overrideError}
+              onRetry={handleAddressWithRevision}
+              onClose={() => setSelectedFindingId(null)}
+              onElementRefClick={onElementRefClick}
+              onCodeAtomClick={setCodeAtomModalId}
+            />
+          </div>
 
-        {/* RIGHT — Submission context */}
-        <aside
-          data-testid="findings-tab-submission-context"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-            borderLeft: "1px solid var(--border-subtle)",
-            background: "var(--bg-subtle, transparent)",
-            padding: 14,
-            gap: 16,
-            overflowY: "auto",
-          }}
-        >
+          <aside
+            data-testid="findings-tab-submission-context"
+            className="findings-triage-context"
+            data-collapsed={contextOpen ? "false" : "true"}
+          >
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span
               className="sc-label"
@@ -941,23 +943,6 @@ export function FindingsTab({
                 <span>{activeSubmission.submittedAt}</span>
               </div>
             )}
-            <div
-              data-testid="findings-tab-unaddressed-count"
-              style={{
-                marginTop: 4,
-                fontSize: 11,
-                color: "var(--text-secondary)",
-                display: "flex",
-                justifyContent: "space-between",
-              }}
-            >
-              <span style={{ opacity: 0.7 }}>Unaddressed</span>
-              <span>
-                {findings.length === 0
-                  ? "0 findings"
-                  : `${countUnaddressedFindings(findings)} of ${findings.length}`}
-              </span>
-            </div>
           </div>
 
           {/* Findings Summary bars */}
@@ -1073,7 +1058,15 @@ export function FindingsTab({
             )}
           </div>
         </aside>
+        </div>
       </div>
+      {codeAtomModalId ? (
+        <CodeAtomDetailModal
+          atomId={codeAtomModalId}
+          onClose={() => setCodeAtomModalId(null)}
+          codeLibraryHref={`${codeLibraryBase}?atom=${encodeURIComponent(codeAtomModalId)}`}
+        />
+      ) : null}
     </div>
   );
 }

@@ -4,6 +4,7 @@ export * from "./sheets";
 export * from "./submissions";
 export * from "./submissionClassifications";
 export * from "./responseTasks";
+export * from "./engagementPackages";
 export * from "./sheetContentExtractions";
 export * from "./attachedDocuments";
 export * from "./deliverableLetters";

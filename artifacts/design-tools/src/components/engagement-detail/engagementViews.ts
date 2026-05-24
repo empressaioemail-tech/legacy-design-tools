@@ -1,4 +1,7 @@
 /** Legacy tab ids (panels); consolidated under top-level views in the header. */
+import type { PackageTemplateId } from "./packages/types";
+import { writePackageTemplateToUrl } from "./packages/types";
+
 export type TabId =
   | "snapshots"
   | "sheets"
@@ -13,7 +16,8 @@ export type TabId =
   | "detail-callouts"
   | "product-specs"
   | "renders"
-  | "presentations"
+  | "client-materials"
+  | "packages"
   | "publish-prep"
   | "publish-launch"
   | "settings";
@@ -28,11 +32,11 @@ export type EngagementViewId =
   | "settings";
 
 export const ENGAGEMENT_VIEW_IDS: EngagementViewId[] = [
-  "model",
   "site",
-  "review",
+  "model",
   "deliver",
   "studio",
+  "review",
   "settings",
 ];
 
@@ -59,9 +63,10 @@ export const TAB_TO_VIEW: Record<TabId, EngagementViewId> = {
   "detail-callouts": "deliver",
   "product-specs": "deliver",
   renders: "studio",
-  presentations: "studio",
-  "publish-prep": "studio",
-  "publish-launch": "studio",
+  "client-materials": "deliver",
+  packages: "deliver",
+  "publish-prep": "deliver",
+  "publish-launch": "deliver",
   settings: "settings",
 };
 
@@ -70,7 +75,7 @@ export const VIEW_DEFAULT_TAB: Record<EngagementViewId, TabId> = {
   site: "site",
   review: "findings",
   deliver: "product-specs",
-  studio: "publish-prep",
+  studio: "renders",
   settings: "settings",
 };
 
@@ -83,7 +88,6 @@ export interface ViewSegment {
 export const VIEW_SEGMENTS: Record<EngagementViewId, ViewSegment[]> = {
   model: [
     { tab: "snapshots", label: "Snapshots", testId: "engagement-tab-snapshots" },
-    { tab: "model-3d", label: "3D model", testId: "engagement-tab-model-3d" },
   ],
   site: [
     { tab: "site", label: "Map", testId: "engagement-tab-site" },
@@ -112,6 +116,11 @@ export const VIEW_SEGMENTS: Record<EngagementViewId, ViewSegment[]> = {
     },
   ],
   deliver: [
+    {
+      tab: "packages",
+      label: "Packages",
+      testId: "engagement-tab-packages",
+    },
     { tab: "sheets", label: "Sheets", testId: "engagement-tab-sheets" },
     {
       tab: "product-specs",
@@ -126,19 +135,9 @@ export const VIEW_SEGMENTS: Record<EngagementViewId, ViewSegment[]> = {
   ],
   studio: [
     {
-      tab: "publish-prep",
-      label: "Publish",
-      testId: "engagement-tab-publish-prep",
-    },
-    {
       tab: "renders",
       label: "Rendering",
       testId: "engagement-tab-renders",
-    },
-    {
-      tab: "presentations",
-      label: "Presentations",
-      testId: "engagement-tab-presentations",
     },
   ],
   settings: [],
@@ -166,16 +165,24 @@ function isTabId(raw: string): raw is TabId {
 export function resolveTabFromSearchParams(params: URLSearchParams): TabId {
   const legacyTab = params.get("tab");
   if (legacyTab === "site-context") return "property-intel";
-  if (legacyTab === "publish-launch") return "publish-prep";
+  if (legacyTab === "presentations") return "packages";
+  if (legacyTab === "publish-prep") return "packages";
+  if (legacyTab === "client-materials") return "packages";
+  if (legacyTab === "publish-launch") return "packages";
+  if (legacyTab === "model-3d") return "snapshots";
   if (legacyTab && isTabId(legacyTab)) return legacyTab;
 
   const viewRaw = params.get("view");
   const view = viewRaw ? normalizeEngagementViewId(viewRaw) : null;
   if (view) {
     const segment = params.get("segment");
+    if (segment === "site-context") return "property-intel";
+    if (segment === "presentations") return "packages";
+    if (segment === "publish-launch") return "packages";
+    if (segment === "publish-prep") return "packages";
+    if (segment === "client-materials") return "packages";
+    if (segment === "model-3d") return "snapshots";
     if (segment && isTabId(segment)) {
-      if (segment === "site-context") return "property-intel";
-      if (segment === "publish-launch") return "publish-prep";
       if (TAB_TO_VIEW[segment] === view) return segment;
       // Honor segment when the view slug is stale (e.g. letters moved deliver → review).
       return segment;
@@ -184,6 +191,14 @@ export function resolveTabFromSearchParams(params: URLSearchParams): TabId {
   }
 
   return "snapshots";
+}
+
+export function packageTemplateForTab(tab: TabId): PackageTemplateId | undefined {
+  if (tab === "publish-prep" || tab === "publish-launch") {
+    return "publisher-handoff";
+  }
+  if (tab === "client-materials") return "client-presentation";
+  return undefined;
 }
 
 export function writeViewStateToUrl(nextTab: TabId): void {
@@ -204,6 +219,11 @@ export function writeViewStateToUrl(nextTab: TabId): void {
     } else {
       url.searchParams.delete("segment");
     }
+  }
+
+  const template = packageTemplateForTab(nextTab);
+  if (template) {
+    writePackageTemplateToUrl(template);
   }
 
   window.history.replaceState(null, "", url.toString());

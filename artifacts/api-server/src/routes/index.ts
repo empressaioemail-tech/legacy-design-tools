@@ -28,6 +28,7 @@ import findingsRunsRouter from "./findingsRuns";
 import submissionEventsRouter from "./submissionEvents";
 import communicationsRouter from "./communications";
 import reviewerRequestsRouter from "./reviewerRequests";
+import packagesRouter from "./packages";
 import reviewerQueueRouter from "./submissions";
 import decisionsRouter from "./decisions";
 import rendersRouter from "./renders";
@@ -74,6 +75,7 @@ router.use(briefingSourcesRouter);
 // parametric handler) plus the top-level `/bim-models/:id/*` group
 // the C# Revit add-in calls.
 router.use(bimModelsRouter);
+router.use(packagesRouter);
 // localSetbacksRouter exposes `/local/setbacks/:jurisdictionKey` —
 // distinct path subtree from everything else so ordering is
 // indifferent.

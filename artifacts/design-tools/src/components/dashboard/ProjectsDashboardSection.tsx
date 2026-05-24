@@ -80,7 +80,7 @@ function Kpi({
   );
 }
 
-const MAX_CARDS = 6;
+const MAX_CARDS = 4;
 
 export function ProjectsDashboardSection({
   onRefresh,

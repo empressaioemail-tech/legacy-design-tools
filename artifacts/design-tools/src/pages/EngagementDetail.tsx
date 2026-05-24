@@ -62,9 +62,13 @@ import { SnapshotsTab } from "../components/engagement-detail/SnapshotsTab";
 import { SettingsTab } from "../components/engagement-detail/SettingsTab";
 import { SubmissionsTab } from "../components/engagement-detail/SubmissionsTab";
 import { DesignToolsTab } from "../components/engagement-detail/DesignToolsTab";
-import { PresentationsTab } from "../components/engagement-detail/PresentationsTab";
+import {
+  floorPlanSourceIdForSheet,
+  writeFloorPlanVizDeepLink,
+} from "../components/engagement-detail/renderModeUrl";
 import { TabHeader } from "../components/cockpit/TabChrome";
-import { PublishPrepTab } from "../components/engagement-detail/PublishPrepTab";
+import { PackagesTab } from "../components/engagement-detail/packages/PackagesTab";
+import { packageTemplateForTab } from "../components/engagement-detail/engagementViews";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
 import { ResponseTasksTab } from "../components/engagement-detail/ResponseTasksTab";
 import { DeliverableLettersTab } from "../components/engagement-detail/DeliverableLettersTab";
@@ -126,6 +130,7 @@ export function EngagementDetail() {
   // sprint needs back-button-aware tabs, it can wrap this state in a
   // `useSyncExternalStore` against `popstate`.
   const [tab, setTabState] = useState<TabId>(() => readTabFromUrl());
+  const [renderDeepLinkToken, setRenderDeepLinkToken] = useState(0);
   const setTab = useCallback((next: TabId): void => {
     setTabState(next);
     writeTabToUrl(next);
@@ -230,11 +235,28 @@ export function EngagementDetail() {
     }
     return null;
   }, [bimElements]);
-  const [showBuildingOverlay, setShowBuildingOverlay] = useState(false);
-  // Finding-citation drill-in lands on Snapshots so the new BIM
-  // viewer can highlight the matched element. The Site Context tab
-  // still subscribes to `selectedElementRef` if the user navigates
-  // there manually.
+  const [showBuildingOverlay, setShowBuildingOverlay] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return sessionStorage.getItem(`site-context:show-building:${id}`) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem(
+        `site-context:show-building:${id}`,
+        showBuildingOverlay ? "1" : "0",
+      );
+    } catch {
+      // sessionStorage may be unavailable in private mode — ignore.
+    }
+  }, [id, showBuildingOverlay]);
+  // Finding-citation drill-in lands on Snapshots so the BIM viewer can
+  // highlight the matched element (full-screen affordance on that tab).
   const handleElementRefClick = (elementRef: string): void => {
     setSelectedElementRef(elementRef);
     setTab("snapshots");
@@ -330,6 +352,12 @@ export function EngagementDetail() {
       `What is shown on sheet ${sheet.sheetNumber} (${sheet.sheetName})?`,
     );
     if (rightCollapsed) toggleRight();
+  };
+
+  const handleVisualizeFloorPlanFromSheet = (sheet: SheetSummary) => {
+    writeFloorPlanVizDeepLink(floorPlanSourceIdForSheet(id, sheet.id));
+    setRenderDeepLinkToken((t) => t + 1);
+    setTab("renders");
   };
 
   const explicitlySelected = selectedSnapshotIdByEngagement[id] ?? null;
@@ -458,11 +486,7 @@ export function EngagementDetail() {
     setModalOpen(false);
   };
 
-  // BIM model viewer panel — shared by the Snapshots tab (where WSB.3
-  // moves it up beside the snapshot timeline) and the dedicated
-  // "3D model" tab (WSB.1). Tabs render conditionally so only one
-  // instance ever mounts. Keeps `data-testid="snapshots-bim-viewer"`
-  // so the finding-citation deep-link regression test still resolves.
+  // BIM model viewer panel — Snapshots tab hero only (3D model segment removed).
   const bimViewportCentered = bimModelQuery.isLoading || bimElements.length === 0;
 
   const bimViewportBody =
@@ -488,33 +512,6 @@ export function EngagementDetail() {
       data-centered={bimViewportCentered ? "true" : "false"}
     >
       {bimViewportBody}
-    </div>
-  );
-
-  const bimModelPanel = (
-    <div
-      className="sc-card flex flex-col h-full"
-      data-testid="snapshots-bim-viewer"
-      style={{ minHeight: 420 }}
-    >
-      <div className="sc-card-header sc-row-sb">
-        <span className="sc-label">BIM MODEL</span>
-        <span className="sc-meta">
-          {bimElements.length}{" "}
-          {bimElements.length === 1 ? "element" : "elements"}
-        </span>
-      </div>
-      <div
-        className="flex-1"
-        style={{
-          borderTop: "1px solid var(--border-default)",
-          padding: 8,
-          display: "flex",
-          minHeight: 0,
-        }}
-      >
-        {bimViewportBody}
-      </div>
     </div>
   );
 
@@ -645,19 +642,15 @@ export function EngagementDetail() {
             bimElementCount={bimElements.length}
             jsonExpanded={jsonExpanded}
             setJsonExpanded={setJsonExpanded}
-            onAskClaudeAboutSheet={handleAskClaudeAboutSheet}
+            onOpenSheets={() => setTab("sheets")}
           />
-        </TabPanel>
-
-        <TabPanel id="model-3d" active={tab} className="flex flex-col flex-1 min-h-0">
-          {bimModelPanel}
         </TabPanel>
 
         <TabPanel id="sheets" active={tab} className="flex flex-col gap-3">
           <TabHeader
             overline="Deliver"
             title="Sheets"
-            subtitle="Sheet thumbnails from the latest snapshot. Open a row or jump to the dedicated 3D viewer."
+            subtitle="Sheet thumbnails from the active snapshot — attach to chat, visualize floor plans, or open full size."
             testId="sheets-tab-header"
             actions={
               <button
@@ -665,14 +658,14 @@ export function EngagementDetail() {
                 className="sc-btn-ghost"
                 data-testid="sheets-tab-view-in-3d"
                 disabled={bimElements.length === 0}
-                onClick={() => setTab("model-3d")}
+                onClick={() => setTab("snapshots")}
                 title={
                   bimElements.length === 0
                     ? "Push this engagement's briefing to Revit to enable the 3D viewer."
-                    : "Open the dedicated 3D model tab."
+                    : "Open the BIM model on Snapshots (use Full screen 3D for immersive view)."
                 }
               >
-                View in 3D
+                View BIM model
               </button>
             }
           />
@@ -680,6 +673,7 @@ export function EngagementDetail() {
             snapshotId={selectedSnapshotId}
             engagementId={id}
             onAskClaude={handleAskClaudeAboutSheet}
+            onVisualizeFloorPlan={handleVisualizeFloorPlanFromSheet}
           />
         </TabPanel>
 
@@ -693,6 +687,7 @@ export function EngagementDetail() {
             buildingGlbUrl={defaultBimGlbUrl}
             showBuilding={showBuildingOverlay}
             onToggleShowBuilding={setShowBuildingOverlay}
+            bimModelLoading={bimModelQuery.isLoading}
             initialCanvasMode={
               tab === "site" && selectedElementRef ? "3d" : "map"
             }
@@ -729,7 +724,7 @@ export function EngagementDetail() {
           />
         </TabPanel>
 
-        <TabPanel id="findings" active={tab}>
+        <TabPanel id="findings" active={tab} className="flex flex-col flex-1 min-h-0">
           <FindingsTab
             engagementId={engagement.id}
             initialSubmissionId={latestSubmissionId}
@@ -761,20 +756,34 @@ export function EngagementDetail() {
           />
         </TabPanel>
 
+        <TabPanel
+          id="packages"
+          active={
+            tab === "packages" ||
+            tab === "client-materials" ||
+            tab === "publish-prep" ||
+            tab === "publish-launch"
+              ? "packages"
+              : tab
+          }
+          className="flex flex-col flex-1 min-h-0"
+        >
+          <PackagesTab
+            engagement={engagement}
+            snapshotId={selectedSnapshotId}
+            onNavigate={setTab}
+            initialTemplate={packageTemplateForTab(tab)}
+          />
+        </TabPanel>
+
         <TabPanel id="renders" active={tab} className="flex flex-col flex-1 min-h-0">
           <DesignToolsTab
             engagementId={engagement.id}
             defaultGlbUrl={defaultBimGlbUrl}
-            onOpenBimTab={() => setTab("model-3d")}
+            onOpenBimTab={() => setTab("snapshots")}
+            onOpenClientMaterials={() => setTab("packages")}
+            renderDeepLinkToken={renderDeepLinkToken}
           />
-        </TabPanel>
-
-        <TabPanel id="presentations" active={tab} className="flex flex-col gap-4">
-          <PresentationsTab engagementId={engagement.id} onNavigate={setTab} />
-        </TabPanel>
-
-        <TabPanel id="publish-prep" active={tab} className="flex flex-col flex-1 min-h-0">
-          <PublishPrepTab engagementId={engagement.id} onNavigate={setTab} />
         </TabPanel>
 
         <TabPanel id="settings" active={tab}>
