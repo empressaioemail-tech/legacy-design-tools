@@ -25,6 +25,10 @@ import {
 } from "lucide-react";
 import { TabHeader } from "../cockpit/TabChrome";
 import { relativeTime } from "../../lib/relativeTime";
+import {
+  demoResponseTasksForEngagement,
+  isDemoSeedEnabled,
+} from "../../demo/seed";
 
 /**
  * State → left-rail accent and avatar palette. Mirrors the
@@ -895,7 +899,13 @@ export function ResponseTasksTab({ engagementId }: { engagementId: string }) {
     },
   });
 
-  const tasks = useMemo(() => data?.responseTasks ?? [], [data]);
+  const tasks = useMemo(() => {
+    const live = data?.responseTasks ?? [];
+    if (isDemoSeedEnabled() && live.length === 0 && engagementId) {
+      return demoResponseTasksForEngagement(engagementId);
+    }
+    return live;
+  }, [data, engagementId]);
   const grouped = useMemo(() => groupTasksByDay(tasks), [tasks]);
   const unreadCount = useMemo(
     () =>

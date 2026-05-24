@@ -79,6 +79,7 @@ export interface CockpitProject {
 
 export interface CockpitShellProps {
   title?: string;
+  hidePageTitle?: boolean;
   children: ReactNode;
   rightPanel?: ReactNode;
   /** Top icons (workspace nav). */
@@ -131,39 +132,9 @@ function StatusDot({ status }: { status: string | null | undefined }) {
   );
 }
 
-function NavRailItem({
-  item,
-  active,
-}: {
-  item: CockpitNavItem;
-  active: boolean;
-}) {
-  return (
-    <Link
-      href={item.href}
-      aria-label={item.label}
-      title={item.label}
-      data-active={active ? "true" : "false"}
-      className="cockpit-nav-icon"
-    >
-      <span className="cockpit-nav-icon-inner">
-        {item.icon}
-        {typeof item.badge === "number" && item.badge > 0 && (
-          <span
-            data-testid="inbox-badge"
-            className="cockpit-nav-badge"
-            aria-label={`${item.badge} unread`}
-          >
-            {item.badge > 99 ? "99+" : item.badge}
-          </span>
-        )}
-      </span>
-    </Link>
-  );
-}
-
 export function CockpitShell({
   title,
+  hidePageTitle,
   children,
   rightPanel,
   primaryNav,
@@ -276,29 +247,11 @@ export function CockpitShell({
 
   return (
     <div className="cockpit-shell">
-      {/* SLIM NAV RAIL ---------------------------------------------- */}
-      <nav className="cockpit-nav-rail" aria-label="Workspace navigation">
-        <Link href="/" className="cockpit-nav-brand" aria-label="SmartCity OS Home">
-          <span aria-hidden="true">S</span>
-        </Link>
-        <div className="cockpit-nav-group">
-          {primaryNav.items.map((it) => (
-            <NavRailItem key={it.href} item={it} active={isActive(it.href)} />
-          ))}
-        </div>
-        <div className="cockpit-nav-group cockpit-nav-group-bottom">
-          {secondaryNav?.items.map((it) => (
-            <NavRailItem key={it.href} item={it} active={isActive(it.href)} />
-          ))}
-          {navTrailing && <div className="cockpit-nav-trailing">{navTrailing}</div>}
-        </div>
-      </nav>
-
-      {/* PROJECT LIST RAIL ----------------------------------------- */}
+      {/* UNIFIED LEFT RAIL (workspace nav + project list) ---------------- */}
       {projectRail && (
         <aside
-          className="cockpit-project-rail"
-          aria-label="Projects"
+          className="cockpit-unified-rail"
+          aria-label="Workspace and projects"
           data-testid="cockpit-project-rail"
           data-collapsed={projectRailCollapsed ? "true" : "false"}
           style={{
@@ -319,6 +272,59 @@ export function CockpitShell({
             </button>
           ) : (
             <>
+              <div className="cockpit-unified-rail-top">
+                <Link
+                  href="/"
+                  className="cockpit-nav-brand cockpit-nav-brand-labeled"
+                  aria-label="SmartCity OS Home"
+                >
+                  <span className="cockpit-nav-brand-mark" aria-hidden="true">
+                    S
+                  </span>
+                  <span className="cockpit-nav-brand-text">SmartCity OS</span>
+                </Link>
+                <nav
+                  className="cockpit-workspace-nav"
+                  aria-label="Workspace navigation"
+                >
+                  {primaryNav.items.map((it) => (
+                    <Link
+                      key={it.href}
+                      href={it.href}
+                      className="cockpit-workspace-nav-item"
+                      data-active={isActive(it.href) ? "true" : "false"}
+                      data-testid={`workspace-nav-${it.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <span className="cockpit-workspace-nav-icon">{it.icon}</span>
+                      <span className="cockpit-workspace-nav-label">{it.label}</span>
+                      {typeof it.badge === "number" && it.badge > 0 && (
+                        <span className="cockpit-nav-badge">{it.badge}</span>
+                      )}
+                    </Link>
+                  ))}
+                </nav>
+                {secondaryNav && secondaryNav.items.length > 0 && (
+                  <nav
+                    className="cockpit-workspace-nav cockpit-workspace-nav-secondary"
+                    aria-label={secondaryNav.label ?? "Workspace tools"}
+                  >
+                    {secondaryNav.label && (
+                      <div className="cockpit-rail-overline">{secondaryNav.label}</div>
+                    )}
+                    {secondaryNav.items.map((it) => (
+                      <Link
+                        key={it.href}
+                        href={it.href}
+                        className="cockpit-workspace-nav-item"
+                        data-active={isActive(it.href) ? "true" : "false"}
+                      >
+                        <span className="cockpit-workspace-nav-icon">{it.icon}</span>
+                        <span className="cockpit-workspace-nav-label">{it.label}</span>
+                      </Link>
+                    ))}
+                  </nav>
+                )}
+              </div>
               <div className="cockpit-project-rail-header">
                 <div className="cockpit-search-affordance">
                   <Search size={13} className="opacity-60" />
@@ -380,6 +386,9 @@ export function CockpitShell({
               </Link>
             )}
           </div>
+              <div className="cockpit-unified-rail-footer">
+                {navTrailing}
+              </div>
               <div
                 role="separator"
                 aria-orientation="vertical"
@@ -408,18 +417,20 @@ export function CockpitShell({
 
       {/* MAIN COLUMN ----------------------------------------------- */}
       <div className="cockpit-main">
-        <header className="cockpit-header">
-          <div className="cockpit-header-title">
-            {title && (
-              <h1 className="cockpit-header-h1" data-testid="cockpit-page-title">
-                {title}
-              </h1>
+        {!hidePageTitle && (title || headerActions) && (
+          <header className="cockpit-header">
+            <div className="cockpit-header-title">
+              {title && (
+                <h1 className="cockpit-header-h1" data-testid="cockpit-page-title">
+                  {title}
+                </h1>
+              )}
+            </div>
+            {headerActions && (
+              <div className="cockpit-header-actions">{headerActions}</div>
             )}
-          </div>
-          {headerActions && (
-            <div className="cockpit-header-actions">{headerActions}</div>
-          )}
-        </header>
+          </header>
+        )}
         <main className="cockpit-main-body sc-scroll">{children}</main>
       </div>
 
@@ -470,7 +481,7 @@ export function CockpitShell({
 export const DEFAULT_PRIMARY_NAV: CockpitNavSection = {
   items: [
     { label: "Projects", href: "/", icon: <LayoutDashboard size={18} /> },
-    { label: "Inbox", href: "/notifications", icon: <Inbox size={18} /> },
+    { label: "Inbox", href: "/inbox", icon: <Inbox size={18} /> },
     { label: "Code Library", href: "/code-library", icon: <BookOpen size={18} /> },
     { label: "Style Probe", href: "/style-probe", icon: <Palette size={18} /> },
     { label: "Settings", href: "/settings", icon: <SettingsIcon size={18} /> },

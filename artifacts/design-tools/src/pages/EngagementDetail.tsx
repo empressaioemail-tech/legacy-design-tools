@@ -27,7 +27,7 @@ import {
   type SubmissionReceipt,
 } from "@workspace/api-client-react";
 import { AppShell } from "../components/AppShell";
-import { ClaudeChat } from "../components/ClaudeChat";
+import { EngagementViewHeader } from "../components/engagement-detail/EngagementViewHeader";
 import { EngagementDetailsModal } from "../components/EngagementDetailsModal";
 import { SheetGrid } from "../components/SheetGrid";
 import { SubmissionDetailModal } from "../components/SubmissionDetailModal";
@@ -42,10 +42,7 @@ import {
   SubmitToJurisdictionDialog,
   countUnaddressedFindings,
   useSidebarState,
-  VIEWS_RAIL_MAX_WIDTH,
-  VIEWS_RAIL_MIN_WIDTH,
 } from "@workspace/portal-ui";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -113,286 +110,6 @@ function TabPanel({
     >
       {isActive ? children : null}
     </div>
-  );
-}
-
-const TAB_GROUP_LABELS: Record<string, string> = {
-  model: "Model & Source",
-  site: "Site",
-  review: "Review",
-  deliverables: "Deliverables",
-  config: "Config",
-};
-
-const VIEWS_KEYBOARD_NUDGE = 16;
-
-function ViewsRail({
-  active,
-  onChange,
-  findingsBadgeCount,
-}: {
-  active: TabId;
-  onChange: (id: TabId) => void;
-  /**
-   * Number of unaddressed findings on the most-recent submission
-   * (Task #421 / V1-1 / V1-7). Rendered as a small badge on the
-   * "Findings" view so an architect can spot blocker / concern work
-   * without having to open the view. `undefined` while the badge
-   * fetch is loading or the engagement has no submissions yet —
-   * we render the rail item with no badge in that case.
-   */
-  findingsBadgeCount?: number | undefined;
-}) {
-  // The thirteen tabs the architect uses on an engagement bucket into
-  // the five workflow segments locked in the IA decision (Option A,
-  // workflow-grouped): model intake, site context, the review/findings
-  // loop, deliverable packaging, and configuration. Each cluster is
-  // labelled with a small overline so the 5-workflow IA reads at a
-  // glance instead of dissolving into one long thirteen-tab strip
-  // (QA-01 / WSB.1).
-  //
-  // The tabstrip implements the WAI-ARIA Tabs pattern: role=tablist on
-  // the container, role=tab + aria-selected on each trigger, roving
-  // tabindex (active tab is the only one in the natural tab order),
-  // and arrow-key navigation with Home/End wrap. Activation is
-  // automatic on focus change — matches the rest of the design system
-  // and avoids requiring Enter for what is purely a view-selection
-  // affordance.
-  const tabs: Array<{ id: TabId; label: string; group: string }> = [
-    { id: "snapshots", label: "Snapshots", group: "model" },
-    { id: "sheets", label: "Sheets", group: "model" },
-    { id: "model-3d", label: "3D model", group: "model" },
-    { id: "site", label: "Site", group: "site" },
-    { id: "site-context", label: "Site context", group: "site" },
-    { id: "submissions", label: "Submissions", group: "review" },
-    { id: "findings", label: "Findings", group: "review" },
-    { id: "response-tasks", label: "Response tasks", group: "review" },
-    {
-      id: "deliverable-letters",
-      label: "Deliverable letters",
-      group: "deliverables",
-    },
-    { id: "detail-callouts", label: "Detail callouts", group: "deliverables" },
-    { id: "product-specs", label: "Product specs", group: "deliverables" },
-    { id: "renders", label: "Design Tools", group: "deliverables" },
-    { id: "presentations", label: "Presentations", group: "deliverables" },
-    { id: "publish-prep", label: "Publish prep", group: "deliverables" },
-    { id: "settings", label: "Settings", group: "config" },
-  ];
-
-  // Bucket consecutive same-group tabs so each cluster can render
-  // beneath its own overline label without losing the flat keyboard
-  // tabindex order.
-  const groups: Array<{
-    key: string;
-    label: string;
-    tabs: Array<{ id: TabId; label: string; group: string }>;
-  }> = [];
-  for (const t of tabs) {
-    const last = groups[groups.length - 1];
-    if (last && last.key === t.group) {
-      last.tabs.push(t);
-    } else {
-      groups.push({
-        key: t.group,
-        label: TAB_GROUP_LABELS[t.group] ?? t.group,
-        tabs: [t],
-      });
-    }
-  }
-
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const activeIdx = Math.max(
-    0,
-    tabs.findIndex((t) => t.id === active),
-  );
-
-  // Vertical orientation — ArrowDown / ArrowUp move between items in
-  // the same WAI-ARIA Tabs pattern Wave 1 introduced. ArrowRight /
-  // ArrowLeft are intentionally inert: the rail lives on the right
-  // edge of the page and horizontal arrows are reserved for the main
-  // content's own widgets (sheets grid, BIM viewer, …).
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    let next = activeIdx;
-    if (e.key === "ArrowDown") next = (activeIdx + 1) % tabs.length;
-    else if (e.key === "ArrowUp")
-      next = (activeIdx - 1 + tabs.length) % tabs.length;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = tabs.length - 1;
-    else return;
-    e.preventDefault();
-    onChange(tabs[next].id);
-    // Defer focus to next paint so the re-rendered button is mounted
-    // with the correct tabindex before we ask it to receive focus.
-    requestAnimationFrame(() => tabRefs.current[next]?.focus());
-  };
-
-  const collapsed = useSidebarState((s) => s.viewsRailCollapsed);
-  const width = useSidebarState((s) => s.viewsRailWidth);
-  const toggle = useSidebarState((s) => s.toggleViewsRail);
-  const setWidth = useSidebarState((s) => s.setViewsRailWidth);
-  const resetWidth = useSidebarState((s) => s.resetViewsRailWidth);
-
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  const onResizeDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (collapsed) return;
-    e.preventDefault();
-    dragRef.current = { startX: e.clientX, startWidth: width };
-    setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const start = dragRef.current;
-    if (!start) return;
-    // Rail is on the RIGHT of the page — grows when pointer moves LEFT.
-    setWidth(start.startWidth - (e.clientX - start.startX));
-  };
-  const onResizeUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current) return;
-    dragRef.current = null;
-    setDragging(false);
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch { /* ignore */ }
-  };
-  const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (collapsed) return;
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      setWidth(width + VIEWS_KEYBOARD_NUDGE);
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      setWidth(width - VIEWS_KEYBOARD_NUDGE);
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      setWidth(VIEWS_RAIL_MIN_WIDTH);
-    } else if (e.key === "End") {
-      e.preventDefault();
-      setWidth(VIEWS_RAIL_MAX_WIDTH);
-    }
-  };
-
-  if (collapsed) {
-    return (
-      <aside
-        className="cockpit-views-rail cockpit-views-rail-collapsed"
-        aria-label="Engagement views (collapsed)"
-        data-collapsed="true"
-      >
-        <button
-          type="button"
-          onClick={toggle}
-          className="cockpit-views-rail-stub"
-          aria-label="Expand views rail"
-          title="Expand views rail"
-          data-testid="cockpit-views-rail-toggle"
-        >
-          <ChevronLeft size={14} />
-        </button>
-      </aside>
-    );
-  }
-
-  return (
-    <aside
-      className="cockpit-views-rail sc-scroll"
-      aria-label="Engagement views"
-      data-collapsed="false"
-      style={{
-        width,
-        transition: dragging ? "none" : "width 200ms ease-out",
-      }}
-    >
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize views rail"
-        aria-valuemin={VIEWS_RAIL_MIN_WIDTH}
-        aria-valuemax={VIEWS_RAIL_MAX_WIDTH}
-        aria-valuenow={width}
-        tabIndex={0}
-        data-testid="cockpit-views-rail-resize-handle"
-        onPointerDown={onResizeDown}
-        onPointerMove={onResizeMove}
-        onPointerUp={onResizeUp}
-        onPointerCancel={onResizeUp}
-        onDoubleClick={resetWidth}
-        onKeyDown={onResizeKey}
-        title="Drag to resize, double-click to reset"
-        className="cockpit-views-rail-resize"
-        style={{ background: dragging ? "var(--cyan-dim)" : "transparent" }}
-      />
-      <div className="cockpit-views-rail-header">
-        <span className="cockpit-views-rail-title">Views</span>
-        <button
-          type="button"
-          onClick={toggle}
-          className="cockpit-rail-collapse-btn"
-          aria-label="Collapse views rail"
-          title="Collapse views rail"
-          data-testid="cockpit-views-rail-toggle"
-        >
-          <ChevronRight size={14} />
-        </button>
-      </div>
-      <div
-        role="tablist"
-        aria-label="Engagement workflow"
-        aria-orientation="vertical"
-        onKeyDown={handleKeyDown}
-      >
-        {groups.map((g) => (
-          <div
-            key={g.key}
-            role="presentation"
-            className="cockpit-views-rail-section"
-            data-testid={`engagement-tab-group-${g.key}`}
-          >
-            <div className="cockpit-views-rail-overline" aria-hidden="true">
-              {g.label}
-            </div>
-            {g.tabs.map((t) => {
-              const idx = tabs.indexOf(t);
-              const isActive = active === t.id;
-              const showBadge =
-                t.id === "findings" &&
-                typeof findingsBadgeCount === "number" &&
-                findingsBadgeCount > 0;
-              return (
-                <button
-                  key={t.id}
-                  ref={(el) => {
-                    tabRefs.current[idx] = el;
-                  }}
-                  type="button"
-                  role="tab"
-                  id={`engagement-tab-trigger-${t.id}`}
-                  aria-selected={isActive}
-                  aria-controls={`engagement-tabpanel-${t.id}`}
-                  tabIndex={isActive ? 0 : -1}
-                  onClick={() => onChange(t.id)}
-                  className="cockpit-views-rail-item"
-                  data-active={isActive ? "true" : "false"}
-                  data-testid={`engagement-tab-${t.id}`}
-                >
-                  <span className="cockpit-views-rail-item-label">{t.label}</span>
-                  {showBadge && (
-                    <span
-                      data-testid="engagement-tab-findings-badge"
-                      className="cockpit-views-rail-badge"
-                    >
-                      {findingsBadgeCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    </aside>
   );
 }
 
@@ -696,7 +413,7 @@ export function EngagementDetail() {
 
   if (!engagement) {
     return (
-      <AppShell title="Loading…">
+      <AppShell hidePageTitle title="Loading…">
         <div className="sc-prose opacity-60">Loading engagement…</div>
       </AppShell>
     );
@@ -741,6 +458,37 @@ export function EngagementDetail() {
   // "3D model" tab (WSB.1). Tabs render conditionally so only one
   // instance ever mounts. Keeps `data-testid="snapshots-bim-viewer"`
   // so the finding-citation deep-link regression test still resolves.
+  const bimViewportBody =
+    bimModelQuery.isLoading ? (
+      <div className="sc-prose opacity-60 m-auto">Loading BIM model…</div>
+    ) : bimElements.length === 0 ? (
+      <div className="sc-prose opacity-70 m-auto text-center">
+        No BIM elements yet. Push this engagement&apos;s briefing to Revit to
+        populate the 3D viewer.
+      </div>
+    ) : (
+      <BimModelViewport
+        elements={bimElements}
+        selectedElementRef={selectedElementRef ?? null}
+      />
+    );
+
+  const bimHeroPanel = (
+    <div
+      className="snapshots-bim-hero-viewport flex flex-col h-full min-h-0"
+      data-testid="snapshots-bim-viewer"
+    >
+      <div className="snapshots-bim-hero-viewport-meta sc-row-sb shrink-0">
+        <span className="sc-label">BIM model</span>
+        <span className="sc-meta">
+          {bimElements.length}{" "}
+          {bimElements.length === 1 ? "element" : "elements"}
+        </span>
+      </div>
+      <div className="flex-1 min-h-0 flex">{bimViewportBody}</div>
+    </div>
+  );
+
   const bimModelPanel = (
     <div
       className="sc-card flex flex-col h-full"
@@ -763,37 +511,14 @@ export function EngagementDetail() {
           minHeight: 0,
         }}
       >
-        {bimModelQuery.isLoading ? (
-          <div className="sc-prose opacity-60 m-auto">Loading BIM model…</div>
-        ) : bimElements.length === 0 ? (
-          <div className="sc-prose opacity-70 m-auto text-center">
-            No BIM elements yet. Push this engagement&apos;s briefing to Revit
-            to populate the 3D viewer.
-          </div>
-        ) : (
-          <BimModelViewport
-            elements={bimElements}
-            selectedElementRef={selectedElementRef ?? null}
-          />
-        )}
+        {bimViewportBody}
       </div>
     </div>
   );
 
   return (
-    <AppShell
-      title={engagement.name}
-      rightPanel={
-        <ClaudeChat
-          engagementId={id}
-          hasSnapshots={hasSnapshots}
-          snapshots={snapshots}
-          activeTab={tab}
-        />
-      }
-    >
-      <div className="cockpit-engagement-layout">
-        <div className="cockpit-engagement-main flex flex-col gap-5">
+    <AppShell hidePageTitle>
+      <div className="cockpit-engagement-column flex flex-col flex-1 min-h-0 gap-4">
         {lastSubmission && (
           <SubmissionRecordedBanner
             submittedAt={lastSubmission.receipt.submittedAt}
@@ -899,6 +624,13 @@ export function EngagementDetail() {
         */}
         <ReviewerRequestsHistory engagementId={id} />
 
+        <EngagementViewHeader
+          activeTab={tab}
+          onSelectTab={setTab}
+          findingsBadgeCount={findingsBadgeCount}
+        />
+
+        <div className="cockpit-engagement-body flex flex-col flex-1 min-h-0">
         <TabPanel id="snapshots" active={tab} className="flex flex-col flex-1 min-h-0">
           <SnapshotsTab
             engagementId={id}
@@ -907,7 +639,7 @@ export function EngagementDetail() {
             snapshotDetail={snapshotDetail}
             selectedSnapshotId={selectedSnapshotId}
             onSelectSnapshot={(snapshotId) => selectSnapshot(id, snapshotId)}
-            bimModelPanel={bimModelPanel}
+            bimModelPanel={bimHeroPanel}
             bimElementCount={bimElements.length}
             jsonExpanded={jsonExpanded}
             setJsonExpanded={setJsonExpanded}
@@ -1028,11 +760,6 @@ export function EngagementDetail() {
           <SettingsTab engagement={engagement} onEdit={openEdit} />
         </TabPanel>
         </div>
-        <ViewsRail
-          active={tab}
-          onChange={setTab}
-          findingsBadgeCount={findingsBadgeCount}
-        />
       </div>
 
       <EngagementDetailsModal

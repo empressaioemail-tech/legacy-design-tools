@@ -9,7 +9,7 @@ import { CodeLibrary } from "./pages/CodeLibrary";
 import { DevAtoms } from "./pages/DevAtoms";
 import { DevAtomsProbe } from "./pages/DevAtomsProbe";
 import { Settings } from "./pages/Settings";
-import { Notifications } from "./pages/Notifications";
+import { InboxPage } from "./pages/InboxPage";
 import { Workspace } from "./pages/Workspace";
 import { SharedWithMe } from "./pages/SharedWithMe";
 import NotFound from "./pages/not-found";
@@ -50,10 +50,11 @@ function Router() {
           <Settings />
         </AppShell>
       </Route>
+      <Route path="/inbox">
+        <InboxPage />
+      </Route>
       <Route path="/notifications">
-        <AppShell title="Inbox">
-          <Notifications />
-        </AppShell>
+        <InboxPage />
       </Route>
       <Route path="/workspace">
         <AppShell title="Workspace">

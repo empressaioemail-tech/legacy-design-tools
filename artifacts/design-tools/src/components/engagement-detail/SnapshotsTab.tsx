@@ -70,10 +70,10 @@ export function SnapshotsTab({
 
       {/* Viewer-as-hero canvas: BIM panel fills the space; timeline + drawer overlay at the bottom */}
       <div
-        className="relative flex-1 min-h-0 rounded-lg overflow-hidden"
+        className="relative flex-1 min-h-0 rounded-lg overflow-hidden snapshots-hero-canvas"
         style={{
-          border: "1px solid #1e2a3a",
-          background: "#050914",
+          border: "1px solid var(--border-default)",
+          background: "var(--bg-base)",
           minHeight: 520,
         }}
       >

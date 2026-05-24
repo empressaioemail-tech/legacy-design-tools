@@ -15,11 +15,13 @@ import {
   DEFAULT_SECONDARY_NAV,
   type CockpitProject,
 } from "./CockpitShell";
+import { GlobalClaudePanel } from "./GlobalClaudePanel";
 import { relativeTime } from "../lib/relativeTime";
 
 interface AppShellProps {
   title?: string;
-  rightPanel?: ReactNode;
+  /** Hide the shell page title row (engagement detail supplies its own header). */
+  hidePageTitle?: boolean;
   /** Right-aligned slot in the Cockpit header (Ask Claude, New Snapshot, …). */
   headerActions?: ReactNode;
   children: ReactNode;
@@ -36,7 +38,12 @@ interface AppShellProps {
  * `title`, optional `rightPanel`, and `children` — so no page-level
  * call sites need to be rewritten.
  */
-export function AppShell({ title, rightPanel, headerActions, children }: AppShellProps) {
+export function AppShell({
+  title,
+  hidePageTitle,
+  headerActions,
+  children,
+}: AppShellProps) {
   const params = useParams<{ id?: string }>();
   const activeProjectId = params.id ?? null;
 
@@ -89,15 +96,16 @@ export function AppShell({ title, rightPanel, headerActions, children }: AppShel
   const primaryNav = useMemo(() => {
     return {
       items: DEFAULT_PRIMARY_NAV.items.map((it) =>
-        it.href === "/notifications" ? { ...it, badge: unreadCount } : it,
+        it.href === "/inbox" ? { ...it, badge: unreadCount } : it,
       ),
     };
   }, [unreadCount]);
 
   return (
     <CockpitShell
-      title={title}
-      rightPanel={rightPanel}
+      title={hidePageTitle ? undefined : title}
+      hidePageTitle={hidePageTitle}
+      rightPanel={<GlobalClaudePanel />}
       headerActions={headerActions}
       primaryNav={primaryNav}
       secondaryNav={DEFAULT_SECONDARY_NAV}
