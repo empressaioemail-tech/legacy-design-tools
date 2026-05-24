@@ -338,6 +338,25 @@ CREATE TABLE @@SCHEMA@@.detail_callout_specs (
 );
 
 
+-- Name: engagement_packages; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.engagement_packages (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    template text NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    title text NOT NULL,
+    snapshot_id uuid,
+    selection jsonb DEFAULT '{}'::jsonb NOT NULL,
+    form_snapshot jsonb,
+    client_review_deadline timestamp with time zone,
+    linked_submission_id uuid,
+    exported_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: engagements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.engagements (
@@ -482,6 +501,29 @@ CREATE TABLE @@SCHEMA@@.materializable_elements (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT materializable_elements_provenance_invariants_check CHECK ((((source_kind = 'briefing-derived'::text) AND (briefing_id IS NOT NULL)) OR ((source_kind = ANY (ARRAY['as-built-ifc'::text, 'as-built-ifc-bundle'::text])) AND (source_snapshot_id IS NOT NULL) AND (engagement_id IS NOT NULL) AND (ifc_global_id IS NOT NULL) AND (ifc_type IS NOT NULL)) OR ((source_kind = 'site-topography'::text) AND (engagement_id IS NOT NULL)))),
     CONSTRAINT materializable_elements_source_kind_check CHECK ((source_kind = ANY (ARRAY['briefing-derived'::text, 'as-built-ifc'::text, 'as-built-ifc-bundle'::text, 'site-topography'::text])))
+);
+
+
+-- Name: package_share_comments; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.package_share_comments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    share_id uuid NOT NULL,
+    author_name text NOT NULL,
+    body text NOT NULL,
+    sheet_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: package_shares; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.package_shares (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    package_id uuid NOT NULL,
+    token text NOT NULL,
+    expires_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1003,6 +1045,12 @@ ALTER TABLE ONLY @@SCHEMA@@.detail_callout_specs
     ADD CONSTRAINT detail_callout_specs_pkey PRIMARY KEY (id);
 
 
+-- Name: engagement_packages engagement_packages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.engagement_packages
+    ADD CONSTRAINT engagement_packages_pkey PRIMARY KEY (id);
+
+
 -- Name: engagements engagements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.engagements
@@ -1043,6 +1091,18 @@ ALTER TABLE ONLY @@SCHEMA@@.findings
 
 ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
     ADD CONSTRAINT materializable_elements_pkey PRIMARY KEY (id);
+
+
+-- Name: package_share_comments package_share_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.package_share_comments
+    ADD CONSTRAINT package_share_comments_pkey PRIMARY KEY (id);
+
+
+-- Name: package_shares package_shares_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.package_shares
+    ADD CONSTRAINT package_shares_pkey PRIMARY KEY (id);
 
 
 -- Name: parcel_briefings parcel_briefings_engagement_id_unique; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1350,6 +1410,11 @@ CREATE INDEX deliverable_letters_engagement_created_idx ON @@SCHEMA@@.deliverabl
 CREATE INDEX detail_callout_specs_engagement_created_idx ON @@SCHEMA@@.detail_callout_specs USING btree (engagement_id, created_at);
 
 
+-- Name: engagement_packages_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX engagement_packages_engagement_created_idx ON @@SCHEMA@@.engagement_packages USING btree (engagement_id, created_at);
+
+
 -- Name: engagements_name_lower_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX engagements_name_lower_idx ON @@SCHEMA@@.engagements USING btree (name_lower);
@@ -1418,6 +1483,21 @@ CREATE INDEX materializable_elements_kind_idx ON @@SCHEMA@@.materializable_eleme
 -- Name: materializable_elements_snapshot_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX materializable_elements_snapshot_idx ON @@SCHEMA@@.materializable_elements USING btree (source_snapshot_id) WHERE (source_snapshot_id IS NOT NULL);
+
+
+-- Name: package_share_comments_share_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX package_share_comments_share_created_idx ON @@SCHEMA@@.package_share_comments USING btree (share_id, created_at);
+
+
+-- Name: package_shares_package_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX package_shares_package_idx ON @@SCHEMA@@.package_shares USING btree (package_id);
+
+
+-- Name: package_shares_token_uniq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX package_shares_token_uniq ON @@SCHEMA@@.package_shares USING btree (token);
 
 
 -- Name: parcel_briefings_engagement_idx; Type: INDEX; Schema: public; Owner: -
@@ -1664,6 +1744,24 @@ ALTER TABLE ONLY @@SCHEMA@@.detail_callout_specs
     ADD CONSTRAINT detail_callout_specs_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
+-- Name: engagement_packages engagement_packages_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.engagement_packages
+    ADD CONSTRAINT engagement_packages_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: engagement_packages engagement_packages_linked_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.engagement_packages
+    ADD CONSTRAINT engagement_packages_linked_submission_id_submissions_id_fk FOREIGN KEY (linked_submission_id) REFERENCES @@SCHEMA@@.submissions(id) ON DELETE SET NULL;
+
+
+-- Name: engagement_packages engagement_packages_snapshot_id_snapshots_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.engagement_packages
+    ADD CONSTRAINT engagement_packages_snapshot_id_snapshots_id_fk FOREIGN KEY (snapshot_id) REFERENCES @@SCHEMA@@.snapshots(id) ON DELETE SET NULL;
+
+
 -- Name: eval_runs eval_runs_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.eval_runs
@@ -1728,6 +1826,18 @@ ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
 
 ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
     ADD CONSTRAINT materializable_elements_superseded_by_id_materializable_element FOREIGN KEY (superseded_by_id) REFERENCES @@SCHEMA@@.materializable_elements(id) ON DELETE SET NULL;
+
+
+-- Name: package_share_comments package_share_comments_share_id_package_shares_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.package_share_comments
+    ADD CONSTRAINT package_share_comments_share_id_package_shares_id_fk FOREIGN KEY (share_id) REFERENCES @@SCHEMA@@.package_shares(id) ON DELETE CASCADE;
+
+
+-- Name: package_shares package_shares_package_id_engagement_packages_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.package_shares
+    ADD CONSTRAINT package_shares_package_id_engagement_packages_id_fk FOREIGN KEY (package_id) REFERENCES @@SCHEMA@@.engagement_packages(id) ON DELETE CASCADE;
 
 
 -- Name: parcel_briefings parcel_briefings_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
