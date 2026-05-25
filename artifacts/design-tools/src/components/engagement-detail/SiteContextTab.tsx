@@ -21,6 +21,7 @@ import {
 } from "@workspace/api-client-react";
 import { SiteMap } from "@workspace/site-context/client";
 import { extractBriefingSourceOverlays } from "@workspace/site-context/client";
+import { hasBriefingNarrativeContent } from "@workspace/site-context/client";
 import {
   FEDERAL_PILOT_LAYER_KINDS,
   PILOT_JURISDICTION_COVERAGE,
@@ -339,7 +340,10 @@ export function SiteContextTab({
     briefingStatusState === null && briefingStatusQuery.isLoading;
   const isBriefingJobPending = briefingStatusState === "pending";
   const showBriefingProgress =
-    isBriefingJobPending || isBriefingStatusUnknown;
+    (isBriefingJobPending || isBriefingStatusUnknown) &&
+    !hasBriefingNarrativeContent(
+      briefingQuery.data?.briefing?.narrative ?? null,
+    );
   const briefingJobError =
     briefingStatusState === "failed"
       ? (briefingStatusQuery.data?.error ?? "Briefing generation failed.")
