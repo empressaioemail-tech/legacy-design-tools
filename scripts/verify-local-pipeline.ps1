@@ -2,7 +2,8 @@
 param(
   [string]$EngagementId = "",
   [string]$ApiBase = "http://127.0.0.1:8080",
-  [string]$UiBase = "http://127.0.0.1:20295"
+  [string]$UiBase = "http://127.0.0.1:20295",
+  [switch]$TestRenderKickoff
 )
 
 $ErrorActionPreference = "Continue"
@@ -92,6 +93,23 @@ if ($EngagementId) {
   } catch {
     $status = try { $_.Exception.Response.StatusCode.value__ } catch { "?" }
     Test-Step "GET bim-model" $false "HTTP $status — wrong id or DATABASE_URL points at empty DB"
+  }
+
+  if ($TestRenderKickoff) {
+    $body = @{
+      kind = "still"
+      prompt = "local pipeline smoke still"
+      cameraPosition = @{ x = 0; y = 5; z = 10 }
+      cameraTarget = @{ x = 0; y = 0; z = 0 }
+    } | ConvertTo-Json -Compress
+    try {
+      $kick = Invoke-WebRequest -Uri "$ApiBase/api/engagements/$EngagementId/renders" `
+        -Method POST -ContentType "application/json" -Body $body -UseBasicParsing -TimeoutSec 30
+      Test-Step "POST render kickoff (no glbUrl)" ($kick.StatusCode -eq 202) "HTTP $($kick.StatusCode) renderId=$($kick.Content | ConvertFrom-Json | Select-Object -ExpandProperty renderId)"
+    } catch {
+      $status = try { $_.Exception.Response.StatusCode.value__ } catch { "?" }
+      Test-Step "POST render kickoff" $false "HTTP $status — need briefing+bim+GLB; api on dev:local with mock mnml"
+    }
   }
 }
 

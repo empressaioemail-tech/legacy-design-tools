@@ -262,6 +262,7 @@ Manager. `Class = config` → Cloud Run env var.
 | `MNML_RENDER_MODE` | config | optional | `lib/mnml-client/src/factory.ts` | Default `mock`. `http` requires `MNML_API_URL` + `MNML_API_KEY`. |
 | `MNML_API_URL` | config | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |
 | `MNML_API_KEY` | secret | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |
+| `RENDERS_PROD_ENABLED` | config | optional | `artifacts/api-server/src/routes/renders.ts` | Default `false` on canary deploy. Set `true` to allow `POST .../renders` in production (otherwise 503 `renders_preview_disabled`). See `docs/studio-prod-enable.md`. |
 | `DXF_CONVERTER_MODE` | config | optional | `lib/converterClient.ts` | Default `mock`. `http` requires `CONVERTER_URL` + `CONVERTER_SHARED_SECRET`. |
 | `CONVERTER_URL` | config | conditional | `lib/converterClient.ts` | Required when `DXF_CONVERTER_MODE=http`. |
 | `CONVERTER_SHARED_SECRET` | secret | conditional | `lib/converterClient.ts` | Required when `DXF_CONVERTER_MODE=http`. |

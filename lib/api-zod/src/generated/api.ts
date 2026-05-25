@@ -7520,8 +7520,9 @@ export const KickoffRenderBody = zod
         glbUrl: zod
           .string()
           .url()
+          .optional()
           .describe(
-            "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+            "Optional for GLB-capture kickoffs. When omitted, the api-\nserver resolves the engagement's primary BIM GLB to a\nsigned object-storage URL (architect mesh first, then\nbriefing-source GLB). When provided, API-relative GLB\npaths are normalized to signed GCS URLs for Puppeteer.\n",
           ),
         prompt: zod
           .string()
@@ -7639,8 +7640,9 @@ export const KickoffRenderBody = zod
         glbUrl: zod
           .string()
           .url()
+          .optional()
           .describe(
-            "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+            "Optional for GLB-capture kickoffs. When omitted, the api-\nserver resolves the engagement's primary BIM GLB to a\nsigned object-storage URL (architect mesh first, then\nbriefing-source GLB). When provided, API-relative GLB\npaths are normalized to signed GCS URLs for Puppeteer.\n",
           ),
         prompt: zod
           .string()
@@ -7717,8 +7719,9 @@ export const KickoffRenderBody = zod
         glbUrl: zod
           .string()
           .url()
+          .optional()
           .describe(
-            "Absolute URL the headless capture browser fetches the GLB\nfrom. The FE provides this — typically a signed object-\nstorage URL the FE already loaded into its viewer.\nServer-side resolution from the bim-model row is V1-5.\n",
+            "Optional for GLB-capture kickoffs. When omitted, the api-\nserver resolves the engagement's primary BIM GLB to a\nsigned object-storage URL (architect mesh first, then\nbriefing-source GLB). When provided, API-relative GLB\npaths are normalized to signed GCS URLs for Puppeteer.\n",
           ),
         prompt: zod
           .string()

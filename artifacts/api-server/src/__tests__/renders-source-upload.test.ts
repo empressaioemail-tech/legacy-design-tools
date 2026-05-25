@@ -10,6 +10,13 @@ import { ctx } from "./test-context";
 
 const uploadStore = new Map<string, Buffer>();
 
+const { signObjectEntityGetUrlMock } = vi.hoisted(() => ({
+  signObjectEntityGetUrlMock: vi.fn(async (path: string) => {
+    const normalized = path.startsWith("/objects/") ? path : `/objects/${path}`;
+    return `https://signed.test${normalized}`;
+  }),
+}));
+
 vi.mock("@workspace/db", async () => {
   const actual =
     await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
@@ -45,6 +52,7 @@ vi.mock("../lib/objectStorage", async (importOriginal) => {
   return {
     ...actual,
     ObjectStorageService: TestObjectStorageService,
+    signObjectEntityGetUrl: signObjectEntityGetUrlMock,
   };
 });
 
@@ -95,6 +103,7 @@ const {
   engagements,
   parcelBriefings,
   bimModels,
+  materializableElements,
   viewpointRenders,
 } = await import("@workspace/db");
 const { eq } = await import("drizzle-orm");
@@ -116,6 +125,7 @@ beforeEach(() => {
   setMnmlClient(null);
   captureMock.mockClear();
   mirrorMock.mockClear();
+  signObjectEntityGetUrlMock.mockClear();
 });
 
 afterAll(() => {
@@ -226,4 +236,83 @@ describe("POST /api/engagements/:id/renders — still upload source", () => {
     expect(captureMock).not.toHaveBeenCalled();
     expect(mirrorMock).toHaveBeenCalled();
   }, 30_000);
+});
+
+describe("POST /api/engagements/:id/renders — server GLB resolve (V1-5)", () => {
+  async function seedEngagementWithGlb() {
+    const [eng] = await ctx.schema!.db
+      .insert(engagements)
+      .values({
+        name: "Resolve GLB Test",
+        nameLower: "resolve glb test",
+        jurisdiction: "Boulder, CO",
+        address: "1 Pearl St",
+        status: "active",
+      })
+      .returning();
+    const [briefing] = await ctx.schema!.db
+      .insert(parcelBriefings)
+      .values({ engagementId: eng!.id })
+      .returning();
+    await ctx.schema!.db.insert(bimModels).values({
+      engagementId: eng!.id,
+      briefingVersion: 1,
+      activeBriefingId: briefing!.id,
+    });
+    await ctx.schema!.db.insert(materializableElements).values({
+      briefingId: briefing!.id,
+      engagementId: eng!.id,
+      elementKind: "neighbor-mass",
+      sourceKind: "briefing-derived",
+      label: "mesh",
+      geometry: {},
+      glbObjectPath: "/objects/uploads/render-kickoff-mesh",
+    });
+    return eng!.id;
+  }
+
+  it("202s for still kickoff without glbUrl when engagement has a mesh", async () => {
+    setMnmlClient(new MockMnmlClient());
+    const engagementId = await seedEngagementWithGlb();
+
+    const kickoffRes = await request(getApp())
+      .post(`/api/engagements/${engagementId}/renders`)
+      .send({
+        kind: "still",
+        prompt: "exterior dusk",
+        cameraPosition: { x: 0, y: 5, z: 10 },
+        cameraTarget: { x: 0, y: 0, z: 0 },
+      });
+    expect(kickoffRes.status).toBe(202);
+    await vi.waitFor(() => {
+      expect(captureMock).toHaveBeenCalled();
+      expect(signObjectEntityGetUrlMock).toHaveBeenCalled();
+    });
+
+    await vi.waitFor(
+      async () => {
+        const [row] = await ctx.schema!.db
+          .select()
+          .from(viewpointRenders)
+          .where(eq(viewpointRenders.id, kickoffRes.body.renderId))
+          .limit(1);
+        expect(row?.status).toBe("ready");
+      },
+      { timeout: 20_000 },
+    );
+  }, 30_000);
+
+  it("400 glb_not_attached when glbUrl omitted and no mesh on file", async () => {
+    const engagementId = await seedEngagement();
+    const res = await request(getApp())
+      .post(`/api/engagements/${engagementId}/renders`)
+      .send({
+        kind: "still",
+        prompt: "no mesh",
+        cameraPosition: { x: 0, y: 0, z: 10 },
+        cameraTarget: { x: 0, y: 0, z: 0 },
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("glb_not_attached");
+  });
 });
