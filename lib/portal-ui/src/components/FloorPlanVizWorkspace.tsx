@@ -1,11 +1,8 @@
 /**
- * Floor plan → 3D visualization workspace (stub-driven).
+ * Floor plan → 3D visualization workspace.
  *
- * Expected backend endpoints:
- *   POST /api/engagements/:id/renders/source-upload
- *   POST /api/engagements/:id/renders (expertName: plan)
- *   GET  /api/renders/:id
- *   GET  /api/engagements/:id/renders
+ * Wired to cortex-api via {@link createApiFloorPlanVizService} in
+ * production; falls back to {@link mockFloorPlanVizService} in tests.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
@@ -160,26 +157,45 @@ export function FloorPlanVizWorkspace({
 
   const canGenerate = Boolean(selectedSource && !selectedSource.disabled);
 
-  const handleUpload = useCallback(async () => {
-    setUploading(true);
-    setBannerError(null);
-    await new Promise((r) => window.setTimeout(r, 900));
-    const uploadId = `${engagementId}-upload-${Date.now()}`;
-    const uploadSource: FloorPlanVizSource = {
-      id: uploadId,
-      kind: "upload",
-      label: "Uploaded floor plan",
-      thumbnailUrl: MOCK_FLOOR_PLAN_BEFORE,
-      previewUrl: MOCK_FLOOR_PLAN_BEFORE,
-      fileFormat: "png",
-      fileSizeLabel: "1.8 MB",
-      dimensionsLabel: "2000 × 1500",
-    };
-    registerMockFloorPlanSource(uploadSource);
-    setSources((prev) => [uploadSource, ...prev.filter((s) => s.id !== uploadId)]);
-    setSelectedSourceId(uploadId);
-    setUploading(false);
-  }, [engagementId]);
+  const handleUpload = useCallback(
+    async (file: File) => {
+      setUploading(true);
+      setBannerError(null);
+      try {
+        if (service.uploadSource) {
+          const uploadSource = await service.uploadSource(engagementId, file);
+          setSources((prev) => [
+            uploadSource,
+            ...prev.filter((s) => s.id !== uploadSource.id),
+          ]);
+          setSelectedSourceId(uploadSource.id);
+          return;
+        }
+        await new Promise((r) => window.setTimeout(r, 900));
+        const uploadId = `${engagementId}-upload-${Date.now()}`;
+        const uploadSource: FloorPlanVizSource = {
+          id: uploadId,
+          kind: "upload",
+          label: file.name || "Uploaded floor plan",
+          thumbnailUrl: MOCK_FLOOR_PLAN_BEFORE,
+          previewUrl: MOCK_FLOOR_PLAN_BEFORE,
+          fileFormat: "png",
+          fileSizeLabel: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+        };
+        registerMockFloorPlanSource(uploadSource);
+        setSources((prev) => [
+          uploadSource,
+          ...prev.filter((s) => s.id !== uploadId),
+        ]);
+        setSelectedSourceId(uploadId);
+      } catch {
+        setBannerError("Upload failed. Check the file and try again.");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [engagementId, service],
+  );
 
   const handleGenerate = useCallback(async () => {
     if (!selectedSourceId || !canGenerate) return;
@@ -255,8 +271,9 @@ export function FloorPlanVizWorkspace({
             sources={sources}
             selectedId={selectedSourceId}
             onSelect={setSelectedSourceId}
-            onUploadClick={() => void handleUpload()}
+            onUploadFile={(file) => void handleUpload(file)}
             loading={loading}
+            uploading={uploading}
           />
         </article>
 

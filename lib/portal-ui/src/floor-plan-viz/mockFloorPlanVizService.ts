@@ -1,8 +1,10 @@
 import {
   MOCK_FLOOR_PLAN_AFTER,
+  MOCK_FLOOR_PLAN_BEFORE,
   mockFloorPlanJobs,
   mockFloorPlanSources,
 } from "./mockFixtures";
+import { floorPlanUploadSourceId } from "./sourceIds";
 import type {
   FloorPlanVizJob,
   FloorPlanVizService,
@@ -32,6 +34,23 @@ export function createMockFloorPlanVizService(): FloorPlanVizService {
         j.id.startsWith(engagementId),
       );
       return [...dynamic, ...seeded];
+    },
+
+    async uploadSource(engagementId, file) {
+      await new Promise((r) => window.setTimeout(r, 400));
+      const uploadId = floorPlanUploadSourceId(engagementId);
+      const uploadSource: FloorPlanVizSource = {
+        id: uploadId,
+        kind: "upload",
+        label: file.name || "Uploaded floor plan",
+        thumbnailUrl: MOCK_FLOOR_PLAN_BEFORE,
+        previewUrl: MOCK_FLOOR_PLAN_BEFORE,
+        fileFormat: "png",
+        fileSizeLabel: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+        sourceUploadUrl: `/objects/uploads/mock-${uploadId}`,
+      };
+      registerMockFloorPlanSource(uploadSource);
+      return uploadSource;
     },
 
     async startVisualization({ engagementId, sourceId, preset, prompt }) {

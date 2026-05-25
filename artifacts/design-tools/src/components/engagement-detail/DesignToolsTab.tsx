@@ -1,8 +1,11 @@
 import { TabHeader, TabShell } from "../cockpit/TabChrome";
 import {
+  createApiFloorPlanVizService,
   FloorPlanVizWorkspace,
   RenderCreditsBadge,
 } from "@workspace/portal-ui";
+import { useMemo } from "react";
+import { isFloorPlanSheet } from "../../lib/isFloorPlanSheet";
 import { RenderWorkbench } from "./RenderWorkbench";
 import {
   readFloorPlanSourceFromUrl,
@@ -13,16 +16,18 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * Studio → Rendering — model renders (GLB/BIM) or floor plan visualization.
+ * Studio → Rendering — model renders, floor plan visualization, or video.
  */
 export function DesignToolsTab({
   engagementId,
+  snapshotId,
   defaultGlbUrl,
   onOpenBimTab,
   onOpenClientMaterials,
   renderDeepLinkToken = 0,
 }: {
   engagementId: string;
+  snapshotId?: string | null;
   defaultGlbUrl?: string | null;
   onOpenBimTab?: () => void;
   onOpenClientMaterials?: () => void;
@@ -35,6 +40,16 @@ export function DesignToolsTab({
   );
   const [floorPlanSourceId, setFloorPlanSourceId] = useState<string | null>(() =>
     readFloorPlanSourceFromUrl(),
+  );
+
+  const floorPlanService = useMemo(
+    () =>
+      createApiFloorPlanVizService({
+        engagementId,
+        snapshotId: snapshotId ?? null,
+        filterSheets: isFloorPlanSheet,
+      }),
+    [engagementId, snapshotId],
   );
 
   useEffect(() => {
@@ -50,7 +65,9 @@ export function DesignToolsTab({
   const subtitle =
     renderMode === "floorplan"
       ? "Turn a 2D floor plan into a furnished top-down 3D visualization for client presentations."
-      : "Render, compare, and post-process stills from your BIM or uploaded sources.";
+      : renderMode === "video"
+        ? "Queue Kling flythrough clips from a BIM capture or uploaded source."
+        : "Render, compare, and post-process stills from your BIM or uploaded sources.";
 
   return (
     <TabShell
@@ -94,6 +111,17 @@ export function DesignToolsTab({
               >
                 Floor plan viz
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={renderMode === "video"}
+                data-active={renderMode === "video" ? "true" : "false"}
+                className="render-tab-mode-btn"
+                data-testid="render-mode-video"
+                onClick={() => setRenderMode("video")}
+              >
+                Video rendering
+              </button>
             </nav>
             {onOpenClientMaterials ? (
               <button
@@ -113,6 +141,7 @@ export function DesignToolsTab({
       {renderMode === "floorplan" ? (
         <FloorPlanVizWorkspace
           engagementId={engagementId}
+          service={floorPlanService}
           preselectedSourceId={floorPlanSourceId}
           onSendToCanva={
             onOpenClientMaterials
@@ -120,12 +149,21 @@ export function DesignToolsTab({
               : undefined
           }
         />
+      ) : renderMode === "video" ? (
+        <RenderWorkbench
+          engagementId={engagementId}
+          defaultGlbUrl={defaultGlbUrl}
+          hasBim={hasBim}
+          onOpenBimTab={onOpenBimTab}
+          kindFilter="video"
+        />
       ) : (
         <RenderWorkbench
           engagementId={engagementId}
           defaultGlbUrl={defaultGlbUrl}
           hasBim={hasBim}
           onOpenBimTab={onOpenBimTab}
+          kindFilter="exclude-video"
         />
       )}
     </TabShell>

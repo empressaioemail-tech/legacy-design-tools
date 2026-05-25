@@ -1,6 +1,7 @@
 /**
  * Source floor plan picker for 2D → 3D visualization.
  */
+import { useRef } from "react";
 import { Upload } from "lucide-react";
 import type { FloorPlanVizSource } from "../floor-plan-viz/types";
 
@@ -11,19 +12,25 @@ const KIND_LABEL: Record<FloorPlanVizSource["kind"], string> = {
   "prior-render": "Use prior output",
 };
 
+const ACCEPT = "image/png,image/jpeg,image/webp,application/pdf";
+
 export function FloorPlanSourcePicker({
   sources,
   selectedId,
   onSelect,
-  onUploadClick,
+  onUploadFile,
   loading,
+  uploading,
 }: {
   sources: FloorPlanVizSource[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onUploadClick?: () => void;
+  onUploadFile?: (file: File) => void;
   loading?: boolean;
+  uploading?: boolean;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
   if (loading) {
     return (
       <div className="fpviz-source-picker" data-testid="fpviz-source-loading">
@@ -37,11 +44,24 @@ export function FloorPlanSourcePicker({
   return (
     <div className="fpviz-source-picker" data-testid="fpviz-source-picker">
       <div className="fpviz-source-actions">
+        <input
+          ref={fileRef}
+          type="file"
+          accept={ACCEPT}
+          className="fpviz-source-file-input"
+          data-testid="fpviz-upload-input"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file && onUploadFile) onUploadFile(file);
+            e.target.value = "";
+          }}
+        />
         <button
           type="button"
-          className="sc-btn-primary sc-btn-sm"
+          className="sc-btn-primary sc-btn-sm fpviz-upload-btn"
           data-testid="fpviz-upload-plan"
-          onClick={onUploadClick}
+          disabled={uploading || !onUploadFile}
+          onClick={() => fileRef.current?.click()}
         >
           <Upload size={14} aria-hidden /> Upload floor plan
         </button>

@@ -1,9 +1,9 @@
 /**
- * URL state for Renders tab mode (model vs floor plan visualization).
+ * URL state for Studio → Rendering sub-nav (model / floor plan / video).
  *
  * Example: ?view=studio&segment=renders&renderMode=floorplan&floorPlanSource=eng-1-sheet-a101
  */
-export type RenderTabMode = "model" | "floorplan";
+export type RenderTabMode = "model" | "floorplan" | "video";
 
 const RENDER_MODE_PARAM = "renderMode";
 const FLOOR_PLAN_SOURCE_PARAM = "floorPlanSource";
@@ -11,7 +11,9 @@ const FLOOR_PLAN_SOURCE_PARAM = "floorPlanSource";
 export function readRenderModeFromUrl(): RenderTabMode {
   if (typeof window === "undefined") return "model";
   const raw = new URLSearchParams(window.location.search).get(RENDER_MODE_PARAM);
-  return raw === "floorplan" ? "floorplan" : "model";
+  if (raw === "floorplan") return "floorplan";
+  if (raw === "video") return "video";
+  return "model";
 }
 
 export function writeRenderModeToUrl(mode: RenderTabMode): void {
@@ -19,6 +21,9 @@ export function writeRenderModeToUrl(mode: RenderTabMode): void {
   const url = new URL(window.location.href);
   if (mode === "floorplan") {
     url.searchParams.set(RENDER_MODE_PARAM, "floorplan");
+  } else if (mode === "video") {
+    url.searchParams.set(RENDER_MODE_PARAM, "video");
+    url.searchParams.delete(FLOOR_PLAN_SOURCE_PARAM);
   } else {
     url.searchParams.delete(RENDER_MODE_PARAM);
     url.searchParams.delete(FLOOR_PLAN_SOURCE_PARAM);
@@ -55,7 +60,7 @@ export function writeFloorPlanVizDeepLink(sourceId?: string): void {
   window.history.replaceState(null, "", url.toString());
 }
 
-/** Map a sheet row to a stub floor plan source id for deep links. */
+/** Map a sheet row to a floor plan source id for deep links. */
 export function floorPlanSourceIdForSheet(
   engagementId: string,
   sheetId: string,

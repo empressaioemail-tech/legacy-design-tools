@@ -73,11 +73,14 @@ export function RenderWorkbench({
   defaultGlbUrl,
   hasBim,
   onOpenBimTab,
+  kindFilter = "all",
 }: {
   engagementId: string;
   defaultGlbUrl?: string | null;
   hasBim: boolean;
   onOpenBimTab?: () => void;
+  /** Limit history + kickoff to one render kind (QA-48 video tab). */
+  kindFilter?: "all" | "video" | "exclude-video";
 }) {
   const [mode, setMode] = useState<StudioWorkbenchMode>("create");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -98,11 +101,16 @@ export function RenderWorkbench({
     const items = listQuery.data?.items ?? [];
     return [...items]
       .filter((i) => !i.parentRenderOutputId)
+      .filter((i) => {
+        if (kindFilter === "video") return i.kind === "video";
+        if (kindFilter === "exclude-video") return i.kind !== "video";
+        return true;
+      })
       .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
-  }, [listQuery.data?.items]);
+  }, [listQuery.data?.items, kindFilter]);
 
   useEffect(() => {
     if (rootItems.length === 0) {
@@ -246,8 +254,8 @@ export function RenderWorkbench({
                   className="render-workbench-history-empty sc-prose opacity-70"
                   data-testid="renders-gallery-empty"
                 >
-                  No renders yet. Use the panel on the right to queue your
-                  first job.
+                  No {kindFilter === "video" ? "videos" : "renders"} yet. Use
+                  the panel on the right to queue your first job.
                 </div>
               )}
             {!listQuery.isLoading && rootItems.length > 0 && (
@@ -324,7 +332,25 @@ export function RenderWorkbench({
               detail &&
               detail.status === "ready" &&
               !showCompare &&
-              afterSrc && (
+              afterSrc &&
+              primaryOutput &&
+              (primaryOutput.format === "mp4" ||
+                primaryOutput.format === "webm") && (
+                <video
+                  src={afterSrc}
+                  controls
+                  className="render-workbench-canvas-image"
+                  data-testid="render-workbench-preview-video"
+                />
+              )}
+            {selectedId &&
+              detail &&
+              detail.status === "ready" &&
+              !showCompare &&
+              afterSrc &&
+              primaryOutput &&
+              primaryOutput.format !== "mp4" &&
+              primaryOutput.format !== "webm" && (
                 <img
                   src={afterSrc}
                   alt="Render output"
@@ -420,7 +446,9 @@ export function RenderWorkbench({
                 <div className="render-workbench-configure-overline">Studio</div>
                 <div className="render-workbench-configure-title">Create</div>
                 <p className="render-workbench-configure-sub">
-                  Queue a new mnml job — still, elevation set, or video.
+                  {kindFilter === "video"
+                    ? "Queue a Kling video clip from your BIM capture."
+                    : "Queue a new mnml job — still or elevation set."}
                 </p>
               </div>
               <StudioCreateOverview />
@@ -456,6 +484,14 @@ export function RenderWorkbench({
                   engagementId={engagementId}
                   defaultGlbUrl={defaultGlbUrl ?? null}
                   onKickedOff={handleKickedOff}
+                  lockedKind={kindFilter === "video" ? "video" : undefined}
+                  allowedKinds={
+                    kindFilter === "video"
+                      ? ["video"]
+                      : kindFilter === "exclude-video"
+                        ? ["still", "elevation-set"]
+                        : undefined
+                  }
                 />
               </div>
             </>

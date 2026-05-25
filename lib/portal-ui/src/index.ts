@@ -355,6 +355,11 @@ export {
   mockFloorPlanVizService,
   registerMockFloorPlanSource,
 } from "./floor-plan-viz/mockFloorPlanVizService";
+export { createApiFloorPlanVizService } from "./floor-plan-viz/apiFloorPlanVizService";
+export {
+  floorPlanSheetSourceId,
+  floorPlanUploadSourceId,
+} from "./floor-plan-viz/sourceIds";
 export {
   FLOOR_PLAN_PRESET_META,
   type FloorPlanVizService,
