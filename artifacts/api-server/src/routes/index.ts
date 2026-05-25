@@ -29,6 +29,8 @@ import submissionEventsRouter from "./submissionEvents";
 import communicationsRouter from "./communications";
 import reviewerRequestsRouter from "./reviewerRequests";
 import packagesRouter from "./packages";
+import canvaRouter from "./canva";
+import collateralRouter from "./collateral";
 import reviewerQueueRouter from "./submissions";
 import decisionsRouter from "./decisions";
 import rendersRouter from "./renders";
@@ -44,6 +46,7 @@ import productSpecReferencesRouter from "./productSpecReferences";
 import deliverableLetterRendersRouter from "./deliverableLetterRenders";
 import siteTopographyRouter from "./siteTopography";
 import workspaceSettingsRouter from "./workspaceSettings";
+import coverageRequestsRouter from "./coverageRequests";
 import intakeRouter from "./intake";
 
 const router: IRouter = Router();
@@ -77,7 +80,10 @@ router.use(briefingSourcesRouter);
 // parametric handler) plus the top-level `/bim-models/:id/*` group
 // the C# Revit add-in calls.
 router.use(bimModelsRouter);
+router.use(coverageRequestsRouter);
 router.use(packagesRouter);
+router.use(canvaRouter);
+router.use(collateralRouter);
 // localSetbacksRouter exposes `/local/setbacks/:jurisdictionKey` —
 // distinct path subtree from everything else so ordering is
 // indifferent.

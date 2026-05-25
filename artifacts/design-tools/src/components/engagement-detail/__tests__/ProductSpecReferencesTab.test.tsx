@@ -18,6 +18,11 @@ const hoisted = vi.hoisted(() => ({
   listIsLoading: false,
   createMutate: vi.fn(),
   refreshMutate: vi.fn(),
+  generateMutate: vi.fn(),
+  generateIsPending: false,
+  generateData: undefined as
+    | { recommendations: unknown[]; mode: string }
+    | undefined,
 }));
 
 class MockApiError extends Error {
@@ -45,6 +50,11 @@ vi.mock("@workspace/api-client-react", () => ({
   useRefreshProductSpecReference: () => ({
     mutate: hoisted.refreshMutate,
     isPending: false,
+  }),
+  useGenerateProductSpecRecommendations: () => ({
+    mutate: hoisted.generateMutate,
+    isPending: hoisted.generateIsPending,
+    data: hoisted.generateData,
   }),
 }));
 
@@ -97,6 +107,8 @@ beforeEach(() => {
   hoisted.listIsLoading = false;
   hoisted.createMutate.mockReset();
   hoisted.refreshMutate.mockReset();
+  hoisted.generateMutate.mockReset();
+  hoisted.generateIsPending = false;
 });
 
 describe("ProductSpecReferencesTab", () => {
@@ -150,6 +162,18 @@ describe("ProductSpecReferencesTab", () => {
     fireEvent.click(screen.getByTestId("product-spec-psr-1-refresh"));
     expect(hoisted.refreshMutate).toHaveBeenCalledWith({
       referenceId: "psr-1",
+    });
+  });
+
+  it("calls generate recommendations when the operator clicks the button", () => {
+    hoisted.listData = { productSpecReferences: [] };
+    renderTab();
+    fireEvent.click(
+      screen.getByTestId("product-spec-generate-recommendations"),
+    );
+    expect(hoisted.generateMutate).toHaveBeenCalledWith({
+      engagementId: "eng-1",
+      data: {},
     });
   });
 

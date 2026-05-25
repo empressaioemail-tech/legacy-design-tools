@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Cortex — PNG Generator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fg: #0d0d0d;
+    --bg: #fafaf7;
+    --muted: rgba(13,13,13,0.55);
+    --hair: rgba(13,13,13,0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 64px 40px 120px; }
+
+  /* hero */
+  .hero { padding-bottom: 36px; border-bottom: 1px solid var(--hair); }
+  .hero .label {
+    font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500;
+  }
+  .hero h1 {
+    margin: 12px 0 16px;
+    font-size: 36px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.1;
+  }
+  .hero p { margin: 0; color: var(--muted); max-width: 56ch; }
+
+  /* status bar */
+  .status {
+    margin: 28px 0 0;
+    padding: 16px 20px;
+    border: 1px solid var(--hair);
+    display: flex; align-items: center; gap: 14px;
+    font-size: 12.5px;
+  }
+  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: #cccc88; }
+  .status.ready .dot { background: #4f9c4f; }
+  .status .grow { flex: 1; }
+  .status button {
+    font-family: inherit; font-size: 12px; font-weight: 500;
+    padding: 9px 18px; border: 1px solid var(--fg); background: var(--fg); color: var(--bg);
+    cursor: pointer; letter-spacing: 0.04em;
+  }
+  .status button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .status button:hover:not(:disabled) { background: transparent; color: var(--fg); }
+
+  /* sections */
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 56px 0 20px;
+  }
+  .section-head h2 {
+    margin: 0; font-size: 12px; font-weight: 500;
+    letter-spacing: 0.2em; text-transform: uppercase;
+  }
+  .section-head .count {
+    font-size: 11px; color: var(--muted); letter-spacing: 0.12em;
+  }
+
+  /* asset grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1px;
+    background: var(--hair);
+    border: 1px solid var(--hair);
+  }
+  .card {
+    background: var(--bg);
+    padding: 20px;
+    display: flex; flex-direction: column;
+  }
+  .card .preview {
+    aspect-ratio: 16 / 9;
+    background:
+      linear-gradient(45deg, #f0eee9 25%, transparent 25%),
+      linear-gradient(-45deg, #f0eee9 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #f0eee9 75%),
+      linear-gradient(-45deg, transparent 75%, #f0eee9 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    border: 1px solid var(--hair);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .card .preview canvas {
+    max-width: 100%; max-height: 100%;
+    display: block;
+  }
+  .card .label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 12px;
+    font-size: 11.5px;
+    margin-bottom: 4px;
+  }
+  .card .filename { font-weight: 500; word-break: break-all; }
+  .card .dim { color: var(--muted); white-space: nowrap; font-size: 10.5px; letter-spacing: 0.06em; }
+  .card .desc { color: var(--muted); font-size: 11px; margin-bottom: 12px; }
+  .card .actions { margin-top: auto; }
+  .card .actions button {
+    font-family: inherit; font-size: 11px; font-weight: 500;
+    padding: 8px 12px; border: 1px solid currentColor; background: transparent; color: var(--fg);
+    cursor: pointer; letter-spacing: 0.06em; text-transform: uppercase; width: 100%;
+  }
+  .card .actions button:hover { background: var(--fg); color: var(--bg); }
+
+  footer {
+    margin-top: 80px; padding-top: 24px;
+    border-top: 1px solid var(--hair);
+    font-size: 11px; color: var(--muted); letter-spacing: 0.1em;
+  }
+  footer a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--hair); }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="hero">
+    <div class="label">Cortex · Logo pack</div>
+    <h1>PNG Generator</h1>
+    <p>All exports are rendered locally in your browser using the loaded web font. Pixel-perfect at the listed dimensions. No upload, no server.</p>
+
+    <div class="status" id="status">
+      <span class="dot"></span>
+      <span class="grow" id="status-text">Loading JetBrains Mono…</span>
+      <button id="download-all" disabled>Download all (.zip)</button>
+    </div>
+  </header>
+
+  <div class="section-head">
+    <h2>Wordmark</h2>
+    <span class="count">6 files</span>
+  </div>
+  <div class="grid" id="grid-wordmark"></div>
+
+  <div class="section-head">
+    <h2>App icon</h2>
+    <span class="count">4 files</span>
+  </div>
+  <div class="grid" id="grid-icon"></div>
+
+  <div class="section-head">
+    <h2>Favicon &amp; touch icon</h2>
+    <span class="count">3 files</span>
+  </div>
+  <div class="grid" id="grid-fav"></div>
+
+  <div class="section-head">
+    <h2>Social (OG image)</h2>
+    <span class="count">2 files</span>
+  </div>
+  <div class="grid" id="grid-og"></div>
+
+  <footer>
+    Files render with JetBrains Mono — load it on your site or use the PNG fallback.<br>
+    Back to <a href="preview.html">preview.html</a>
+  </footer>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<script>
+/* ────────────────────────────────────────────────────────────────
+   PNG generator. Each asset is described declaratively, then drawn
+   onto a high-DPI canvas with JetBrains Mono.
+   ──────────────────────────────────────────────────────────────── */
+
+const INK = '#0d0d0d';
+const PAPER = '#fafaf7';
+
+// Drawing primitives ─────────────────────────────────────────────
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+// Draw "[ cortex ]" centered. fontPx is the type size in CSS px.
+function drawWordmark(canvas, { fg, bg, fontPx }) {
+  const ctx = canvas.getContext('2d');
+  const { width: w, height: h } = canvas;
+  if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h); }
+  else { ctx.clearRect(0, 0, w, h); }
+  ctx.fillStyle = fg;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  // letter-spacing isn't natively supported on canvas, so we segment
+  // and add a fixed advance between characters scaled with the font.
+  const tracking = fontPx * 0.01; // 0.01em
+  const segments = [
+    { t: '[ ', weight: 300 },
+    { t: 'cortex', weight: 500 },
+    { t: ' ]', weight: 300 },
+  ];
+  // Measure total width
+  let total = 0;
+  const measured = segments.map(s => {
+    ctx.font = `${s.weight} ${fontPx}px "JetBrains Mono", monospace`;
+    const m = ctx.measureText(s.t);
+    total += m.width + tracking * s.t.length;
+    return m;
+  });
+  total -= tracking; // trailing tracking
+  let x = (w - total) / 2;
+  const y = h / 2;
+  segments.forEach((s, i) => {
+    ctx.font = `${s.weight} ${fontPx}px "JetBrains Mono", monospace`;
+    for (const ch of s.t) {
+      ctx.fillText(ch, x, y);
+      x += ctx.measureText(ch).width + tracking;
+    }
+  });
+}
+
+// Draw "[c]" centered (square icon)
+function drawIcon(canvas, { fg, bg, fontPx, weight = 500, tracking = 0.01 }) {
+  const ctx = canvas.getContext('2d');
+  const { width: w, height: h } = canvas;
+  if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h); }
+  else { ctx.clearRect(0, 0, w, h); }
+  ctx.fillStyle = fg;
+  ctx.textBaseline = 'middle';
+  const trk = fontPx * tracking;
+  const segments = [
+    { t: '[', weight: 300 },
+    { t: 'c', weight },
+    { t: ']', weight: 300 },
+  ];
+  let total = 0;
+  segments.forEach(s => {
+    ctx.font = `${s.weight} ${fontPx}px "JetBrains Mono", monospace`;
+    total += ctx.measureText(s.t).width;
+  });
+  total += trk * 2; // gaps between 3 chars
+  let x = (w - total) / 2;
+  const y = h / 2;
+  segments.forEach((s, i) => {
+    ctx.font = `${s.weight} ${fontPx}px "JetBrains Mono", monospace`;
+    ctx.fillText(s.t, x, y);
+    x += ctx.measureText(s.t).width + trk;
+  });
+}
+
+// Asset catalog ───────────────────────────────────────────────────
+const ASSETS = [
+  // Wordmark
+  { group: 'wordmark', name: 'cortex-wordmark-light-1600.png', desc: 'Wordmark · black on paper · large',  w: 1600, h: 340,  draw: c => drawWordmark(c, { fg: INK,   bg: PAPER, fontPx: 160 }) },
+  { group: 'wordmark', name: 'cortex-wordmark-dark-1600.png',  desc: 'Wordmark · white on ink · large',     w: 1600, h: 340,  draw: c => drawWordmark(c, { fg: PAPER, bg: INK,   fontPx: 160 }) },
+  { group: 'wordmark', name: 'cortex-wordmark-light-800.png',  desc: 'Wordmark · black on paper · medium',  w: 800,  h: 170,  draw: c => drawWordmark(c, { fg: INK,   bg: PAPER, fontPx: 80 })  },
+  { group: 'wordmark', name: 'cortex-wordmark-dark-800.png',   desc: 'Wordmark · white on ink · medium',    w: 800,  h: 170,  draw: c => drawWordmark(c, { fg: PAPER, bg: INK,   fontPx: 80 })  },
+  { group: 'wordmark', name: 'cortex-wordmark-black-transparent-1600.png', desc: 'Wordmark · black · transparent bg', w: 1600, h: 340, draw: c => drawWordmark(c, { fg: INK,   bg: null,  fontPx: 160 }) },
+  { group: 'wordmark', name: 'cortex-wordmark-white-transparent-1600.png', desc: 'Wordmark · white · transparent bg', w: 1600, h: 340, draw: c => drawWordmark(c, { fg: PAPER, bg: null,  fontPx: 160 }) },
+
+  // App icon
+  { group: 'icon', name: 'cortex-icon-light-1024.png', desc: 'App icon · ink on paper · square',  w: 1024, h: 1024, draw: c => drawIcon(c, { fg: INK,   bg: PAPER, fontPx: 480 }) },
+  { group: 'icon', name: 'cortex-icon-dark-1024.png',  desc: 'App icon · paper on ink · square',  w: 1024, h: 1024, draw: c => drawIcon(c, { fg: PAPER, bg: INK,   fontPx: 480 }) },
+  { group: 'icon', name: 'cortex-icon-light-512.png',  desc: 'App icon · ink on paper · 512',     w: 512,  h: 512,  draw: c => drawIcon(c, { fg: INK,   bg: PAPER, fontPx: 240 }) },
+  { group: 'icon', name: 'cortex-icon-dark-512.png',   desc: 'App icon · paper on ink · 512',     w: 512,  h: 512,  draw: c => drawIcon(c, { fg: PAPER, bg: INK,   fontPx: 240 }) },
+
+  // Favicon (heavier weight + tighter tracking — same rules as favicon.svg)
+  { group: 'fav', name: 'apple-touch-icon-180.png', desc: 'Apple touch icon · 180×180',  w: 180, h: 180, draw: c => drawIcon(c, { fg: INK, bg: PAPER, fontPx: 90 }) },
+  { group: 'fav', name: 'favicon-32.png',           desc: 'Favicon · 32×32',             w: 32,  h: 32,  draw: c => drawIcon(c, { fg: INK, bg: PAPER, fontPx: 18, weight: 600, tracking: -0.02 }) },
+  { group: 'fav', name: 'favicon-16.png',           desc: 'Favicon · 16×16',             w: 16,  h: 16,  draw: c => drawIcon(c, { fg: INK, bg: PAPER, fontPx: 9,  weight: 600, tracking: -0.04 }) },
+
+  // OG
+  { group: 'og', name: 'og-image-light-1200x630.png', desc: 'OG image · light · 1200×630', w: 1200, h: 630, draw: c => drawWordmark(c, { fg: INK,   bg: PAPER, fontPx: 128 }) },
+  { group: 'og', name: 'og-image-dark-1200x630.png',  desc: 'OG image · dark · 1200×630',  w: 1200, h: 630, draw: c => drawWordmark(c, { fg: PAPER, bg: INK,   fontPx: 128 }) },
+];
+
+// Render each asset card ──────────────────────────────────────────
+const groupContainers = {
+  wordmark: document.getElementById('grid-wordmark'),
+  icon: document.getElementById('grid-icon'),
+  fav: document.getElementById('grid-fav'),
+  og: document.getElementById('grid-og'),
+};
+
+const allBlobs = new Map(); // name -> Blob
+
+function renderAsset(asset) {
+  const canvas = makeCanvas(asset.w, asset.h);
+  asset.draw(canvas);
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="preview"></div>
+    <div class="label"><span class="filename">${asset.name}</span><span class="dim">${asset.w}×${asset.h}</span></div>
+    <div class="desc">${asset.desc}</div>
+    <div class="actions"><button>Download PNG</button></div>
+  `;
+  // Scale preview to fit
+  const preview = card.querySelector('.preview');
+  const scaledCanvas = makeCanvas(asset.w, asset.h);
+  asset.draw(scaledCanvas);
+  scaledCanvas.style.maxWidth = '100%';
+  scaledCanvas.style.maxHeight = '100%';
+  scaledCanvas.style.height = 'auto';
+  scaledCanvas.style.width = 'auto';
+  preview.appendChild(scaledCanvas);
+
+  // Convert to blob
+  canvas.toBlob(blob => {
+    allBlobs.set(asset.name, blob);
+    card.querySelector('button').addEventListener('click', () => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = asset.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+  }, 'image/png');
+
+  groupContainers[asset.group].appendChild(card);
+}
+
+// Wait for font, then render everything ──────────────────────────
+async function init() {
+  const status = document.getElementById('status');
+  const statusText = document.getElementById('status-text');
+  const downloadAll = document.getElementById('download-all');
+
+  // Force-load every weight we need
+  try {
+    await Promise.all([
+      document.fonts.load('300 64px "JetBrains Mono"'),
+      document.fonts.load('500 64px "JetBrains Mono"'),
+      document.fonts.load('600 64px "JetBrains Mono"'),
+    ]);
+    await document.fonts.ready;
+  } catch (e) {
+    statusText.textContent = '⚠ Couldn\'t load JetBrains Mono. Falling back to system monospace.';
+    return;
+  }
+
+  ASSETS.forEach(renderAsset);
+
+  status.classList.add('ready');
+  statusText.textContent = `JetBrains Mono loaded · ${ASSETS.length} assets ready`;
+  downloadAll.disabled = false;
+
+  downloadAll.addEventListener('click', async () => {
+    downloadAll.disabled = true; downloadAll.textContent = 'Building zip…';
+    const zip = new JSZip();
+    const folder = zip.folder('cortex-logo-pack/png');
+    for (const [name, blob] of allBlobs) {
+      folder.file(name, blob);
+    }
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'cortex-logo-pack-png.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    downloadAll.disabled = false; downloadAll.textContent = 'Download all (.zip)';
+  });
+}
+
+init();
+</script>
+
+</body>
+</html>

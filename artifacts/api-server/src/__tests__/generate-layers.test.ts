@@ -376,9 +376,7 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       .filter((o) => o.status !== "no-coverage")
       .map((o) => o.adapterKey)
       .sort();
-    expect(ranKeys).toEqual(
-      ["fema:nfhl-flood-zone", "fcc:broadband"].sort(),
-    );
+    expect(ranKeys).toEqual(["fema:nfhl-flood-zone"]);
     // The successful federal row was persisted as a briefing source,
     // so the briefing wire has a non-empty `sources` array.
     expect(res.body.briefing.sources.length).toBeGreaterThan(0);
@@ -505,16 +503,6 @@ describe("POST /api/engagements/:id/generate-layers", () => {
     expect(byKey.get("fema:nfhl-flood-zone")?.sourceId).toEqual(
       expect.any(String),
     );
-    // Federal-tier failure — proves the failure-isolation contract
-    // also applies at the federal tier (one bad federal adapter
-    // cannot break the rest of the run).
-    expect(byKey.get("fcc:broadband")).toMatchObject({
-      tier: "federal",
-      sourceKind: "federal-adapter",
-      status: "failed",
-      error: { code: "upstream-error", message: "FCC NBM returned 502" },
-      sourceId: null,
-    });
     expect(byKey.get("tceq:edwards-aquifer")).toMatchObject({
       tier: "state",
       sourceKind: "state-adapter",
@@ -961,9 +949,9 @@ describe("POST /api/engagements/:id/generate-layers", () => {
       .post(`/api/engagements/${eng.id}/generate-layers`)
       .query({ adapterKey: "   " });
     expect(emptyKey.status).toBe(200);
-    // Full Bastrop run produces 5 outcomes (2 federal + 1 state +
+    // Full Bastrop run produces 4 outcomes (1 federal + 1 state +
     // 2 local). Anything less would mean we accidentally narrowed
     // the run on the empty value.
-    expect(emptyKey.body.outcomes).toHaveLength(5);
+    expect(emptyKey.body.outcomes).toHaveLength(4);
   });
 });

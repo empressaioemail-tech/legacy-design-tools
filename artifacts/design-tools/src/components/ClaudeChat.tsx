@@ -407,10 +407,7 @@ export function ClaudeChat({
                 key={i}
                 className="self-end max-w-[80%] flex flex-col items-end gap-1"
               >
-                <div
-                  className="rounded-lg px-3 py-2 text-white sc-ui"
-                  style={{ background: "var(--cyan)" }}
-                >
+                <div className="rounded-lg px-3 py-2 claude-chat-user-bubble">
                   {msg.content}
                 </div>
                 {msg.snapshotFocus && (

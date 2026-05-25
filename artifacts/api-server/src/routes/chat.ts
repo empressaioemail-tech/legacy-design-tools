@@ -659,16 +659,20 @@ router.post("/chat", async (req: Request, res: Response) => {
   }
   const allAtoms = [...explicitAtoms, ...retrievedAtoms];
 
-  // QA-23 — jurisdiction coverage honesty guardrail. Determine whether
-  // this engagement's jurisdiction has real, ingested code coverage. If
-  // it does not, the agent must flag every code answer as ungrounded /
-  // model-knowledge-only instead of presenting a fabricated section
-  // number as a confident citation. `allAtoms.length > 0` is already
-  // proof of coverage (atoms were just retrieved for this jurisdiction);
-  // only the empty-retrieval case needs the count query to tell a
-  // genuinely uncovered jurisdiction apart from a question that missed.
+  // QA-23 / v2 — prefer persisted coverageStatus; fall back to atom probe.
+  const storedStatus = engagementTyped.coverageStatus;
   let jurisdictionCoverage: JurisdictionCoverage;
-  if (!jurisdictionKey) {
+  if (storedStatus === "ready") {
+    jurisdictionCoverage = "covered";
+  } else if (
+    storedStatus === "not_in_catalog" ||
+    storedStatus === "substrate_only" ||
+    storedStatus === "warming"
+  ) {
+    jurisdictionCoverage = "no_atoms";
+  } else if (storedStatus === "unknown") {
+    jurisdictionCoverage = "unrecognized";
+  } else if (!jurisdictionKey) {
     jurisdictionCoverage = "unrecognized";
   } else if (allAtoms.length > 0) {
     jurisdictionCoverage = "covered";
@@ -677,9 +681,6 @@ router.post("/chat", async (req: Request, res: Response) => {
       const atomCount = await countAtomsForJurisdiction(jurisdictionKey);
       jurisdictionCoverage = atomCount > 0 ? "covered" : "no_atoms";
     } catch (err) {
-      // Fail safe: if coverage cannot be confirmed, assume none. An
-      // over-cautious "ungrounded" flag is harmless; a wrongly-confident
-      // citation is exactly the QA-23 bug.
       logger.warn(
         { err, engagementId, jurisdictionKey },
         "chat: jurisdiction coverage check failed — treating as no coverage",

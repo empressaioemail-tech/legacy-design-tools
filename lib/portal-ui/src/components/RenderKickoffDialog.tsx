@@ -20,6 +20,7 @@ import {
 import { DragDropUpload } from "./DragDropUpload";
 import { MnmlExpertParamGrid } from "./MnmlExpertParamGrid";
 import type { MnmlExpertName } from "../schemas/mnml-experts";
+import { formatVec3, type BimStudioCapture } from "./bimStudioCapture";
 
 interface ListEngagementRendersCache {
   items: RenderListItem[];
@@ -70,12 +71,24 @@ export interface RenderKickoffDialogProps {
   lockedKind?: DomainRenderKind;
   /** When set, limits the kind picker to these options. */
   allowedKinds?: DomainRenderKind[];
+  /**
+   * One-shot capture from the Model tab BIM viewer (camera + GLB URL).
+   * Consumed via {@link onStudioCaptureConsumed} after fields are applied.
+   */
+  initialStudioCapture?: BimStudioCapture | null;
+  onStudioCaptureConsumed?: () => void;
 }
 
 /** Inline kickoff panel for the Renders tab dashboard (not a modal). */
 export type RenderKickoffPanelProps = Pick<
   RenderKickoffDialogProps,
-  "engagementId" | "defaultGlbUrl" | "onKickedOff" | "lockedKind" | "allowedKinds"
+  | "engagementId"
+  | "defaultGlbUrl"
+  | "onKickedOff"
+  | "lockedKind"
+  | "allowedKinds"
+  | "initialStudioCapture"
+  | "onStudioCaptureConsumed"
 >;
 
 export function RenderKickoffPanel(props: RenderKickoffPanelProps) {
@@ -200,6 +213,8 @@ export function RenderKickoffDialog({
   onKickedOff,
   lockedKind,
   allowedKinds,
+  initialStudioCapture = null,
+  onStudioCaptureConsumed,
 }: RenderKickoffDialogProps) {
   const embedded = variant === "embedded";
   const qc = useQueryClient();
@@ -238,6 +253,7 @@ export function RenderKickoffDialog({
   const [expertParams, setExpertParams] = useState<Record<string, string>>({});
   const [negativePrompt, setNegativePrompt] = useState("");
   const [seed, setSeed] = useState("");
+  const [loadedFromModelTab, setLoadedFromModelTab] = useState(false);
 
   function resetForm() {
     setKind(defaultKind);
@@ -262,6 +278,7 @@ export function RenderKickoffDialog({
     setExpertParams({});
     setNegativePrompt("");
     setSeed("");
+    setLoadedFromModelTab(false);
   }
 
   useEffect(() => {
@@ -271,6 +288,18 @@ export function RenderKickoffDialog({
     }
     if (isOpen) resetForm();
   }, [isOpen, defaultGlbUrl, embedded, defaultKind]);
+
+  useEffect(() => {
+    if (!initialStudioCapture) return;
+    setKind("still");
+    setStillSourceMode("model-capture");
+    setGlbUrl(initialStudioCapture.glbUrl);
+    setCameraPos(formatVec3(initialStudioCapture.cameraPosition));
+    setCameraTarget(formatVec3(initialStudioCapture.cameraTarget));
+    applyIntent("deliverable");
+    setLoadedFromModelTab(true);
+    onStudioCaptureConsumed?.();
+  }, [initialStudioCapture, onStudioCaptureConsumed]);
 
   useEffect(() => {
     if (lockedKind) setKind(lockedKind);
@@ -515,6 +544,24 @@ export function RenderKickoffDialog({
           }
           style={embedded ? undefined : { gap: 12 }}
         >
+          {embedded && loadedFromModelTab ? (
+            <div
+              role="status"
+              data-testid="render-kickoff-from-model"
+              style={{
+                padding: "8px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--border-default)",
+                background: "var(--surface-raised, rgba(255,255,255,0.04))",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                lineHeight: 1.4,
+              }}
+            >
+              View loaded from the Model tab — adjust the prompt, then kick off to
+              render this camera angle.
+            </div>
+          ) : null}
           <KickoffSection
             embedded={embedded}
             title="Output & intent"

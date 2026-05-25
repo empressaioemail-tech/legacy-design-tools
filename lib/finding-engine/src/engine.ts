@@ -33,6 +33,8 @@ import {
   FindingGeneratorError,
   type RawFindingDraft,
 } from "./anthropicGenerator";
+import { callGrokGenerator } from "./grokGenerator";
+import type { GrokClient } from "@workspace/integrations-xai-grok";
 import {
   validateInlineCitations,
   type CitationResolvers,
@@ -51,13 +53,12 @@ export interface GenerateFindingsOptions {
   /** Force a mode; defaults to {@link resolveFindingLlmMode}. */
   mode?: FindingLlmMode;
   /**
-   * Anthropic SDK client to use when `mode === "anthropic"`. Required
-   * for the anthropic branch (the engine deliberately does not import
-   * the singleton — keeps tests in control of what client is wired in
-   * and avoids forcing the package to depend on a live API key at
-   * import time).
+   * Anthropic SDK client when `mode === "anthropic"` (legacy — prefer
+   * `grok`).
    */
   anthropicClient?: Anthropic;
+  /** xAI Grok client when `mode === "grok"`. */
+  grokClient?: GrokClient;
   /** Override the engine's clock — test-only. */
   now?: () => Date;
   /**
@@ -75,6 +76,7 @@ export interface GenerateFindingsOptions {
  */
 export function resolveFindingLlmMode(): FindingLlmMode {
   const raw = (process.env.AIR_FINDING_LLM_MODE ?? "mock").toLowerCase();
+  if (raw === "grok") return "grok";
   if (raw === "anthropic") return "anthropic";
   return "mock";
 }
@@ -209,7 +211,15 @@ export async function generateFindings(
   };
 
   let drafts: RawFindingDraft[];
-  if (mode === "anthropic") {
+  if (mode === "grok") {
+    if (!options.grokClient) {
+      throw new FindingGeneratorError(
+        "anthropic_call_failed",
+        "AIR_FINDING_LLM_MODE=grok requires a Grok client to be passed",
+      );
+    }
+    drafts = await callGrokGenerator(options.grokClient, input);
+  } else if (mode === "anthropic") {
     if (!options.anthropicClient) {
       throw new FindingGeneratorError(
         "anthropic_call_failed",

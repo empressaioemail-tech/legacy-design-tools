@@ -213,6 +213,67 @@ CREATE TABLE @@SCHEMA@@.canned_findings (
 );
 
 
+-- Name: canva_connections; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.canva_connections (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    owner_user_id text NOT NULL,
+    access_token text NOT NULL,
+    refresh_token text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    display_name text NOT NULL,
+    avatar_url text,
+    connected_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: canva_design_pushes; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.canva_design_pushes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    push_job_id uuid,
+    template_id text NOT NULL,
+    template_name text NOT NULL,
+    status text DEFAULT 'uploading'::text NOT NULL,
+    thumbnail_url text,
+    design_url text,
+    source_asset_ids jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: canva_oauth_states; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.canva_oauth_states (
+    state text NOT NULL,
+    code_verifier text NOT NULL,
+    owner_user_id text NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: canva_push_jobs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.canva_push_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    step text DEFAULT 'preparing'::text NOT NULL,
+    progress_label text NOT NULL,
+    request jsonb NOT NULL,
+    design_url text,
+    design_thumbnail_url text,
+    error_code text,
+    error_message text,
+    canva_autofill_job_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: code_atom_fetch_queue; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.code_atom_fetch_queue (
@@ -268,6 +329,72 @@ CREATE TABLE @@SCHEMA@@.code_atoms (
     source_url text NOT NULL,
     fetched_at timestamp with time zone DEFAULT now() NOT NULL,
     metadata jsonb
+);
+
+
+-- Name: collateral_export_jobs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.collateral_export_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    step text DEFAULT 'preparing'::text NOT NULL,
+    progress_label text NOT NULL,
+    request jsonb NOT NULL,
+    download_url text,
+    thumbnail_url text,
+    error_code text,
+    error_message text,
+    placid_pdf_id text,
+    credits_estimated integer,
+    credits_actual integer,
+    provider text DEFAULT 'placid'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: collateral_exports; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.collateral_exports (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    export_job_id uuid,
+    template_pack_id text NOT NULL,
+    template_name text NOT NULL,
+    status text DEFAULT 'rendering'::text NOT NULL,
+    download_url text,
+    thumbnail_url text,
+    source_asset_ids jsonb DEFAULT '[]'::jsonb NOT NULL,
+    credits_charged integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: collateral_metering_events; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.collateral_metering_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    engagement_id uuid NOT NULL,
+    export_job_id uuid NOT NULL,
+    units integer NOT NULL,
+    provider text DEFAULT 'placid'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: coverage_requests; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.coverage_requests (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    jurisdiction_state text,
+    jurisdiction_city text,
+    jurisdiction_fips text,
+    note text,
+    status text DEFAULT 'open'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -377,6 +504,10 @@ CREATE TABLE @@SCHEMA@@.engagements (
     jurisdiction_city text,
     jurisdiction_state text,
     jurisdiction_fips text,
+    substrate_jurisdiction_key text,
+    cortex_jurisdiction_key text,
+    coverage_status text DEFAULT 'unknown'::text NOT NULL,
+    coverage_requested_at timestamp with time zone,
     project_type text,
     zoning_code text,
     lot_area_sqft numeric,
@@ -919,6 +1050,9 @@ CREATE TABLE @@SCHEMA@@.workspace_settings (
     id text DEFAULT 'default'::text NOT NULL,
     firm_display_name text DEFAULT 'Cortex Workspace'::text NOT NULL,
     logo_url text,
+    primary_color text,
+    preferences jsonb DEFAULT '{}'::jsonb NOT NULL,
+    practice_states jsonb DEFAULT '[]'::jsonb NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -1001,6 +1135,30 @@ ALTER TABLE ONLY @@SCHEMA@@.canned_findings
     ADD CONSTRAINT canned_findings_pkey PRIMARY KEY (id);
 
 
+-- Name: canva_connections canva_connections_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.canva_connections
+    ADD CONSTRAINT canva_connections_pkey PRIMARY KEY (id);
+
+
+-- Name: canva_design_pushes canva_design_pushes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.canva_design_pushes
+    ADD CONSTRAINT canva_design_pushes_pkey PRIMARY KEY (id);
+
+
+-- Name: canva_oauth_states canva_oauth_states_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.canva_oauth_states
+    ADD CONSTRAINT canva_oauth_states_pkey PRIMARY KEY (state);
+
+
+-- Name: canva_push_jobs canva_push_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.canva_push_jobs
+    ADD CONSTRAINT canva_push_jobs_pkey PRIMARY KEY (id);
+
+
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
@@ -1029,6 +1187,30 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atoms
     ADD CONSTRAINT code_atoms_pkey PRIMARY KEY (id);
+
+
+-- Name: collateral_export_jobs collateral_export_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.collateral_export_jobs
+    ADD CONSTRAINT collateral_export_jobs_pkey PRIMARY KEY (id);
+
+
+-- Name: collateral_exports collateral_exports_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.collateral_exports
+    ADD CONSTRAINT collateral_exports_pkey PRIMARY KEY (id);
+
+
+-- Name: collateral_metering_events collateral_metering_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.collateral_metering_events
+    ADD CONSTRAINT collateral_metering_events_pkey PRIMARY KEY (id);
+
+
+-- Name: coverage_requests coverage_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
+    ADD CONSTRAINT coverage_requests_pkey PRIMARY KEY (id);
 
 
 -- Name: decision_pdf_artifacts decision_pdf_artifacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1366,6 +1548,26 @@ CREATE UNIQUE INDEX briefing_sources_current_layer_uniq ON @@SCHEMA@@.briefing_s
 CREATE INDEX canned_findings_tenant_discipline_idx ON @@SCHEMA@@.canned_findings USING btree (tenant_id, discipline);
 
 
+-- Name: canva_connections_tenant_owner_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX canva_connections_tenant_owner_idx ON @@SCHEMA@@.canva_connections USING btree (tenant_id, owner_user_id);
+
+
+-- Name: canva_design_pushes_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX canva_design_pushes_engagement_created_idx ON @@SCHEMA@@.canva_design_pushes USING btree (engagement_id, created_at);
+
+
+-- Name: canva_oauth_states_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX canva_oauth_states_created_idx ON @@SCHEMA@@.canva_oauth_states USING btree (created_at);
+
+
+-- Name: canva_push_jobs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX canva_push_jobs_engagement_created_idx ON @@SCHEMA@@.canva_push_jobs USING btree (engagement_id, created_at);
+
+
 -- Name: code_atom_fetch_queue_jurisdiction_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX code_atom_fetch_queue_jurisdiction_idx ON @@SCHEMA@@.code_atom_fetch_queue USING btree (jurisdiction_key);
@@ -1404,6 +1606,31 @@ CREATE INDEX code_atoms_section_idx ON @@SCHEMA@@.code_atoms USING btree (jurisd
 -- Name: code_atoms_source_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX code_atoms_source_idx ON @@SCHEMA@@.code_atoms USING btree (source_id);
+
+
+-- Name: collateral_export_jobs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX collateral_export_jobs_engagement_created_idx ON @@SCHEMA@@.collateral_export_jobs USING btree (engagement_id, created_at);
+
+
+-- Name: collateral_exports_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX collateral_exports_engagement_created_idx ON @@SCHEMA@@.collateral_exports USING btree (engagement_id, created_at);
+
+
+-- Name: collateral_metering_events_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX collateral_metering_events_engagement_idx ON @@SCHEMA@@.collateral_metering_events USING btree (engagement_id, created_at);
+
+
+-- Name: coverage_requests_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX coverage_requests_engagement_idx ON @@SCHEMA@@.coverage_requests USING btree (engagement_id);
+
+
+-- Name: coverage_requests_open_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX coverage_requests_open_idx ON @@SCHEMA@@.coverage_requests USING btree (status, created_at);
 
 
 -- Name: decision_pdf_artifacts_submission_idx; Type: INDEX; Schema: public; Owner: -
@@ -1734,6 +1961,12 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atoms
     ADD CONSTRAINT code_atoms_source_id_code_atom_sources_id_fk FOREIGN KEY (source_id) REFERENCES @@SCHEMA@@.code_atom_sources(id) ON DELETE CASCADE;
+
+
+-- Name: coverage_requests coverage_requests_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
+    ADD CONSTRAINT coverage_requests_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
 -- Name: decision_pdf_artifacts decision_pdf_artifacts_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

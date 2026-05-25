@@ -55,6 +55,7 @@ import {
   parseCreateProductSpecReferenceBody,
   parseStatusFilter,
 } from "./productSpecReference.logic";
+import { generateProductSpecRecommendations } from "../lib/productSpecRecommendations";
 
 const router: IRouter = Router();
 
@@ -105,6 +106,46 @@ async function loadReference(
     .limit(1);
   return rows[0] ?? null;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  POST …/product-spec-references/generate-recommendations — QA-55 AI batch    */
+/* -------------------------------------------------------------------------- */
+
+router.post(
+  "/engagements/:engagementId/product-spec-references/generate-recommendations",
+  async (req: Request, res: Response): Promise<void> => {
+    const reqLog = (req as Request & { log?: typeof logger }).log ?? logger;
+    const engagementId =
+      typeof req.params.engagementId === "string"
+        ? req.params.engagementId
+        : "";
+
+    if (!UUID_RE.test(engagementId)) {
+      res.status(404).json({ error: "engagement_not_found" });
+      return;
+    }
+
+    try {
+      const result = await generateProductSpecRecommendations(engagementId);
+      if (!result) {
+        res.status(404).json({ error: "engagement_not_found" });
+        return;
+      }
+      res.json({
+        mode: result.mode,
+        recommendations: result.recommendations,
+      });
+    } catch (err) {
+      reqLog.error(
+        { err, engagementId },
+        "generate product-spec recommendations failed",
+      );
+      res
+        .status(500)
+        .json({ error: "Failed to generate product spec recommendations" });
+    }
+  },
+);
 
 /* -------------------------------------------------------------------------- */
 /*   POST /api/engagements/:engagementId/product-spec-references  — create      */

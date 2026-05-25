@@ -15,10 +15,12 @@ import {
 } from "./jurisdictions";
 
 describe("jurisdictions registry", () => {
-  it("exposes both shipped jurisdictions", () => {
+  it("exposes shipped jurisdictions including cedar_hill_tx (40i Track B)", () => {
     const keys = listJurisdictions().map((j) => j.key);
     expect(keys).toContain("grand_county_ut");
     expect(keys).toContain("bastrop_tx");
+    expect(keys).toContain("cedar_hill_tx");
+    expect(keys).not.toContain("dallas_county_tx");
   });
 
   it("getJurisdiction returns null for unknown keys", () => {
@@ -30,6 +32,15 @@ describe("jurisdictions registry", () => {
     expect(cfg).not.toBeNull();
     const book = cfg!.books.find((b) => b.sourceName === "bastrop_municode");
     expect(book?.config?.municodeClientId).toBe(1169);
+  });
+
+  it("Cedar Hill config carries verified Municode clientId 1568 and productId 11825", () => {
+    const cfg = getJurisdiction("cedar_hill_tx");
+    expect(cfg).not.toBeNull();
+    const book = cfg!.books.find((b) => b.sourceName === "cedar_hill_municode");
+    expect(book?.config?.municodeClientId).toBe(1568);
+    expect(book?.config?.municodeProductId).toBe(11825);
+    expect(book?.config?.librarySlug).toBe("cedar_hill");
   });
 
   it("every JURISDICTIONS entry's key matches its dictionary key", () => {
@@ -47,6 +58,12 @@ describe("keyFromEngagement: three-tier fallback", () => {
     expect(
       keyFromEngagement({ jurisdictionCity: "Bastrop", jurisdictionState: "TX" }),
     ).toBe("bastrop_tx");
+    expect(
+      keyFromEngagement({
+        jurisdictionCity: "Cedar Hill",
+        jurisdictionState: "TX",
+      }),
+    ).toBe("cedar_hill_tx");
   });
 
   it("Tier 1 is case-insensitive", () => {
@@ -88,6 +105,21 @@ describe("keyFromEngagement: three-tier fallback", () => {
     expect(
       keyFromEngagement({ address: "200 Main St, Bastrop, TX 78602" }),
     ).toBe("bastrop_tx");
+    expect(
+      keyFromEngagement({
+        address: "430 Evergreen Trl, Cedar Hill, TX 75104",
+      }),
+    ).toBe("cedar_hill_tx");
+  });
+
+  it("does not map Dallas or Dallas County (blocked corpora)", () => {
+    expect(
+      keyFromEngagement({ jurisdictionCity: "Dallas", jurisdictionState: "TX" }),
+    ).toBeNull();
+    expect(keyFromEngagement({ jurisdiction: "Dallas, TX" })).toBeNull();
+    expect(
+      keyFromEngagement({ jurisdiction: "Dallas County, TX" }),
+    ).toBeNull();
   });
 
   it("Tier 3 — case-insensitive address scan", () => {

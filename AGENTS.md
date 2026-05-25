@@ -30,6 +30,8 @@ Always confirm which workstation before running tooling — paths differ.
 
 Cursor work is on Windows; workspace root is `p:\legacy-design-tools`. Per-sprint worktrees follow the convention `p:\ldt-<sprint-name>`.
 
+**Local full pipeline (BIM GLB + Studio):** `docs/local-dev-windows.md` — start with `.\scripts\dev-local-windows.ps1`, verify with `.\scripts\verify-local-pipeline.ps1`. Requires `DATABASE_URL` + GCS vars in `.env.local`; do not use api-server `dev` (Cloud Run proxy) for local BIM work.
+
 ---
 
 ## Tooling baseline
@@ -180,3 +182,5 @@ When a multi-sprint suite (V1, future Vn) lands as a coordinated set:
 ## Append history
 
 - **2026-05-02** — Initial draft. Distilled from the V1 sprint cascade (V1-1 through V1-7, six PRs across two parallel rebase chains). Documents the openapi.yaml hand-merge procedure, the cross-branch atom registry coupling pattern, the fake-timer + real-DB-I/O race, and the Windows rollup native-binary quirk.
+- **2026-05-25** — `docs/local-dev-windows.md` + `scripts/verify-local-pipeline.ps1`: canonical Windows path for `dev:local` (Neon + GCS ADC + Vite :20295). GLB 500 on Windows was Replit object-storage sidecar without `GOOGLE_APPLICATION_CREDENTIALS`; use `dev:local` not api-server `dev` proxy for BIM/Studio.
+- **2026-05-26** — Placid client collateral export (`sprint/placid-collateral`): primary Deliver → Client materials PDF path via `artifacts/api-server/README-collateral.md`. Signed asset URLs (`COLLATERAL_SIGNING_SECRET`); `VITE_CANVA_AUTOFILL=0` hides Canva autofill UI. Local QA: `dev:local` + migration `0025_add_collateral.sql`, not `pnpm run dev` proxy.

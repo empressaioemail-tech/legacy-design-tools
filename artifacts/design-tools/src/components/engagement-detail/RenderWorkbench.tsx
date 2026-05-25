@@ -24,6 +24,7 @@ import {
   RenderCard,
   RenderKickoffPanel,
   RenderPowerToolDialog,
+  type BimStudioCapture,
 } from "@workspace/portal-ui";
 import type { KickoffRenderResponse } from "@workspace/api-client-react";
 import { StudioCreateOverview } from "./StudioCreateOverview";
@@ -74,6 +75,8 @@ export function RenderWorkbench({
   hasBim,
   onOpenBimTab,
   kindFilter = "all",
+  initialStudioCapture = null,
+  onStudioCaptureConsumed,
 }: {
   engagementId: string;
   defaultGlbUrl?: string | null;
@@ -81,6 +84,8 @@ export function RenderWorkbench({
   onOpenBimTab?: () => void;
   /** Limit history + kickoff to one render kind (QA-48 video tab). */
   kindFilter?: "all" | "video" | "exclude-video";
+  initialStudioCapture?: BimStudioCapture | null;
+  onStudioCaptureConsumed?: () => void;
 }) {
   const [mode, setMode] = useState<StudioWorkbenchMode>("create");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -492,6 +497,8 @@ export function RenderWorkbench({
                         ? ["still", "elevation-set"]
                         : undefined
                   }
+                  initialStudioCapture={initialStudioCapture}
+                  onStudioCaptureConsumed={onStudioCaptureConsumed}
                 />
               </div>
             </>

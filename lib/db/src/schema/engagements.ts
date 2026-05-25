@@ -51,6 +51,12 @@ export const engagements = pgTable(
     jurisdictionCity: text("jurisdiction_city"),
     jurisdictionState: text("jurisdiction_state"),
     jurisdictionFips: text("jurisdiction_fips"),
+    substrateJurisdictionKey: text("substrate_jurisdiction_key"),
+    cortexJurisdictionKey: text("cortex_jurisdiction_key"),
+    coverageStatus: text("coverage_status").notNull().default("unknown"),
+    coverageRequestedAt: timestamp("coverage_requested_at", {
+      withTimezone: true,
+    }),
     projectType: text("project_type"),
     zoningCode: text("zoning_code"),
     lotAreaSqft: numeric("lot_area_sqft"),

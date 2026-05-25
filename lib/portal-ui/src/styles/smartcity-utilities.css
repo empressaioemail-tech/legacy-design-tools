@@ -153,7 +153,16 @@
   opacity: 0.88;
   transform: translateY(-1px);
 }
-.sc-btn-sm {
+/* Size-only modifier when paired with primary/alert — avoids ghost colors bleeding */
+.sc-btn-primary.sc-btn-sm,
+.sc-btn-alert.sc-btn-sm {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 9.5px;
+  border-radius: 4px;
+}
+
+.sc-btn-sm:not(.sc-btn-primary):not(.sc-btn-alert) {
   background: transparent;
   color: var(--cyan-text);
   border: 1px solid rgba(0, 180, 216, 0.28);
@@ -167,7 +176,7 @@
     0 1px 3px rgba(0, 0, 0, 0.18);
   transition: all 0.14s;
 }
-.sc-btn-sm:hover {
+.sc-btn-sm:not(.sc-btn-primary):not(.sc-btn-alert):hover {
   background: var(--cyan-dim);
   border-color: rgba(0, 180, 216, 0.45);
 }

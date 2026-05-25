@@ -8,17 +8,16 @@ import {
   CircleMarker,
 } from "react-leaflet";
 import L from "leaflet";
-import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
-import iconUrl from "leaflet/dist/images/marker-icon.png";
-import shadowUrl from "leaflet/dist/images/marker-shadow.png";
 import "leaflet/dist/leaflet.css";
 import type { SiteMapOverlay, SiteMapOverlayTier } from "./overlays";
 
-// Fix the well-known Leaflet+Vite marker-icon issue
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl,
-  iconUrl,
-  shadowUrl,
+/** Site address pin — inline SVG so Vite/monorepo builds never 404 Leaflet PNG assets. */
+const SITE_PIN_ICON = L.divIcon({
+  className: "site-map-pin-leaflet",
+  html: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36" aria-hidden="true"><path fill="#00b4d8" stroke="#0891b2" stroke-width="1.25" d="M14 0C7.4 0 2 5.4 2 12c0 9 12 24 12 24s12-15 12-24C26 5.4 20.6 0 14 0zm0 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>`,
+  iconSize: [28, 36],
+  iconAnchor: [14, 36],
+  popupAnchor: [0, -32],
 });
 
 export interface SiteMapProps {
@@ -160,7 +159,7 @@ export function SiteMap({
             </CircleMarker>
           );
         })}
-        <Marker position={[latitude, longitude]}>
+        <Marker position={[latitude, longitude]} icon={SITE_PIN_ICON}>
           {addressLabel && <Popup>{addressLabel}</Popup>}
         </Marker>
       </MapContainer>

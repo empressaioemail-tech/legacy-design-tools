@@ -47,3 +47,6 @@ export * from "./evalRuns";
 export * from "./evalScores";
 export * from "./evalBaselines";
 export * from "./workspaceSettings";
+export * from "./coverageRequests";
+export * from "./canva";
+export * from "./collateral";

@@ -84,7 +84,28 @@ const apiState = vi.hoisted(() => ({
 const warmupJurisdictionMock = vi.hoisted(() => vi.fn());
 const getWarmupStatusMock = vi.hoisted(() => vi.fn());
 
+vi.mock("../../lib/workspaceSettingsApi", () => ({
+  fetchWorkspaceSettings: vi.fn().mockResolvedValue({
+    id: "default",
+    firmDisplayName: "Test",
+    logoUrl: null,
+    primaryColor: null,
+    practiceStates: ["UT"],
+    updatedAt: new Date().toISOString(),
+  }),
+}));
+
 vi.mock("@workspace/api-client-react", () => ({
+  useListEngagements: () => ({
+    data: [
+      {
+        id: "eng-1",
+        site: { geocode: { jurisdictionState: "UT" } },
+      },
+    ],
+    isLoading: false,
+  }),
+  useGetEngagement: () => ({ data: undefined, isLoading: false }),
   useListCodeJurisdictions: () => ({
     data: apiState.jurisdictions,
     isLoading: false,
@@ -194,14 +215,14 @@ describe("CodeLibrary — warmup observability (P1.3)", () => {
 
     render(<CodeLibrary />);
 
-    const btn = screen.getByTestId("warmup-btn-grand_county_ut");
+    const btn = screen.getByTestId("warmup-btn-firm-grand_county_ut");
     expect(btn).toHaveTextContent(/Warm up now/);
 
     // Click. The button immediately flips to "Warming up…" before any async resolves.
     await act(async () => {
       fireEvent.click(btn);
     });
-    expect(screen.getByTestId("warmup-btn-grand_county_ut")).toHaveTextContent(
+    expect(screen.getByTestId("warmup-btn-firm-grand_county_ut")).toHaveTextContent(
       /Warming up…/,
     );
     expect(warmupJurisdictionMock).toHaveBeenCalledWith("grand_county_ut");
@@ -211,7 +232,7 @@ describe("CodeLibrary — warmup observability (P1.3)", () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
     expect(
-      screen.getByTestId("warmup-progress-grand_county_ut"),
+      screen.getByTestId("warmup-progress-firm-grand_county_ut"),
     ).toHaveTextContent(/Warming up: 1 \/ 4 sections processed/);
 
     // Advance to second poll tick (another 2000ms) → status[1] returns completed.
@@ -222,11 +243,11 @@ describe("CodeLibrary — warmup observability (P1.3)", () => {
     });
 
     // Button back to idle.
-    expect(screen.getByTestId("warmup-btn-grand_county_ut")).toHaveTextContent(
+    expect(screen.getByTestId("warmup-btn-firm-grand_county_ut")).toHaveTextContent(
       /Warm up now/,
     );
     // Outcome message visible.
-    expect(screen.getByTestId("warmup-msg-grand_county_ut")).toHaveTextContent(
+    expect(screen.getByTestId("warmup-msg-firm-grand_county_ut")).toHaveTextContent(
       /Completed 4\/4 sections\./,
     );
   });
@@ -250,15 +271,15 @@ describe("CodeLibrary — warmup observability (P1.3)", () => {
 
     render(<CodeLibrary />);
     await act(async () => {
-      fireEvent.click(screen.getByTestId("warmup-btn-grand_county_ut"));
+      fireEvent.click(screen.getByTestId("warmup-btn-firm-grand_county_ut"));
     });
     // No timer advance — the message is set synchronously after the awaited
     // warmupJurisdiction call resolves.
-    expect(screen.getByTestId("warmup-msg-grand_county_ut")).toHaveTextContent(
+    expect(screen.getByTestId("warmup-msg-firm-grand_county_ut")).toHaveTextContent(
       /Warmup discovered nothing — grand_county_pdf: source_row_missing/,
     );
     // Spinner returns to idle.
-    expect(screen.getByTestId("warmup-btn-grand_county_ut")).toHaveTextContent(
+    expect(screen.getByTestId("warmup-btn-firm-grand_county_ut")).toHaveTextContent(
       /Warm up now/,
     );
     expect(getWarmupStatusMock).not.toHaveBeenCalled();
@@ -281,16 +302,16 @@ describe("CodeLibrary — warmup observability (P1.3)", () => {
 
     render(<CodeLibrary />);
     await act(async () => {
-      fireEvent.click(screen.getByTestId("warmup-btn-grand_county_ut"));
+      fireEvent.click(screen.getByTestId("warmup-btn-firm-grand_county_ut"));
     });
     // Advance 3 polling ticks.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000 * 3);
     });
-    expect(screen.getByTestId("warmup-msg-grand_county_ut")).toHaveTextContent(
+    expect(screen.getByTestId("warmup-msg-firm-grand_county_ut")).toHaveTextContent(
       /Status polling unavailable/,
     );
-    expect(screen.getByTestId("warmup-btn-grand_county_ut")).toHaveTextContent(
+    expect(screen.getByTestId("warmup-btn-firm-grand_county_ut")).toHaveTextContent(
       /Warm up now/,
     );
   });
@@ -320,7 +341,7 @@ describe("CodeLibrary — warmup observability (P1.3)", () => {
 
     render(<CodeLibrary />);
     await act(async () => {
-      fireEvent.click(screen.getByTestId("warmup-btn-grand_county_ut"));
+      fireEvent.click(screen.getByTestId("warmup-btn-firm-grand_county_ut"));
     });
     // First poll tick → terminal failed.
     await act(async () => {
@@ -329,13 +350,13 @@ describe("CodeLibrary — warmup observability (P1.3)", () => {
 
     // Outcome message includes the lastError text, so the user can debug
     // without going to logs.
-    expect(screen.getByTestId("warmup-msg-grand_county_ut")).toHaveTextContent(
+    expect(screen.getByTestId("warmup-msg-firm-grand_county_ut")).toHaveTextContent(
       /Warmup failed \(3\/4 sections\): Municode 429: Too Many Requests/,
     );
     // Failed-row warning panel is also visible (independent of the
     // auto-clearing message). This is the load-bearing lastError surface.
     expect(
-      screen.getByTestId("warmup-error-grand_county_ut"),
+      screen.getByTestId("warmup-error-firm-grand_county_ut"),
     ).toHaveTextContent(/Last error: Municode 429: Too Many Requests/);
 
     // Advance past the 5s auto-clear window — the inline message clears,
@@ -343,15 +364,76 @@ describe("CodeLibrary — warmup observability (P1.3)", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5500);
     });
-    expect(screen.queryByTestId("warmup-msg-grand_county_ut")).toBeNull();
+    expect(screen.queryByTestId("warmup-msg-firm-grand_county_ut")).toBeNull();
     expect(
-      screen.getByTestId("warmup-error-grand_county_ut"),
+      screen.getByTestId("warmup-error-firm-grand_county_ut"),
     ).toHaveTextContent(/Municode 429/);
+  });
+});
+
+describe("CodeLibrary — jurisdiction sections (QA-59 / v1.5)", () => {
+  it("shows Your firm section and Explore collapsed by default", async () => {
+    apiState.jurisdictions = [
+      {
+        key: "grand_county_ut",
+        displayName: "Grand County, UT",
+        atomCount: 1,
+        embeddedCount: 1,
+        lastFetchedAt: null,
+        books: [],
+      },
+      {
+        key: "bastrop_tx",
+        displayName: "Bastrop, TX",
+        atomCount: 1,
+        embeddedCount: 1,
+        lastFetchedAt: null,
+        books: [],
+      },
+    ];
+    render(<CodeLibrary />);
+    expect(screen.getByTestId("code-library-section-your-firm")).toBeTruthy();
+    expect(screen.getByTestId("code-library-section-explore")).toBeTruthy();
+    const explore = screen.getByTestId(
+      "code-library-section-explore",
+    ) as HTMLDetailsElement;
+    expect(explore.open).toBe(false);
+    expect(
+      screen.getByTestId("jurisdiction-card-firm-grand_county_ut"),
+    ).toBeTruthy();
+    expect(
+      screen.queryByTestId("jurisdiction-card-firm-bastrop_tx"),
+    ).toBeNull();
   });
 });
 
 describe("CodeLibrary — clickable book rows (P1.4)", () => {
   it("clicking a book pill filters the atom list to just that book and updates the panel header", async () => {
+    apiState.jurisdictions = [
+      {
+        key: "grand_county_ut",
+        displayName: "Grand County, UT",
+        atomCount: 4,
+        embeddedCount: 4,
+        lastFetchedAt: "2026-04-30T10:00:00.000Z",
+        books: [
+          {
+            codeBook: "IRC_R301_2_1",
+            edition: "2021",
+            label: "2021 IRC R301.2(1)",
+            sourceName: "grand_county_html",
+            atomCount: 1,
+          },
+          {
+            codeBook: "IWUIC",
+            edition: "2006",
+            label: "2006 IWUIC",
+            sourceName: "grand_county_pdf",
+            atomCount: 3,
+          },
+        ],
+      },
+    ];
     // Two atoms across two books. The unfiltered list shows both; clicking
     // the IWUIC pill filters to just the IWUIC atom.
     const ircAtom: Atom = {
@@ -404,7 +486,7 @@ describe("CodeLibrary — clickable book rows (P1.4)", () => {
     // Click the IWUIC book pill.
     await act(async () => {
       fireEvent.click(
-        screen.getByTestId("book-pill-grand_county_ut-IWUIC"),
+        screen.getByTestId("book-pill-firm-grand_county_ut-IWUIC"),
       );
     });
 

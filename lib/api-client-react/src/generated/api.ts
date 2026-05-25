@@ -30,11 +30,26 @@ import type {
   BundleQaTriageItemsBody,
   CancelRenderResponse,
   CannedFindingResponse,
+  CanvaBrandTemplate,
+  CanvaConnectionStatus,
+  CanvaDesignPush,
+  CanvaOAuthCallbackParams,
+  CanvaOAuthStartResponse,
+  CanvaPushJob,
+  CanvaPushJobIdResponse,
+  CanvaPushRequest,
+  CanvaSelectableAsset,
   ChatErrorResponse,
   ChatRequest,
   CodeAtomDetail,
   CodeAtomListResponse,
   CodeAtomSummary,
+  CollateralExportJob,
+  CollateralExportJobIdResponse,
+  CollateralExportRecord,
+  CollateralExportRequest,
+  CollateralSelectableAsset,
+  CollateralTemplatePack,
   CreateBriefingSourceBody,
   CreateCannedFindingBody,
   CreateDeliverableLetterBody,
@@ -84,6 +99,8 @@ import type {
   GenerateBriefingResponse,
   GenerateEngagementLayersParams,
   GenerateLayersResponse,
+  GenerateProductSpecRecommendationsBody,
+  GenerateProductSpecRecommendationsResponse,
   GenerateRenderPromptBody,
   GenerateSubmissionFindingsBody,
   GenerateSubmissionFindingsResponse,
@@ -1680,6 +1697,1348 @@ export const usePostPackageShareComment = <
   TContext
 > => {
   return useMutation(getPostPackageShareCommentMutationOptions(options));
+};
+
+/**
+ * @summary Collateral template packs
+ */
+export const getListCollateralTemplatesUrl = () => {
+  return `/api/collateral/templates`;
+};
+
+export const listCollateralTemplates = async (
+  options?: RequestInit,
+): Promise<CollateralTemplatePack[]> => {
+  return customFetch<CollateralTemplatePack[]>(
+    getListCollateralTemplatesUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListCollateralTemplatesQueryKey = () => {
+  return [`/api/collateral/templates`] as const;
+};
+
+export const getListCollateralTemplatesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCollateralTemplates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listCollateralTemplates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListCollateralTemplatesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listCollateralTemplates>>
+  > = ({ signal }) => listCollateralTemplates({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCollateralTemplates>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListCollateralTemplatesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCollateralTemplates>>
+>;
+export type ListCollateralTemplatesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Collateral template packs
+ */
+
+export function useListCollateralTemplates<
+  TData = Awaited<ReturnType<typeof listCollateralTemplates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listCollateralTemplates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListCollateralTemplatesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Signed public asset bytes for Placid (no session)
+ */
+export const getFetchCollateralSignedAssetUrl = (
+  token: string,
+  assetKey: string,
+) => {
+  return `/api/collateral/fetch/${token}/${assetKey}`;
+};
+
+export const fetchCollateralSignedAsset = async (
+  token: string,
+  assetKey: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getFetchCollateralSignedAssetUrl(token, assetKey), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getFetchCollateralSignedAssetQueryKey = (
+  token: string,
+  assetKey: string,
+) => {
+  return [`/api/collateral/fetch/${token}/${assetKey}`] as const;
+};
+
+export const getFetchCollateralSignedAssetQueryOptions = <
+  TData = Awaited<ReturnType<typeof fetchCollateralSignedAsset>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  token: string,
+  assetKey: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof fetchCollateralSignedAsset>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getFetchCollateralSignedAssetQueryKey(token, assetKey);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof fetchCollateralSignedAsset>>
+  > = ({ signal }) =>
+    fetchCollateralSignedAsset(token, assetKey, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(token && assetKey),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof fetchCollateralSignedAsset>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type FetchCollateralSignedAssetQueryResult = NonNullable<
+  Awaited<ReturnType<typeof fetchCollateralSignedAsset>>
+>;
+export type FetchCollateralSignedAssetQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Signed public asset bytes for Placid (no session)
+ */
+
+export function useFetchCollateralSignedAsset<
+  TData = Awaited<ReturnType<typeof fetchCollateralSignedAsset>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  token: string,
+  assetKey: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof fetchCollateralSignedAsset>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getFetchCollateralSignedAssetQueryOptions(
+    token,
+    assetKey,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Poll collateral export job
+ */
+export const getGetCollateralExportJobUrl = (jobId: string) => {
+  return `/api/collateral/export-jobs/${jobId}`;
+};
+
+export const getCollateralExportJob = async (
+  jobId: string,
+  options?: RequestInit,
+): Promise<CollateralExportJob> => {
+  return customFetch<CollateralExportJob>(getGetCollateralExportJobUrl(jobId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCollateralExportJobQueryKey = (jobId: string) => {
+  return [`/api/collateral/export-jobs/${jobId}`] as const;
+};
+
+export const getGetCollateralExportJobQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCollateralExportJob>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCollateralExportJob>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetCollateralExportJobQueryKey(jobId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCollateralExportJob>>
+  > = ({ signal }) =>
+    getCollateralExportJob(jobId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!jobId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCollateralExportJob>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCollateralExportJobQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCollateralExportJob>>
+>;
+export type GetCollateralExportJobQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Poll collateral export job
+ */
+
+export function useGetCollateralExportJob<
+  TData = Awaited<ReturnType<typeof getCollateralExportJob>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCollateralExportJob>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCollateralExportJobQueryOptions(jobId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Selectable engagement assets for PDF export
+ */
+export const getListEngagementCollateralAssetsUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/collateral/assets`;
+};
+
+export const listEngagementCollateralAssets = async (
+  engagementId: string,
+  options?: RequestInit,
+): Promise<CollateralSelectableAsset[]> => {
+  return customFetch<CollateralSelectableAsset[]>(
+    getListEngagementCollateralAssetsUrl(engagementId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementCollateralAssetsQueryKey = (
+  engagementId: string,
+) => {
+  return [`/api/engagements/${engagementId}/collateral/assets`] as const;
+};
+
+export const getListEngagementCollateralAssetsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementCollateralAssets>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementCollateralAssets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListEngagementCollateralAssetsQueryKey(engagementId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementCollateralAssets>>
+  > = ({ signal }) =>
+    listEngagementCollateralAssets(engagementId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementCollateralAssets>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementCollateralAssetsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementCollateralAssets>>
+>;
+export type ListEngagementCollateralAssetsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Selectable engagement assets for PDF export
+ */
+
+export function useListEngagementCollateralAssets<
+  TData = Awaited<ReturnType<typeof listEngagementCollateralAssets>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementCollateralAssets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementCollateralAssetsQueryOptions(
+    engagementId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Past PDF exports for an engagement
+ */
+export const getListEngagementCollateralExportsUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/collateral/exports`;
+};
+
+export const listEngagementCollateralExports = async (
+  engagementId: string,
+  options?: RequestInit,
+): Promise<CollateralExportRecord[]> => {
+  return customFetch<CollateralExportRecord[]>(
+    getListEngagementCollateralExportsUrl(engagementId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementCollateralExportsQueryKey = (
+  engagementId: string,
+) => {
+  return [`/api/engagements/${engagementId}/collateral/exports`] as const;
+};
+
+export const getListEngagementCollateralExportsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementCollateralExports>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementCollateralExports>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListEngagementCollateralExportsQueryKey(engagementId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementCollateralExports>>
+  > = ({ signal }) =>
+    listEngagementCollateralExports(engagementId, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementCollateralExports>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementCollateralExportsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementCollateralExports>>
+>;
+export type ListEngagementCollateralExportsQueryError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Past PDF exports for an engagement
+ */
+
+export function useListEngagementCollateralExports<
+  TData = Awaited<ReturnType<typeof listEngagementCollateralExports>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementCollateralExports>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementCollateralExportsQueryOptions(
+    engagementId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Start async Placid PDF export job
+ */
+export const getStartEngagementCollateralExportUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/collateral/export`;
+};
+
+export const startEngagementCollateralExport = async (
+  engagementId: string,
+  collateralExportRequest: CollateralExportRequest,
+  options?: RequestInit,
+): Promise<CollateralExportJobIdResponse> => {
+  return customFetch<CollateralExportJobIdResponse>(
+    getStartEngagementCollateralExportUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(collateralExportRequest),
+    },
+  );
+};
+
+export const getStartEngagementCollateralExportMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startEngagementCollateralExport>>,
+    TError,
+    { engagementId: string; data: BodyType<CollateralExportRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startEngagementCollateralExport>>,
+  TError,
+  { engagementId: string; data: BodyType<CollateralExportRequest> },
+  TContext
+> => {
+  const mutationKey = ["startEngagementCollateralExport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startEngagementCollateralExport>>,
+    { engagementId: string; data: BodyType<CollateralExportRequest> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return startEngagementCollateralExport(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartEngagementCollateralExportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startEngagementCollateralExport>>
+>;
+export type StartEngagementCollateralExportMutationBody =
+  BodyType<CollateralExportRequest>;
+export type StartEngagementCollateralExportMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Start async Placid PDF export job
+ */
+export const useStartEngagementCollateralExport = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startEngagementCollateralExport>>,
+    TError,
+    { engagementId: string; data: BodyType<CollateralExportRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startEngagementCollateralExport>>,
+  TError,
+  { engagementId: string; data: BodyType<CollateralExportRequest> },
+  TContext
+> => {
+  return useMutation(
+    getStartEngagementCollateralExportMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Canva connection status
+ */
+export const getGetCanvaConnectionUrl = () => {
+  return `/api/canva/connection`;
+};
+
+export const getCanvaConnection = async (
+  options?: RequestInit,
+): Promise<CanvaConnectionStatus> => {
+  return customFetch<CanvaConnectionStatus>(getGetCanvaConnectionUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCanvaConnectionQueryKey = () => {
+  return [`/api/canva/connection`] as const;
+};
+
+export const getGetCanvaConnectionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCanvaConnection>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getCanvaConnection>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCanvaConnectionQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCanvaConnection>>
+  > = ({ signal }) => getCanvaConnection({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCanvaConnection>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCanvaConnectionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCanvaConnection>>
+>;
+export type GetCanvaConnectionQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Canva connection status
+ */
+
+export function useGetCanvaConnection<
+  TData = Awaited<ReturnType<typeof getCanvaConnection>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getCanvaConnection>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCanvaConnectionQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Disconnect Canva
+ */
+export const getDisconnectCanvaUrl = () => {
+  return `/api/canva/connection`;
+};
+
+export const disconnectCanva = async (options?: RequestInit): Promise<void> => {
+  return customFetch<void>(getDisconnectCanvaUrl(), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDisconnectCanvaMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof disconnectCanva>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof disconnectCanva>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["disconnectCanva"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof disconnectCanva>>,
+    void
+  > = () => {
+    return disconnectCanva(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DisconnectCanvaMutationResult = NonNullable<
+  Awaited<ReturnType<typeof disconnectCanva>>
+>;
+
+export type DisconnectCanvaMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Disconnect Canva
+ */
+export const useDisconnectCanva = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof disconnectCanva>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof disconnectCanva>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getDisconnectCanvaMutationOptions(options));
+};
+
+/**
+ * @summary Start Canva OAuth (PKCE)
+ */
+export const getStartCanvaOAuthUrl = () => {
+  return `/api/canva/oauth/start`;
+};
+
+export const startCanvaOAuth = async (
+  options?: RequestInit,
+): Promise<CanvaOAuthStartResponse> => {
+  return customFetch<CanvaOAuthStartResponse>(getStartCanvaOAuthUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getStartCanvaOAuthMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startCanvaOAuth>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startCanvaOAuth>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["startCanvaOAuth"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startCanvaOAuth>>,
+    void
+  > = () => {
+    return startCanvaOAuth(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartCanvaOAuthMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startCanvaOAuth>>
+>;
+
+export type StartCanvaOAuthMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Start Canva OAuth (PKCE)
+ */
+export const useStartCanvaOAuth = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startCanvaOAuth>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startCanvaOAuth>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getStartCanvaOAuthMutationOptions(options));
+};
+
+/**
+ * @summary Canva OAuth callback (browser redirect)
+ */
+export const getCanvaOAuthCallbackUrl = (params?: CanvaOAuthCallbackParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/canva/oauth/callback?${stringifiedParams}`
+    : `/api/canva/oauth/callback`;
+};
+
+export const canvaOAuthCallback = async (
+  params?: CanvaOAuthCallbackParams,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getCanvaOAuthCallbackUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getCanvaOAuthCallbackQueryKey = (
+  params?: CanvaOAuthCallbackParams,
+) => {
+  return [`/api/canva/oauth/callback`, ...(params ? [params] : [])] as const;
+};
+
+export const getCanvaOAuthCallbackQueryOptions = <
+  TData = Awaited<ReturnType<typeof canvaOAuthCallback>>,
+  TError = ErrorType<void>,
+>(
+  params?: CanvaOAuthCallbackParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof canvaOAuthCallback>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getCanvaOAuthCallbackQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof canvaOAuthCallback>>
+  > = ({ signal }) => canvaOAuthCallback(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof canvaOAuthCallback>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type CanvaOAuthCallbackQueryResult = NonNullable<
+  Awaited<ReturnType<typeof canvaOAuthCallback>>
+>;
+export type CanvaOAuthCallbackQueryError = ErrorType<void>;
+
+/**
+ * @summary Canva OAuth callback (browser redirect)
+ */
+
+export function useCanvaOAuthCallback<
+  TData = Awaited<ReturnType<typeof canvaOAuthCallback>>,
+  TError = ErrorType<void>,
+>(
+  params?: CanvaOAuthCallbackParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof canvaOAuthCallback>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getCanvaOAuthCallbackQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Brand templates for autofill
+ */
+export const getListCanvaBrandTemplatesUrl = () => {
+  return `/api/canva/brand-templates`;
+};
+
+export const listCanvaBrandTemplates = async (
+  options?: RequestInit,
+): Promise<CanvaBrandTemplate[]> => {
+  return customFetch<CanvaBrandTemplate[]>(getListCanvaBrandTemplatesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListCanvaBrandTemplatesQueryKey = () => {
+  return [`/api/canva/brand-templates`] as const;
+};
+
+export const getListCanvaBrandTemplatesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCanvaBrandTemplates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listCanvaBrandTemplates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListCanvaBrandTemplatesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listCanvaBrandTemplates>>
+  > = ({ signal }) => listCanvaBrandTemplates({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCanvaBrandTemplates>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListCanvaBrandTemplatesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCanvaBrandTemplates>>
+>;
+export type ListCanvaBrandTemplatesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Brand templates for autofill
+ */
+
+export function useListCanvaBrandTemplates<
+  TData = Awaited<ReturnType<typeof listCanvaBrandTemplates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listCanvaBrandTemplates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListCanvaBrandTemplatesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Poll Canva push job
+ */
+export const getGetCanvaPushJobUrl = (jobId: string) => {
+  return `/api/canva/push-jobs/${jobId}`;
+};
+
+export const getCanvaPushJob = async (
+  jobId: string,
+  options?: RequestInit,
+): Promise<CanvaPushJob> => {
+  return customFetch<CanvaPushJob>(getGetCanvaPushJobUrl(jobId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCanvaPushJobQueryKey = (jobId: string) => {
+  return [`/api/canva/push-jobs/${jobId}`] as const;
+};
+
+export const getGetCanvaPushJobQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCanvaPushJob>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCanvaPushJob>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCanvaPushJobQueryKey(jobId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getCanvaPushJob>>> = ({
+    signal,
+  }) => getCanvaPushJob(jobId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!jobId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCanvaPushJob>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCanvaPushJobQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCanvaPushJob>>
+>;
+export type GetCanvaPushJobQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Poll Canva push job
+ */
+
+export function useGetCanvaPushJob<
+  TData = Awaited<ReturnType<typeof getCanvaPushJob>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  jobId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCanvaPushJob>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCanvaPushJobQueryOptions(jobId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Selectable engagement assets for Canva
+ */
+export const getListEngagementCanvaAssetsUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/canva/assets`;
+};
+
+export const listEngagementCanvaAssets = async (
+  engagementId: string,
+  options?: RequestInit,
+): Promise<CanvaSelectableAsset[]> => {
+  return customFetch<CanvaSelectableAsset[]>(
+    getListEngagementCanvaAssetsUrl(engagementId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementCanvaAssetsQueryKey = (engagementId: string) => {
+  return [`/api/engagements/${engagementId}/canva/assets`] as const;
+};
+
+export const getListEngagementCanvaAssetsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementCanvaAssets>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementCanvaAssets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListEngagementCanvaAssetsQueryKey(engagementId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementCanvaAssets>>
+  > = ({ signal }) =>
+    listEngagementCanvaAssets(engagementId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementCanvaAssets>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementCanvaAssetsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementCanvaAssets>>
+>;
+export type ListEngagementCanvaAssetsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Selectable engagement assets for Canva
+ */
+
+export function useListEngagementCanvaAssets<
+  TData = Awaited<ReturnType<typeof listEngagementCanvaAssets>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementCanvaAssets>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementCanvaAssetsQueryOptions(
+    engagementId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Past Canva pushes for an engagement
+ */
+export const getListEngagementCanvaDesignsUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/canva/designs`;
+};
+
+export const listEngagementCanvaDesigns = async (
+  engagementId: string,
+  options?: RequestInit,
+): Promise<CanvaDesignPush[]> => {
+  return customFetch<CanvaDesignPush[]>(
+    getListEngagementCanvaDesignsUrl(engagementId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementCanvaDesignsQueryKey = (engagementId: string) => {
+  return [`/api/engagements/${engagementId}/canva/designs`] as const;
+};
+
+export const getListEngagementCanvaDesignsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementCanvaDesigns>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementCanvaDesigns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getListEngagementCanvaDesignsQueryKey(engagementId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementCanvaDesigns>>
+  > = ({ signal }) =>
+    listEngagementCanvaDesigns(engagementId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementCanvaDesigns>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementCanvaDesignsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementCanvaDesigns>>
+>;
+export type ListEngagementCanvaDesignsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Past Canva pushes for an engagement
+ */
+
+export function useListEngagementCanvaDesigns<
+  TData = Awaited<ReturnType<typeof listEngagementCanvaDesigns>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementCanvaDesigns>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementCanvaDesignsQueryOptions(
+    engagementId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Start async Canva push job
+ */
+export const getStartEngagementCanvaPushUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/canva/push`;
+};
+
+export const startEngagementCanvaPush = async (
+  engagementId: string,
+  canvaPushRequest: CanvaPushRequest,
+  options?: RequestInit,
+): Promise<CanvaPushJobIdResponse> => {
+  return customFetch<CanvaPushJobIdResponse>(
+    getStartEngagementCanvaPushUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(canvaPushRequest),
+    },
+  );
+};
+
+export const getStartEngagementCanvaPushMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startEngagementCanvaPush>>,
+    TError,
+    { engagementId: string; data: BodyType<CanvaPushRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof startEngagementCanvaPush>>,
+  TError,
+  { engagementId: string; data: BodyType<CanvaPushRequest> },
+  TContext
+> => {
+  const mutationKey = ["startEngagementCanvaPush"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof startEngagementCanvaPush>>,
+    { engagementId: string; data: BodyType<CanvaPushRequest> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return startEngagementCanvaPush(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type StartEngagementCanvaPushMutationResult = NonNullable<
+  Awaited<ReturnType<typeof startEngagementCanvaPush>>
+>;
+export type StartEngagementCanvaPushMutationBody = BodyType<CanvaPushRequest>;
+export type StartEngagementCanvaPushMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Start async Canva push job
+ */
+export const useStartEngagementCanvaPush = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof startEngagementCanvaPush>>,
+    TError,
+    { engagementId: string; data: BodyType<CanvaPushRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof startEngagementCanvaPush>>,
+  TError,
+  { engagementId: string; data: BodyType<CanvaPushRequest> },
+  TContext
+> => {
+  return useMutation(getStartEngagementCanvaPushMutationOptions(options));
 };
 
 /**
@@ -16306,6 +17665,129 @@ export function useListProductSpecReferences<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * QA-55 — scans the engagement's sheets, existing L5 references, and
+recent plan-review findings, then returns a batch of draft product-spec
+rows for operator review. Nothing is persisted until the operator saves
+each reference via `POST /engagements/{id}/product-spec-references`.
+
+Uses `PRODUCT_SPEC_RECOMMENDATIONS_LLM_MODE` (`mock` default,
+`anthropic` when AI Integrations env vars are set).
+
+ * @summary AI-generate draft ICC-ES product-spec recommendations
+ */
+export const getGenerateProductSpecRecommendationsUrl = (
+  engagementId: string,
+) => {
+  return `/api/engagements/${engagementId}/product-spec-references/generate-recommendations`;
+};
+
+export const generateProductSpecRecommendations = async (
+  engagementId: string,
+  generateProductSpecRecommendationsBody?: GenerateProductSpecRecommendationsBody,
+  options?: RequestInit,
+): Promise<GenerateProductSpecRecommendationsResponse> => {
+  return customFetch<GenerateProductSpecRecommendationsResponse>(
+    getGenerateProductSpecRecommendationsUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(generateProductSpecRecommendationsBody),
+    },
+  );
+};
+
+export const getGenerateProductSpecRecommendationsMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateProductSpecRecommendations>>,
+    TError,
+    {
+      engagementId: string;
+      data: BodyType<GenerateProductSpecRecommendationsBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateProductSpecRecommendations>>,
+  TError,
+  {
+    engagementId: string;
+    data: BodyType<GenerateProductSpecRecommendationsBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["generateProductSpecRecommendations"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateProductSpecRecommendations>>,
+    {
+      engagementId: string;
+      data: BodyType<GenerateProductSpecRecommendationsBody>;
+    }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return generateProductSpecRecommendations(
+      engagementId,
+      data,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateProductSpecRecommendationsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateProductSpecRecommendations>>
+>;
+export type GenerateProductSpecRecommendationsMutationBody =
+  BodyType<GenerateProductSpecRecommendationsBody>;
+export type GenerateProductSpecRecommendationsMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary AI-generate draft ICC-ES product-spec recommendations
+ */
+export const useGenerateProductSpecRecommendations = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateProductSpecRecommendations>>,
+    TError,
+    {
+      engagementId: string;
+      data: BodyType<GenerateProductSpecRecommendationsBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateProductSpecRecommendations>>,
+  TError,
+  {
+    engagementId: string;
+    data: BodyType<GenerateProductSpecRecommendationsBody>;
+  },
+  TContext
+> => {
+  return useMutation(
+    getGenerateProductSpecRecommendationsMutationOptions(options),
+  );
+};
 
 /**
  * Cortex L5 (Lane C.4). Includes the full statusHistory.

@@ -76,9 +76,10 @@ describe("SubstrateCatalogPanel", () => {
     // QA-17 success criterion: all five jurisdictions visible.
     await waitFor(() => {
       expect(screen.getByTestId("substrate-count")).toHaveTextContent(
-        /5 jurisdictions in the substrate/,
+        /5 jurisdictions nationwide/,
       );
     });
+    expect(screen.getByTestId("substrate-mock-banner")).toBeInTheDocument();
     for (const j of CATALOG.jurisdictions) {
       expect(
         screen.getByTestId(`substrate-jurisdiction-${j.key}`),

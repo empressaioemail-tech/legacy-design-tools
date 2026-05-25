@@ -320,23 +320,6 @@
   letter-spacing: 0;
 }
 
-.cockpit-kbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 18px;
-  min-width: 18px;
-  padding: 0 4px;
-  border-radius: 4px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-soft);
-  color: var(--text-secondary);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  text-transform: uppercase;
-  line-height: 1;
-}
-
 .cockpit-project-rail-list {
   flex: 1;
   overflow-y: auto;
@@ -1324,14 +1307,72 @@
   color: var(--text-muted);
 }
 
+/* Leaflet DivIcon site pin — suppress default broken PNG marker chrome */
+.site-map-pin-leaflet {
+  background: transparent !important;
+  border: none !important;
+}
+
+.site-map-pin-leaflet svg {
+  display: block;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+}
+
 .site-hero-map-float {
   position: absolute;
   top: 10px;
   right: 10px;
   z-index: 900;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
   pointer-events: none;
+}
+
+.site-hero-map-float-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.site-hero-map-float-notice {
+  max-width: min(320px, calc(100vw - 48px));
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--overlay-glass-border, var(--border-default));
+  background: var(--overlay-glass, rgba(20, 24, 36, 0.92));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.35;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+.site-hero-map-float-notice--success {
+  border-color: color-mix(in srgb, var(--cyan) 55%, var(--border-default));
+}
+
+.site-hero-map-float-notice--error {
+  border-color: color-mix(in srgb, var(--status-error, #ef4444) 55%, var(--border-default));
+  color: var(--status-error-text, #fecaca);
+}
+
+.site-hero-float-btn--pending svg {
+  animation: site-hero-float-spin 0.9s linear infinite;
+}
+
+@keyframes site-hero-float-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .site-hero-float-btn {
@@ -3445,12 +3486,28 @@
    CLIENT MATERIALS TAB — Canva deliverables
    ======================================================================== */
 
+.client-materials-tab {
+  min-height: 0;
+}
+
+.client-materials-connect-error {
+  margin: -6px 0 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--warning-dim, rgba(251, 191, 36, 0.35));
+  background: var(--warning-dim, rgba(251, 191, 36, 0.12));
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .client-materials-workspace {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.4fr) minmax(240px, 0.9fr);
   gap: 14px;
   align-items: start;
-  min-height: 520px;
+  min-height: 0;
+  padding-bottom: 16px;
 }
 
 @media (max-width: 1100px) {
@@ -3866,6 +3923,92 @@
   color: var(--text-muted);
 }
 
+/* Workspace branding — custom accent overrides theme cyan in cockpit chrome */
+html[data-workspace-accent="custom"] .cockpit-shell {
+  --cyan: var(--workspace-accent);
+}
+
+.workspace-branding-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border-default);
+}
+
+.workspace-branding-field:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.workspace-accent-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-accent-preset {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.workspace-accent-preset[data-active="true"] {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px var(--cyan);
+}
+
+.workspace-accent-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.workspace-nav-mark-preview {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+.workspace-nav-mark-img {
+  display: block;
+  object-fit: contain;
+}
+
+.workspace-letter-header-preview {
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-bottom: 2px dotted var(--border-default);
+  border-radius: 6px 6px 0 0;
+}
+
+.workspace-inline-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--cyan);
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
+.cockpit-nav-brand-img {
+  display: block;
+}
+
 .workspace-card-row-value {
   margin: 0;
   color: var(--text-primary);
@@ -3875,6 +4018,44 @@
 .workspace-card-cta {
   align-self: flex-start;
   font-size: 11px;
+}
+
+/* Workspace save CTAs — primary+sm must keep dark label on light fill (charcoal) */
+.workspace-card .sc-btn-primary.sc-btn-sm {
+  color: #111111;
+}
+
+/* Toggle chips (practice states, federal layers, cover templates) */
+.workspace-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.workspace-chip:hover {
+  border-color: var(--border-active);
+}
+.workspace-chip[data-active="true"] {
+  background: var(--cyan);
+  color: var(--text-inverse);
+  border-color: var(--cyan);
+}
+[data-theme="charcoal"] .workspace-chip[data-active="true"] {
+  background: #d4d4d4;
+  color: #111111;
+  border-color: #d4d4d4;
+}
+[data-theme="charcoal"] .workspace-chip {
+  color: #e5e5e5;
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 .workspace-coming-soon-banner {
@@ -4089,36 +4270,57 @@
 .cockpit-unified-rail-top-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+}
+
+.cockpit-unified-rail-top-row .cockpit-nav-brand-labeled {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
 }
 
 .cockpit-nav-brand-labeled {
   display: flex;
   align-items: center;
-  gap: 10px;
   text-decoration: none;
   margin-bottom: 4px;
 }
 
 .cockpit-nav-brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  background: var(--cyan);
-  color: var(--text-inverse);
+  display: block;
+  flex-shrink: 0;
+}
+
+.cockpit-nav-brand-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  font-family: "IBM Plex Mono", monospace;
-  box-shadow: 0 0 14px var(--cyan-glow);
+  text-decoration: none;
+  padding: 6px 0;
+}
+
+.cockpit-project-rail-collapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.cockpit-project-rail-collapsed .cockpit-project-rail-stub {
+  height: auto;
+  margin-top: 0;
 }
 
 .cockpit-nav-brand-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
+  font-family: Oxygen, Inter, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--chrome-text, var(--text-primary));
+  line-height: 1.1;
 }
 
 .cockpit-workspace-nav {
@@ -4252,6 +4454,13 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Scrollable deliver/settings tabs (not full-bleed viewers like Snapshots). */
+.cockpit-engagement-tabpanel-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .snapshots-bim-hero-viewport {
@@ -4731,7 +4940,7 @@
 }
 
 .cockpit-dashboard-panel--inbox {
-  padding: 0;
+  padding: 12px;
   overflow: visible;
 }
 
@@ -4849,6 +5058,27 @@
 
 .cockpit-engagement-card--compact .cockpit-engagement-kpis {
   display: none;
+}
+
+.cockpit-inbox-item-chip.cockpit-engagement-card--muted,
+.cockpit-inbox-item-chip[data-inbox-kind] {
+  opacity: 1;
+}
+
+.cockpit-inbox-item-chip .cockpit-engagement-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.cockpit-inbox-item-chip[data-inbox-kind="needs-you"]:hover,
+.cockpit-inbox-item-chip[data-inbox-kind="reviewer"]:hover {
+  border-color: var(--danger-dim);
+}
+
+.cockpit-inbox-item-chip[data-inbox-kind="ai"]:hover {
+  border-color: var(--info-dim);
 }
 
 .cockpit-dashboard-empty {
@@ -6808,5 +7038,62 @@
 [data-theme="light"] .cockpit-inbox-cta-btn {
   color: var(--cyan-text);
   border-color: var(--cyan-accent-border);
+}
+
+/* Light themes — chrome rails, site dock, map floats (token swap + fallbacks) */
+[data-theme="soft-light"] .cockpit-unified-rail,
+[data-theme="light"] .cockpit-unified-rail,
+[data-theme="soft-light"] .cockpit-project-rail-header,
+[data-theme="light"] .cockpit-project-rail-header,
+[data-theme="soft-light"] .site-details-panel,
+[data-theme="light"] .site-details-panel,
+[data-theme="soft-light"] .site-map-resize-handle,
+[data-theme="light"] .site-map-resize-handle {
+  background: var(--bg-surface);
+  border-color: var(--border-default);
+}
+
+[data-theme="soft-light"] .cockpit-project-rail[data-collapsed="true"],
+[data-theme="light"] .cockpit-project-rail[data-collapsed="true"] {
+  background: var(--bg-surface);
+}
+
+[data-theme="soft-light"] .cockpit-workspace-nav-item,
+[data-theme="light"] .cockpit-workspace-nav-item {
+  color: var(--text-secondary);
+}
+
+[data-theme="soft-light"] .cockpit-workspace-nav-item[data-active="true"],
+[data-theme="light"] .cockpit-workspace-nav-item[data-active="true"] {
+  color: var(--cyan-text);
+  background: var(--bg-elevated);
+}
+
+[data-theme="soft-light"] .cockpit-nav-brand-text,
+[data-theme="light"] .cockpit-nav-brand-text {
+  color: var(--text-primary);
+}
+
+[data-theme="soft-light"] .site-workbench-inspector,
+[data-theme="light"] .site-workbench-inspector,
+[data-theme="soft-light"] .site-hero-float-btn,
+[data-theme="light"] .site-hero-float-btn,
+[data-theme="soft-light"] .site-context-3d-model-toggle,
+[data-theme="light"] .site-context-3d-model-toggle {
+  background: var(--overlay-glass);
+  border-color: var(--overlay-glass-border);
+  box-shadow: var(--depth-shadow-md);
+  color: var(--text-primary);
+}
+
+[data-theme="soft-light"] .cockpit-sheet-lightbox,
+[data-theme="light"] .cockpit-sheet-lightbox {
+  background: color-mix(in srgb, var(--bg-base) 92%, transparent);
+}
+
+[data-theme="soft-light"] .cockpit-right-panel,
+[data-theme="light"] .cockpit-right-panel {
+  background: var(--ai-panel-bg);
+  border-left-color: var(--border-default);
 }
 

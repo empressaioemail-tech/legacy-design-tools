@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { canRunPlanReview } from "../../lib/coverageUi";
 import {
   ApiError,
   FindingCategory,
@@ -338,12 +339,15 @@ export function FindingsTab({
   engagementId,
   initialSubmissionId,
   engagementJurisdiction,
+  engagementCoverageStatus,
   onElementRefClick,
 }: {
   engagementId: string;
   initialSubmissionId: string | null;
   /** Used to gate self-run plan review when jurisdiction is unknown. */
   engagementJurisdiction?: string | null;
+  /** v2 — honest coverage gate (QA-49). */
+  engagementCoverageStatus?: string;
   /**
    * Invoked when the architect clicks the CAD `elementRef` chip on a
    * finding. The page wires this to swing the tab strip over to the
@@ -684,7 +688,14 @@ export function FindingsTab({
     );
   }
   if (sortedSubmissions.length === 0) {
-    const canSelfRun = Boolean(engagementJurisdiction?.trim());
+    const canSelfRun = canRunPlanReview(
+      engagementJurisdiction,
+      engagementCoverageStatus,
+    );
+    const coverageBlocked =
+      engagementCoverageStatus === "not_in_catalog" ||
+      engagementCoverageStatus === "substrate_only" ||
+      engagementCoverageStatus === "warming";
     const selfRunBusy = createSubmission.isPending;
     return (
       <div className="cockpit-tab findings-triage-tab" data-testid="findings-tab">
@@ -704,6 +715,12 @@ export function FindingsTab({
                 context. You can still{" "}
                 <strong>Submit to jurisdiction</strong> from the header when
                 ready for formal submittal.
+              </p>
+            ) : coverageBlocked ? (
+              <p>
+                No ingested code corpus for this location yet. Use{" "}
+                <strong>Request coverage</strong> on the Site tab, or wait for
+                warmup to finish.
               </p>
             ) : (
               <p>

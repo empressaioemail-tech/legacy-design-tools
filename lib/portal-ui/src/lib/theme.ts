@@ -30,7 +30,7 @@ export const STYLE_PROBE_THEMES: ReadonlyArray<{
     id: "soft-light",
     label: "Soft light",
     description:
-      "Muted light surfaces — warm grey base, not paper-white.",
+      "Full light UI — warm grey surfaces, sidebar, and panels match the main canvas.",
   },
 ] as const;
 
