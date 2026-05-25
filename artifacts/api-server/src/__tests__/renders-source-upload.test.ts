@@ -284,7 +284,10 @@ describe("POST /api/engagements/:id/renders — server GLB resolve (V1-5)", () =
         cameraTarget: { x: 0, y: 0, z: 0 },
       });
     expect(kickoffRes.status).toBe(202);
-    expect(captureMock).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(captureMock).toHaveBeenCalled();
+      expect(signObjectEntityGetUrlMock).toHaveBeenCalled();
+    });
 
     await vi.waitFor(
       async () => {
