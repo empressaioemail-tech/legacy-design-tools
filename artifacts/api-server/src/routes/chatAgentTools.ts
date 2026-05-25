@@ -43,6 +43,8 @@ import {
   briefingSources,
   sheetContentExtractions,
   attachedDocuments,
+  deliverableLetters,
+  engagementPackages,
 } from "@workspace/db";
 import { and, desc, eq } from "drizzle-orm";
 import type { Scope } from "@hauska/atom-contract";
@@ -53,6 +55,12 @@ import {
 import { logger } from "../lib/logger";
 import { recordLSurfaceEvent } from "../lib/lSurfaceRoute";
 import { parseCreateResponseTaskBody } from "./responseTasks.logic";
+import {
+  emptyProvenance,
+  parseCreateLetterBody,
+} from "./deliverableLetter.logic";
+import { defaultPackageTitle } from "./packages.logic";
+import type { LetterSection } from "@workspace/atoms-l-surface";
 
 /* -------------------------------------------------------------------------- */
 /*  Provenance (WSC.5)                                                        */
@@ -407,6 +415,61 @@ export const CHAT_AGENT_TOOLS: AgentToolDefinition[] = [
     },
   },
   {
+    name: "list_client_materials",
+    description:
+      "List client materials attached to this engagement (PDFs, photos, notes, links). Alias of list_attached_documents for QA-50.",
+    input_schema: EMPTY_INPUT,
+  },
+  {
+    name: "generate_deliverable_letter",
+    description:
+      "Create a DRAFT deliverable letter (L3) on this engagement from structured sections. Every section is AI-drafted — the operator must review before sending. Include code citations in content where applicable and feasibility caveats in intro/signature.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Letter title." },
+        reasoning: {
+          type: "string",
+          description: "One-line provenance for the draft.",
+        },
+        sections: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            properties: {
+              kind: {
+                type: "string",
+                enum: ["cover", "intro", "per-comment-response", "signature"],
+              },
+              heading: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["kind", "heading", "content"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["title", "reasoning", "sections"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "generate_presentation_packet",
+    description:
+      "Create a DRAFT client-presentation package on this engagement (QA-29). Assembles a branded presentation packet the operator exports from Deliver → Packages.",
+    input_schema: {
+      type: "object",
+      properties: {
+        headline: { type: "string" },
+        talkingPoints: { type: "string" },
+        reasoning: { type: "string" },
+      },
+      required: ["reasoning"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "draft_product_spec_reference",
     description:
       "Prepare a product-spec reference (L5) DRAFT for the current engagement and open it in the manual form for the operator to review, edit, and save. This does NOT persist anything — the operator saves it. `esrNumber` must match the ICC-ES report format `ESR-####`.",
@@ -480,7 +543,11 @@ export function buildAgentToolGuidance(input: {
     "For detail-callout specs (L4) and product-spec references (L5), use " +
     "draft_detail_callout_spec / draft_product_spec_reference. These do not save " +
     "anything — they open the manual form pre-filled so the operator reviews and " +
-    "saves. Tell the operator the draft is waiting for review in the form."
+    "saves. Tell the operator the draft is waiting for review in the form.\n\n" +
+    "Client materials: list_client_materials (same as list_attached_documents).\n\n" +
+    "Deliverables: generate_deliverable_letter creates a draft letter on Review → Letters; " +
+    "generate_presentation_packet creates a draft client-presentation package on Deliver → Packages. " +
+    "Both are draft-only and require operator review."
   );
 }
 
@@ -1064,6 +1131,119 @@ function handleDraftProductSpecReference(
   };
 }
 
+async function handleGenerateDeliverableLetter(
+  ctx: ToolContext,
+  input: unknown,
+): Promise<ToolRunResult> {
+  if (!isRecord(input)) {
+    return { resultText: "Error: invalid input.", isError: true };
+  }
+  const reasoning = optionalString(input.reasoning);
+  if (!reasoning) {
+    return { resultText: "Error: `reasoning` is required.", isError: true };
+  }
+  const parsed = parseCreateLetterBody({
+    title: input.title,
+    sections: input.sections,
+    actorId: AI_AGENT_ACTOR_ID,
+    principalActorId: resolvePrincipalActorId(ctx.req),
+  });
+  if (!parsed.ok) {
+    return {
+      resultText: `Error: ${parsed.error}`,
+      isError: true,
+    };
+  }
+
+  const sections: LetterSection[] = parsed.value.sections.map((s) => ({
+    kind: s.kind,
+    heading: s.heading,
+    content: `${s.content}\n\n[AI-drafted — review before sending. ${reasoning}]`,
+    provenance: emptyProvenance(),
+  }));
+
+  const [row] = await db
+    .insert(deliverableLetters)
+    .values({
+      engagementId: ctx.engagementId,
+      title: parsed.value.title,
+      status: "draft",
+      recipientActorId: parsed.value.recipientActorId,
+      sections,
+      actorId: AI_AGENT_ACTOR_ID,
+      principalActorId: resolvePrincipalActorId(ctx.req),
+    })
+    .returning();
+  if (!row) {
+    return { resultText: "Error: insert failed.", isError: true };
+  }
+
+  await recordLSurfaceEvent(ctx.reqLog, {
+    entityType: "deliverable-letter",
+    entityId: row.id,
+    eventType: "deliverable-letter.drafted",
+    actor: { kind: "agent", id: AI_AGENT_ACTOR_ID },
+    payload: {
+      engagementId: ctx.engagementId,
+      title: row.title,
+      aiOriginated: true,
+      agentReasoning: reasoning,
+    },
+  });
+
+  return {
+    resultText: asJson({
+      letterId: row.id,
+      title: row.title,
+      status: "draft",
+      note: "Draft letter created — open Review → Letters to edit and send.",
+    }),
+  };
+}
+
+async function handleGeneratePresentationPacket(
+  ctx: ToolContext,
+  input: unknown,
+): Promise<ToolRunResult> {
+  if (!isRecord(input)) {
+    return { resultText: "Error: invalid input.", isError: true };
+  }
+  const reasoning = optionalString(input.reasoning);
+  if (!reasoning) {
+    return { resultText: "Error: `reasoning` is required.", isError: true };
+  }
+  const headline = optionalString(input.headline) ?? "Client presentation";
+  const talkingPoints =
+    optionalString(input.talkingPoints) ??
+    "Draft talking points — confirm site, scope, and schedule with the client.";
+
+  const [row] = await db
+    .insert(engagementPackages)
+    .values({
+      engagementId: ctx.engagementId,
+      template: "client-presentation",
+      status: "draft",
+      title: defaultPackageTitle("client-presentation"),
+      formSnapshot: {
+        clientHeadline: headline,
+        clientTalkingPoints: `${talkingPoints}\n\n[AI-drafted — ${reasoning}]`,
+      },
+      selection: { includeIntake: true, includeBriefing: true },
+    })
+    .returning();
+  if (!row) {
+    return { resultText: "Error: package insert failed.", isError: true };
+  }
+
+  return {
+    resultText: asJson({
+      packageId: row.id,
+      template: row.template,
+      note: "Draft presentation package — open Deliver → Packages → Client presentation to export.",
+    }),
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Dispatcher                                                                */
 /* -------------------------------------------------------------------------- */
@@ -1104,9 +1284,14 @@ export async function executeAgentTool(
     case "read_site_context":
       return handleReadSiteContext(ctx);
     case "list_attached_documents":
+    case "list_client_materials":
       return handleListAttachedDocuments(ctx);
     case "read_attached_document":
       return handleReadAttachedDocument(ctx, input);
+    case "generate_deliverable_letter":
+      return handleGenerateDeliverableLetter(ctx, input);
+    case "generate_presentation_packet":
+      return handleGeneratePresentationPacket(ctx, input);
     case "create_response_tasks":
       return handleCreateResponseTasks(ctx, input);
     case "draft_detail_callout_spec":

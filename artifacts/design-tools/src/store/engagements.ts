@@ -116,6 +116,8 @@ interface EngagementsUiState {
       snapshotFocusIds?: string[];
       /** The engagement-detail tab the operator is currently viewing. */
       activeTab?: string;
+      /** QA-45 — portfolio chat from dashboard without an engagement open. */
+      chatScope?: "workspace" | "engagement";
     },
   ) => Promise<void>;
 }
@@ -381,6 +383,7 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
     const snapshotFocus = options?.snapshotFocus === true;
     const snapshotFocusIds = options?.snapshotFocusIds ?? [];
     const activeTab = options?.activeTab;
+    const chatScope = options?.chatScope;
     set((state) => {
       const msgs = state.messagesByEngagement[engagementId] || [];
       const userMsg: ChatMessage = { role: "user", content: question };
@@ -437,6 +440,7 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
           ...(snapshotFocusIds.length > 0 ? { snapshotFocusIds } : {}),
           // WS-C — ambient context: which tab the operator is on.
           ...(activeTab ? { activeTab } : {}),
+          ...(chatScope ? { chatScope } : {}),
         }),
       });
 

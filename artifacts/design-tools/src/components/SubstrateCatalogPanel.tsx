@@ -82,7 +82,12 @@ const ACCESS_POLICY_BADGE: Record<
   },
 };
 
-export function SubstrateCatalogPanel() {
+export function SubstrateCatalogPanel({
+  onSourceChange,
+}: {
+  /** QA-38 — parent hides cortex-local split when source is live MCP. */
+  onSourceChange?: (source: "mcp" | "mock") => void;
+} = {}) {
   const [data, setData] = useState<SubstrateCatalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,6 +99,7 @@ export function SubstrateCatalogPanel() {
       .then((catalog) => {
         if (cancelled) return;
         setData(catalog);
+        onSourceChange?.(catalog.source);
         setError(null);
       })
       .catch((err: unknown) => {

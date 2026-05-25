@@ -124,13 +124,8 @@ export const VIEW_SEGMENTS: Record<EngagementViewId, ViewSegment[]> = {
     { tab: "sheets", label: "Sheets", testId: "engagement-tab-sheets" },
     {
       tab: "product-specs",
-      label: "Product specs",
+      label: "Specs & callouts",
       testId: "engagement-tab-product-specs",
-    },
-    {
-      tab: "detail-callouts",
-      label: "Callouts",
-      testId: "engagement-tab-detail-callouts",
     },
   ],
   studio: [
@@ -170,6 +165,7 @@ export function resolveTabFromSearchParams(params: URLSearchParams): TabId {
   if (legacyTab === "client-materials") return "packages";
   if (legacyTab === "publish-launch") return "packages";
   if (legacyTab === "model-3d") return "snapshots";
+  if (legacyTab === "detail-callouts") return "product-specs";
   if (legacyTab && isTabId(legacyTab)) return legacyTab;
 
   const viewRaw = params.get("view");

@@ -76,7 +76,12 @@ const TOOL_LABELS: Record<string, string> = {
   draft_detail_callout_spec: "Drafted a detail callout",
   draft_product_spec_reference: "Drafted a product spec",
   list_attached_documents: "Read attached documents",
+  list_client_materials: "Listed client materials",
   read_attached_document: "Read an attached document",
+  generate_deliverable_letter: "Drafted a client letter",
+  generate_presentation_packet: "Drafted a presentation packet",
+  list_engagements: "Listed projects",
+  summarize_inbox: "Summarized inbox",
 };
 
 /**
@@ -104,6 +109,8 @@ interface ClaudeChatProps {
    * where the operator is without being told.
    */
   activeTab?: string;
+  /** QA-45 — dashboard/portfolio chat without an open engagement. */
+  chatScope?: "engagement" | "workspace";
 }
 
 export function ClaudeChat({
@@ -111,7 +118,9 @@ export function ClaudeChat({
   hasSnapshots,
   snapshots = [],
   activeTab,
+  chatScope = "engagement",
 }: ClaudeChatProps) {
+  const workspaceMode = chatScope === "workspace";
   const messagesByEngagement = useEngagementsStore(
     (s) => s.messagesByEngagement,
   );
@@ -254,8 +263,9 @@ export function ClaudeChat({
   // QA-18 — load the engagement's persisted client documents so the
   // chip row shows what the in-app agent can reach.
   useEffect(() => {
+    if (workspaceMode) return;
     void loadAttachedDocuments(engagementId);
-  }, [engagementId, loadAttachedDocuments]);
+  }, [engagementId, loadAttachedDocuments, workspaceMode]);
 
   const handleAttachClick = () => {
     fileInputRef.current?.click();
@@ -280,6 +290,7 @@ export function ClaudeChat({
         ? { snapshotFocusIds: stagedFocusIds }
         : {}),
       ...(activeTab ? { activeTab } : {}),
+      ...(workspaceMode ? { chatScope: "workspace" as const } : {}),
     });
     setInput("");
     setSnapshotFocus(false);
@@ -335,9 +346,11 @@ export function ClaudeChat({
     );
   }
 
-  const placeholder = hasSnapshots
-    ? "Ask a question (Cmd/Ctrl + Enter to send)"
-    : "Send a snapshot from Revit first.";
+  const placeholder = workspaceMode
+    ? "Ask which projects need attention (Cmd/Ctrl + Enter)"
+    : hasSnapshots
+      ? "Ask a question (Cmd/Ctrl + Enter to send)"
+      : "Send a snapshot from Revit first.";
 
   return (
     <div className="flex flex-col h-full">

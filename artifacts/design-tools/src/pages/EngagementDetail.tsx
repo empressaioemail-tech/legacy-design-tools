@@ -313,7 +313,7 @@ export function EngagementDetail() {
     if (!draft) return;
     if (draft.draftKind === "detail-callout-spec") {
       setDetailCalloutDraft(draft);
-      setTab("detail-callouts");
+      setTab("product-specs");
     } else {
       setProductSpecDraft(draft);
       setTab("product-specs");
@@ -742,11 +742,19 @@ export function EngagementDetail() {
         </TabPanel>
 
         <TabPanel id="detail-callouts" active={tab}>
-          <DetailCalloutSpecsTab
+          {/* QA-56 B — legacy deep link; same unified surface as product-specs */}
+          <ProductSpecReferencesTab
             engagementId={engagement.id}
-            aiDraft={detailCalloutDraft}
-            onAiDraftConsumed={() => setDetailCalloutDraft(null)}
+            aiDraft={productSpecDraft}
+            onAiDraftConsumed={() => setProductSpecDraft(null)}
           />
+          <div style={{ marginTop: 24 }}>
+            <DetailCalloutSpecsTab
+              engagementId={engagement.id}
+              aiDraft={detailCalloutDraft}
+              onAiDraftConsumed={() => setDetailCalloutDraft(null)}
+            />
+          </div>
         </TabPanel>
 
         <TabPanel id="product-specs" active={tab}>
@@ -755,6 +763,13 @@ export function EngagementDetail() {
             aiDraft={productSpecDraft}
             onAiDraftConsumed={() => setProductSpecDraft(null)}
           />
+          <div style={{ marginTop: 24 }}>
+            <DetailCalloutSpecsTab
+              engagementId={engagement.id}
+              aiDraft={detailCalloutDraft}
+              onAiDraftConsumed={() => setDetailCalloutDraft(null)}
+            />
+          </div>
         </TabPanel>
 
         <TabPanel

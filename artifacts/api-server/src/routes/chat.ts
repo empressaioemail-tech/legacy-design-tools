@@ -31,6 +31,7 @@ import {
   buildCoverageGuardrail,
   type JurisdictionCoverage,
 } from "./coverageGuardrail";
+import { handleWorkspaceChat } from "./chatWorkspace";
 
 /**
  * Render-mode token the inline-reference syntax uses to opt a chat
@@ -177,6 +178,28 @@ router.post("/chat", async (req: Request, res: Response) => {
     typeof (req.body as { activeTab?: unknown }).activeTab === "string"
       ? (req.body as { activeTab: string }).activeTab
       : null;
+
+  const chatScope =
+    (req.body as { chatScope?: unknown }).chatScope === "workspace"
+      ? "workspace"
+      : "engagement";
+
+  if (chatScope === "workspace") {
+    try {
+      await handleWorkspaceChat(req, res, {
+        question,
+        history: history ?? [],
+        activeTab,
+        scope: chatScopeFromSession(req),
+      });
+    } catch (err) {
+      logger.error({ err }, "workspace chat failed");
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Chat failed" });
+      }
+    }
+    return;
+  }
 
   // Resolve the engagement through the framework registry instead of a
   // hand-rolled Drizzle read (sprint A3 follow-up). Two reasons this

@@ -2,6 +2,7 @@ import type { EngagementDetail as EngagementDetailType } from "@workspace/api-cl
 import { RevitBinding } from "../RevitBinding";
 import { TabHeader } from "../cockpit/TabChrome";
 import { AccessSection } from "./AccessSection";
+import { ClientMaterialsSection } from "./ClientMaterialsSection";
 
 /**
  * Engagement settings — read-only config display. Edit details and archive
@@ -43,7 +44,8 @@ export function SettingsTab({
         revitDocumentPath={engagement.revitDocumentPath}
       />
 
-      <AccessSection />
+      <AccessSection engagementId={engagement.id} />
+      <ClientMaterialsSection engagementId={engagement.id} />
     </div>
   );
 }
