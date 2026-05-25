@@ -70,6 +70,12 @@ const TIER_STYLES: Record<
     fillOpacity: 0.18,
     weight: 2,
   },
+  topography: {
+    color: "#a16207",
+    fillColor: "#a16207",
+    fillOpacity: 0,
+    weight: 1.5,
+  },
 };
 
 const TIER_LABELS: Record<SiteMapOverlayTier, string> = {
@@ -77,6 +83,7 @@ const TIER_LABELS: Record<SiteMapOverlayTier, string> = {
   state: "State",
   local: "Local",
   manual: "Manual",
+  topography: "Topography",
 };
 
 export function SiteMap({
@@ -132,7 +139,11 @@ export function SiteMap({
               <Polyline
                 key={`${overlay.sourceId}-${idx}`}
                 positions={overlay.positions}
-                pathOptions={{ color: style.color, weight: 3 }}
+                pathOptions={{
+                  color: style.color,
+                  weight: overlay.tier === "topography" ? 1.5 : 3,
+                  opacity: overlay.tier === "topography" ? 0.85 : 1,
+                }}
               >
                 <Popup>{popupBody}</Popup>
               </Polyline>

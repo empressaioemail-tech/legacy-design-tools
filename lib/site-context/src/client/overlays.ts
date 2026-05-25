@@ -34,7 +34,12 @@ export interface BriefingSourceForOverlays {
   supersededAt: Date | string | null;
 }
 
-export type SiteMapOverlayTier = "federal" | "state" | "local" | "manual";
+export type SiteMapOverlayTier =
+  | "federal"
+  | "state"
+  | "local"
+  | "manual"
+  | "topography";
 
 export type SiteMapOverlay =
   | {
