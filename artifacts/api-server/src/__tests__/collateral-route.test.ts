@@ -21,6 +21,15 @@ vi.mock("@workspace/db", async () => {
   };
 });
 
+vi.mock("../lib/collateral/config", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../lib/collateral/config")>();
+  return {
+    ...actual,
+    isPlacidConfigured: () => false,
+  };
+});
+
 vi.mock("../lib/collateral/placidClient", () => ({
   createPlacidPdf: vi.fn(),
   getPlacidPdf: vi.fn(),
@@ -36,10 +45,13 @@ setupRouteTests((g) => {
 
 beforeEach(() => {
   process.env.COLLATERAL_SIGNING_SECRET = signingSecret;
+  delete process.env.PLACID_API_TOKEN;
+  delete process.env.PLACID_TEST_MODE;
 });
 
-afterEach(() => {
+afterEach(async () => {
   delete process.env.PLACID_API_TOKEN;
+  await new Promise((r) => setTimeout(r, 50));
 });
 
 async function seedEngagement() {
