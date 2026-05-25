@@ -10,6 +10,13 @@ import { ctx } from "./test-context";
 
 const uploadStore = new Map<string, Buffer>();
 
+const { signObjectEntityGetUrlMock } = vi.hoisted(() => ({
+  signObjectEntityGetUrlMock: vi.fn(async (path: string) => {
+    const normalized = path.startsWith("/objects/") ? path : `/objects/${path}`;
+    return `https://signed.test${normalized}`;
+  }),
+}));
+
 vi.mock("@workspace/db", async () => {
   const actual =
     await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
@@ -45,6 +52,7 @@ vi.mock("../lib/objectStorage", async (importOriginal) => {
   return {
     ...actual,
     ObjectStorageService: TestObjectStorageService,
+    signObjectEntityGetUrl: signObjectEntityGetUrlMock,
   };
 });
 
@@ -117,6 +125,7 @@ beforeEach(() => {
   setMnmlClient(null);
   captureMock.mockClear();
   mirrorMock.mockClear();
+  signObjectEntityGetUrlMock.mockClear();
 });
 
 afterAll(() => {
