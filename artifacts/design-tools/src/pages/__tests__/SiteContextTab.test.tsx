@@ -140,8 +140,13 @@ vi.mock("@workspace/site-context/client", async () => {
   const { extractBriefingSourceOverlays } = await import(
     "@workspace/site-context/client/overlays"
   );
+  const { extractContoursGeoJsonOverlays, hasContoursGeoJson } = await import(
+    "@workspace/site-context/client/topoContours"
+  );
   return {
     extractBriefingSourceOverlays,
+    extractContoursGeoJsonOverlays,
+    hasContoursGeoJson,
     SiteMap: () => null,
   };
 });
