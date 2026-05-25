@@ -217,15 +217,15 @@ export function PackagesTab({
             </button>
           </div>
         ) : null}
-        {activePackage ? (
-          <PublisherIntakeWorkbench
-            engagement={engagement}
-            snapshotId={snapshotId}
-            onNavigate={onNavigate}
-            packageRecord={activePackage}
-            onPersistPackage={persistPublisherPackage}
-          />
-        ) : null}
+        <PublisherIntakeWorkbench
+          engagement={engagement}
+          snapshotId={snapshotId}
+          onNavigate={onNavigate}
+          packageRecord={activePackage}
+          onPersistPackage={
+            activePackage ? persistPublisherPackage : undefined
+          }
+        />
       </div>
     );
   }
