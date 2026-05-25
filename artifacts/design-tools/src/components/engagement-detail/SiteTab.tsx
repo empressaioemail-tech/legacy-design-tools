@@ -6,11 +6,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   useGetEngagementBriefing,
   getGetEngagementBriefingQueryKey,
+  useGenerateEngagementLayers,
   type EngagementDetail as EngagementDetailType,
   type EngagementBriefing,
   type EngagementBriefingSource,
@@ -19,7 +20,9 @@ import {
   SiteMap,
   extractBriefingSourceOverlays,
   extractContoursGeoJsonOverlays,
+  filterOverlaysByLayerVisibility,
   hasContoursGeoJson,
+  resolveMapPinPosition,
 } from "@workspace/site-context/client";
 import {
   ParcelZoningCard,
@@ -558,6 +561,23 @@ export function SiteTab({
     },
   });
   const briefing = briefingQuery.data?.briefing ?? null;
+  const queryClient = useQueryClient();
+  const generateLayersMutation = useGenerateEngagementLayers({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: getGetEngagementBriefingQueryKey(engagement.id),
+        });
+      },
+    },
+  });
+
+  const handleForceRefreshLayers = useCallback(() => {
+    generateLayersMutation.mutate({
+      id: engagement.id,
+      params: { forceRefresh: true },
+    });
+  }, [engagement.id, generateLayersMutation]);
 
   const topoQuery = useQuery({
     queryKey: ["siteTopography", engagement.id],
@@ -713,25 +733,35 @@ export function SiteTab({
   }, [mapHeroRef]);
 
   const briefingSources = briefing?.sources ?? [];
-  const mapOverlays = useMemo(() => {
+  const mapOverlaysRaw = useMemo(() => {
     const fromBriefing = extractBriefingSourceOverlays(briefingSources);
-    const demContoursVisible = isVisible("base-dem-contours");
     const fromDem =
-      hasDemContours &&
-      demContoursVisible &&
-      topoQuery.data?.propertySet?.contoursGeoJson
+      hasDemContours && topoQuery.data?.propertySet?.contoursGeoJson
         ? extractContoursGeoJsonOverlays(
             topoQuery.data.propertySet.contoursGeoJson,
           )
         : [];
     return [...fromBriefing, ...fromDem];
-  }, [
-    briefingSources,
-    hasDemContours,
-    topoQuery.data,
-    visibility,
-    initialVisibility,
-  ]);
+  }, [briefingSources, hasDemContours, topoQuery.data]);
+
+  const mapOverlays = useMemo(
+    () =>
+      filterOverlaysByLayerVisibility(
+        mapOverlaysRaw,
+        briefingSources,
+        visibility,
+        initialVisibility,
+      ),
+    [mapOverlaysRaw, briefingSources, visibility, initialVisibility],
+  );
+
+  const mapPin = useMemo(() => {
+    if (!geocode) return null;
+    return resolveMapPinPosition(
+      { latitude: geocode.latitude, longitude: geocode.longitude },
+      briefingSources,
+    );
+  }, [geocode, briefingSources]);
 
   const jurisdictionLabel = geocode
     ? [geocode.jurisdictionCity, geocode.jurisdictionState]
@@ -810,9 +840,10 @@ export function SiteTab({
             <button
               type="button"
               className="site-hero-float-btn"
-              onClick={() => briefingQuery.refetch()}
+              onClick={handleForceRefreshLayers}
+              disabled={generateLayersMutation.isPending}
               data-testid="site-tab-refresh"
-              title="Refresh briefing"
+              title="Force refresh site layers"
             >
               <RefreshCw size={14} aria-hidden />
             </button>
@@ -869,8 +900,8 @@ export function SiteTab({
             <div className="site-hero-map-canvas">
               {canvasMode === "map" ? (
                 <SiteMap
-                  latitude={geocode.latitude}
-                  longitude={geocode.longitude}
+                  latitude={mapPin!.latitude}
+                  longitude={mapPin!.longitude}
                   addressLabel={site?.address ?? undefined}
                   overlays={mapOverlays}
                   height={mapHeight}
@@ -972,7 +1003,11 @@ export function SiteTab({
               <button
                 type="button"
                 className="sc-btn-ghost sc-btn-sm"
-                onClick={scrollToLayersPanel}
+                onClick={() => {
+                  scrollToLayersPanel();
+                  handleForceRefreshLayers();
+                }}
+                disabled={generateLayersMutation.isPending}
                 data-testid="site-tab-generate-layers"
               >
                 <LayersIcon size={14} aria-hidden /> Generate layers
