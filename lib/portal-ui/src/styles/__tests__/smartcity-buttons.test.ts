@@ -17,3 +17,18 @@ describe("sc-btn icon+label alignment", () => {
     expect(utilitiesCss).toMatch(/gap:\s*6px/);
   });
 });
+
+const componentsCss = readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "../smartcity-components.css"),
+  "utf8",
+);
+
+describe("fpviz action buttons", () => {
+  it("forces download CTA contrast on elevated cards", () => {
+    expect(componentsCss).toMatch(/\.fpviz-download-btn[\s\S]*color:\s*#ffffff/);
+  });
+
+  it("aligns upload action row", () => {
+    expect(componentsCss).toMatch(/\.fpviz-source-actions[\s\S]*align-items:\s*center/);
+  });
+});

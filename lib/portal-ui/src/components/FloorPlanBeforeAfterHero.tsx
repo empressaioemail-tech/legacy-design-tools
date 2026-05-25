@@ -48,6 +48,7 @@ export function FloorPlanBeforeAfterHero({
   const narrow = useNarrowViewport();
   const before = job.sourcePreviewUrl;
   const after = job.outputPreviewUrl;
+  const downloadHref = job.outputDownloadUrl ?? after;
   const presetLabel = FLOOR_PLAN_PRESET_META[job.preset]?.label ?? job.preset;
 
   if (!after) return null;
@@ -80,8 +81,8 @@ export function FloorPlanBeforeAfterHero({
 
       <footer className="fpviz-result-actions">
         <a
-          href={after}
-          className="sc-btn-primary sc-btn-sm"
+          href={downloadHref}
+          className="sc-btn-primary sc-btn-sm fpviz-download-btn"
           data-testid="fpviz-download"
           download={`floor-plan-viz-${job.id}.png`}
         >

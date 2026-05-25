@@ -780,6 +780,7 @@ export function EngagementDetail() {
         <TabPanel id="renders" active={tab} className="flex flex-col flex-1 min-h-0">
           <DesignToolsTab
             engagementId={engagement.id}
+            snapshotId={selectedSnapshotId}
             defaultGlbUrl={defaultBimGlbUrl}
             onOpenBimTab={() => setTab("snapshots")}
             onOpenClientMaterials={() => setTab("packages")}

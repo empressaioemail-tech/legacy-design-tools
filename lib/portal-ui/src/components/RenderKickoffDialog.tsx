@@ -66,12 +66,16 @@ export interface RenderKickoffDialogProps {
    * `onClose`; embedded resets the form in place.
    */
   onKickedOff?: (response: KickoffRenderResponse) => void;
+  /** When set, hides the kind picker and pins kickoff to this kind. */
+  lockedKind?: DomainRenderKind;
+  /** When set, limits the kind picker to these options. */
+  allowedKinds?: DomainRenderKind[];
 }
 
 /** Inline kickoff panel for the Renders tab dashboard (not a modal). */
 export type RenderKickoffPanelProps = Pick<
   RenderKickoffDialogProps,
-  "engagementId" | "defaultGlbUrl" | "onKickedOff"
+  "engagementId" | "defaultGlbUrl" | "onKickedOff" | "lockedKind" | "allowedKinds"
 >;
 
 export function RenderKickoffPanel(props: RenderKickoffPanelProps) {
@@ -194,10 +198,16 @@ export function RenderKickoffDialog({
   isOpen = false,
   onClose,
   onKickedOff,
+  lockedKind,
+  allowedKinds,
 }: RenderKickoffDialogProps) {
   const embedded = variant === "embedded";
   const qc = useQueryClient();
-  const [kind, setKind] = useState<DomainRenderKind>("still");
+  const defaultKind = lockedKind ?? "still";
+  const kindOptions =
+    allowedKinds ??
+    (Object.keys(KIND_LABEL) as DomainRenderKind[]);
+  const [kind, setKind] = useState<DomainRenderKind>(defaultKind);
   const [glbUrl, setGlbUrl] = useState<string>(defaultGlbUrl ?? "");
   const [prompt, setPrompt] = useState<string>("");
   // Camera fields (still / video).
@@ -230,7 +240,7 @@ export function RenderKickoffDialog({
   const [seed, setSeed] = useState("");
 
   function resetForm() {
-    setKind("still");
+    setKind(defaultKind);
     setGlbUrl(defaultGlbUrl ?? "");
     setPrompt("");
     setCameraPos("0,0,10");
@@ -260,7 +270,11 @@ export function RenderKickoffDialog({
       return;
     }
     if (isOpen) resetForm();
-  }, [isOpen, defaultGlbUrl, embedded]);
+  }, [isOpen, defaultGlbUrl, embedded, defaultKind]);
+
+  useEffect(() => {
+    if (lockedKind) setKind(lockedKind);
+  }, [lockedKind]);
 
   const [sourceUploadBusy, setSourceUploadBusy] = useState(false);
 
@@ -555,6 +569,7 @@ export function RenderKickoffDialog({
             </div>
           </div>
 
+          {!lockedKind ? (
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span
               className="sc-label"
@@ -577,13 +592,14 @@ export function RenderKickoffDialog({
                 fontSize: 12.5,
               }}
             >
-              {(Object.keys(KIND_LABEL) as DomainRenderKind[]).map((k) => (
+              {kindOptions.map((k) => (
                 <option key={k} value={k}>
                   {KIND_LABEL[k]}
                 </option>
               ))}
             </select>
           </label>
+          ) : null}
           </KickoffSection>
 
           <KickoffSection

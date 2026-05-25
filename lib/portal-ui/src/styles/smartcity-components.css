@@ -1031,6 +1031,40 @@
   gap: 10px;
 }
 
+.fpviz-source-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fpviz-source-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.fpviz-upload-btn {
+  flex-shrink: 0;
+}
+
+.fpviz-download-btn {
+  background: var(--cyan) !important;
+  color: #ffffff !important;
+  border-color: var(--cyan) !important;
+}
+
+[data-theme="charcoal"] .fpviz-download-btn {
+  background: #0ea5e9 !important;
+  color: #ffffff !important;
+  border-color: #0ea5e9 !important;
+}
+
 .fpviz-source-list {
   list-style: none;
   margin: 0;

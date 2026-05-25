@@ -722,7 +722,7 @@ describe("EngagementDetail Rendering tab (Task #422)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("switches to floor plan visualization mode with stub workspace", async () => {
+  it("switches to floor plan visualization mode with live workspace", async () => {
     renderPage();
     gotoRendersTab();
     fireEvent.click(screen.getByTestId("render-mode-floorplan"));
@@ -731,9 +731,20 @@ describe("EngagementDetail Rendering tab (Task #422)", () => {
       expect(screen.getByTestId("fpviz-source-picker")).toBeInTheDocument();
     });
     expect(screen.getByTestId("fpviz-visualize-cta")).toBeInTheDocument();
-    expect(screen.getByTestId("fpviz-history-list")).toBeInTheDocument();
+    expect(screen.getByTestId("fpviz-history-empty")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("render-mode-model"));
     expect(screen.getByTestId("renders-tab-dashboard")).toBeInTheDocument();
+  });
+
+  it("switches to video rendering mode with filtered workbench", async () => {
+    renderPage();
+    gotoRendersTab();
+    fireEvent.click(screen.getByTestId("render-mode-video"));
+    expect(screen.getByTestId("renders-tab-dashboard")).toBeInTheDocument();
+    expect(screen.getByTestId("render-kickoff-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("render-kickoff-kind")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("render-mode-model"));
+    expect(screen.getByTestId("render-kickoff-kind")).toBeInTheDocument();
   });
 });
 

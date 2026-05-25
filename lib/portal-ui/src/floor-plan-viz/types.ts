@@ -27,6 +27,10 @@ export type FloorPlanVizSource = {
   dimensionsLabel?: string;
   disabled?: boolean;
   disabledReason?: string;
+  /** Set after `POST .../renders/source-upload` (upload kind). */
+  sourceUploadUrl?: string;
+  /** Snapshot sheet row id (sheet kind). */
+  sheetId?: string;
 };
 
 export type FloorPlanVizPreset =
@@ -49,6 +53,8 @@ export type FloorPlanVizJob = {
   preset: FloorPlanVizPreset;
   sourcePreviewUrl: string;
   outputPreviewUrl?: string;
+  /** Durable download URL (`?download=1` when mirrored). */
+  outputDownloadUrl?: string;
   error?: string;
   errorCode?: "upload" | "invalid" | "credits" | "engine" | "timeout";
   creditsUsed?: number;
@@ -59,6 +65,8 @@ export type FloorPlanVizJob = {
 export interface FloorPlanVizService {
   listSources(engagementId: string): Promise<FloorPlanVizSource[]>;
   listJobs(engagementId: string): Promise<FloorPlanVizJob[]>;
+  /** Optional — real API service uploads via source-upload. */
+  uploadSource?(engagementId: string, file: File): Promise<FloorPlanVizSource>;
   startVisualization(req: {
     engagementId: string;
     sourceId: string;
