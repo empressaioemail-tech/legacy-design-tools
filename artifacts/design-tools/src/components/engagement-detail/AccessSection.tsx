@@ -76,7 +76,7 @@ export function AccessSection() {
             <input
               type="text"
               className="access-share-link-input"
-              value="https://app.smartcity.example/share/—"
+              value="https://cortex.hauska.io/share/—"
               readOnly
               disabled
               aria-label="Share link (coming soon)"
