@@ -33,9 +33,8 @@ dist
 *.log
 **/*.log
 
-# Test outputs
-coverage
-**/coverage
+# Test outputs (Vitest/Istanbul — NOT lib/coverage workspace package)
+lib/coverage/coverage
 artifacts/qa/test-results
 artifacts/*/coverage
 artifacts/*/test-results
