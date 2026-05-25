@@ -173,6 +173,8 @@ describe("lib/db schema integration", () => {
         "submissions",
         "users",
         "viewpoint_renders",
+        // QA-57 — pilot workspace branding (firm display name, logo URL).
+        "workspace_settings",
       ]);
     });
   });
