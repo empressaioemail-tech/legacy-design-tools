@@ -8,6 +8,7 @@ import {
 import { SheetThumbnail } from "./SheetThumbnail";
 import { SheetViewer } from "./SheetViewer";
 import { useEngagementsStore } from "../store/engagements";
+import { isFloorPlanSheet } from "../lib/isFloorPlanSheet";
 
 interface SheetGridProps {
   snapshotId: string | null;
@@ -138,7 +139,7 @@ export function SheetGrid({
                   sheet={sheet}
                   onClick={() => setViewerSheetId(sheet.id)}
                 />
-                {onVisualizeFloorPlan ? (
+                {onVisualizeFloorPlan && isFloorPlanSheet(sheet) ? (
                   <button
                     type="button"
                     className="cockpit-sheet-grid-viz sc-btn-ghost sc-btn-sm"
