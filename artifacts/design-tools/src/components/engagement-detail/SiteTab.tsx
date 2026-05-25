@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   useGetEngagementBriefing,
@@ -17,6 +18,8 @@ import {
 import {
   SiteMap,
   extractBriefingSourceOverlays,
+  extractContoursGeoJsonOverlays,
+  hasContoursGeoJson,
 } from "@workspace/site-context/client";
 import {
   ParcelZoningCard,
@@ -76,6 +79,7 @@ interface LayerGroupSpec {
 function buildLayerGroups(
   briefing: EngagementBriefing | null,
   hasGeocode: boolean,
+  hasDemContours: boolean,
 ): LayerGroupSpec[] {
   const sources = briefing?.sources ?? [];
   const has = (kindPrefix: string) =>
@@ -115,11 +119,7 @@ function buildLayerGroups(
       defaultVisible: false,
     }));
 
-  return [
-    {
-      key: "base",
-      title: "Base",
-      rows: [
+  const baseRows: LayerRowSpec[] = [
         {
           id: "base-dark",
           name: "Dark Map Base",
@@ -140,7 +140,21 @@ function buildLayerGroups(
           defaultVisible: has("usgs"),
           opacity: 40,
         },
-      ],
+      ];
+  if (hasDemContours) {
+    baseRows.push({
+      id: "base-dem-contours",
+      name: "Elevation Contours (USGS 3DEP)",
+      source: "DEM ingest",
+      defaultVisible: true,
+    });
+  }
+
+  return [
+    {
+      key: "base",
+      title: "Base",
+      rows: baseRows,
     },
     { key: "local-state", title: "Local & State", rows: localStateRows },
     {
@@ -188,6 +202,18 @@ function humanizeLayer(layerKind: string): string {
   return layerKind
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+async function fetchSiteTopography(engagementId: string) {
+  const res = await fetch(`/api/engagements/${engagementId}/site-topography`);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`site-topography GET failed (${res.status})`);
+  }
+  return (await res.json()) as {
+    status: string;
+    propertySet?: { contoursGeoJson?: unknown };
+  };
 }
 
 interface ContextItemSpec {
@@ -533,9 +559,19 @@ export function SiteTab({
   });
   const briefing = briefingQuery.data?.briefing ?? null;
 
+  const topoQuery = useQuery({
+    queryKey: ["siteTopography", engagement.id],
+    queryFn: () => fetchSiteTopography(engagement.id),
+    enabled: !!engagement.id && !!geocode,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  const hasDemContours = hasContoursGeoJson(topoQuery.data?.propertySet);
+
   const layerGroups = useMemo(
-    () => buildLayerGroups(briefing, !!geocode),
-    [briefing, geocode],
+    () => buildLayerGroups(briefing, !!geocode, hasDemContours),
+    [briefing, geocode, hasDemContours],
   );
   const contextItems = useMemo(() => buildActiveContext(briefing), [briefing]);
 
@@ -548,6 +584,18 @@ export function SiteTab({
   }, [layerGroups]);
   const [visibility, setVisibility] =
     useState<Record<string, boolean>>(initialVisibility);
+
+  useEffect(() => {
+    setVisibility((prev) => {
+      const next = { ...prev };
+      for (const g of layerGroups) {
+        for (const r of g.rows) {
+          if (!(r.id in next)) next[r.id] = r.defaultVisible;
+        }
+      }
+      return next;
+    });
+  }, [layerGroups]);
 
   const toggleLayer = (id: string) =>
     setVisibility((prev) => ({
@@ -665,10 +713,25 @@ export function SiteTab({
   }, [mapHeroRef]);
 
   const briefingSources = briefing?.sources ?? [];
-  const mapOverlays = useMemo(
-    () => extractBriefingSourceOverlays(briefingSources),
-    [briefingSources],
-  );
+  const mapOverlays = useMemo(() => {
+    const fromBriefing = extractBriefingSourceOverlays(briefingSources);
+    const demContoursVisible = isVisible("base-dem-contours");
+    const fromDem =
+      hasDemContours &&
+      demContoursVisible &&
+      topoQuery.data?.propertySet?.contoursGeoJson
+        ? extractContoursGeoJsonOverlays(
+            topoQuery.data.propertySet.contoursGeoJson,
+          )
+        : [];
+    return [...fromBriefing, ...fromDem];
+  }, [
+    briefingSources,
+    hasDemContours,
+    topoQuery.data,
+    visibility,
+    initialVisibility,
+  ]);
 
   const jurisdictionLabel = geocode
     ? [geocode.jurisdictionCity, geocode.jurisdictionState]

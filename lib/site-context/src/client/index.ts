@@ -5,3 +5,7 @@ export {
   type SiteMapOverlayTier,
   type BriefingSourceForOverlays,
 } from "./overlays";
+export {
+  extractContoursGeoJsonOverlays,
+  hasContoursGeoJson,
+} from "./topoContours";
