@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ApiError,
   FindingCategory,
+  useCreateEngagementSubmission,
   useGenerateSubmissionFindings,
   useGetSubmissionFindingsGenerationStatus,
   useListEngagementSubmissions,
@@ -336,10 +337,13 @@ const TRIAGE_TAB_OPTIONS: { id: TriageScope; label: string }[] = [
 export function FindingsTab({
   engagementId,
   initialSubmissionId,
+  engagementJurisdiction,
   onElementRefClick,
 }: {
   engagementId: string;
   initialSubmissionId: string | null;
+  /** Used to gate self-run plan review when jurisdiction is unknown. */
+  engagementJurisdiction?: string | null;
   /**
    * Invoked when the architect clicks the CAD `elementRef` chip on a
    * finding. The page wires this to swing the tab strip over to the
@@ -491,6 +495,25 @@ export function FindingsTab({
     },
   );
   const [rerunError, setRerunError] = useState<string | null>(null);
+  const [selfRunError, setSelfRunError] = useState<string | null>(null);
+  const createSubmission = useCreateEngagementSubmission({
+    mutation: {
+      onSuccess: async (receipt) => {
+        setSelfRunError(null);
+        await queryClient.invalidateQueries({
+          queryKey: getListEngagementSubmissionsQueryKey(engagementId),
+        });
+        setSelectedSubmissionId(receipt.submissionId);
+      },
+      onError: (err) => {
+        setSelfRunError(
+          err instanceof Error
+            ? err.message
+            : "Could not start self-run plan review.",
+        );
+      },
+    },
+  });
   const generate = useGenerateSubmissionFindings({
     mutation: {
       onSuccess: () => {
@@ -661,15 +684,59 @@ export function FindingsTab({
     );
   }
   if (sortedSubmissions.length === 0) {
+    const canSelfRun = Boolean(engagementJurisdiction?.trim());
+    const selfRunBusy = createSubmission.isPending;
     return (
-      <div
-        className="sc-card p-6"
-        data-testid="findings-tab-empty-no-submissions"
-      >
-        <div className="sc-prose opacity-70">
-          No submissions yet. Click <strong>Submit to jurisdiction</strong>{" "}
-          above to record a submission — the AI plan review runs
-          automatically as soon as you do.
+      <div className="cockpit-tab findings-triage-tab" data-testid="findings-tab">
+        <TabHeader
+          overline="Review"
+          title="Findings"
+          subtitle="Run a pre-submittal compliance review on this engagement without recording a jurisdiction submission."
+        />
+        <div
+          className="sc-card p-6 flex flex-col gap-4"
+          data-testid="findings-tab-empty-no-submissions"
+        >
+          <div className="sc-prose opacity-80">
+            {canSelfRun ? (
+              <p>
+                Start a one-click AI plan review on the current model and site
+                context. You can still{" "}
+                <strong>Submit to jurisdiction</strong> from the header when
+                ready for formal submittal.
+              </p>
+            ) : (
+              <p>
+                Add a project address (so jurisdiction resolves) before running
+                a plan review. You can also{" "}
+                <strong>Submit to jurisdiction</strong> once the address is set.
+              </p>
+            )}
+          </div>
+          {selfRunError ? (
+            <p className="text-sm" style={{ color: "var(--danger-text)" }}>
+              {selfRunError}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="sc-btn-primary"
+              data-testid="findings-tab-self-run"
+              disabled={!canSelfRun || selfRunBusy}
+              onClick={() =>
+                createSubmission.mutate({
+                  id: engagementId,
+                  data: {
+                    note: "Pre-submittal self-review (architect-initiated)",
+                    discipline: "building",
+                  },
+                })
+              }
+            >
+              {selfRunBusy ? "Starting review…" : "Run plan review"}
+            </button>
+          </div>
         </div>
       </div>
     );
