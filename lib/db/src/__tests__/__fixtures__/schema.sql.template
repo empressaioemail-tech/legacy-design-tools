@@ -212,6 +212,7 @@ CREATE TABLE @@SCHEMA@@.canned_findings (
     CONSTRAINT canned_findings_severity_check CHECK ((severity = ANY (ARRAY['blocker'::text, 'concern'::text, 'advisory'::text])))
 );
 
+
 -- Name: canva_connections; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.canva_connections (
@@ -329,6 +330,7 @@ CREATE TABLE @@SCHEMA@@.code_atoms (
     fetched_at timestamp with time zone DEFAULT now() NOT NULL,
     metadata jsonb
 );
+
 
 -- Name: collateral_export_jobs; Type: TABLE; Schema: public; Owner: -
 
@@ -1132,6 +1134,7 @@ ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
 ALTER TABLE ONLY @@SCHEMA@@.canned_findings
     ADD CONSTRAINT canned_findings_pkey PRIMARY KEY (id);
 
+
 -- Name: canva_connections canva_connections_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.canva_connections
@@ -1184,6 +1187,7 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atoms
 
 ALTER TABLE ONLY @@SCHEMA@@.code_atoms
     ADD CONSTRAINT code_atoms_pkey PRIMARY KEY (id);
+
 
 -- Name: collateral_export_jobs collateral_export_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
@@ -1958,6 +1962,7 @@ ALTER TABLE ONLY @@SCHEMA@@.code_atom_fetch_queue
 ALTER TABLE ONLY @@SCHEMA@@.code_atoms
     ADD CONSTRAINT code_atoms_source_id_code_atom_sources_id_fk FOREIGN KEY (source_id) REFERENCES @@SCHEMA@@.code_atom_sources(id) ON DELETE CASCADE;
 
+
 -- Name: coverage_requests coverage_requests_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
@@ -2214,6 +2219,7 @@ ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
 
 ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
     ADD CONSTRAINT viewpoint_renders_parent_render_output_id_render_outputs_id_fk FOREIGN KEY (parent_render_output_id) REFERENCES @@SCHEMA@@.render_outputs(id) ON DELETE SET NULL;
+
 
 
 
