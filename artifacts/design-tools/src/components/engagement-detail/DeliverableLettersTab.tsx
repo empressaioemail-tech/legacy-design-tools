@@ -18,8 +18,7 @@ import {
   type LetterSectionKind,
 } from "@workspace/api-client-react";
 import { relativeTime } from "../../lib/relativeTime";
-import { TabHeader, ReservedRail } from "../cockpit/TabChrome";
-import { Sparkles, Presentation } from "lucide-react";
+import { TabHeader } from "../cockpit/TabChrome";
 
 /**
  * Cortex L3 (Lane C.4 / C.4.3) — architect-side deliverable-letter
@@ -900,31 +899,16 @@ export function DeliverableLettersTab({
         onCreated={(id) => setSelectedId(id)}
       />
       </div>
-      {/*
-        QA-28 / QA-29 growth zones — reserves layout for the
-        chat-initiated client-letter generator and the branded
-        presentation packet, both called out in the planning brief.
-        Wired here so the next wave drops into Deliverables without
-        another IA pass.
-      */}
-      <ReservedRail
-        title="Coming — agent-assisted deliverables"
-        testId="deliverable-letters-reserved"
-        tiles={[
-          {
-            id: "qa-28-chat-generate",
-            icon: <Sparkles size={14} />,
-            title: "Generate from chat (QA-28)",
-            body: "Ask the agent for a client letter — it drafts the L3 sections and stages them here for review.",
-          },
-          {
-            id: "qa-29-presentation-packet",
-            icon: <Presentation size={14} />,
-            title: "Branded presentation packet (QA-29)",
-            body: "Wizard that assembles letters, renders, and site context into a single branded deliverable PDF.",
-          },
-        ]}
-      />
+      <p
+        className="sc-meta opacity-70"
+        style={{ marginTop: 12 }}
+        data-testid="deliverable-letters-agent-hint"
+      >
+        Ask the in-app agent to{" "}
+        <strong>generate a deliverable letter</strong> (draft L3 sections land
+        here) or a <strong>client presentation packet</strong> (Deliver →
+        Packages).
+      </p>
     </div>
   );
 }

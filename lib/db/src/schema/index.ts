@@ -46,3 +46,4 @@ export * from "./qaTriageItems";
 export * from "./evalRuns";
 export * from "./evalScores";
 export * from "./evalBaselines";
+export * from "./workspaceSettings";

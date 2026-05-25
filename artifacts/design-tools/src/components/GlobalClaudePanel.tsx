@@ -44,12 +44,15 @@ export function GlobalClaudePanel() {
     return "workspace";
   })();
 
+  const workspaceChat = !onEngagementRoute;
+
   return (
     <ClaudeChat
-      engagementId={onEngagementRoute ? engagementId : ""}
-      hasSnapshots={snapshots.length > 0}
+      engagementId={onEngagementRoute ? engagementId : "__workspace__"}
+      hasSnapshots={workspaceChat ? true : snapshots.length > 0}
       snapshots={snapshots}
       activeTab={surfaceLabel}
+      chatScope={workspaceChat ? "workspace" : "engagement"}
     />
   );
 }

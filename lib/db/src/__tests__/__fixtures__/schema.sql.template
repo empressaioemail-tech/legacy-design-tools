@@ -913,6 +913,16 @@ CREATE TABLE @@SCHEMA@@.viewpoint_renders (
 );
 
 
+-- Name: workspace_settings; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.workspace_settings (
+    id text DEFAULT 'default'::text NOT NULL,
+    firm_display_name text DEFAULT 'Cortex Workspace'::text NOT NULL,
+    logo_url text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: adapter_response_cache adapter_response_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.adapter_response_cache
@@ -1253,6 +1263,12 @@ ALTER TABLE ONLY @@SCHEMA@@.users
 
 ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
     ADD CONSTRAINT viewpoint_renders_pkey PRIMARY KEY (id);
+
+
+-- Name: workspace_settings workspace_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.workspace_settings
+    ADD CONSTRAINT workspace_settings_pkey PRIMARY KEY (id);
 
 
 -- Name: adapter_response_cache_expires_idx; Type: INDEX; Schema: public; Owner: -

@@ -48,6 +48,9 @@ const ERROR_AUTOCLEAR_MS = 5000;
 const POLL_FAILURE_THRESHOLD = 3;
 
 export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
+  const [substrateSource, setSubstrateSource] = useState<"mcp" | "mock" | null>(
+    null,
+  );
   const qc = useQueryClient();
   const { data: jurisdictions, isLoading } = useListCodeJurisdictions({
     query: {
@@ -272,11 +275,19 @@ export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
       {/* QA-17 — every jurisdiction in the Hauska substrate, read live via
           the MCP catalog surface. Sits above the cortex-prod-local corpus
           (which still owns warmup + atom browsing). */}
-      <SubstrateCatalogPanel />
+      <SubstrateCatalogPanel onSourceChange={setSubstrateSource} />
 
-      <h2 className="sc-label" style={{ marginTop: 8 }}>
-        Cortex-local corpus
-      </h2>
+      {substrateSource !== "mcp" && (
+        <h2 className="sc-label" style={{ marginTop: 8 }}>
+          Cortex-local corpus
+        </h2>
+      )}
+      {substrateSource === "mcp" && (
+        <p className="sc-meta opacity-70" data-testid="code-library-mcp-unified">
+          Live substrate catalog — browse atoms below for jurisdictions with a
+          warmed cortex-local corpus.
+        </p>
+      )}
 
       {isLoading && <div className="sc-body">Loading jurisdictions…</div>}
 

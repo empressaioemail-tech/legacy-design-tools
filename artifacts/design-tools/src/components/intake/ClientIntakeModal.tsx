@@ -231,10 +231,56 @@ export function ClientIntakeModal({
   const handleSubmit = () => {
     if (!canSubmit) return;
     setSubmitting(true);
-    window.setTimeout(() => {
-      setSubmitting(false);
-      setDraft(mergeDraft(mode, details));
-    }, 600);
+    const apiBase = `${import.meta.env.BASE_URL}api`;
+    const rawContent =
+      mode === "file"
+        ? fileName
+          ? `Uploaded file: ${fileName}`
+          : ""
+        : value;
+    const sourceUrl = mode === "link" ? value.trim() : "";
+
+    void fetch(`${apiBase}/intake/parse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode, rawContent, sourceUrl }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Parse failed (${res.status})`);
+        return (await res.json()) as {
+          projectName?: string;
+          address?: string;
+          jurisdiction?: string;
+          projectType?: string;
+          clientName?: string;
+          clientEmail?: string;
+          clientNotes?: string;
+          unverifiedFields?: string[];
+          sources?: Array<{ kind: string; label: string }>;
+        };
+      })
+      .then((parsed) => {
+        const merged = mergeDraft(mode, {
+          projectName: details.projectName || parsed.projectName || "",
+          address: details.address || parsed.address || "",
+          jurisdiction: details.jurisdiction || parsed.jurisdiction || "",
+          projectType: (details.projectType ||
+            (parsed.projectType as ProjectTypeValue) ||
+            "") as ProjectTypeValue,
+          clientName: details.clientName || parsed.clientName || "",
+          clientEmail: details.clientEmail || parsed.clientEmail || "",
+          clientNotes: details.clientNotes || parsed.clientNotes || "",
+        });
+        setDraft({
+          ...merged,
+          unverifiedFields: (parsed.unverifiedFields ?? merged.unverifiedFields) as DraftPreview["unverifiedFields"],
+          sources: parsed.sources ?? merged.sources,
+        });
+      })
+      .catch(() => {
+        setDraft(mergeDraft(mode, details));
+      })
+      .finally(() => setSubmitting(false));
   };
 
   const updateDetails = (patch: Partial<ProjectDetailsForm>) => {

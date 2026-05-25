@@ -834,10 +834,12 @@ describe("EngagementDetail submission banner (Task #126)", () => {
       "engagement-tab-packages",
       "engagement-tab-sheets",
       "engagement-tab-product-specs",
-      "engagement-tab-detail-callouts",
     ]) {
       expect(screen.getByTestId(id)).toBeInTheDocument();
     }
+    expect(
+      screen.queryByTestId("engagement-tab-detail-callouts"),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("engagement-view-model"));
     expect(screen.getByTestId("engagement-tab-snapshots")).toBeInTheDocument();

@@ -43,6 +43,8 @@ import detailCalloutSpecsRouter from "./detailCalloutSpecs";
 import productSpecReferencesRouter from "./productSpecReferences";
 import deliverableLetterRendersRouter from "./deliverableLetterRenders";
 import siteTopographyRouter from "./siteTopography";
+import workspaceSettingsRouter from "./workspaceSettings";
+import intakeRouter from "./intake";
 
 const router: IRouter = Router();
 
@@ -83,6 +85,8 @@ router.use(localSetbacksRouter);
 router.use(engagementsRouter);
 router.use(snapshotsRouter);
 router.use(sheetsRouter);
+router.use(workspaceSettingsRouter);
+router.use(intakeRouter);
 router.use(chatRouter);
 router.use(codesRouter);
 // QA-17 — live Hauska substrate catalog at `/substrate/jurisdictions`.
