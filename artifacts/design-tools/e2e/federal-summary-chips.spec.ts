@@ -66,6 +66,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -226,7 +227,7 @@ test.afterAll(async () => {
 test("federal-adapter rows render their summary chip with the expected human-readable text", async ({
   page,
 }) => {
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // Wait for the federal tier group to render so we know the
   // briefing read landed; without this the per-row assertions

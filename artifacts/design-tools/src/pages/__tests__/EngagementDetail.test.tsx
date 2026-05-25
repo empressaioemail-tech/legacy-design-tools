@@ -456,8 +456,8 @@ beforeEach(() => {
   submit.reset();
   overrideFinding.reset();
   generateFindings.reset();
-  // Reset URL state — the page reads the active tab from
-  // `?tab=…` once on mount via `useState(() => readTabFromUrl())`,
+  // Reset URL state — the page reads Cockpit view/segment (or legacy
+  // `?tab=`) once on mount via `useState(() => readTabFromUrl())`,
   // so a leftover query string from a prior test would land us on
   // the wrong tab.
   window.history.replaceState(null, "", "/");
@@ -1217,7 +1217,7 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     window.history.replaceState(
       null,
       "",
-      "/?tab=findings&severity=concern&category=egress&showAddressed=false",
+      "/?view=review&severity=concern&category=egress&showAddressed=false",
     );
     renderPage({
       seed: seedSubmissionsWithFindings([
@@ -1239,7 +1239,7 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
         }),
       ]),
     });
-    // No need to click the tab — it was deep-linked via ?tab=findings.
+    // No need to click the tab — it was deep-linked via ?view=review.
     expect(screen.getByTestId("findings-tab")).toBeInTheDocument();
     const rows = within(screen.getByTestId("architect-findings-list"))
       .getAllByRole("listitem")
@@ -1345,10 +1345,11 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
     const link = screen.getByTestId("architect-finding-detail-cad-ref-link");
     expect(link.tagName).toBe("BUTTON");
     fireEvent.click(link);
-    // Default tab is snapshots — `writeTabToUrl` removes `?tab=` rather
-    // than writing `tab=snapshots`, so the URL must not claim site-context.
-    expect(window.location.search).not.toContain("tab=site-context");
-    expect(new URLSearchParams(window.location.search).get("tab")).toBeNull();
+    // Default tab is snapshots — `writeTabToUrl` clears view/segment
+    // rather than writing model defaults, so the URL must not claim site.
+    expect(window.location.search).not.toContain("segment=property-intel");
+    expect(window.location.search).not.toContain("view=site");
+    expect(new URLSearchParams(window.location.search).get("view")).toBeNull();
     // The findings list/detail is no longer in the DOM — proves the
     // tab actually switched, not just URL-only.
     expect(screen.queryByTestId("findings-tab")).not.toBeInTheDocument();

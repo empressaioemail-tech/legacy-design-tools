@@ -30,6 +30,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -112,7 +113,7 @@ test.afterAll(async () => {
 test("clicking a narrative citation pill scrolls to and highlights the matching source row", async ({
   page,
 }) => {
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // The source row renders inside the Briefing Sources list above
   // the narrative panel. Wait for it to mount before doing anything

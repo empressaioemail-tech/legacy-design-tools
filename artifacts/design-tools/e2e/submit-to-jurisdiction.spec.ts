@@ -35,6 +35,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import { db, engagements, submissions } from "@workspace/db";
 
@@ -76,7 +77,7 @@ test.afterAll(async () => {
 test("submits a package via the SubmitToJurisdictionDialog", async ({
   page,
 }) => {
-  await page.goto(`/engagements/${engagementId}?tab=submissions`);
+  await page.goto(engagementAtSegment(engagementId, "submissions"));
 
   // Sanity check: there should be no submission rows on the empty
   // listing yet — proves the row that appears after submit really

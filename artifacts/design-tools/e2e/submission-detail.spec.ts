@@ -39,6 +39,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import { db, engagements } from "@workspace/db";
 
@@ -100,7 +101,7 @@ test.afterAll(async () => {
 test("opens, displays, closes, and re-opens the submission detail modal", async ({
   page,
 }) => {
-  await page.goto(`/engagements/${engagementId}?tab=submissions`);
+  await page.goto(engagementAtSegment(engagementId, "submissions"));
 
   const row = page.getByTestId(`submission-row-${submissionId}`);
   await expect(row).toBeVisible();

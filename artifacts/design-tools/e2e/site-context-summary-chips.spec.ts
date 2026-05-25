@@ -68,6 +68,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -470,7 +471,7 @@ test.afterAll(async () => {
 test("each Site Context state and local layer renders its summary chip with the expected human-readable text", async ({
   page,
 }) => {
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // Wait for each tier group present in the seed set to render so we
   // know the briefing read landed for that tier; without this the

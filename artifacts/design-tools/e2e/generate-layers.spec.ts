@@ -84,6 +84,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import { db, engagements } from "@workspace/db";
 import {
@@ -276,7 +277,7 @@ test("Generate Layers: POST → outcome panel + cache-invalidation re-renders th
     },
   );
 
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // Pre-condition: the briefing read returned `{ briefing: null }`,
   // so neither tier group should be rendered. Asserting the absence
@@ -468,7 +469,7 @@ test("Generate Layers: 422 no_applicable_adapters renders the empty-pilot banner
     },
   );
 
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // Pre-condition: neither banner is up before the click.
   await expect(
@@ -655,7 +656,7 @@ test.describe("Generate Layers pre-flight (PL-04)", () => {
     );
 
     await page.goto(
-      `/engagements/${outOfPilotEngagementId}?tab=site-context`,
+      engagementAtSegment(outOfPilotEngagementId, "property-intel"),
     );
 
     // Federal-only banner must be up *before* any click.

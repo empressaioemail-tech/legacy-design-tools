@@ -51,6 +51,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -221,7 +222,7 @@ test.afterAll(async () => {
 test("federal-adapter briefing sources render under the Federal layers tier group", async ({
   page,
 }) => {
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // The federal tier group renders, with its heading reading
   // "Federal layers" and a (4) count badge — proves that the four

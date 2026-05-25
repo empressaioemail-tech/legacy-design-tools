@@ -34,7 +34,7 @@
  *      generation pipeline into the test.
  *   3. Drive the UI through Playwright:
  *        - Visit
- *          `/engagements/<id>?tab=site-context&recentRunsOpen=1&recentRunsFilter=failed`
+ *          `/engagements/<id>?view=site&segment=property-intel&recentRunsOpen=1&recentRunsFilter=failed`
  *          and assert the Recent runs disclosure paints already
  *          open and pre-filtered to Failed on first paint (the
  *          failed row is visible, the completed row is filtered
@@ -56,6 +56,11 @@
  */
 
 import { test, expect } from "@playwright/test";
+import {
+  engagementAtSegment,
+  expectSitePropertyIntelSegmentUrl,
+  expectSitePropertyIntelUrl,
+} from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -146,7 +151,10 @@ test("?recentRunsOpen + ?recentRunsFilter deep link round-trips through the disc
   // this URL into a Slack thread lands the recipient on the same
   // already-open + already-filtered view.
   await page.goto(
-    `/engagements/${engagementId}?tab=site-context&recentRunsOpen=1&recentRunsFilter=failed`,
+    engagementAtSegment(engagementId, "property-intel", {
+      recentRunsOpen: "1",
+      recentRunsFilter: "failed",
+    }),
   );
 
   const disclosure = page.getByTestId("briefing-recent-runs");
@@ -189,11 +197,11 @@ test("?recentRunsOpen + ?recentRunsFilter deep link round-trips through the disc
 
   // Click the All chip — the URL's `recentRunsFilter` param must be
   // dropped entirely (canonical URL stays bare when "all" is the
-  // active filter), but `tab` and `recentRunsOpen` must survive so
-  // the disclosure remains in the same shareable open state.
+  // active filter), but view/segment and `recentRunsOpen` must survive.
   await allChip.click();
   await expect(page).not.toHaveURL(/[?&]recentRunsFilter=/);
-  await expect(page).toHaveURL(/[?&]tab=site-context(&|$)/);
+  await expect(page).toHaveURL(expectSitePropertyIntelUrl);
+  await expect(page).toHaveURL(expectSitePropertyIntelSegmentUrl);
   await expect(page).toHaveURL(/[?&]recentRunsOpen=1(&|$)/);
   await expect(allChip).toHaveAttribute("aria-pressed", "true");
   await expect(failedChip).toHaveAttribute("aria-pressed", "false");
@@ -215,7 +223,8 @@ test("?recentRunsOpen + ?recentRunsFilter deep link round-trips through the disc
   // present (the second click is the same in-place rewrite).
   await failedChip.click();
   await expect(page).toHaveURL(/[?&]recentRunsFilter=failed(&|$)/);
-  await expect(page).toHaveURL(/[?&]tab=site-context(&|$)/);
+  await expect(page).toHaveURL(expectSitePropertyIntelUrl);
+  await expect(page).toHaveURL(expectSitePropertyIntelSegmentUrl);
   await expect(page).toHaveURL(/[?&]recentRunsOpen=1(&|$)/);
   await expect(failedChip).toHaveAttribute("aria-pressed", "true");
   await expect(failedRow).toBeVisible();
