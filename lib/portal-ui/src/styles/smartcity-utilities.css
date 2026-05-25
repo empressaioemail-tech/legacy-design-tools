@@ -77,6 +77,19 @@
   }
 }
 
+.sc-btn-primary,
+.sc-btn-ghost,
+.sc-btn-alert,
+.sc-btn-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
 .sc-btn-primary {
   background: var(--cyan);
   color: var(--text-inverse);
