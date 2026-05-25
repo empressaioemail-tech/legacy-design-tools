@@ -30,11 +30,11 @@
  *      decisions is exercised by `decisions.test.ts` on the
  *      api-server side.
  *   3. Drive the UI through Playwright:
- *        - Land on `?tab=submissions&reply=backfilled`, assert the
- *          Backfilled chip is pre-selected and only the backfilled
- *          row is visible.
+ *        - Land on `?view=review&segment=submissions&reply=backfilled`,
+ *          assert the Backfilled chip is pre-selected and only the
+ *          backfilled row is visible.
  *        - Click "Live", assert the URL is rewritten to
- *          `?tab=submissions&reply=live` (the `tab` param survives)
+ *          `?view=review&segment=submissions&reply=live` (view/segment survive)
  *          and only the live row is visible.
  *        - Click "All", assert the `reply` param is dropped from the
  *          URL entirely (canonical URL stays clean) and both rows
@@ -45,6 +45,11 @@
  */
 
 import { test, expect } from "@playwright/test";
+import {
+  engagementAtSegment,
+  expectReviewSubmissionsSegmentUrl,
+  expectReviewSubmissionsUrl,
+} from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import { db, engagements, submissions } from "@workspace/db";
 
@@ -133,7 +138,7 @@ test("?reply= deep link round-trips through the backfill filter chips", async ({
   // the test exists for: the page must read `?reply=backfilled` on
   // initial mount (not just after a click).
   await page.goto(
-    `/engagements/${engagementId}?tab=submissions&reply=backfilled`,
+    engagementAtSegment(engagementId, "submissions", { reply: "backfilled" }),
   );
 
   const filterGroup = page.getByTestId("submissions-backfill-filter");
@@ -161,18 +166,19 @@ test("?reply= deep link round-trips through the backfill filter chips", async ({
   // lands on the same view, and the visible rows must flip.
   await liveChip.click();
   await expect(page).toHaveURL(/[?&]reply=live(&|$)/);
-  await expect(page).toHaveURL(/[?&]tab=submissions(&|$)/);
+  await expect(page).toHaveURL(expectReviewSubmissionsUrl);
+  await expect(page).toHaveURL(expectReviewSubmissionsSegmentUrl);
   await expect(liveChip).toHaveAttribute("aria-checked", "true");
   await expect(backfilledChip).toHaveAttribute("aria-checked", "false");
   await expect(liveRow).toBeVisible();
   await expect(backfilledRow).toHaveCount(0);
 
   // Click the All chip — the `reply` param must be removed entirely
-  // (canonical URL stays clean) while `tab` is preserved, and both
-  // rows render again.
+  // (canonical URL stays clean) while view/segment are preserved.
   await allChip.click();
   await expect(page).not.toHaveURL(/[?&]reply=/);
-  await expect(page).toHaveURL(/[?&]tab=submissions(&|$)/);
+  await expect(page).toHaveURL(expectReviewSubmissionsUrl);
+  await expect(page).toHaveURL(expectReviewSubmissionsSegmentUrl);
   await expect(allChip).toHaveAttribute("aria-checked", "true");
   await expect(backfilledRow).toBeVisible();
   await expect(liveRow).toBeVisible();

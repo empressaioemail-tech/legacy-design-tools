@@ -48,7 +48,7 @@
  *      "session cookie carries audience" coverage.
  *
  *   3. Drive the UI through Playwright:
- *        a. Visit `/engagements/<id>?tab=site-context` and locate
+ *        a. Visit `/engagements/<id>?view=site&segment=property-intel` and locate
  *           the seeded divergence row by its
  *           `data-divergence-id="<id>"` attribute.
  *        b. Click the row's "View details" button and assert the
@@ -74,6 +74,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -215,9 +216,8 @@ test("View details opens the divergence dialog with a diff table; Resolve still 
     },
   ]);
 
-  // Land directly on the Site Context tab — `readTabFromUrl` in
-  // EngagementDetail.tsx allow-lists `site-context`.
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  // Land directly on Property Intel (Cockpit Site view).
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // The divergences panel renders the seeded `geometry-edited` row.
   // The row carries `data-divergence-id="<id>"` so we can scope
@@ -503,7 +503,7 @@ for (const flatCase of FLAT_ATTRIBUTES_CASES) {
       ]);
 
       await page.goto(
-        `/engagements/${flatEngagementId}?tab=site-context`,
+        engagementAtSegment(flatEngagementId, "property-intel"),
       );
 
       const row = page.locator(
@@ -698,7 +698,7 @@ test.describe("empty-detail branch", () => {
       },
     ]);
 
-    await page.goto(`/engagements/${emptyEngagementId}?tab=site-context`);
+    await page.goto(engagementAtSegment(emptyEngagementId, "property-intel"));
 
     const row = page.locator(
       `[data-testid="briefing-divergences-row"][data-divergence-id="${emptyDivergenceId}"]`,
@@ -875,7 +875,7 @@ test.describe("combined diff + flat-attributes branch", () => {
       },
     ]);
 
-    await page.goto(`/engagements/${combinedEngagementId}?tab=site-context`);
+    await page.goto(engagementAtSegment(combinedEngagementId, "property-intel"));
 
     const row = page.locator(
       `[data-testid="briefing-divergences-row"][data-divergence-id="${combinedDivergenceId}"]`,

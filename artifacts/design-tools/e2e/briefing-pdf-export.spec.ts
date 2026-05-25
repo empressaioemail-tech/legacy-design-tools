@@ -46,6 +46,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import { db, engagements, parcelBriefings } from "@workspace/db";
 
@@ -141,7 +142,7 @@ async function openEngagementSiteContext(
   page: Page,
   engagementId: string,
 ): Promise<void> {
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
   await expect(page.getByTestId("briefing-export-pdf-button")).toBeVisible();
 }
 

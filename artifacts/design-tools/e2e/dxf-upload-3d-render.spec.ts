@@ -61,6 +61,7 @@
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import { db, engagements } from "@workspace/db";
 
@@ -206,7 +207,7 @@ test("uploading a DXF renders a 3D mesh in the Site Context viewer", async ({
   // criterion).
   const sourceId = await uploadDxfBriefingSource(request, "buildable-envelope");
 
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // The row appears with its `3D ready` status pill — proves the
   // briefing query loaded the persisted `conversionStatus` from the

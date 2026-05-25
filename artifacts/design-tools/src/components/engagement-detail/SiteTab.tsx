@@ -584,7 +584,7 @@ export function SiteTab({
   );
 
   const openSnapshots = useCallback(() => {
-    setLocation(`/engagements/${engagement.id}?tab=snapshots`);
+    setLocation(`/engagements/${engagement.id}`);
   }, [engagement.id, setLocation]);
 
   const scrollToLayersPanel = useCallback(() => {

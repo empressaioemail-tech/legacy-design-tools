@@ -26,7 +26,7 @@
  *      auto-select-most-recent behavior *and* the click-to-switch
  *      behavior in one spec.
  *   2. Drive the UI through Playwright: navigate to the engagement
- *      with `?tab=snapshots`, assert the auto-selected row's counts
+ *      on the Model view (default URL), assert the auto-selected row's counts
  *      land in the timeline meta, click the older row, and assert
  *      the meta re-renders with the older snapshot's counts.
  *   3. `afterAll` deletes the seeded engagement; the FK cascade on
@@ -42,6 +42,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import { db, engagements, snapshots } from "@workspace/db";
 
@@ -130,7 +131,7 @@ test.afterAll(async () => {
 test("renders the snapshot timeline + KPI strip after snapshots are ingested", async ({
   page,
 }) => {
-  await page.goto(`/engagements/${engagementId}?tab=snapshots`);
+  await page.goto(engagementAtSegment(engagementId, "snapshots"));
 
   // The timeline list wrapper is rendered by the Snapshots tab; the
   // two seeded rows show up inside it.

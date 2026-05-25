@@ -327,12 +327,12 @@ function renderPage(opts?: { search?: string }) {
   });
   client.setQueryData(["listEngagements"], [{ ...hoisted.engagement }]);
   client.setQueryData(["getSession"], { permissions: [] as string[] });
-  // The page reads the active tab from `?tab=…` once on mount, so
-  // this lands directly on the Site Context tab where
-  // BriefingNarrativePanel (and its Recent runs disclosure) is mounted.
-  // Tests that need the disclosure pre-opened or pre-filtered (Task
-  // #275) pass an `opts.search` that augments the base query string.
-  const baseSearch = "tab=property-intel";
+  // The page reads Cockpit view/segment once on mount, so this lands
+  // directly on Property Intel where BriefingNarrativePanel (and its
+  // Recent runs disclosure) is mounted. Tests that need the disclosure
+  // pre-opened or pre-filtered (Task #275) pass an `opts.search` that
+  // augments the base query string.
+  const baseSearch = "view=site&segment=property-intel";
   const search = opts?.search
     ? `${baseSearch}&${opts.search.replace(/^\?/, "")}`
     : baseSearch;

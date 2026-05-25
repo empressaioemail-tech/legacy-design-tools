@@ -74,6 +74,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { engagementAtSegment } from "./engagementUrl";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -229,7 +230,7 @@ test.afterAll(async () => {
 test("federal-adapter row exposes a Copy summary button that writes the markdown digest to the clipboard, and non-federal rows do not", async ({
   page,
 }) => {
-  await page.goto(`/engagements/${engagementId}?tab=site-context`);
+  await page.goto(engagementAtSegment(engagementId, "property-intel"));
 
   // Wait for the federal tier group to render so the briefing read
   // landed; without this the per-row assertions could race the
