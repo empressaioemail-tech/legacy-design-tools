@@ -13,12 +13,13 @@ import type { KickoffRenderCommonFieldsRenderStyle } from "./kickoffRenderCommon
  * Common kickoff fields shared across every render kind.
  */
 export interface KickoffRenderCommonFields {
-  /** Absolute URL the headless capture browser fetches the GLB
-from. The FE provides this — typically a signed object-
-storage URL the FE already loaded into its viewer.
-Server-side resolution from the bim-model row is V1-5.
+  /** Optional for GLB-capture kickoffs. When omitted, the api-
+server resolves the engagement's primary BIM GLB to a
+signed object-storage URL (architect mesh first, then
+briefing-source GLB). When provided, API-relative GLB
+paths are normalized to signed GCS URLs for Puppeteer.
  */
-  glbUrl: string;
+  glbUrl?: string;
   /**
    * Free-form prompt forwarded to mnml as the
 `archDiffusion-v43.prompt` (or `video-ai.prompt`) form

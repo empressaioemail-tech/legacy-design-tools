@@ -40,11 +40,10 @@
  * is permissive in dev / CI / staging. Locked decision §4 from the
  * Phase 1A approval.
  *
- * GLB resolution: V1-4 requires the kickoff body to include `glbUrl`
- * (an absolute URL the FE provides — typically a signed object-storage
- * URL the FE already loaded into its viewer). Server-side resolution
- * from the bim-model row's pointer is V1-5 work; the route returns 400
- * if `glbUrl` is missing. The capture helper accepts the URL verbatim.
+ * GLB resolution: kickoff may omit `glbUrl` for capture kinds; the
+ * worker resolves the engagement's primary BIM GLB to a signed GCS URL
+ * (V1-5, `resolveEngagementGlbSignedUrl`). When provided, `glbUrl` is
+ * normalized via `resolveCaptureGlbUrl` (API paths → signed GCS).
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -78,6 +77,10 @@ import {
   BimViewportCaptureError,
   type CaptureVec3,
 } from "../lib/bimViewportCapture";
+import {
+  EngagementGlbResolveError,
+  resolveEngagementGlbSignedUrl,
+} from "../lib/resolveEngagementGlbUrl";
 import {
   mirrorRenderOutput,
   RenderMirrorError,
@@ -216,7 +219,7 @@ const KickoffPromptFieldsSchema = z.object({
 
 /** GLB-capture kickoffs (still from viewport, elevation-set, video). */
 const KickoffCaptureCommonSchema = KickoffPromptFieldsSchema.extend({
-  glbUrl: z.string().url(),
+  glbUrl: z.string().url().optional(),
 });
 
 const KickoffStillCaptureSchema = KickoffCaptureCommonSchema.extend({
@@ -579,18 +582,19 @@ async function persistTerminalState(
  */
 export async function runRenderPolling(args: {
   viewpointRenderId: string;
+  engagementId: string;
   body: KickoffBody;
 }): Promise<void> {
-  const { viewpointRenderId, body } = args;
+  const { viewpointRenderId, engagementId, body } = args;
   try {
     await emitRenderEvent(viewpointRenderId, "viewpoint-render.requested", {
       kind: body.kind,
     });
 
     if (body.kind === "elevation-set") {
-      await runElevationSet(viewpointRenderId, body);
+      await runElevationSet(viewpointRenderId, engagementId, body);
     } else {
-      await runSingleCall(viewpointRenderId, body);
+      await runSingleCall(viewpointRenderId, engagementId, body);
     }
   } catch (err) {
     // Last-ditch safety net. The branches above already persist their
@@ -668,6 +672,25 @@ async function resolveCaptureGlbUrl(rawUrl: string): Promise<string> {
   return signObjectEntityGetUrl(normalized, 1800);
 }
 
+/**
+ * Resolve the GLB URL Puppeteer should load: explicit kickoff URL
+ * (normalized) or the engagement's default signed mesh URL.
+ */
+async function resolveKickoffGlbUrl(
+  engagementId: string,
+  rawUrl?: string,
+): Promise<string> {
+  if (rawUrl?.trim()) {
+    return resolveCaptureGlbUrl(rawUrl.trim());
+  }
+  return resolveEngagementGlbSignedUrl(engagementId);
+}
+
+function isGlbCaptureKickoff(body: KickoffBody): boolean {
+  if (body.kind === "still" && isStillUploadBody(body)) return false;
+  return true;
+}
+
 async function loadRenderSourceUpload(sourceUploadUrl: string): Promise<Buffer> {
   if (!RENDER_SOURCE_UPLOAD_PATH_RE.test(sourceUploadUrl)) {
     throw new Error("invalid_source_upload_url");
@@ -685,6 +708,7 @@ async function loadRenderSourceUpload(sourceUploadUrl: string): Promise<Buffer> 
 // Single-call branch for `still` (capture or upload) and `video` kickoffs.
 async function runSingleCall(
   viewpointRenderId: string,
+  engagementId: string,
   body: Extract<KickoffBody, { kind: "still" } | { kind: "video" }>,
 ): Promise<void> {
   // 1. Resolve source image bytes (GLB capture vs uploaded reference).
@@ -699,7 +723,7 @@ async function runSingleCall(
       const captureBody = body as
         | z.infer<typeof KickoffStillCaptureSchema>
         | z.infer<typeof KickoffVideoSchema>;
-      const glbUrl = await resolveCaptureGlbUrl(captureBody.glbUrl);
+      const glbUrl = await resolveKickoffGlbUrl(engagementId, captureBody.glbUrl);
       const cap = await captureBimViewport({
         glbUrl,
         cameraPosition: captureBody.cameraPosition,
@@ -712,15 +736,17 @@ async function runSingleCall(
     }
   } catch (err) {
     const code =
-      err instanceof BimViewportCaptureError
-        ? `capture_${err.code}`
-        : (err as Error).message === "source_upload_not_found"
-          ? "source_upload_not_found"
-          : (err as Error).message === "source_upload_empty"
-            ? "source_upload_empty"
-            : (err as Error).message === "invalid_source_upload_url"
-              ? "invalid_source_upload_url"
-              : "capture_failed";
+      err instanceof EngagementGlbResolveError
+        ? err.code
+        : err instanceof BimViewportCaptureError
+          ? `capture_${err.code}`
+          : (err as Error).message === "source_upload_not_found"
+            ? "source_upload_not_found"
+            : (err as Error).message === "source_upload_empty"
+              ? "source_upload_empty"
+              : (err as Error).message === "invalid_source_upload_url"
+                ? "invalid_source_upload_url"
+                : "capture_failed";
     await persistTerminalState(viewpointRenderId, {
       status: "failed",
       errorCode: code,
@@ -917,6 +943,7 @@ async function finalizeSingleCallReady(
 // Elevation-set branch — 4 captures + 4 mnml calls + 4-way rollup.
 async function runElevationSet(
   viewpointRenderId: string,
+  engagementId: string,
   body: Extract<KickoffBody, { kind: "elevation-set" }>,
 ): Promise<void> {
   // 1. Initialize mnml_jobs jsonb with 4 pending entries.
@@ -939,15 +966,21 @@ async function runElevationSet(
   // Resolve once for the whole set — same GLB, four camera angles.
   let resolvedGlbUrl: string;
   try {
-    resolvedGlbUrl = await resolveCaptureGlbUrl(body.glbUrl);
+    resolvedGlbUrl = await resolveKickoffGlbUrl(engagementId, body.glbUrl);
   } catch (err) {
+    const code =
+      err instanceof EngagementGlbResolveError
+        ? err.code
+        : err instanceof BimViewportCaptureError
+          ? `capture_${err.code}`
+          : "capture_failed";
     await persistTerminalState(viewpointRenderId, {
       status: "failed",
-      errorCode: "capture_failed",
+      errorCode: code,
       errorMessage: (err as Error).message,
     });
     await emitRenderEvent(viewpointRenderId, "viewpoint-render.failed", {
-      errorCode: "capture_failed",
+      errorCode: code,
     });
     return;
   }
@@ -1537,6 +1570,21 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
   const uploadSource = isStillUploadBody(kickoff);
   const sourceUploadUrl = uploadSource ? kickoff.sourceUploadUrl : null;
 
+  if (isGlbCaptureKickoff(kickoff)) {
+    try {
+      await resolveKickoffGlbUrl(
+        engagementId,
+        "glbUrl" in kickoff ? kickoff.glbUrl : undefined,
+      );
+    } catch (err) {
+      if (err instanceof EngagementGlbResolveError) {
+        res.status(400).json({ error: err.code, message: err.message });
+        return;
+      }
+      throw err;
+    }
+  }
+
   let inserted: ViewpointRender;
   try {
     const rows = await db
@@ -1563,7 +1611,11 @@ router.post("/engagements/:id/renders", async (req: Request, res: Response) => {
   }
 
   // Fire-and-forget worker. The 202 returns immediately.
-  void runRenderPolling({ viewpointRenderId: inserted.id, body: body.data });
+  void runRenderPolling({
+    viewpointRenderId: inserted.id,
+    engagementId,
+    body: body.data,
+  });
 
   // Surface the kickoff cost on the response so the FE can render
   // a "Render: N credits" chip without a second round-trip. Spec 54

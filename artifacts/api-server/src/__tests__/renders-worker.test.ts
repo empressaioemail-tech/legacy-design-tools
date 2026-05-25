@@ -287,6 +287,7 @@ describe("runRenderPolling — still happy path", () => {
 
     const polling = runRenderPolling({
       viewpointRenderId: row.id,
+      engagementId: fixture.engagement.id,
       body: {
         kind: "still",
         glbUrl: "https://example.test/model.glb",
@@ -339,6 +340,7 @@ describe("runRenderPolling — still trigger validation failure", () => {
 
     await runRenderPolling({
       viewpointRenderId: row.id,
+      engagementId: fixture.engagement.id,
       body: {
         kind: "still",
         glbUrl: "https://example.test/model.glb",
@@ -391,6 +393,7 @@ describe("runRenderPolling — elevation-set happy path", () => {
 
     const polling = runRenderPolling({
       viewpointRenderId: row.id,
+      engagementId: fixture.engagement.id,
       body: {
         kind: "elevation-set",
         glbUrl: "https://example.test/model.glb",
@@ -450,6 +453,7 @@ describe("runRenderPolling — cancellation observed mid-poll", () => {
 
     const polling = runRenderPolling({
       viewpointRenderId: row.id,
+      engagementId: fixture.engagement.id,
       body: {
         kind: "still",
         glbUrl: "https://example.test/model.glb",
