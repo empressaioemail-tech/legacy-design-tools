@@ -103,8 +103,40 @@ export const ListEngagementsResponseItem = zod.object({
     .describe(
       "Structured architect-of-record contact for the engagement\n(Task #475). When present, the Communicate composer uses\nthis for the recipient row on outbound comment letters.\nNull when no contact has been captured yet.\n",
     ),
+  clientBrief: zod
+    .union([
+      zod.object({
+        clientName: zod.string().nullable(),
+        clientEmail: zod.string().nullable(),
+        clientNotes: zod.string().nullable(),
+        intakeSource: zod.string().nullable(),
+        capturedAt: zod.coerce.date().nullable(),
+      }),
+      zod.null(),
+    ])
+    .optional()
+    .describe("Client context captured at intake, when present."),
 });
 export const ListEngagementsResponse = zod.array(ListEngagementsResponseItem);
+
+/**
+ * Creates a new engagement. Optional intake fields are persisted in
+`site_context_raw.intake` and surfaced on `clientBrief` in list/detail
+responses.
+
+ * @summary Create engagement (intake / new project)
+ */
+export const CreateEngagementBody = zod.object({
+  name: zod.string(),
+  address: zod.string().nullish(),
+  jurisdiction: zod.string().nullish(),
+  projectType: zod.string().nullish(),
+  intakeSource: zod.string().nullish(),
+  applicantFirm: zod.string().nullish(),
+  clientEmail: zod.string().nullish(),
+  clientNotes: zod.string().nullish(),
+  sourceExcerpt: zod.string().nullish(),
+});
 
 /**
  * Called by the Revit add-in BEFORE uploading a snapshot, to decide which
@@ -272,6 +304,19 @@ export const GetEngagementResponse = zod.object({
     .describe(
       "Structured architect-of-record contact for the engagement\n(Task #475). When present, the Communicate composer uses\nthis for the recipient row on outbound comment letters.\nNull when no contact has been captured yet.\n",
     ),
+  clientBrief: zod
+    .union([
+      zod.object({
+        clientName: zod.string().nullable(),
+        clientEmail: zod.string().nullable(),
+        clientNotes: zod.string().nullable(),
+        intakeSource: zod.string().nullable(),
+        capturedAt: zod.coerce.date().nullable(),
+      }),
+      zod.null(),
+    ])
+    .optional()
+    .describe("Client context captured at intake, when present."),
 });
 
 /**
@@ -336,6 +381,24 @@ export const UpdateEngagementBody = zod.object({
     .describe(
       "Structured architect-of-record contact (Task #475).\nPass an object with `name` + `email` (and optional\n`role`) to set or replace the contact, or `null`\nto clear it. The Communicate composer uses this to\npopulate a real recipient row on the comment letter.\n",
     ),
+  clientEmail: zod
+    .string()
+    .nullish()
+    .describe(
+      "Client email captured at intake; stored in site_context_raw.intake.",
+    ),
+  clientNotes: zod
+    .string()
+    .nullish()
+    .describe("Client notes \/ brief; stored in site_context_raw.intake."),
+  intakeSource: zod
+    .string()
+    .nullish()
+    .describe("Intake channel (link, file, paste, email)."),
+  sourceExcerpt: zod
+    .string()
+    .nullish()
+    .describe("Raw excerpt from intake agent (max 8000 chars)."),
 });
 
 export const UpdateEngagementResponse = zod.object({
@@ -436,6 +499,19 @@ export const UpdateEngagementResponse = zod.object({
     .describe(
       "Structured architect-of-record contact for the engagement\n(Task #475). When present, the Communicate composer uses\nthis for the recipient row on outbound comment letters.\nNull when no contact has been captured yet.\n",
     ),
+  clientBrief: zod
+    .union([
+      zod.object({
+        clientName: zod.string().nullable(),
+        clientEmail: zod.string().nullable(),
+        clientNotes: zod.string().nullable(),
+        intakeSource: zod.string().nullable(),
+        capturedAt: zod.coerce.date().nullable(),
+      }),
+      zod.null(),
+    ])
+    .optional()
+    .describe("Client context captured at intake, when present."),
 });
 
 /**
@@ -543,6 +619,19 @@ export const RegeocodeEngagementResponse = zod.object({
     .describe(
       "Structured architect-of-record contact for the engagement\n(Task #475). When present, the Communicate composer uses\nthis for the recipient row on outbound comment letters.\nNull when no contact has been captured yet.\n",
     ),
+  clientBrief: zod
+    .union([
+      zod.object({
+        clientName: zod.string().nullable(),
+        clientEmail: zod.string().nullable(),
+        clientNotes: zod.string().nullable(),
+        intakeSource: zod.string().nullable(),
+        capturedAt: zod.coerce.date().nullable(),
+      }),
+      zod.null(),
+    ])
+    .optional()
+    .describe("Client context captured at intake, when present."),
 });
 
 /**
@@ -641,6 +730,309 @@ export const CreateEngagementSubmissionBody = zod
   .describe(
     "Request body for `POST \/engagements\/{id}\/submissions`. The\nsubmission flow is currently a forward-ref child in the\nengagement atom's composition (no dedicated submissions table\nyet), so the body is intentionally narrow: an optional free-text\n`note` that lands in the `engagement.submitted` event payload.\nWhen the catalog atom and table land this schema can grow\nadditional fields (package label, attached document refs, etc.)\nwithout breaking existing callers.\n",
   );
+
+/**
+ * @summary List packages for an engagement
+ */
+export const ListEngagementPackagesParams = zod.object({
+  engagementId: zod.coerce.string().uuid(),
+});
+
+export const ListEngagementPackagesResponseItem = zod.object({
+  id: zod.string().uuid(),
+  engagementId: zod.string().uuid(),
+  template: zod.enum([
+    "client-presentation",
+    "client-review",
+    "publisher-handoff",
+    "jurisdiction-manifest",
+  ]),
+  status: zod.enum(["draft", "exported", "shared", "handed-off", "closed"]),
+  title: zod.string(),
+  snapshotId: zod.string().uuid().nullable(),
+  selection: zod.object({
+    includeIntake: zod.boolean().optional(),
+    includeBriefing: zod.boolean().optional(),
+    renderIds: zod.array(zod.string().uuid()).optional(),
+    videoIds: zod.array(zod.string().uuid()).optional(),
+    sheetIds: zod.array(zod.string().uuid()).optional(),
+    heroRenderId: zod.string().uuid().nullish(),
+  }),
+  formSnapshot: zod.union([
+    zod.object({
+      publisherIntake: zod.record(zod.string(), zod.unknown()).optional(),
+      clientHeadline: zod.string().optional(),
+      clientTalkingPoints: zod.string().optional(),
+      clientReviewNote: zod.string().optional(),
+    }),
+    zod.null(),
+  ]),
+  clientReviewDeadline: zod.coerce.date().nullable(),
+  linkedSubmissionId: zod.string().uuid().nullable(),
+  exportedAt: zod.coerce.date().nullable(),
+  shareToken: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const ListEngagementPackagesResponse = zod.array(
+  ListEngagementPackagesResponseItem,
+);
+
+/**
+ * @summary Create a package draft
+ */
+export const CreateEngagementPackageParams = zod.object({
+  engagementId: zod.coerce.string().uuid(),
+});
+
+export const CreateEngagementPackageBody = zod.object({
+  template: zod.enum([
+    "client-presentation",
+    "client-review",
+    "publisher-handoff",
+    "jurisdiction-manifest",
+  ]),
+  title: zod.string().optional(),
+  status: zod
+    .enum(["draft", "exported", "shared", "handed-off", "closed"])
+    .optional(),
+  snapshotId: zod.string().uuid().nullish(),
+  selection: zod
+    .object({
+      includeIntake: zod.boolean().optional(),
+      includeBriefing: zod.boolean().optional(),
+      renderIds: zod.array(zod.string().uuid()).optional(),
+      videoIds: zod.array(zod.string().uuid()).optional(),
+      sheetIds: zod.array(zod.string().uuid()).optional(),
+      heroRenderId: zod.string().uuid().nullish(),
+    })
+    .optional(),
+  formSnapshot: zod
+    .union([
+      zod.object({
+        publisherIntake: zod.record(zod.string(), zod.unknown()).optional(),
+        clientHeadline: zod.string().optional(),
+        clientTalkingPoints: zod.string().optional(),
+        clientReviewNote: zod.string().optional(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+  clientReviewDeadline: zod.coerce.date().nullish(),
+  linkedSubmissionId: zod.string().uuid().nullish(),
+});
+
+/**
+ * @summary Update a package draft
+ */
+export const UpdateEngagementPackageParams = zod.object({
+  packageId: zod.coerce.string().uuid(),
+});
+
+export const UpdateEngagementPackageBody = zod.object({
+  template: zod
+    .enum([
+      "client-presentation",
+      "client-review",
+      "publisher-handoff",
+      "jurisdiction-manifest",
+    ])
+    .optional(),
+  title: zod.string().optional(),
+  status: zod
+    .enum(["draft", "exported", "shared", "handed-off", "closed"])
+    .optional(),
+  snapshotId: zod.string().uuid().nullish(),
+  selection: zod
+    .object({
+      includeIntake: zod.boolean().optional(),
+      includeBriefing: zod.boolean().optional(),
+      renderIds: zod.array(zod.string().uuid()).optional(),
+      videoIds: zod.array(zod.string().uuid()).optional(),
+      sheetIds: zod.array(zod.string().uuid()).optional(),
+      heroRenderId: zod.string().uuid().nullish(),
+    })
+    .optional(),
+  formSnapshot: zod
+    .union([
+      zod.object({
+        publisherIntake: zod.record(zod.string(), zod.unknown()).optional(),
+        clientHeadline: zod.string().optional(),
+        clientTalkingPoints: zod.string().optional(),
+        clientReviewNote: zod.string().optional(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+  clientReviewDeadline: zod.coerce.date().nullish(),
+  linkedSubmissionId: zod.string().uuid().nullish(),
+});
+
+export const UpdateEngagementPackageResponse = zod.object({
+  id: zod.string().uuid(),
+  engagementId: zod.string().uuid(),
+  template: zod.enum([
+    "client-presentation",
+    "client-review",
+    "publisher-handoff",
+    "jurisdiction-manifest",
+  ]),
+  status: zod.enum(["draft", "exported", "shared", "handed-off", "closed"]),
+  title: zod.string(),
+  snapshotId: zod.string().uuid().nullable(),
+  selection: zod.object({
+    includeIntake: zod.boolean().optional(),
+    includeBriefing: zod.boolean().optional(),
+    renderIds: zod.array(zod.string().uuid()).optional(),
+    videoIds: zod.array(zod.string().uuid()).optional(),
+    sheetIds: zod.array(zod.string().uuid()).optional(),
+    heroRenderId: zod.string().uuid().nullish(),
+  }),
+  formSnapshot: zod.union([
+    zod.object({
+      publisherIntake: zod.record(zod.string(), zod.unknown()).optional(),
+      clientHeadline: zod.string().optional(),
+      clientTalkingPoints: zod.string().optional(),
+      clientReviewNote: zod.string().optional(),
+    }),
+    zod.null(),
+  ]),
+  clientReviewDeadline: zod.coerce.date().nullable(),
+  linkedSubmissionId: zod.string().uuid().nullable(),
+  exportedAt: zod.coerce.date().nullable(),
+  shareToken: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Create or reuse a share link for a package
+ */
+export const CreatePackageShareParams = zod.object({
+  packageId: zod.coerce.string().uuid(),
+});
+
+/**
+ * @summary List comments on a package share (authenticated)
+ */
+export const ListPackageShareCommentsParams = zod.object({
+  packageId: zod.coerce.string().uuid(),
+});
+
+export const ListPackageShareCommentsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  authorName: zod.string(),
+  body: zod.string(),
+  sheetId: zod.string().uuid().nullable(),
+  createdAt: zod.coerce.date(),
+});
+export const ListPackageShareCommentsResponse = zod.array(
+  ListPackageShareCommentsResponseItem,
+);
+
+/**
+ * @summary Public share viewer payload
+ */
+export const GetPackageShareParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+export const GetPackageShareResponse = zod.object({
+  engagementName: zod.string(),
+  package: zod.object({
+    id: zod.string().uuid(),
+    engagementId: zod.string().uuid(),
+    template: zod.enum([
+      "client-presentation",
+      "client-review",
+      "publisher-handoff",
+      "jurisdiction-manifest",
+    ]),
+    status: zod.enum(["draft", "exported", "shared", "handed-off", "closed"]),
+    title: zod.string(),
+    snapshotId: zod.string().uuid().nullable(),
+    selection: zod.object({
+      includeIntake: zod.boolean().optional(),
+      includeBriefing: zod.boolean().optional(),
+      renderIds: zod.array(zod.string().uuid()).optional(),
+      videoIds: zod.array(zod.string().uuid()).optional(),
+      sheetIds: zod.array(zod.string().uuid()).optional(),
+      heroRenderId: zod.string().uuid().nullish(),
+    }),
+    formSnapshot: zod.union([
+      zod.object({
+        publisherIntake: zod.record(zod.string(), zod.unknown()).optional(),
+        clientHeadline: zod.string().optional(),
+        clientTalkingPoints: zod.string().optional(),
+        clientReviewNote: zod.string().optional(),
+      }),
+      zod.null(),
+    ]),
+    clientReviewDeadline: zod.coerce.date().nullable(),
+    linkedSubmissionId: zod.string().uuid().nullable(),
+    exportedAt: zod.coerce.date().nullable(),
+    shareToken: zod.string().nullable(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  }),
+  assets: zod.object({
+    heroRender: zod.union([
+      zod.object({
+        id: zod.string().uuid(),
+        kind: zod.string(),
+        label: zod.string(),
+        previewUrl: zod.string().nullable(),
+      }),
+      zod.null(),
+    ]),
+    renders: zod.array(
+      zod.object({
+        id: zod.string().uuid(),
+        kind: zod.string(),
+        label: zod.string(),
+        previewUrl: zod.string().nullable(),
+      }),
+    ),
+    videos: zod.array(
+      zod.object({
+        id: zod.string().uuid(),
+        kind: zod.string(),
+        label: zod.string(),
+        previewUrl: zod.string().nullable(),
+      }),
+    ),
+    sheets: zod.array(
+      zod.object({
+        id: zod.string().uuid(),
+        sheetNumber: zod.string(),
+        sheetName: zod.string(),
+        thumbnailUrl: zod.string(),
+      }),
+    ),
+  }),
+  comments: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      authorName: zod.string(),
+      body: zod.string(),
+      sheetId: zod.string().uuid().nullable(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Post a comment on a public share link
+ */
+export const PostPackageShareCommentParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+export const PostPackageShareCommentBody = zod.object({
+  authorName: zod.string(),
+  body: zod.string(),
+  sheetId: zod.string().uuid().nullish(),
+});
 
 /**
  * Returns the engagement's `parcel_briefings` row (if any) along

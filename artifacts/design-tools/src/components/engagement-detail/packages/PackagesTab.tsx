@@ -192,13 +192,39 @@ export function PackagesTab({
   );
 
   if (template === "publisher-handoff") {
+    const persistPublisherPackage = async (patch: {
+      formSnapshot: EngagementPackageRecord["formSnapshot"];
+      selection?: EngagementPackageRecord["selection"];
+    }) => {
+      if (!activePackage) return;
+      await updateEngagementPackage(activePackage.id, patch);
+      await refresh();
+    };
+
     return (
       <div className="packages-tab packages-tab--publisher" data-testid="packages-tab">
         {templateBar}
+        {!activePackage && !loading ? (
+          <div className="packages-tab-empty sc-prose">
+            <p>{PACKAGE_TEMPLATE_DESCRIPTIONS[template]}</p>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              onClick={() => void handleCreatePackage()}
+              disabled={busy}
+            >
+              <Plus size={14} /> New publisher handoff package
+            </button>
+          </div>
+        ) : null}
         <PublisherIntakeWorkbench
           engagement={engagement}
           snapshotId={snapshotId}
           onNavigate={onNavigate}
+          packageRecord={activePackage}
+          onPersistPackage={
+            activePackage ? persistPublisherPackage : undefined
+          }
         />
       </div>
     );

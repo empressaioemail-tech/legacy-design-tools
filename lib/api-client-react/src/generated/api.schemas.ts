@@ -89,6 +89,14 @@ CommunicateComposer pushes this into the persisted
   role: string | null;
 }
 
+export interface ClientBrief {
+  clientName: string | null;
+  clientEmail: string | null;
+  clientNotes: string | null;
+  intakeSource: string | null;
+  capturedAt: string | null;
+}
+
 export interface EngagementSummary {
   id: string;
   name: string;
@@ -114,6 +122,8 @@ this for the recipient row on outbound comment letters.
 Null when no contact has been captured yet.
  */
   architectOfRecord: ArchitectOfRecordContact | null;
+  /** Client context captured at intake, when present. */
+  clientBrief?: ClientBrief | null;
 }
 
 export interface EngagementDetail {
@@ -143,6 +153,145 @@ this for the recipient row on outbound comment letters.
 Null when no contact has been captured yet.
  */
   architectOfRecord: ArchitectOfRecordContact | null;
+  /** Client context captured at intake, when present. */
+  clientBrief?: ClientBrief | null;
+}
+
+export interface CreateEngagementBody {
+  name: string;
+  address?: string | null;
+  jurisdiction?: string | null;
+  projectType?: string | null;
+  intakeSource?: string | null;
+  applicantFirm?: string | null;
+  clientEmail?: string | null;
+  clientNotes?: string | null;
+  sourceExcerpt?: string | null;
+}
+
+export type PackageTemplateId =
+  (typeof PackageTemplateId)[keyof typeof PackageTemplateId];
+
+export const PackageTemplateId = {
+  "client-presentation": "client-presentation",
+  "client-review": "client-review",
+  "publisher-handoff": "publisher-handoff",
+  "jurisdiction-manifest": "jurisdiction-manifest",
+} as const;
+
+export type PackageStatus = (typeof PackageStatus)[keyof typeof PackageStatus];
+
+export const PackageStatus = {
+  draft: "draft",
+  exported: "exported",
+  shared: "shared",
+  "handed-off": "handed-off",
+  closed: "closed",
+} as const;
+
+export interface PackageSelection {
+  includeIntake?: boolean;
+  includeBriefing?: boolean;
+  renderIds?: string[];
+  videoIds?: string[];
+  sheetIds?: string[];
+  heroRenderId?: string | null;
+}
+
+export type PackageFormSnapshotPublisherIntake = { [key: string]: unknown };
+
+export interface PackageFormSnapshot {
+  publisherIntake?: PackageFormSnapshotPublisherIntake;
+  clientHeadline?: string;
+  clientTalkingPoints?: string;
+  clientReviewNote?: string;
+  [key: string]: unknown;
+}
+
+export interface EngagementPackageRecord {
+  id: string;
+  engagementId: string;
+  template: PackageTemplateId;
+  status: PackageStatus;
+  title: string;
+  snapshotId: string | null;
+  selection: PackageSelection;
+  formSnapshot: PackageFormSnapshot | null;
+  clientReviewDeadline: string | null;
+  linkedSubmissionId: string | null;
+  exportedAt: string | null;
+  shareToken: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateEngagementPackageBody {
+  template: PackageTemplateId;
+  title?: string;
+  status?: PackageStatus;
+  snapshotId?: string | null;
+  selection?: PackageSelection;
+  formSnapshot?: PackageFormSnapshot | null;
+  clientReviewDeadline?: string | null;
+  linkedSubmissionId?: string | null;
+}
+
+export interface UpdateEngagementPackageBody {
+  template?: PackageTemplateId;
+  title?: string;
+  status?: PackageStatus;
+  snapshotId?: string | null;
+  selection?: PackageSelection;
+  formSnapshot?: PackageFormSnapshot | null;
+  clientReviewDeadline?: string | null;
+  linkedSubmissionId?: string | null;
+}
+
+export interface PackageShareTokenResponse {
+  token: string;
+  shareUrl: string;
+}
+
+export interface PackageShareComment {
+  id: string;
+  authorName: string;
+  body: string;
+  sheetId: string | null;
+  createdAt: string;
+}
+
+export interface PostPackageShareCommentBody {
+  authorName: string;
+  body: string;
+  sheetId?: string | null;
+}
+
+export interface PackageShareAssetRender {
+  id: string;
+  kind: string;
+  label: string;
+  previewUrl: string | null;
+}
+
+export interface PackageShareAssetSheet {
+  id: string;
+  sheetNumber: string;
+  sheetName: string;
+  thumbnailUrl: string;
+}
+
+export interface PackageShareAssets {
+  heroRender: PackageShareAssetRender | null;
+  renders: PackageShareAssetRender[];
+  videos: PackageShareAssetRender[];
+  sheets: PackageShareAssetSheet[];
+}
+
+export interface PackageShareView {
+  engagementName: string;
+  package: EngagementPackageRecord;
+  assets: PackageShareAssets;
+  comments: PackageShareComment[];
 }
 
 /**
@@ -5734,6 +5883,14 @@ to clear it. The Communicate composer uses this to
 populate a real recipient row on the comment letter.
  */
   architectOfRecord?: ArchitectOfRecordContact | null;
+  /** Client email captured at intake; stored in site_context_raw.intake. */
+  clientEmail?: string | null;
+  /** Client notes / brief; stored in site_context_raw.intake. */
+  clientNotes?: string | null;
+  /** Intake channel (link, file, paste, email). */
+  intakeSource?: string | null;
+  /** Raw excerpt from intake agent (max 8000 chars). */
+  sourceExcerpt?: string | null;
 };
 
 export type ListEngagementBriefingSourcesParams = {

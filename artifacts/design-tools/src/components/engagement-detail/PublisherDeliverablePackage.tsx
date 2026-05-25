@@ -19,6 +19,7 @@ import type { TabId } from "./urlState";
 import type { PublisherPackageManifestItem, PublisherPackageSelection } from "./publisherIntake/packageTypes";
 import { emptyPublisherPackageSelection } from "./publisherIntake/packageTypes";
 import type { PublisherIntakeForm } from "./publisherIntake/types";
+import type { PackageSelection } from "./packages/types";
 import { exportDeliverablePackage } from "./publisherIntake/exportDeliverablePackage";
 
 const PACKAGE_STORAGE_PREFIX = "publisher-package-v1:";
@@ -66,6 +67,18 @@ function sheetLabel(sheet: SheetSummary): string {
   return `${sheet.sheetNumber} — ${sheet.sheetName}`;
 }
 
+function selectionFromPackage(
+  pkgSelection: PackageSelection | null | undefined,
+): PublisherPackageSelection | null {
+  if (!pkgSelection) return null;
+  return {
+    includeIntake: pkgSelection.includeIntake ?? true,
+    renderIds: pkgSelection.renderIds ?? [],
+    videoIds: pkgSelection.videoIds ?? [],
+    sheetIds: pkgSelection.sheetIds ?? [],
+  };
+}
+
 export function PublisherDeliverablePackage({
   engagementId,
   snapshotId,
@@ -75,6 +88,8 @@ export function PublisherDeliverablePackage({
   autoFilledCount,
   onNavigate,
   hideIntakeLane = false,
+  packageSelection,
+  onSelectionPersist,
 }: {
   engagementId: string;
   snapshotId: string | null;
@@ -84,6 +99,8 @@ export function PublisherDeliverablePackage({
   autoFilledCount: number;
   onNavigate?: (tab: TabId) => void;
   hideIntakeLane?: boolean;
+  packageSelection?: PackageSelection | null;
+  onSelectionPersist?: (selection: PublisherPackageSelection) => Promise<void>;
 }) {
   const rendersQuery = useListEngagementRenders(engagementId, {
     query: {
@@ -123,6 +140,12 @@ export function PublisherDeliverablePackage({
 
   useEffect(() => {
     setPackageInitialized(false);
+    const fromApi = selectionFromPackage(packageSelection);
+    if (fromApi) {
+      setSelection(fromApi);
+      setPackageInitialized(true);
+      return;
+    }
     const persisted = loadPackageSelection(engagementId);
     if (persisted) {
       setSelection(persisted);
@@ -130,10 +153,12 @@ export function PublisherDeliverablePackage({
     } else {
       setSelection(emptyPublisherPackageSelection());
     }
-  }, [engagementId]);
+  }, [engagementId, packageSelection]);
 
   useEffect(() => {
     if (packageInitialized) return;
+    const fromApi = selectionFromPackage(packageSelection);
+    if (fromApi) return;
     const persisted = loadPackageSelection(engagementId);
     if (persisted) return;
     if (rendersQuery.isLoading) return;
@@ -148,6 +173,7 @@ export function PublisherDeliverablePackage({
   }, [
     engagementId,
     packageInitialized,
+    packageSelection,
     readyStills,
     readyVideos,
     sheets,
@@ -158,8 +184,15 @@ export function PublisherDeliverablePackage({
 
   useEffect(() => {
     if (!packageInitialized) return;
+    if (onSelectionPersist) {
+      const timer = window.setTimeout(() => {
+        void onSelectionPersist(selection);
+      }, 600);
+      return () => window.clearTimeout(timer);
+    }
     persistPackageSelection(engagementId, selection);
-  }, [engagementId, selection, packageInitialized]);
+    return undefined;
+  }, [engagementId, selection, packageInitialized, onSelectionPersist]);
 
   const toggleId = useCallback(
     (key: "renderIds" | "videoIds" | "sheetIds", id: string) => {

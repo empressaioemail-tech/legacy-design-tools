@@ -32,11 +32,29 @@ import type {
   PublisherIntakeRoomRow,
 } from "./publisherIntake/types";
 import type { TabId } from "./urlState";
+import type {
+  EngagementPackageRecord,
+  PackageFormSnapshot,
+  PackageSelection,
+} from "./packages/types";
 
 const STORAGE_PREFIX = "publisher-intake-v1:";
 
 function storageKey(engagementId: string): string {
   return `${STORAGE_PREFIX}${engagementId}`;
+}
+
+function loadPersistedFromPackage(
+  formSnapshot: PackageFormSnapshot | null | undefined,
+): { form: PublisherIntakeForm; sources: PublisherFieldSources } | null {
+  const raw = formSnapshot?.publisherIntake;
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (!o.form || typeof o.form !== "object") return null;
+  return {
+    form: o.form as PublisherIntakeForm,
+    sources: (o.sources as PublisherFieldSources) ?? {},
+  };
 }
 
 function loadPersisted(
@@ -80,10 +98,17 @@ export function PublisherIntakeWorkbench({
   engagement,
   snapshotId,
   onNavigate,
+  packageRecord,
+  onPersistPackage,
 }: {
   engagement: EngagementDetail;
   snapshotId: string | null;
   onNavigate?: (tab: TabId) => void;
+  packageRecord?: EngagementPackageRecord | null;
+  onPersistPackage?: (patch: {
+    formSnapshot: PackageFormSnapshot;
+    selection?: PackageSelection;
+  }) => Promise<void>;
 }) {
   const briefingQuery = useGetEngagementBriefing(engagement.id, {
     query: {
@@ -106,7 +131,9 @@ export function PublisherIntakeWorkbench({
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    const persisted = loadPersisted(engagement.id);
+    const persisted =
+      loadPersistedFromPackage(packageRecord?.formSnapshot) ??
+      (packageRecord ? null : loadPersisted(engagement.id));
     const fresh = buildPublisherIntakeDraft(
       engagement,
       briefingQuery.data ?? null,
@@ -124,12 +151,31 @@ export function PublisherIntakeWorkbench({
       setSources(fresh.sources);
     }
     setHydrated(true);
-  }, [engagement, briefingQuery.data, engagement.id]);
+  }, [engagement, briefingQuery.data, engagement.id, packageRecord?.id, packageRecord?.formSnapshot]);
 
   useEffect(() => {
     if (!hydrated) return;
+    if (onPersistPackage && packageRecord) {
+      const timer = window.setTimeout(() => {
+        void onPersistPackage({
+          formSnapshot: {
+            ...(packageRecord.formSnapshot ?? {}),
+            publisherIntake: { form, sources },
+          },
+        });
+      }, 600);
+      return () => window.clearTimeout(timer);
+    }
     persistState(engagement.id, form, sources);
-  }, [engagement.id, form, sources, hydrated]);
+    return undefined;
+  }, [
+    engagement.id,
+    form,
+    sources,
+    hydrated,
+    onPersistPackage,
+    packageRecord,
+  ]);
 
   const setScalar = useCallback(
     (key: PublisherIntakeFieldKey, value: string) => {
@@ -205,6 +251,24 @@ export function PublisherIntakeWorkbench({
         completionPct={completionPct}
         autoFilledCount={autoCount}
         onNavigate={onNavigate}
+        packageSelection={packageRecord?.selection ?? null}
+        onSelectionPersist={
+          onPersistPackage && packageRecord
+            ? (selection) =>
+                onPersistPackage({
+                  formSnapshot: {
+                    ...(packageRecord.formSnapshot ?? {}),
+                    publisherIntake: { form, sources },
+                  },
+                  selection: {
+                    includeIntake: selection.includeIntake,
+                    renderIds: selection.renderIds,
+                    videoIds: selection.videoIds,
+                    sheetIds: selection.sheetIds,
+                  },
+                })
+            : undefined
+        }
       />
 
       <div className="publisher-intake-toolbar sc-card">

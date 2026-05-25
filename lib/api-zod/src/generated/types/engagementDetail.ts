@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ArchitectOfRecordContact } from "./architectOfRecordContact";
+import type { ClientBrief } from "./clientBrief";
 import type { EngagementStatus } from "./engagementStatus";
 import type { Site } from "./site";
 import type { SnapshotSummary } from "./snapshotSummary";
@@ -37,4 +38,6 @@ this for the recipient row on outbound comment letters.
 Null when no contact has been captured yet.
  */
   architectOfRecord: ArchitectOfRecordContact | null;
+  /** Client context captured at intake, when present. */
+  clientBrief?: ClientBrief | null;
 }
