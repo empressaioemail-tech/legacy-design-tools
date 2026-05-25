@@ -44,6 +44,8 @@ interface FormState {
   lotAreaSqft: string;
   status: (typeof STATUS_OPTIONS)[number]["value"];
   applicantFirm: string;
+  clientEmail: string;
+  clientNotes: string;
 }
 
 function buildInitial(e: EngagementDetail): FormState {
@@ -59,6 +61,8 @@ function buildInitial(e: EngagementDetail): FormState {
         : "",
     status: (e.status ?? "active") as FormState["status"],
     applicantFirm: e.applicantFirm ?? "",
+    clientEmail: e.clientBrief?.clientEmail ?? "",
+    clientNotes: e.clientBrief?.clientNotes ?? "",
   };
 }
 
@@ -173,6 +177,16 @@ export function EngagementDetailsModal({
     const currentJurisdiction = engagement.jurisdiction ?? "";
     if (newJurisdiction !== currentJurisdiction) {
       data["jurisdiction"] = newJurisdiction;
+    }
+    const newClientEmail = form.clientEmail.trim();
+    const currentClientEmail = engagement.clientBrief?.clientEmail ?? "";
+    if (newClientEmail !== currentClientEmail) {
+      data["clientEmail"] = newClientEmail === "" ? null : newClientEmail;
+    }
+    const newClientNotes = form.clientNotes.trim();
+    const currentClientNotes = engagement.clientBrief?.clientNotes ?? "";
+    if (newClientNotes !== currentClientNotes) {
+      data["clientNotes"] = newClientNotes === "" ? null : newClientNotes;
     }
 
     if (Object.keys(data).length === 0) {
@@ -314,6 +328,35 @@ export function EngagementDetailsModal({
               className="sc-ui"
               style={inputStyle}
               data-testid="engagement-applicant-firm-input"
+            />
+          </Field>
+
+          <Field label="Client email (optional)">
+            <input
+              type="email"
+              value={form.clientEmail}
+              onChange={(e) =>
+                setForm({ ...form, clientEmail: e.target.value })
+              }
+              disabled={submitting}
+              placeholder="client@example.com"
+              className="sc-ui"
+              style={inputStyle}
+              data-testid="engagement-client-email-input"
+            />
+          </Field>
+
+          <Field label="Client notes (optional)">
+            <textarea
+              value={form.clientNotes}
+              onChange={(e) =>
+                setForm({ ...form, clientNotes: e.target.value })
+              }
+              disabled={submitting}
+              rows={3}
+              className="sc-ui sc-scroll"
+              style={{ ...inputStyle, resize: "vertical", minHeight: 60 }}
+              data-testid="engagement-client-notes-input"
             />
           </Field>
 

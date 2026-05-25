@@ -18,6 +18,7 @@ import { autoTriggerFindingsOnSubmissionCreated } from "../lib/autoTriggerFindin
 import { autoTriggerClassificationOnSubmissionCreated } from "../lib/autoTriggerClassificationOnSubmissionCreated";
 import {
   buildIntakeSiteContextRaw,
+  mergeIntakePatchIntoSiteContextRaw,
   mergeSiteContextRaw,
   parseCreateEngagementBody,
   toClientBrief,
@@ -371,6 +372,23 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
         update["architectOfRecordEmail"] = trim(c.email);
         update["architectOfRecordRole"] = trim(c.role ?? null);
       }
+    }
+
+    const hasIntakePatch =
+      body.clientEmail !== undefined ||
+      body.clientNotes !== undefined ||
+      body.intakeSource !== undefined ||
+      body.sourceExcerpt !== undefined;
+    if (hasIntakePatch) {
+      update["siteContextRaw"] = mergeIntakePatchIntoSiteContextRaw(
+        existing.siteContextRaw,
+        {
+          clientEmail: body.clientEmail,
+          clientNotes: body.clientNotes,
+          intakeSource: body.intakeSource,
+          sourceExcerpt: body.sourceExcerpt,
+        },
+      );
     }
 
     const warnings: string[] = [];

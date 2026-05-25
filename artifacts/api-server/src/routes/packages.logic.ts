@@ -288,3 +288,95 @@ export function parsePatchPackageBody(
 export function generateShareToken(): string {
   return randomBytes(24).toString("hex");
 }
+
+export interface PackageSelectionContext {
+  renderIds: Set<string>;
+  videoIds: Set<string>;
+  sheetIds: Set<string>;
+}
+
+/** Drop selection IDs that do not belong to the engagement snapshot/render set. */
+export function sanitizePackageSelection(
+  selection: PackageSelectionJson | undefined,
+  ctx: PackageSelectionContext,
+): PackageSelectionJson {
+  const sel = selection ?? {};
+  const filter = (ids: string[] | undefined, allowed: Set<string>) =>
+    (ids ?? []).filter((id) => allowed.has(id));
+  const renderIds = filter(sel.renderIds, ctx.renderIds);
+  const videoIds = filter(sel.videoIds, ctx.videoIds);
+  const sheetIds = filter(sel.sheetIds, ctx.sheetIds);
+  let heroRenderId = sel.heroRenderId ?? null;
+  if (heroRenderId && !ctx.renderIds.has(heroRenderId)) {
+    heroRenderId = renderIds[0] ?? null;
+  } else if (!heroRenderId && renderIds.length > 0) {
+    heroRenderId = renderIds[0] ?? null;
+  }
+  return {
+    ...sel,
+    renderIds,
+    videoIds,
+    sheetIds,
+    heroRenderId,
+  };
+}
+
+export interface IntakePatchFields {
+  clientEmail?: string | null;
+  clientNotes?: string | null;
+  intakeSource?: string | null;
+  sourceExcerpt?: string | null;
+}
+
+/** Merge intake field edits into siteContextRaw without dropping geocode payload. */
+export function mergeIntakePatchIntoSiteContextRaw(
+  existing: unknown,
+  patch: IntakePatchFields,
+): Record<string, unknown> | null {
+  const prev = extractIntakeFromSiteContextRaw(existing) ?? {};
+  const intake: EngagementIntakeBlob = { ...prev };
+  if (patch.clientEmail !== undefined) {
+    intake.clientEmail = trimOrNull(patch.clientEmail);
+  }
+  if (patch.clientNotes !== undefined) {
+    intake.clientNotes = trimOrNull(patch.clientNotes);
+  }
+  if (patch.intakeSource !== undefined) {
+    intake.intakeSource = trimOrNull(patch.intakeSource);
+  }
+  if (patch.sourceExcerpt !== undefined) {
+    intake.sourceExcerpt =
+      typeof patch.sourceExcerpt === "string"
+        ? patch.sourceExcerpt.slice(0, 8000)
+        : null;
+  }
+  intake.capturedAt = intake.capturedAt ?? new Date().toISOString();
+
+  const base =
+    existing && typeof existing === "object"
+      ? { ...(existing as Record<string, unknown>) }
+      : {};
+  base.intake = intake;
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+export interface PackageShareAssetRender {
+  id: string;
+  kind: string;
+  label: string;
+  previewUrl: string | null;
+}
+
+export interface PackageShareAssetSheet {
+  id: string;
+  sheetNumber: string;
+  sheetName: string;
+  thumbnailUrl: string;
+}
+
+export interface PackageShareAssets {
+  heroRender: PackageShareAssetRender | null;
+  renders: PackageShareAssetRender[];
+  videos: PackageShareAssetRender[];
+  sheets: PackageShareAssetSheet[];
+}

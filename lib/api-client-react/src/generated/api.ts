@@ -39,6 +39,8 @@ import type {
   CreateCannedFindingBody,
   CreateDeliverableLetterBody,
   CreateDetailCalloutSpecBody,
+  CreateEngagementBody,
+  CreateEngagementPackageBody,
   CreateEngagementSubmissionBody,
   CreateProductSpecReferenceBody,
   CreateQaTriageItemBody,
@@ -69,6 +71,7 @@ import type {
   EngagementBriefingResponse,
   EngagementBriefingSourcesResponse,
   EngagementDetail,
+  EngagementPackageRecord,
   EngagementSubmissionSummary,
   EngagementSummary,
   ErrorResponse,
@@ -132,6 +135,10 @@ import type {
   MatchEngagementBody,
   MatchEngagementResponse,
   OverrideFindingBody,
+  PackageShareComment,
+  PackageShareTokenResponse,
+  PackageShareView,
+  PostPackageShareCommentBody,
   ProductSpecReferenceListResponse,
   ProductSpecReferenceResponse,
   PromoteReviewerAnnotationsBody,
@@ -195,6 +202,7 @@ import type {
   SubmissionReceipt,
   UpdateCannedFindingBody,
   UpdateEngagementBody,
+  UpdateEngagementPackageBody,
   UpdateMyArchitectPdfHeaderBody,
   UpdateMyDisciplinesBody,
   UpdateMyProfileBody,
@@ -371,6 +379,96 @@ export function useListEngagements<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Creates a new engagement. Optional intake fields are persisted in
+`site_context_raw.intake` and surfaced on `clientBrief` in list/detail
+responses.
+
+ * @summary Create engagement (intake / new project)
+ */
+export const getCreateEngagementUrl = () => {
+  return `/api/engagements`;
+};
+
+export const createEngagement = async (
+  createEngagementBody: CreateEngagementBody,
+  options?: RequestInit,
+): Promise<EngagementSummary> => {
+  return customFetch<EngagementSummary>(getCreateEngagementUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createEngagementBody),
+  });
+};
+
+export const getCreateEngagementMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagement>>,
+    TError,
+    { data: BodyType<CreateEngagementBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createEngagement>>,
+  TError,
+  { data: BodyType<CreateEngagementBody> },
+  TContext
+> => {
+  const mutationKey = ["createEngagement"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createEngagement>>,
+    { data: BodyType<CreateEngagementBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createEngagement(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateEngagementMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createEngagement>>
+>;
+export type CreateEngagementMutationBody = BodyType<CreateEngagementBody>;
+export type CreateEngagementMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create engagement (intake / new project)
+ */
+export const useCreateEngagement = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagement>>,
+    TError,
+    { data: BodyType<CreateEngagementBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createEngagement>>,
+  TError,
+  { data: BodyType<CreateEngagementBody> },
+  TContext
+> => {
+  return useMutation(getCreateEngagementMutationOptions(options));
+};
 
 /**
  * Called by the Revit add-in BEFORE uploading a snapshot, to decide which
@@ -945,6 +1043,643 @@ export const useCreateEngagementSubmission = <
   TContext
 > => {
   return useMutation(getCreateEngagementSubmissionMutationOptions(options));
+};
+
+/**
+ * @summary List packages for an engagement
+ */
+export const getListEngagementPackagesUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/packages`;
+};
+
+export const listEngagementPackages = async (
+  engagementId: string,
+  options?: RequestInit,
+): Promise<EngagementPackageRecord[]> => {
+  return customFetch<EngagementPackageRecord[]>(
+    getListEngagementPackagesUrl(engagementId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListEngagementPackagesQueryKey = (engagementId: string) => {
+  return [`/api/engagements/${engagementId}/packages`] as const;
+};
+
+export const getListEngagementPackagesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEngagementPackages>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementPackages>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListEngagementPackagesQueryKey(engagementId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listEngagementPackages>>
+  > = ({ signal }) =>
+    listEngagementPackages(engagementId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!engagementId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEngagementPackages>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListEngagementPackagesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEngagementPackages>>
+>;
+export type ListEngagementPackagesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List packages for an engagement
+ */
+
+export function useListEngagementPackages<
+  TData = Awaited<ReturnType<typeof listEngagementPackages>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  engagementId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listEngagementPackages>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListEngagementPackagesQueryOptions(
+    engagementId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a package draft
+ */
+export const getCreateEngagementPackageUrl = (engagementId: string) => {
+  return `/api/engagements/${engagementId}/packages`;
+};
+
+export const createEngagementPackage = async (
+  engagementId: string,
+  createEngagementPackageBody: CreateEngagementPackageBody,
+  options?: RequestInit,
+): Promise<EngagementPackageRecord> => {
+  return customFetch<EngagementPackageRecord>(
+    getCreateEngagementPackageUrl(engagementId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createEngagementPackageBody),
+    },
+  );
+};
+
+export const getCreateEngagementPackageMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagementPackage>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateEngagementPackageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createEngagementPackage>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateEngagementPackageBody> },
+  TContext
+> => {
+  const mutationKey = ["createEngagementPackage"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createEngagementPackage>>,
+    { engagementId: string; data: BodyType<CreateEngagementPackageBody> }
+  > = (props) => {
+    const { engagementId, data } = props ?? {};
+
+    return createEngagementPackage(engagementId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateEngagementPackageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createEngagementPackage>>
+>;
+export type CreateEngagementPackageMutationBody =
+  BodyType<CreateEngagementPackageBody>;
+export type CreateEngagementPackageMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create a package draft
+ */
+export const useCreateEngagementPackage = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createEngagementPackage>>,
+    TError,
+    { engagementId: string; data: BodyType<CreateEngagementPackageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createEngagementPackage>>,
+  TError,
+  { engagementId: string; data: BodyType<CreateEngagementPackageBody> },
+  TContext
+> => {
+  return useMutation(getCreateEngagementPackageMutationOptions(options));
+};
+
+/**
+ * @summary Update a package draft
+ */
+export const getUpdateEngagementPackageUrl = (packageId: string) => {
+  return `/api/packages/${packageId}`;
+};
+
+export const updateEngagementPackage = async (
+  packageId: string,
+  updateEngagementPackageBody: UpdateEngagementPackageBody,
+  options?: RequestInit,
+): Promise<EngagementPackageRecord> => {
+  return customFetch<EngagementPackageRecord>(
+    getUpdateEngagementPackageUrl(packageId),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateEngagementPackageBody),
+    },
+  );
+};
+
+export const getUpdateEngagementPackageMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateEngagementPackage>>,
+    TError,
+    { packageId: string; data: BodyType<UpdateEngagementPackageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateEngagementPackage>>,
+  TError,
+  { packageId: string; data: BodyType<UpdateEngagementPackageBody> },
+  TContext
+> => {
+  const mutationKey = ["updateEngagementPackage"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateEngagementPackage>>,
+    { packageId: string; data: BodyType<UpdateEngagementPackageBody> }
+  > = (props) => {
+    const { packageId, data } = props ?? {};
+
+    return updateEngagementPackage(packageId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateEngagementPackageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateEngagementPackage>>
+>;
+export type UpdateEngagementPackageMutationBody =
+  BodyType<UpdateEngagementPackageBody>;
+export type UpdateEngagementPackageMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update a package draft
+ */
+export const useUpdateEngagementPackage = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateEngagementPackage>>,
+    TError,
+    { packageId: string; data: BodyType<UpdateEngagementPackageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateEngagementPackage>>,
+  TError,
+  { packageId: string; data: BodyType<UpdateEngagementPackageBody> },
+  TContext
+> => {
+  return useMutation(getUpdateEngagementPackageMutationOptions(options));
+};
+
+/**
+ * @summary Create or reuse a share link for a package
+ */
+export const getCreatePackageShareUrl = (packageId: string) => {
+  return `/api/packages/${packageId}/share`;
+};
+
+export const createPackageShare = async (
+  packageId: string,
+  options?: RequestInit,
+): Promise<PackageShareTokenResponse> => {
+  return customFetch<PackageShareTokenResponse>(
+    getCreatePackageShareUrl(packageId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getCreatePackageShareMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPackageShare>>,
+    TError,
+    { packageId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createPackageShare>>,
+  TError,
+  { packageId: string },
+  TContext
+> => {
+  const mutationKey = ["createPackageShare"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createPackageShare>>,
+    { packageId: string }
+  > = (props) => {
+    const { packageId } = props ?? {};
+
+    return createPackageShare(packageId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreatePackageShareMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createPackageShare>>
+>;
+
+export type CreatePackageShareMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create or reuse a share link for a package
+ */
+export const useCreatePackageShare = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPackageShare>>,
+    TError,
+    { packageId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createPackageShare>>,
+  TError,
+  { packageId: string },
+  TContext
+> => {
+  return useMutation(getCreatePackageShareMutationOptions(options));
+};
+
+/**
+ * @summary List comments on a package share (authenticated)
+ */
+export const getListPackageShareCommentsUrl = (packageId: string) => {
+  return `/api/packages/${packageId}/comments`;
+};
+
+export const listPackageShareComments = async (
+  packageId: string,
+  options?: RequestInit,
+): Promise<PackageShareComment[]> => {
+  return customFetch<PackageShareComment[]>(
+    getListPackageShareCommentsUrl(packageId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListPackageShareCommentsQueryKey = (packageId: string) => {
+  return [`/api/packages/${packageId}/comments`] as const;
+};
+
+export const getListPackageShareCommentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPackageShareComments>>,
+  TError = ErrorType<unknown>,
+>(
+  packageId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listPackageShareComments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListPackageShareCommentsQueryKey(packageId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listPackageShareComments>>
+  > = ({ signal }) =>
+    listPackageShareComments(packageId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!packageId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPackageShareComments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListPackageShareCommentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPackageShareComments>>
+>;
+export type ListPackageShareCommentsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List comments on a package share (authenticated)
+ */
+
+export function useListPackageShareComments<
+  TData = Awaited<ReturnType<typeof listPackageShareComments>>,
+  TError = ErrorType<unknown>,
+>(
+  packageId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listPackageShareComments>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListPackageShareCommentsQueryOptions(
+    packageId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Public share viewer payload
+ */
+export const getGetPackageShareUrl = (token: string) => {
+  return `/api/package-shares/${token}`;
+};
+
+export const getPackageShare = async (
+  token: string,
+  options?: RequestInit,
+): Promise<PackageShareView> => {
+  return customFetch<PackageShareView>(getGetPackageShareUrl(token), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPackageShareQueryKey = (token: string) => {
+  return [`/api/package-shares/${token}`] as const;
+};
+
+export const getGetPackageShareQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPackageShare>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPackageShare>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPackageShareQueryKey(token);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getPackageShare>>> = ({
+    signal,
+  }) => getPackageShare(token, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!token,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPackageShare>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPackageShareQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPackageShare>>
+>;
+export type GetPackageShareQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Public share viewer payload
+ */
+
+export function useGetPackageShare<
+  TData = Awaited<ReturnType<typeof getPackageShare>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPackageShare>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPackageShareQueryOptions(token, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Post a comment on a public share link
+ */
+export const getPostPackageShareCommentUrl = (token: string) => {
+  return `/api/package-shares/${token}/comments`;
+};
+
+export const postPackageShareComment = async (
+  token: string,
+  postPackageShareCommentBody: PostPackageShareCommentBody,
+  options?: RequestInit,
+): Promise<PackageShareComment> => {
+  return customFetch<PackageShareComment>(
+    getPostPackageShareCommentUrl(token),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(postPackageShareCommentBody),
+    },
+  );
+};
+
+export const getPostPackageShareCommentMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof postPackageShareComment>>,
+    TError,
+    { token: string; data: BodyType<PostPackageShareCommentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof postPackageShareComment>>,
+  TError,
+  { token: string; data: BodyType<PostPackageShareCommentBody> },
+  TContext
+> => {
+  const mutationKey = ["postPackageShareComment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof postPackageShareComment>>,
+    { token: string; data: BodyType<PostPackageShareCommentBody> }
+  > = (props) => {
+    const { token, data } = props ?? {};
+
+    return postPackageShareComment(token, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PostPackageShareCommentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof postPackageShareComment>>
+>;
+export type PostPackageShareCommentMutationBody =
+  BodyType<PostPackageShareCommentBody>;
+export type PostPackageShareCommentMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Post a comment on a public share link
+ */
+export const usePostPackageShareComment = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof postPackageShareComment>>,
+    TError,
+    { token: string; data: BodyType<PostPackageShareCommentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof postPackageShareComment>>,
+  TError,
+  { token: string; data: BodyType<PostPackageShareCommentBody> },
+  TContext
+> => {
+  return useMutation(getPostPackageShareCommentMutationOptions(options));
 };
 
 /**

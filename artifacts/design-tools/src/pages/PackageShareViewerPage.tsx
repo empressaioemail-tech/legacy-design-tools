@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "wouter";
 import { AppShell } from "../components/AppShell";
 import {
-  fetchPackageShare,
+  getPackageShare,
   postShareComment,
 } from "../components/engagement-detail/packages/packagesApi";
 import type { PackageShareView } from "../components/engagement-detail/packages/types";
@@ -17,7 +17,7 @@ export function PackageShareViewerPage() {
 
   useEffect(() => {
     if (!token) return;
-    void fetchPackageShare(token)
+    void getPackageShare(token)
       .then(setData)
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Share not found."),
@@ -32,7 +32,7 @@ export function PackageShareViewerPage() {
         authorName: authorName.trim(),
         body: body.trim(),
       });
-      const refreshed = await fetchPackageShare(token);
+      const refreshed = await getPackageShare(token);
       setData(refreshed);
       setBody("");
     } catch (err) {
@@ -41,6 +41,8 @@ export function PackageShareViewerPage() {
       setSubmitting(false);
     }
   };
+
+  const assets = data?.assets;
 
   return (
     <AppShell title="Plan review">
@@ -62,6 +64,54 @@ export function PackageShareViewerPage() {
                 </p>
               ) : null}
             </header>
+
+            {assets?.heroRender?.previewUrl ? (
+              <section className="package-share-hero sc-card">
+                <img
+                  src={assets.heroRender.previewUrl}
+                  alt={assets.heroRender.label}
+                  className="package-share-hero-img"
+                />
+                <p className="sc-meta">{assets.heroRender.label}</p>
+              </section>
+            ) : null}
+
+            {assets && (assets.sheets.length > 0 || assets.renders.length > 0) ? (
+              <section className="package-share-assets sc-card">
+                <h2 className="sc-label">Selected assets</h2>
+                {assets.sheets.length > 0 ? (
+                  <div className="package-share-asset-grid">
+                    <h3 className="sc-meta">Plan sheets</h3>
+                    <ul className="package-share-sheet-list">
+                      {assets.sheets.map((sheet) => (
+                        <li key={sheet.id}>
+                          <img
+                            src={sheet.thumbnailUrl}
+                            alt={`${sheet.sheetNumber} ${sheet.sheetName}`}
+                            loading="lazy"
+                          />
+                          <span>
+                            {sheet.sheetNumber} — {sheet.sheetName}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {assets.renders.length > 0 ? (
+                  <ul className="package-share-render-list">
+                    {assets.renders.map((render) => (
+                      <li key={render.id}>
+                        {render.previewUrl ? (
+                          <img src={render.previewUrl} alt={render.label} loading="lazy" />
+                        ) : null}
+                        <span>{render.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            ) : null}
 
             <section className="package-share-comments sc-card">
               <h2 className="sc-label">Comments</h2>

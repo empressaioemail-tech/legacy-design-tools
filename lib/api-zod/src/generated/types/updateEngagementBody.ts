@@ -30,4 +30,12 @@ to clear it. The Communicate composer uses this to
 populate a real recipient row on the comment letter.
  */
   architectOfRecord?: ArchitectOfRecordContact | null;
+  /** Client email captured at intake; stored in site_context_raw.intake. */
+  clientEmail?: string | null;
+  /** Client notes / brief; stored in site_context_raw.intake. */
+  clientNotes?: string | null;
+  /** Intake channel (link, file, paste, email). */
+  intakeSource?: string | null;
+  /** Raw excerpt from intake agent (max 8000 chars). */
+  sourceExcerpt?: string | null;
 };

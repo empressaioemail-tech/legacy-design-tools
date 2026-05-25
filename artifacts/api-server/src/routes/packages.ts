@@ -20,7 +20,12 @@ import {
   parsePatchPackageBody,
   parseShareCommentBody,
   parseUpsertPackageBody,
+  sanitizePackageSelection,
 } from "./packages.logic";
+import {
+  hydratePackageShareAssets,
+  loadPackageSelectionContext,
+} from "./packages.hydration";
 
 const router: IRouter = Router();
 
@@ -131,6 +136,13 @@ authed.post(
         res.status(404).json({ error: "Engagement not found" });
         return;
       }
+      const ctx = await loadPackageSelectionContext(
+        engagementId,
+        parsed.snapshotId ?? null,
+      );
+      const selection = parsed.selection
+        ? sanitizePackageSelection(parsed.selection, ctx)
+        : {};
       const now = new Date();
       const [row] = await db
         .insert(engagementPackages)
@@ -140,7 +152,7 @@ authed.post(
           title: parsed.title ?? defaultPackageTitle(parsed.template),
           status: parsed.status ?? "draft",
           snapshotId: parsed.snapshotId ?? null,
-          selection: parsed.selection ?? {},
+          selection,
           formSnapshot: parsed.formSnapshot ?? null,
           clientReviewDeadline: parsed.clientReviewDeadline
             ? new Date(parsed.clientReviewDeadline)
@@ -171,6 +183,16 @@ authed.patch(
       return;
     }
     try {
+      const [existingPkg] = await db
+        .select()
+        .from(engagementPackages)
+        .where(eq(engagementPackages.id, packageId))
+        .limit(1);
+      if (!existingPkg) {
+        res.status(404).json({ error: "Package not found" });
+        return;
+      }
+
       const patch: Partial<typeof engagementPackages.$inferInsert> = {
         updatedAt: new Date(),
       };
@@ -178,7 +200,13 @@ authed.patch(
       if (parsed.title !== undefined) patch.title = parsed.title;
       if (parsed.status !== undefined) patch.status = parsed.status;
       if (parsed.snapshotId !== undefined) patch.snapshotId = parsed.snapshotId;
-      if (parsed.selection !== undefined) patch.selection = parsed.selection;
+      if (parsed.selection !== undefined) {
+        const ctx = await loadPackageSelectionContext(
+          existingPkg.engagementId,
+          parsed.snapshotId ?? existingPkg.snapshotId,
+        );
+        patch.selection = sanitizePackageSelection(parsed.selection, ctx);
+      }
       if (parsed.formSnapshot !== undefined) {
         patch.formSnapshot = parsed.formSnapshot;
       }
@@ -314,9 +342,11 @@ router.get("/package-shares/:token", async (req: Request, res: Response) => {
     .from(packageShareComments)
     .where(eq(packageShareComments.shareId, loaded.share.id))
     .orderBy(packageShareComments.createdAt);
+  const assets = await hydratePackageShareAssets(loaded.pkg);
   res.json({
     engagementName: loaded.engagementName,
     package: toPackageWire(loaded.pkg),
+    assets,
     comments: comments.map((c) => ({
       id: c.id,
       authorName: c.authorName,

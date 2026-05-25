@@ -2,8 +2,9 @@
 
 ## Summary
 
-The `api-server` artifact runs on **Cloud Run** in `us-central1` as a single
-service named `api-server`. The frontends (`design-tools`, `plan-review`,
+The `api-server` artifact runs on **Cloud Run** in `us-central1` as service
+**`cortex-api`** (see `.github/workflows/cloud-run-deploy.yml`). The monorepo
+artifact path is still `artifacts/api-server`. Frontends (`design-tools`,
 `mockup-sandbox`) remain on **Replit autoscale** — their migration is a
 separate phase. The database stays on the **existing Replit Neon** for Phase
 1A; the Empressa Neon swap is Phase 1C and is a Secret Manager value rotation,
@@ -350,10 +351,16 @@ gcloud services enable run.googleapis.com --project="<your-project-id>"
 ## Operator deploy lifecycle (workflow_dispatch actions)
 
 Phase 2 (`2026-05-22_cc-agent-C_cortex_qa_build` P2-1 + P2-2) makes the
-cortex-api deploy fully runnable as an operator-supervised agent dispatch:
-the workflow exposes an `action` input that gates exactly one job per
+**cortex-api** Cloud Run deploy fully runnable as an operator-supervised agent
+dispatch: the workflow exposes an `action` input that gates exactly one job per
 dispatch. All four are unreachable from `push` — push only runs
 `build-and-push` (image only).
+
+**Deploy discipline (no races):** wait for green **Build & push image** on the
+merge SHA, then run **`deploy-canary`** with `image_tag=<full-sha>`, smoke the
+canary URL (`/api/healthz`, `POST /api/engagements` → 201,
+`POST /api/engagements/{id}/packages` → 201), **`run-migrations`** only when new
+SQL landed, then **`shift-traffic`**. Never chain these on `push`.
 
 | `action` input | Job | What it does |
 |---|---|---|
