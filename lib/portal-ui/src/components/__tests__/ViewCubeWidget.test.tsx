@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import * as THREE from "three";
 import { ViewCubeWidget } from "../ViewCubeWidget";
 
 const viewCubeMock = vi.hoisted(() => ({
@@ -45,9 +46,9 @@ vi.mock("../ViewCubeRenderer", () => ({
 }));
 
 describe("ViewCubeWidget", () => {
-  const mainCamera = { current: { quaternion: { x: 0, y: 0, z: 0, w: 1 } } };
+  const mainCamera = { current: new THREE.PerspectiveCamera() };
   const orbitControls = {
-    current: { target: { x: 0, y: 0, z: 0 } },
+    current: { target: new THREE.Vector3() },
   };
 
   beforeEach(() => {
