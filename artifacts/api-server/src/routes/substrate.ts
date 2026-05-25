@@ -18,18 +18,30 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
   getHauskaSubstrateClient,
+  getSubstrateHealthSnapshot,
   SubstrateError,
 } from "../lib/hauskaSubstrateClient";
 import { logger } from "../lib/logger";
+import { filterSubstrateCatalog } from "./substrateFilter";
 
 const router: IRouter = Router();
 
+router.get("/substrate/health", (_req: Request, res: Response): void => {
+  res.json(getSubstrateHealthSnapshot());
+});
+
 router.get(
   "/substrate/jurisdictions",
-  async (_req: Request, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       const catalog = await getHauskaSubstrateClient().listJurisdictions();
-      res.json(catalog);
+      const filtered = filterSubstrateCatalog(catalog, {
+        states:
+          typeof req.query.states === "string" ? req.query.states : undefined,
+        keys: typeof req.query.keys === "string" ? req.query.keys : undefined,
+        q: typeof req.query.q === "string" ? req.query.q : undefined,
+      });
+      res.json(filtered);
     } catch (err) {
       if (err instanceof SubstrateError) {
         // The substrate (or its key/URL config) is the problem, not the

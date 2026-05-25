@@ -44,6 +44,7 @@ import { logger } from "../lib/logger";
 import {
   ObjectStorageService,
   ObjectNotFoundError,
+  ObjectStorageAccessDeniedError,
 } from "../lib/objectStorage";
 const router: IRouter = Router();
 
@@ -123,6 +124,14 @@ router.get(
       res.setHeader("ETag", etag);
       res.end(bytes);
     } catch (err) {
+      if (err instanceof ObjectStorageAccessDeniedError) {
+        logger.error({ err, id }, "serve briefing source glb forbidden");
+        res.status(403).json({
+          error: "glb_storage_forbidden",
+          message: err.message,
+        });
+        return;
+      }
       logger.error({ err, id }, "serve briefing source glb failed");
       res.status(500).json({ error: "Failed to load briefing source glb" });
     }

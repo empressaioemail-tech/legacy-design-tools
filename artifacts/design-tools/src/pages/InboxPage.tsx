@@ -1,6 +1,13 @@
-import { DashboardFocusPage } from "./DashboardPage";
+import { AppShell } from "../components/AppShell";
+import { InboxActionQueue } from "../components/inbox/InboxActionQueue";
 
-/** Full inbox view — scrolls to the inbox column on the unified dashboard. */
+/** Full inbox triage — buckets, mentions, FYI, filters, and today's plan. */
 export function InboxPage() {
-  return <DashboardFocusPage section="inbox" />;
+  return (
+    <AppShell title="Inbox">
+      <div className="cockpit-inbox-page">
+        <InboxActionQueue />
+      </div>
+    </AppShell>
+  );
 }

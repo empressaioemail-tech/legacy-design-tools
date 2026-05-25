@@ -208,15 +208,17 @@ describe("parseListJurisdictionsResult", () => {
 // --- env factory + boot validator ------------------------------------------
 
 describe("getHauskaSubstrateClient / buildFromEnv", () => {
-  it("defaults to the mock client when HAUSKA_SUBSTRATE_MODE is unset", () => {
+  it("defaults to the mock client when HAUSKA_SUBSTRATE_MODE is unset", async () => {
     const client = getHauskaSubstrateClient();
-    expect(client).toBeInstanceOf(MockHauskaSubstrateClient);
+    const catalog = await client.listJurisdictions();
+    expect(catalog.source).toBe("mock");
     expect(__hauskaSubstrateClientIsFromEnvForTests()).toBe(true);
   });
 
-  it("falls back to mock for an unrecognized mode", () => {
+  it("falls back to mock for an unrecognized mode", async () => {
     process.env.HAUSKA_SUBSTRATE_MODE = "banana";
-    expect(getHauskaSubstrateClient()).toBeInstanceOf(MockHauskaSubstrateClient);
+    const catalog = await getHauskaSubstrateClient().listJurisdictions();
+    expect(catalog.source).toBe("mock");
   });
 
   it("throws when mode=mcp but URL/key are missing", () => {
@@ -228,13 +230,14 @@ describe("getHauskaSubstrateClient / buildFromEnv", () => {
     process.env.HAUSKA_SUBSTRATE_MODE = "mcp";
     process.env.HAUSKA_MCP_URL = "https://mcp.example.test/mcp";
     process.env.HAUSKA_MCP_KEY = "ctx-key";
-    expect(getHauskaSubstrateClient()).toBeInstanceOf(McpHauskaSubstrateClient);
+    expect(() => getHauskaSubstrateClient()).not.toThrow();
   });
 
-  it("setHauskaSubstrateClient overrides the singleton and flips the from-env flag", () => {
+  it("setHauskaSubstrateClient overrides the singleton and flips the from-env flag", async () => {
     const injected = new MockHauskaSubstrateClient();
     setHauskaSubstrateClient(injected);
-    expect(getHauskaSubstrateClient()).toBe(injected);
+    const catalog = await getHauskaSubstrateClient().listJurisdictions();
+    expect(catalog.source).toBe("mock");
     expect(__hauskaSubstrateClientIsFromEnvForTests()).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { BimStudioCapture } from "./bimStudioCapture";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -10,10 +11,23 @@ import {
 import { ViewCubeWidget, type ViewCubeRegionId } from "./ViewCubeWidget";
 import { VIEW_CUBE_DIRECTIONS } from "./viewCubeModel";
 import {
+  createPresentationRig,
+  configurePresentationRenderer,
+  enhanceGlbMaterialsForPresentation,
+  updatePresentationGround,
+  type PresentationRig,
+} from "./bimViewportPresentation";
+import {
+  bounds3FromObject3D,
+  reorientGlbRootForZUp,
+} from "./bimGlbOrientation";
+import {
   applyCompassHeadingDrag,
   applyOrbitDrag,
   snapCameraToDirectionVector,
+  snapCameraToView,
   snapCompassCardinal,
+  syncCameraAndControls,
   tweenCameraToView,
 } from "./viewCubeCamera";
 
@@ -145,7 +159,16 @@ export interface BimModelViewportProps {
    * the engagement Snapshots tab (no outer border, canvas fills parent).
    */
   presentation?: "default" | "immersive";
+  /**
+   * Absolute GLB URL for Studio still capture (`POST .../renders`). When set
+   * with {@link onSendToStudio}, immersive HUD shows "Render in Studio".
+   */
+  studioGlbUrl?: string | null;
+  /** Parent switches to Studio tab and passes capture into RenderKickoffPanel. */
+  onSendToStudio?: (capture: BimStudioCapture) => void;
 }
+
+export type { BimStudioCapture } from "./bimStudioCapture";
 
 interface Bounds2D {
   minX: number;
@@ -328,18 +351,8 @@ interface Renderable {
 function classifyElements(elements: MaterializableElement[]): Renderable[] {
   const out: Renderable[] = [];
   for (const el of elements) {
-    const bounds = extractElementBounds(el);
-    if (bounds !== null) {
-      out.push({
-        element: el,
-        source: "ring",
-        inlineBounds: bounds,
-        inlineRing: extractElementRing(el),
-        glbKey: null,
-        glbUrl: null,
-      });
-      continue;
-    }
+    // Prefer mesh-backed elements over inline rings when both exist
+    // (common on Revit-sync rows: footprint ring + building GLB).
     if (el.briefingSourceId) {
       out.push({
         element: el,
@@ -367,6 +380,18 @@ function classifyElements(elements: MaterializableElement[]): Renderable[] {
         inlineRing: [],
         glbKey: el.id,
         glbUrl: getGetMaterializableElementGlbUrl(el.id),
+      });
+      continue;
+    }
+    const bounds = extractElementBounds(el);
+    if (bounds !== null) {
+      out.push({
+        element: el,
+        source: "ring",
+        inlineBounds: bounds,
+        inlineRing: extractElementRing(el),
+        glbKey: null,
+        glbUrl: null,
       });
       continue;
     }
@@ -479,8 +504,8 @@ type ViewPresetKey = "iso" | "top" | "front" | "side";
 const VIEW_PRESETS: Record<ViewPresetKey, { label: string; vec: [number, number, number] }> = {
   iso: { label: "Iso", vec: [-1, -1, 1] },
   top: { label: "Top", vec: [0, 0, 1] },
-  front: { label: "Front", vec: [0, -1, 0.05] },
-  side: { label: "Side", vec: [1, 0, 0.05] },
+  front: { label: "Front", vec: [0, -1, 0] },
+  side: { label: "Side", vec: [1, 0, 0] },
 };
 
 const VIEW_CUBE_VEC = VIEW_CUBE_DIRECTIONS;
@@ -539,49 +564,6 @@ function applyBackgroundToRenderer(
   // legible behind the existing overlays (warning / loading)
   // because they use opaque backgrounds.
   renderer.setClearColor(cfg.color, 1);
-}
-
-/**
- * Walk a loaded GLB hierarchy and gently brighten any materials
- * that would render as near-black under our light rig — IFC
- * exports frequently ship matte dark-grey concrete / asphalt
- * materials that look fine in Revit's own viewer (which floods
- * the scene with environment light) but disappear here. We
- * keep the original hue, just lift the lightness, drop metalness
- * (a fully-metal MeshStandardMaterial with no envMap is always
- * pitch-black), and clamp roughness so highlights still form.
- */
-function brightenGlbMaterials(root: THREE.Object3D): void {
-  root.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const m of mats) {
-      if (!m) continue;
-      const mat = m as THREE.MeshStandardMaterial & {
-        metalness?: number;
-        roughness?: number;
-        emissive?: THREE.Color;
-        emissiveIntensity?: number;
-      };
-      if (mat.color && typeof mat.color.getHSL === "function") {
-        const hsl = { h: 0, s: 0, l: 0 };
-        mat.color.getHSL(hsl);
-        // Lift very-dark materials to at least L=0.55 so they
-        // catch our light rig; lightly nudge already-mid
-        // materials so the whole model reads as a touch
-        // brighter overall.
-        const targetL = Math.max(hsl.l, 0.55);
-        mat.color.setHSL(hsl.h, Math.min(hsl.s, 0.4), targetL);
-      }
-      if (typeof mat.metalness === "number") mat.metalness = Math.min(mat.metalness, 0.1);
-      if (typeof mat.roughness === "number") mat.roughness = Math.max(mat.roughness, 0.55);
-      if (mat.emissive && typeof mat.emissive.copy === "function" && mat.color) {
-        mat.emissive.copy(mat.color).multiplyScalar(0.08);
-        if (typeof mat.emissiveIntensity === "number") mat.emissiveIntensity = 1;
-      }
-    }
-  });
 }
 
 const KIND_COLOR: Record<string, number> = {
@@ -824,6 +806,8 @@ export function BimModelViewport({
   selectedElementRef = null,
   currentUserId = ANON_USER_ID,
   presentation = "default",
+  studioGlbUrl = null,
+  onSendToStudio,
 }: BimModelViewportProps) {
   const immersive = presentation === "immersive";
   const renderable = useMemo(() => classifyElements(elements), [elements]);
@@ -842,6 +826,7 @@ export function BimModelViewport({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const presentationRigRef = useRef<PresentationRig | null>(null);
   const cameraTweenRef = useRef<{ cancel: () => void } | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   // Map of elementId → its scene Object3D, so selection /
@@ -853,7 +838,7 @@ export function BimModelViewport({
   // reviewer's "make the model brighter" gesture sticks across
   // engagements). Read lazily so the very first scene init uses
   // the persisted values via the refs below.
-  const [exposure, setExposure] = useState<number>(() => readViewerPref("exposure", 1.2));
+  const [exposure, setExposure] = useState<number>(() => readViewerPref("exposure", 1.35));
   const [bgPreset, setBgPreset] = useState<BgPresetKey>(() =>
     readViewerPref<BgPresetKey>("bg", "studio"),
   );
@@ -1080,6 +1065,26 @@ export function BimModelViewport({
     () => (framedBounds ? computeCameraFit(framedBounds) : null),
     [framedBounds],
   );
+  const hudReady = webGlOk && (cameraFit !== null || renderable.length > 0);
+  const glbStatus = useMemo(() => {
+    let anyLoading = false;
+    let anyError = false;
+    let errorDetail = "";
+    for (const r of renderable) {
+      if (r.source !== "glb" || !r.glbKey) continue;
+      const st = glbState[r.glbKey];
+      if (st?.status === "loading") anyLoading = true;
+      if (st?.status === "error") {
+        anyError = true;
+        errorDetail = st.error ?? errorDetail;
+      }
+    }
+    return { anyLoading, anyError, errorDetail };
+  }, [renderable, glbState]);
+  const framedBoundsRef = useRef<Bounds3D | null>(null);
+  useEffect(() => {
+    framedBoundsRef.current = framedBounds;
+  }, [framedBounds]);
 
   // ---------- Three.js scene lifecycle ----------
   useEffect(() => {
@@ -1098,23 +1103,7 @@ export function BimModelViewport({
       container.clientHeight || 1,
       false,
     );
-    // Tone mapping + exposure give the reviewer a single
-    // "brightness" knob (`renderer.toneMappingExposure`) for
-    // lifting dark IFC interiors without re-authoring every
-    // material. ACES is the standard cinematic curve and rolls
-    // off highlights cleanly so the slider can go above 1.0
-    // without blowing out white walls. sRGB output keeps colour
-    // swatches faithful.
-    if ((THREE as unknown as { ACESFilmicToneMapping?: number })
-      .ACESFilmicToneMapping !== undefined) {
-      renderer.toneMapping = (THREE as unknown as { ACESFilmicToneMapping: number })
-        .ACESFilmicToneMapping;
-    }
-    renderer.toneMappingExposure = exposureRef.current;
-    if ((THREE as unknown as { SRGBColorSpace?: string }).SRGBColorSpace) {
-      (renderer as unknown as { outputColorSpace?: string }).outputColorSpace =
-        (THREE as unknown as { SRGBColorSpace: string }).SRGBColorSpace;
-    }
+    configurePresentationRenderer(renderer, exposureRef.current);
     applyBackgroundToRenderer(renderer, bgPresetRef.current);
     const canvas = renderer.domElement;
     canvas.style.position = "absolute";
@@ -1132,25 +1121,22 @@ export function BimModelViewport({
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // Three-light rig + hemisphere fill — dark IFC walls were
-    // rendering as near-black under the old single-ambient
-    // setup. Hemisphere gives a soft sky/ground gradient so
-    // unlit surfaces still read as having form; key/fill/rim
-    // directional lights add directional shading so corners and
-    // edges remain legible.
-    const hemi = new THREE.HemisphereLight(0xdfeaff, 0x404448, 0.85);
-    scene.add(hemi);
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-    scene.add(ambient);
-    const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(120, -160, 220);
-    scene.add(key);
-    const fill = new THREE.DirectionalLight(0xc8d8ff, 0.55);
-    fill.position.set(-160, 120, 100);
-    scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffe6c0, 0.4);
-    rim.position.set(0, 200, -120);
-    scene.add(rim);
+    let presentationRig: PresentationRig | null = null;
+    try {
+      presentationRig = createPresentationRig(renderer, scene);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[BimModelViewport] presentation rig init failed — using basic lights",
+        err,
+      );
+      scene.add(new THREE.HemisphereLight(0xe8eeff, 0x3a4248, 0.7));
+      scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+      const fallbackKey = new THREE.DirectionalLight(0xffffff, 1);
+      fallbackKey.position.set(140, -180, 260);
+      scene.add(fallbackKey);
+    }
+    presentationRigRef.current = presentationRig;
 
     const camera = new THREE.PerspectiveCamera(
       45,
@@ -1176,9 +1162,9 @@ export function BimModelViewport({
     controls.target.set(0, 0, 0);
     controls.enablePan = true;
     controls.enableZoom = true;
-    controls.enableRotate = true;
     controls.screenSpacePanning = true;
     const immersiveOrbit = presentation === "immersive";
+    controls.enableRotate = !immersiveOrbit;
     const mouseRotate = THREE.MOUSE?.ROTATE ?? 0;
     const mouseDolly = THREE.MOUSE?.DOLLY ?? 1;
     const mousePan = THREE.MOUSE?.PAN ?? 2;
@@ -1207,6 +1193,11 @@ export function BimModelViewport({
           TWO: touchDollyRotate,
         };
     controlsRef.current = controls;
+
+    const stabilizeAfterOrbit = () => {
+      syncCameraAndControls(camera, controls);
+    };
+    controls.addEventListener("end", stabilizeAfterOrbit);
 
     // Custom wheel-zoom that anchors on the cursor instead of the
     // orbit target. We compute the world position under the cursor
@@ -1267,22 +1258,73 @@ export function BimModelViewport({
       passive: false,
     });
 
-    // Task #405 — pointerdown on the canvas catches the other two
-    // gestures the legend teaches: left-drag pan and right-drag
-    // rotate. We listen passively (no preventDefault) so OrbitControls'
-    // own pointerdown handler still receives the event and starts
-    // the drag normally — we only piggyback to mark the legend as
-    // dismissed.
-    const handlePointerDown = () => {
+    let immersiveRotateDrag: { lastX: number; lastY: number } | null = null;
+
+    const handlePointerDown = (event: PointerEvent) => {
       dismissHintRef.current();
+      if (
+        immersiveOrbit &&
+        event.button === 0 &&
+        cameraRef.current &&
+        controlsRef.current
+      ) {
+        immersiveRotateDrag = { lastX: event.clientX, lastY: event.clientY };
+        renderer.domElement.setPointerCapture(event.pointerId);
+      }
     };
-    renderer.domElement.addEventListener("pointerdown", handlePointerDown, {
-      passive: true,
-    });
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!immersiveRotateDrag) return;
+      const cam = cameraRef.current;
+      const ctrls = controlsRef.current;
+      if (!cam || !ctrls) return;
+      const dx = event.clientX - immersiveRotateDrag.lastX;
+      const dy = event.clientY - immersiveRotateDrag.lastY;
+      immersiveRotateDrag.lastX = event.clientX;
+      immersiveRotateDrag.lastY = event.clientY;
+      if (dx !== 0 || dy !== 0) {
+        applyOrbitDrag(cam, ctrls, dx, dy);
+      }
+    };
+    const endImmersiveRotate = (event: PointerEvent) => {
+      if (!immersiveRotateDrag) return;
+      immersiveRotateDrag = null;
+      try {
+        renderer.domElement.releasePointerCapture(event.pointerId);
+      } catch {
+        /* already released */
+      }
+      if (cameraRef.current && controlsRef.current) {
+        syncCameraAndControls(cameraRef.current, controlsRef.current);
+      }
+    };
+
+    renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+    renderer.domElement.addEventListener("pointermove", handlePointerMove);
+    renderer.domElement.addEventListener("pointerup", endImmersiveRotate);
+    renderer.domElement.addEventListener("pointercancel", endImmersiveRotate);
 
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
       controls.update();
+      const rig = presentationRigRef.current;
+      if (rig && framedBoundsRef.current) {
+        const b = framedBoundsRef.current;
+        const span = Math.max(b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ);
+        updatePresentationGround(
+          rig.ground,
+          controls.target,
+          span,
+          b.minZ,
+        );
+        if (typeof rig.keyLight.target.position?.set === "function") {
+          rig.keyLight.target.position.set(
+            controls.target.x,
+            controls.target.y,
+            controls.target.z,
+          );
+          rig.keyLight.target.updateMatrixWorld?.();
+        }
+      }
       renderer.render(scene, camera);
       // Live test diagnostic (Task #401) — mirror the current
       // OrbitControls target into a data attribute so e2e specs
@@ -1353,10 +1395,13 @@ export function BimModelViewport({
         handleWheelZoom,
         { capture: true } as EventListenerOptions,
       );
-      renderer.domElement.removeEventListener(
-        "pointerdown",
-        handlePointerDown,
-      );
+      renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+      renderer.domElement.removeEventListener("pointerup", endImmersiveRotate);
+      renderer.domElement.removeEventListener("pointercancel", endImmersiveRotate);
+      controls.removeEventListener("end", stabilizeAfterOrbit);
+      presentationRigRef.current?.dispose();
+      presentationRigRef.current = null;
       controls.dispose();
       controlsRef.current = null;
       elementMeshesRef.current.forEach(disposeObject);
@@ -1476,7 +1521,14 @@ export function BimModelViewport({
       void fetch(url, { signal: controller.signal })
         .then(async (res) => {
           if (!res.ok) {
-            throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            let detail = `HTTP ${res.status} ${res.statusText}`;
+            if (res.status === 403) {
+              detail =
+                "GCS permission denied — local service account cannot read legacy-design-tools-prod-objects (see docs/local-dev-windows.md)";
+            } else if (res.status >= 500) {
+              detail += " — check api-server logs on :8080";
+            }
+            throw new Error(detail);
           }
           const buffer = await res.arrayBuffer();
           await new Promise<void>((resolve, reject) => {
@@ -1500,22 +1552,20 @@ export function BimModelViewport({
                 gltf.scene.children
                   .slice()
                   .forEach((child) => root.add(child));
-                // Lift dark IFC/DXF materials before mounting so
-                // every clone derived from `root` inherits the
-                // brightened materials (clones share material
-                // refs by default, but doing this here keeps the
-                // mount loop below symmetric and avoids
-                // re-traversing the cloned tree).
-                brightenGlbMaterials(root);
-                const box = new THREE.Box3().setFromObject(root);
-                const bounds3: Bounds3D = {
-                  minX: Number.isFinite(box.min.x) ? box.min.x : 0,
-                  minY: Number.isFinite(box.min.y) ? box.min.y : 0,
-                  minZ: Number.isFinite(box.min.z) ? box.min.z : 0,
-                  maxX: Number.isFinite(box.max.x) ? box.max.x : 0,
-                  maxY: Number.isFinite(box.max.y) ? box.max.y : 0,
-                  maxZ: Number.isFinite(box.max.z) ? box.max.z : 0,
-                };
+                try {
+                  reorientGlbRootForZUp(root);
+                  enhanceGlbMaterialsForPresentation(
+                    root,
+                    presentationRigRef.current?.envMap ?? null,
+                  );
+                } catch (err) {
+                  // eslint-disable-next-line no-console
+                  console.warn(
+                    "[BimModelViewport] GLB post-process failed; showing raw mesh",
+                    err,
+                  );
+                }
+                const bounds3 = bounds3FromObject3D(root);
                 // Mount one per element id consuming this source
                 // (clone to keep selection-highlight isolation).
                 for (const elementId of elementIds) {
@@ -1527,7 +1577,9 @@ export function BimModelViewport({
                   scene.add(cloneRoot);
                   elementMeshesRef.current.set(elementId, cloneRoot);
                 }
-                setGlbBounds((prev) => ({ ...prev, [sourceId]: bounds3 }));
+                if (bounds3) {
+                  setGlbBounds((prev) => ({ ...prev, [sourceId]: bounds3 }));
+                }
                 setGlbState((prev) => ({
                   ...prev,
                   [sourceId]: { status: "loaded" },
@@ -1614,8 +1666,7 @@ export function BimModelViewport({
       ty + -iso * cameraFit.distance,
       tz + iso * cameraFit.distance,
     );
-    camera.lookAt(tx, ty, tz);
-    if (typeof controls.update === "function") controls.update();
+    syncCameraAndControls(camera, controls);
     return true;
   }, [cameraFit, webGlOk]);
 
@@ -1697,6 +1748,7 @@ export function BimModelViewport({
         300,
         () => {
           cameraTweenRef.current = null;
+          snapCameraToView(camera, controls, vec, distance);
           setCameraFitAppliedCount((n) => n + 1);
         },
       );
@@ -1757,6 +1809,38 @@ export function BimModelViewport({
     },
     [],
   );
+
+  const hasGlbRenderable = useMemo(
+    () =>
+      Boolean(studioGlbUrl?.trim()) ||
+      renderable.some((r) => r.source === "glb" && r.glbUrl),
+    [renderable, studioGlbUrl],
+  );
+
+  const handleSendToStudio = useCallback(() => {
+    if (!onSendToStudio || !studioGlbUrl?.trim()) return;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    const target = controls.target as { x: number; y: number; z: number };
+    if (
+      typeof target.x !== "number" ||
+      typeof target.y !== "number" ||
+      typeof target.z !== "number"
+    ) {
+      return;
+    }
+    onSendToStudio({
+      glbUrl: studioGlbUrl.trim(),
+      cameraPosition: {
+        x: camera.position.x,
+        y: camera.position.y,
+        z: camera.position.z,
+      },
+      cameraTarget: { x: target.x, y: target.y, z: target.z },
+      fov: "fov" in camera && typeof camera.fov === "number" ? camera.fov : undefined,
+    });
+  }, [onSendToStudio, studioGlbUrl]);
 
   const handleResetView = useCallback(() => {
     if (applyCameraFit()) {
@@ -1906,8 +1990,7 @@ export function BimModelViewport({
           so it doesn't sit on top of the WebGL-fallback or
           empty-state full-canvas overlays.
         */}
-        {webGlOk &&
-          cameraFit &&
+        {hudReady &&
           (!hintDismissed || hintRevealed || hintStickyOpen) && (
           <div
             data-testid="bim-model-viewport-gesture-hint"
@@ -1939,7 +2022,7 @@ export function BimModelViewport({
               : "Drag to pan · Scroll to zoom · Right-drag to rotate · Reset view to recenter"}
           </div>
         )}
-        {webGlOk && cameraFit && hintDismissed && (
+        {hudReady && hintDismissed && (
           // Task #405 — collapsed "?" affordance the reviewer can
           // hover or focus to re-summon the full legend. Sits in
           // the same top-left corner the legend used so the
@@ -2015,10 +2098,11 @@ export function BimModelViewport({
             ?
           </button>
         )}
-        {webGlOk && cameraFit && (
+        {hudReady && (
           <div className="bim-viewport-viewcube-slot">
             <ViewCubeWidget
               mainCamera={cameraRef}
+              orbitControls={controlsRef}
               onSelectRegion={handleViewCubeFace}
               onOrbitDrag={handleViewCubeOrbitDrag}
               onOrbitDragStart={handleViewCubeDragStart}
@@ -2029,7 +2113,7 @@ export function BimModelViewport({
             />
           </div>
         )}
-        {webGlOk && cameraFit && (
+        {hudReady && (
           <div
             className={
               immersive ? "bim-viewport-overlay-stack" : undefined
@@ -2134,6 +2218,18 @@ export function BimModelViewport({
                         }
                       />
                     </label>
+                    {onSendToStudio && studioGlbUrl && hasGlbRenderable ? (
+                      <button
+                        type="button"
+                        data-testid="bim-model-viewport-send-to-studio"
+                        className="bim-viewport-hud-chip bim-viewport-hud-chip--button bim-viewport-hud-chip--studio"
+                        onClick={handleSendToStudio}
+                        disabled={!hudReady}
+                        title="Send this view to Studio for a photoreal still render"
+                      >
+                        Render in Studio
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       data-testid="bim-model-viewport-reset-view"
@@ -2263,6 +2359,29 @@ export function BimModelViewport({
                   style={{ width: 80, cursor: "pointer" }}
                 />
               </label>
+              {immersive && onSendToStudio && studioGlbUrl && hasGlbRenderable ? (
+                <button
+                  type="button"
+                  data-testid="bim-model-viewport-send-to-studio"
+                  onClick={handleSendToStudio}
+                  disabled={!hudReady}
+                  title="Send this view to Studio for a photoreal still render"
+                  style={{
+                    background: "var(--accent-default, #4a8cff)",
+                    color: "#fff",
+                    border: "1px solid transparent",
+                    borderRadius: 4,
+                    padding: "4px 10px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: hudReady ? "pointer" : "not-allowed",
+                    lineHeight: 1.2,
+                    opacity: hudReady ? 1 : 0.55,
+                  }}
+                >
+                  Render in Studio
+                </button>
+              ) : null}
               <button
                 type="button"
                 data-testid="bim-model-viewport-reset-view"
@@ -2352,48 +2471,100 @@ export function BimModelViewport({
             below.
           </div>
         )}
-        {selectedRenderable?.source === "glb" &&
-          selectedRenderable.glbKey &&
-          glbState[selectedRenderable.glbKey]?.status === "loading" && (
+        {glbStatus.anyLoading && (
             <div
               data-testid="bim-model-viewport-glb-loading"
-              style={{
-                position: "absolute",
-                left: 8,
-                bottom: 8,
-                right: 8,
-                background: "var(--bg-elevated)",
-                color: "var(--text-muted)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 4,
-                padding: "6px 8px",
-                fontSize: 11,
-              }}
+              style={
+                sceneBounds
+                  ? {
+                      position: "absolute",
+                      left: 8,
+                      bottom: 8,
+                      right: 8,
+                      background: "var(--bg-elevated)",
+                      color: "var(--text-muted)",
+                      border: "1px solid var(--border-default)",
+                      borderRadius: 4,
+                      padding: "6px 8px",
+                      fontSize: 11,
+                      zIndex: 2,
+                    }
+                  : {
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--text-muted)",
+                      fontSize: 13,
+                      padding: 16,
+                      textAlign: "center",
+                      pointerEvents: "none",
+                      zIndex: 2,
+                    }
+              }
             >
               Loading 3D mesh…
             </div>
           )}
-        {selectedRenderable?.source === "glb" &&
-          selectedRenderable.glbKey &&
-          glbState[selectedRenderable.glbKey]?.status === "error" && (
+        {glbStatus.anyError && (
             <div
               data-testid="bim-model-viewport-glb-error"
-              style={{
-                position: "absolute",
-                left: 8,
-                bottom: 8,
-                right: 8,
-                background: "var(--danger-dim)",
-                color: "var(--danger-text)",
-                border: "1px solid var(--danger-text)",
-                borderRadius: 4,
-                padding: "6px 8px",
-                fontSize: 11,
-              }}
+              style={
+                sceneBounds
+                  ? {
+                      position: "absolute",
+                      left: 8,
+                      bottom: 8,
+                      right: 8,
+                      background: "var(--danger-dim)",
+                      color: "var(--danger-text)",
+                      border: "1px solid var(--danger-text)",
+                      borderRadius: 4,
+                      padding: "6px 8px",
+                      fontSize: 11,
+                      zIndex: 2,
+                    }
+                  : {
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--danger-text)",
+                      fontSize: 13,
+                      padding: 24,
+                      textAlign: "center",
+                      pointerEvents: "none",
+                      zIndex: 2,
+                    }
+              }
             >
-              Couldn&apos;t load the 3D mesh for{" "}
-              <strong>{selectedRenderable.element.label ?? selectedRenderable.element.id}</strong>
-              . The element list still highlights its row below.
+              {sceneBounds ? (
+                <>
+                  Couldn&apos;t load the 3D mesh for the selected element.
+                  The element list still highlights its row below.
+                </>
+              ) : (
+                <>
+                  Couldn&apos;t load the 3D mesh.
+                  {glbStatus.errorDetail ? (
+                    <>
+                      {" "}
+                      <span style={{ opacity: 0.85 }}>
+                        ({glbStatus.errorDetail})
+                      </span>
+                    </>
+                  ) : null}
+                  <br />
+                  <span style={{ fontSize: 11, opacity: 0.8 }}>
+                    {glbStatus.errorDetail.includes("permission denied") ||
+                    glbStatus.errorDetail.includes("403")
+                      ? "Fix GOOGLE_APPLICATION_CREDENTIALS (needs storage.objects.get on legacy-design-tools-prod-objects), restart api-server, refresh."
+                      : "Check that the API server is running (port 8080) and refresh."}
+                  </span>
+                </>
+              )}
             </div>
           )}
         </div>

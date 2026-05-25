@@ -801,7 +801,7 @@ async function runFindingGeneration(args: {
   const { submissionId, generationId, reqLog } = args;
   try {
     const inputs = await resolveEngineInputs(submissionId, reqLog);
-    const client = await getFindingLlmClient();
+    const llmClient = await getFindingLlmClient();
     const mode = getFindingLlmMode();
     reqLog.info(
       {
@@ -841,7 +841,12 @@ async function runFindingGeneration(args: {
       },
       {
         mode,
-        ...(client ? { anthropicClient: client } : {}),
+        ...(llmClient?.kind === "grok"
+          ? { grokClient: llmClient.client }
+          : {}),
+        ...(llmClient?.kind === "anthropic"
+          ? { anthropicClient: llmClient.client }
+          : {}),
       },
     );
 

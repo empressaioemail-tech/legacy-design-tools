@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Cortex — Logo Pack</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fg: #0d0d0d;
+    --bg: #fafaf7;
+    --muted: rgba(13,13,13,0.55);
+    --hair: rgba(13,13,13,0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 1080px; margin: 0 auto; padding: 80px 56px 120px; }
+
+  /* tiny mono meta */
+  .meta {
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  /* hero */
+  .hero {
+    padding: 88px 0 96px;
+    border-bottom: 1px solid var(--hair);
+    text-align: center;
+  }
+  .hero .mark {
+    font-size: 88px;
+    letter-spacing: 0.01em;
+    line-height: 1;
+  }
+  .hero .b { font-weight: 300; }
+  .hero .w { font-weight: 500; }
+  .hero .caption {
+    margin-top: 28px;
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  /* section header row */
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 64px 0 24px;
+  }
+  .section-head h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .section-head .count {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.14em;
+  }
+
+  /* swatch grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--hair);
+    border: 1px solid var(--hair);
+  }
+  .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+  .cell {
+    background: var(--bg);
+    padding: 56px 24px 28px;
+    display: flex; flex-direction: column; align-items: stretch; justify-content: space-between;
+    min-height: 220px;
+    position: relative;
+  }
+  .cell.dark { background: #0d0d0d; color: #fafaf7; }
+  .cell .display { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .cell .filename {
+    margin-top: 28px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: inherit;
+    opacity: 0.5;
+    text-align: left;
+    word-break: break-all;
+    border-top: 1px solid currentColor;
+    border-top-color: rgba(13,13,13,0.10);
+    padding-top: 10px;
+  }
+  .cell.dark .filename { border-top-color: rgba(250,250,247,0.10); }
+
+  /* the actual marks (rendered with the SAME CSS as the SVGs) */
+  .display .wm {
+    font-size: 44px;
+    letter-spacing: 0.01em;
+    line-height: 1;
+  }
+  .display .icon {
+    font-size: 56px;
+    letter-spacing: 0.01em;
+    line-height: 1;
+  }
+  .display .favglyph {
+    font-size: 56px;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .display .b { font-weight: 300; }
+  .display .w { font-weight: 500; }
+  .display .favglyph .w { font-weight: 600; }
+
+  /* in-context: simulated app surfaces */
+  .ctx-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+    margin-top: 24px;
+  }
+  .ctx {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--hair);
+    background: var(--bg);
+    aspect-ratio: 16 / 10;
+    display: flex; flex-direction: column;
+  }
+  .ctx.dark { background: #0d0d0d; color: #fafaf7; border-color: rgba(250,250,247,0.10); }
+  .ctx .chrome {
+    height: 30px;
+    border-bottom: 1px solid var(--hair);
+    display: flex; align-items: center; gap: 6px; padding: 0 12px;
+  }
+  .ctx.dark .chrome { border-bottom-color: rgba(250,250,247,0.10); }
+  .ctx .dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(13,13,13,0.18); }
+  .ctx.dark .dot { background: rgba(250,250,247,0.20); }
+  .ctx .stage {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .ctx .stage .wm { font-size: 28px; letter-spacing: 0.01em; line-height: 1; }
+
+  /* file list */
+  .files {
+    border: 1px solid var(--hair);
+    background: var(--bg);
+    padding: 0;
+  }
+  .files .row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--hair);
+    font-size: 12px;
+    gap: 16px;
+  }
+  .files .row:last-child { border-bottom: 0; }
+  .files .path { font-weight: 500; }
+  .files .desc { color: var(--muted); text-align: right; }
+
+  /* tokens */
+  .tokens { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .token {
+    border: 1px solid var(--hair);
+    padding: 18px 20px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .swatch { width: 36px; height: 36px; border-radius: 4px; border: 1px solid var(--hair); flex-shrink: 0; }
+  .token .info { flex: 1; min-width: 0; }
+  .token .info .name { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; }
+  .token .info .hex { font-size: 14px; font-weight: 500; }
+
+  /* footer */
+  footer {
+    margin-top: 96px; padding-top: 32px;
+    border-top: 1px solid var(--hair);
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  footer a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--hair); }
+
+  @media (max-width: 640px) {
+    .page { padding: 48px 24px 80px; }
+    .hero .mark { font-size: 56px; }
+    .grid { grid-template-columns: 1fr; }
+    .grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
+    .ctx-grid { grid-template-columns: 1fr; }
+    .tokens { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- hero -->
+  <section class="hero">
+    <div class="mark">
+      <span class="b">[ </span><span class="w">cortex</span><span class="b"> ]</span>
+    </div>
+    <div class="caption">Logo pack · v1.0</div>
+  </section>
+
+  <!-- wordmark -->
+  <div class="section-head">
+    <h2>Wordmark</h2>
+    <span class="count">02 variants · light + dark</span>
+  </div>
+  <div class="grid">
+    <div class="cell">
+      <div class="display">
+        <span class="wm"><span class="b">[ </span><span class="w">cortex</span><span class="b"> ]</span></span>
+      </div>
+      <div class="filename">svg/cortex-wordmark-light.svg</div>
+    </div>
+    <div class="cell dark">
+      <div class="display">
+        <span class="wm"><span class="b">[ </span><span class="w">cortex</span><span class="b"> ]</span></span>
+      </div>
+      <div class="filename">svg/cortex-wordmark-dark.svg</div>
+    </div>
+  </div>
+
+  <!-- icon -->
+  <div class="section-head">
+    <h2>Icon</h2>
+    <span class="count">02 variants · light + dark</span>
+  </div>
+  <div class="grid">
+    <div class="cell">
+      <div class="display">
+        <span class="icon"><span class="b">[</span><span class="w">c</span><span class="b">]</span></span>
+      </div>
+      <div class="filename">svg/cortex-icon-light.svg</div>
+    </div>
+    <div class="cell dark">
+      <div class="display">
+        <span class="icon"><span class="b">[</span><span class="w">c</span><span class="b">]</span></span>
+      </div>
+      <div class="filename">svg/cortex-icon-dark.svg</div>
+    </div>
+  </div>
+
+  <!-- favicon: same mark, optimized for small sizes -->
+  <div class="section-head">
+    <h2>Favicon</h2>
+    <span class="count">heavier weight · tighter tracking · designed for ≤32px</span>
+  </div>
+  <div class="grid cols-4">
+    <div class="cell" style="min-height: 140px; padding: 24px;">
+      <div class="display"><span class="favglyph" style="font-size: 80px;"><span class="b">[</span><span class="w">c</span><span class="b">]</span></span></div>
+      <div class="filename">@ 80px</div>
+    </div>
+    <div class="cell" style="min-height: 140px; padding: 24px;">
+      <div class="display"><span class="favglyph" style="font-size: 48px;"><span class="b">[</span><span class="w">c</span><span class="b">]</span></span></div>
+      <div class="filename">@ 48px</div>
+    </div>
+    <div class="cell" style="min-height: 140px; padding: 24px;">
+      <div class="display"><span class="favglyph" style="font-size: 32px;"><span class="b">[</span><span class="w">c</span><span class="b">]</span></span></div>
+      <div class="filename">@ 32px</div>
+    </div>
+    <div class="cell" style="min-height: 140px; padding: 24px;">
+      <div class="display"><span class="favglyph" style="font-size: 16px;"><span class="b">[</span><span class="w">c</span><span class="b">]</span></span></div>
+      <div class="filename">@ 16px</div>
+    </div>
+  </div>
+
+  <!-- in context -->
+  <div class="section-head">
+    <h2>In context</h2>
+    <span class="count">light + dark window surfaces</span>
+  </div>
+  <div class="ctx-grid">
+    <div class="ctx">
+      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      <div class="stage">
+        <span class="wm"><span class="b">[ </span><span class="w">cortex</span><span class="b"> ]</span></span>
+      </div>
+    </div>
+    <div class="ctx dark">
+      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      <div class="stage">
+        <span class="wm"><span class="b">[ </span><span class="w">cortex</span><span class="b"> ]</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- tokens -->
+  <div class="section-head">
+    <h2>Color tokens</h2>
+    <span class="count">monochrome · 2 surfaces</span>
+  </div>
+  <div class="tokens">
+    <div class="token">
+      <div class="swatch" style="background: #0d0d0d;"></div>
+      <div class="info"><div class="name">Ink</div><div class="hex">#0d0d0d</div></div>
+    </div>
+    <div class="token">
+      <div class="swatch" style="background: #fafaf7;"></div>
+      <div class="info"><div class="name">Paper</div><div class="hex">#fafaf7</div></div>
+    </div>
+  </div>
+
+  <!-- files -->
+  <div class="section-head">
+    <h2>Files</h2>
+    <span class="count">07 SVG · PNG via generator</span>
+  </div>
+  <div class="files">
+    <div class="row"><span class="path">svg/cortex-wordmark.svg</span><span class="desc">wordmark · currentColor · auto-adapting</span></div>
+    <div class="row"><span class="path">svg/cortex-wordmark-light.svg</span><span class="desc">wordmark · black</span></div>
+    <div class="row"><span class="path">svg/cortex-wordmark-dark.svg</span><span class="desc">wordmark · white</span></div>
+    <div class="row"><span class="path">svg/cortex-icon.svg</span><span class="desc">icon · currentColor</span></div>
+    <div class="row"><span class="path">svg/cortex-icon-light.svg</span><span class="desc">icon · black</span></div>
+    <div class="row"><span class="path">svg/cortex-icon-dark.svg</span><span class="desc">icon · white</span></div>
+    <div class="row"><span class="path">svg/favicon.svg</span><span class="desc">favicon · weight 600 · tighter spacing</span></div>
+    <div class="row"><span class="path">png-generator.html</span><span class="desc">open in browser to export PNGs</span></div>
+    <div class="row"><span class="path">README.md</span><span class="desc">usage notes · web · favicon · app icon</span></div>
+  </div>
+
+  <footer>
+    Font: JetBrains Mono · weights 300 / 500 / 600 · <a href="https://fonts.google.com/specimen/JetBrains+Mono" target="_blank" rel="noopener">fonts.google.com</a><br>
+    To export PNGs at any size, open <a href="png-generator.html">png-generator.html</a>
+  </footer>
+
+</div>
+
+</body>
+</html>

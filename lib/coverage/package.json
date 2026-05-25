@@ -1,0 +1,25 @@
+{
+  "name": "@workspace/coverage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./jurisdictionMatch": "./src/jurisdictionMatch.ts",
+    "./resolveEngagementCoverage": "./src/resolveEngagementCoverage.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@workspace/codes": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "typescript": "~5.9.2",
+    "vitest": "catalog:"
+  }
+}

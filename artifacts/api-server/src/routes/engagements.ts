@@ -12,6 +12,10 @@ import {
   UpdateEngagementBody,
 } from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
+import {
+  computeEngagementCoverage,
+  coverageFieldsFromResolved,
+} from "../lib/engagementCoverage";
 import { logger } from "../lib/logger";
 import { getHistoryService } from "../atoms/registry";
 import { autoTriggerFindingsOnSubmissionCreated } from "../lib/autoTriggerFindingsOnSubmissionCreated";
@@ -149,6 +153,17 @@ function buildArchitectOfRecord(e: EngagementRow) {
   };
 }
 
+function coverageWire(e: EngagementRow) {
+  return {
+    substrateJurisdictionKey: e.substrateJurisdictionKey ?? null,
+    cortexJurisdictionKey: e.cortexJurisdictionKey ?? null,
+    coverageStatus: e.coverageStatus ?? "unknown",
+    coverageRequestedAt: e.coverageRequestedAt
+      ? e.coverageRequestedAt.toISOString()
+      : null,
+  };
+}
+
 function toEngagementSummary(
   e: EngagementRow,
   count: number,
@@ -165,12 +180,27 @@ function toEngagementSummary(
     snapshotCount: count,
     latestSnapshot: latest,
     site: buildSite(e),
+    ...coverageWire(e),
     revitCentralGuid: e.revitCentralGuid,
     revitDocumentPath: e.revitDocumentPath,
     applicantFirm: e.applicantFirm,
     architectOfRecord: buildArchitectOfRecord(e),
     clientBrief: toClientBrief(e),
   };
+}
+
+async function mergeCoverageIntoUpdate(
+  update: Record<string, unknown>,
+  input: {
+    jurisdictionCity?: string | null;
+    jurisdictionState?: string | null;
+    jurisdictionFips?: string | null;
+    jurisdiction?: string | null;
+    address?: string | null;
+  },
+) {
+  const resolved = await computeEngagementCoverage(input);
+  Object.assign(update, coverageFieldsFromResolved(resolved));
 }
 
 router.get("/engagements", async (_req: Request, res: Response) => {
@@ -440,6 +470,16 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
               resolvedJurisdictionState = geo.jurisdictionState;
               resolvedJurisdictionFips = geo.jurisdictionFips;
             }
+            await mergeCoverageIntoUpdate(update, {
+              jurisdictionCity: geo.jurisdictionCity,
+              jurisdictionState: geo.jurisdictionState,
+              jurisdictionFips: geo.jurisdictionFips,
+              jurisdiction:
+                typeof update["jurisdiction"] === "string"
+                  ? update["jurisdiction"]
+                  : existing.jurisdiction,
+              address: trimmed,
+            });
           } else {
             warnings.push(
               "Geocoding didn't find this address — map view will be unavailable until corrected.",
@@ -547,6 +587,15 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
     try {
       resolvedGeo = await geocodeAddress(address);
       if (resolvedGeo) {
+        const coveragePatch = coverageFieldsFromResolved(
+          await computeEngagementCoverage({
+            jurisdictionCity: resolvedGeo.jurisdictionCity,
+            jurisdictionState: resolvedGeo.jurisdictionState,
+            jurisdictionFips: resolvedGeo.jurisdictionFips,
+            jurisdiction: existing.jurisdiction,
+            address,
+          }),
+        );
         await db
           .update(engagements)
           .set({
@@ -561,6 +610,7 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
               existing.siteContextRaw,
               resolvedGeo.raw ?? null,
             ),
+            ...coveragePatch,
             updatedAt: new Date(),
           })
           .where(eq(engagements.id, existing.id));

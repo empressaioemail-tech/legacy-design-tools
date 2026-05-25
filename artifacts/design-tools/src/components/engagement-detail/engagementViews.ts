@@ -121,6 +121,11 @@ export const VIEW_SEGMENTS: Record<EngagementViewId, ViewSegment[]> = {
       label: "Packages",
       testId: "engagement-tab-packages",
     },
+    {
+      tab: "client-materials",
+      label: "Client materials",
+      testId: "engagement-tab-client-materials",
+    },
     { tab: "sheets", label: "Sheets", testId: "engagement-tab-sheets" },
     {
       tab: "product-specs",
@@ -162,7 +167,7 @@ export function resolveTabFromSearchParams(params: URLSearchParams): TabId {
   if (legacyTab === "site-context") return "property-intel";
   if (legacyTab === "presentations") return "packages";
   if (legacyTab === "publish-prep") return "packages";
-  if (legacyTab === "client-materials") return "packages";
+  if (legacyTab === "client-materials") return "client-materials";
   if (legacyTab === "publish-launch") return "packages";
   if (legacyTab === "model-3d") return "snapshots";
   if (legacyTab === "detail-callouts") return "product-specs";
@@ -176,7 +181,7 @@ export function resolveTabFromSearchParams(params: URLSearchParams): TabId {
     if (segment === "presentations") return "packages";
     if (segment === "publish-launch") return "packages";
     if (segment === "publish-prep") return "packages";
-    if (segment === "client-materials") return "packages";
+    if (segment === "client-materials") return "client-materials";
     if (segment === "model-3d") return "snapshots";
     if (segment && isTabId(segment)) {
       if (TAB_TO_VIEW[segment] === view) return segment;
@@ -193,7 +198,6 @@ export function packageTemplateForTab(tab: TabId): PackageTemplateId | undefined
   if (tab === "publish-prep" || tab === "publish-launch") {
     return "publisher-handoff";
   }
-  if (tab === "client-materials") return "client-presentation";
   return undefined;
 }
 

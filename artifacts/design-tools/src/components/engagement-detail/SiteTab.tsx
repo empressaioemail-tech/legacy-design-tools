@@ -30,6 +30,11 @@ import {
   StatusPill,
 } from "@workspace/portal-ui";
 import type { TabId } from "./urlState";
+import {
+  coverageStatusLabel,
+  requestEngagementCoverage,
+  shouldShowRequestCoverage,
+} from "../../lib/coverageUi";
 import { SiteContextTab } from "./SiteContextTab";
 import { SiteContext3DModelToggle } from "./SiteContext3DModelToggle";
 import type { BuildingOverlayState } from "@workspace/portal-ui";
@@ -217,6 +222,45 @@ async function fetchSiteTopography(engagementId: string) {
     status: string;
     propertySet?: { contoursGeoJson?: unknown };
   };
+}
+
+function formatGenerateLayersError(err: unknown): string {
+  const apiErr = err as
+    | {
+        status?: number;
+        data?: { error?: string; message?: string } | null;
+      }
+    | undefined;
+  const data = apiErr?.data;
+  return (
+    data?.message ??
+    (err as { message?: string } | undefined)?.message ??
+    data?.error ??
+    "Could not refresh site layers. Check that the API server is running."
+  );
+}
+
+function summarizeGenerateLayersOutcomes(
+  outcomes: ReadonlyArray<{ status: string; fromCache?: boolean }>,
+): string {
+  if (outcomes.length === 0) {
+    return "Layer refresh finished.";
+  }
+  const ok = outcomes.filter((o) => o.status === "ok");
+  const failed = outcomes.filter((o) => o.status === "failed");
+  if (failed.length > 0 && ok.length === 0) {
+    return `Layer refresh failed (${failed.length} adapter${failed.length === 1 ? "" : "s"}). See Site layers for details.`;
+  }
+  const allCached =
+    ok.length > 0 && ok.every((o) => o.fromCache === true);
+  if (allCached) {
+    return "Layers are up to date (served from cache).";
+  }
+  const live = ok.filter((o) => o.fromCache !== true).length;
+  if (live > 0) {
+    return `Refreshed ${live} layer source${live === 1 ? "" : "s"}.`;
+  }
+  return "Layer refresh finished.";
 }
 
 interface ContextItemSpec {
@@ -553,6 +597,14 @@ export function SiteTab({
   const [, setLocation] = useLocation();
   const site = engagement.site;
   const geocode = site?.geocode ?? null;
+  const coverageStatus = (
+    engagement as EngagementDetailType & { coverageStatus?: string }
+  ).coverageStatus;
+  const coverageRequestedAt = (
+    engagement as EngagementDetailType & { coverageRequestedAt?: string | null }
+  ).coverageRequestedAt;
+  const [coverageBusy, setCoverageBusy] = useState(false);
+  const [coverageNotice, setCoverageNotice] = useState<string | null>(null);
 
   const briefingQuery = useGetEngagementBriefing(engagement.id, {
     query: {
@@ -562,22 +614,83 @@ export function SiteTab({
   });
   const briefing = briefingQuery.data?.briefing ?? null;
   const queryClient = useQueryClient();
+  const [mapRenderEpoch, setMapRenderEpoch] = useState(0);
+  const [layerRefreshNotice, setLayerRefreshNotice] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
+  const layerRefreshNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  const showLayerRefreshNotice = useCallback(
+    (tone: "success" | "error", message: string) => {
+      if (layerRefreshNoticeTimerRef.current) {
+        clearTimeout(layerRefreshNoticeTimerRef.current);
+      }
+      setLayerRefreshNotice({ tone, message });
+      layerRefreshNoticeTimerRef.current = setTimeout(() => {
+        setLayerRefreshNotice(null);
+        layerRefreshNoticeTimerRef.current = null;
+      }, 6000);
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      if (layerRefreshNoticeTimerRef.current) {
+        clearTimeout(layerRefreshNoticeTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const generateLayersMutation = useGenerateEngagementLayers({
     mutation: {
-      onSuccess: () => {
-        void queryClient.invalidateQueries({
+      onSuccess: async (data) => {
+        if (data.briefing) {
+          queryClient.setQueryData(
+            getGetEngagementBriefingQueryKey(engagement.id),
+            { briefing: data.briefing },
+          );
+        }
+        await queryClient.invalidateQueries({
           queryKey: getGetEngagementBriefingQueryKey(engagement.id),
         });
+        await queryClient.invalidateQueries({
+          queryKey: ["siteTopography", engagement.id],
+        });
+        setMapRenderEpoch((epoch) => epoch + 1);
+        showLayerRefreshNotice(
+          "success",
+          summarizeGenerateLayersOutcomes(data.outcomes),
+        );
+      },
+      onError: (err) => {
+        showLayerRefreshNotice("error", formatGenerateLayersError(err));
       },
     },
   });
 
   const handleForceRefreshLayers = useCallback(() => {
+    if (!geocode) {
+      showLayerRefreshNotice(
+        "error",
+        "Add a site address before refreshing map layers.",
+      );
+      return;
+    }
     generateLayersMutation.mutate({
       id: engagement.id,
       params: { forceRefresh: true },
     });
-  }, [engagement.id, generateLayersMutation]);
+  }, [
+    engagement.id,
+    generateLayersMutation,
+    geocode,
+    showLayerRefreshNotice,
+  ]);
 
   const topoQuery = useQuery({
     queryKey: ["siteTopography", engagement.id],
@@ -787,6 +900,54 @@ export function SiteTab({
         }
       />
 
+      {coverageStatus && coverageStatus !== "ready" && (
+        <div
+          className="alert-block warning rounded-md mb-3 flex flex-wrap items-center gap-3"
+          data-testid="site-coverage-banner"
+          style={{ fontSize: 12, padding: "10px 12px" }}
+        >
+          <span>
+            <strong>Code coverage:</strong> {coverageStatusLabel(coverageStatus)}
+            {coverageStatus === "not_in_catalog" && (
+              <> — No ingested code corpus for this location yet.</>
+            )}
+          </span>
+          {shouldShowRequestCoverage(coverageStatus) && (
+            <button
+              type="button"
+              className="sc-btn-secondary sc-btn-sm"
+              data-testid="site-request-coverage"
+              disabled={coverageBusy || !!coverageRequestedAt}
+              onClick={() => {
+                setCoverageBusy(true);
+                setCoverageNotice(null);
+                void requestEngagementCoverage(engagement.id)
+                  .then(() =>
+                    setCoverageNotice(
+                      "Coverage request queued. We will notify you when code is available.",
+                    ),
+                  )
+                  .catch((err: unknown) =>
+                    setCoverageNotice(
+                      err instanceof Error ? err.message : "Request failed",
+                    ),
+                  )
+                  .finally(() => setCoverageBusy(false));
+              }}
+            >
+              {coverageRequestedAt
+                ? "Coverage requested"
+                : coverageBusy
+                  ? "Requesting…"
+                  : "Request coverage"}
+            </button>
+          )}
+          {coverageNotice && (
+            <span className="sc-meta">{coverageNotice}</span>
+          )}
+        </div>
+      )}
+
       <div
         ref={workbenchRef}
         className="site-workbench flex flex-col flex-1 min-h-0"
@@ -803,6 +964,7 @@ export function SiteTab({
           }
         >
           <div className="site-hero-map-float" aria-label="Map view controls">
+            <div className="site-hero-map-float-tools">
             <button
               type="button"
               className="site-hero-float-btn"
@@ -839,11 +1001,19 @@ export function SiteTab({
             ) : null}
             <button
               type="button"
-              className="site-hero-float-btn"
-              onClick={handleForceRefreshLayers}
-              disabled={generateLayersMutation.isPending}
+              className={`site-hero-float-btn${generateLayersMutation.isPending ? " site-hero-float-btn--pending" : ""}`}
+              onClick={() => {
+                scrollToLayersPanel();
+                handleForceRefreshLayers();
+              }}
+              disabled={!geocode || generateLayersMutation.isPending}
               data-testid="site-tab-refresh"
-              title="Force refresh site layers"
+              title={
+                geocode
+                  ? "Force refresh site layers and map overlays"
+                  : "Add a site address to refresh layers"
+              }
+              aria-busy={generateLayersMutation.isPending}
             >
               <RefreshCw size={14} aria-hidden />
             </button>
@@ -870,6 +1040,17 @@ export function SiteTab({
             >
               <Expand size={14} aria-hidden />
             </button>
+            </div>
+            {layerRefreshNotice ? (
+              <div
+                className={`site-hero-map-float-notice site-hero-map-float-notice--${layerRefreshNotice.tone}`}
+                role="status"
+                aria-live="polite"
+                data-testid="site-tab-layer-refresh-notice"
+              >
+                {layerRefreshNotice.message}
+              </div>
+            ) : null}
           </div>
 
           {geocode && (
@@ -900,6 +1081,7 @@ export function SiteTab({
             <div className="site-hero-map-canvas">
               {canvasMode === "map" ? (
                 <SiteMap
+                  key={`site-map-${mapRenderEpoch}`}
                   latitude={mapPin!.latitude}
                   longitude={mapPin!.longitude}
                   addressLabel={site?.address ?? undefined}
@@ -1007,7 +1189,7 @@ export function SiteTab({
                   scrollToLayersPanel();
                   handleForceRefreshLayers();
                 }}
-                disabled={generateLayersMutation.isPending}
+                disabled={!geocode || generateLayersMutation.isPending}
                 data-testid="site-tab-generate-layers"
               >
                 <LayersIcon size={14} aria-hidden /> Generate layers

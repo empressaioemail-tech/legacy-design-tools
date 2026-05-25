@@ -10,8 +10,14 @@
     0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
+[data-theme="charcoal"] .sc-btn-primary.sc-btn-sm {
+  color: #111111;
+  background: #d4d4d4;
+  border-color: #d4d4d4;
+}
+
 [data-theme="charcoal"] .sc-btn-ghost,
-[data-theme="charcoal"] .sc-btn-sm {
+[data-theme="charcoal"] .sc-btn-sm:not(.sc-btn-primary):not(.sc-btn-alert) {
   color: #e5e5e5;
   border-color: rgba(255, 255, 255, 0.22);
   box-shadow:
@@ -20,7 +26,7 @@
 }
 
 [data-theme="charcoal"] .sc-btn-ghost:hover,
-[data-theme="charcoal"] .sc-btn-sm:hover {
+[data-theme="charcoal"] .sc-btn-sm:not(.sc-btn-primary):not(.sc-btn-alert):hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.32);
 }

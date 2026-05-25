@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useLocation } from "wouter";
 import {
   Box,
@@ -10,6 +17,7 @@ import {
   Settings as SettingsIcon,
 } from "lucide-react";
 import { isSettingsAreaPath } from "./settings/settingsNav";
+import { CockpitNavBrand } from "./CockpitNavBrand";
 import {
   ChromeThemeToggle,
   useSidebarState,
@@ -107,6 +115,9 @@ export interface CockpitShellProps {
   };
   /** Right-aligned header actions (e.g. Ask Claude / New Snapshot). */
   headerActions?: ReactNode;
+  /** Workspace firm logo URL; empty uses Cortex mark. */
+  navLogoUrl?: string | null;
+  navFirmDisplayName?: string;
 }
 
 function statusColor(status: string | null | undefined): string {
@@ -150,6 +161,8 @@ export function CockpitShell({
   navTrailing,
   projectRail,
   headerActions,
+  navLogoUrl,
+  navFirmDisplayName,
 }: CockpitShellProps) {
   const [location] = useLocation();
 
@@ -181,6 +194,15 @@ export function CockpitShell({
     [projectRail, searchQuery],
   );
 
+  const focusEngagementSearch = useCallback(() => {
+    if (!projectRail) return;
+    if (projectRailCollapsed) toggleProjectRail();
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+  }, [projectRail, projectRailCollapsed, toggleProjectRail]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -190,14 +212,12 @@ export function CockpitShell({
           return;
         }
         e.preventDefault();
-        if (projectRailCollapsed) toggleProjectRail();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        focusEngagementSearch();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [projectRailCollapsed, toggleProjectRail]);
+  }, [focusEngagementSearch]);
 
   useEffect(() => {
     if (searchQuery.trim() && engagementsCollapsed) {
@@ -321,29 +341,54 @@ export function CockpitShell({
           }}
         >
           {projectRailCollapsed ? (
-            <button
-              type="button"
-              onClick={toggleProjectRail}
-              className="cockpit-project-rail-stub"
-              aria-label="Expand projects rail"
-              title="Expand projects rail"
-              data-testid="cockpit-project-rail-toggle"
-            >
-              <ChevronRight size={14} />
-            </button>
+            <div className="cockpit-project-rail-collapsed">
+              <button
+                type="button"
+                onClick={toggleProjectRail}
+                className="cockpit-rail-collapse-btn cockpit-project-rail-stub"
+                aria-label="Expand sidebar"
+                title="Expand sidebar"
+                data-testid="cockpit-project-rail-toggle"
+              >
+                <ChevronRight size={14} />
+              </button>
+              <Link
+                href="/"
+                className="cockpit-nav-brand-icon"
+                aria-label="Cortex Home"
+                data-testid="cockpit-nav-brand-collapsed"
+              >
+                <CockpitNavBrand
+                  logoUrl={navLogoUrl}
+                  firmDisplayName={navFirmDisplayName}
+                  variant="icon"
+                />
+              </Link>
+            </div>
           ) : (
             <>
               <div className="cockpit-unified-rail-top">
                 <div className="cockpit-unified-rail-top-row">
+                  <button
+                    type="button"
+                    onClick={toggleProjectRail}
+                    className="cockpit-rail-collapse-btn"
+                    aria-label="Collapse sidebar"
+                    title="Collapse sidebar"
+                    data-testid="cockpit-project-rail-toggle"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
                   <Link
                     href="/"
-                    className="cockpit-nav-brand cockpit-nav-brand-labeled"
+                    className="cockpit-nav-brand-labeled"
                     aria-label="Cortex Home"
                   >
-                    <span className="cockpit-nav-brand-mark" aria-hidden="true">
-                      C
-                    </span>
-                    <span className="cockpit-nav-brand-text">Cortex</span>
+                    <CockpitNavBrand
+                      logoUrl={navLogoUrl}
+                      firmDisplayName={navFirmDisplayName}
+                      variant="wordmark"
+                    />
                   </Link>
                   <ChromeThemeToggle />
                 </div>
@@ -404,23 +449,7 @@ export function CockpitShell({
                     autoComplete="off"
                     spellCheck={false}
                   />
-                  <span className="cockpit-kbd" aria-hidden>
-                    ⌘
-                  </span>
-                  <span className="cockpit-kbd" aria-hidden>
-                    K
-                  </span>
                 </label>
-                <button
-                  type="button"
-                  onClick={toggleProjectRail}
-                  className="cockpit-rail-collapse-btn"
-                  aria-label="Collapse projects rail"
-                  title="Collapse projects rail"
-                  data-testid="cockpit-project-rail-toggle"
-                >
-                  <ChevronLeft size={14} />
-                </button>
               </div>
               <div className="cockpit-project-rail-list sc-scroll">
                 <button

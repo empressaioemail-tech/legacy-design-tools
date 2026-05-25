@@ -1,12 +1,16 @@
 import * as THREE from "three";
+import {
+  computeCubeGroupQuaternionFromMainCamera,
+  type Vec3Like,
+} from "./viewCubeCamera";
 import { faceIdFromWorldNormal, type ViewCubeFaceId } from "./viewCubeModel";
 
 /**
  * Mini WebGL ViewCube — Z-up BIM axes (matches BimModelViewport):
  *   TOP +Z, FRONT −Y, RIGHT +X, compass N = −Y on the ground (XY) plane.
  *
- * Cube orientation = inverse(mainCamera.quaternion) so visible faces occlude
- * correctly and at most ~3 labeled faces show at once.
+ * Cube orientation = stabilized (viewDir, up) mirror of the main camera so
+ * labels stay roll-consistent; compass yaw is derived from that quaternion.
  */
 
 const FACE_LABELS: Record<ViewCubeFaceId, string> = {
@@ -95,7 +99,6 @@ export class ViewCubeRenderer {
   private readonly cubeMesh: THREE.Mesh;
   private readonly compassGroup: THREE.Group;
   private readonly compassRing: THREE.Mesh;
-  private readonly invertQuat = new THREE.Quaternion();
   private readonly yawEuler = new THREE.Euler(0, 0, 0, "ZYX");
   private readonly hitTargets: THREE.Object3D[] = [];
   private readonly size: { w: number; h: number };
@@ -228,13 +231,17 @@ export class ViewCubeRenderer {
     }
   }
 
-  setOrientationFromMainCamera(mainCamera: THREE.Camera): void {
-    this.invertQuat.copy(mainCamera.quaternion).invert();
-    this.cubeGroup.quaternion.copy(this.invertQuat);
+  setOrientationFromMainCamera(
+    mainCamera: THREE.PerspectiveCamera,
+    orbitTarget: Vec3Like,
+  ): void {
+    this.cubeGroup.quaternion.copy(
+      computeCubeGroupQuaternionFromMainCamera(mainCamera, orbitTarget),
+    );
 
     // Compass stays on the ground plane: yaw-only spin so N/E/S/W track heading
     // without pitching up to the top face when the main view is plan (TOP).
-    this.yawEuler.setFromQuaternion(this.invertQuat, "ZYX");
+    this.yawEuler.setFromQuaternion(this.cubeGroup.quaternion, "ZYX");
     this.compassRoot.rotation.set(0, 0, this.yawEuler.z);
   }
 
@@ -314,15 +321,8 @@ export class ViewCubeRenderer {
   }
 
   updateHover(clientX: number, clientY: number): void {
-    const hits = this.intersect(clientX, clientY);
-    for (const hit of hits) {
-      if (hit.object === this.cubeMesh && hit.face) {
-        const idx = hit.face.materialIndex ?? 0;
-        this.setHoverFace(MATERIAL_TO_FACE[idx] ?? null);
-        return;
-      }
-    }
-    this.setHoverFace(null);
+    const face = this.raycastFace(clientX, clientY);
+    this.setHoverFace(face);
   }
 
   render(): void {

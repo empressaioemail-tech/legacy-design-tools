@@ -12,11 +12,14 @@ export function CanvaConnectionBanner({
   onConnect,
   onDisconnect,
   onReconnect,
+  connecting = false,
 }: {
   status: CanvaConnectionStatus;
   onConnect?: () => void;
   onDisconnect?: () => void;
   onReconnect?: () => void;
+  /** Disables connect/reconnect while OAuth or dev-connect is in flight. */
+  connecting?: boolean;
 }) {
   if (status.state === "connected") {
     return (
@@ -59,9 +62,10 @@ export function CanvaConnectionBanner({
             type="button"
             className="sc-btn-primary sc-btn-sm"
             data-testid="canva-reconnect"
+            disabled={connecting}
             onClick={onReconnect ?? onConnect}
           >
-            Reconnect Canva
+            {connecting ? "Connecting…" : "Reconnect Canva"}
           </button>
         }
       />
@@ -105,9 +109,10 @@ export function CanvaConnectionBanner({
           type="button"
           className="sc-btn-primary sc-btn-sm"
           data-testid="canva-connect"
+          disabled={connecting || !onConnect}
           onClick={onConnect}
         >
-          Connect Canva account
+          {connecting ? "Connecting…" : "Connect Canva account"}
         </button>
       }
     />
@@ -142,7 +147,9 @@ function StatusBanner({
         <div className="canva-connection-banner-title">{title}</div>
         <p className="canva-connection-banner-body">{body}</p>
       </div>
-      <div className="canva-connection-banner-actions">{action}</div>
+      <div className="canva-connection-banner-actions" data-testid="canva-connection-banner-actions">
+        {action}
+      </div>
     </div>
   );
 }

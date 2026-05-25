@@ -16,6 +16,10 @@ import {
 } from "./CockpitShell";
 import { GlobalClaudePanel } from "./GlobalClaudePanel";
 import { relativeTime } from "../lib/relativeTime";
+import {
+  useApplyWorkspaceAccent,
+  useWorkspaceSettings,
+} from "../lib/useWorkspaceSettings";
 
 interface AppShellProps {
   title?: string;
@@ -45,6 +49,8 @@ export function AppShell({
 }: AppShellProps) {
   const params = useParams<{ id?: string }>();
   const activeProjectId = params.id ?? null;
+  const { data: workspaceSettings } = useWorkspaceSettings();
+  useApplyWorkspaceAccent(workspaceSettings);
 
   const { data: engagementsData } = useListEngagements({
     query: {
@@ -111,6 +117,8 @@ export function AppShell({
       secondaryNav={undefined}
       navTrailing={<AuthChip />}
       projectRail={projectRail}
+      navLogoUrl={workspaceSettings?.logoUrl}
+      navFirmDisplayName={workspaceSettings?.firmDisplayName}
     >
       {children}
     </CockpitShell>

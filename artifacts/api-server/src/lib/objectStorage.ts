@@ -30,7 +30,15 @@ const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
  */
 const isCloudRun = Boolean(process.env.K_SERVICE);
 
-export const objectStorageClient = isCloudRun
+/**
+ * Cloud Run and local Windows/mac dev with `GOOGLE_APPLICATION_CREDENTIALS`
+ * use the GCS SDK + ADC. Replit alone uses the localhost object-storage
+ * sidecar at :1106 — without ADC that path 500s on GLB serve routes.
+ */
+export const usesGcsApplicationDefaultCredentials =
+  isCloudRun || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
+export const objectStorageClient = usesGcsApplicationDefaultCredentials
   ? new Storage()
   : new Storage({
       credentials: {
@@ -56,6 +64,32 @@ export class ObjectNotFoundError extends Error {
     this.name = "ObjectNotFoundError";
     Object.setPrototypeOf(this, ObjectNotFoundError.prototype);
   }
+}
+
+/** GCS returned 403 — credentials work but lack `storage.objects.get` on the object. */
+export class ObjectStorageAccessDeniedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ObjectStorageAccessDeniedError";
+    Object.setPrototypeOf(this, ObjectStorageAccessDeniedError.prototype);
+  }
+}
+
+export function asObjectStorageReadError(err: unknown): Error {
+  const code = (err as { code?: number } | null)?.code;
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  if (
+    code === 403 ||
+    /storage\.objects\.get/i.test(message) ||
+    /Permission .* denied/i.test(message)
+  ) {
+    const creds =
+      process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim() || "Application Default Credentials";
+    return new ObjectStorageAccessDeniedError(
+      `GCS read denied (${creds}). Grant storage.objects.get on gs://legacy-design-tools-prod-objects to this service account, or use api-server-runtime credentials — see docs/local-dev-windows.md.`,
+    );
+  }
+  return err instanceof Error ? err : new Error(message);
 }
 
 export class ObjectStorageService {
@@ -191,7 +225,7 @@ export class ObjectStorageService {
       if (code === 404) {
         throw new ObjectNotFoundError();
       }
-      throw err;
+      throw asObjectStorageReadError(err);
     }
     return Buffer.concat(chunks);
   }
@@ -506,8 +540,8 @@ async function signObjectURL({
   method: "GET" | "PUT" | "DELETE" | "HEAD";
   ttlSec: number;
 }): Promise<string> {
-  if (isCloudRun) {
-    // Cloud Run: sign via the GCS SDK. V4 signing without a local
+  if (usesGcsApplicationDefaultCredentials) {
+    // Cloud Run / local ADC: sign via the GCS SDK. V4 signing without a local
     // key file delegates to the IAM `signBlob` API — the runtime
     // service account needs `roles/iam.serviceAccountTokenCreator`
     // on itself (see the C.2.3 IAM setup). HEAD shares the read

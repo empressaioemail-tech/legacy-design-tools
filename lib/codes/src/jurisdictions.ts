@@ -78,6 +78,26 @@ export const JURISDICTIONS: Record<string, JurisdictionConfig> = {
       },
     ],
   },
+  cedar_hill_tx: {
+    key: "cedar_hill_tx",
+    displayName: "Cedar Hill, TX",
+    books: [
+      {
+        label: "City of Cedar Hill — Code of Ordinances",
+        codeBook: "MUNI_CODE",
+        edition: "Code of Ordinances (current)",
+        sourceName: "cedar_hill_municode",
+        config: {
+          municodeClientId: 1568,
+          municodeProductId: 11825,
+          municipalityName: "Cedar Hill",
+          stateAbbr: "TX",
+          librarySlug: "cedar_hill",
+          maxTocNodes: 40,
+        },
+      },
+    ],
+  },
 };
 
 /**
@@ -94,6 +114,10 @@ const CITY_STATE_TO_KEY: Record<string, string> = {
   // Bastrop, TX
   "bastrop|tx": "bastrop_tx",
   "bastrop|texas": "bastrop_tx",
+  // Cedar Hill, TX — QA-58 / QA-60 (city municipal code; 706 atoms shipped)
+  "cedar hill|tx": "cedar_hill_tx",
+  "cedar hill|texas": "cedar_hill_tx",
+  // Blocked — do not map: dallas|tx (AmLegal partnership), dallas county|tx (no Municode product)
 };
 
 /**

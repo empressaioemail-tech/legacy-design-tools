@@ -133,9 +133,9 @@
   --overlay-glass-border: var(--border-default);
 }
 
-/* Muted light chrome — not paper-white */
+/* Muted light — surfaces and chrome share the same warm-grey family */
 [data-theme="soft-light"] {
-  --bg-chrome: #2a2a2e;
+  --bg-chrome: #ededf0;
   --bg-base: #e8e8eb;
   --bg-surface: #ededf0;
   --bg-elevated: #f3f3f5;
@@ -151,10 +151,10 @@
   --text-secondary: #5a5a63;
   --text-muted: #8a8a95;
   --text-inverse: #ffffff;
-  --chrome-text: #ececec;
-  --chrome-text-sec: #b0b0b8;
-  --chrome-text-muted: #7a7a85;
-  --chrome-border: rgba(255, 255, 255, 0.08);
+  --chrome-text: #1c1c1f;
+  --chrome-text-sec: #5a5a63;
+  --chrome-text-muted: #8a8a95;
+  --chrome-border: rgba(0, 0, 0, 0.10);
   --nav-active-border: #6398aa;
   --brand-glyph-fill: #6398aa;
   --cyan: #0284c7;
@@ -203,7 +203,7 @@
 }
 
 [data-theme="light"] {
-  --bg-chrome: #1e2a35;
+  --bg-chrome: #f4f7fa;
   --bg-base: #eef2f6;
   --bg-surface: #f4f7fa;
   --bg-elevated: #ffffff;
@@ -219,10 +219,10 @@
   --text-secondary: #4a6278;
   --text-muted: #94a8b8;
   --text-inverse: #ffffff;
-  --chrome-text: #e2edf5;
-  --chrome-text-sec: #8aa8be;
-  --chrome-text-muted: #4a6278;
-  --chrome-border: rgba(160, 220, 255, 0.09);
+  --chrome-text: #0f2035;
+  --chrome-text-sec: #4a6278;
+  --chrome-text-muted: #94a8b8;
+  --chrome-border: rgba(30, 60, 90, 0.11);
   --cyan: #0284c7;
   --cyan-bright: #0ea5e9;
   --cyan-dim: rgba(2, 132, 199, 0.09);

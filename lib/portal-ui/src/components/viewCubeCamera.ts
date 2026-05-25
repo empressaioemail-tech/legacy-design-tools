@@ -12,6 +12,10 @@ export interface Vec3Like {
 }
 
 const Z_UP = new THREE.Vector3(0, 0, 1);
+const _stableEye = new THREE.Vector3();
+const _stableTarget = new THREE.Vector3();
+const _stableUp = new THREE.Vector3();
+const _stableMatrix = new THREE.Matrix4();
 
 /** Unit vector from orbit target toward the camera. */
 export function computeViewDirection(
@@ -59,6 +63,89 @@ function applyCameraUp(
   }
 }
 
+/**
+ * Re-apply lookAt with BIM-stable camera.up derived from the current view
+ * direction (target → camera). Use after every programmatic camera move.
+ */
+export function applyStableCameraView(
+  camera: THREE.PerspectiveCamera,
+  target: Vec3Like,
+): void {
+  const dir = computeViewDirection(
+    { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+    target,
+  );
+  const up = resolveCameraUpForDirection(dir);
+  applyCameraUp(camera, up);
+  _stableEye.copy(camera.position);
+  _stableTarget.set(target.x, target.y, target.z);
+  _stableUp.set(up[0], up[1], up[2]);
+  _stableMatrix.lookAt(_stableEye, _stableTarget, _stableUp);
+  camera.quaternion.setFromRotationMatrix(_stableMatrix);
+  applyCameraUp(camera, up);
+}
+
+/** Apply stable camera.up then resync OrbitControls internal state (post-snap / post-drag). */
+export function syncCameraAndControls(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+): void {
+  applyStableCameraView(camera, controls.target);
+  controls.update();
+}
+
+const _cubeSyncPose = new THREE.Object3D();
+
+/**
+ * ViewCube body orientation from stabilized (viewDir, up) — roll is fixed by
+ * {@link resolveCameraUpForDirection}, not copied from the live quaternion.
+ */
+export function computeCubeGroupQuaternion(
+  viewDir: [number, number, number],
+  up: [number, number, number],
+): THREE.Quaternion {
+  _cubeSyncPose.position.set(viewDir[0], viewDir[1], viewDir[2]);
+  _cubeSyncPose.up.set(up[0], up[1], up[2]);
+  _cubeSyncPose.lookAt(0, 0, 0);
+  return _cubeSyncPose.quaternion.clone().invert();
+}
+
+/** Stabilized cube mirror for the main viewport camera + orbit target. */
+export function computeCubeGroupQuaternionFromCamera(
+  camera: Vec3Like,
+  target: Vec3Like,
+): THREE.Quaternion {
+  const viewDir = computeViewDirection(camera, target);
+  const up = resolveCameraUpForDirection(viewDir);
+  return computeCubeGroupQuaternion(viewDir, up);
+}
+
+/** ViewCube group orientation — always derived from position + target, not raw quat. */
+export function computeCubeGroupQuaternionFromMainCamera(
+  camera: THREE.PerspectiveCamera,
+  target: Vec3Like,
+): THREE.Quaternion {
+  return computeCubeGroupQuaternionFromCamera(camera.position, target);
+}
+
+/** Place camera on a standard view and sync controls (face / HUD snap). */
+export function snapCameraToView(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  direction: [number, number, number],
+  distance: number,
+): void {
+  const { position, target } = snapCameraToDirectionVector(
+    camera,
+    controls,
+    direction,
+    distance,
+  );
+  camera.position.set(position.x, position.y, position.z);
+  controls.target.set(target.x, target.y, target.z);
+  syncCameraAndControls(camera, controls);
+}
+
 /** Smoothly move camera + target over `durationMs` (default 300). */
 export function tweenCameraToView(
   camera: THREE.PerspectiveCamera,
@@ -98,12 +185,11 @@ export function tweenCameraToView(
       startTarget.y + (endTarget.y - startTarget.y) * e,
       startTarget.z + (endTarget.z - startTarget.z) * e,
     );
-    applyCameraUp(camera, endUp);
-    camera.lookAt(controls.target.x, controls.target.y, controls.target.z);
-    controls.update();
+    syncCameraAndControls(camera, controls);
     if (t < 1) {
       frame = requestAnimationFrame(tick);
     } else {
+      syncCameraAndControls(camera, controls);
       onComplete?.();
     }
   };
@@ -120,7 +206,10 @@ export function tweenCameraToView(
 /** Snappier ViewCube drag — Z-up orbit math (not THREE.Spherical, which is Y-up). */
 export const VIEW_CUBE_ORBIT_ROTATE_SPEED = 0.011;
 
-/** Orbit the camera around `controls.target` in a Z-up world. */
+/** Stay off straight top/bottom poles (elevation ±π/2 in Z-up spherical). */
+const MAX_ELEVATION = Math.PI / 2 - 0.06;
+
+/** Orbit the camera around `controls.target` in a Z-up world (true Z-pole spherical). */
 export function applyOrbitDrag(
   camera: THREE.PerspectiveCamera,
   controls: OrbitControls,
@@ -129,33 +218,28 @@ export function applyOrbitDrag(
   rotateSpeed = VIEW_CUBE_ORBIT_ROTATE_SPEED,
 ): void {
   const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-  if (offset.lengthSq() < 1e-10) return;
+  const radius = offset.length();
+  if (radius < 1e-10) return;
 
-  // Horizontal: spin around world Z (matches compass / plan rotation).
-  offset.applyAxisAngle(Z_UP, -deltaX * rotateSpeed);
+  const azimuth = Math.atan2(offset.y, offset.x);
+  const elevation = Math.atan2(offset.z, Math.hypot(offset.x, offset.y));
 
-  // Vertical: elevate around axis ⊥ (Z × view).
-  const viewDir = offset.clone().normalize();
-  const elevationAxis = new THREE.Vector3().crossVectors(Z_UP, viewDir);
-  if (elevationAxis.lengthSq() > 1e-8) {
-    elevationAxis.normalize();
-    offset.applyAxisAngle(elevationAxis, -deltaY * rotateSpeed);
-  }
+  const nextAzimuth = azimuth - deltaX * rotateSpeed;
+  const nextElevation = Math.max(
+    -MAX_ELEVATION,
+    Math.min(MAX_ELEVATION, elevation - deltaY * rotateSpeed),
+  );
 
-  // Prevent camera crossing the XY plane (flip / gimbal).
-  const horiz = Math.hypot(offset.x, offset.y);
-  const minHoriz = 0.08;
-  if (horiz < minHoriz) {
-    const sign = offset.z >= 0 ? 1 : -1;
-    offset.x = minHoriz;
-    offset.y = 0;
-    offset.z = sign * Math.abs(offset.z || minHoriz);
-  }
+  const cosElev = Math.cos(nextElevation);
+  const sinElev = Math.sin(nextElevation);
+  offset.set(
+    radius * cosElev * Math.cos(nextAzimuth),
+    radius * cosElev * Math.sin(nextAzimuth),
+    radius * sinElev,
+  );
 
   camera.position.copy(controls.target).add(offset);
-  camera.up.set(0, 0, 1);
-  camera.lookAt(controls.target);
-  controls.update();
+  syncCameraAndControls(camera, controls);
 }
 
 /** Rotate heading only (compass): spin around world Z. */
@@ -167,9 +251,7 @@ export function applyCompassHeadingDrag(
   const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
   offset.applyAxisAngle(Z_UP, deltaRadians);
   camera.position.copy(controls.target).add(offset);
-  camera.up.set(0, 0, 1);
-  camera.lookAt(controls.target);
-  controls.update();
+  syncCameraAndControls(camera, controls);
 }
 
 /** Snap so the given world horizontal direction faces the camera (−Y = front = N). */
@@ -192,11 +274,9 @@ export function snapCompassCardinal(
     dir,
     dist,
   );
-  applyCameraUp(camera, resolveCameraUpForDirection(dir));
   camera.position.set(position.x, position.y, position.z);
   controls.target.set(target.x, target.y, target.z);
-  camera.lookAt(controls.target);
-  controls.update();
+  syncCameraAndControls(camera, controls);
 }
 
 export function snapCameraToDirectionVector(
@@ -210,7 +290,6 @@ export function snapCameraToDirectionVector(
   const tz = controls.target.z;
   const [vx, vy, vz] = direction;
   const len = Math.hypot(vx, vy, vz) || 1;
-  applyCameraUp(camera, resolveCameraUpForDirection(direction));
   return {
     position: {
       x: tx + (vx / len) * distance,

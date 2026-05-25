@@ -17,9 +17,16 @@ const VIEW_CUBE_DRAG_SLOP_PX = 2;
 
 export type { ViewCubeRegionId } from "./viewCubeModel";
 
+/** Minimal OrbitControls surface for cube sync (needs target, not full controls). */
+export type ViewCubeOrbitControlsRef = RefObject<{
+  target: THREE.Vector3;
+} | null>;
+
 export interface ViewCubeWidgetProps {
-  /** Live main viewport camera — cube mirrors its inverse quaternion each frame. */
+  /** Live main viewport camera. */
   mainCamera: RefObject<THREE.Camera | null>;
+  /** Orbit target — cube mirror uses viewDir + stabilized up (Tier 2). */
+  orbitControls: ViewCubeOrbitControlsRef;
   onSelectRegion: (region: ViewCubeRegionId) => void;
   onOrbitDrag?: (deltaX: number, deltaY: number) => void;
   onOrbitDragStart?: () => void;
@@ -33,10 +40,11 @@ export interface ViewCubeWidgetProps {
 
 /**
  * Revit-style ViewCube — real BoxGeometry mesh in a mini WebGL canvas.
- * Bi-directional sync via inverse main-camera quaternion; face clicks via raycast.
+ * Bi-directional sync via stabilized view direction + up; face clicks via raycast.
  */
 export function ViewCubeWidget({
   mainCamera,
+  orbitControls,
   onSelectRegion,
   onOrbitDrag,
   onOrbitDragStart,
@@ -69,8 +77,9 @@ export function ViewCubeWidget({
     let frame = 0;
     const loop = () => {
       const cam = mainCamera.current;
-      if (cam) {
-        cubeRenderer.setOrientationFromMainCamera(cam);
+      const controls = orbitControls.current;
+      if (cam && controls) {
+        cubeRenderer.setOrientationFromMainCamera(cam, controls.target);
       }
       cubeRenderer.render();
       frame = requestAnimationFrame(loop);
@@ -82,7 +91,7 @@ export function ViewCubeWidget({
       cubeRenderer.dispose();
       rendererRef.current = null;
     };
-  }, [mainCamera, disabled]);
+  }, [mainCamera, orbitControls, disabled]);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {

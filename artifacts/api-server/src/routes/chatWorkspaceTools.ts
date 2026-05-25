@@ -9,7 +9,7 @@ import {
   atomEvents,
   architectNotificationReads,
 } from "@workspace/db";
-import { desc, eq, sql, and, gt } from "drizzle-orm";
+import { desc, eq, sql, and, gt, inArray } from "drizzle-orm";
 import type { Scope } from "@hauska/atom-contract";
 import type { AgentToolDefinition } from "./chatAgentTools";
 import { logger } from "../lib/logger";
@@ -52,6 +52,26 @@ function asJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/** One query for many engagements — avoids N+1 before workspace chat streams. */
+export async function snapshotCountsForEngagements(
+  engagementIds: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (engagementIds.length === 0) return counts;
+  const rows = await db
+    .select({
+      engagementId: snapshots.engagementId,
+      count: sql<number>`cast(count(*) as int)`,
+    })
+    .from(snapshots)
+    .where(inArray(snapshots.engagementId, engagementIds))
+    .groupBy(snapshots.engagementId);
+  for (const row of rows) {
+    counts.set(row.engagementId, Number(row.count) || 0);
+  }
+  return counts;
+}
+
 export function buildWorkspaceAgentToolGuidance(input: {
   activeTab: string | null;
 }): string {
@@ -73,27 +93,22 @@ async function handleListEngagements(): Promise<ToolRunResult> {
     .orderBy(desc(engagements.updatedAt))
     .limit(MAX_LIST_ROWS);
 
-  const enriched = await Promise.all(
-    rows.map(async (e) => {
-      const [{ count }] = await db
-        .select({ count: sql<number>`cast(count(*) as int)` })
-        .from(snapshots)
-        .where(eq(snapshots.engagementId, e.id));
-      const snapCount = Number(count) || 0;
-      return {
-        id: e.id,
-        name: e.name,
-        status: e.status,
-        address: e.address,
-        jurisdiction: e.jurisdiction,
-        snapshotCount: snapCount,
-        updatedAt: e.updatedAt.toISOString(),
-        needsAttention:
-          e.status === "active" &&
-          (!e.address?.trim() || snapCount === 0 || !e.geocodedAt),
-      };
-    }),
-  );
+  const snapCounts = await snapshotCountsForEngagements(rows.map((e) => e.id));
+  const enriched = rows.map((e) => {
+    const snapCount = snapCounts.get(e.id) ?? 0;
+    return {
+      id: e.id,
+      name: e.name,
+      status: e.status,
+      address: e.address,
+      jurisdiction: e.jurisdiction,
+      snapshotCount: snapCount,
+      updatedAt: e.updatedAt.toISOString(),
+      needsAttention:
+        e.status === "active" &&
+        (!e.address?.trim() || snapCount === 0 || !e.geocodedAt),
+    };
+  });
 
   return {
     resultText: asJson({

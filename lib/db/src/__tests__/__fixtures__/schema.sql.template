@@ -1988,5 +1988,114 @@ ALTER TABLE ONLY @@SCHEMA@@.viewpoint_renders
     ADD CONSTRAINT viewpoint_renders_parent_render_output_id_render_outputs_id_fk FOREIGN KEY (parent_render_output_id) REFERENCES @@SCHEMA@@.render_outputs(id) ON DELETE SET NULL;
 
 
+-- Canva Connect (0020) + Placid collateral (0025) — appended for route tests
+
+CREATE TABLE @@SCHEMA@@.canva_connections (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id text DEFAULT 'default' NOT NULL,
+    owner_user_id text NOT NULL,
+    access_token text NOT NULL,
+    refresh_token text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    display_name text NOT NULL,
+    avatar_url text,
+    connected_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE @@SCHEMA@@.canva_oauth_states (
+    state text NOT NULL,
+    code_verifier text NOT NULL,
+    owner_user_id text NOT NULL,
+    tenant_id text DEFAULT 'default' NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE @@SCHEMA@@.canva_push_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    step text DEFAULT 'preparing' NOT NULL,
+    progress_label text NOT NULL,
+    request jsonb NOT NULL,
+    design_url text,
+    design_thumbnail_url text,
+    error_code text,
+    error_message text,
+    canva_autofill_job_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE @@SCHEMA@@.canva_design_pushes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    push_job_id uuid,
+    template_id text NOT NULL,
+    template_name text NOT NULL,
+    status text DEFAULT 'uploading' NOT NULL,
+    thumbnail_url text,
+    design_url text,
+    source_asset_ids jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE @@SCHEMA@@.collateral_export_jobs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    tenant_id text DEFAULT 'default' NOT NULL,
+    step text DEFAULT 'preparing' NOT NULL,
+    progress_label text NOT NULL,
+    request jsonb NOT NULL,
+    download_url text,
+    thumbnail_url text,
+    error_code text,
+    error_message text,
+    placid_pdf_id text,
+    credits_estimated integer,
+    credits_actual integer,
+    provider text DEFAULT 'placid' NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE @@SCHEMA@@.collateral_exports (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    export_job_id uuid,
+    template_pack_id text NOT NULL,
+    template_name text NOT NULL,
+    status text DEFAULT 'rendering' NOT NULL,
+    download_url text,
+    thumbnail_url text,
+    source_asset_ids jsonb DEFAULT '[]'::jsonb NOT NULL,
+    credits_charged integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE @@SCHEMA@@.collateral_metering_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id text DEFAULT 'default' NOT NULL,
+    engagement_id uuid NOT NULL,
+    export_job_id uuid NOT NULL,
+    units integer NOT NULL,
+    provider text DEFAULT 'placid' NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY @@SCHEMA@@.canva_connections ADD CONSTRAINT canva_connections_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY @@SCHEMA@@.canva_oauth_states ADD CONSTRAINT canva_oauth_states_pkey PRIMARY KEY (state);
+ALTER TABLE ONLY @@SCHEMA@@.canva_push_jobs ADD CONSTRAINT canva_push_jobs_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY @@SCHEMA@@.canva_design_pushes ADD CONSTRAINT canva_design_pushes_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY @@SCHEMA@@.collateral_export_jobs ADD CONSTRAINT collateral_export_jobs_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY @@SCHEMA@@.collateral_exports ADD CONSTRAINT collateral_exports_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY @@SCHEMA@@.collateral_metering_events ADD CONSTRAINT collateral_metering_events_pkey PRIMARY KEY (id);
+
+CREATE INDEX canva_connections_tenant_owner_idx ON @@SCHEMA@@.canva_connections (tenant_id, owner_user_id);
+CREATE INDEX canva_oauth_states_created_idx ON @@SCHEMA@@.canva_oauth_states (created_at);
+CREATE INDEX canva_push_jobs_engagement_created_idx ON @@SCHEMA@@.canva_push_jobs (engagement_id, created_at);
+CREATE INDEX canva_design_pushes_engagement_created_idx ON @@SCHEMA@@.canva_design_pushes (engagement_id, created_at);
+CREATE INDEX collateral_export_jobs_engagement_created_idx ON @@SCHEMA@@.collateral_export_jobs (engagement_id, created_at);
+CREATE INDEX collateral_exports_engagement_created_idx ON @@SCHEMA@@.collateral_exports (engagement_id, created_at);
+CREATE INDEX collateral_metering_events_engagement_idx ON @@SCHEMA@@.collateral_metering_events (engagement_id, created_at);
 
 

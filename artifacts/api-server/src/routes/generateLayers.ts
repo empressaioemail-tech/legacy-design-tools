@@ -63,6 +63,8 @@ import {
   BRIEFING_SOURCE_EVENT_TYPES,
   type BriefingSourceEventType,
 } from "../atoms/briefing-source.atom";
+import { filterAdaptersByPreferences } from "../lib/workspacePreferences";
+import { loadWorkspacePreferences } from "../lib/loadWorkspacePreferences";
 
 /**
  * Pinned to the briefing-source atom's event-type union so a rename
@@ -532,7 +534,11 @@ router.post(
     // the helper imports from `./registry` directly to avoid an
     // internal circular import, which would bypass that mock if we let
     // it default.
-    const applicable = filterApplicableAdapters(ctx, ALL_ADAPTERS);
+    const workspacePrefs = await loadWorkspacePreferences();
+    const applicable = filterAdaptersByPreferences(
+      filterApplicableAdapters(ctx, ALL_ADAPTERS),
+      workspacePrefs,
+    );
     if (applicable.length === 0) {
       res.status(422).json({
         error: "no_applicable_adapters",

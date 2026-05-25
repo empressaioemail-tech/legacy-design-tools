@@ -34,6 +34,8 @@ export { parseSectionResponse, htmlToPlainText } from "./parser";
 interface MunicodeAdapterConfig {
   /** Optional pre-resolved Municode ClientID. If omitted, we resolve via /Clients/name. */
   municodeClientId?: number;
+  /** Optional pre-resolved productId from /ClientContent. Pins codes[] when a client has multiple products. */
+  municodeProductId?: number;
   /** Required: human-friendly municipality name to look up if clientId not provided. */
   municipalityName?: string;
   /** Required: 2-letter state code (e.g. "TX"). */
@@ -83,10 +85,16 @@ async function resolveContext(
     clientId = info.ClientID;
   }
   const content = await getClientContent(clientId);
-  const product = content.codes?.[0];
+  const codes = content.codes ?? [];
+  const product =
+    cfg.municodeProductId != null
+      ? codes.find((c) => c.productId === cfg.municodeProductId)
+      : codes[0];
   if (!product) {
     throw new Error(
-      `municodeSource: client ${clientId} has no codes[] product`,
+      cfg.municodeProductId != null
+        ? `municodeSource: client ${clientId} has no productId ${cfg.municodeProductId}`
+        : `municodeSource: client ${clientId} has no codes[] product`,
     );
   }
   const job = await getLatestJob(product.productId);

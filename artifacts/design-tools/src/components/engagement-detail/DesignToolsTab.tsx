@@ -3,6 +3,7 @@ import {
   createApiFloorPlanVizService,
   FloorPlanVizWorkspace,
   RenderCreditsBadge,
+  type BimStudioCapture,
 } from "@workspace/portal-ui";
 import { useMemo } from "react";
 import { isFloorPlanSheet } from "../../lib/isFloorPlanSheet";
@@ -25,6 +26,8 @@ export function DesignToolsTab({
   onOpenBimTab,
   onOpenClientMaterials,
   renderDeepLinkToken = 0,
+  initialStudioCapture = null,
+  onStudioCaptureConsumed,
 }: {
   engagementId: string;
   snapshotId?: string | null;
@@ -33,6 +36,9 @@ export function DesignToolsTab({
   onOpenClientMaterials?: () => void;
   /** Bumped when an external entry point deep-links into floor plan mode. */
   renderDeepLinkToken?: number;
+  /** One-shot camera + GLB from Snapshots BIM viewer → Studio still kickoff. */
+  initialStudioCapture?: BimStudioCapture | null;
+  onStudioCaptureConsumed?: () => void;
 }) {
   const hasBim = Boolean(defaultGlbUrl);
   const [renderMode, setRenderModeState] = useState<RenderTabMode>(() =>
@@ -56,6 +62,12 @@ export function DesignToolsTab({
     setRenderModeState(readRenderModeFromUrl());
     setFloorPlanSourceId(readFloorPlanSourceFromUrl());
   }, [renderDeepLinkToken]);
+
+  useEffect(() => {
+    if (!initialStudioCapture) return;
+    setRenderModeState("model");
+    writeRenderModeToUrl("model");
+  }, [initialStudioCapture]);
 
   const setRenderMode = useCallback((mode: RenderTabMode) => {
     setRenderModeState(mode);
@@ -156,6 +168,8 @@ export function DesignToolsTab({
           hasBim={hasBim}
           onOpenBimTab={onOpenBimTab}
           kindFilter="video"
+          initialStudioCapture={initialStudioCapture}
+          onStudioCaptureConsumed={onStudioCaptureConsumed}
         />
       ) : (
         <RenderWorkbench
@@ -164,6 +178,8 @@ export function DesignToolsTab({
           hasBim={hasBim}
           onOpenBimTab={onOpenBimTab}
           kindFilter="exclude-video"
+          initialStudioCapture={initialStudioCapture}
+          onStudioCaptureConsumed={onStudioCaptureConsumed}
         />
       )}
     </TabShell>

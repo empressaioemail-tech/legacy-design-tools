@@ -70,6 +70,7 @@ import {
 import {
   ObjectStorageService,
   ObjectNotFoundError,
+  ObjectStorageAccessDeniedError,
 } from "../lib/objectStorage";
 import type { EventAnchoringService } from "@hauska/atom-contract";
 import {
@@ -1052,6 +1053,14 @@ router.get(
       res.setHeader("ETag", etag);
       res.end(bytes);
     } catch (err) {
+      if (err instanceof ObjectStorageAccessDeniedError) {
+        reqLog.error({ err, id }, "serve materializable element glb forbidden");
+        res.status(403).json({
+          error: "glb_storage_forbidden",
+          message: err.message,
+        });
+        return;
+      }
       reqLog.error({ err, id }, "serve materializable element glb failed");
       res.status(500).json({ error: "Failed to load materializable element glb" });
     }

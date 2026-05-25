@@ -155,6 +155,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // settings). No FK to anything, so the engagements truncate above
   // does not clear it. qa-autopilot-notify.test.ts seeds it directly.
   "qa_settings",
+  "canva_design_pushes",
+  "canva_push_jobs",
+  "canva_connections",
+  "canva_oauth_states",
+  "collateral_metering_events",
+  "collateral_exports",
+  "collateral_export_jobs",
 ];
 
 /**

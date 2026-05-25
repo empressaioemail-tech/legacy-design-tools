@@ -191,6 +191,52 @@ git push origin "backup/pre-migration-sprint-${DATE}"
 
 ---
 
+## Local dev: live substrate catalog (QA-61)
+
+The Code Library **Hauska Substrate Catalog** panel reads `GET /api/substrate/jurisdictions`, which calls the Hauska MCP `list_jurisdictions` tool when configured for live mode. **Ingest on `hauska-engine` does not change localhost by itself** — you must point local api-server at a deployed MCP server that serves the current catalog.
+
+### Default (fixture)
+
+If unset, `HAUSKA_SUBSTRATE_MODE` defaults to **`mock`** (five fixture jurisdictions: Grand County UT, Bastrop TX, Bastrop County, Elgin, Hutto). The UI shows a **fixture** badge and a yellow banner.
+
+### Live catalog (operator)
+
+1. Copy `.env.local.example` → `.env.local` and set:
+
+   ```text
+   HAUSKA_SUBSTRATE_MODE=mcp
+   HAUSKA_MCP_URL=https://<mcp-host>/mcp
+   HAUSKA_MCP_KEY=<cortex product key>
+   ```
+
+2. Mint the Cortex product key on **hauska-mcp-server** (admin key-issuance) if you do not have one.
+
+3. Confirm **hauska-mcp-server** is deployed against the **current** `hauska-engine` DB (post–Sync 5 metros PRs #38–#47 and any Dallas ingest). If the MCP list is stale, flag cc-agent-M / redeploy MCP before blaming Cortex.
+
+4. Restart local api-server (`pnpm --filter @workspace/api-server run dev:local` or `scripts/dev-local-windows.ps1`). Boot log should include `Hauska substrate client wired in MCP mode`.
+
+5. Verify:
+
+   ```bash
+   curl -s http://localhost:8080/api/substrate/health
+   curl -s "http://localhost:8080/api/substrate/jurisdictions?states=TX" | jq '.source, .total, (.jurisdictions | length)'
+   ```
+
+   Expect `"source":"mcp"`, `total` well above 5, and TX metros (San Antonio, Crowley, Converse, …) in the payload when filtered to TX.
+
+6. In the app: Code Library → badge **live** → enable **Show all jurisdictions** to browse the nationwide catalog without practice-state filter.
+
+### Substrate vs cortex-local (common confusion)
+
+| Surface | What it is | How rows appear |
+|--------|------------|-----------------|
+| **Hauska Substrate Catalog** | MCP `list_jurisdictions` | Ingest on hauska-engine + `HAUSKA_SUBSTRATE_MODE=mcp` |
+| **Your firm / Warm up cards** | Cortex `code_atoms` + `lib/codes/jurisdictions.ts` | Per-city mapping + **Warm up** in Code Library (cc-agent-C Dallas corpus, etc.) |
+
+Plan review citations require **cortex-local warmup**, not substrate browse alone.
+
+---
+
 ## Env var inventory
 
 Derived from `process.env.*` in `artifacts/api-server/src/` plus the
@@ -207,7 +253,11 @@ Manager. `Class = config` → Cloud Run env var.
 | `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | config | hard required at boot | `lib/integrations-anthropic-ai/src/client.ts` | Workflow sets `https://api.anthropic.com` — confirm before first deploy. |
 | `SESSION_SECRET` | secret | yes | Secret Manager | Required by `sessionMiddleware`. Recon's `process.env.*` grep missed this — surfaced post-deploy-doc-authoring. |
 | `BIM_MODEL_SHARED_SECRET` | secret | required for upload flow | `routes/bimModels.ts` | HMAC secret for BIM model uploads. Generated fresh during Phase 1A setup (no value existed in Replit). Same value will need to be configured on the Revit Connector side when BIM upload integration is wired end-to-end. |
-| `AIR_FINDING_LLM_MODE` | config | optional | `lib/finding-engine/src/engine.ts` | Default `mock`. `anthropic` requires the AI Integrations env. |
+| `AIR_FINDING_LLM_MODE` | config | optional | `lib/finding-engine/src/engine.ts` | Default `mock`. `grok` requires `XAI_API_KEY`. `anthropic` is legacy and requires the AI Integrations env. |
+| `XAI_API_KEY` | secret | conditional | `lib/integrations-xai-grok/src/client.ts` | Required when `AIR_FINDING_LLM_MODE=grok`. |
+| `XAI_BASE_URL` | config | optional | `lib/integrations-xai-grok/src/client.ts` | Default `https://api.x.ai/v1`. |
+| `XAI_FINDING_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for plan-review findings. Default `grok-3-mini`. |
+| `XAI_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Fallback model id when `XAI_FINDING_MODEL` unset. |
 | `BRIEFING_LLM_MODE` | config | optional | `lib/briefing-engine/src/engine.ts` | Default `mock`. |
 | `MNML_RENDER_MODE` | config | optional | `lib/mnml-client/src/factory.ts` | Default `mock`. `http` requires `MNML_API_URL` + `MNML_API_KEY`. |
 | `MNML_API_URL` | config | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |
@@ -217,6 +267,10 @@ Manager. `Class = config` → Cloud Run env var.
 | `CONVERTER_SHARED_SECRET` | secret | conditional | `lib/converterClient.ts` | Required when `DXF_CONVERTER_MODE=http`. |
 | `OPENAI_API_KEY` | secret | optional (gates embeddings) | `lib/codes/src/embeddings.ts` | Without it, embedding-dependent code paths skip. |
 | `OPENAI_BASE_URL` | config | optional | `lib/codes/src/embeddings.ts` | Default `https://api.openai.com/v1`. |
+| `HAUSKA_SUBSTRATE_MODE` | config | optional | `lib/hauskaSubstrateClient.ts` | Default `mock`. Set `mcp` for live Code Library substrate catalog; requires `HAUSKA_MCP_URL` + `HAUSKA_MCP_KEY`. Boot fails if `mcp` without both. |
+| `HAUSKA_MCP_URL` | config | conditional | `lib/hauskaSubstrateClient.ts` | MCP JSON-RPC endpoint (e.g. `https://<host>/mcp`). Required when `HAUSKA_SUBSTRATE_MODE=mcp`. |
+| `HAUSKA_MCP_KEY` | secret | conditional | `lib/hauskaSubstrateClient.ts` | Cortex product key for MCP auth. Required when `HAUSKA_SUBSTRATE_MODE=mcp`. |
+| `SUBSTRATE_CATALOG_CACHE_TTL_MS` | config | optional | `lib/hauskaSubstrateClient.ts` | Default `600000` (10 min). |
 | `PUBLIC_OBJECT_SEARCH_PATHS` | config | required for object reads | `artifacts/api-server/src/lib/objectStorage.ts` | Comma-separated `/<bucket>/<prefix>` paths. Each prefix must **not** end with `/` (the service joins `${path}/${filePath}`). Canary deploy sets `/legacy-design-tools-prod-objects/public`. |
 | `PRIVATE_OBJECT_DIR` | config | required for object writes | `artifacts/api-server/src/lib/objectStorage.ts` | `/<bucket>/<prefix>`; the API appends `/uploads/<uuid>` itself — use `/legacy-design-tools-prod-objects/.private` so objects live under `.private/uploads/…`, not `…/.private/uploads/uploads/…`. Canary deploy sets that value. |
 | `ADAPTER_CACHE_TTL_MS` | config | optional | `lib/adapterCache.ts` | Has internal default. |

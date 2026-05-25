@@ -6,7 +6,7 @@ import {
   getListEngagementsQueryKey,
 } from "@workspace/api-client-react";
 import { AppShell } from "../components/AppShell";
-import { InboxActionQueue } from "../components/inbox/InboxActionQueue";
+import { InboxDashboardSection } from "../components/dashboard/InboxDashboardSection";
 import { ProjectsDashboardSection } from "../components/dashboard/ProjectsDashboardSection";
 import { CodeLibrary } from "./CodeLibrary";
 
@@ -65,7 +65,7 @@ export function DashboardPage({
               id="dashboard-inbox"
               data-testid="dashboard-inbox-section"
             >
-              <InboxActionQueue compact />
+              <InboxDashboardSection />
             </section>
 
             <section

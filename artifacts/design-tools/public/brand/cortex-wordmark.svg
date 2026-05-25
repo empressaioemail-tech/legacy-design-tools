@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 140" width="640" height="140" role="img" aria-label="Cortex">
+  <style>
+    text { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 88px; fill: currentColor; }
+    .b { font-weight: 300; }
+    .w { font-weight: 500; }
+  </style>
+  <text x="320" y="98" text-anchor="middle">
+    <tspan class="b">[ </tspan><tspan class="w">cortex</tspan><tspan class="b"> ]</tspan>
+  </text>
+</svg>

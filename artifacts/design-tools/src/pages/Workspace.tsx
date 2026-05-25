@@ -1,34 +1,41 @@
-import { useEffect, useState } from "react";
-import { Building2, FolderOpen, Globe, Image as ImageIcon, Palette } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Building2 } from "lucide-react";
+import { US_STATE_OPTIONS } from "../lib/jurisdictionSurfacing";
 import { TabHeader } from "../components/cockpit/TabChrome";
+import { WorkspaceBrandingCard } from "../components/workspace/WorkspaceBrandingCard";
+import { WorkspaceJurisdictionsCard } from "../components/workspace/WorkspaceJurisdictionsCard";
+import { WorkspacePresentationCard } from "../components/workspace/WorkspacePresentationCard";
+import { WorkspaceStorageCard } from "../components/workspace/WorkspaceStorageCard";
 import {
-  fetchWorkspaceSettings,
   patchWorkspaceSettings,
 } from "../lib/workspaceSettingsApi";
+import {
+  useApplyWorkspaceAccent,
+  useInvalidateWorkspaceSettings,
+  useWorkspaceSettings,
+} from "../lib/useWorkspaceSettings";
 
 /**
  * Workspace → Product settings (QA-57).
  *
- * Firm display name persists via /api/workspace/settings. Other cards
- * remain honest preview copy until their backends land.
+ * Organization + branding persist via /api/workspace/settings.
  */
 export function Workspace() {
+  const firmNameRef = useRef<HTMLInputElement>(null);
+  const { data: settings } = useWorkspaceSettings();
+  useApplyWorkspaceAccent(settings);
+  const invalidate = useInvalidateWorkspaceSettings();
   const [firmName, setFirmName] = useState("Cortex Workspace");
-  const [logoUrl, setLogoUrl] = useState("");
+  const [practiceStates, setPracticeStates] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetchWorkspaceSettings()
-      .then((s) => {
-        setFirmName(s.firmDisplayName);
-        setLogoUrl(s.logoUrl ?? "");
-      })
-      .catch(() => {
-        /* keep defaults */
-      });
-  }, []);
+    if (!settings) return;
+    setFirmName(settings.firmDisplayName);
+    setPracticeStates(settings.practiceStates ?? []);
+  }, [settings]);
 
   const handleSaveOrg = async () => {
     setSaving(true);
@@ -37,8 +44,9 @@ export function Workspace() {
     try {
       await patchWorkspaceSettings({
         firmDisplayName: firmName.trim() || "Cortex Workspace",
-        logoUrl: logoUrl.trim() || null,
+        practiceStates,
       });
+      await invalidate();
       setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -47,12 +55,25 @@ export function Workspace() {
     }
   };
 
+  const togglePracticeState = (code: string) => {
+    setPracticeStates((prev) => {
+      if (prev.includes(code)) return prev.filter((c) => c !== code);
+      if (prev.length >= 10) return prev;
+      return [...prev, code];
+    });
+  };
+
+  const practiceSorted = useMemo(
+    () => [...practiceStates].sort(),
+    [practiceStates],
+  );
+
   return (
     <div className="cockpit-tab" data-testid="workspace-settings">
       <TabHeader
         overline="Workspace"
         title="Product settings"
-        subtitle="Workspace-level branding and defaults. Firm name is persisted; other controls preview upcoming backends."
+        subtitle="Workspace-level branding, layer defaults, PDF export, and storage policy."
       />
 
       <div className="workspace-grid">
@@ -67,6 +88,7 @@ export function Workspace() {
             Firm display name
           </label>
           <input
+            ref={firmNameRef}
             id="workspace-firm-name"
             type="text"
             className="sc-input"
@@ -74,18 +96,36 @@ export function Workspace() {
             onChange={(e) => setFirmName(e.target.value)}
             data-testid="workspace-firm-name-input"
           />
-          <label className="sc-meta mt-2" htmlFor="workspace-logo-url">
-            Logo URL (optional)
-          </label>
-          <input
-            id="workspace-logo-url"
-            type="url"
-            className="sc-input"
-            value={logoUrl}
-            onChange={(e) => setLogoUrl(e.target.value)}
-            placeholder="https://…"
-            data-testid="workspace-logo-url-input"
-          />
+          <p className="sc-meta mt-3 mb-1">Practice regions (US states)</p>
+          <p className="sc-meta opacity-60 mb-2">
+            Filters Code Library before you have projects. Up to 10 states.
+          </p>
+          <div
+            className="flex flex-wrap gap-1"
+            data-testid="workspace-practice-states"
+          >
+            {US_STATE_OPTIONS.map(({ code, label }) => {
+              const on = practiceStates.includes(code);
+              return (
+                <button
+                  key={code}
+                  type="button"
+                  title={label}
+                  data-testid={`workspace-state-${code}`}
+                  onClick={() => togglePracticeState(code)}
+                  className="workspace-chip"
+                  data-active={on ? "true" : "false"}
+                >
+                  {code}
+                </button>
+              );
+            })}
+          </div>
+          {practiceSorted.length > 0 && (
+            <p className="sc-meta mt-2" data-testid="workspace-practice-selected">
+              Selected: {practiceSorted.join(", ")}
+            </p>
+          )}
           <button
             type="button"
             className="sc-btn-primary sc-btn-sm workspace-card-cta"
@@ -107,75 +147,15 @@ export function Workspace() {
           )}
         </article>
 
-        <SettingsCard
-          icon={<Palette size={14} />}
-          title="Branding"
-          rows={[
-            { label: "Primary color", value: "var(--cyan)" },
-            { label: "Letter header", value: "Uses firm name above" },
-          ]}
-          comingSoon
+        <WorkspaceBrandingCard
+          settings={settings}
+          firmDisplayName={firmName}
+          onFirmNameHint={() => firmNameRef.current?.focus()}
         />
-        <SettingsCard
-          icon={<Globe size={14} />}
-          title="Default jurisdictions"
-          rows={[
-            { label: "Federal", value: "FEMA, USGS NED, EPA, FCC" },
-            { label: "Local", value: "From Code Library substrate" },
-          ]}
-          comingSoon
-        />
-        <SettingsCard
-          icon={<ImageIcon size={14} />}
-          title="Presentation defaults"
-          rows={[
-            { label: "Cover template", value: "Cockpit / Cyan" },
-            { label: "Watermark", value: "Draft" },
-          ]}
-          comingSoon
-        />
-        <SettingsCard
-          icon={<FolderOpen size={14} />}
-          title="Storage"
-          rows={[
-            { label: "Uploads bucket", value: "Object storage" },
-            { label: "Retention", value: "Indefinite (pilot)" },
-          ]}
-          comingSoon
-        />
+        <WorkspaceJurisdictionsCard preferences={settings?.preferences} />
+        <WorkspacePresentationCard preferences={settings?.preferences} />
+        <WorkspaceStorageCard storageDisplay={settings?.storageDisplay} />
       </div>
     </div>
-  );
-}
-
-function SettingsCard({
-  icon,
-  title,
-  rows,
-  comingSoon = false,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  rows: Array<{ label: string; value: string }>;
-  comingSoon?: boolean;
-}) {
-  return (
-    <article className="workspace-card">
-      <header className="workspace-card-head">
-        <span className="workspace-card-icon">{icon}</span>
-        <h2 className="workspace-card-title">{title}</h2>
-      </header>
-      <dl className="workspace-card-rows">
-        {rows.map((r, i) => (
-          <div key={i} className="workspace-card-row">
-            <dt className="workspace-card-row-label">{r.label}</dt>
-            <dd className="workspace-card-row-value">{r.value}</dd>
-          </div>
-        ))}
-      </dl>
-      {comingSoon && (
-        <p className="sc-meta opacity-60">More controls coming soon.</p>
-      )}
-    </article>
   );
 }
