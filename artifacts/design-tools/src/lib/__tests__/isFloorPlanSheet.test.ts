@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFloorPlanSheet } from "./isFloorPlanSheet";
+import { isFloorPlanSheet } from "../isFloorPlanSheet";
 
 describe("isFloorPlanSheet", () => {
   it("matches explicit floor plan sheet names", () => {
