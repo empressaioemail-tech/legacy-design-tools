@@ -48,6 +48,13 @@ export {
 } from "./anthropicGenerator";
 
 export {
+  FINDING_GROK_DEFAULT_MODEL,
+  FINDING_GROK_MAX_TOKENS,
+  callGrokGenerator,
+  resolveGrokFindingModel,
+} from "./grokGenerator";
+
+export {
   validateInlineCitations,
   type CitationResolvers,
   type CitationScanResult,

@@ -555,6 +555,27 @@ export const useEngagementsStore = create<EngagementsUiState>((set, get) => ({
                     },
                   };
                 });
+              } else if (parsed.error) {
+                set((state) => {
+                  const msgs = [
+                    ...(state.messagesByEngagement[engagementId] || []),
+                  ];
+                  const lastIdx = msgs.length - 1;
+                  if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+                    msgs[lastIdx] = {
+                      ...msgs[lastIdx],
+                      content:
+                        msgs[lastIdx].content ||
+                        `⚠️ Chat error (${String(parsed.error)})`,
+                    };
+                  }
+                  return {
+                    messagesByEngagement: {
+                      ...state.messagesByEngagement,
+                      [engagementId]: msgs,
+                    },
+                  };
+                });
               }
             } catch {
               // ignore partial chunks

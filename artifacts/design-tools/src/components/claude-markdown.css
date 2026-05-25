@@ -2,6 +2,17 @@
    .claude-md so user message bubbles and other prose elsewhere are
    unaffected. Token references match SmartCity OS design tokens. */
 
+/* User prompts — always dark text on a light bubble. Charcoal maps
+   --cyan to #e5e5e5, so cyan fill + text-white was unreadable. */
+.claude-chat-user-bubble {
+  font-family: Inter, sans-serif;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: #ffffff;
+  color: #111111;
+  border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.12));
+}
+
 .claude-md {
   font-family: Inter, sans-serif;
   font-size: 12.5px;

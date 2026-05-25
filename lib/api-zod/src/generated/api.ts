@@ -1035,6 +1035,283 @@ export const PostPackageShareCommentBody = zod.object({
 });
 
 /**
+ * @summary Collateral template packs
+ */
+export const ListCollateralTemplatesResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  thumbnailUrl: zod.string(),
+  tags: zod.array(zod.string()),
+  pageCountEstimate: zod.number(),
+  creditsPerPage: zod.number(),
+  slots: zod.array(
+    zod.union([
+      zod.object({
+        key: zod.string(),
+        type: zod.enum(["text"]),
+        label: zod.string(),
+        defaultValue: zod.string().optional(),
+      }),
+      zod.object({
+        key: zod.string(),
+        type: zod.enum(["image"]),
+        label: zod.string(),
+        accepts: zod.array(
+          zod.enum(["render", "floorplan", "sheet", "site-context"]),
+        ),
+      }),
+    ]),
+  ),
+});
+export const ListCollateralTemplatesResponse = zod.array(
+  ListCollateralTemplatesResponseItem,
+);
+
+/**
+ * @summary Signed public asset bytes for Placid (no session)
+ */
+export const FetchCollateralSignedAssetParams = zod.object({
+  token: zod.coerce.string(),
+  assetKey: zod.coerce.string(),
+});
+
+/**
+ * @summary Poll collateral export job
+ */
+export const GetCollateralExportJobParams = zod.object({
+  jobId: zod.coerce.string().uuid(),
+});
+
+export const GetCollateralExportJobResponse = zod.object({
+  jobId: zod.string().uuid(),
+  step: zod.enum([
+    "preparing",
+    "resolving_assets",
+    "rendering",
+    "ready",
+    "failed",
+  ]),
+  progressLabel: zod.string(),
+  downloadUrl: zod.string().url().optional(),
+  thumbnailUrl: zod.string().optional(),
+  creditsEstimated: zod.number().optional(),
+  creditsActual: zod.number().optional(),
+  error: zod
+    .object({
+      code: zod.enum(["assets", "placid", "config"]),
+      message: zod.string(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Selectable engagement assets for PDF export
+ */
+export const ListEngagementCollateralAssetsParams = zod.object({
+  engagementId: zod.coerce.string().uuid(),
+});
+
+export const ListEngagementCollateralAssetsResponseItem = zod.object({
+  id: zod.string(),
+  kind: zod.enum(["render", "floorplan", "sheet", "site-context", "metadata"]),
+  label: zod.string(),
+  fileType: zod.string(),
+  thumbnailUrl: zod.string().optional(),
+  exportable: zod.boolean(),
+  disabledReason: zod.string().optional(),
+  sourceTab: zod.string().optional(),
+});
+export const ListEngagementCollateralAssetsResponse = zod.array(
+  ListEngagementCollateralAssetsResponseItem,
+);
+
+/**
+ * @summary Past PDF exports for an engagement
+ */
+export const ListEngagementCollateralExportsParams = zod.object({
+  engagementId: zod.coerce.string().uuid(),
+});
+
+export const ListEngagementCollateralExportsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  createdAt: zod.string(),
+  templateName: zod.string(),
+  status: zod.enum(["rendering", "ready", "failed"]),
+  thumbnailUrl: zod.string().optional(),
+  downloadUrl: zod.string().url().optional(),
+  sourceAssetIds: zod.array(zod.string()),
+  creditsCharged: zod.number().optional(),
+});
+export const ListEngagementCollateralExportsResponse = zod.array(
+  ListEngagementCollateralExportsResponseItem,
+);
+
+/**
+ * @summary Start async Placid PDF export job
+ */
+export const StartEngagementCollateralExportParams = zod.object({
+  engagementId: zod.coerce.string().uuid(),
+});
+
+export const StartEngagementCollateralExportBody = zod.object({
+  engagementId: zod.string().uuid(),
+  templatePackId: zod.string(),
+  assetIds: zod.array(zod.string()),
+  slotMapping: zod.record(zod.string(), zod.string()),
+  textFields: zod.record(zod.string(), zod.string()),
+  sheetAssetIds: zod.array(zod.string()).optional(),
+});
+
+/**
+ * @summary Canva connection status
+ */
+export const GetCanvaConnectionResponse = zod.union([
+  zod.object({
+    state: zod.enum(["disconnected"]),
+  }),
+  zod.object({
+    state: zod.enum(["connected"]),
+    displayName: zod.string(),
+    avatarUrl: zod.string().url().optional(),
+    connectedAt: zod.string(),
+  }),
+  zod.object({
+    state: zod.enum(["expired"]),
+    displayName: zod.string().optional(),
+  }),
+  zod.object({
+    state: zod.enum(["enterprise_required"]),
+    message: zod.string(),
+  }),
+]);
+
+/**
+ * @summary Start Canva OAuth (PKCE)
+ */
+export const StartCanvaOAuthResponse = zod.object({
+  url: zod.string().url(),
+});
+
+/**
+ * @summary Canva OAuth callback (browser redirect)
+ */
+export const CanvaOAuthCallbackQueryParams = zod.object({
+  code: zod.coerce.string().optional(),
+  state: zod.coerce.string().optional(),
+  error: zod.coerce.string().optional(),
+});
+
+/**
+ * @summary Brand templates for autofill
+ */
+export const ListCanvaBrandTemplatesResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  thumbnailUrl: zod.string(),
+  tags: zod.array(zod.string()),
+  pageCount: zod.number(),
+  slots: zod.array(
+    zod.union([
+      zod.object({
+        key: zod.string(),
+        type: zod.enum(["text"]),
+        label: zod.string(),
+        defaultValue: zod.string().optional(),
+      }),
+      zod.object({
+        key: zod.string(),
+        type: zod.enum(["image"]),
+        label: zod.string(),
+        accepts: zod.array(
+          zod.enum(["render", "floorplan", "sheet", "site-context"]),
+        ),
+      }),
+    ]),
+  ),
+});
+export const ListCanvaBrandTemplatesResponse = zod.array(
+  ListCanvaBrandTemplatesResponseItem,
+);
+
+/**
+ * @summary Poll Canva push job
+ */
+export const GetCanvaPushJobParams = zod.object({
+  jobId: zod.coerce.string().uuid(),
+});
+
+export const GetCanvaPushJobResponse = zod.object({
+  jobId: zod.string().uuid(),
+  step: zod.enum(["preparing", "uploading", "creating", "ready", "failed"]),
+  progressLabel: zod.string(),
+  designUrl: zod.string().url().optional(),
+  designThumbnailUrl: zod.string().optional(),
+  error: zod
+    .object({
+      code: zod.enum(["upload", "template", "auth"]),
+      message: zod.string(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Selectable engagement assets for Canva
+ */
+export const ListEngagementCanvaAssetsParams = zod.object({
+  engagementId: zod.coerce.string().uuid(),
+});
+
+export const ListEngagementCanvaAssetsResponseItem = zod.object({
+  id: zod.string(),
+  kind: zod.enum(["render", "floorplan", "sheet", "site-context", "metadata"]),
+  label: zod.string(),
+  fileType: zod.string(),
+  thumbnailUrl: zod.string().optional(),
+  exportable: zod.boolean(),
+  disabledReason: zod.string().optional(),
+  sourceTab: zod.string().optional(),
+});
+export const ListEngagementCanvaAssetsResponse = zod.array(
+  ListEngagementCanvaAssetsResponseItem,
+);
+
+/**
+ * @summary Past Canva pushes for an engagement
+ */
+export const ListEngagementCanvaDesignsParams = zod.object({
+  engagementId: zod.coerce.string().uuid(),
+});
+
+export const ListEngagementCanvaDesignsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  createdAt: zod.string(),
+  templateName: zod.string(),
+  status: zod.enum(["uploading", "ready", "failed", "edited_in_canva"]),
+  thumbnailUrl: zod.string().optional(),
+  designUrl: zod.string().url().optional(),
+  sourceAssetIds: zod.array(zod.string()),
+});
+export const ListEngagementCanvaDesignsResponse = zod.array(
+  ListEngagementCanvaDesignsResponseItem,
+);
+
+/**
+ * @summary Start async Canva push job
+ */
+export const StartEngagementCanvaPushParams = zod.object({
+  engagementId: zod.coerce.string().uuid(),
+});
+
+export const StartEngagementCanvaPushBody = zod.object({
+  engagementId: zod.string().uuid(),
+  templateId: zod.string(),
+  assetIds: zod.array(zod.string()),
+  slotMapping: zod.record(zod.string(), zod.string()),
+  textFields: zod.record(zod.string(), zod.string()),
+  uploadAssetsOnly: zod.boolean().optional(),
+});
+
+/**
  * Returns the engagement's `parcel_briefings` row (if any) along
 with its current (non-superseded) `briefing_sources`. Returns
 `null` when no briefing has been created yet — i.e. before the
@@ -10282,6 +10559,57 @@ export const ListProductSpecReferencesResponse = zod.object({
       })
       .describe(
         "Cortex L5 `product-spec-reference` atom instance. Conforms to\n`PRODUCT_SPEC_REFERENCE_SCHEMA` in `@workspace\/atoms-l-surface`.\n",
+      ),
+  ),
+});
+
+/**
+ * QA-55 — scans the engagement's sheets, existing L5 references, and
+recent plan-review findings, then returns a batch of draft product-spec
+rows for operator review. Nothing is persisted until the operator saves
+each reference via `POST /engagements/{id}/product-spec-references`.
+
+Uses `PRODUCT_SPEC_RECOMMENDATIONS_LLM_MODE` (`mock` default,
+`anthropic` when AI Integrations env vars are set).
+
+ * @summary AI-generate draft ICC-ES product-spec recommendations
+ */
+export const GenerateProductSpecRecommendationsParams = zod.object({
+  engagementId: zod.coerce.string(),
+});
+
+export const GenerateProductSpecRecommendationsBody = zod
+  .object({})
+  .describe(
+    "Optional body for\n`POST \/engagements\/{id}\/product-spec-references\/generate-recommendations`.\nReserved for future filters; the baseline ignores all fields.\n",
+  );
+
+export const GenerateProductSpecRecommendationsResponse = zod.object({
+  mode: zod
+    .enum(["mock", "anthropic"])
+    .describe("Which LLM backend produced the batch."),
+  recommendations: zod.array(
+    zod
+      .object({
+        product: zod
+          .object({
+            name: zod.string(),
+            manufacturer: zod.string(),
+          })
+          .describe("Structured product identity (never free-text)."),
+        esrNumber: zod
+          .string()
+          .describe("ICC-ES ESR number, format `ESR-<digits>`."),
+        reasoning: zod
+          .string()
+          .describe("One-line rationale shown in the recommendations list."),
+        sheetHint: zod
+          .string()
+          .nullish()
+          .describe("Optional sheet or note the model tied the suggestion to."),
+      })
+      .describe(
+        "A single AI-suggested ICC-ES product-spec row. Not persisted until the\noperator reviews and saves it as an L5 `product-spec-reference`.\n",
       ),
   ),
 });

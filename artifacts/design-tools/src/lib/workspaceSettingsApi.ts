@@ -1,9 +1,18 @@
+import type {
+  WorkspacePreferencesWire,
+  WorkspaceStorageDisplayWire,
+} from "./workspacePreferences";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 export interface WorkspaceSettingsWire {
   id: string;
   firmDisplayName: string;
   logoUrl: string | null;
+  primaryColor: string | null;
+  practiceStates: string[];
+  preferences: WorkspacePreferencesWire;
+  storageDisplay: WorkspaceStorageDisplayWire;
   updatedAt: string;
 }
 
@@ -16,6 +25,9 @@ export async function fetchWorkspaceSettings(): Promise<WorkspaceSettingsWire> {
 export async function patchWorkspaceSettings(patch: {
   firmDisplayName?: string;
   logoUrl?: string | null;
+  primaryColor?: string | null;
+  practiceStates?: string[];
+  preferences?: Partial<WorkspacePreferencesWire>;
 }): Promise<WorkspaceSettingsWire> {
   const res = await fetch(`${API_BASE}/workspace/settings`, {
     method: "PATCH",

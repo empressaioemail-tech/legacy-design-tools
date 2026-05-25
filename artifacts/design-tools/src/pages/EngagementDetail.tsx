@@ -42,6 +42,7 @@ import {
   SubmitToJurisdictionDialog,
   countUnaddressedFindings,
   useSidebarState,
+  type BimStudioCapture,
 } from "@workspace/portal-ui";
 import {
   AlertDialog,
@@ -65,8 +66,10 @@ import { DesignToolsTab } from "../components/engagement-detail/DesignToolsTab";
 import {
   floorPlanSourceIdForSheet,
   writeFloorPlanVizDeepLink,
+  writeRenderModeToUrl,
 } from "../components/engagement-detail/renderModeUrl";
 import { TabHeader } from "../components/cockpit/TabChrome";
+import { ClientMaterialsTab } from "../components/engagement-detail/ClientMaterialsTab";
 import { PackagesTab } from "../components/engagement-detail/packages/PackagesTab";
 import { packageTemplateForTab } from "../components/engagement-detail/engagementViews";
 import { FindingsTab } from "../components/engagement-detail/FindingsTab";
@@ -131,6 +134,9 @@ export function EngagementDetail() {
   // `useSyncExternalStore` against `popstate`.
   const [tab, setTabState] = useState<TabId>(() => readTabFromUrl());
   const [renderDeepLinkToken, setRenderDeepLinkToken] = useState(0);
+  const [studioCapture, setStudioCapture] = useState<BimStudioCapture | null>(
+    null,
+  );
   const setTab = useCallback((next: TabId): void => {
     setTabState(next);
     writeTabToUrl(next);
@@ -360,6 +366,20 @@ export function EngagementDetail() {
     setTab("renders");
   };
 
+  const handleSendToStudio = useCallback(
+    (capture: BimStudioCapture) => {
+      setStudioCapture(capture);
+      writeRenderModeToUrl("model");
+      setRenderDeepLinkToken((t) => t + 1);
+      setTab("renders");
+    },
+    [setTab],
+  );
+
+  const handleStudioCaptureConsumed = useCallback(() => {
+    setStudioCapture(null);
+  }, []);
+
   const explicitlySelected = selectedSnapshotIdByEngagement[id] ?? null;
   const defaultSelected = engagement?.snapshots?.[0]?.id ?? null;
   const selectedSnapshotId = explicitlySelected ?? defaultSelected;
@@ -502,6 +522,8 @@ export function EngagementDetail() {
         elements={bimElements}
         selectedElementRef={selectedElementRef ?? null}
         presentation="immersive"
+        studioGlbUrl={defaultBimGlbUrl}
+        onSendToStudio={handleSendToStudio}
       />
     );
 
@@ -728,6 +750,9 @@ export function EngagementDetail() {
           <FindingsTab
             engagementId={engagement.id}
             engagementJurisdiction={engagement.jurisdiction}
+            engagementCoverageStatus={
+              (engagement as { coverageStatus?: string }).coverageStatus
+            }
             initialSubmissionId={latestSubmissionId}
             onElementRefClick={handleElementRefClick}
           />
@@ -775,14 +800,11 @@ export function EngagementDetail() {
         <TabPanel
           id="packages"
           active={
-            tab === "packages" ||
-            tab === "client-materials" ||
-            tab === "publish-prep" ||
-            tab === "publish-launch"
+            tab === "publish-prep" || tab === "publish-launch"
               ? "packages"
               : tab
           }
-          className="flex flex-col flex-1 min-h-0"
+          className="cockpit-engagement-tabpanel-scroll flex flex-col flex-1 min-h-0"
         >
           <PackagesTab
             engagement={engagement}
@@ -792,14 +814,24 @@ export function EngagementDetail() {
           />
         </TabPanel>
 
+        <TabPanel
+          id="client-materials"
+          active={tab}
+          className="cockpit-engagement-tabpanel-scroll flex flex-col flex-1 min-h-0"
+        >
+          <ClientMaterialsTab engagement={engagement} onNavigate={setTab} />
+        </TabPanel>
+
         <TabPanel id="renders" active={tab} className="flex flex-col flex-1 min-h-0">
           <DesignToolsTab
             engagementId={engagement.id}
             snapshotId={selectedSnapshotId}
             defaultGlbUrl={defaultBimGlbUrl}
             onOpenBimTab={() => setTab("snapshots")}
-            onOpenClientMaterials={() => setTab("packages")}
+            onOpenClientMaterials={() => setTab("client-materials")}
             renderDeepLinkToken={renderDeepLinkToken}
+            initialStudioCapture={studioCapture}
+            onStudioCaptureConsumed={handleStudioCaptureConsumed}
           />
         </TabPanel>
 

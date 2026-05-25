@@ -208,6 +208,352 @@ export interface PackageFormSnapshot {
   [key: string]: unknown;
 }
 
+export type CollateralTemplateSlotTextType =
+  (typeof CollateralTemplateSlotTextType)[keyof typeof CollateralTemplateSlotTextType];
+
+export const CollateralTemplateSlotTextType = {
+  text: "text",
+} as const;
+
+export interface CollateralTemplateSlotText {
+  key: string;
+  type: CollateralTemplateSlotTextType;
+  label: string;
+  defaultValue?: string;
+}
+
+export type CollateralTemplateSlotImageType =
+  (typeof CollateralTemplateSlotImageType)[keyof typeof CollateralTemplateSlotImageType];
+
+export const CollateralTemplateSlotImageType = {
+  image: "image",
+} as const;
+
+export type CollateralTemplateSlotImageAcceptsItem =
+  (typeof CollateralTemplateSlotImageAcceptsItem)[keyof typeof CollateralTemplateSlotImageAcceptsItem];
+
+export const CollateralTemplateSlotImageAcceptsItem = {
+  render: "render",
+  floorplan: "floorplan",
+  sheet: "sheet",
+  "site-context": "site-context",
+} as const;
+
+export interface CollateralTemplateSlotImage {
+  key: string;
+  type: CollateralTemplateSlotImageType;
+  label: string;
+  accepts: CollateralTemplateSlotImageAcceptsItem[];
+}
+
+export interface CollateralTemplatePack {
+  id: string;
+  name: string;
+  thumbnailUrl: string;
+  tags: string[];
+  pageCountEstimate: number;
+  creditsPerPage: number;
+  slots: (CollateralTemplateSlotText | CollateralTemplateSlotImage)[];
+}
+
+export type CollateralSelectableAssetKind =
+  (typeof CollateralSelectableAssetKind)[keyof typeof CollateralSelectableAssetKind];
+
+export const CollateralSelectableAssetKind = {
+  render: "render",
+  floorplan: "floorplan",
+  sheet: "sheet",
+  "site-context": "site-context",
+  metadata: "metadata",
+} as const;
+
+export interface CollateralSelectableAsset {
+  id: string;
+  kind: CollateralSelectableAssetKind;
+  label: string;
+  fileType: string;
+  thumbnailUrl?: string;
+  exportable: boolean;
+  disabledReason?: string;
+  sourceTab?: string;
+}
+
+export type CollateralExportJobStep =
+  (typeof CollateralExportJobStep)[keyof typeof CollateralExportJobStep];
+
+export const CollateralExportJobStep = {
+  preparing: "preparing",
+  resolving_assets: "resolving_assets",
+  rendering: "rendering",
+  ready: "ready",
+  failed: "failed",
+} as const;
+
+export type CollateralExportJobErrorCode =
+  (typeof CollateralExportJobErrorCode)[keyof typeof CollateralExportJobErrorCode];
+
+export const CollateralExportJobErrorCode = {
+  assets: "assets",
+  placid: "placid",
+  config: "config",
+} as const;
+
+export interface CollateralExportJobError {
+  code: CollateralExportJobErrorCode;
+  message: string;
+}
+
+export interface CollateralExportJob {
+  jobId: string;
+  step: CollateralExportJobStep;
+  progressLabel: string;
+  downloadUrl?: string;
+  thumbnailUrl?: string;
+  creditsEstimated?: number;
+  creditsActual?: number;
+  error?: CollateralExportJobError;
+}
+
+export interface CollateralExportJobIdResponse {
+  jobId: string;
+  creditsEstimated?: number;
+  placidConfigured?: boolean;
+}
+
+export type CollateralExportRecordStatus =
+  (typeof CollateralExportRecordStatus)[keyof typeof CollateralExportRecordStatus];
+
+export const CollateralExportRecordStatus = {
+  rendering: "rendering",
+  ready: "ready",
+  failed: "failed",
+} as const;
+
+export interface CollateralExportRecord {
+  id: string;
+  createdAt: string;
+  templateName: string;
+  status: CollateralExportRecordStatus;
+  thumbnailUrl?: string;
+  downloadUrl?: string;
+  sourceAssetIds: string[];
+  creditsCharged?: number;
+}
+
+export type CollateralExportRequestSlotMapping = { [key: string]: string };
+
+export type CollateralExportRequestTextFields = { [key: string]: string };
+
+export interface CollateralExportRequest {
+  engagementId: string;
+  templatePackId: string;
+  assetIds: string[];
+  slotMapping: CollateralExportRequestSlotMapping;
+  textFields: CollateralExportRequestTextFields;
+  sheetAssetIds?: string[];
+}
+
+export interface CanvaOAuthStartResponse {
+  url: string;
+}
+
+export type CanvaConnectionStatusDisconnectedState =
+  (typeof CanvaConnectionStatusDisconnectedState)[keyof typeof CanvaConnectionStatusDisconnectedState];
+
+export const CanvaConnectionStatusDisconnectedState = {
+  disconnected: "disconnected",
+} as const;
+
+export interface CanvaConnectionStatusDisconnected {
+  state: CanvaConnectionStatusDisconnectedState;
+}
+
+export type CanvaConnectionStatusConnectedState =
+  (typeof CanvaConnectionStatusConnectedState)[keyof typeof CanvaConnectionStatusConnectedState];
+
+export const CanvaConnectionStatusConnectedState = {
+  connected: "connected",
+} as const;
+
+export interface CanvaConnectionStatusConnected {
+  state: CanvaConnectionStatusConnectedState;
+  displayName: string;
+  avatarUrl?: string;
+  connectedAt: string;
+}
+
+export type CanvaConnectionStatusExpiredState =
+  (typeof CanvaConnectionStatusExpiredState)[keyof typeof CanvaConnectionStatusExpiredState];
+
+export const CanvaConnectionStatusExpiredState = {
+  expired: "expired",
+} as const;
+
+export interface CanvaConnectionStatusExpired {
+  state: CanvaConnectionStatusExpiredState;
+  displayName?: string;
+}
+
+export type CanvaConnectionStatusEnterpriseRequiredState =
+  (typeof CanvaConnectionStatusEnterpriseRequiredState)[keyof typeof CanvaConnectionStatusEnterpriseRequiredState];
+
+export const CanvaConnectionStatusEnterpriseRequiredState = {
+  enterprise_required: "enterprise_required",
+} as const;
+
+export interface CanvaConnectionStatusEnterpriseRequired {
+  state: CanvaConnectionStatusEnterpriseRequiredState;
+  message: string;
+}
+
+export type CanvaConnectionStatus =
+  | CanvaConnectionStatusDisconnected
+  | CanvaConnectionStatusConnected
+  | CanvaConnectionStatusExpired
+  | CanvaConnectionStatusEnterpriseRequired;
+
+export type CanvaAssetKind =
+  (typeof CanvaAssetKind)[keyof typeof CanvaAssetKind];
+
+export const CanvaAssetKind = {
+  render: "render",
+  floorplan: "floorplan",
+  sheet: "sheet",
+  "site-context": "site-context",
+  metadata: "metadata",
+} as const;
+
+export interface CanvaSelectableAsset {
+  id: string;
+  kind: CanvaAssetKind;
+  label: string;
+  fileType: string;
+  thumbnailUrl?: string;
+  exportable: boolean;
+  disabledReason?: string;
+  sourceTab?: string;
+}
+
+export type CanvaTemplateSlotTextType =
+  (typeof CanvaTemplateSlotTextType)[keyof typeof CanvaTemplateSlotTextType];
+
+export const CanvaTemplateSlotTextType = {
+  text: "text",
+} as const;
+
+export interface CanvaTemplateSlotText {
+  key: string;
+  type: CanvaTemplateSlotTextType;
+  label: string;
+  defaultValue?: string;
+}
+
+export type CanvaTemplateSlotImageType =
+  (typeof CanvaTemplateSlotImageType)[keyof typeof CanvaTemplateSlotImageType];
+
+export const CanvaTemplateSlotImageType = {
+  image: "image",
+} as const;
+
+export type CanvaTemplateSlotImageAcceptsItem =
+  (typeof CanvaTemplateSlotImageAcceptsItem)[keyof typeof CanvaTemplateSlotImageAcceptsItem];
+
+export const CanvaTemplateSlotImageAcceptsItem = {
+  render: "render",
+  floorplan: "floorplan",
+  sheet: "sheet",
+  "site-context": "site-context",
+} as const;
+
+export interface CanvaTemplateSlotImage {
+  key: string;
+  type: CanvaTemplateSlotImageType;
+  label: string;
+  accepts: CanvaTemplateSlotImageAcceptsItem[];
+}
+
+export type CanvaTemplateSlot = CanvaTemplateSlotText | CanvaTemplateSlotImage;
+
+export interface CanvaBrandTemplate {
+  id: string;
+  name: string;
+  thumbnailUrl: string;
+  tags: string[];
+  pageCount: number;
+  slots: CanvaTemplateSlot[];
+}
+
+export type CanvaPushJobStep =
+  (typeof CanvaPushJobStep)[keyof typeof CanvaPushJobStep];
+
+export const CanvaPushJobStep = {
+  preparing: "preparing",
+  uploading: "uploading",
+  creating: "creating",
+  ready: "ready",
+  failed: "failed",
+} as const;
+
+export type CanvaPushJobErrorCode =
+  (typeof CanvaPushJobErrorCode)[keyof typeof CanvaPushJobErrorCode];
+
+export const CanvaPushJobErrorCode = {
+  upload: "upload",
+  template: "template",
+  auth: "auth",
+} as const;
+
+export interface CanvaPushJobError {
+  code: CanvaPushJobErrorCode;
+  message: string;
+}
+
+export interface CanvaPushJob {
+  jobId: string;
+  step: CanvaPushJobStep;
+  progressLabel: string;
+  designUrl?: string;
+  designThumbnailUrl?: string;
+  error?: CanvaPushJobError;
+}
+
+export interface CanvaPushJobIdResponse {
+  jobId: string;
+}
+
+export type CanvaDesignPushStatus =
+  (typeof CanvaDesignPushStatus)[keyof typeof CanvaDesignPushStatus];
+
+export const CanvaDesignPushStatus = {
+  uploading: "uploading",
+  ready: "ready",
+  failed: "failed",
+  edited_in_canva: "edited_in_canva",
+} as const;
+
+export interface CanvaDesignPush {
+  id: string;
+  createdAt: string;
+  templateName: string;
+  status: CanvaDesignPushStatus;
+  thumbnailUrl?: string;
+  designUrl?: string;
+  sourceAssetIds: string[];
+}
+
+export type CanvaPushRequestSlotMapping = { [key: string]: string };
+
+export type CanvaPushRequestTextFields = { [key: string]: string };
+
+export interface CanvaPushRequest {
+  engagementId: string;
+  templateId: string;
+  assetIds: string[];
+  slotMapping: CanvaPushRequestSlotMapping;
+  textFields: CanvaPushRequestTextFields;
+  uploadAssetsOnly?: boolean;
+}
+
 export interface EngagementPackageRecord {
   id: string;
   engagementId: string;
@@ -2487,6 +2833,48 @@ export interface CreateProductSpecReferenceBody {
   responseTaskId?: string | null;
   actorId?: string | null;
   principalActorId?: string | null;
+}
+
+/**
+ * A single AI-suggested ICC-ES product-spec row. Not persisted until the
+operator reviews and saves it as an L5 `product-spec-reference`.
+
+ */
+export interface ProductSpecRecommendation {
+  product: ProductIdentifier;
+  /** ICC-ES ESR number, format `ESR-<digits>`. */
+  esrNumber: string;
+  /** One-line rationale shown in the recommendations list. */
+  reasoning: string;
+  /** Optional sheet or note the model tied the suggestion to. */
+  sheetHint?: string | null;
+}
+
+/**
+ * Optional body for
+`POST /engagements/{id}/product-spec-references/generate-recommendations`.
+Reserved for future filters; the baseline ignores all fields.
+
+ */
+export interface GenerateProductSpecRecommendationsBody {
+  [key: string]: unknown;
+}
+
+/**
+ * Which LLM backend produced the batch.
+ */
+export type GenerateProductSpecRecommendationsResponseMode =
+  (typeof GenerateProductSpecRecommendationsResponseMode)[keyof typeof GenerateProductSpecRecommendationsResponseMode];
+
+export const GenerateProductSpecRecommendationsResponseMode = {
+  mock: "mock",
+  anthropic: "anthropic",
+} as const;
+
+export interface GenerateProductSpecRecommendationsResponse {
+  /** Which LLM backend produced the batch. */
+  mode: GenerateProductSpecRecommendationsResponseMode;
+  recommendations: ProductSpecRecommendation[];
 }
 
 /**
@@ -5892,6 +6280,12 @@ populate a real recipient row on the comment letter.
   intakeSource?: string | null;
   /** Raw excerpt from intake agent (max 8000 chars). */
   sourceExcerpt?: string | null;
+};
+
+export type CanvaOAuthCallbackParams = {
+  code?: string;
+  state?: string;
+  error?: string;
 };
 
 export type ListEngagementBriefingSourcesParams = {

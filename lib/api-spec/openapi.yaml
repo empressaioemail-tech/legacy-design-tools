@@ -130,6 +130,14 @@ tags:
       rendered DOCX/PDF artifact of an L3 deliverable letter, as a
       first-class atom (queryable, provenance-pinned). Render is
       completeness-gated and synchronous. Dual-auth.
+  - name: canva
+    description: |
+      Canva Connect — OAuth, engagement asset export, brand templates,
+      and async design push jobs for Client materials (Deliver tab).
+  - name: collateral
+    description: |
+      Placid headless PDF export — engagement assets, signed public fetch,
+      async collateral export jobs for Client materials (Deliver tab).
 paths:
   /healthz:
     get:
@@ -688,6 +696,386 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Share not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /collateral/templates:
+    get:
+      operationId: listCollateralTemplates
+      tags: [collateral]
+      summary: Collateral template packs
+      responses:
+        "200":
+          description: Template packs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CollateralTemplatePack"
+
+  /collateral/fetch/{token}/{assetKey}:
+    get:
+      operationId: fetchCollateralSignedAsset
+      tags: [collateral]
+      summary: Signed public asset bytes for Placid (no session)
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: assetKey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Asset bytes
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "403":
+          description: Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Asset not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /collateral/export-jobs/{jobId}:
+    get:
+      operationId: getCollateralExportJob
+      tags: [collateral]
+      summary: Poll collateral export job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollateralExportJob"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/collateral/assets:
+    get:
+      operationId: listEngagementCollateralAssets
+      tags: [collateral]
+      summary: Selectable engagement assets for PDF export
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CollateralSelectableAsset"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/collateral/exports:
+    get:
+      operationId: listEngagementCollateralExports
+      tags: [collateral]
+      summary: Past PDF exports for an engagement
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Export history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CollateralExportRecord"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/collateral/export:
+    post:
+      operationId: startEngagementCollateralExport
+      tags: [collateral]
+      summary: Start async Placid PDF export job
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CollateralExportRequest"
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollateralExportJobIdResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Signing or Placid not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /canva/connection:
+    get:
+      operationId: getCanvaConnection
+      tags: [canva]
+      summary: Canva connection status
+      responses:
+        "200":
+          description: Connection status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CanvaConnectionStatus"
+    delete:
+      operationId: disconnectCanva
+      tags: [canva]
+      summary: Disconnect Canva
+      responses:
+        "204":
+          description: Disconnected
+
+  /canva/oauth/start:
+    post:
+      operationId: startCanvaOAuth
+      tags: [canva]
+      summary: Start Canva OAuth (PKCE)
+      responses:
+        "200":
+          description: Redirect URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CanvaOAuthStartResponse"
+        "503":
+          description: OAuth not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /canva/oauth/callback:
+    get:
+      operationId: canvaOAuthCallback
+      tags: [canva]
+      summary: Canva OAuth callback (browser redirect)
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to app after connect
+
+  /canva/brand-templates:
+    get:
+      operationId: listCanvaBrandTemplates
+      tags: [canva]
+      summary: Brand templates for autofill
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CanvaBrandTemplate"
+
+  /canva/push-jobs/{jobId}:
+    get:
+      operationId: getCanvaPushJob
+      tags: [canva]
+      summary: Poll Canva push job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CanvaPushJob"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/canva/assets:
+    get:
+      operationId: listEngagementCanvaAssets
+      tags: [canva]
+      summary: Selectable engagement assets for Canva
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CanvaSelectableAsset"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/canva/designs:
+    get:
+      operationId: listEngagementCanvaDesigns
+      tags: [canva]
+      summary: Past Canva pushes for an engagement
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Design history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CanvaDesignPush"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{engagementId}/canva/push:
+    post:
+      operationId: startEngagementCanvaPush
+      tags: [canva]
+      summary: Start async Canva push job
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CanvaPushRequest"
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CanvaPushJobIdResponse"
+        "400":
+          description: Invalid body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Canva not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found
           content:
             application/json:
               schema:
@@ -7208,6 +7596,57 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /engagements/{engagementId}/product-spec-references/generate-recommendations:
+    post:
+      operationId: generateProductSpecRecommendations
+      tags: [product-spec-references]
+      summary: AI-generate draft ICC-ES product-spec recommendations
+      description: |
+        QA-55 — scans the engagement's sheets, existing L5 references, and
+        recent plan-review findings, then returns a batch of draft product-spec
+        rows for operator review. Nothing is persisted until the operator saves
+        each reference via `POST /engagements/{id}/product-spec-references`.
+
+        Uses `PRODUCT_SPEC_RECOMMENDATIONS_LLM_MODE` (`mock` default,
+        `anthropic` when AI Integrations env vars are set).
+      parameters:
+        - name: engagementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateProductSpecRecommendationsBody"
+      responses:
+        "200":
+          description: Draft recommendations for operator review.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateProductSpecRecommendationsResponse"
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Engagement not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Recommendation generation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /product-spec-references/{referenceId}:
     get:
       operationId: getProductSpecReference
@@ -7754,6 +8193,420 @@ components:
           type: string
         clientReviewNote:
           type: string
+
+    CollateralTemplateSlotText:
+      type: object
+      required: [key, type, label]
+      properties:
+        key:
+          type: string
+        type:
+          type: string
+          enum: [text]
+        label:
+          type: string
+        defaultValue:
+          type: string
+
+    CollateralTemplateSlotImage:
+      type: object
+      required: [key, type, label, accepts]
+      properties:
+        key:
+          type: string
+        type:
+          type: string
+          enum: [image]
+        label:
+          type: string
+        accepts:
+          type: array
+          items:
+            type: string
+            enum: [render, floorplan, sheet, site-context]
+
+    CollateralTemplatePack:
+      type: object
+      required: [id, name, thumbnailUrl, tags, pageCountEstimate, slots, creditsPerPage]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        thumbnailUrl:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        pageCountEstimate:
+          type: integer
+        creditsPerPage:
+          type: integer
+        slots:
+          type: array
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/CollateralTemplateSlotText"
+              - $ref: "#/components/schemas/CollateralTemplateSlotImage"
+
+    CollateralSelectableAsset:
+      type: object
+      required: [id, kind, label, fileType, exportable]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [render, floorplan, sheet, site-context, metadata]
+        label:
+          type: string
+        fileType:
+          type: string
+        thumbnailUrl:
+          type: string
+        exportable:
+          type: boolean
+        disabledReason:
+          type: string
+        sourceTab:
+          type: string
+
+    CollateralExportJobStep:
+      type: string
+      enum: [preparing, resolving_assets, rendering, ready, failed]
+
+    CollateralExportJobError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [assets, placid, config]
+        message:
+          type: string
+
+    CollateralExportJob:
+      type: object
+      required: [jobId, step, progressLabel]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        step:
+          $ref: "#/components/schemas/CollateralExportJobStep"
+        progressLabel:
+          type: string
+        downloadUrl:
+          type: string
+          format: uri
+        thumbnailUrl:
+          type: string
+        creditsEstimated:
+          type: integer
+        creditsActual:
+          type: integer
+        error:
+          $ref: "#/components/schemas/CollateralExportJobError"
+
+    CollateralExportJobIdResponse:
+      type: object
+      required: [jobId]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        creditsEstimated:
+          type: integer
+        placidConfigured:
+          type: boolean
+
+    CollateralExportRecordStatus:
+      type: string
+      enum: [rendering, ready, failed]
+
+    CollateralExportRecord:
+      type: object
+      required: [id, createdAt, templateName, status, sourceAssetIds]
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+        templateName:
+          type: string
+        status:
+          $ref: "#/components/schemas/CollateralExportRecordStatus"
+        thumbnailUrl:
+          type: string
+        downloadUrl:
+          type: string
+          format: uri
+        sourceAssetIds:
+          type: array
+          items:
+            type: string
+        creditsCharged:
+          type: integer
+
+    CollateralExportRequest:
+      type: object
+      required: [engagementId, templatePackId, assetIds, slotMapping, textFields]
+      properties:
+        engagementId:
+          type: string
+          format: uuid
+        templatePackId:
+          type: string
+        assetIds:
+          type: array
+          items:
+            type: string
+        slotMapping:
+          type: object
+          additionalProperties:
+            type: string
+        textFields:
+          type: object
+          additionalProperties:
+            type: string
+        sheetAssetIds:
+          type: array
+          items:
+            type: string
+
+    CanvaOAuthStartResponse:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+
+    CanvaConnectionStatusDisconnected:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [disconnected]
+
+    CanvaConnectionStatusConnected:
+      type: object
+      required: [state, displayName, connectedAt]
+      properties:
+        state:
+          type: string
+          enum: [connected]
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+        connectedAt:
+          type: string
+
+    CanvaConnectionStatusExpired:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [expired]
+        displayName:
+          type: string
+
+    CanvaConnectionStatusEnterpriseRequired:
+      type: object
+      required: [state, message]
+      properties:
+        state:
+          type: string
+          enum: [enterprise_required]
+        message:
+          type: string
+
+    CanvaConnectionStatus:
+      oneOf:
+        - $ref: "#/components/schemas/CanvaConnectionStatusDisconnected"
+        - $ref: "#/components/schemas/CanvaConnectionStatusConnected"
+        - $ref: "#/components/schemas/CanvaConnectionStatusExpired"
+        - $ref: "#/components/schemas/CanvaConnectionStatusEnterpriseRequired"
+
+    CanvaAssetKind:
+      type: string
+      enum: [render, floorplan, sheet, site-context, metadata]
+
+    CanvaSelectableAsset:
+      type: object
+      required: [id, kind, label, fileType, exportable]
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: "#/components/schemas/CanvaAssetKind"
+        label:
+          type: string
+        fileType:
+          type: string
+        thumbnailUrl:
+          type: string
+        exportable:
+          type: boolean
+        disabledReason:
+          type: string
+        sourceTab:
+          type: string
+
+    CanvaTemplateSlotText:
+      type: object
+      required: [key, type, label]
+      properties:
+        key:
+          type: string
+        type:
+          type: string
+          enum: [text]
+        label:
+          type: string
+        defaultValue:
+          type: string
+
+    CanvaTemplateSlotImage:
+      type: object
+      required: [key, type, label, accepts]
+      properties:
+        key:
+          type: string
+        type:
+          type: string
+          enum: [image]
+        label:
+          type: string
+        accepts:
+          type: array
+          items:
+            type: string
+            enum: [render, floorplan, sheet, site-context]
+
+    CanvaTemplateSlot:
+      oneOf:
+        - $ref: "#/components/schemas/CanvaTemplateSlotText"
+        - $ref: "#/components/schemas/CanvaTemplateSlotImage"
+
+    CanvaBrandTemplate:
+      type: object
+      required: [id, name, thumbnailUrl, tags, pageCount, slots]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        thumbnailUrl:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        pageCount:
+          type: integer
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/CanvaTemplateSlot"
+
+    CanvaPushJobStep:
+      type: string
+      enum: [preparing, uploading, creating, ready, failed]
+
+    CanvaPushJobError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [upload, template, auth]
+        message:
+          type: string
+
+    CanvaPushJob:
+      type: object
+      required: [jobId, step, progressLabel]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        step:
+          $ref: "#/components/schemas/CanvaPushJobStep"
+        progressLabel:
+          type: string
+        designUrl:
+          type: string
+          format: uri
+        designThumbnailUrl:
+          type: string
+        error:
+          $ref: "#/components/schemas/CanvaPushJobError"
+
+    CanvaPushJobIdResponse:
+      type: object
+      required: [jobId]
+      properties:
+        jobId:
+          type: string
+          format: uuid
+
+    CanvaDesignPushStatus:
+      type: string
+      enum: [uploading, ready, failed, edited_in_canva]
+
+    CanvaDesignPush:
+      type: object
+      required: [id, createdAt, templateName, status, sourceAssetIds]
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+        templateName:
+          type: string
+        status:
+          $ref: "#/components/schemas/CanvaDesignPushStatus"
+        thumbnailUrl:
+          type: string
+        designUrl:
+          type: string
+          format: uri
+        sourceAssetIds:
+          type: array
+          items:
+            type: string
+
+    CanvaPushRequest:
+      type: object
+      required: [engagementId, templateId, assetIds, slotMapping, textFields]
+      properties:
+        engagementId:
+          type: string
+          format: uuid
+        templateId:
+          type: string
+        assetIds:
+          type: array
+          items:
+            type: string
+        slotMapping:
+          type: object
+          additionalProperties:
+            type: string
+        textFields:
+          type: object
+          additionalProperties:
+            type: string
+        uploadAssetsOnly:
+          type: boolean
 
     EngagementPackageRecord:
       type: object
@@ -10976,6 +11829,52 @@ components:
       required:
         - product
         - esrNumber
+
+    ProductSpecRecommendation:
+      type: object
+      description: |
+        A single AI-suggested ICC-ES product-spec row. Not persisted until the
+        operator reviews and saves it as an L5 `product-spec-reference`.
+      properties:
+        product:
+          $ref: "#/components/schemas/ProductIdentifier"
+        esrNumber:
+          type: string
+          description: ICC-ES ESR number, format `ESR-<digits>`.
+        reasoning:
+          type: string
+          description: One-line rationale shown in the recommendations list.
+        sheetHint:
+          type: string
+          nullable: true
+          description: Optional sheet or note the model tied the suggestion to.
+      required:
+        - product
+        - esrNumber
+        - reasoning
+
+    GenerateProductSpecRecommendationsBody:
+      type: object
+      description: |
+        Optional body for
+        `POST /engagements/{id}/product-spec-references/generate-recommendations`.
+        Reserved for future filters; the baseline ignores all fields.
+      additionalProperties: false
+
+    GenerateProductSpecRecommendationsResponse:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [mock, anthropic]
+          description: Which LLM backend produced the batch.
+        recommendations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSpecRecommendation"
+      required:
+        - mode
+        - recommendations
 
     RenderFormat:
       type: string

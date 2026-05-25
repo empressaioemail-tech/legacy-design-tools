@@ -35,10 +35,21 @@ interface SubstrateJurisdiction {
 interface SubstrateCatalog {
   source: "mcp" | "mock";
   jurisdictions: SubstrateJurisdiction[];
+  total?: number;
+  filtered?: number;
 }
 
-async function fetchSubstrateCatalog(): Promise<SubstrateCatalog> {
-  const res = await fetch("/api/substrate/jurisdictions");
+async function fetchSubstrateCatalog(
+  stateCodes: string[],
+): Promise<SubstrateCatalog & { total?: number; filtered?: number }> {
+  const params = new URLSearchParams();
+  if (stateCodes.length > 0) {
+    params.set("states", stateCodes.join(","));
+  }
+  const qs = params.toString();
+  const res = await fetch(
+    `/api/substrate/jurisdictions${qs ? `?${qs}` : ""}`,
+  );
   if (!res.ok) {
     // The route answers 502 with { error, code, detail } when the
     // substrate itself is unreachable — surface the detail so the
@@ -84,18 +95,28 @@ const ACCESS_POLICY_BADGE: Record<
 
 export function SubstrateCatalogPanel({
   onSourceChange,
+  stateCodes = [],
+  showAllJurisdictions = false,
+  onShowAllChange,
 }: {
   /** QA-38 — parent hides cortex-local split when source is live MCP. */
   onSourceChange?: (source: "mcp" | "mock") => void;
+  /** v3 — server-side state filter (engagements ∪ practice states). Omit when show-all. */
+  stateCodes?: string[];
+  /** v3 — fetch nationwide catalog (no `?states=`). */
+  showAllJurisdictions?: boolean;
+  onShowAllChange?: (showAll: boolean) => void;
 } = {}) {
   const [data, setData] = useState<SubstrateCatalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const fetchStates = showAllJurisdictions ? [] : stateCodes;
+
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    fetchSubstrateCatalog()
+    fetchSubstrateCatalog(fetchStates)
       .then((catalog) => {
         if (cancelled) return;
         setData(catalog);
@@ -112,11 +133,24 @@ export function SubstrateCatalogPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fetchStates.join(","), showAllJurisdictions]);
 
   return (
     <div className="flex flex-col gap-3" data-testid="substrate-catalog-panel">
-      <div className="flex items-center gap-2">
+      {data?.source === "mock" && (
+        <div
+          className="alert-block warning rounded-md"
+          data-testid="substrate-mock-banner"
+          style={{ fontSize: 12, padding: "10px 12px" }}
+        >
+          <strong>Fixture catalog only (5 jurisdictions).</strong> Live Hauska
+          ingest (Sync 5 TX metros, Dallas, etc.) requires{" "}
+          <code>HAUSKA_SUBSTRATE_MODE=mcp</code> plus <code>HAUSKA_MCP_URL</code>{" "}
+          and <code>HAUSKA_MCP_KEY</code> on api-server, then restart. See{" "}
+          <code>docs/deploy.md</code> — Local dev: live substrate catalog.
+        </div>
+      )}
+      <div className="flex items-center gap-2 flex-wrap">
         <Globe size={16} />
         <h2 className="sc-label">Hauska Substrate Catalog</h2>
         {data && (
@@ -131,6 +165,19 @@ export function SubstrateCatalogPanel({
           >
             {data.source === "mcp" ? "live" : "fixture"}
           </span>
+        )}
+        {onShowAllChange && (
+          <label
+            className="sc-meta flex items-center gap-2 cursor-pointer ml-auto"
+            data-testid="substrate-show-all-toggle"
+          >
+            <input
+              type="checkbox"
+              checked={showAllJurisdictions}
+              onChange={(e) => onShowAllChange(e.target.checked)}
+            />
+            Show all jurisdictions
+          </label>
         )}
       </div>
       <p className="sc-body opacity-70">
@@ -159,8 +206,27 @@ export function SubstrateCatalogPanel({
       {data && (
         <>
           <div className="sc-meta opacity-70" data-testid="substrate-count">
-            {data.jurisdictions.length} jurisdiction
-            {data.jurisdictions.length === 1 ? "" : "s"} in the substrate
+            {showAllJurisdictions || fetchStates.length === 0 ? (
+              <>
+                {data.jurisdictions.length} jurisdiction
+                {data.jurisdictions.length === 1 ? "" : "s"} nationwide
+                {data.total != null && data.total !== data.jurisdictions.length
+                  ? ` (${data.total} in catalog)`
+                  : ""}
+              </>
+            ) : (
+              <>
+                Showing {data.filtered ?? data.jurisdictions.length} jurisdiction
+                {(data.filtered ?? data.jurisdictions.length) === 1 ? "" : "s"}{" "}
+                in your states
+                {data.total != null && (
+                  <>
+                    {" "}
+                    · {data.total} nationwide
+                  </>
+                )}
+              </>
+            )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {data.jurisdictions.map((j) => {

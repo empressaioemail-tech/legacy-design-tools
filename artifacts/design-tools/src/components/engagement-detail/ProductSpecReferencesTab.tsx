@@ -15,9 +15,11 @@ import {
   getListProductSpecReferencesQueryKey,
   useCreateProductSpecReference,
   useRefreshProductSpecReference,
+  useGenerateProductSpecRecommendations,
   ApiError,
   type ProductSpecReferenceAtom,
   type ProductSpecStatus,
+  type ProductSpecRecommendation,
 } from "@workspace/api-client-react";
 import { TabHeader } from "../cockpit/TabChrome";
 import { relativeTime } from "../../lib/relativeTime";
@@ -938,9 +940,37 @@ export function ProductSpecReferencesTab({
   const [draftInitial, setDraftInitial] =
     useState<ProductSpecDraftInitial | null>(null);
   const [draftReasoning, setDraftReasoning] = useState<string | null>(null);
+  const [recommendations, setRecommendations] = useState<
+    ProductSpecRecommendation[] | null
+  >(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  const generateRecommendations = useGenerateProductSpecRecommendations({
+    mutation: {
+      onSuccess: (data) => {
+        setGenerateError(null);
+        setRecommendations(data.recommendations);
+      },
+      onError: (err: unknown) => {
+        setGenerateError(formatRefError(err));
+        setRecommendations(null);
+      },
+    },
+  });
+
+  const openRecommendationForReview = (rec: ProductSpecRecommendation) => {
+    setDraftInitial({
+      name: rec.product.name,
+      manufacturer: rec.product.manufacturer,
+      esrNumber: rec.esrNumber,
+    });
+    const hint = rec.sheetHint ? ` (${rec.sheetHint})` : "";
+    setDraftReasoning(`${rec.reasoning}${hint}`);
+    setCreateOpen(true);
+  };
 
   // WS-C (WSC.4) — when the chat agent routes a product-spec draft in,
   // open the create dialog pre-filled with it for operator review.
@@ -1163,13 +1193,210 @@ export function ProductSpecReferencesTab({
 
           <button
             type="button"
+            className="sc-btn-secondary sc-btn-sm"
+            data-testid="product-spec-generate-recommendations"
+            disabled={generateRecommendations.isPending}
+            onClick={() => {
+              setGenerateError(null);
+              generateRecommendations.mutate({
+                engagementId,
+                data: {},
+              });
+            }}
+          >
+            <Sparkles size={12} aria-hidden />
+            {generateRecommendations.isPending
+              ? "Generating…"
+              : "Generate recommendations"}
+          </button>
+
+          <button
+            type="button"
             className="sc-btn-primary sc-btn-sm"
             data-testid="product-spec-references-new"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              setDraftInitial(null);
+              setDraftReasoning(null);
+              setCreateOpen(true);
+            }}
           >
             Add reference
           </button>
         </div>
+
+        {generateError && (
+          <div
+            role="alert"
+            data-testid="product-spec-generate-error"
+            style={{
+              margin: "0 14px",
+              padding: "8px 10px",
+              borderRadius: 4,
+              background: "var(--danger-dim)",
+              border: "1px solid var(--danger)",
+              color: "var(--danger-text)",
+              fontSize: 11.5,
+            }}
+          >
+            {generateError}
+          </div>
+        )}
+
+        {recommendations && recommendations.length > 0 && (
+          <div
+            data-testid="product-spec-recommendations-panel"
+            style={{
+              margin: "10px 14px 0",
+              padding: "12px 14px",
+              borderRadius: 6,
+              background: "var(--cyan-accent-bg)",
+              border: "1px solid var(--cyan-accent-border)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: 12,
+                marginBottom: 10,
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    color: "var(--cyan-text)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  <Sparkles size={13} aria-hidden />
+                  AI spec recommendations
+                </div>
+                <p
+                  className="sc-meta"
+                  style={{
+                    margin: "4px 0 0",
+                    color: "var(--text-secondary)",
+                    fontSize: 11.5,
+                    maxWidth: 520,
+                  }}
+                >
+                  Draft suggestions from your sheets and findings — review each
+                  row, edit if needed, then save as a tracked reference.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="sc-btn-ghost sc-btn-sm"
+                data-testid="product-spec-recommendations-dismiss"
+                onClick={() => setRecommendations(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              {recommendations.map((rec, index) => (
+                <li
+                  key={`${rec.esrNumber}-${index}`}
+                  data-testid={`product-spec-recommendation-${index}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "10px 12px",
+                    borderRadius: 4,
+                    background: "var(--bg-surface)",
+                    border: "1px solid var(--border-default)",
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        color: "var(--text-primary)",
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {rec.product.name}
+                    </div>
+                    <div
+                      style={{
+                        color: "var(--text-secondary)",
+                        fontSize: 11.5,
+                        marginTop: 2,
+                      }}
+                    >
+                      {rec.product.manufacturer}
+                      <span style={{ color: "var(--text-muted)" }}> · </span>
+                      <span
+                        style={{
+                          fontFamily:
+                            "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                        }}
+                      >
+                        {rec.esrNumber}
+                      </span>
+                      {rec.sheetHint ? (
+                        <span style={{ color: "var(--text-muted)" }}>
+                          {" "}
+                          · {rec.sheetHint}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p
+                      className="sc-meta"
+                      style={{
+                        margin: "6px 0 0",
+                        color: "var(--text-secondary)",
+                        fontSize: 11,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {rec.reasoning}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="sc-btn-primary sc-btn-sm"
+                    data-testid={`product-spec-recommendation-review-${index}`}
+                    onClick={() => openRecommendationForReview(rec)}
+                  >
+                    Review & add
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {recommendations && recommendations.length === 0 && (
+          <div
+            className="sc-meta"
+            data-testid="product-spec-recommendations-empty"
+            style={{
+              margin: "8px 14px 0",
+              color: "var(--text-secondary)",
+              fontSize: 11.5,
+            }}
+          >
+            No new recommendations — existing references may already cover this
+            project, or add sheets/findings and try again.
+          </div>
+        )}
 
         {/* Catalog body: table + drawer */}
         <div
@@ -1200,9 +1427,29 @@ export function ProductSpecReferencesTab({
                 data-testid="product-spec-references-empty"
               >
                 <div className="sc-prose opacity-70" style={{ maxWidth: 460, margin: "0 auto" }}>
-                  No product-spec references yet. Add one to track an
-                  ICC-ES-evaluated product's live evaluation status.
+                  No product-spec references yet. Use{" "}
+                  <strong>Generate recommendations</strong> for AI-suggested
+                  ICC-ES products from your sheets, or add a reference manually.
                 </div>
+                <button
+                  type="button"
+                  className="sc-btn-secondary sc-btn-sm"
+                  style={{ marginTop: 12 }}
+                  data-testid="product-spec-generate-recommendations-empty"
+                  disabled={generateRecommendations.isPending}
+                  onClick={() => {
+                    setGenerateError(null);
+                    generateRecommendations.mutate({
+                      engagementId,
+                      data: {},
+                    });
+                  }}
+                >
+                  <Sparkles size={12} aria-hidden />
+                  {generateRecommendations.isPending
+                    ? "Generating…"
+                    : "Generate recommendations"}
+                </button>
               </div>
             ) : (
               <table

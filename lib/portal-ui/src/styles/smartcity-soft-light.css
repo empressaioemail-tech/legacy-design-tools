@@ -21,3 +21,35 @@
   color: var(--text-secondary);
   border-color: var(--border-default);
 }
+
+[data-theme="soft-light"] .sc-btn-primary,
+[data-theme="light"] .sc-btn-primary {
+  background: var(--cyan);
+  color: #ffffff;
+  border-color: var(--cyan-accent-border, var(--cyan));
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.22);
+}
+
+[data-theme="soft-light"] .sc-btn-primary:hover,
+[data-theme="light"] .sc-btn-primary:hover {
+  opacity: 1;
+  background: var(--cyan-bright, #0ea5e9);
+  color: #ffffff;
+}
+
+/* Client materials — Connect / Reconnect (brand blue, not theme cyan clash) */
+[data-theme="soft-light"] .canva-connection-banner-actions .sc-btn-primary,
+[data-theme="light"] .canva-connection-banner-actions .sc-btn-primary {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.28);
+}
+
+[data-theme="soft-light"] .canva-connection-banner-actions .sc-btn-primary:hover,
+[data-theme="light"] .canva-connection-banner-actions .sc-btn-primary:hover {
+  background: #0369a1;
+  border-color: #0369a1;
+  color: #ffffff;
+  opacity: 1;
+}

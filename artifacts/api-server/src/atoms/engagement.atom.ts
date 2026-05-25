@@ -141,6 +141,10 @@ export interface EngagementTypedPayload {
   longitude?: string | null;
   geocodedAt?: string | null;
   geocodeSource?: string | null;
+  substrateJurisdictionKey?: string | null;
+  cortexJurisdictionKey?: string | null;
+  coverageStatus?: string;
+  coverageRequestedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
   /** Internal-only: omitted from user-audience scope. */
@@ -454,6 +458,12 @@ export function makeEngagementAtom(
         longitude: row.longitude,
         geocodedAt: row.geocodedAt ? row.geocodedAt.toISOString() : null,
         geocodeSource: row.geocodeSource,
+        substrateJurisdictionKey: row.substrateJurisdictionKey,
+        cortexJurisdictionKey: row.cortexJurisdictionKey,
+        coverageStatus: row.coverageStatus,
+        coverageRequestedAt: row.coverageRequestedAt
+          ? row.coverageRequestedAt.toISOString()
+          : null,
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
       } satisfies EngagementTypedPayload;

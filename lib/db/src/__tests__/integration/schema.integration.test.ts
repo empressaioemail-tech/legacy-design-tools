@@ -95,9 +95,17 @@ describe("lib/db schema integration", () => {
         // tenant admins; reviewers consume entries on FindingsTab to
         // pre-fill the manual-add form.
         "canned_findings",
+        "canva_connections",
+        "canva_design_pushes",
+        "canva_oauth_states",
+        "canva_push_jobs",
         "code_atom_fetch_queue",
         "code_atom_sources",
         "code_atoms",
+        "collateral_export_jobs",
+        "collateral_exports",
+        "collateral_metering_events",
+        "coverage_requests",
         // PLR-11 — derived-state side table for the issued plan-set
         // PDF (one row per recorded approval event).
         "decision_pdf_artifacts",

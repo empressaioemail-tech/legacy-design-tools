@@ -69,4 +69,13 @@ export const REQUIRED_CODE_ATOM_SOURCES: ReadonlyArray<RequiredCodeAtomSource> =
       notes:
         "Unofficial Municode JSON API at api.municode.com. Municipal ordinances are public records by Texas law. Bridge infrastructure pending official Municode API partnership. ClientID 1169 verified during recon. Rate-limited to >=1.5s spacing + jitter, daily cap 500.",
     },
+    {
+      sourceName: "cedar_hill_municode",
+      label: "Municode (Cedar Hill, TX)",
+      sourceType: "api",
+      licenseType: "permitted_use",
+      baseUrl: "https://api.municode.com",
+      notes:
+        "QA-58 / QA-60. library.municode.com/tx/cedar_hill — clientId 1568, productId 11825. Shipped substrate cedar_hill_tx (~706 atoms, eval 0.913/1.0/1.0). Same adapter as bastrop_municode.",
+    },
   ];

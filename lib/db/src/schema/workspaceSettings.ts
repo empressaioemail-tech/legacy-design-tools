@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb } from "drizzle-orm/pg-core";
 
 /**
  * Pilot workspace branding — single default row (`id = 'default'`).
@@ -10,6 +10,18 @@ export const workspaceSettings = pgTable("workspace_settings", {
     .notNull()
     .default("Cortex Workspace"),
   logoUrl: text("logo_url"),
+  /** Hex accent (#RGB / #RRGGBB). Null = theme default (--cyan). */
+  primaryColor: text("primary_color"),
+  /** Jurisdiction, presentation, and storage defaults (see workspacePreferences). */
+  preferences: jsonb("preferences")
+    .$type<Record<string, unknown>>()
+    .notNull()
+    .default({}),
+  /** US state codes (uppercase), e.g. `["TX","UT"]`. Max 10. */
+  practiceStates: jsonb("practice_states")
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

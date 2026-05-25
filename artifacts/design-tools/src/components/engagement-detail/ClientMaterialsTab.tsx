@@ -1,34 +1,33 @@
 /**
- * Client Materials — Canva-ready deliverables workspace (UI shell).
- *
- * Cross-asset workflow: pick engagement exports, map to brand templates,
- * push to Canva for client-facing collateral. Stub-driven via
- * `CanvaIntegrationService` — no OAuth or Canva API calls yet.
- *
- * Expected API endpoints:
- *   GET  /api/canva/connection
- *   POST /api/canva/oauth/start
- *   GET  /api/engagements/:id/canva/assets
- *   GET  /api/canva/brand-templates
- *   POST /api/engagements/:id/canva/push
- *   GET  /api/canva/push-jobs/:jobId
+ * Client Materials — Placid PDF export (primary) + optional Canva autofill (flagged off for GA).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EngagementDetail as EngagementDetailType } from "@workspace/api-client-react";
+import { listEngagementPackages } from "@workspace/api-client-react";
 import {
   CanvaAssetPicker,
   CanvaConnectionBanner,
   CanvaPushProgress,
   CanvaTemplateGrid,
-  mockCanvaIntegrationService,
+  CollateralExportProgress,
+  connectCanvaAccount,
+  disconnectCanvaAccount,
 } from "@workspace/portal-ui";
+import {
+  canvaAutofillEnabled,
+  collateralIntegrationService,
+} from "../../lib/collateralService";
+import { canvaIntegrationService } from "../../lib/canvaService";
 import type {
   CanvaConnectionStatus,
-  CanvaDesignPush,
   CanvaPushJob,
   CanvaSelectableAsset,
+  CollateralExportJob,
+  CollateralExportRecord,
+  CollateralSelectableAsset,
+  CollateralTemplatePack,
 } from "@workspace/portal-ui";
-import { ExternalLink, History, Upload } from "lucide-react";
+import { ExternalLink, FileText, History, Upload } from "lucide-react";
 import { TabHeader } from "../cockpit/TabChrome";
 import type { TabId } from "./urlState";
 import { parseCanvaAssetTokens, readCanvaAssetPreselectFromUrl } from "./clientMaterialsUrl";
@@ -40,92 +39,186 @@ export function ClientMaterialsTab({
 }: {
   engagement: EngagementDetailType;
   onNavigate?: (tab: TabId) => void;
-  /** Stub toggle — simulates OAuth connected state. */
   canvaConnected?: boolean;
 }) {
   const engagementId = engagement.id;
-  const service = mockCanvaIntegrationService;
+  const collateral = collateralIntegrationService;
+  const canva = canvaIntegrationService;
 
-  const [connection, setConnection] = useState<CanvaConnectionStatus>({
-    state: "disconnected",
-  });
-  const [assets, setAssets] = useState<CanvaSelectableAsset[]>([]);
-  const [templates, setTemplates] = useState<Awaited<
-    ReturnType<typeof service.listBrandTemplates>
-  >>([]);
-  const [history, setHistory] = useState<CanvaDesignPush[]>([]);
+  const [packs, setPacks] = useState<CollateralTemplatePack[]>([]);
+  const [assets, setAssets] = useState<CollateralSelectableAsset[]>([]);
+  const [exportHistory, setExportHistory] = useState<CollateralExportRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [heroAssetId, setHeroAssetId] = useState<string | null>(null);
-  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [packId, setPackId] = useState<string | null>("client-presentation");
   const [slotMapping, setSlotMapping] = useState<Record<string, string>>({});
   const [textFields, setTextFields] = useState<Record<string, string>>(() => ({
     project_name: engagement.name,
     address: engagement.address ?? engagement.site?.address ?? "",
     headline: engagement.name,
+    talking_points: "",
   }));
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [activeJob, setActiveJob] = useState<CanvaPushJob | null>(null);
-  const [pushOpen, setPushOpen] = useState(false);
+  const [activeJob, setActiveJob] = useState<CollateralExportJob | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
-  const refreshConnection = useCallback(async () => {
-    const status = await service.getConnectionStatus();
-    if (!canvaConnectedProp && status.state === "connected") {
-      setConnection({ state: "disconnected" });
-      return;
-    }
-    setConnection(status);
-  }, [canvaConnectedProp, service]);
+  const [connection, setConnection] = useState<CanvaConnectionStatus>({
+    state: "disconnected",
+  });
+  const [canvaTemplates, setCanvaTemplates] = useState<
+    Awaited<ReturnType<typeof canva.listBrandTemplates>>
+  >([]);
+  const [canvaTemplateId, setCanvaTemplateId] = useState<string | null>(null);
+  const [canvaSlotMapping, setCanvaSlotMapping] = useState<Record<string, string>>({});
+  const [canvaTextFields, setCanvaTextFields] = useState(textFields);
+  const [canvaActiveJob, setCanvaActiveJob] = useState<CanvaPushJob | null>(null);
+  const [canvaPushOpen, setCanvaPushOpen] = useState(false);
+  const [, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  const selectedPack = packs.find((p) => p.id === packId) ?? null;
+  const sheetIds = useMemo(
+    () => [...selectedIds].filter((id) => id.startsWith("sheet:")),
+    [selectedIds],
+  );
+  const pageCount = 1 + Math.min(sheetIds.length, 12) + 1;
+  const estimatedCredits = pageCount * (selectedPack?.creditsPerPage ?? 2);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
-      await refreshConnection();
-      const [assetList, templateList, designList] = await Promise.all([
-        service.listEngagementAssets(engagementId),
-        service.listBrandTemplates(),
-        service.listEngagementDesigns(engagementId),
-      ]);
-      if (cancelled) return;
-      setAssets(assetList);
-      setTemplates(templateList);
-      setHistory(designList);
-      setLoading(false);
-
-      const preselect = parseCanvaAssetTokens(readCanvaAssetPreselectFromUrl());
-      if (preselect.length > 0) {
-        const valid = preselect.filter((id) =>
-          assetList.some((a) => a.id === id && a.exportable),
+      try {
+        const rows = await listEngagementPackages(engagementId);
+        const presentation = rows.find(
+          (r) => r.template === "client-presentation" && r.formSnapshot,
         );
-        if (valid.length > 0) {
-          setSelectedIds(new Set(valid));
-          setHeroAssetId(valid[0] ?? null);
-        }
+        const form = presentation?.formSnapshot;
+        if (!form || cancelled) return;
+        setTextFields((prev) => ({
+          ...prev,
+          headline: form.clientHeadline?.trim() || prev.headline,
+          talking_points:
+            form.clientTalkingPoints?.trim() || prev.talking_points,
+        }));
+      } catch {
+        /* packages optional */
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [engagementId, refreshConnection, service]);
+  }, [engagementId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const [assetList, packList, historyList] = await Promise.all([
+          collateral.listEngagementAssets(engagementId),
+          collateral.listTemplatePacks(),
+          collateral.listEngagementExports(engagementId),
+        ]);
+        if (cancelled) return;
+        setAssets(assetList);
+        setPacks(packList);
+        setExportHistory(historyList);
+        if (!packId && packList[0]) setPackId(packList[0].id);
+
+        const preselect = parseCanvaAssetTokens(readCanvaAssetPreselectFromUrl());
+        if (preselect.length > 0) {
+          const valid = preselect.filter((id) =>
+            assetList.some(
+              (a: CollateralSelectableAsset) => a.id === id && a.exportable,
+            ),
+          );
+          if (valid.length > 0) {
+            setSelectedIds(new Set(valid));
+            setHeroAssetId(valid[0] ?? null);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(
+            err instanceof Error ? err.message : "Failed to load client materials",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [engagementId, collateral, packId]);
+
+  useEffect(() => {
+    if (!canvaAutofillEnabled) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await canva.getConnectionStatus();
+        if (!canvaConnectedProp && status.state === "connected") {
+          setConnection({ state: "disconnected" });
+        } else {
+          setConnection(status);
+        }
+        const templateList = await canva.listBrandTemplates();
+        if (!cancelled) {
+          setCanvaTemplates(templateList);
+        }
+      } catch {
+        /* Canva optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canva, canvaConnectedProp, engagementId]);
+
+  useEffect(() => {
+    if (!activeJobId) return;
+    const interval = window.setInterval(async () => {
+      const job = await collateral.getExportJob(activeJobId);
+      setActiveJob(job);
+      if (job.step === "ready" || job.step === "failed") {
+        window.clearInterval(interval);
+        setExportOpen(false);
+        if (job.step === "ready") {
+          void collateral
+            .listEngagementExports(engagementId)
+            .then(setExportHistory);
+        }
+      }
+    }, 400);
+    return () => window.clearInterval(interval);
+  }, [activeJobId, collateral, engagementId]);
 
   const assetsById = useMemo(
     () => new Map(assets.map((a) => [a.id, a])),
     [assets],
   );
 
-  const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
   const requiredImageSlots =
-    selectedTemplate?.slots.filter((s) => s.type === "image") ?? [];
-  const slotsFilled = requiredImageSlots.every((s) => Boolean(slotMapping[s.key]));
-  const connected = connection.state === "connected";
-  const canGenerate =
-    connected &&
+    selectedPack?.slots.filter(
+      (s: CollateralTemplatePack["slots"][number]) => s.type === "image",
+    ) ?? [];
+  const slotsFilled = requiredImageSlots.every((s) => {
+    if (s.key === "hero_image") {
+      return Boolean(slotMapping.hero_image ?? heroAssetId);
+    }
+    return Boolean(slotMapping[s.key]);
+  });
+
+  const canGeneratePdf =
     selectedIds.size > 0 &&
-    templateId !== null &&
+    packId !== null &&
     slotsFilled &&
-    !pushOpen;
+    !exportOpen;
 
   const toggleAsset = (id: string) => {
     setSelectedIds((prev) => {
@@ -142,38 +235,57 @@ export function ClientMaterialsTab({
   };
 
   useEffect(() => {
-    if (!activeJobId) return;
-    const interval = window.setInterval(async () => {
-      const job = await service.getPushJob(activeJobId);
-      setActiveJob(job);
-      if (job.step === "ready" || job.step === "failed") {
-        window.clearInterval(interval);
-        setPushOpen(false);
-        if (job.step === "ready") {
-          void service.listEngagementDesigns(engagementId).then(setHistory);
-        }
-      }
-    }, 350);
-    return () => window.clearInterval(interval);
-  }, [activeJobId, engagementId, service]);
+    if (heroAssetId) {
+      setSlotMapping((prev) => ({ ...prev, hero_image: heroAssetId }));
+    }
+  }, [heroAssetId]);
 
-  const startPush = async (uploadOnly = false) => {
-    if (!templateId && !uploadOnly) return;
-    setPushOpen(true);
+  const startPdfExport = async () => {
+    if (!packId) return;
+    setExportOpen(true);
     setActiveJob({
       jobId: "pending",
       step: "preparing",
-      progressLabel: "Preparing assets…",
+      progressLabel: "Preparing export…",
+      creditsEstimated: estimatedCredits,
     });
-    const { jobId } = await service.startPush({
+    const mapping = { ...slotMapping };
+    if (heroAssetId && !mapping.hero_image) {
+      mapping.hero_image = heroAssetId;
+    }
+    const { jobId } = await collateral.startExport({
       engagementId,
-      templateId: templateId ?? "upload-only",
+      templatePackId: packId,
       assetIds: [...selectedIds],
-      slotMapping,
+      slotMapping: mapping,
       textFields,
-      uploadAssetsOnly: uploadOnly,
+      sheetAssetIds: sheetIds,
     });
     setActiveJobId(jobId);
+  };
+
+  const refreshCanvaConnection = useCallback(async () => {
+    const status = await canva.getConnectionStatus();
+    if (!canvaConnectedProp && status.state === "connected") {
+      setConnection({ state: "disconnected" });
+      return;
+    }
+    setConnection(status);
+  }, [canva, canvaConnectedProp]);
+
+  const handleConnectCanva = async () => {
+    setConnectError(null);
+    setConnecting(true);
+    try {
+      await connectCanvaAccount();
+      await refreshCanvaConnection();
+    } catch (err) {
+      setConnectError(
+        err instanceof Error ? err.message : "Could not connect Canva",
+      );
+    } finally {
+      setConnecting(false);
+    }
   };
 
   return (
@@ -185,27 +297,14 @@ export function ClientMaterialsTab({
       <TabHeader
         overline="Deliver · client collateral"
         title="Client materials"
-        subtitle="Select engagement assets, choose a brand template, and generate editable proposals in Canva."
+        subtitle="Generate client-ready PDF presentations from your renders and plan sheets. Usage-based export credits."
       />
 
-      <CanvaConnectionBanner
-        status={connection}
-        onConnect={() =>
-          setConnection({
-            state: "connected",
-            displayName: "Studio Canva (demo)",
-            connectedAt: "just now",
-          })
-        }
-        onDisconnect={() => setConnection({ state: "disconnected" })}
-        onReconnect={() =>
-          setConnection({
-            state: "connected",
-            displayName: "Studio Canva (demo)",
-            connectedAt: "reconnected",
-          })
-        }
-      />
+      {loadError ? (
+        <p className="client-materials-connect-error sc-meta" role="alert">
+          {loadError}
+        </p>
+      ) : null}
 
       <div className="client-materials-workspace">
         <section className="client-materials-pane client-materials-pane--assets">
@@ -214,7 +313,7 @@ export function ClientMaterialsTab({
             Renders, plans, and sheet exports from this engagement.
           </p>
           <CanvaAssetPicker
-            assets={assets}
+            assets={assets as CanvaSelectableAsset[]}
             selectedIds={selectedIds}
             heroAssetId={heroAssetId}
             onToggle={toggleAsset}
@@ -224,21 +323,48 @@ export function ClientMaterialsTab({
         </section>
 
         <section className="client-materials-pane client-materials-pane--templates">
-          <h2 className="client-materials-pane-title">Brand template</h2>
-          <CanvaTemplateGrid
-            templates={templates}
-            selectedTemplateId={templateId}
-            onSelectTemplate={setTemplateId}
-            slotMapping={slotMapping}
-            onSlotMappingChange={(key, assetId) =>
-              setSlotMapping((prev) => ({ ...prev, [key]: assetId }))
-            }
-            assetsById={assetsById}
-            textFields={textFields}
-            onTextFieldChange={(key, value) =>
-              setTextFields((prev) => ({ ...prev, [key]: value }))
-            }
-          />
+          <h2 className="client-materials-pane-title">Presentation template</h2>
+          <div className="canva-template-grid" role="list">
+            {packs.map((pack) => (
+              <button
+                key={pack.id}
+                type="button"
+                role="listitem"
+                className={`canva-template-card${packId === pack.id ? " canva-template-card--selected" : ""}`}
+                data-testid={`collateral-pack-${pack.id}`}
+                onClick={() => setPackId(pack.id)}
+              >
+                <img src={pack.thumbnailUrl} alt="" />
+                <span className="canva-template-name">{pack.name}</span>
+                <span className="sc-meta">{pack.tags.join(" · ")}</span>
+              </button>
+            ))}
+          </div>
+          {selectedPack ? (
+            <div className="client-materials-text-fields">
+              {selectedPack.slots
+                .filter(
+                  (s: CollateralTemplatePack["slots"][number]) =>
+                    s.type === "text",
+                )
+                .map((slot) => (
+                  <label key={slot.key} className="sc-field">
+                    <span className="sc-field-label">{slot.label}</span>
+                    <input
+                      type="text"
+                      className="sc-input"
+                      value={textFields[slot.key] ?? ""}
+                      onChange={(e) =>
+                        setTextFields((prev) => ({
+                          ...prev,
+                          [slot.key]: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                ))}
+            </div>
+          ) : null}
         </section>
 
         <aside className="client-materials-pane client-materials-pane--summary sc-card">
@@ -249,92 +375,70 @@ export function ClientMaterialsTab({
               {selectedIds.size === 1 ? "" : "s"} selected
             </li>
             <li>
-              Template:{" "}
-              {selectedTemplate ? selectedTemplate.name : "None selected"}
+              ~<strong>{estimatedCredits}</strong> credits · {pageCount} pages
             </li>
-            <li>
-              Project: {textFields.project_name ?? engagement.name}
-            </li>
-            {engagement.jurisdiction ? (
-              <li>Jurisdiction: {engagement.jurisdiction}</li>
-            ) : null}
+            <li>Pack: {selectedPack?.name ?? "None"}</li>
           </ul>
 
           <div className="client-materials-summary-actions">
             <button
               type="button"
               className="sc-btn-primary"
-              disabled={!canGenerate}
-              title={
-                !connected
-                  ? "Connect Canva first"
-                  : selectedIds.size === 0
-                    ? "Select at least one asset"
-                    : !templateId
-                      ? "Select a template"
-                      : !slotsFilled
-                        ? "Fill required image slots"
-                        : undefined
-              }
-              data-testid="canva-generate"
-              onClick={() => startPush(false)}
+              disabled={!canGeneratePdf}
+              data-testid="collateral-generate-pdf"
+              onClick={() => void startPdfExport()}
             >
-              Generate in Canva
-            </button>
-            <button
-              type="button"
-              className="sc-btn-ghost"
-              disabled={!connected || selectedIds.size === 0 || pushOpen}
-              data-testid="canva-upload-only"
-              onClick={() => startPush(true)}
-            >
-              <Upload size={14} aria-hidden /> Upload assets only
+              <FileText size={14} aria-hidden /> Generate PDF
             </button>
           </div>
 
-          {(pushOpen || activeJob) && (
-            <CanvaPushProgress
+          {(exportOpen || activeJob) && (
+            <CollateralExportProgress
               job={activeJob}
               onCancel={() => {
-                setPushOpen(false);
+                setExportOpen(false);
                 setActiveJob(null);
                 setActiveJobId(null);
               }}
-              onRetry={() => startPush(false)}
-              onCopyLink={() => {
-                /* stub — clipboard wiring deferred */
-              }}
+              onRetry={() => void startPdfExport()}
             />
           )}
 
-          <section className="client-materials-history" data-testid="canva-design-history">
+          <section
+            className="client-materials-history"
+            data-testid="collateral-export-history"
+          >
             <h3 className="client-materials-history-title">
-              <History size={14} aria-hidden /> Previous designs
+              <History size={14} aria-hidden /> Previous PDF exports
             </h3>
-            {history.length === 0 ? (
-              <p className="sc-meta">No Canva pushes yet for this engagement.</p>
+            {exportHistory.length === 0 ? (
+              <p className="sc-meta">No PDF exports yet for this engagement.</p>
             ) : (
               <ul className="canva-history-list">
-                {history.map((row) => (
-                  <li key={row.id} className="canva-history-row" data-testid={`canva-history-${row.id}`}>
-                    {row.thumbnailUrl ? (
-                      <img src={row.thumbnailUrl} alt="" className="canva-history-thumb" />
-                    ) : null}
+                {exportHistory.map((row) => (
+                  <li
+                    key={row.id}
+                    className="canva-history-row"
+                    data-testid={`collateral-history-${row.id}`}
+                  >
                     <div>
                       <div className="canva-history-name">{row.templateName}</div>
                       <div className="sc-meta">
-                        {row.createdAt} · {row.status.replace(/_/g, " ")}
+                        {row.createdAt} · {row.status}
+                        {row.creditsCharged != null
+                          ? ` · ${row.creditsCharged} credits`
+                          : ""}
                       </div>
                     </div>
-                    {row.designUrl ? (
+                    {row.downloadUrl ? (
                       <a
-                        href={row.designUrl}
+                        href={row.downloadUrl}
                         target="_blank"
                         rel="noopener noreferrer"
+                        download
                         className="sc-btn-ghost sc-btn-sm"
-                        data-testid={`canva-history-open-${row.id}`}
                       >
-                        Open <ExternalLink size={12} aria-hidden />
+                        Download <ExternalLink size={12} aria-hidden />
                       </a>
                     ) : null}
                   </li>
@@ -343,13 +447,108 @@ export function ClientMaterialsTab({
             )}
           </section>
 
+          {canvaAutofillEnabled ? (
+            <>
+              <hr className="client-materials-divider" />
+              <h3 className="client-materials-pane-title">Canva (optional)</h3>
+              <CanvaConnectionBanner
+                status={connection}
+                onConnect={() => void handleConnectCanva()}
+                onDisconnect={async () => {
+                  await disconnectCanvaAccount();
+                  setConnection({ state: "disconnected" });
+                }}
+                onReconnect={() => void handleConnectCanva()}
+              />
+              {connectError ? (
+                <p className="sc-meta" role="alert">
+                  {connectError}
+                </p>
+              ) : null}
+              <CanvaTemplateGrid
+                templates={canvaTemplates}
+                selectedTemplateId={canvaTemplateId}
+                onSelectTemplate={setCanvaTemplateId}
+                slotMapping={canvaSlotMapping}
+                onSlotMappingChange={(key, assetId) =>
+                  setCanvaSlotMapping((prev) => ({ ...prev, [key]: assetId }))
+                }
+                assetsById={assetsById as Map<string, CanvaSelectableAsset>}
+                textFields={canvaTextFields}
+                onTextFieldChange={(key, value) =>
+                  setCanvaTextFields((prev) => ({ ...prev, [key]: value }))
+                }
+              />
+              <button
+                type="button"
+                className="sc-btn-ghost"
+                disabled={
+                  connection.state !== "connected" ||
+                  selectedIds.size === 0 ||
+                  !canvaTemplateId
+                }
+                data-testid="canva-generate"
+                onClick={async () => {
+                  setCanvaPushOpen(true);
+                  const { jobId } = await canva.startPush({
+                    engagementId,
+                    templateId: canvaTemplateId!,
+                    assetIds: [...selectedIds],
+                    slotMapping: canvaSlotMapping,
+                    textFields: canvaTextFields,
+                  });
+                  const poll = window.setInterval(async () => {
+                    const job = await canva.getPushJob(jobId);
+                    setCanvaActiveJob(job);
+                    if (job.step === "ready" || job.step === "failed") {
+                      window.clearInterval(poll);
+                      setCanvaPushOpen(false);
+                    }
+                  }, 400);
+                }}
+              >
+                Generate in Canva
+              </button>
+              <button
+                type="button"
+                className="sc-btn-ghost sc-btn-sm"
+                data-testid="canva-upload-only"
+                onClick={async () => {
+                  await canva.startPush({
+                    engagementId,
+                    templateId: "upload-only",
+                    assetIds: [...selectedIds],
+                    slotMapping: {},
+                    textFields: canvaTextFields,
+                    uploadAssetsOnly: true,
+                  });
+                }}
+              >
+                <Upload size={14} aria-hidden /> Upload to my Canva
+              </button>
+              {canvaPushOpen || canvaActiveJob ? (
+                <CanvaPushProgress job={canvaActiveJob} />
+              ) : null}
+            </>
+          ) : (
+            <p className="sc-meta client-materials-canva-backlog">
+              <a
+                href="https://www.canva.com"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Export to my Canva
+              </a>{" "}
+              — upload-only path (backlog; Enterprise autofill not required).
+            </p>
+          )}
+
           {onNavigate ? (
             <p className="client-materials-footer sc-meta">
               Need more assets?{" "}
               <button
                 type="button"
                 className="client-materials-inline-link"
-                data-testid="client-materials-goto-renders"
                 onClick={() => onNavigate("renders")}
               >
                 Open Rendering
@@ -358,7 +557,6 @@ export function ClientMaterialsTab({
               <button
                 type="button"
                 className="client-materials-inline-link"
-                data-testid="client-materials-goto-sheets"
                 onClick={() => onNavigate("sheets")}
               >
                 Sheets

@@ -97,6 +97,11 @@ import {
   renderBriefingPdf,
   type PdfBriefingSource,
 } from "../lib/briefingPdf";
+import { loadWorkspacePreferences } from "../lib/loadWorkspacePreferences";
+import {
+  coverAccentColor,
+  pdfWatermarkText,
+} from "../lib/workspacePreferences";
 
 /**
  * Lazily-instantiated singleton — the constructor reads env at the
@@ -2196,6 +2201,13 @@ router.get(
 
       const identity = await loadArchitectIdentity(req, reqLog);
       const header = identity.header ?? DEFAULT_BRIEFING_PDF_HEADER;
+      const workspacePrefs = await loadWorkspacePreferences();
+      const footerWatermark = pdfWatermarkText(
+        workspacePrefs.presentation.pdfWatermark,
+      );
+      const coverAccent = coverAccentColor(
+        workspacePrefs.presentation.coverTemplate,
+      );
 
       const pdfBuffer = await renderBriefingPdf({
         engagement: {
@@ -2233,6 +2245,8 @@ router.get(
         },
         sources: pdfSources,
         header,
+        footerWatermark,
+        coverAccentColor: coverAccent,
         architectName: identity.displayName,
         // Task #468: forward the FE-supplied stale-source map so each
         // A–G section that cites at least one cache-stale source gets

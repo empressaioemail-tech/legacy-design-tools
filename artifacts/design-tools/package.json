@@ -61,6 +61,7 @@
     "@workspace/briefing-diff": "workspace:*",
     "@workspace/briefing-pdf-tokens": "workspace:*",
     "@workspace/briefing-prior-snapshot": "workspace:*",
+    "@workspace/coverage": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/object-storage-web": "workspace:*",
     "@workspace/portal-ui": "workspace:*",

@@ -3,6 +3,8 @@ import {
   useListCodeJurisdictions,
   useListJurisdictionAtoms,
   useGetCodeAtom,
+  useListEngagements,
+  useGetEngagement,
   warmupJurisdiction,
   getWarmupStatus,
   getListCodeJurisdictionsQueryKey,
@@ -12,8 +14,21 @@ import {
   type WarmupStatus,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { BookOpen, ExternalLink, RefreshCw, X } from "lucide-react";
+import { BookOpen, ExternalLink, X } from "lucide-react";
+import { Link } from "wouter";
 import { SubstrateCatalogPanel } from "../components/SubstrateCatalogPanel";
+import {
+  JurisdictionCard,
+  type ActiveBook,
+} from "../components/code-library/JurisdictionCard";
+import {
+  collectRelevantStateCodes,
+  filterJurisdictionsBySearch,
+  filterJurisdictionsByStates,
+  jurisdictionMatchesState,
+  normalizeStateCode,
+} from "../lib/jurisdictionSurfacing";
+import { fetchWorkspaceSettings } from "../lib/workspaceSettingsApi";
 
 function relativeTime(iso: string | null | undefined): string {
   if (!iso) return "never";
@@ -32,11 +47,9 @@ function readAtomFromHash(): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-interface ActiveBook {
-  jurisdictionKey: string;
-  codeBook: string;
-  edition: string;
-  label: string;
+function readEngagementIdFromSearch(): string | null {
+  const m = window.location.search.match(/[?&]engagementId=([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 const POLL_INTERVAL_MS = 2000;
@@ -51,7 +64,28 @@ export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
   const [substrateSource, setSubstrateSource] = useState<"mcp" | "mock" | null>(
     null,
   );
+  const [substrateShowAll, setSubstrateShowAll] = useState(false);
+  const [practiceStates, setPracticeStates] = useState<string[]>([]);
+  const [exploreOpen, setExploreOpen] = useState(false);
+  const [exploreSearch, setExploreSearch] = useState("");
+  const contextEngagementId = readEngagementIdFromSearch();
   const qc = useQueryClient();
+  const { data: engagements } = useListEngagements({
+    query: { queryKey: ["engagements"], enabled: true },
+  });
+  const { data: contextEngagement } = useGetEngagement(contextEngagementId ?? "", {
+    query: {
+      queryKey: ["engagement", contextEngagementId ?? ""],
+      enabled: !!contextEngagementId,
+    },
+  });
+  useEffect(() => {
+    void fetchWorkspaceSettings()
+      .then((s) => setPracticeStates(s.practiceStates ?? []))
+      .catch(() => {
+        /* defaults */
+      });
+  }, []);
   const { data: jurisdictions, isLoading } = useListCodeJurisdictions({
     query: {
       queryKey: getListCodeJurisdictionsQueryKey(),
@@ -75,12 +109,67 @@ export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
   // a stale timer from the previous run.
   const warmupRunIdRef = useRef<Record<string, number>>({});
 
-  // First jurisdiction selected by default once data arrives.
-  useEffect(() => {
-    if (!activeKey && jurisdictions && jurisdictions.length > 0) {
-      setActiveKey(jurisdictions[0].key);
+  const relevantStates = useMemo(
+    () =>
+      collectRelevantStateCodes(engagements ?? [], practiceStates),
+    [engagements, practiceStates],
+  );
+
+  const contextState = useMemo(() => {
+    const geo = contextEngagement?.site?.geocode;
+    return normalizeStateCode(geo?.jurisdictionState ?? null);
+  }, [contextEngagement]);
+
+  const coverageByEngagementState = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of engagements ?? []) {
+      const st = normalizeStateCode(e.site?.geocode?.jurisdictionState);
+      const cov = (e as { coverageStatus?: string }).coverageStatus;
+      if (st && cov) m.set(st, cov);
     }
-  }, [jurisdictions, activeKey]);
+    if (contextEngagement) {
+      const cov = (contextEngagement as { coverageStatus?: string })
+        .coverageStatus;
+      if (contextState && cov) m.set(contextState, cov);
+    }
+    return m;
+  }, [engagements, contextEngagement, contextState]);
+
+  const { firmJurisdictions, activeJurisdictions, exploreJurisdictions } =
+    useMemo(() => {
+      const all = jurisdictions ?? [];
+      const searched = filterJurisdictionsBySearch(all, exploreSearch);
+      const firm = filterJurisdictionsByStates(searched, relevantStates);
+      const active =
+        contextState != null
+          ? firm.filter((j) => jurisdictionMatchesState(j, contextState))
+          : [];
+      const firmRest =
+        active.length > 0
+          ? firm.filter(
+              (j) =>
+                !active.some((a) => a.key === j.key),
+            )
+          : firm;
+      return {
+        firmJurisdictions: firmRest,
+        activeJurisdictions: active,
+        exploreJurisdictions: searched,
+      };
+    }, [jurisdictions, relevantStates, contextState, exploreSearch]);
+
+  const hasFirmScope = relevantStates.size > 0;
+  const engagementCount = engagements?.length ?? 0;
+
+  // Default selection: first card in Your firm (or active project).
+  useEffect(() => {
+    if (activeKey) return;
+    const pick =
+      activeJurisdictions[0]?.key ??
+      firmJurisdictions[0]?.key ??
+      null;
+    if (pick) setActiveKey(pick);
+  }, [activeKey, activeJurisdictions, firmJurisdictions]);
 
   // If URL has ?atom=<id>, fetch the atom, then jump to its jurisdiction.
   const atomDetailQuery = useGetCodeAtom(activeAtomId ?? "", {
@@ -275,7 +364,12 @@ export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
       {/* QA-17 — every jurisdiction in the Hauska substrate, read live via
           the MCP catalog surface. Sits above the cortex-prod-local corpus
           (which still owns warmup + atom browsing). */}
-      <SubstrateCatalogPanel onSourceChange={setSubstrateSource} />
+      <SubstrateCatalogPanel
+        onSourceChange={setSubstrateSource}
+        stateCodes={[...relevantStates]}
+        showAllJurisdictions={substrateShowAll}
+        onShowAllChange={setSubstrateShowAll}
+      />
 
       {substrateSource !== "mcp" && (
         <h2 className="sc-label" style={{ marginTop: 8 }}>
@@ -291,153 +385,157 @@ export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
 
       {isLoading && <div className="sc-body">Loading jurisdictions…</div>}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {(jurisdictions ?? []).map((j) => {
-          const isActive = j.key === activeKey;
-          const liveStatus = warmupStatusMap[j.key];
-          const isWarming = !!warming[j.key];
-          return (
-            <div
-              key={j.key}
-              data-testid={`jurisdiction-card-${j.key}`}
-              className="sc-card p-4 flex flex-col gap-3 cursor-pointer"
-              style={{
-                borderColor: isActive ? "var(--cyan)" : "var(--border-default)",
-                borderWidth: isActive ? 2 : 1,
-                borderStyle: "solid",
-                borderRadius: 6,
-              }}
-              onClick={() => {
-                setActiveKey(j.key);
-                if (activeBook && activeBook.jurisdictionKey !== j.key) {
-                  setActiveBook(null);
-                }
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <div className="sc-medium">{j.displayName}</div>
-                <div className="sc-meta opacity-60">{j.key}</div>
-              </div>
-              <div className="flex items-baseline gap-4">
-                <div>
-                  <div className="text-2xl">{j.atomCount}</div>
-                  <div className="sc-meta opacity-60">atoms</div>
-                </div>
-                <div>
-                  <div className="text-2xl">{j.embeddedCount}</div>
-                  <div className="sc-meta opacity-60">embedded</div>
-                </div>
-                <div className="ml-auto sc-meta opacity-60">
-                  Last fetched {relativeTime(j.lastFetchedAt)}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {j.books.map((b) => {
-                  const isBookActive =
-                    activeBook?.jurisdictionKey === j.key &&
-                    activeBook?.codeBook === b.codeBook &&
-                    activeBook?.edition === b.edition;
-                  return (
-                    <button
-                      key={`${b.codeBook}|${b.edition}`}
-                      type="button"
-                      data-testid={`book-pill-${j.key}-${b.codeBook}`}
-                      title={`${b.label} via ${b.sourceName} — click to browse`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveKey(j.key);
-                        setActiveBook({
-                          jurisdictionKey: j.key,
-                          codeBook: b.codeBook,
-                          edition: b.edition,
-                          label: b.label,
-                        });
-                        setActiveAtomId(null);
-                      }}
-                      style={{
-                        background: isBookActive
-                          ? "var(--cyan)"
-                          : "rgba(99, 152, 170, 0.15)",
-                        color: isBookActive ? "var(--bg-page)" : "var(--cyan)",
-                        fontSize: 10,
-                        padding: "2px 6px",
-                        borderRadius: 3,
-                        letterSpacing: "0.04em",
-                        textTransform: "uppercase",
-                        border: "none",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {b.label} · {b.atomCount}
-                    </button>
-                  );
-                })}
-              </div>
-              {/* Warmup row: button + status. While running, show live progress
-                  with completed/total. After terminal state, show outcome
-                  message (auto-clears on failure). */}
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  className="sc-btn-secondary inline-flex items-center gap-1"
-                  disabled={isWarming}
-                  onClick={(e) => {
+      {contextEngagementId && (
+        <section data-testid="code-library-section-active-project">
+          <h2 className="sc-label">Active on this project</h2>
+          {activeJurisdictions.length === 0 ? (
+            <p className="sc-meta opacity-70">
+              No code corpus matched — add or correct the address on the Site
+              tab.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
+              {activeJurisdictions.map((j) => (
+                <JurisdictionCard
+                  key={j.key}
+                  section="active"
+                  j={j}
+                  isActive={j.key === activeKey}
+                  activeBook={activeBook}
+                  liveStatus={warmupStatusMap[j.key]}
+                  isWarming={!!warming[j.key]}
+                  warmupMsg={warmupMsg[j.key] ?? ""}
+                  coverageStatus={
+                    contextState
+                      ? coverageByEngagementState.get(contextState)
+                      : undefined
+                  }
+                  onSelect={() => {
+                    setActiveKey(j.key);
+                    if (activeBook && activeBook.jurisdictionKey !== j.key) {
+                      setActiveBook(null);
+                    }
+                  }}
+                  onWarmup={(e) => {
                     e.stopPropagation();
                     void handleWarmup(j.key);
                   }}
-                  style={{ fontSize: 11, padding: "4px 8px" }}
-                  data-testid={`warmup-btn-${j.key}`}
-                >
-                  <RefreshCw
-                    size={12}
-                    className={isWarming ? "animate-spin" : ""}
-                  />
-                  {isWarming ? "Warming up…" : "Warm up now"}
-                </button>
-                {isWarming && liveStatus && liveStatus.total > 0 && (
-                  <div
-                    className="sc-meta opacity-80"
-                    data-testid={`warmup-progress-${j.key}`}
-                  >
-                    Warming up: {liveStatus.completed} / {liveStatus.total}{" "}
-                    sections processed
-                    {liveStatus.processing > 0 &&
-                      ` (${liveStatus.processing} in flight)`}
-                  </div>
-                )}
-                {!isWarming && warmupMsg[j.key] && (
-                  <div
-                    className="sc-meta opacity-80 max-w-[60%] text-right"
-                    data-testid={`warmup-msg-${j.key}`}
-                  >
-                    {warmupMsg[j.key]}
-                  </div>
-                )}
-              </div>
-              {/* Failed-row lastError surface: visible even when not actively
-                  warming, as long as the queue still has failed rows. The
-                  load-bearing addition called out in the spec — without this,
-                  "warmup did nothing" becomes a silent diagnostic mystery. */}
-              {!isWarming &&
-                liveStatus &&
-                liveStatus.state === "failed" &&
-                liveStatus.lastError && (
-                  <div
-                    className="alert-block warning"
-                    data-testid={`warmup-error-${j.key}`}
-                    style={{
-                      fontSize: 11,
-                      padding: "6px 8px",
-                      borderRadius: 3,
-                    }}
-                  >
-                    Last error: {liveStatus.lastError}
-                  </div>
-                )}
+                  onSelectBook={(book, e) => {
+                    e.stopPropagation();
+                    setActiveKey(j.key);
+                    setActiveBook(book);
+                    setActiveAtomId(null);
+                  }}
+                />
+              ))}
             </div>
-          );
-        })}
-      </div>
+          )}
+        </section>
+      )}
+
+      <section data-testid="code-library-section-your-firm">
+        <h2 className="sc-label">Your firm</h2>
+        {!hasFirmScope && engagementCount === 0 ? (
+          <p className="sc-meta opacity-70" data-testid="code-library-firm-empty">
+            Set practice states in{" "}
+            <Link href="/workspace" className="underline" style={{ color: "var(--cyan)" }}>
+              Workspace settings
+            </Link>{" "}
+            or create a project to see relevant jurisdictions here. Expand
+            Explore catalog for the full list.
+          </p>
+        ) : firmJurisdictions.length === 0 ? (
+          <p className="sc-meta opacity-70">
+            No cortex-local jurisdictions match your states yet.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
+            {firmJurisdictions.map((j) => {
+              const st = [...relevantStates].find((s) =>
+                jurisdictionMatchesState(j, s),
+              );
+              return (
+                <JurisdictionCard
+                  key={j.key}
+                  section="firm"
+                  j={j}
+                  isActive={j.key === activeKey}
+                  activeBook={activeBook}
+                  liveStatus={warmupStatusMap[j.key]}
+                  isWarming={!!warming[j.key]}
+                  warmupMsg={warmupMsg[j.key] ?? ""}
+                  coverageStatus={st ? coverageByEngagementState.get(st) : undefined}
+                  onSelect={() => {
+                    setActiveKey(j.key);
+                    if (activeBook && activeBook.jurisdictionKey !== j.key) {
+                      setActiveBook(null);
+                    }
+                  }}
+                  onWarmup={(e) => {
+                    e.stopPropagation();
+                    void handleWarmup(j.key);
+                  }}
+                  onSelectBook={(book, e) => {
+                    e.stopPropagation();
+                    setActiveKey(j.key);
+                    setActiveBook(book);
+                    setActiveAtomId(null);
+                  }}
+                />
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <details
+        open={exploreOpen}
+        onToggle={(e) => setExploreOpen((e.target as HTMLDetailsElement).open)}
+        data-testid="code-library-section-explore"
+        className="mt-2"
+      >
+        <summary className="sc-label cursor-pointer">Explore catalog</summary>
+        <div className="mt-3 flex flex-col gap-3">
+          <input
+            type="search"
+            className="sc-input max-w-md"
+            placeholder="Search jurisdictions…"
+            value={exploreSearch}
+            onChange={(e) => setExploreSearch(e.target.value)}
+            data-testid="code-library-explore-search"
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {exploreJurisdictions.map((j) => (
+              <JurisdictionCard
+                key={j.key}
+                section="explore"
+                j={j}
+                isActive={j.key === activeKey}
+                activeBook={activeBook}
+                liveStatus={warmupStatusMap[j.key]}
+                isWarming={!!warming[j.key]}
+                warmupMsg={warmupMsg[j.key] ?? ""}
+                onSelect={() => {
+                  setActiveKey(j.key);
+                  if (activeBook && activeBook.jurisdictionKey !== j.key) {
+                    setActiveBook(null);
+                  }
+                }}
+                onWarmup={(e) => {
+                  e.stopPropagation();
+                  void handleWarmup(j.key);
+                }}
+                onSelectBook={(book, e) => {
+                  e.stopPropagation();
+                  setActiveKey(j.key);
+                  setActiveBook(book);
+                  setActiveAtomId(null);
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </details>
 
       {activeKey && activeJurisdiction && (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">

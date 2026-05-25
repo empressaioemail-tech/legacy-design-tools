@@ -6,7 +6,6 @@ import { anthropic } from "@workspace/integrations-anthropic-ai";
 import {
   db,
   engagements,
-  snapshots,
   architectNotificationReads,
   atomEvents,
 } from "@workspace/db";
@@ -17,6 +16,7 @@ import {
   WORKSPACE_CHAT_TOOLS,
   executeWorkspaceAgentTool,
   buildWorkspaceAgentToolGuidance,
+  snapshotCountsForEngagements,
 } from "./chatWorkspaceTools";
 
 const MAX_AGENT_ITERATIONS = 6;
@@ -41,13 +41,10 @@ export async function handleWorkspaceChat(
       .from(engagements)
       .orderBy(desc(engagements.updatedAt))
       .limit(40);
+    const snapCounts = await snapshotCountsForEngagements(rows.map((e) => e.id));
     const lines: string[] = [];
     for (const e of rows) {
-      const [{ count }] = await db
-        .select({ count: sql<number>`cast(count(*) as int)` })
-        .from(snapshots)
-        .where(eq(snapshots.engagementId, e.id));
-      const snapCount = Number(count) || 0;
+      const snapCount = snapCounts.get(e.id) ?? 0;
       const needsAttention =
         e.status === "active" &&
         (!e.address?.trim() || snapCount === 0 || !e.geocodedAt);
@@ -102,73 +99,90 @@ export async function handleWorkspaceChat(
     { role: "user", content: question },
   ];
 
-  let iterations = 0;
-  while (iterations < MAX_AGENT_ITERATIONS) {
-    iterations++;
-    const stream = anthropic.messages.stream({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages: convo,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tools: WORKSPACE_CHAT_TOOLS as any,
-    });
+  try {
+    let iterations = 0;
+    while (iterations < MAX_AGENT_ITERATIONS) {
+      iterations++;
+      const stream = anthropic.messages.stream({
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: convo,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tools: WORKSPACE_CHAT_TOOLS as any,
+      });
 
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+      for await (const event of stream) {
+        if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "text_delta"
+        ) {
+          res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+        }
       }
-    }
 
-    const finalMessage = await stream.finalMessage();
-    if (finalMessage.stop_reason !== "tool_use") break;
+      const finalMessage = await stream.finalMessage();
+      if (finalMessage.stop_reason !== "tool_use") break;
 
-    convo.push({ role: "assistant", content: finalMessage.content });
-    const toolUseBlocks = finalMessage.content.filter(
-      (b): b is Extract<typeof b, { type: "tool_use" }> =>
-        b.type === "tool_use",
-    );
-
-    const toolResults: Array<{
-      type: "tool_result";
-      tool_use_id: string;
-      content: string;
-      is_error?: boolean;
-    }> = [];
-
-    for (const block of toolUseBlocks) {
-      res.write(
-        `data: ${JSON.stringify({ type: "tool_use", tool: block.name })}\n\n`,
+      convo.push({ role: "assistant", content: finalMessage.content });
+      const toolUseBlocks = finalMessage.content.filter(
+        (b): b is Extract<typeof b, { type: "tool_use" }> =>
+          b.type === "tool_use",
       );
-      try {
-        const run = await executeWorkspaceAgentTool(block.name, block.input, {
-          scope,
-          req,
-          reqLog,
-        });
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: run.resultText,
-          ...(run.isError ? { is_error: true } : {}),
-        });
-      } catch (toolErr) {
-        reqLog.error({ err: toolErr, tool: block.name }, "workspace tool failed");
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: "Tool execution failed.",
-          is_error: true,
-        });
+
+      const toolResults: Array<{
+        type: "tool_result";
+        tool_use_id: string;
+        content: string;
+        is_error?: boolean;
+      }> = [];
+
+      for (const block of toolUseBlocks) {
+        res.write(
+          `data: ${JSON.stringify({ type: "tool_use", tool: block.name })}\n\n`,
+        );
+        try {
+          const run = await executeWorkspaceAgentTool(block.name, block.input, {
+            scope,
+            req,
+            reqLog,
+          });
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: run.resultText,
+            ...(run.isError ? { is_error: true } : {}),
+          });
+        } catch (toolErr) {
+          reqLog.error({ err: toolErr, tool: block.name }, "workspace tool failed");
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: "Tool execution failed.",
+            is_error: true,
+          });
+        }
       }
+
+      convo.push({ role: "user", content: toolResults });
     }
 
-    convo.push({ role: "user", content: toolResults });
+    res.write(`data: [DONE]\n\n`);
+    res.end();
+  } catch (err) {
+    reqLog.error({ err }, "workspace chat stream failed");
+    const message =
+      err instanceof Error ? err.message : "Workspace chat stream failed";
+    try {
+      res.write(
+        `data: ${JSON.stringify({
+          text: `⚠️ ${message.slice(0, 400)}`,
+        })}\n\n`,
+      );
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+    } catch {
+      // socket already closed
+    }
   }
-
-  res.write(`data: [DONE]\n\n`);
-  res.end();
 }

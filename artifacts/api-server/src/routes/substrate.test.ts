@@ -28,6 +28,18 @@ afterEach(() => {
   setHauskaSubstrateClient(null);
 });
 
+describe("GET /api/substrate/health", () => {
+  it("returns mode and cache snapshot without listing jurisdictions", async () => {
+    setHauskaSubstrateClient(new MockHauskaSubstrateClient());
+    await request(buildApp()).get("/api/substrate/jurisdictions");
+    const res = await request(buildApp()).get("/api/substrate/health");
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("mode");
+    expect(res.body.cachedJurisdictionCount).toBe(5);
+    expect(res.body.cachedSource).toBe("mock");
+  });
+});
+
 describe("GET /api/substrate/jurisdictions", () => {
   it("returns the substrate catalog with all five jurisdictions", async () => {
     setHauskaSubstrateClient(new MockHauskaSubstrateClient());
@@ -53,6 +65,19 @@ describe("GET /api/substrate/jurisdictions", () => {
     expect(res.body.error).toBe("substrate_unavailable");
     expect(res.body.code).toBe("substrate_unreachable");
     expect(res.body.detail).toMatch(/did not respond/);
+  });
+
+  it("filters by states query param (v3)", async () => {
+    setHauskaSubstrateClient(new MockHauskaSubstrateClient());
+    const res = await request(buildApp()).get(
+      "/api/substrate/jurisdictions?states=TX,UT",
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.filtered).toBeLessThanOrEqual(res.body.total);
+    for (const j of res.body.jurisdictions) {
+      const key = j.key.toLowerCase();
+      expect(key.includes("tx") || key.includes("ut")).toBe(true);
+    }
   });
 
   it("answers 500 on an unexpected (non-SubstrateError) failure", async () => {

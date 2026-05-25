@@ -81,6 +81,10 @@ export interface SubstrateCatalog {
    */
   source: "mcp" | "mock";
   jurisdictions: SubstrateJurisdiction[];
+  /** Full catalog size before optional `states` / `keys` / `q` filter (v3). */
+  total?: number;
+  /** Rows returned after filter (v3). */
+  filtered?: number;
 }
 
 /**
@@ -395,9 +399,66 @@ function withTimeout<T>(ms: number, work: Promise<T>): Promise<T> {
 let cached: HauskaSubstrateClient | null = null;
 let cachedFromEnv = true;
 
+let catalogCache: { fetchedAt: number; catalog: SubstrateCatalog } | null =
+  null;
+
+function catalogCacheTtlMs(): number {
+  const raw = process.env.SUBSTRATE_CATALOG_CACHE_TTL_MS;
+  const n = raw ? Number(raw) : 600_000;
+  return Number.isFinite(n) && n > 0 ? n : 600_000;
+}
+
+class CachedHauskaSubstrateClient implements HauskaSubstrateClient {
+  constructor(private readonly inner: HauskaSubstrateClient) {}
+
+  async listJurisdictions(): Promise<SubstrateCatalog> {
+    const ttl = catalogCacheTtlMs();
+    if (catalogCache && Date.now() - catalogCache.fetchedAt < ttl) {
+      logger.info(
+        { mode: catalogCache.catalog.source, count: catalogCache.catalog.jurisdictions.length },
+        "hauska substrate: cache hit",
+      );
+      return catalogCache.catalog;
+    }
+    const catalog = await this.inner.listJurisdictions();
+    catalogCache = { fetchedAt: Date.now(), catalog };
+    logger.info(
+      { mode: catalog.source, count: catalog.jurisdictions.length },
+      "hauska substrate: cache miss",
+    );
+    return catalog;
+  }
+}
+
+export function clearHauskaSubstrateCatalogCache(): void {
+  catalogCache = null;
+}
+
+/** Operator QA — substrate mode + cache snapshot (no MCP round-trip). */
+export function getSubstrateHealthSnapshot(): {
+  mode: string;
+  mcpUrlConfigured: boolean;
+  mcpKeyConfigured: boolean;
+  cacheAgeMs: number | null;
+  cachedJurisdictionCount: number | null;
+  cachedSource: SubstrateCatalog["source"] | null;
+} {
+  const mode = (process.env.HAUSKA_SUBSTRATE_MODE ?? "mock").toLowerCase();
+  return {
+    mode,
+    mcpUrlConfigured: Boolean(process.env.HAUSKA_MCP_URL?.trim()),
+    mcpKeyConfigured: Boolean(process.env.HAUSKA_MCP_KEY?.trim()),
+    cacheAgeMs: catalogCache
+      ? Date.now() - catalogCache.fetchedAt
+      : null,
+    cachedJurisdictionCount: catalogCache?.catalog.jurisdictions.length ?? null,
+    cachedSource: catalogCache?.catalog.source ?? null,
+  };
+}
+
 export function getHauskaSubstrateClient(): HauskaSubstrateClient {
   if (cached) return cached;
-  cached = buildFromEnv();
+  cached = new CachedHauskaSubstrateClient(buildFromEnv());
   cachedFromEnv = true;
   return cached;
 }
@@ -405,7 +466,8 @@ export function getHauskaSubstrateClient(): HauskaSubstrateClient {
 export function setHauskaSubstrateClient(
   client: HauskaSubstrateClient | null,
 ): void {
-  cached = client;
+  catalogCache = null;
+  cached = client ? new CachedHauskaSubstrateClient(client) : null;
   cachedFromEnv = client === null;
 }
 

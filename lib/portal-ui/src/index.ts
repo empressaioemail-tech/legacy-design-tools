@@ -87,6 +87,8 @@ export type { PowerToolKind } from "./components/render-tools/powerToolKickoff";
 // finding-citation drill-in.
 export { BimModelViewport } from "./components/BimModelViewport";
 export type { BimModelViewportProps } from "./components/BimModelViewport";
+export type { BimStudioCapture } from "./components/bimStudioCapture";
+export { formatVec3, parseVec3Csv } from "./components/bimStudioCapture";
 export { ViewCubeWidget } from "./components/ViewCubeWidget";
 export type { ViewCubeWidgetProps, ViewCubeRegionId } from "./components/ViewCubeWidget";
 export { BimViewCube } from "./components/BimViewCube";
@@ -331,6 +333,11 @@ export {
   createMockCanvaIntegrationService,
   mockCanvaIntegrationService,
 } from "./canva/mockCanvaIntegrationService";
+export {
+  createApiCanvaIntegrationService,
+  connectCanvaAccount,
+  disconnectCanvaAccount,
+} from "./canva/apiCanvaIntegrationService";
 export type {
   CanvaIntegrationService,
   CanvaConnectionStatus,
@@ -341,6 +348,23 @@ export type {
   CanvaDesignPush,
   CanvaPushRequest,
 } from "./canva/types";
+
+// Placid collateral PDF export (Client materials primary path).
+export { CollateralExportProgress } from "./components/CollateralExportProgress";
+export {
+  createMockCollateralIntegrationService,
+  mockCollateralIntegrationService,
+} from "./collateral/mockCollateralIntegrationService";
+export { createApiCollateralIntegrationService } from "./collateral/apiCollateralService";
+export type {
+  CollateralIntegrationService,
+  CollateralSelectableAsset,
+  CollateralTemplatePack,
+  CollateralTemplateSlot,
+  CollateralExportJob,
+  CollateralExportRecord,
+  CollateralExportRequest,
+} from "./collateral/types";
 
 // Floor plan → 3D visualization (stub phase).
 export { FloorPlanSourcePicker } from "./components/FloorPlanSourcePicker";

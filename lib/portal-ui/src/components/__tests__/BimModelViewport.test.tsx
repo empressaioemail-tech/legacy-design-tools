@@ -128,8 +128,23 @@ vi.mock("three", () => {
         return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z);
       },
     };
-    quaternion = { set: () => {} };
-    scale = { set: () => {} };
+    rotation = { x: 0, y: 0, z: 0 };
+    quaternion = {
+      set: () => {},
+      setFromRotationMatrix: () => this.quaternion,
+      clone: () => ({ invert: () => ({}) }),
+      invert: () => this.quaternion,
+    };
+    scale = {
+      x: 1,
+      y: 1,
+      z: 1,
+      set: (x?: number, y?: number, z?: number) => {
+        if (typeof x === "number") this.x = x;
+        if (typeof y === "number") this.y = y ?? this.y;
+        if (typeof z === "number") this.z = z ?? this.z;
+      },
+    };
     matrixWorld = { decompose: () => {} };
     isMesh = false;
     geometry?: { dispose: () => void; computeBoundingBox: () => void };
@@ -171,6 +186,9 @@ vi.mock("three", () => {
   }
   class WebGLRenderer {
     domElement: HTMLCanvasElement;
+    shadowMap = { enabled: false, type: 0 };
+    toneMapping = 0;
+    toneMappingExposure = 1;
     constructor() {
       this.domElement = document.createElement("canvas");
     }
@@ -181,7 +199,15 @@ vi.mock("three", () => {
     dispose() {}
   }
   class AmbientLight extends FakeObject {}
-  class DirectionalLight extends FakeObject {}
+  class DirectionalLight extends FakeObject {
+    castShadow = false;
+    shadow = {
+      mapSize: { set: () => {} },
+      camera: { near: 0, far: 0, left: 0, right: 0, top: 0, bottom: 0 },
+      bias: 0,
+    };
+    target = new Group();
+  }
   class HemisphereLight extends FakeObject {}
   class Color {
     setHex(_n: number) {}
@@ -189,9 +215,16 @@ vi.mock("three", () => {
   class MeshLambertMaterial {
     color = new Color();
     opacity = 1;
+    envMap: unknown = null;
+    envMapIntensity = 1;
+    metalness = 0;
+    roughness = 1;
+    emissive = new Color();
+    emissiveIntensity = 1;
     dispose() {}
     constructor(_opts?: unknown) {}
   }
+  const MeshStandardMaterial = MeshLambertMaterial;
   class Shape {
     moveTo() {}
     lineTo() {}
@@ -270,6 +303,53 @@ vi.mock("three", () => {
       return this;
     }
   }
+  class Matrix4 {
+    lookAt() {
+      return this;
+    }
+  }
+  class Euler {
+    x: number;
+    y: number;
+    z: number;
+    constructor(x = 0, y = 0, z = 0) {
+      this.x = x;
+      this.y = y;
+      this.z = z;
+    }
+  }
+  class PMREMGenerator {
+    constructor(_renderer: unknown) {}
+    compileEquirectangularShader() {}
+    fromScene() {
+      return { texture: { dispose: () => {} } };
+    }
+    dispose() {}
+  }
+  class CircleGeometry {
+    dispose() {}
+    constructor(_radius: number, _segments: number) {}
+  }
+  class Quaternion {
+    setFromEuler() {
+      return this;
+    }
+    clone() {
+      return new Quaternion();
+    }
+    invert() {
+      return this;
+    }
+    multiply() {
+      return this;
+    }
+    copy() {
+      return this;
+    }
+    angleTo() {
+      return 0;
+    }
+  }
   class Spherical {
     radius = 1;
     phi = 0;
@@ -298,9 +378,15 @@ vi.mock("three", () => {
     DirectionalLight,
     Color,
     MeshLambertMaterial,
+    MeshStandardMaterial,
     Shape,
     ExtrudeGeometry,
     Box3,
+    Matrix4,
+    Euler,
+    Quaternion,
+    PMREMGenerator,
+    CircleGeometry,
     Vector3,
     Spherical,
     DoubleSide: 2,
@@ -314,6 +400,7 @@ vi.mock("three", () => {
     TOUCH: { ROTATE: 0, PAN: 1, DOLLY_PAN: 2, DOLLY_ROTATE: 3 },
     HemisphereLight,
     ACESFilmicToneMapping: 4,
+    PCFSoftShadowMap: 2,
     SRGBColorSpace: "srgb",
   };
 });
@@ -321,6 +408,7 @@ vi.mock("three", () => {
 vi.mock("three/examples/jsm/controls/OrbitControls.js", () => ({
   OrbitControls: class {
     targetCalls: Array<[number, number, number]> = [];
+    private readonly listeners = new Map<string, Set<() => void>>();
     target!: { x: number; y: number; z: number; set: (x: number, y: number, z: number) => void };
     enableDamping = false;
     dampingFactor = 0;
@@ -331,6 +419,14 @@ vi.mock("three/examples/jsm/controls/OrbitControls.js", () => ({
     zoomToCursor?: boolean;
     mouseButtons?: { LEFT?: number; MIDDLE?: number; RIGHT?: number };
     touches?: { ONE?: number; TWO?: number };
+    addEventListener(type: string, handler: () => void) {
+      const set = this.listeners.get(type) ?? new Set();
+      set.add(handler);
+      this.listeners.set(type, set);
+    }
+    removeEventListener(type: string, handler: () => void) {
+      this.listeners.get(type)?.delete(handler);
+    }
     update() {}
     dispose() {}
     constructor() {

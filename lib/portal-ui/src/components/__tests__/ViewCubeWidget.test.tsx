@@ -47,6 +47,9 @@ vi.mock("../ViewCubeRenderer", () => ({
 
 describe("ViewCubeWidget", () => {
   const mainCamera = { current: new THREE.PerspectiveCamera() };
+  const orbitControls = {
+    current: { target: new THREE.Vector3() },
+  };
 
   beforeEach(() => {
     viewCubeMock.instances.length = 0;
@@ -87,14 +90,24 @@ describe("ViewCubeWidget", () => {
     viewCubeMock.raycastFace.mockReturnValue("top");
     const onSelectRegion = vi.fn();
     render(
-      <ViewCubeWidget mainCamera={mainCamera} onSelectRegion={onSelectRegion} />,
+      <ViewCubeWidget
+        mainCamera={mainCamera}
+        orbitControls={orbitControls}
+        onSelectRegion={onSelectRegion}
+      />,
     );
     fireEvent.click(screen.getByTestId("bim-viewport-viewcube-canvas-wrap"));
     expect(onSelectRegion).toHaveBeenCalledWith("top");
   });
 
   it("syncs cube orientation from the main camera each frame", async () => {
-    render(<ViewCubeWidget mainCamera={mainCamera} onSelectRegion={() => {}} />);
+    render(
+      <ViewCubeWidget
+        mainCamera={mainCamera}
+        orbitControls={orbitControls}
+        onSelectRegion={() => {}}
+      />,
+    );
     await vi.waitFor(() => {
       expect(viewCubeMock.syncCalls).toBeGreaterThan(0);
     });
@@ -108,6 +121,7 @@ describe("ViewCubeWidget", () => {
     render(
       <ViewCubeWidget
         mainCamera={mainCamera}
+        orbitControls={orbitControls}
         onSelectRegion={() => {}}
         onHome={onHome}
         onCompassSnap={onCompassSnap}
