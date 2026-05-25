@@ -76,7 +76,7 @@ export function ClientMaterialsTab({
   const [canvaTextFields, setCanvaTextFields] = useState(textFields);
   const [canvaActiveJob, setCanvaActiveJob] = useState<CanvaPushJob | null>(null);
   const [canvaPushOpen, setCanvaPushOpen] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const [, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
 
   const selectedPack = packs.find((p) => p.id === packId) ?? null;

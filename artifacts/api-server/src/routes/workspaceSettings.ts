@@ -139,7 +139,10 @@ router.patch("/workspace/settings", async (req: Request, res: Response) => {
 
     const [row] = await db
       .update(workspaceSettings)
-      .set(patch)
+      .set(
+        patch as typeof workspaceSettings.$inferInsert &
+          Record<string, unknown>,
+      )
       .where(eq(workspaceSettings.id, DEFAULT_ID))
       .returning();
     if (!row) {

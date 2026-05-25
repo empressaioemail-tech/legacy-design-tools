@@ -78,7 +78,7 @@ export function ViewCubeWidget({
     const loop = () => {
       const cam = mainCamera.current;
       const controls = orbitControls.current;
-      if (cam && controls) {
+      if (cam && controls && cam instanceof THREE.PerspectiveCamera) {
         cubeRenderer.setOrientationFromMainCamera(cam, controls.target);
       }
       cubeRenderer.render();
