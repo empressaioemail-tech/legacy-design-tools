@@ -5158,10 +5158,17 @@
 .cockpit-inbox-action-card {
   display: flex;
   gap: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
+  background: var(--bg-surface);
   overflow: hidden;
+  box-shadow: var(--depth-shadow-sm);
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.cockpit-inbox-action-card:hover {
+  border-color: var(--cyan-accent-border);
+  transform: translateY(-1px);
   box-shadow: var(--depth-shadow-md);
 }
 
@@ -6715,3 +6722,52 @@
   border-radius: 6px;
   padding: 8px 10px;
 }
+
+/* QA-44 — light theme readability for Cockpit engagement surfaces */
+[data-theme="soft-light"] .cockpit-engagement-view-header,
+[data-theme="light"] .cockpit-engagement-view-header {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+[data-theme="soft-light"] .cockpit-engagement-view-tab,
+[data-theme="light"] .cockpit-engagement-view-tab {
+  color: var(--text-secondary);
+}
+
+[data-theme="soft-light"] .cockpit-engagement-view-tab[data-active="true"],
+[data-theme="light"] .cockpit-engagement-view-tab[data-active="true"] {
+  background: var(--bg-elevated);
+  color: var(--cyan-text);
+}
+
+[data-theme="soft-light"] .render-workbench-canvas,
+[data-theme="light"] .render-workbench-canvas {
+  background: var(--bg-highlight);
+}
+
+[data-theme="soft-light"] .site-workbench-3d-canvas,
+[data-theme="light"] .site-workbench-3d-canvas {
+  background: var(--bg-highlight);
+}
+
+[data-theme="soft-light"] .cockpit-tab-header-h1,
+[data-theme="light"] .cockpit-tab-header-h1,
+[data-theme="soft-light"] .cockpit-tab-header-sub,
+[data-theme="light"] .cockpit-tab-header-sub {
+  color: var(--text-primary);
+}
+
+[data-theme="soft-light"] .cockpit-inbox-action-card-headline,
+[data-theme="light"] .cockpit-inbox-action-card-headline,
+[data-theme="soft-light"] .cockpit-inbox-action-card-preview,
+[data-theme="light"] .cockpit-inbox-action-card-preview {
+  color: var(--text-secondary);
+}
+
+[data-theme="soft-light"] .cockpit-inbox-cta-btn,
+[data-theme="light"] .cockpit-inbox-cta-btn {
+  color: var(--cyan-text);
+  border-color: var(--cyan-accent-border);
+}
+

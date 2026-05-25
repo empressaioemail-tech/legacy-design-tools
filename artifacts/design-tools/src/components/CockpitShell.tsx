@@ -338,12 +338,12 @@ export function CockpitShell({
                   <Link
                     href="/"
                     className="cockpit-nav-brand cockpit-nav-brand-labeled"
-                    aria-label="SmartCity OS Home"
+                    aria-label="Cortex Home"
                   >
                     <span className="cockpit-nav-brand-mark" aria-hidden="true">
-                      S
+                      C
                     </span>
-                    <span className="cockpit-nav-brand-text">SmartCity OS</span>
+                    <span className="cockpit-nav-brand-text">Cortex</span>
                   </Link>
                   <ChromeThemeToggle />
                 </div>

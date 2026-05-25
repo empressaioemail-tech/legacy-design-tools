@@ -23,12 +23,12 @@ export type { TabId };
  * an unknown tab. SSR-safe: returns the default when `window` is
  * undefined.
  *
- * The default is `snapshots` (the page's "home" tab); a missing or
+ * The default is `site` (the page's home tab); a missing or
  * unknown `tab` param resolves to that, so a bookmark of the bare
- * engagement URL keeps working.
+ * engagement URL opens Site first (QA-42).
  */
 export function readTabFromUrl(): TabId {
-  if (typeof window === "undefined") return "snapshots";
+  if (typeof window === "undefined") return "site";
   return resolveTabFromSearchParams(new URLSearchParams(window.location.search));
 }
 

@@ -190,7 +190,7 @@ export function resolveTabFromSearchParams(params: URLSearchParams): TabId {
     return VIEW_DEFAULT_TAB[view];
   }
 
-  return "snapshots";
+  return "site";
 }
 
 export function packageTemplateForTab(tab: TabId): PackageTemplateId | undefined {
@@ -209,7 +209,10 @@ export function writeViewStateToUrl(nextTab: TabId): void {
   const view = tabToView(nextTab);
   const defaultTab = VIEW_DEFAULT_TAB[view];
 
-  if (view === "model" && nextTab === "snapshots") {
+  if (view === "site" && nextTab === "site") {
+    url.searchParams.delete("view");
+    url.searchParams.delete("segment");
+  } else if (view === "model" && nextTab === "snapshots") {
     url.searchParams.delete("view");
     url.searchParams.delete("segment");
   } else {

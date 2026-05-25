@@ -34,10 +34,8 @@ describe("resolveTabFromSearchParams", () => {
     ).toBe("findings");
   });
 
-  it("defaults bare URL to snapshots", () => {
-    expect(resolveTabFromSearchParams(new URLSearchParams(""))).toBe(
-      "snapshots",
-    );
+  it("defaults bare URL to site (Map tab)", () => {
+    expect(resolveTabFromSearchParams(new URLSearchParams(""))).toBe("site");
   });
 });
 
@@ -67,7 +65,16 @@ describe("writeViewStateToUrl", () => {
     );
   });
 
-  it("clears view params for default snapshots tab", () => {
+  it("clears view params for default site tab", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/engagements/eng-1?view=model&segment=snapshots",
+    );
+    expect(searchAfter("site")).toBe("");
+  });
+
+  it("clears view params for default snapshots tab under model view", () => {
     window.history.replaceState(
       null,
       "",
