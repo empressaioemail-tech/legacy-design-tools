@@ -179,18 +179,8 @@ vi.mock("@workspace/api-zod", () => ({
 // from the leaf-free subpath — `importOriginal` on the client barrel pulls
 // `SiteMap.tsx` through Vite and breaks under the design-tools config.
 vi.mock("@workspace/site-context/client", async () => {
-  const { extractBriefingSourceOverlays } = await import(
-    "@workspace/site-context/client/overlays"
-  );
-  const { extractContoursGeoJsonOverlays, hasContoursGeoJson } = await import(
-    "@workspace/site-context/client/topoContours"
-  );
-  return {
-    extractBriefingSourceOverlays,
-    extractContoursGeoJsonOverlays,
-    hasContoursGeoJson,
-    SiteMap: () => null,
-  };
+  const { siteContextClientMockExports } = await import("./siteContextClientMock");
+  return siteContextClientMockExports();
 });
 
 // Mock the generated React Query hooks the page (and the dialog it

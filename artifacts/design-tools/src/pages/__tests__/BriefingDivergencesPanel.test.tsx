@@ -133,18 +133,8 @@ const resolve = createMutationCapture();
 // directly), but the symbol is pulled in transitively by
 // `EngagementDetail.tsx` when we import the panel from it.
 vi.mock("@workspace/site-context/client", async () => {
-  const { extractBriefingSourceOverlays } = await import(
-    "@workspace/site-context/client/overlays"
-  );
-  const { extractContoursGeoJsonOverlays, hasContoursGeoJson } = await import(
-    "@workspace/site-context/client/topoContours"
-  );
-  return {
-    extractBriefingSourceOverlays,
-    extractContoursGeoJsonOverlays,
-    hasContoursGeoJson,
-    SiteMap: () => null,
-  };
+  const { siteContextClientMockExports } = await import("./siteContextClientMock");
+  return siteContextClientMockExports();
 });
 
 vi.mock("@workspace/api-client-react", async (importOriginal) => {
