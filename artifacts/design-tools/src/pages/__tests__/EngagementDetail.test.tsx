@@ -1396,17 +1396,13 @@ describe("EngagementDetail Findings tab (Task #421 / V1-1 / V1-7)", () => {
 });
 
 describe("EngagementDetail Findings tab — manual plan-review trigger (PL-02)", () => {
-  it("rewrites the no-submissions empty state to point at Submit to jurisdiction and renders no re-run button", () => {
+  it("shows self-run plan review in the no-submissions empty state", () => {
     renderPage();
     gotoFindingsTab();
     const empty = screen.getByTestId("findings-tab-empty-no-submissions");
     expect(empty).toBeInTheDocument();
-    // The new copy must surface the Submit-to-jurisdiction handoff and
-    // explain the auto-trigger so the architect doesn't think the
-    // engine is gated on a manual click here.
     expect(empty.textContent ?? "").toMatch(/Submit to jurisdiction/);
-    expect(empty.textContent ?? "").toMatch(/runs automatically/);
-    // The button only renders in the with-submissions branch.
+    expect(screen.getByTestId("findings-tab-self-run")).toBeInTheDocument();
     expect(screen.queryByTestId("findings-tab-rerun")).not.toBeInTheDocument();
   });
 

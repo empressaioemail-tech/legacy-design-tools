@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link2, Copy, MessageSquare, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link2, Copy, MessageSquare, Plus, Package } from "lucide-react";
+import {
+  useGetSnapshotSheets,
+  getGetSnapshotSheetsQueryKey,
+} from "@workspace/api-client-react";
 import type { EngagementDetail } from "@workspace/api-client-react";
 import { TabHeader } from "../../cockpit/TabChrome";
 import { PublisherIntakeWorkbench } from "../PublisherIntakeWorkbench";
@@ -233,7 +237,7 @@ export function PackagesTab({
   const placeholderForm = buildPublisherIntakeDraft(engagement).form;
 
   return (
-    <div className="packages-tab" data-testid="packages-tab">
+    <div className="packages-tab packages-tab-scroll" data-testid="packages-tab">
       <TabHeader
         overline="Deliver"
         title="Packages"
@@ -305,6 +309,12 @@ export function PackagesTab({
             autoFilledCount={0}
             onNavigate={onNavigate}
             hideIntakeLane
+            packageSelection={activePackage.selection ?? null}
+          />
+          <PackageExportPreview
+            packageRecord={activePackage}
+            snapshotId={snapshotId}
+            shareUrl={shareUrl}
           />
           <footer className="packages-tab-actions">
             {template === "client-presentation" ? (
@@ -440,5 +450,76 @@ function PackageTemplateBar({
         </button>
       </div>
     </div>
+  );
+}
+
+function PackageExportPreview({
+  packageRecord,
+  snapshotId,
+  shareUrl,
+}: {
+  packageRecord: EngagementPackageRecord;
+  snapshotId: string | null;
+  shareUrl: string | null;
+}) {
+  const selection = packageRecord.selection;
+  const sheetIds = selection?.sheetIds ?? [];
+  const renderCount =
+    (selection?.renderIds?.length ?? 0) + (selection?.videoIds?.length ?? 0);
+  const { data: sheets = [] } = useGetSnapshotSheets(snapshotId ?? "", {
+    query: {
+      enabled: !!snapshotId && sheetIds.length > 0,
+      queryKey: getGetSnapshotSheetsQueryKey(snapshotId ?? ""),
+    },
+  });
+  const selectedSheets = useMemo(
+    () => sheets.filter((s) => sheetIds.includes(s.id)),
+    [sheets, sheetIds],
+  );
+  const itemCount =
+    sheetIds.length +
+    renderCount +
+    (selection?.includeIntake ? 1 : 0) +
+    (selection?.includeBriefing ? 1 : 0);
+
+  return (
+    <section
+      className="packages-export-preview sc-card"
+      data-testid="packages-export-preview"
+    >
+      <h3 className="sc-label flex items-center gap-2">
+        <Package size={14} aria-hidden />
+        Export preview
+      </h3>
+      <p className="sc-meta">
+        {itemCount > 0
+          ? `${itemCount} item${itemCount === 1 ? "" : "s"} selected for this package.`
+          : "Select assets in the builder above before exporting or sharing."}
+      </p>
+      {selectedSheets.length > 0 ? (
+        <ul className="packages-export-preview-sheets">
+          {selectedSheets.map((sheet) => (
+            <li key={sheet.id} className="packages-export-preview-sheet">
+              <img
+                src={`/api/sheets/${sheet.id}/thumbnail.png`}
+                alt=""
+                loading="lazy"
+              />
+              <span>
+                {sheet.sheetNumber} — {sheet.sheetName}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {shareUrl ? (
+        <p className="sc-meta">
+          Client preview:{" "}
+          <a href={shareUrl} target="_blank" rel="noreferrer">
+            Open share link
+          </a>
+        </p>
+      ) : null}
+    </section>
   );
 }
