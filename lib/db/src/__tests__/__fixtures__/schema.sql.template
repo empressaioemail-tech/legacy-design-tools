@@ -787,25 +787,6 @@ CREATE TABLE @@SCHEMA@@.qa_triage_items (
 );
 
 
--- Name: render_outputs; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.render_outputs (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    viewpoint_render_id uuid NOT NULL,
-    role text NOT NULL,
-    format text NOT NULL,
-    resolution text,
-    size_bytes integer,
-    duration_seconds integer,
-    source_url text NOT NULL,
-    mirrored_object_key text,
-    mnml_output_id text,
-    thumbnail_url text,
-    seed integer,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
 -- Name: recorded_instruments; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.recorded_instruments (
@@ -827,6 +808,25 @@ CREATE TABLE @@SCHEMA@@.recorded_instruments (
     upload_content_type text,
     upload_byte_size integer,
     extract_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: render_outputs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.render_outputs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    viewpoint_render_id uuid NOT NULL,
+    role text NOT NULL,
+    format text NOT NULL,
+    resolution text,
+    size_bytes integer,
+    duration_seconds integer,
+    source_url text NOT NULL,
+    mirrored_object_key text,
+    mnml_output_id text,
+    thumbnail_url text,
+    seed integer,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
