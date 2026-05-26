@@ -1412,6 +1412,12 @@ ALTER TABLE ONLY @@SCHEMA@@.qa_triage_items
     ADD CONSTRAINT qa_triage_items_pkey PRIMARY KEY (id);
 
 
+-- Name: recorded_instruments recorded_instruments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
+    ADD CONSTRAINT recorded_instruments_pkey PRIMARY KEY (id);
+
+
 -- Name: render_outputs render_outputs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.render_outputs
@@ -1422,6 +1428,12 @@ ALTER TABLE ONLY @@SCHEMA@@.render_outputs
 
 ALTER TABLE ONLY @@SCHEMA@@.response_tasks
     ADD CONSTRAINT response_tasks_pkey PRIMARY KEY (id);
+
+
+-- Name: restriction_clauses restriction_clauses_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.restriction_clauses
+    ADD CONSTRAINT restriction_clauses_pkey PRIMARY KEY (id);
 
 
 -- Name: reviewer_annotations reviewer_annotations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1682,7 +1694,7 @@ CREATE INDEX collateral_export_jobs_engagement_created_idx ON @@SCHEMA@@.collate
 
 -- Name: brokerage_brief_runs_listing_key_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX brokerage_brief_runs_listing_key_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (listing_key, created_at DESC);
+CREATE INDEX brokerage_brief_runs_listing_key_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (listing_key, created_at);
 
 
 -- Name: collateral_exports_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
@@ -1840,6 +1852,11 @@ CREATE INDEX qa_triage_items_source_idx ON @@SCHEMA@@.qa_triage_items USING btre
 CREATE INDEX qa_triage_items_status_idx ON @@SCHEMA@@.qa_triage_items USING btree (status, created_at);
 
 
+-- Name: recorded_instruments_engagement_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX recorded_instruments_engagement_idx ON @@SCHEMA@@.recorded_instruments USING btree (engagement_id);
+
+
 -- Name: render_outputs_render_role_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX render_outputs_render_role_uniq ON @@SCHEMA@@.render_outputs USING btree (viewpoint_render_id, role);
@@ -1853,6 +1870,11 @@ CREATE INDEX render_outputs_viewpoint_render_idx ON @@SCHEMA@@.render_outputs US
 -- Name: response_tasks_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX response_tasks_engagement_created_idx ON @@SCHEMA@@.response_tasks USING btree (engagement_id, created_at);
+
+
+-- Name: restriction_clauses_instrument_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX restriction_clauses_instrument_idx ON @@SCHEMA@@.restriction_clauses USING btree (instrument_id);
 
 
 -- Name: reviewer_annotations_parent_idx; Type: INDEX; Schema: public; Owner: -
@@ -2179,6 +2201,12 @@ ALTER TABLE ONLY @@SCHEMA@@.product_spec_references
     ADD CONSTRAINT product_spec_references_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
 
 
+-- Name: recorded_instruments recorded_instruments_engagement_id_engagements_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.recorded_instruments
+    ADD CONSTRAINT recorded_instruments_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
 -- Name: render_outputs render_outputs_viewpoint_render_id_viewpoint_renders_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.render_outputs
@@ -2189,6 +2217,12 @@ ALTER TABLE ONLY @@SCHEMA@@.render_outputs
 
 ALTER TABLE ONLY @@SCHEMA@@.response_tasks
     ADD CONSTRAINT response_tasks_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: restriction_clauses restriction_clauses_instrument_id_recorded_instruments_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.restriction_clauses
+    ADD CONSTRAINT restriction_clauses_instrument_id_recorded_instruments_id_fk FOREIGN KEY (instrument_id) REFERENCES @@SCHEMA@@.recorded_instruments(id) ON DELETE CASCADE;
 
 
 -- Name: reviewer_annotations reviewer_annotations_parent_annotation_id_reviewer_annotations_; Type: FK CONSTRAINT; Schema: public; Owner: -
