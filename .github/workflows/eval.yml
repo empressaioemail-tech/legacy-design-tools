@@ -36,14 +36,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Checkout atom-contract (api-server file: dep)
-        run: |
-          git clone --depth 1 https://github.com/empressaioemail-tech/hauska-atom-contract.git "${GITHUB_WORKSPACE}/../hauska-atom-contract"
-          cd "${GITHUB_WORKSPACE}/../hauska-atom-contract"
-          git fetch --depth 1 origin 1e9a1d2
-          git checkout 1e9a1d2
-          npm ci
-          npm run build
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:

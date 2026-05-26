@@ -184,8 +184,8 @@ importers:
         specifier: ^7.19.0
         version: 7.19.0
       '@hauska/atom-contract':
-        specifier: file:../../../hauska-atom-contract
-        version: file:../hauska-atom-contract(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: file:../../vendor/hauska-atom-contract-1.2.0.tgz
+        version: file:vendor/hauska-atom-contract-1.2.0.tgz(@types/pg@8.18.0)(pg@8.20.0)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -2097,8 +2097,9 @@ packages:
     resolution: {integrity: sha512-vhJdXwlhf0finvxzfvqXQ1bAJx3zwDSEO1m3SNXkVuD68IziibfMTWwNWabvl7DuEBZkaEGIJM02ZXnG+F2eUg==}
     engines: {node: '>=18.18.0'}
 
-  '@hauska/atom-contract@file:../hauska-atom-contract':
-    resolution: {directory: ../hauska-atom-contract, type: directory}
+  '@hauska/atom-contract@file:vendor/hauska-atom-contract-1.2.0.tgz':
+    resolution: {integrity: sha512-Tzd9oXHmFnUTKAAoqloSOLyhIikAHfoxifJFzkPseusxHVxD635Y/qkMcxa63XIH4DHn8Oa7um5CryxvzTIUdg==, tarball: file:vendor/hauska-atom-contract-1.2.0.tgz}
+    version: 1.2.0
     engines: {node: '>=18.18.0'}
 
   '@hono/node-server@1.19.14':
@@ -5535,6 +5536,7 @@ packages:
   recharts@2.15.4:
     resolution: {integrity: sha512-UT/q6fwS3c1dHbXv2uFgYJ9BMFHu3fwnd7AYZaEQhXuYQ4hgsxLvsUXzGdKeZrW5xopzDCvuA2N41WJ88I7zIw==}
     engines: {node: '>=14'}
+    deprecated: 1.x and 2.x branches are no longer active. Bump to Recharts v3 to receive latest features and bugfixes. See https://github.com/recharts/recharts/wiki/3.0-migration-guide
     peerDependencies:
       react: ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
@@ -6532,7 +6534,7 @@ snapshots:
       - sql.js
       - sqlite3
 
-  '@hauska/atom-contract@file:../hauska-atom-contract(@types/pg@8.18.0)(pg@8.20.0)':
+  '@hauska/atom-contract@file:vendor/hauska-atom-contract-1.2.0.tgz(@types/pg@8.18.0)(pg@8.20.0)':
     dependencies:
       drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
       zod: 3.25.76
