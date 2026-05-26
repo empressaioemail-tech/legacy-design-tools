@@ -82,6 +82,7 @@ import type {
   DismissReviewerRequestBody,
   DraftSubmissionCommunicationResponse,
   EmbeddingsBackfillResult,
+  EncumbrancesListResponse,
   EngagementBimModelResponse,
   EngagementBriefingResponse,
   EngagementBriefingSourcesResponse,
@@ -228,6 +229,7 @@ import type {
   UpdateQaTriageItemBody,
   UpdateReviewerAnnotationBody,
   UpdateUserBody,
+  UploadEngagementEncumbrancePdfBody,
   UploadRenderSourceBody,
   UploadSnapshotSheetsBody,
   User,
@@ -3039,6 +3041,284 @@ export const useStartEngagementCanvaPush = <
   TContext
 > => {
   return useMutation(getStartEngagementCanvaPushMutationOptions(options));
+};
+
+/**
+ * @summary List recorded instruments and restriction clauses
+ */
+export const getGetEngagementEncumbrancesUrl = (id: string) => {
+  return `/api/engagements/${id}/encumbrances`;
+};
+
+export const getEngagementEncumbrances = async (
+  id: string,
+  options?: RequestInit,
+): Promise<EncumbrancesListResponse> => {
+  return customFetch<EncumbrancesListResponse>(
+    getGetEngagementEncumbrancesUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetEngagementEncumbrancesQueryKey = (id: string) => {
+  return [`/api/engagements/${id}/encumbrances`] as const;
+};
+
+export const getGetEngagementEncumbrancesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEngagementEncumbrances>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagementEncumbrances>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetEngagementEncumbrancesQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEngagementEncumbrances>>
+  > = ({ signal }) =>
+    getEngagementEncumbrances(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEngagementEncumbrances>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEngagementEncumbrancesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEngagementEncumbrances>>
+>;
+export type GetEngagementEncumbrancesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary List recorded instruments and restriction clauses
+ */
+
+export function useGetEngagementEncumbrances<
+  TData = Awaited<ReturnType<typeof getEngagementEncumbrances>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEngagementEncumbrances>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEngagementEncumbrancesQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Upload a recorded-instrument PDF (R4)
+ */
+export const getUploadEngagementEncumbrancePdfUrl = (id: string) => {
+  return `/api/engagements/${id}/encumbrances/upload`;
+};
+
+export const uploadEngagementEncumbrancePdf = async (
+  id: string,
+  uploadEngagementEncumbrancePdfBody: UploadEngagementEncumbrancePdfBody,
+  options?: RequestInit,
+): Promise<EncumbrancesListResponse> => {
+  const formData = new FormData();
+  formData.append(`file`, uploadEngagementEncumbrancePdfBody.file);
+
+  return customFetch<EncumbrancesListResponse>(
+    getUploadEngagementEncumbrancePdfUrl(id),
+    {
+      ...options,
+      method: "POST",
+      body: formData,
+    },
+  );
+};
+
+export const getUploadEngagementEncumbrancePdfMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadEngagementEncumbrancePdf>>,
+    TError,
+    { id: string; data: BodyType<UploadEngagementEncumbrancePdfBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof uploadEngagementEncumbrancePdf>>,
+  TError,
+  { id: string; data: BodyType<UploadEngagementEncumbrancePdfBody> },
+  TContext
+> => {
+  const mutationKey = ["uploadEngagementEncumbrancePdf"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof uploadEngagementEncumbrancePdf>>,
+    { id: string; data: BodyType<UploadEngagementEncumbrancePdfBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return uploadEngagementEncumbrancePdf(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UploadEngagementEncumbrancePdfMutationResult = NonNullable<
+  Awaited<ReturnType<typeof uploadEngagementEncumbrancePdf>>
+>;
+export type UploadEngagementEncumbrancePdfMutationBody =
+  BodyType<UploadEngagementEncumbrancePdfBody>;
+export type UploadEngagementEncumbrancePdfMutationError = ErrorType<void>;
+
+/**
+ * @summary Upload a recorded-instrument PDF (R4)
+ */
+export const useUploadEngagementEncumbrancePdf = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadEngagementEncumbrancePdf>>,
+    TError,
+    { id: string; data: BodyType<UploadEngagementEncumbrancePdfBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof uploadEngagementEncumbrancePdf>>,
+  TError,
+  { id: string; data: BodyType<UploadEngagementEncumbrancePdfBody> },
+  TContext
+> => {
+  return useMutation(getUploadEngagementEncumbrancePdfMutationOptions(options));
+};
+
+/**
+ * @summary Human-verify a restriction clause
+ */
+export const getVerifyEngagementEncumbranceClauseUrl = (
+  id: string,
+  clauseId: string,
+) => {
+  return `/api/engagements/${id}/encumbrances/clauses/${clauseId}/verify`;
+};
+
+export const verifyEngagementEncumbranceClause = async (
+  id: string,
+  clauseId: string,
+  options?: RequestInit,
+): Promise<EncumbrancesListResponse> => {
+  return customFetch<EncumbrancesListResponse>(
+    getVerifyEngagementEncumbranceClauseUrl(id, clauseId),
+    {
+      ...options,
+      method: "PATCH",
+    },
+  );
+};
+
+export const getVerifyEngagementEncumbranceClauseMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyEngagementEncumbranceClause>>,
+    TError,
+    { id: string; clauseId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof verifyEngagementEncumbranceClause>>,
+  TError,
+  { id: string; clauseId: string },
+  TContext
+> => {
+  const mutationKey = ["verifyEngagementEncumbranceClause"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof verifyEngagementEncumbranceClause>>,
+    { id: string; clauseId: string }
+  > = (props) => {
+    const { id, clauseId } = props ?? {};
+
+    return verifyEngagementEncumbranceClause(id, clauseId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VerifyEngagementEncumbranceClauseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof verifyEngagementEncumbranceClause>>
+>;
+
+export type VerifyEngagementEncumbranceClauseMutationError = ErrorType<void>;
+
+/**
+ * @summary Human-verify a restriction clause
+ */
+export const useVerifyEngagementEncumbranceClause = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyEngagementEncumbranceClause>>,
+    TError,
+    { id: string; clauseId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof verifyEngagementEncumbranceClause>>,
+  TError,
+  { id: string; clauseId: string },
+  TContext
+> => {
+  return useMutation(
+    getVerifyEngagementEncumbranceClauseMutationOptions(options),
+  );
 };
 
 /**

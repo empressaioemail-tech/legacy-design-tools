@@ -70,9 +70,10 @@ const RESEARCH_CHAT_BODY = z.object({
 });
 
 const router: IRouter = Router();
+const brokerageV1: IRouter = Router();
 
-router.use(brokerageCors);
-router.use(brokerageAuth);
+brokerageV1.use(brokerageCors);
+brokerageV1.use(brokerageAuth);
 
 function listingKey(address: string, mlsId?: string | null): string {
   const norm = address.trim().toLowerCase().replace(/\s+/g, " ");
@@ -169,7 +170,7 @@ async function runCodeRetrieval(
   return { sections, citations };
 }
 
-router.post("/brokerage/v1/brief", async (req: Request, res: Response) => {
+brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const parse = BRIEF_BODY.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: "invalid_request", message: "Invalid brief body" });
@@ -288,8 +289,8 @@ router.post("/brokerage/v1/brief", async (req: Request, res: Response) => {
   res.json(responseBody);
 });
 
-router.post(
-  "/brokerage/v1/brief/summarize",
+brokerageV1.post(
+  "/brief/summarize",
   async (req: Request, res: Response) => {
     const parse = SUMMARIZE_BODY.safeParse(req.body);
     if (!parse.success) {
@@ -316,8 +317,8 @@ router.post(
   },
 );
 
-router.post(
-  "/brokerage/v1/research/chat",
+brokerageV1.post(
+  "/research/chat",
   async (req: Request, res: Response) => {
     const parse = RESEARCH_CHAT_BODY.safeParse(req.body);
     if (!parse.success) {
@@ -408,5 +409,7 @@ router.post(
     res.json(result);
   },
 );
+
+router.use("/brokerage/v1", brokerageV1);
 
 export default router;

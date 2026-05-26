@@ -35,6 +35,7 @@ import { sessionMiddleware } from "../middlewares/session";
 export const TRUNCATE_TABLES: readonly string[] = [
   "engagements",
   "recorded_instruments",
+  "restriction_clauses",
   "snapshots",
   "sheets",
   // Manual-QGIS upload tables (DA-PI-1B). `briefing_sources` cascades
@@ -202,6 +203,9 @@ export function setupRouteTests(
   let app: Express | null = null;
 
   beforeAll(async () => {
+    if (!process.env.PRIVATE_OBJECT_DIR?.trim()) {
+      process.env.PRIVATE_OBJECT_DIR = "/test-bucket/private";
+    }
     ctx.schema = await createTestSchema();
     app = await buildTestApp();
     onReady(() => {

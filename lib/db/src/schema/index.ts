@@ -50,4 +50,5 @@ export * from "./workspaceSettings";
 export * from "./coverageRequests";
 export * from "./canva";
 export * from "./collateral";
+export * from "./encumbrances";
 export * from "./brokerageBriefRuns";

@@ -91,6 +91,8 @@ describe("lib/db schema integration", () => {
         "briefing_divergences",
         "briefing_generation_jobs",
         "briefing_sources",
+        // Hauska Property Brief Chrome extension — persisted brief runs.
+        "brokerage_brief_runs",
         // PLR-10 — tenant-scoped canned-finding library curated by
         // tenant admins; reviewers consume entries on FindingsTab to
         // pre-fill the manual-add form.
@@ -149,9 +151,13 @@ describe("lib/db schema integration", () => {
         "qa_settings",
         // Task #503 — QA triage queue items (forwarded to planning).
         "qa_triage_items",
+        // ADR-020 Phase 1 — engagement-scoped recorded instruments (R4 upload).
+        "recorded_instruments",
         "render_outputs",
         // Cortex L1 (Lane C.4 / C.4.1) — response-task workflow rows.
         "response_tasks",
+        // ADR-020 Phase 1 — restriction clauses extracted from instruments.
+        "restriction_clauses",
         // Spec 307 / Task #307 — reviewer scratch-note surface anchored
         // per (submission, target atom) tuple. Reviewer-only until the
         // bulk-promote endpoint flips `promoted_at`.

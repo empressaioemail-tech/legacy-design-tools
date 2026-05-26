@@ -39,6 +39,8 @@ export default defineConfig({
           "@workspace/db",
           "@workspace/codes",
           "@workspace/codes-sources",
+          "@hauska/atom-contract",
+          "@workspace/codes-sources",
           "@workspace/integrations-anthropic-ai",
           "@workspace/api-zod",
           "@workspace/logger",

@@ -138,6 +138,10 @@ tags:
     description: |
       Placid headless PDF export — engagement assets, signed public fetch,
       async collateral export jobs for Client materials (Deliver tab).
+  - name: encumbrances
+    description: |
+      Recorded private land-use instruments (CC&Rs, deed restrictions) per ADR-020.
+      Phase 1 — engagement PDF upload (R4). Not municipal code.
 paths:
   /healthz:
     get:
@@ -1080,6 +1084,94 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{id}/encumbrances:
+    get:
+      operationId: getEngagementEncumbrances
+      tags: [encumbrances]
+      summary: List recorded instruments and restriction clauses
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Instruments and clauses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncumbrancesListResponse"
+        "404":
+          description: Engagement not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /engagements/{id}/encumbrances/upload:
+    post:
+      operationId: uploadEngagementEncumbrancePdf
+      tags: [encumbrances]
+      summary: Upload a recorded-instrument PDF (R4)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncumbrancesListResponse"
+        "404":
+          description: Engagement not found
+        "413":
+          description: PDF too large
+        "415":
+          description: Expected multipart/form-data
+
+  /engagements/{id}/encumbrances/clauses/{clauseId}/verify:
+    patch:
+      operationId: verifyEngagementEncumbranceClause
+      tags: [encumbrances]
+      summary: Human-verify a restriction clause
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: clauseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncumbrancesListResponse"
+        "404":
+          description: Not found
 
   /engagements/{id}/briefing:
     get:
@@ -9708,6 +9800,134 @@ components:
         - supersededById
         - createdAt
 
+    EncumbrancesListResponse:
+      type: object
+      required: [instruments, clauses]
+      properties:
+        instruments:
+          type: array
+          items:
+            $ref: "#/components/schemas/EncumbranceInstrument"
+        clauses:
+          type: array
+          items:
+            $ref: "#/components/schemas/EncumbranceClause"
+
+    EncumbranceInstrument:
+      type: object
+      required: [id, engagementId, instrument, sourceObjectPath, pdfUrl, extractMetadata, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        engagementId:
+          type: string
+          format: uuid
+        instrument:
+          type: object
+          additionalProperties: true
+        sourceObjectPath:
+          type: string
+        pdfUrl:
+          type: string
+        uploadOriginalFilename:
+          type: string
+          nullable: true
+        uploadContentType:
+          type: string
+          nullable: true
+        uploadByteSize:
+          type: integer
+          nullable: true
+        extractMetadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+
+    EncumbranceClause:
+      type: object
+      required: [id, instrumentId, clause, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        instrumentId:
+          type: string
+          format: uuid
+        clause:
+          type: object
+          additionalProperties: true
+        sourcePage:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    PrivateRestrictionsBriefing:
+      type: object
+      required: [summary, confidence, evaluatedAt, items]
+      properties:
+        summary:
+          type: string
+        confidence:
+          type: number
+        evaluatedAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrivateRestrictionBriefingItem"
+
+    PrivateRestrictionBriefingItem:
+      type: object
+      required:
+        - clauseId
+        - instrumentId
+        - clausePath
+        - bodyText
+        - legalWeight
+        - confidence
+        - sourceCitation
+        - instrumentType
+        - sourceDocumentUrl
+        - evaluatedAt
+      properties:
+        clauseId:
+          type: string
+          format: uuid
+        instrumentId:
+          type: string
+          format: uuid
+        clausePath:
+          type: string
+        bodyText:
+          type: string
+        legalWeight:
+          type: string
+          enum: [recorded, advisory]
+        confidence:
+          type: number
+        reasoningSummary:
+          type: string
+          nullable: true
+        sourceCitation:
+          type: string
+        humanVerifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        instrumentType:
+          type: string
+        sourceDocumentUrl:
+          type: string
+        evaluatedAt:
+          type: string
+          format: date-time
+
     EngagementBriefing:
       type: object
       description: |
@@ -9737,6 +9957,12 @@ components:
             `null` when the engine has never run on this row (the
             briefing exists but no `POST /briefing/generate` call has
             populated `section_a..g` yet).
+        privateRestrictions:
+          allOf:
+            - $ref: "#/components/schemas/PrivateRestrictionsBriefing"
+          nullable: true
+          description: |
+            Recorded private restriction clauses for this engagement. Null when none uploaded.
       required:
         - id
         - engagementId
@@ -9744,6 +9970,7 @@ components:
         - updatedAt
         - sources
         - narrative
+        - privateRestrictions
 
     EngagementBriefingNarrative:
       type: object

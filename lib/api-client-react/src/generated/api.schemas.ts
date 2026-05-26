@@ -1332,6 +1332,68 @@ asking the server.
   createdAt: string;
 }
 
+export type EncumbranceInstrumentInstrument = { [key: string]: unknown };
+
+export type EncumbranceInstrumentExtractMetadata = { [key: string]: unknown };
+
+export interface EncumbranceInstrument {
+  id: string;
+  engagementId: string;
+  instrument: EncumbranceInstrumentInstrument;
+  sourceObjectPath: string;
+  pdfUrl: string;
+  uploadOriginalFilename?: string | null;
+  uploadContentType?: string | null;
+  uploadByteSize?: number | null;
+  extractMetadata: EncumbranceInstrumentExtractMetadata;
+  createdAt: string;
+}
+
+export type EncumbranceClauseClause = { [key: string]: unknown };
+
+export interface EncumbranceClause {
+  id: string;
+  instrumentId: string;
+  clause: EncumbranceClauseClause;
+  sourcePage?: number | null;
+  createdAt: string;
+}
+
+export interface EncumbrancesListResponse {
+  instruments: EncumbranceInstrument[];
+  clauses: EncumbranceClause[];
+}
+
+export type PrivateRestrictionBriefingItemLegalWeight =
+  (typeof PrivateRestrictionBriefingItemLegalWeight)[keyof typeof PrivateRestrictionBriefingItemLegalWeight];
+
+export const PrivateRestrictionBriefingItemLegalWeight = {
+  recorded: "recorded",
+  advisory: "advisory",
+} as const;
+
+export interface PrivateRestrictionBriefingItem {
+  clauseId: string;
+  instrumentId: string;
+  clausePath: string;
+  bodyText: string;
+  legalWeight: PrivateRestrictionBriefingItemLegalWeight;
+  confidence: number;
+  reasoningSummary?: string | null;
+  sourceCitation: string;
+  humanVerifiedAt?: string | null;
+  instrumentType: string;
+  sourceDocumentUrl: string;
+  evaluatedAt: string;
+}
+
+export interface PrivateRestrictionsBriefing {
+  summary: string;
+  confidence: number;
+  evaluatedAt: string;
+  items: PrivateRestrictionBriefingItem[];
+}
+
 /**
  * The seven-section A–G briefing produced by the briefing engine
 (Spec 51 §2). Each section is independently nullable so a
@@ -1399,6 +1461,9 @@ briefing exists but no `POST /briefing/generate` call has
 populated `section_a..g` yet).
  */
   narrative: EngagementBriefingNarrative | null;
+  /** Recorded private restriction clauses for this engagement. Null when none uploaded.
+   */
+  privateRestrictions: PrivateRestrictionsBriefing | null;
 }
 
 /**
@@ -6286,6 +6351,10 @@ export type CanvaOAuthCallbackParams = {
   code?: string;
   state?: string;
   error?: string;
+};
+
+export type UploadEngagementEncumbrancePdfBody = {
+  file: Blob;
 };
 
 export type ListEngagementBriefingSourcesParams = {

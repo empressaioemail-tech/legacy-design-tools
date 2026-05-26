@@ -1312,6 +1312,84 @@ export const StartEngagementCanvaPushBody = zod.object({
 });
 
 /**
+ * @summary List recorded instruments and restriction clauses
+ */
+export const GetEngagementEncumbrancesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetEngagementEncumbrancesResponse = zod.object({
+  instruments: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      engagementId: zod.string().uuid(),
+      instrument: zod.record(zod.string(), zod.unknown()),
+      sourceObjectPath: zod.string(),
+      pdfUrl: zod.string(),
+      uploadOriginalFilename: zod.string().nullish(),
+      uploadContentType: zod.string().nullish(),
+      uploadByteSize: zod.number().nullish(),
+      extractMetadata: zod.record(zod.string(), zod.unknown()),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  clauses: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      instrumentId: zod.string().uuid(),
+      clause: zod.record(zod.string(), zod.unknown()),
+      sourcePage: zod.number().nullish(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Upload a recorded-instrument PDF (R4)
+ */
+export const UploadEngagementEncumbrancePdfParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UploadEngagementEncumbrancePdfBody = zod.object({
+  file: zod.instanceof(File),
+});
+
+/**
+ * @summary Human-verify a restriction clause
+ */
+export const VerifyEngagementEncumbranceClauseParams = zod.object({
+  id: zod.coerce.string(),
+  clauseId: zod.coerce.string().uuid(),
+});
+
+export const VerifyEngagementEncumbranceClauseResponse = zod.object({
+  instruments: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      engagementId: zod.string().uuid(),
+      instrument: zod.record(zod.string(), zod.unknown()),
+      sourceObjectPath: zod.string(),
+      pdfUrl: zod.string(),
+      uploadOriginalFilename: zod.string().nullish(),
+      uploadContentType: zod.string().nullish(),
+      uploadByteSize: zod.number().nullish(),
+      extractMetadata: zod.record(zod.string(), zod.unknown()),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  clauses: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      instrumentId: zod.string().uuid(),
+      clause: zod.record(zod.string(), zod.unknown()),
+      sourcePage: zod.number().nullish(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
  * Returns the engagement's `parcel_briefings` row (if any) along
 with its current (non-superseded) `briefing_sources`. Returns
 `null` when no briefing has been created yet — i.e. before the
@@ -1463,6 +1541,32 @@ export const GetEngagementBriefingResponse = zod
           .nullable()
           .describe(
             "The latest generated A–G narrative for this engagement.\n`null` when the engine has never run on this row (the\nbriefing exists but no `POST \/briefing\/generate` call has\npopulated `section_a..g` yet).\n",
+          ),
+        privateRestrictions: zod
+          .object({
+            summary: zod.string(),
+            confidence: zod.number(),
+            evaluatedAt: zod.coerce.date(),
+            items: zod.array(
+              zod.object({
+                clauseId: zod.string().uuid(),
+                instrumentId: zod.string().uuid(),
+                clausePath: zod.string(),
+                bodyText: zod.string(),
+                legalWeight: zod.enum(["recorded", "advisory"]),
+                confidence: zod.number(),
+                reasoningSummary: zod.string().nullish(),
+                sourceCitation: zod.string(),
+                humanVerifiedAt: zod.coerce.date().nullish(),
+                instrumentType: zod.string(),
+                sourceDocumentUrl: zod.string(),
+                evaluatedAt: zod.coerce.date(),
+              }),
+            ),
+          })
+          .nullable()
+          .describe(
+            "Recorded private restriction clauses for this engagement. Null when none uploaded.\n",
           ),
       })
       .describe(
@@ -1857,6 +1961,32 @@ export const RestoreEngagementBriefingSourceResponse = zod
           .describe(
             "The latest generated A–G narrative for this engagement.\n`null` when the engine has never run on this row (the\nbriefing exists but no `POST \/briefing\/generate` call has\npopulated `section_a..g` yet).\n",
           ),
+        privateRestrictions: zod
+          .object({
+            summary: zod.string(),
+            confidence: zod.number(),
+            evaluatedAt: zod.coerce.date(),
+            items: zod.array(
+              zod.object({
+                clauseId: zod.string().uuid(),
+                instrumentId: zod.string().uuid(),
+                clausePath: zod.string(),
+                bodyText: zod.string(),
+                legalWeight: zod.enum(["recorded", "advisory"]),
+                confidence: zod.number(),
+                reasoningSummary: zod.string().nullish(),
+                sourceCitation: zod.string(),
+                humanVerifiedAt: zod.coerce.date().nullish(),
+                instrumentType: zod.string(),
+                sourceDocumentUrl: zod.string(),
+                evaluatedAt: zod.coerce.date(),
+              }),
+            ),
+          })
+          .nullable()
+          .describe(
+            "Recorded private restriction clauses for this engagement. Null when none uploaded.\n",
+          ),
       })
       .describe(
         "The engagement's parcel briefing row plus its current sources\nand (when generated) the seven-section A–G narrative.\n",
@@ -2023,6 +2153,32 @@ export const RetryBriefingSourceConversionResponse = zod
           .nullable()
           .describe(
             "The latest generated A–G narrative for this engagement.\n`null` when the engine has never run on this row (the\nbriefing exists but no `POST \/briefing\/generate` call has\npopulated `section_a..g` yet).\n",
+          ),
+        privateRestrictions: zod
+          .object({
+            summary: zod.string(),
+            confidence: zod.number(),
+            evaluatedAt: zod.coerce.date(),
+            items: zod.array(
+              zod.object({
+                clauseId: zod.string().uuid(),
+                instrumentId: zod.string().uuid(),
+                clausePath: zod.string(),
+                bodyText: zod.string(),
+                legalWeight: zod.enum(["recorded", "advisory"]),
+                confidence: zod.number(),
+                reasoningSummary: zod.string().nullish(),
+                sourceCitation: zod.string(),
+                humanVerifiedAt: zod.coerce.date().nullish(),
+                instrumentType: zod.string(),
+                sourceDocumentUrl: zod.string(),
+                evaluatedAt: zod.coerce.date(),
+              }),
+            ),
+          })
+          .nullable()
+          .describe(
+            "Recorded private restriction clauses for this engagement. Null when none uploaded.\n",
           ),
       })
       .describe(
@@ -2221,6 +2377,32 @@ export const GenerateEngagementLayersResponse = zod
           .nullable()
           .describe(
             "The latest generated A–G narrative for this engagement.\n`null` when the engine has never run on this row (the\nbriefing exists but no `POST \/briefing\/generate` call has\npopulated `section_a..g` yet).\n",
+          ),
+        privateRestrictions: zod
+          .object({
+            summary: zod.string(),
+            confidence: zod.number(),
+            evaluatedAt: zod.coerce.date(),
+            items: zod.array(
+              zod.object({
+                clauseId: zod.string().uuid(),
+                instrumentId: zod.string().uuid(),
+                clausePath: zod.string(),
+                bodyText: zod.string(),
+                legalWeight: zod.enum(["recorded", "advisory"]),
+                confidence: zod.number(),
+                reasoningSummary: zod.string().nullish(),
+                sourceCitation: zod.string(),
+                humanVerifiedAt: zod.coerce.date().nullish(),
+                instrumentType: zod.string(),
+                sourceDocumentUrl: zod.string(),
+                evaluatedAt: zod.coerce.date(),
+              }),
+            ),
+          })
+          .nullable()
+          .describe(
+            "Recorded private restriction clauses for this engagement. Null when none uploaded.\n",
           ),
       })
       .describe(
