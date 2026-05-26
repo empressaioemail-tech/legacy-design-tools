@@ -1591,7 +1591,7 @@ async function runBriefingGeneration(args: {
 }): Promise<void> {
   const { engagementId, briefingId, generationId, generatedBy, sources, reqLog } = args;
   try {
-    const client = await getBriefingLlmClient();
+    const llmClient = await getBriefingLlmClient();
     const mode = getBriefingLlmMode();
     reqLog.info(
       { engagementId, briefingId, generationId, mode, sourceCount: sources.length },
@@ -1605,7 +1605,10 @@ async function runBriefingGeneration(args: {
       },
       {
         mode,
-        ...(client ? { anthropicClient: client } : {}),
+        ...(llmClient?.kind === "grok" ? { grokClient: llmClient.client } : {}),
+        ...(llmClient?.kind === "anthropic"
+          ? { anthropicClient: llmClient.client }
+          : {}),
       },
     );
     const { row, wasRegeneration } = await persistGenerationResult(

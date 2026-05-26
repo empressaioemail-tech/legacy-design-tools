@@ -1390,6 +1390,9 @@ importers:
       '@workspace/integrations-anthropic-ai':
         specifier: workspace:*
         version: link:../integrations-anthropic-ai
+      '@workspace/integrations-xai-grok':
+        specifier: workspace:*
+        version: link:../integrations-xai-grok
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

@@ -258,7 +258,8 @@ Manager. `Class = config` → Cloud Run env var.
 | `XAI_BASE_URL` | config | optional | `lib/integrations-xai-grok/src/client.ts` | Default `https://api.x.ai/v1`. |
 | `XAI_FINDING_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for plan-review findings. Default `grok-3-mini`. |
 | `XAI_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Fallback model id when `XAI_FINDING_MODEL` unset. |
-| `BRIEFING_LLM_MODE` | config | optional | `lib/briefing-engine/src/engine.ts` | Default `mock`. |
+| `BRIEFING_LLM_MODE` | config | optional | `lib/briefing-engine/src/engine.ts` | Default `mock`. `grok` requires `XAI_API_KEY`. `anthropic` requires AI Integrations env. AI chat stays Anthropic regardless. |
+| `XAI_BRIEFING_MODEL` | config | optional | `lib/briefing-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for parcel briefings. Default `grok-3-mini`. |
 | `MNML_RENDER_MODE` | config | optional | `lib/mnml-client/src/factory.ts` | Default `mock`. `http` requires `MNML_API_URL` + `MNML_API_KEY`. |
 | `MNML_API_URL` | config | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |
 | `MNML_API_KEY` | secret | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |

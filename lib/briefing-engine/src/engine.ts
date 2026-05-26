@@ -12,10 +12,12 @@
  */
 
 import type Anthropic from "@anthropic-ai/sdk";
+import type { GrokClient } from "@workspace/integrations-xai-grok";
 import {
   callAnthropicGenerator,
   AnthropicGeneratorError,
 } from "./anthropicGenerator";
+import { callGrokGenerator } from "./grokGenerator";
 import {
   validateSectionCitations,
   type CitationResolvers,
@@ -43,6 +45,11 @@ export interface GenerateBriefingOptions {
    */
   anthropicClient?: Anthropic;
   /**
+   * xAI Grok client to use when `mode === "grok"`. Required for the
+   * grok branch (same injection pattern as findings).
+   */
+  grokClient?: GrokClient;
+  /**
    * When supplied, validation also accepts these code-section atom
    * ids. Anything else is treated as invalid and stripped.
    */
@@ -58,6 +65,7 @@ export interface GenerateBriefingOptions {
  */
 export function resolveBriefingLlmMode(): BriefingLlmMode {
   const raw = (process.env.BRIEFING_LLM_MODE ?? "mock").toLowerCase();
+  if (raw === "grok") return "grok";
   if (raw === "anthropic") return "anthropic";
   return "mock";
 }
@@ -89,7 +97,15 @@ export async function generateBriefing(
   const now = options.now ?? (() => new Date());
 
   let raw: BriefingSections;
-  if (mode === "anthropic") {
+  if (mode === "grok") {
+    if (!options.grokClient) {
+      throw new AnthropicGeneratorError(
+        "anthropic_call_failed",
+        "BRIEFING_LLM_MODE=grok requires a Grok client to be passed",
+      );
+    }
+    raw = await callGrokGenerator(options.grokClient, input);
+  } else if (mode === "anthropic") {
     if (!options.anthropicClient) {
       throw new AnthropicGeneratorError(
         "anthropic_call_failed",

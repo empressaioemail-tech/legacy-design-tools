@@ -143,7 +143,7 @@ export const MATERIALIZABLE_SECTIONS = ["c", "d", "f"] as const;
 export type MaterializableSection = (typeof MATERIALIZABLE_SECTIONS)[number];
 
 /** LLM provider modes selected by `BRIEFING_LLM_MODE`. */
-export type BriefingLlmMode = "mock" | "anthropic";
+export type BriefingLlmMode = "mock" | "anthropic" | "grok";
 
 /**
  * Section keys grouped per Spec 51 §1.2 architect-audience weighting:

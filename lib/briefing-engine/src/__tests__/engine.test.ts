@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateBriefing } from "../engine";
+import { generateBriefing, resolveBriefingLlmMode } from "../engine";
 import type { BriefingSourceInput, GenerateBriefingInput } from "../types";
 
 const src = (overrides: Partial<BriefingSourceInput>): BriefingSourceInput => ({
@@ -100,5 +100,35 @@ describe("generateBriefing (mock mode)", () => {
     await expect(
       generateBriefing(input(), { mode: "anthropic" }),
     ).rejects.toThrow(/requires an Anthropic client/);
+  });
+
+  it("rejects grok mode without an injected client", async () => {
+    await expect(
+      generateBriefing(input(), { mode: "grok" }),
+    ).rejects.toThrow(/requires a Grok client/);
+  });
+});
+
+describe("resolveBriefingLlmMode", () => {
+  it("returns grok when BRIEFING_LLM_MODE === 'grok'", () => {
+    const original = process.env.BRIEFING_LLM_MODE;
+    process.env.BRIEFING_LLM_MODE = "grok";
+    try {
+      expect(resolveBriefingLlmMode()).toBe("grok");
+    } finally {
+      if (original === undefined) delete process.env.BRIEFING_LLM_MODE;
+      else process.env.BRIEFING_LLM_MODE = original;
+    }
+  });
+
+  it("treats unknown env values as mock", () => {
+    const original = process.env.BRIEFING_LLM_MODE;
+    process.env.BRIEFING_LLM_MODE = "openai";
+    try {
+      expect(resolveBriefingLlmMode()).toBe("mock");
+    } finally {
+      if (original === undefined) delete process.env.BRIEFING_LLM_MODE;
+      else process.env.BRIEFING_LLM_MODE = original;
+    }
   });
 });

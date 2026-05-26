@@ -85,6 +85,7 @@ const {
 } = await import("@workspace/db");
 const { eq, and, asc, desc } = await import("drizzle-orm");
 const { geocodeAddress } = await import("@workspace/site-context/server");
+const { enqueueWarmupForJurisdiction } = await import("@workspace/codes");
 const registryModule = await import("../atoms/registry");
 const { resetAtomRegistryForTests } = registryModule;
 const findingEngineActual = await vi.importActual<
@@ -107,11 +108,13 @@ beforeAll(() => {
 });
 
 const mockedGeocodeAddress = vi.mocked(geocodeAddress);
+const mockedEnqueueWarmup = vi.mocked(enqueueWarmupForJurisdiction);
 
 beforeEach(() => {
   // Reset queued `mockResolvedValueOnce` returns so a test that does
   // NOT call geocode does not pick up a leftover from the prior test.
   mockedGeocodeAddress.mockReset();
+  mockedEnqueueWarmup.mockClear();
   // Default `generateFindings` to the real engine impl so the rest of
   // the suite is unaffected; the auto-trigger failure test below
   // overrides per-call to force a deterministic failure.
@@ -278,6 +281,32 @@ describe("PATCH /api/engagements/:id — lifecycle events", () => {
     // independent root events).
     expect(events[0]!.prevHash).toBeNull();
     expect(events[1]!.prevHash).toBe(events[0]!.chainHash);
+  });
+
+  it("enqueues code corpus warmup for cedar_hill_tx when geocode yields Cedar Hill, TX", async () => {
+    mockedGeocodeAddress.mockResolvedValueOnce({
+      latitude: 32.588,
+      longitude: -96.956,
+      jurisdictionCity: "Cedar Hill",
+      jurisdictionState: "TX",
+      jurisdictionFips: "4811332",
+      source: "nominatim",
+      geocodedAt: new Date().toISOString(),
+    });
+    const eng = await seedEngagement({
+      address: "100 Original St",
+      jurisdictionCity: null,
+      jurisdictionState: null,
+    });
+
+    const res = await request(getApp())
+      .patch(`/api/engagements/${eng.id}`)
+      .send({ address: "430 Evergreen Trl, Cedar Hill, TX 75104" });
+    expect(res.status).toBe(200);
+    expect(mockedEnqueueWarmup).toHaveBeenCalledWith(
+      "cedar_hill_tx",
+      expect.anything(),
+    );
   });
 
   it("does NOT emit jurisdiction-resolved when the geocode yields the same city/state already on the row", async () => {

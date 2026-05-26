@@ -47,6 +47,13 @@ export {
 } from "./anthropicGenerator";
 
 export {
+  BRIEFING_GROK_DEFAULT_MODEL,
+  BRIEFING_GROK_MAX_TOKENS,
+  callGrokGenerator,
+  resolveGrokBriefingModel,
+} from "./grokGenerator";
+
+export {
   validateSectionCitations,
   type CitationResolvers,
   type CitationScanResult,

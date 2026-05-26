@@ -13,11 +13,6 @@ import {
   listJurisdictions,
 } from "@workspace/codes";
 import { logger } from "../lib/logger";
-import { requireArchitectAudience } from "../lib/audienceGuards";
-
-const CODES_WARMUP_AUDIENCE_ERROR = "codes_warmup_requires_internal_audience";
-const CODES_BACKFILL_AUDIENCE_ERROR =
-  "codes_backfill_requires_internal_audience";
 
 const router: IRouter = Router();
 
@@ -484,11 +479,15 @@ router.get(
   },
 );
 
+/**
+ * Manual Code Library warmup. QA-30/31 / renders precedent: prod
+ * `sessionMiddleware` forces `audience: "user"`, so `requireArchitectAudience`
+ * dead-locked warmup with 403. Gate removed until signed-session auth can
+ * prove architect role (same follow-up as renders.ts).
+ */
 router.post(
   "/codes/warmup/:key",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireArchitectAudience(req, res, CODES_WARMUP_AUDIENCE_ERROR))
-      return;
     const key = String(req.params.key ?? "");
     if (!getJurisdiction(key)) {
       res.status(404).json({ error: "Unknown jurisdiction" });
@@ -528,8 +527,6 @@ router.post(
 router.post(
   "/codes/embeddings/backfill",
   async (req: Request, res: Response): Promise<void> => {
-    if (requireArchitectAudience(req, res, CODES_BACKFILL_AUDIENCE_ERROR))
-      return;
     const limit = Math.min(
       Math.max(Number(req.query.limit ?? 200) || 200, 1),
       1000,
