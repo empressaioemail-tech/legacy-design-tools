@@ -258,8 +258,10 @@ Manager. `Class = config` → Cloud Run env var.
 | `XAI_BASE_URL` | config | optional | `lib/integrations-xai-grok/src/client.ts` | Default `https://api.x.ai/v1`. |
 | `XAI_FINDING_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for plan-review findings. Default `grok-3-mini`. |
 | `XAI_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Fallback model id when `XAI_FINDING_MODEL` unset. |
-| `BRIEFING_LLM_MODE` | config | optional | `lib/briefing-engine/src/engine.ts` | Default `mock`. `grok` requires `XAI_API_KEY`. `anthropic` requires AI Integrations env. AI chat stays Anthropic regardless. |
-| `XAI_BRIEFING_MODEL` | config | optional | `lib/briefing-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for parcel briefings. Default `grok-3-mini`. |
+| `BRIEFING_LLM_MODE` | config | optional | `lib/briefing-engine/src/engine.ts` | Default `mock`. `grok` requires `XAI_API_KEY`. `anthropic` requires AI Integrations env. AI chat stays Anthropic regardless. Property Brief brokerage routes (`/api/brokerage/v1/*`) use the same client via `briefingLlmClient.ts` — set `grok` for production extension summaries. |
+| `XAI_BRIEFING_MODEL` | config | optional | `lib/briefing-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for parcel briefings and brokerage brief/research Grok calls. Default `grok-3-mini`. |
+| `BROKERAGE_DEV_API_KEY` | secret | required for extension API | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Comma-separated keys accepted. Extension sends `Authorization: Bearer <key>` or `X-Hauska-Key`. Also reads `BROKERAGE_API_KEYS` (alias). |
+| `BROKERAGE_API_KEYS` | secret | optional alias | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Same as `BROKERAGE_DEV_API_KEY` when multiple pilot keys are needed. |
 | `MNML_RENDER_MODE` | config | optional | `lib/mnml-client/src/factory.ts` | Default `mock`. `http` requires `MNML_API_URL` + `MNML_API_KEY`. |
 | `MNML_API_URL` | config | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |
 | `MNML_API_KEY` | secret | conditional | `lib/mnml-client/src/factory.ts` | Required when `MNML_RENDER_MODE=http`. |
