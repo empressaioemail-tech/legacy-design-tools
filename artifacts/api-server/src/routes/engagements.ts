@@ -13,6 +13,10 @@ import {
 } from "@workspace/api-zod";
 import { geocodeAddress } from "@workspace/site-context/server";
 import {
+  enqueueWarmupForJurisdiction,
+  keyFromEngagement,
+} from "@workspace/codes";
+import {
   computeEngagementCoverage,
   coverageFieldsFromResolved,
 } from "../lib/engagementCoverage";
@@ -48,6 +52,49 @@ import {
  * audit trail still records *that* an edit happened — matching the
  * pre-session behavior.
  */
+/**
+ * Best-effort code corpus warmup when geocode resolves a registered
+ * jurisdiction whose city/state pair changed. Non-fatal — mirrors
+ * `fireGeocodeAndWarmup` in snapshots.ts.
+ */
+async function tryEnqueueWarmupForResolvedJurisdiction(
+  log: typeof logger,
+  engagementId: string,
+  jurisdictionCity: string | null,
+  jurisdictionState: string | null,
+  previousJurisdictionCity: string | null,
+  previousJurisdictionState: string | null,
+): Promise<void> {
+  const city = jurisdictionCity?.trim() || null;
+  const state = jurisdictionState?.trim() || null;
+  if (!city || !state) return;
+  const prevCity = previousJurisdictionCity?.trim() || null;
+  const prevState = previousJurisdictionState?.trim() || null;
+  if (city === prevCity && state === prevState) return;
+  const jKey = keyFromEngagement({
+    jurisdictionCity: city,
+    jurisdictionState: state,
+  });
+  if (!jKey) return;
+  try {
+    const enq = await enqueueWarmupForJurisdiction(jKey, log);
+    log.info(
+      {
+        engagementId,
+        jurisdictionKey: jKey,
+        enqueued: enq.enqueued,
+        skipped: enq.skipped,
+      },
+      "auto-warmup: enqueued for engagement jurisdiction",
+    );
+  } catch (warmErr) {
+    log.warn(
+      { warmErr, jurisdictionKey: jKey },
+      "auto-warmup enqueue failed (non-fatal)",
+    );
+  }
+}
+
 function actorFromRequest(req: Request): EngagementEventActor {
   const requestor = req.session?.requestor;
   if (requestor && requestor.id) {
@@ -535,6 +582,14 @@ router.patch("/engagements/:id", async (req: Request, res: Response) => {
           },
           reqLog,
         );
+        await tryEnqueueWarmupForResolvedJurisdiction(
+          reqLog,
+          existing.id,
+          resolvedJurisdictionCity,
+          resolvedJurisdictionState,
+          existing.jurisdictionCity,
+          existing.jurisdictionState,
+        );
       }
     }
 
@@ -646,6 +701,14 @@ router.post("/engagements/:id/geocode", async (req: Request, res: Response) => {
           actor: actorFromRequest(req),
         },
         reqLog,
+      );
+      await tryEnqueueWarmupForResolvedJurisdiction(
+        reqLog,
+        existing.id,
+        resolvedGeo.jurisdictionCity,
+        resolvedGeo.jurisdictionState,
+        existing.jurisdictionCity,
+        existing.jurisdictionState,
       );
     }
 

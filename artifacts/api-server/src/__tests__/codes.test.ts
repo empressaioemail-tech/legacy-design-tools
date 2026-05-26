@@ -446,24 +446,29 @@ describe("GET /api/codes/atoms (global inspector list)", () => {
   });
 });
 
-describe("audience guards on mutation routes", () => {
-  it("403s POST /api/codes/warmup/:key for the applicant audience", async () => {
+describe("prod session posture on mutation routes (QA-30/31)", () => {
+  it("allows POST /api/codes/warmup/:key without x-audience (prod user session)", async () => {
+    if (!ctx.schema) throw new Error("schema not ready");
+    await seedGrandCountySources();
+    sourceMocks.listTocImpl = async () => [];
+
     const res = await request(getApp())
       .post("/api/codes/warmup/grand_county_ut")
       .set("x-audience", "user");
-    expect(res.status).toBe(403);
-    expect(res.body).toEqual({
-      error: "codes_warmup_requires_internal_audience",
-    });
+    expect(res.status).toBe(200);
+    expect(res.body.jurisdictionKey).toBe("grand_county_ut");
   });
 
-  it("403s POST /api/codes/embeddings/backfill for the applicant audience", async () => {
+  it("allows POST /api/codes/embeddings/backfill without internal audience (empty queue)", async () => {
     const res = await request(getApp())
       .post("/api/codes/embeddings/backfill")
       .set("x-audience", "user");
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      error: "codes_backfill_requires_internal_audience",
+      scanned: 0,
+      embedded: 0,
+      failed: 0,
+      remaining: 0,
     });
   });
 

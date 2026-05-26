@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@workspace/integrations-anthropic-ai": "workspace:*"
+    "@workspace/integrations-anthropic-ai": "workspace:*",
+    "@workspace/integrations-xai-grok": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

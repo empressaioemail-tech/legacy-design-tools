@@ -6,6 +6,7 @@ import { bootstrapAtomRegistry } from "./atoms/registry";
 import { validateConverterEnvAtBoot } from "./lib/converterClient";
 import { validateHauskaSubstrateEnvAtBoot } from "./lib/hauskaSubstrateClient";
 import { validateFindingEngineEnvAtBoot } from "./lib/findingLlmClient";
+import { validateBriefingEngineEnvAtBoot } from "./lib/briefingLlmClient";
 import { validateSheetContentEnvAtBoot } from "./lib/sheetContentLlmClient";
 import { reconcileOrphanedAutopilotRuns } from "./lib/qa/autopilot";
 
@@ -79,6 +80,19 @@ try {
   logger.error(
     { err },
     "finding-engine env validation failed — refusing to start",
+  );
+  process.exit(1);
+}
+
+// Fail-fast on misconfigured briefing-engine env: when
+// BRIEFING_LLM_MODE=grok we require XAI_API_KEY; when anthropic we
+// require the AI Integrations env vars. Mock mode boots clean.
+try {
+  validateBriefingEngineEnvAtBoot();
+} catch (err) {
+  logger.error(
+    { err },
+    "briefing-engine env validation failed — refusing to start",
   );
   process.exit(1);
 }
