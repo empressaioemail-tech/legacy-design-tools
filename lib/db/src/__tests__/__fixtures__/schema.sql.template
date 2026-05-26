@@ -192,51 +192,14 @@ CREATE TABLE @@SCHEMA@@.briefing_sources (
 );
 
 
--- Name: recorded_instruments; Type: TABLE; Schema: public; Owner: -
+-- Name: brokerage_brief_runs; Type: TABLE; Schema: public; Owner: -
 
-CREATE TABLE @@SCHEMA@@.recorded_instruments (
+CREATE TABLE @@SCHEMA@@.brokerage_brief_runs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    engagement_id uuid NOT NULL,
-    instrument_did text NOT NULL,
-    instrument_type text NOT NULL,
-    recording jsonb,
-    issuer_actor_did text NOT NULL,
-    source_document_cid text NOT NULL,
-    applies_to jsonb NOT NULL,
-    access_policy text DEFAULT 'tenant-private'::text NOT NULL,
-    legal_weight text DEFAULT 'recorded'::text NOT NULL,
-    verification_status text DEFAULT 'machine'::text NOT NULL,
-    extracted_at timestamp with time zone NOT NULL,
-    source_adapter text NOT NULL,
-    source_object_path text NOT NULL,
-    upload_original_filename text,
-    upload_content_type text,
-    upload_byte_size integer,
-    extract_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
--- Name: restriction_clauses; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.restriction_clauses (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    instrument_id uuid NOT NULL,
-    clause_did text NOT NULL,
-    parent_instrument_cid text NOT NULL,
-    clause_path text NOT NULL,
-    body_text text NOT NULL,
-    structured_fields jsonb,
-    confidence numeric(4,3) NOT NULL,
-    extracted_by text NOT NULL,
-    human_verified_at timestamp with time zone,
-    verified_by_actor_did text,
-    access_policy text DEFAULT 'tenant-private'::text NOT NULL,
-    legal_weight text DEFAULT 'recorded'::text NOT NULL,
-    reasoning_summary text,
-    source_citation text NOT NULL,
-    evaluated_at timestamp with time zone NOT NULL,
-    source_page integer,
+    tenant_slug text DEFAULT 'default'::text NOT NULL,
+    listing_key text NOT NULL,
+    address text NOT NULL,
+    payload_json jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -429,18 +392,6 @@ CREATE TABLE @@SCHEMA@@.collateral_metering_events (
     export_job_id uuid NOT NULL,
     units integer NOT NULL,
     provider text DEFAULT 'placid'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
--- Name: brokerage_brief_runs; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.brokerage_brief_runs (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_slug text DEFAULT 'default'::text NOT NULL,
-    listing_key text NOT NULL,
-    address text NOT NULL,
-    payload_json jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -855,6 +806,31 @@ CREATE TABLE @@SCHEMA@@.render_outputs (
 );
 
 
+-- Name: recorded_instruments; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.recorded_instruments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    engagement_id uuid NOT NULL,
+    instrument_did text NOT NULL,
+    instrument_type text NOT NULL,
+    recording jsonb,
+    issuer_actor_did text NOT NULL,
+    source_document_cid text NOT NULL,
+    applies_to jsonb NOT NULL,
+    access_policy text DEFAULT 'tenant-private'::text NOT NULL,
+    legal_weight text DEFAULT 'recorded'::text NOT NULL,
+    verification_status text DEFAULT 'machine'::text NOT NULL,
+    extracted_at timestamp with time zone NOT NULL,
+    source_adapter text NOT NULL,
+    source_object_path text NOT NULL,
+    upload_original_filename text,
+    upload_content_type text,
+    upload_byte_size integer,
+    extract_metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: response_tasks; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.response_tasks (
@@ -872,6 +848,30 @@ CREATE TABLE @@SCHEMA@@.response_tasks (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT response_tasks_state_check CHECK ((state = ANY (ARRAY['open'::text, 'in-progress'::text, 'done'::text, 'cancelled'::text])))
+);
+
+
+-- Name: restriction_clauses; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.restriction_clauses (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    instrument_id uuid NOT NULL,
+    clause_did text NOT NULL,
+    parent_instrument_cid text NOT NULL,
+    clause_path text NOT NULL,
+    body_text text NOT NULL,
+    structured_fields jsonb,
+    confidence numeric(4,3) NOT NULL,
+    extracted_by text NOT NULL,
+    human_verified_at timestamp with time zone,
+    verified_by_actor_did text,
+    access_policy text DEFAULT 'tenant-private'::text NOT NULL,
+    legal_weight text DEFAULT 'recorded'::text NOT NULL,
+    reasoning_summary text,
+    source_citation text NOT NULL,
+    evaluated_at timestamp with time zone NOT NULL,
+    source_page integer,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1190,6 +1190,12 @@ ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
     ADD CONSTRAINT briefing_sources_pkey PRIMARY KEY (id);
 
 
+-- Name: brokerage_brief_runs brokerage_brief_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_brief_runs
+    ADD CONSTRAINT brokerage_brief_runs_pkey PRIMARY KEY (id);
+
+
 -- Name: canned_findings canned_findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.canned_findings
@@ -1266,12 +1272,6 @@ ALTER TABLE ONLY @@SCHEMA@@.collateral_exports
 
 ALTER TABLE ONLY @@SCHEMA@@.collateral_metering_events
     ADD CONSTRAINT collateral_metering_events_pkey PRIMARY KEY (id);
-
-
--- Name: brokerage_brief_runs brokerage_brief_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.brokerage_brief_runs
-    ADD CONSTRAINT brokerage_brief_runs_pkey PRIMARY KEY (id);
 
 
 -- Name: coverage_requests coverage_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1622,6 +1622,11 @@ CREATE INDEX briefing_sources_briefing_idx ON @@SCHEMA@@.briefing_sources USING 
 CREATE UNIQUE INDEX briefing_sources_current_layer_uniq ON @@SCHEMA@@.briefing_sources USING btree (briefing_id, layer_kind) WHERE (superseded_at IS NULL);
 
 
+-- Name: brokerage_brief_runs_listing_key_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_brief_runs_listing_key_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (listing_key, created_at);
+
+
 -- Name: canned_findings_tenant_discipline_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX canned_findings_tenant_discipline_idx ON @@SCHEMA@@.canned_findings USING btree (tenant_id, discipline);
@@ -1690,11 +1695,6 @@ CREATE INDEX code_atoms_source_idx ON @@SCHEMA@@.code_atoms USING btree (source_
 -- Name: collateral_export_jobs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX collateral_export_jobs_engagement_created_idx ON @@SCHEMA@@.collateral_export_jobs USING btree (engagement_id, created_at);
-
-
--- Name: brokerage_brief_runs_listing_key_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX brokerage_brief_runs_listing_key_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (listing_key, created_at);
 
 
 -- Name: collateral_exports_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
