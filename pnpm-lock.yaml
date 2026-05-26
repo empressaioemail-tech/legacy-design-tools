@@ -184,8 +184,8 @@ importers:
         specifier: ^7.19.0
         version: 7.19.0
       '@hauska/atom-contract':
-        specifier: ^1.1.0
-        version: 1.1.0(@types/pg@8.18.0)(pg@8.20.0)
+        specifier: file:../../../hauska-atom-contract
+        version: file:../hauska-atom-contract(@types/pg@8.18.0)(pg@8.20.0)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
@@ -207,6 +207,9 @@ importers:
       '@workspace/codes':
         specifier: workspace:*
         version: link:../../lib/codes
+      '@workspace/codes-sources':
+        specifier: workspace:*
+        version: link:../../lib/codes-sources
       '@workspace/comment-letter':
         specifier: workspace:*
         version: link:../../lib/comment-letter
@@ -325,9 +328,6 @@ importers:
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@15.11.7)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
-      '@workspace/codes-sources':
-        specifier: workspace:*
-        version: link:../../lib/codes-sources
       cross-env:
         specifier: ^7.0.3
         version: 7.0.3
@@ -2095,6 +2095,10 @@ packages:
 
   '@hauska/atom-contract@1.1.0':
     resolution: {integrity: sha512-vhJdXwlhf0finvxzfvqXQ1bAJx3zwDSEO1m3SNXkVuD68IziibfMTWwNWabvl7DuEBZkaEGIJM02ZXnG+F2eUg==}
+    engines: {node: '>=18.18.0'}
+
+  '@hauska/atom-contract@file:../hauska-atom-contract':
+    resolution: {directory: ../hauska-atom-contract, type: directory}
     engines: {node: '>=18.18.0'}
 
   '@hono/node-server@1.19.14':
@@ -6497,6 +6501,41 @@ snapshots:
   '@hauska/atom-contract@1.1.0(@types/pg@8.18.0)(pg@8.20.0)':
     dependencies:
       drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
+    transitivePeerDependencies:
+      - '@aws-sdk/client-rds-data'
+      - '@cloudflare/workers-types'
+      - '@electric-sql/pglite'
+      - '@libsql/client'
+      - '@libsql/client-wasm'
+      - '@neondatabase/serverless'
+      - '@op-engineering/op-sqlite'
+      - '@opentelemetry/api'
+      - '@planetscale/database'
+      - '@prisma/client'
+      - '@tidbcloud/serverless'
+      - '@types/better-sqlite3'
+      - '@types/pg'
+      - '@types/sql.js'
+      - '@upstash/redis'
+      - '@vercel/postgres'
+      - '@xata.io/client'
+      - better-sqlite3
+      - bun-types
+      - expo-sqlite
+      - gel
+      - knex
+      - kysely
+      - mysql2
+      - pg
+      - postgres
+      - prisma
+      - sql.js
+      - sqlite3
+
+  '@hauska/atom-contract@file:../hauska-atom-contract(@types/pg@8.18.0)(pg@8.20.0)':
+    dependencies:
+      drizzle-orm: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
+      zod: 3.25.76
     transitivePeerDependencies:
       - '@aws-sdk/client-rds-data'
       - '@cloudflare/workers-types'

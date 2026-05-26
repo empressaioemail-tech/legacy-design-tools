@@ -36,6 +36,7 @@ import {
   shouldShowRequestCoverage,
 } from "../../lib/coverageUi";
 import { SiteContextTab } from "./SiteContextTab";
+import { EncumbrancesPanel } from "./EncumbrancesPanel";
 import { SiteContext3DModelToggle } from "./SiteContext3DModelToggle";
 import type { BuildingOverlayState } from "@workspace/portal-ui";
 import {
@@ -507,6 +508,10 @@ function SiteParcelInspector({
         briefing={briefing}
         siteContextHref={`/engagements/${engagement.id}?view=site&segment=property-intel`}
         onOpenSiteContext={onOpenPropertyIntel}
+      />
+      <EncumbrancesPanel
+        engagementId={engagement.id}
+        privateRestrictions={briefing?.privateRestrictions ?? null}
       />
       <div>
         <h4 className="site-details-subheading">Active context</h4>

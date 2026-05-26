@@ -9,7 +9,8 @@
     "./grand-county-html": "./src/grandCountyHtml/index.ts",
     "./code-publishing-html": "./src/codePublishingHtml/index.ts",
     "./grand-county-pdf": "./src/grandCountyPdf/index.ts",
-    "./municode": "./src/municode/index.ts"
+    "./municode": "./src/municode/index.ts",
+    "./pdf-text": "./src/pdfText.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

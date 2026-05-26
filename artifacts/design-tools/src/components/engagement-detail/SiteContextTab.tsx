@@ -40,6 +40,7 @@ import {
   scrollToBriefingSource,
 } from "@workspace/portal-ui";
 import { BriefingSourceUploadModal } from "../BriefingSourceUploadModal";
+import { EncumbrancesPanel } from "./EncumbrancesPanel";
 import { BriefingRecentRunsPanel } from "./BriefingRecentRunsPanel";
 import { BriefingDivergencesPanel, PushToRevitAffordance } from "./PushToRevitAffordance";
 import { GenerateLayersSummaryBanner } from "./GenerateLayersSummaryBanner";
@@ -1635,6 +1636,11 @@ export function SiteContextTab({
 
       {showBriefingPanel && (
       <>
+      <EncumbrancesPanel
+        engagementId={engagementId}
+        privateRestrictions={briefingQuery.data?.briefing?.privateRestrictions ?? null}
+      />
+
       {/*
         Task #316 — render the shared BriefingNarrativePanel from
         portal-ui and inject the design-tools-specific

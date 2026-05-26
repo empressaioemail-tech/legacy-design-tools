@@ -7,6 +7,7 @@
  */
 import type { EngagementBriefingNarrative } from "./engagementBriefingNarrative";
 import type { EngagementBriefingSource } from "./engagementBriefingSource";
+import type { PrivateRestrictionsBriefing } from "./privateRestrictionsBriefing";
 
 /**
  * The engagement's parcel briefing row plus its current sources
@@ -25,4 +26,7 @@ briefing exists but no `POST /briefing/generate` call has
 populated `section_a..g` yet).
  */
   narrative: EngagementBriefingNarrative | null;
+  /** Recorded private restriction clauses for this engagement. Null when none uploaded.
+   */
+  privateRestrictions: PrivateRestrictionsBriefing | null;
 }

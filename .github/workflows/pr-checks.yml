@@ -11,6 +11,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Checkout atom-contract (api-server file: dep)
+        uses: actions/checkout@v4
+        with:
+          repository: empressaioemail-tech/hauska-atom-contract
+          ref: 1e9a1d2
+          path: ../hauska-atom-contract
+      - name: Build atom-contract
+        working-directory: ../hauska-atom-contract
+        run: npm ci && npm run build
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -56,6 +65,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Checkout atom-contract (api-server file: dep)
+        uses: actions/checkout@v4
+        with:
+          repository: empressaioemail-tech/hauska-atom-contract
+          ref: 1e9a1d2
+          path: ../hauska-atom-contract
+      - name: Build atom-contract
+        working-directory: ../hauska-atom-contract
+        run: npm ci && npm run build
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:

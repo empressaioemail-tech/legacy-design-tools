@@ -35,6 +35,7 @@ import { sessionMiddleware } from "../middlewares/session";
 export const TRUNCATE_TABLES: readonly string[] = [
   "engagements",
   "recorded_instruments",
+  "recorded_instruments",
   "snapshots",
   "sheets",
   // Manual-QGIS upload tables (DA-PI-1B). `briefing_sources` cascades

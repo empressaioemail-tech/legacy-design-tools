@@ -28,6 +28,11 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
+  buildPrivateRestrictionsBriefing,
+  type PrivateRestrictionsBriefing,
+} from "../lib/encumbranceWire";
+import { loadEncumbrancesForEngagement } from "./encumbrances";
+import {
   db,
   engagements,
   parcelBriefings,
@@ -212,6 +217,7 @@ interface BriefingWire {
   updatedAt: string;
   sources: BriefingSourceWire[];
   narrative: BriefingNarrativeWire | null;
+  privateRestrictions: PrivateRestrictionsBriefing | null;
 }
 
 /**
@@ -304,7 +310,7 @@ function toBriefingNarrativeWire(
 function toBriefingWire(
   briefing: ParcelBriefing,
   sources: BriefingSource[],
-): BriefingWire {
+): Omit<BriefingWire, "privateRestrictions"> {
   return {
     id: briefing.id,
     engagementId: briefing.engagementId,
@@ -312,6 +318,20 @@ function toBriefingWire(
     updatedAt: briefing.updatedAt.toISOString(),
     sources: sources.map(toBriefingSourceWire),
     narrative: toBriefingNarrativeWire(briefing),
+  };
+}
+
+async function projectBriefingWire(
+  briefing: ParcelBriefing,
+  sources: BriefingSource[],
+): Promise<BriefingWire> {
+  const enc = await loadEncumbrancesForEngagement(briefing.engagementId);
+  return {
+    ...toBriefingWire(briefing, sources),
+    privateRestrictions: buildPrivateRestrictionsBriefing(
+      enc.instruments,
+      enc.clauses,
+    ),
   };
 }
 
@@ -509,7 +529,7 @@ router.get(
         return;
       }
       const sources = await loadCurrentSources(briefing.id);
-      res.json({ briefing: toBriefingWire(briefing, sources) });
+      res.json({ briefing: await projectBriefingWire(briefing, sources) });
     } catch (err) {
       logger.error({ err, engagementId }, "get engagement briefing failed");
       res.status(500).json({ error: "Failed to load briefing" });
@@ -736,7 +756,7 @@ router.post(
     const sources = await loadCurrentSources(outcome.briefing.id);
     res
       .status(201)
-      .json({ briefing: toBriefingWire(outcome.briefing, sources) });
+      .json({ briefing: await projectBriefingWire(outcome.briefing, sources) });
   },
 );
 
@@ -1023,7 +1043,7 @@ router.post(
     }
 
     const sources = await loadCurrentSources(outcome.briefing.id);
-    res.json({ briefing: toBriefingWire(outcome.briefing, sources) });
+    res.json({ briefing: await projectBriefingWire(outcome.briefing, sources) });
   },
 );
 
@@ -1157,7 +1177,7 @@ router.post(
         .where(eq(parcelBriefings.id, briefing.id))
         .returning();
       const sources = await loadCurrentSources(briefing.id);
-      res.json({ briefing: toBriefingWire(updatedBriefing, sources) });
+      res.json({ briefing: await projectBriefingWire(updatedBriefing, sources) });
     } catch (err) {
       logger.error(
         { err, engagementId, sourceId },

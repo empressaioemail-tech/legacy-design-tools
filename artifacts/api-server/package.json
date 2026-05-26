@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
-    "@hauska/atom-contract": "^1.1.0",
+    "@hauska/atom-contract": "file:../../../hauska-atom-contract",
+    "@workspace/codes-sources": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@workspace/adapters": "workspace:*",
     "@workspace/api-zod": "workspace:*",
