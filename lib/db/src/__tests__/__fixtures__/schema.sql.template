@@ -384,6 +384,18 @@ CREATE TABLE @@SCHEMA@@.collateral_metering_events (
 );
 
 
+-- Name: brokerage_brief_runs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.brokerage_brief_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_slug text DEFAULT 'default'::text NOT NULL,
+    listing_key text NOT NULL,
+    address text NOT NULL,
+    payload_json jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: coverage_requests; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.coverage_requests (
@@ -1207,6 +1219,12 @@ ALTER TABLE ONLY @@SCHEMA@@.collateral_metering_events
     ADD CONSTRAINT collateral_metering_events_pkey PRIMARY KEY (id);
 
 
+-- Name: brokerage_brief_runs brokerage_brief_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_brief_runs
+    ADD CONSTRAINT brokerage_brief_runs_pkey PRIMARY KEY (id);
+
+
 -- Name: coverage_requests coverage_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.coverage_requests
@@ -1611,6 +1629,11 @@ CREATE INDEX code_atoms_source_idx ON @@SCHEMA@@.code_atoms USING btree (source_
 -- Name: collateral_export_jobs_engagement_created_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX collateral_export_jobs_engagement_created_idx ON @@SCHEMA@@.collateral_export_jobs USING btree (engagement_id, created_at);
+
+
+-- Name: brokerage_brief_runs_listing_key_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX brokerage_brief_runs_listing_key_idx ON @@SCHEMA@@.brokerage_brief_runs USING btree (listing_key, created_at DESC);
 
 
 -- Name: collateral_exports_engagement_created_idx; Type: INDEX; Schema: public; Owner: -

@@ -48,10 +48,13 @@ import siteTopographyRouter from "./siteTopography";
 import workspaceSettingsRouter from "./workspaceSettings";
 import coverageRequestsRouter from "./coverageRequests";
 import intakeRouter from "./intake";
+import brokerageBriefRouter from "./brokerageBrief";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+// Hauska Property Brief Chrome extension — API-key auth + extension CORS.
+router.use(brokerageBriefRouter);
 // /engagements/match must register BEFORE /engagements/:id otherwise Express
 // matches the literal path against the parametric route first.
 router.use(matchRouter);

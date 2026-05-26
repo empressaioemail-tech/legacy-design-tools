@@ -34,6 +34,7 @@ import { sessionMiddleware } from "../middlewares/session";
  */
 export const TRUNCATE_TABLES: readonly string[] = [
   "engagements",
+  "recorded_instruments",
   "snapshots",
   "sheets",
   // Manual-QGIS upload tables (DA-PI-1B). `briefing_sources` cascades
@@ -162,6 +163,7 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "collateral_metering_events",
   "collateral_exports",
   "collateral_export_jobs",
+  "brokerage_brief_runs",
 ];
 
 /**
