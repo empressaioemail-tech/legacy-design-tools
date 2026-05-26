@@ -525,7 +525,28 @@ router.get(
         .limit(1);
       const briefing = briefingRows[0];
       if (!briefing) {
-        res.json({ briefing: null });
+        const enc = await loadEncumbrancesForEngagement(engagementId);
+        const privateRestrictions = buildPrivateRestrictionsBriefing(
+          enc.instruments,
+          enc.clauses,
+        );
+        if (!privateRestrictions) {
+          res.json({ briefing: null });
+          return;
+        }
+        // Encumbrances can exist before a parcel briefing is generated;
+        // surface privateRestrictions on the standard briefing envelope.
+        res.json({
+          briefing: {
+            id: "",
+            engagementId,
+            createdAt: new Date(0).toISOString(),
+            updatedAt: new Date(0).toISOString(),
+            sources: [],
+            narrative: null,
+            privateRestrictions,
+          },
+        });
         return;
       }
       const sources = await loadCurrentSources(briefing.id);
