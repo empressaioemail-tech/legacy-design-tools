@@ -27,6 +27,8 @@ import {
   generateResearchChat,
   type BriefAtomInput,
 } from "../lib/brokerageBriefLlm";
+import { recordGtmEvent } from "../lib/recordGtmEvent";
+import { brokerageGtmRouter } from "./brokerageGtm";
 
 /** Mirrors hauska-brief-extension/src/lib/brief-engine.js CODE_QUERIES */
 export const BROKERAGE_CODE_QUERIES = [
@@ -74,6 +76,14 @@ const brokerageV1: IRouter = Router();
 
 brokerageV1.use(brokerageCors);
 brokerageV1.use(brokerageAuth);
+brokerageV1.use("/gtm", brokerageGtmRouter);
+
+function installIdFromRequest(req: Request): string | null {
+  const raw = req.headers["x-hauska-install-id"];
+  if (typeof raw !== "string") return null;
+  const id = raw.trim();
+  return id.length >= 8 ? id : null;
+}
 
 function listingKey(address: string, mlsId?: string | null): string {
   const norm = address.trim().toLowerCase().replace(/\s+/g, " ");
@@ -180,6 +190,18 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const { address, mls_id, source, page_url } = parse.data;
   const runId = randomUUID();
   const startedAt = new Date().toISOString();
+  const installId = installIdFromRequest(req);
+  const lk = listingKey(address, mls_id);
+
+  if (installId) {
+    recordGtmEvent({
+      installId,
+      eventType: "brief_started",
+      runId,
+      listingKey: lk,
+      payload: { source: source ?? null },
+    });
+  }
 
   let geocode: {
     lat: number;
@@ -281,10 +303,24 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   await db.insert(brokerageBriefRuns).values({
     id: runId,
     tenantSlug: "default",
-    listingKey: listingKey(address, mls_id),
+    listingKey: lk,
     address,
     payloadJson: responseBody,
   });
+
+  if (installId) {
+    recordGtmEvent({
+      installId,
+      eventType: "brief_completed",
+      runId,
+      listingKey: lk,
+      payload: {
+        corpusStatus,
+        jurisdiction: jurisdictionKey,
+        citationCount: citations.length,
+      },
+    });
+  }
 
   res.json(responseBody);
 });
@@ -405,6 +441,17 @@ brokerageV1.post(
       history,
       atoms,
     });
+
+    const installId = installIdFromRequest(req);
+    if (installId) {
+      recordGtmEvent({
+        installId,
+        eventType: "research_chat_turn",
+        runId,
+        listingKey: run.listingKey,
+        payload: { messageLength: message.length },
+      });
+    }
 
     res.json(result);
   },

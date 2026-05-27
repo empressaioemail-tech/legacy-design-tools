@@ -165,6 +165,8 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "collateral_exports",
   "collateral_export_jobs",
   "brokerage_brief_runs",
+  "gtm_events",
+  "gtm_consent",
 ];
 
 /**

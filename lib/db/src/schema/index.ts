@@ -52,3 +52,5 @@ export * from "./canva";
 export * from "./collateral";
 export * from "./encumbrances";
 export * from "./brokerageBriefRuns";
+export * from "./gtmEvents";
+export * from "./gtmConsent";
