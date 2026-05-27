@@ -1,0 +1,122 @@
+/**
+ * brokerageSiteContext — FEMA + Regrid layers for Property Brief wedge.
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const runAdaptersMock = vi.hoisted(() => vi.fn());
+const resolveJurisdictionMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@workspace/adapters", async () => {
+  const actual = await vi.importActual<typeof import("@workspace/adapters")>(
+    "@workspace/adapters",
+  );
+  return {
+    ...actual,
+    runAdapters: runAdaptersMock,
+    resolveJurisdiction: resolveJurisdictionMock,
+  };
+});
+
+const {
+  fetchBrokerageSiteContext,
+  formatSiteContextForLlm,
+} = await import("../lib/brokerageSiteContext");
+
+describe("fetchBrokerageSiteContext", () => {
+  beforeEach(() => {
+    runAdaptersMock.mockReset();
+    resolveJurisdictionMock.mockReset();
+    resolveJurisdictionMock.mockReturnValue({
+      stateKey: "texas",
+      localKey: "bastrop-tx",
+    });
+  });
+
+  it("returns empty layers when coordinates are invalid", async () => {
+    const ctx = await fetchBrokerageSiteContext({
+      latitude: NaN,
+      longitude: -97.32,
+      address: "251 Cool Water Dr, Bastrop, TX 78602",
+    });
+    expect(ctx.layers).toEqual([]);
+    expect(runAdaptersMock).not.toHaveBeenCalled();
+  });
+
+  it("maps FEMA and Regrid adapter outcomes to siteContext.layers", async () => {
+    runAdaptersMock.mockResolvedValue([
+      {
+        adapterKey: "fema:nfhl-flood-zone",
+        tier: "federal",
+        layerKind: "fema-nfhl-flood-zone",
+        status: "ok",
+        result: {
+          adapterKey: "fema:nfhl-flood-zone",
+          tier: "federal",
+          layerKind: "fema-nfhl-flood-zone",
+          sourceKind: "federal-adapter",
+          provider: "FEMA NFHL",
+          snapshotDate: "2026-05-01T00:00:00.000Z",
+          payload: {
+            kind: "flood-zone",
+            inSpecialFloodHazardArea: true,
+            floodZone: "AE",
+            baseFloodElevation: 425.5,
+          },
+        },
+      },
+      {
+        adapterKey: "regrid:parcels",
+        tier: "federal",
+        layerKind: "regrid-parcel",
+        status: "ok",
+        result: {
+          adapterKey: "regrid:parcels",
+          tier: "federal",
+          layerKind: "regrid-parcel",
+          sourceKind: "national-aggregator",
+          provider: "Regrid",
+          snapshotDate: "2026-05-01T00:00:00.000Z",
+          payload: {
+            kind: "parcel",
+            parcel: {
+              properties: { fields: { parcelnumb: "R12345", ll_gisacre: 0.42 } },
+            },
+          },
+        },
+      },
+      {
+        adapterKey: "regrid:zoning",
+        tier: "federal",
+        layerKind: "regrid-zoning",
+        status: "no-coverage",
+        error: {
+          code: "no-coverage",
+          message: "No zoning at this point",
+        },
+      },
+    ]);
+
+    const ctx = await fetchBrokerageSiteContext({
+      latitude: 30.11,
+      longitude: -97.32,
+      address: "251 Cool Water Dr, Bastrop, TX 78602",
+      jurisdictionCity: "Bastrop",
+      jurisdictionState: "TX",
+    });
+
+    expect(runAdaptersMock).toHaveBeenCalledOnce();
+    expect(ctx.layers).toHaveLength(3);
+    expect(ctx.layers[0]?.layerKind).toBe("fema-nfhl-flood-zone");
+    expect(ctx.layers[0]?.status).toBe("ok");
+    expect(ctx.layers[0]?.summary).toMatch(/Flood Zone AE/);
+    expect(ctx.layers[1]?.layerKind).toBe("regrid-parcel");
+    expect(ctx.layers[1]?.summary).toMatch(/ac/);
+    expect(ctx.layers[2]?.status).toBe("no-coverage");
+
+    const llm = formatSiteContextForLlm(ctx);
+    expect(llm).toContain("fema-nfhl-flood-zone");
+    expect(llm).toContain("regrid-parcel");
+    expect(llm).not.toContain("regrid-zoning");
+  });
+});

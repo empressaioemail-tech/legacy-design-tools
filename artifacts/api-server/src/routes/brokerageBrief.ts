@@ -28,6 +28,7 @@ import {
   type BriefAtomInput,
 } from "../lib/brokerageBriefLlm";
 import { recordGtmEvent } from "../lib/recordGtmEvent";
+import { fetchBrokerageSiteContext } from "../lib/brokerageSiteContext";
 import { brokerageGtmRouter } from "./brokerageGtm";
 
 /** Mirrors hauska-brief-extension/src/lib/brief-engine.js CODE_QUERIES */
@@ -256,6 +257,23 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const corpusStatus = await resolveCorpusStatus(jurisdictionKey, hasHits);
   const finishedAt = new Date().toISOString();
 
+  let siteContext: Awaited<ReturnType<typeof fetchBrokerageSiteContext>> = {
+    layers: [],
+  };
+  if (geocode && Number.isFinite(geocode.lat) && Number.isFinite(geocode.lon)) {
+    try {
+      siteContext = await fetchBrokerageSiteContext({
+        latitude: geocode.lat,
+        longitude: geocode.lon,
+        address,
+        jurisdictionCity: geocode.city,
+        jurisdictionState: geocode.state,
+      });
+    } catch (err) {
+      logger.warn({ err, address }, "brokerage: site context layers failed");
+    }
+  }
+
   const briefAtoms: BriefAtomInput[] = [];
   for (const s of sections) {
     const top = s.hits[0];
@@ -274,6 +292,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     corpusStatus,
     atoms: briefAtoms,
     finishedAt,
+    siteContext,
   });
 
   const responseBody = {
@@ -290,6 +309,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     geocode: geocode
       ? { lat: geocode.lat, lon: geocode.lon }
       : undefined,
+    siteContext,
     sections,
     citations,
     reasoningSummary,
@@ -434,12 +454,16 @@ brokerageV1.post(
     }
 
     const atoms = [...atomMap.values()];
+    const storedSiteContext = (
+      payload as { siteContext?: Awaited<ReturnType<typeof fetchBrokerageSiteContext>> }
+    ).siteContext;
     const result = await generateResearchChat({
       address,
       jurisdiction: jurisdictionKey,
       message,
       history,
       atoms,
+      siteContext: storedSiteContext,
     });
 
     const installId = installIdFromRequest(req);

@@ -7,6 +7,10 @@ import {
   BRIEFING_GROK_MAX_TOKENS,
 } from "@workspace/briefing-engine";
 import { getBriefingLlmClient } from "./briefingLlmClient";
+import {
+  formatSiteContextForLlm,
+  type BrokerageSiteContext,
+} from "./brokerageSiteContext";
 
 export const BROKERAGE_DISCLAIMER =
   "Reasoning summary from Hauska municipal code catalog. Not legal advice. Verify with city staff and applicable zoning before client representations.";
@@ -172,6 +176,7 @@ export async function generateReasoningSummary(input: {
   corpusStatus: string;
   atoms: BriefAtomInput[];
   finishedAt: string;
+  siteContext?: BrokerageSiteContext;
 }): Promise<ReasoningSummaryResult> {
   const atoms = input.atoms.slice(0, 12);
   const system = [
@@ -182,10 +187,15 @@ export async function generateReasoningSummary(input: {
     "Respond with JSON only: {\"headline\": string, \"body\": string (plain text, multiple paragraphs separated by blank lines)}.",
   ].join(" ");
 
+  const siteBlock = input.siteContext
+    ? formatSiteContextForLlm(input.siteContext)
+    : "";
+
   const user = [
     `Address: ${input.address}`,
     `Jurisdiction: ${input.jurisdiction ?? "unknown"}`,
     `Corpus status: ${input.corpusStatus}`,
+    siteBlock ? `\n${siteBlock}` : "",
     "",
     "Sources:",
     numberedAtomBlock(atoms),
@@ -298,6 +308,7 @@ export async function generateResearchChat(input: {
   message: string;
   history: Array<{ role: string; content: string }>;
   atoms: BriefAtomInput[];
+  siteContext?: BrokerageSiteContext;
 }): Promise<ResearchChatResult> {
   const atoms = input.atoms.slice(0, 16);
   const historyBlock = input.history
@@ -312,9 +323,14 @@ export async function generateResearchChat(input: {
     "Respond with JSON only: {\"answer\": string (plain text)}.",
   ].join(" ");
 
+  const siteBlock = input.siteContext
+    ? formatSiteContextForLlm(input.siteContext)
+    : "";
+
   const user = [
     `Property: ${input.address}`,
     `Jurisdiction: ${input.jurisdiction ?? "unknown"}`,
+    siteBlock ? `\n${siteBlock}` : "",
     "",
     "Conversation:",
     historyBlock || "(none)",
