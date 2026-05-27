@@ -621,6 +621,34 @@ CREATE TABLE @@SCHEMA@@.findings (
 );
 
 
+-- Name: gtm_consent; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.gtm_consent (
+    install_id text NOT NULL,
+    consent_version text NOT NULL,
+    terms_accepted_at timestamp with time zone NOT NULL,
+    graph_opt_in boolean DEFAULT false NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: gtm_events; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.gtm_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    install_id text NOT NULL,
+    event_type text NOT NULL,
+    source_surface text DEFAULT 'extension'::text NOT NULL,
+    run_id uuid,
+    listing_key text,
+    persona_inferred text,
+    consent_version text,
+    graph_opt_in text,
+    payload_json jsonb DEFAULT '{}'::jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: materializable_elements; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.materializable_elements (
@@ -1346,6 +1374,18 @@ ALTER TABLE ONLY @@SCHEMA@@.findings
     ADD CONSTRAINT findings_pkey PRIMARY KEY (id);
 
 
+-- Name: gtm_consent gtm_consent_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.gtm_consent
+    ADD CONSTRAINT gtm_consent_pkey PRIMARY KEY (install_id);
+
+
+-- Name: gtm_events gtm_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.gtm_events
+    ADD CONSTRAINT gtm_events_pkey PRIMARY KEY (id);
+
+
 -- Name: materializable_elements materializable_elements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.materializable_elements
@@ -1785,6 +1825,16 @@ CREATE UNIQUE INDEX findings_atom_id_uniq ON @@SCHEMA@@.findings USING btree (at
 -- Name: findings_submission_created_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree (submission_id, created_at);
+
+
+-- Name: gtm_events_event_type_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_events_event_type_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (event_type, created_at DESC);
+
+
+-- Name: gtm_events_install_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX gtm_events_install_id_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (install_id, created_at DESC);
 
 
 -- Name: materializable_elements_active_ifc_identity_uniq; Type: INDEX; Schema: public; Owner: -

@@ -79,7 +79,8 @@ brokerageGtmRouter.post("/consent", async (req: Request, res: Response) => {
 brokerageGtmRouter.get(
   "/consent/:installId",
   async (req: Request, res: Response) => {
-    const installId = req.params.installId?.trim();
+    const raw = req.params.installId;
+    const installId = (Array.isArray(raw) ? raw[0] : raw)?.trim();
     if (!installId) {
       res.status(400).json({ error: "invalid_request" });
       return;
