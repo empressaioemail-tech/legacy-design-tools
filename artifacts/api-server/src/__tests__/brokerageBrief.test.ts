@@ -13,6 +13,7 @@ const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
 const geocodeAddressMock = vi.hoisted(() => vi.fn());
 const completeChatMock = vi.hoisted(() => vi.fn());
 const fetchBrokerageSiteContextMock = vi.hoisted(() => vi.fn());
+const recordGtmEventMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -46,6 +47,11 @@ vi.mock("../lib/brokerageSiteContext", () => ({
     ctx.layers.length ? "Site context layers:\n- mock" : "",
 }));
 
+vi.mock("../lib/recordGtmEvent", () => ({
+  recordGtmEvent: recordGtmEventMock,
+  GTM_CONSENT_VERSION: "2026-05-26-v1",
+}));
+
 vi.mock("../lib/briefingLlmClient", async () => {
   const actual = await vi.importActual<typeof import("../lib/briefingLlmClient")>(
     "../lib/briefingLlmClient",
@@ -74,7 +80,61 @@ setupRouteTests((g) => {
 
 const authHeaders = {
   Authorization: `Bearer ${TEST_API_KEY}`,
+  "X-Hauska-Install-Id": "install-brief-test-aaaaaaaa",
 };
+
+const layVerdictsJson = JSON.stringify({
+  verdicts: [
+    {
+      id: "adu",
+      label: "ADU / guest house",
+      status: "maybe",
+      oneLine: "Local rules mention ADUs — confirm with the city.",
+      detailParagraph: "Code hints at accessory dwelling rules; zoning still controls.",
+    },
+    {
+      id: "flood",
+      label: "Flood risk",
+      status: "maybe",
+      oneLine: "FEMA shows elevated flood exposure.",
+      detailParagraph: "Budget for flood insurance and verify with your agent.",
+    },
+    {
+      id: "major_restrictions",
+      label: "Major restrictions",
+      status: "maybe",
+      oneLine: "Setbacks or rental rules may limit plans.",
+      detailParagraph: "Review setbacks and STR rules before renovating.",
+    },
+    {
+      id: "corpus_coverage",
+      label: "Local code coverage",
+      status: "yes",
+      oneLine: "Hauska has adopted-code coverage for this city.",
+      detailParagraph: "This is research, not a permit approval.",
+    },
+  ],
+});
+
+function mockGrokResponses() {
+  completeChatMock.mockImplementation(
+    async (opts: { system?: string }) => {
+      const system = opts.system ?? "";
+      if (system.includes("lay-friendly") || system.includes("verdicts")) {
+        return layVerdictsJson;
+      }
+      if (system.includes("research assistant") || system.includes("property intel")) {
+        return JSON.stringify({
+          answer: "An ADU may be possible subject to zoning. Confirm with planning.",
+        });
+      }
+      return JSON.stringify({
+        headline: "ADU and setbacks may apply for this Bastrop lot.",
+        body: "The code addresses accessory dwellings [1]. Agents should verify zoning.",
+      });
+    },
+  );
+}
 
 const mockAtom = {
   id: "did:hauska:atom:bastrop-adu-1",
@@ -92,7 +152,9 @@ const mockAtom = {
 
 beforeEach(() => {
   process.env.BROKERAGE_DEV_API_KEY = TEST_API_KEY;
+  process.env.BROKERAGE_WALLET_BYPASS = "1";
   resetBrokerageApiKeysForTests();
+  recordGtmEventMock.mockReset();
   geocodeAddressMock.mockReset();
   geocodeAddressMock.mockResolvedValue({
     latitude: 30.11,
@@ -118,12 +180,7 @@ beforeEach(() => {
     ],
   });
   completeChatMock.mockReset();
-  completeChatMock.mockResolvedValue(
-    JSON.stringify({
-      headline: "ADU and setbacks may apply for this Bastrop lot.",
-      body: "The code addresses accessory dwellings [1]. Agents should verify zoning.",
-    }),
-  );
+  mockGrokResponses();
   setBriefingLlmClient({
     kind: "grok",
     client: { completeChat: completeChatMock },
@@ -132,6 +189,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.BROKERAGE_DEV_API_KEY;
+  delete process.env.BROKERAGE_WALLET_BYPASS;
   resetBrokerageApiKeysForTests();
   setBriefingLlmClient(null);
 });
@@ -163,8 +221,14 @@ describe("POST /api/brokerage/v1/brief", () => {
     expect(fetchBrokerageSiteContextMock).toHaveBeenCalled();
     expect(res.body.sections).toHaveLength(5);
     expect(res.body.reasoningSummary.method).toBe("grok");
+    expect(res.body.laySummary).toBeTruthy();
+    expect(res.body.laySummary.verdicts.length).toBeGreaterThanOrEqual(3);
+    expect(res.body.laySummary.verdicts[0].status).toMatch(
+      /^(yes|maybe|no|unknown)$/,
+    );
+    expect(res.body.presentationMode).toBe("consumer");
     expect(retrieveAtomsForQuestionMock).toHaveBeenCalled();
-    expect(completeChatMock).toHaveBeenCalled();
+    expect(completeChatMock.mock.calls.length).toBeGreaterThanOrEqual(2);
 
     if (!ctx.schema) throw new Error("schema missing");
     const [row] = await ctx.schema.db
@@ -240,6 +304,42 @@ describe("POST /api/brokerage/v1/research/chat", () => {
     expect(chatRes.status).toBe(200);
     expect(chatRes.body.message).toMatch(/ADU/i);
     expect(chatRes.body.method).toBe("grok");
+    expect(chatRes.body.sources).toBeDefined();
+    expect(Array.isArray(chatRes.body.sources)).toBe(true);
+    expect(chatRes.body.presentationMode).toBe("consumer");
     expect(retrieveAtomsForQuestionMock.mock.calls.length).toBeGreaterThan(5);
+  });
+
+  it("logs starter_prompt_selected when starterPromptId is sent", async () => {
+    const briefRes = await request(getApp())
+      .post("/api/brokerage/v1/brief")
+      .set(authHeaders)
+      .send({
+        address: "251 Cool Water Dr, Bastrop, TX 78602",
+        starterPromptId: "adu",
+        personaBucket: "owner_buyer",
+      });
+    expect(briefRes.status).toBe(200);
+
+    const chatRes = await request(getApp())
+      .post("/api/brokerage/v1/research/chat")
+      .set(authHeaders)
+      .send({
+        runId: briefRes.body.runId,
+        message: "Could we add an ADU?",
+        history: [],
+        starterPromptId: "adu",
+        personaBucket: "owner_buyer",
+      });
+    expect(chatRes.status).toBe(200);
+
+    const starterEvents = recordGtmEventMock.mock.calls.filter(
+      (c) => c[0]?.eventType === "starter_prompt_selected",
+    );
+    expect(starterEvents.length).toBeGreaterThanOrEqual(2);
+    expect(starterEvents[0]![0].payload).toMatchObject({
+      starterPromptId: "adu",
+      personaBucket: "owner_buyer",
+    });
   });
 });
