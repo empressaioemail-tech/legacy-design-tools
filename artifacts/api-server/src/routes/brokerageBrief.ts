@@ -4,9 +4,13 @@
  *   POST /api/brokerage/v1/brief
  *   POST /api/brokerage/v1/brief/summarize
  *   POST /api/brokerage/v1/research/chat
+ *   GET  /api/brokerage/v1/workspaces/recent
+ *   GET  /api/brokerage/v1/workspaces/:id
+ *   GET  /api/brokerage/v1/wallet
+ *   GET  /api/brokerage/v1/admin/graph
  */
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { geocodeAddress } from "@workspace/site-context/server";
@@ -27,6 +31,18 @@ import {
   generateResearchChat,
   type BriefAtomInput,
 } from "../lib/brokerageBriefLlm";
+import { recordGtmEvent } from "../lib/recordGtmEvent";
+import { fetchBrokerageSiteContext } from "../lib/brokerageSiteContext";
+import { installIdFromRequest } from "../lib/brokerageInstallId";
+import { assertComputeAllowed } from "../lib/brokerageWallet";
+import {
+  listingKeyFromAddress,
+  upsertWorkspaceFromBrief,
+} from "../lib/brokerageWorkspace";
+import { brokerageGtmRouter } from "./brokerageGtm";
+import { brokerageWorkspaceRouter } from "./brokerageWorkspace";
+import { brokerageWalletRouter } from "./brokerageWalletRoute";
+import { brokerageAdminGraphRouter } from "./brokerageAdminGraph";
 
 /** Mirrors hauska-brief-extension/src/lib/brief-engine.js CODE_QUERIES */
 export const BROKERAGE_CODE_QUERIES = [
@@ -74,13 +90,10 @@ const brokerageV1: IRouter = Router();
 
 brokerageV1.use(brokerageCors);
 brokerageV1.use(brokerageAuth);
-
-function listingKey(address: string, mlsId?: string | null): string {
-  const norm = address.trim().toLowerCase().replace(/\s+/g, " ");
-  return createHash("sha256")
-    .update(`${norm}|${(mlsId ?? "").trim()}`)
-    .digest("hex");
-}
+brokerageV1.use("/gtm", brokerageGtmRouter);
+brokerageV1.use("/workspaces", brokerageWorkspaceRouter);
+brokerageV1.use("/wallet", brokerageWalletRouter);
+brokerageV1.use("/admin", brokerageAdminGraphRouter);
 
 function sectionTitle(query: string): string {
   const first = query.split(" ")[0] ?? query;
@@ -180,6 +193,31 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const { address, mls_id, source, page_url } = parse.data;
   const runId = randomUUID();
   const startedAt = new Date().toISOString();
+  const installId = installIdFromRequest(req);
+  const lk = listingKeyFromAddress(address, mls_id);
+
+  if (installId) {
+    const debit = await assertComputeAllowed(installId);
+    if (!debit.ok && "reason" in debit && debit.reason === "insufficient_balance") {
+      res.status(402).json({
+        error: "insufficient_balance",
+        message:
+          "Wallet balance is zero. Top up in $5 increments to run new briefs.",
+        balanceCents: debit.balanceCents,
+      });
+      return;
+    }
+  }
+
+  if (installId) {
+    recordGtmEvent({
+      installId,
+      eventType: "brief_started",
+      runId,
+      listingKey: lk,
+      payload: { source: source ?? null },
+    });
+  }
 
   let geocode: {
     lat: number;
@@ -234,6 +272,23 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const corpusStatus = await resolveCorpusStatus(jurisdictionKey, hasHits);
   const finishedAt = new Date().toISOString();
 
+  let siteContext: Awaited<ReturnType<typeof fetchBrokerageSiteContext>> = {
+    layers: [],
+  };
+  if (geocode && Number.isFinite(geocode.lat) && Number.isFinite(geocode.lon)) {
+    try {
+      siteContext = await fetchBrokerageSiteContext({
+        latitude: geocode.lat,
+        longitude: geocode.lon,
+        address,
+        jurisdictionCity: geocode.city,
+        jurisdictionState: geocode.state,
+      });
+    } catch (err) {
+      logger.warn({ err, address }, "brokerage: site context layers failed");
+    }
+  }
+
   const briefAtoms: BriefAtomInput[] = [];
   for (const s of sections) {
     const top = s.hits[0];
@@ -252,6 +307,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     corpusStatus,
     atoms: briefAtoms,
     finishedAt,
+    siteContext,
   });
 
   const responseBody = {
@@ -268,6 +324,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     geocode: geocode
       ? { lat: geocode.lat, lon: geocode.lon }
       : undefined,
+    siteContext,
     sections,
     citations,
     reasoningSummary,
@@ -281,10 +338,42 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   await db.insert(brokerageBriefRuns).values({
     id: runId,
     tenantSlug: "default",
-    listingKey: listingKey(address, mls_id),
+    listingKey: lk,
     address,
     payloadJson: responseBody,
   });
+
+  if (installId) {
+    await upsertWorkspaceFromBrief({
+      installId,
+      listingKey: lk,
+      address,
+      sourceListingUrl: page_url ?? null,
+      runId,
+    });
+
+    if (geocode && Number.isFinite(geocode.lat) && Number.isFinite(geocode.lon)) {
+      recordGtmEvent({
+        installId,
+        eventType: "session_geo",
+        runId,
+        listingKey: lk,
+        payload: { lat: geocode.lat, lon: geocode.lon },
+      });
+    }
+
+    recordGtmEvent({
+      installId,
+      eventType: "brief_completed",
+      runId,
+      listingKey: lk,
+      payload: {
+        corpusStatus,
+        jurisdiction: jurisdictionKey,
+        citationCount: citations.length,
+      },
+    });
+  }
 
   res.json(responseBody);
 });
@@ -330,6 +419,20 @@ brokerageV1.post(
     }
 
     const { runId, message, history } = parse.data;
+
+    const installId = installIdFromRequest(req);
+    if (installId) {
+      const debit = await assertComputeAllowed(installId);
+      if (!debit.ok && "reason" in debit && debit.reason === "insufficient_balance") {
+        res.status(402).json({
+          error: "insufficient_balance",
+          message:
+            "Wallet balance is zero. Top up in $5 increments for new research chat turns.",
+          balanceCents: debit.balanceCents,
+        });
+        return;
+      }
+    }
 
     const [run] = await db
       .select()
@@ -398,13 +501,27 @@ brokerageV1.post(
     }
 
     const atoms = [...atomMap.values()];
+    const storedSiteContext = (
+      payload as { siteContext?: Awaited<ReturnType<typeof fetchBrokerageSiteContext>> }
+    ).siteContext;
     const result = await generateResearchChat({
       address,
       jurisdiction: jurisdictionKey,
       message,
       history,
       atoms,
+      siteContext: storedSiteContext,
     });
+
+    if (installId) {
+      recordGtmEvent({
+        installId,
+        eventType: "research_chat_turn",
+        runId,
+        listingKey: run.listingKey,
+        payload: { messageLength: message.length },
+      });
+    }
 
     res.json(result);
   },

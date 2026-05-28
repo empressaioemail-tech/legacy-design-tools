@@ -12,6 +12,7 @@ const TEST_API_KEY = "brokerage-test-key-001";
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
 const geocodeAddressMock = vi.hoisted(() => vi.fn());
 const completeChatMock = vi.hoisted(() => vi.fn());
+const fetchBrokerageSiteContextMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -38,6 +39,12 @@ vi.mock("@workspace/codes", async () => {
     countAtomsForJurisdiction: vi.fn(async () => 10),
   };
 });
+
+vi.mock("../lib/brokerageSiteContext", () => ({
+  fetchBrokerageSiteContext: fetchBrokerageSiteContextMock,
+  formatSiteContextForLlm: (ctx: { layers: unknown[] }) =>
+    ctx.layers.length ? "Site context layers:\n- mock" : "",
+}));
 
 vi.mock("../lib/briefingLlmClient", async () => {
   const actual = await vi.importActual<typeof import("../lib/briefingLlmClient")>(
@@ -98,6 +105,18 @@ beforeEach(() => {
   });
   retrieveAtomsForQuestionMock.mockReset();
   retrieveAtomsForQuestionMock.mockResolvedValue([mockAtom]);
+  fetchBrokerageSiteContextMock.mockReset();
+  fetchBrokerageSiteContextMock.mockResolvedValue({
+    layers: [
+      {
+        layerKind: "fema-nfhl-flood-zone",
+        adapterKey: "fema:nfhl-flood-zone",
+        tier: "federal",
+        status: "ok",
+        summary: "Flood Zone AE (high-risk)",
+      },
+    ],
+  });
   completeChatMock.mockReset();
   completeChatMock.mockResolvedValue(
     JSON.stringify({
@@ -137,6 +156,11 @@ describe("POST /api/brokerage/v1/brief", () => {
     expect(res.status).toBe(200);
     expect(res.body.runId).toBeTruthy();
     expect(res.body.jurisdiction).toBe("bastrop_tx");
+    expect(res.body.siteContext.layers).toHaveLength(1);
+    expect(res.body.siteContext.layers[0].layerKind).toBe(
+      "fema-nfhl-flood-zone",
+    );
+    expect(fetchBrokerageSiteContextMock).toHaveBeenCalled();
     expect(res.body.sections).toHaveLength(5);
     expect(res.body.reasoningSummary.method).toBe("grok");
     expect(retrieveAtomsForQuestionMock).toHaveBeenCalled();

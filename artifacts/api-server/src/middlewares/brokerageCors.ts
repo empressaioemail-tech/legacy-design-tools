@@ -17,6 +17,11 @@ export const brokerageCors = cors({
     }
     callback(null, false);
   },
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Hauska-Key"],
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Hauska-Key",
+    "X-Hauska-Install-Id",
+  ],
 });

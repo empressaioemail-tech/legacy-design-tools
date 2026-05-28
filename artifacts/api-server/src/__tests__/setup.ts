@@ -165,6 +165,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "collateral_exports",
   "collateral_export_jobs",
   "brokerage_brief_runs",
+  "brokerage_workspace_shares",
+  "brokerage_workspace_attachments",
+  "brokerage_workspaces",
+  "brokerage_wallet_ledger",
+  "brokerage_wallets",
+  "gtm_events",
+  "gtm_consent",
 ];
 
 /**

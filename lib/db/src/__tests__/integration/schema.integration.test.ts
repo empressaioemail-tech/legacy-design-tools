@@ -93,6 +93,11 @@ describe("lib/db schema integration", () => {
         "briefing_sources",
         // Hauska Property Brief Chrome extension — persisted brief runs.
         "brokerage_brief_runs",
+        "brokerage_wallet_ledger",
+        "brokerage_wallets",
+        "brokerage_workspace_attachments",
+        "brokerage_workspace_shares",
+        "brokerage_workspaces",
         // PLR-10 — tenant-scoped canned-finding library curated by
         // tenant admins; reviewers consume entries on FindingsTab to
         // pre-fill the manual-add form.
