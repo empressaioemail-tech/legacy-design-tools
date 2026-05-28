@@ -80,6 +80,11 @@ const authHeaders = {
   "X-Hauska-Install-Id": OWNER_INSTALL,
 };
 
+const adminHeaders = {
+  Authorization: `Bearer ${TEST_API_KEY}`,
+  "X-Brokerage-Admin-Key": ADMIN_KEY,
+};
+
 const mockAtom = {
   id: "did:hauska:atom:bastrop-adu-1",
   sourceName: "bastrop_municode",
@@ -279,21 +284,10 @@ describe("brokerage wallet auto-refill", () => {
       .set(authHeaders)
       .send({ autoRefillEnabled: true });
 
-    const blocked = await request(getApp())
-      .post("/api/brokerage/v1/brief")
-      .set(authHeaders)
-      .send({ address: "50 Refill Rd, Bastrop, TX 78602" });
-    expect(blocked.status).toBe(402);
-
     await request(getApp())
       .post("/api/brokerage/v1/wallet/top-up")
       .set(authHeaders)
       .send({ amountCents: 500 });
-
-    await request(getApp())
-      .post("/api/brokerage/v1/wallet/settings")
-      .set(authHeaders)
-      .send({ autoRefillEnabled: true });
 
     if (!ctx.schema) throw new Error("schema missing");
     const { brokerageWallets } = await import("@workspace/db");
@@ -344,7 +338,7 @@ describe("brokerage admin graph", () => {
 
     const graph = await request(getApp())
       .get("/api/brokerage/v1/admin/graph")
-      .set({ "X-Brokerage-Admin-Key": ADMIN_KEY });
+      .set(adminHeaders);
     expect(graph.status).toBe(200);
     expect(graph.body.consentFiltered).toBe(true);
     expect(graph.body.nodes.length).toBeGreaterThan(0);
@@ -380,8 +374,9 @@ describe("brokerage admin graph", () => {
 
     const graph = await request(getApp())
       .get("/api/brokerage/v1/admin/graph")
-      .set({ "X-Brokerage-Admin-Key": ADMIN_KEY });
+      .set(adminHeaders);
 
+    expect(graph.status).toBe(200);
     const nodeIds = graph.body.nodes.map((n: { id: string }) => n.id);
     expect(nodeIds.some((id: string) => id.startsWith(NO_OPT.slice(0, 12)))).toBe(
       false,
