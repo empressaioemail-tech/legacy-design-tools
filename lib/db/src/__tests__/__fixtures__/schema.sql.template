@@ -1765,12 +1765,12 @@ CREATE INDEX brokerage_brief_runs_listing_key_idx ON @@SCHEMA@@.brokerage_brief_
 
 -- Name: brokerage_wallet_ledger_install_created_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX brokerage_wallet_ledger_install_created_idx ON @@SCHEMA@@.brokerage_wallet_ledger USING btree (install_id, created_at DESC);
+CREATE INDEX brokerage_wallet_ledger_install_created_idx ON @@SCHEMA@@.brokerage_wallet_ledger USING btree (install_id, created_at);
 
 
 -- Name: brokerage_workspace_attachments_workspace_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX brokerage_workspace_attachments_workspace_idx ON @@SCHEMA@@.brokerage_workspace_attachments USING btree (workspace_id, created_at DESC);
+CREATE INDEX brokerage_workspace_attachments_workspace_idx ON @@SCHEMA@@.brokerage_workspace_attachments USING btree (workspace_id, created_at);
 
 
 -- Name: brokerage_workspace_shares_token_uidx; Type: INDEX; Schema: public; Owner: -
@@ -1785,7 +1785,7 @@ CREATE UNIQUE INDEX brokerage_workspaces_install_listing_key_uidx ON @@SCHEMA@@.
 
 -- Name: brokerage_workspaces_install_opened_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX brokerage_workspaces_install_opened_idx ON @@SCHEMA@@.brokerage_workspaces USING btree (install_id, opened_at DESC);
+CREATE INDEX brokerage_workspaces_install_opened_idx ON @@SCHEMA@@.brokerage_workspaces USING btree (install_id, opened_at);
 
 
 -- Name: canned_findings_tenant_discipline_idx; Type: INDEX; Schema: public; Owner: -
@@ -1950,12 +1950,12 @@ CREATE INDEX findings_submission_created_idx ON @@SCHEMA@@.findings USING btree 
 
 -- Name: gtm_events_event_type_created_at_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX gtm_events_event_type_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (event_type, created_at DESC);
+CREATE INDEX gtm_events_event_type_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (event_type, created_at);
 
 
 -- Name: gtm_events_install_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
 
-CREATE INDEX gtm_events_install_id_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (install_id, created_at DESC);
+CREATE INDEX gtm_events_install_id_created_at_idx ON @@SCHEMA@@.gtm_events USING btree (install_id, created_at);
 
 
 -- Name: materializable_elements_active_ifc_identity_uniq; Type: INDEX; Schema: public; Owner: -
@@ -2216,16 +2216,22 @@ ALTER TABLE ONLY @@SCHEMA@@.briefing_sources
     ADD CONSTRAINT briefing_sources_superseded_by_id_briefing_sources_id_fk FOREIGN KEY (superseded_by_id) REFERENCES @@SCHEMA@@.briefing_sources(id) ON DELETE SET NULL;
 
 
--- Name: brokerage_workspace_attachments brokerage_workspace_attachments_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: brokerage_workspace_attachments brokerage_workspace_attachments_workspace_id_brokerage_workspac; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspace_attachments
-    ADD CONSTRAINT brokerage_workspace_attachments_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES @@SCHEMA@@.brokerage_workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT brokerage_workspace_attachments_workspace_id_brokerage_workspac FOREIGN KEY (workspace_id) REFERENCES @@SCHEMA@@.brokerage_workspaces(id) ON DELETE CASCADE;
 
 
--- Name: brokerage_workspace_shares brokerage_workspace_shares_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: brokerage_workspace_shares brokerage_workspace_shares_workspace_id_brokerage_workspaces_id; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspace_shares
-    ADD CONSTRAINT brokerage_workspace_shares_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES @@SCHEMA@@.brokerage_workspaces(id) ON DELETE CASCADE;
+    ADD CONSTRAINT brokerage_workspace_shares_workspace_id_brokerage_workspaces_id FOREIGN KEY (workspace_id) REFERENCES @@SCHEMA@@.brokerage_workspaces(id) ON DELETE CASCADE;
+
+
+-- Name: brokerage_workspaces brokerage_workspaces_latest_run_id_brokerage_brief_runs_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.brokerage_workspaces
+    ADD CONSTRAINT brokerage_workspaces_latest_run_id_brokerage_brief_runs_id_fk FOREIGN KEY (latest_run_id) REFERENCES @@SCHEMA@@.brokerage_brief_runs(id);
 
 
 -- Name: code_atom_fetch_queue code_atom_fetch_queue_source_id_code_atom_sources_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
